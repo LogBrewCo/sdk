@@ -4,7 +4,8 @@ const {
   createTraceparent,
   LogBrewClient,
   parseTraceparent,
-  SdkError
+  SdkError,
+  TransportError
 } = require("@logbrew/sdk");
 const {
   runtimeReactNativeDebugIdMap,
@@ -14,22 +15,83 @@ const {
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
+const BACKGROUND_APP_STATES = new Set(["background", "inactive"]);
 const LogBrewNativeContext = React.createContext(null);
 const activeTraceScopes = [];
 let nextTraceScopeId = 0;
 
 function createLogBrewReactNativeClient({
+  automaticDelivery,
   apiKey,
   clientKey,
+  deliveryIntervalMs,
+  deliveryQueueThreshold,
+  maxBatchBytes,
+  maxBatchEvents,
+  maxQueueBytes,
+  maxQueueSize,
+  onEventDropped,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
-  maxRetries = 2
+  maxRetries = 2,
+  transport
 }) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
     throw new SdkError("configuration_error", "createLogBrewReactNativeClient requires clientKey or apiKey");
   }
-  return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({
+    apiKey: authKey,
+    automaticDelivery,
+    deliveryIntervalMs,
+    deliveryQueueThreshold,
+    maxBatchBytes,
+    maxBatchEvents,
+    maxQueueBytes,
+    maxQueueSize,
+    maxRetries,
+    onEventDropped,
+    sdkName,
+    sdkVersion,
+    transport
+  });
+}
+
+function createReactNativeFetchTransport({
+  endpoint = DEFAULT_ENDPOINT,
+  fetchImpl = defaultFetch(),
+  headers = {}
+} = {}) {
+  validateDeliveryEndpoint(endpoint);
+  if (typeof fetchImpl !== "function") {
+    throw new SdkError("configuration_error", "createReactNativeFetchTransport requires fetch");
+  }
+  if (!headers || Array.isArray(headers) || typeof headers !== "object") {
+    throw new SdkError("configuration_error", "createReactNativeFetchTransport headers must be an object");
+  }
+
+  return Object.freeze({
+    async send(apiKey, body) {
+      try {
+        const response = await fetchImpl(endpoint, {
+          body,
+          headers: {
+            ...headers,
+            authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json"
+          },
+          method: "POST"
+        });
+        const retryAfterMs = retryAfterMsFromHeaders(response?.headers);
+        return retryAfterMs === undefined
+          ? { statusCode: response?.status, attempts: 1 }
+          : { statusCode: response?.status, attempts: 1, retryAfterMs };
+      } catch {
+        throw TransportError.network("LogBrew React Native delivery failed");
+      }
+    }
+  });
 }
 
 function createReactNativeTraceparent({ randomValues = defaultRandomValues, spanId, traceFlags = "01", traceId } = {}) {
@@ -574,12 +636,34 @@ function createAppStateListener(client, appState, options = {}) {
   if (!appState || typeof appState.addEventListener !== "function") {
     throw new SdkError("configuration_error", "createAppStateListener requires AppState.addEventListener");
   }
+  const {
+    flushOnBackground = false,
+    onFlushError,
+    ...captureOptions
+  } = options;
+  if (typeof flushOnBackground !== "boolean") {
+    throw new SdkError("configuration_error", "createAppStateListener flushOnBackground must be a boolean");
+  }
+  if (onFlushError !== undefined && typeof onFlushError !== "function") {
+    throw new SdkError("configuration_error", "createAppStateListener onFlushError must be a function");
+  }
 
   const subscription = appState.addEventListener("change", (nextState) => {
     captureAppStateChange(client, nextState, {
-      ...options,
+      ...captureOptions,
       appState
     });
+    if (flushOnBackground && BACKGROUND_APP_STATES.has(nextState)) {
+      void client.flush().catch((error) => {
+        if (typeof onFlushError === "function") {
+          try {
+            onFlushError(error);
+          } catch {
+            // Delivery diagnostics must not interrupt the app-state callback.
+          }
+        }
+      });
+    }
   });
 
   return subscriptionRemover(subscription);
@@ -616,6 +700,9 @@ function useLogBrewNativeActions() {
     action: (id, timestamp, attributes) => client.action(id, timestamp, attributesWithTrace(attributes, trace)),
     flush: client.flush.bind(client),
     shutdown: client.shutdown.bind(client),
+    deliveryHealth: client.deliveryHealth.bind(client),
+    droppedEvents: client.droppedEvents.bind(client),
+    pendingBytes: client.pendingBytes.bind(client),
     previewJson: client.previewJson.bind(client),
     pendingEvents: client.pendingEvents.bind(client),
     trace,
@@ -697,6 +784,44 @@ function errorMessage(error) {
     return error;
   }
   return String(error ?? "unknown error");
+}
+
+function validateDeliveryEndpoint(endpoint) {
+  if (typeof endpoint !== "string" || endpoint.trim() === "") {
+    throw new SdkError("configuration_error", "createReactNativeFetchTransport requires a non-empty endpoint");
+  }
+  let parsed;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    throw new SdkError("configuration_error", "createReactNativeFetchTransport endpoint must be an absolute URL");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new SdkError("configuration_error", "createReactNativeFetchTransport endpoint must use HTTPS");
+  }
+  if (endpoint !== `${parsed.origin}${parsed.pathname}`) {
+    throw new SdkError("configuration_error", "createReactNativeFetchTransport endpoint must be a plain HTTPS path");
+  }
+}
+
+function retryAfterMsFromHeaders(headers) {
+  if (!headers || typeof headers.get !== "function") {
+    return undefined;
+  }
+  return retryAfterMsFromHeader(headers.get("retry-after"));
+}
+
+function retryAfterMsFromHeader(value, now = Date.now()) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (/^\d+$/u.test(trimmed)) {
+    const milliseconds = Number(trimmed) * 1000;
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : undefined;
 }
 
 function defaultErrorEventId({ message, screen }) {
@@ -977,7 +1102,8 @@ const defaultExport = {
   LogBrewNativeProvider, captureAppStateChange, captureReactNativeAction, captureReactNativeError,
   captureReactNativeNetwork, captureReactNativeNavigationSpan, captureReactNativeResourceSpan, captureScreenView,
   bindLogBrewTrace, createAppStateListener, createLogBrewReactNativeClient, createReactNavigationSpanListener,
-  createReactNativeSpanAttributes, createReactNativeTraceContext, createReactNativeTraceHeaders, createReactNativeActionEvent,
+  createReactNativeFetchTransport, createReactNativeSpanAttributes, createReactNativeTraceContext,
+  createReactNativeTraceHeaders, createReactNativeActionEvent,
   createReactNativeErrorEvent, createReactNativeNetworkEvent, createReactNativeNavigationSpanEvent,
   createReactNativeResourceSpanEvent, createReactNativeTraceparent, createTraceparentFetch, getActiveLogBrewTrace,
   getReactNativeContext, getReactNativeTraceMetadata, shouldPropagateTraceparent, useLogBrewNative,

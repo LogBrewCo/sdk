@@ -28,7 +28,14 @@ captureScreenView(client, "Checkout", {
 
 console.log(client.previewJson());
 const response = await client.shutdown(RecordingTransport.alwaysAccept());
-console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 6 }));
+console.error(JSON.stringify({
+  ok: true,
+  mode: "local_recording",
+  hostedAccepted: false,
+  status: response.statusCode,
+  attempts: response.attempts,
+  events: 6
+}));
 
 function addFullBatch(client) {
   client.release("evt_release_001", "2026-06-02T10:00:00Z", {

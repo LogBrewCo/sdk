@@ -1,6 +1,8 @@
 import type * as React from "react";
 import type {
   ActionAttributes,
+  DeliveryHealthSnapshot,
+  DroppedEvent,
   EnvironmentAttributes,
   IssueAttributes,
   LogAttributes,
@@ -30,11 +32,42 @@ export type ReactNativeAppStateLike = {
 };
 
 export type CreateLogBrewReactNativeClientConfig = {
+  automaticDelivery?: boolean;
   apiKey?: string;
   clientKey?: string;
+  deliveryIntervalMs?: number;
+  deliveryQueueThreshold?: number;
+  maxBatchBytes?: number;
+  maxBatchEvents?: number;
+  maxQueueBytes?: number;
+  maxQueueSize?: number;
+  maxRetries?: number;
+  onEventDropped?: (drop: DroppedEvent) => void;
   sdkName?: string;
   sdkVersion?: string;
-  maxRetries?: number;
+  transport?: Transport;
+};
+
+export type ReactNativeFetchResponseLike = {
+  status: number;
+  headers?: {
+    get(name: string): string | null | undefined;
+  };
+};
+
+export type ReactNativeFetchLike = (
+  endpoint: string,
+  init: {
+    body: string;
+    headers: Record<string, string>;
+    method: "POST";
+  }
+) => Promise<ReactNativeFetchResponseLike> | ReactNativeFetchResponseLike;
+
+export type ReactNativeFetchTransportConfig = {
+  endpoint?: string;
+  fetchImpl?: ReactNativeFetchLike;
+  headers?: Record<string, string>;
 };
 
 export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
@@ -120,6 +153,13 @@ export type CaptureScreenViewOptions = ReactNativeContextOptions & {
 export type CaptureAppStateChangeOptions = ReactNativeContextOptions & {
   id?: string;
   timestamp?: string;
+};
+
+export type CreateAppStateListenerOptions = CaptureAppStateChangeOptions & {
+  /** Flush the configured client transport when AppState becomes inactive or background. */
+  flushOnBackground?: boolean;
+  /** Observe a background flush failure without throwing from the AppState callback. */
+  onFlushError?: (error: unknown) => void;
 };
 
 export type ReactNativeActionEvent = {
@@ -278,8 +318,11 @@ export type LogBrewNativeActions = {
   log(id: string, timestamp: string, attributes: LogAttributes): void;
   span(id: string, timestamp: string, attributes: SpanAttributes): void;
   action(id: string, timestamp: string, attributes: ActionAttributes): void;
-  flush(transport: Transport): Promise<TransportResponse>;
-  shutdown(transport: Transport): Promise<TransportResponse>;
+  flush(transport?: Transport): Promise<TransportResponse>;
+  shutdown(transport?: Transport): Promise<TransportResponse>;
+  deliveryHealth(): DeliveryHealthSnapshot;
+  droppedEvents(): number;
+  pendingBytes(): number;
   previewJson(): string;
   pendingEvents(): number;
   trace?: ReactNativeTraceContext;
@@ -295,6 +338,9 @@ export type LogBrewNativeActions = {
 export declare function createLogBrewReactNativeClient(
   config: CreateLogBrewReactNativeClientConfig
 ): LogBrewClient;
+export declare function createReactNativeFetchTransport(
+  config?: ReactNativeFetchTransportConfig
+): Transport;
 export declare function createReactNativeTraceparent(config?: ReactNativeTraceparentConfig): string;
 export declare function createReactNativeTraceContext(
   config?: ReactNativeTraceContextConfig
@@ -378,7 +424,7 @@ export declare function captureReactNativeError(
 export declare function createAppStateListener(
   client: LogBrewClient,
   appState: ReactNativeAppStateLike,
-  options?: CaptureAppStateChangeOptions
+  options?: CreateAppStateListenerOptions
 ): () => void;
 export declare function LogBrewNativeProvider(props: LogBrewNativeProviderProps): React.ReactElement;
 export declare function useLogBrewNative(): LogBrewNativeContextValue;
@@ -413,7 +459,7 @@ export declare function captureDefaultReactNativeError(
 ): ReactNativeErrorEvent;
 export declare function createDefaultAppStateListener(
   client: LogBrewClient,
-  options?: Omit<CaptureAppStateChangeOptions, "appState">
+  options?: Omit<CreateAppStateListenerOptions, "appState">
 ): () => void;
 
 declare const defaultExport: {
@@ -429,6 +475,7 @@ declare const defaultExport: {
   createAppStateListener: typeof createAppStateListener;
   createLogBrewReactNativeClient: typeof createLogBrewReactNativeClient;
   createReactNavigationSpanListener: typeof createReactNavigationSpanListener;
+  createReactNativeFetchTransport: typeof createReactNativeFetchTransport;
   createReactNativeSpanAttributes: typeof createReactNativeSpanAttributes;
   createReactNativeTraceContext: typeof createReactNativeTraceContext;
   createReactNativeTraceHeaders: typeof createReactNativeTraceHeaders;

@@ -22,27 +22,96 @@ import { AppState, Platform } from "react-native";
 import {
   captureScreenView,
   createAppStateListener,
-  createLogBrewReactNativeClient
+  createLogBrewReactNativeClient,
+  createReactNativeFetchTransport
 } from "@logbrew/react-native";
 
+// Expo example. Bare React Native apps can use the same public key from
+// their app-owned configuration layer.
+const clientKey = process.env.EXPO_PUBLIC_LOGBREW_CLIENT_KEY;
+if (!clientKey) {
+  throw new Error("Set EXPO_PUBLIC_LOGBREW_CLIENT_KEY to the public app-scoped key");
+}
+
 const client = createLogBrewReactNativeClient({
-  clientKey: "LOGBREW_CLIENT_KEY",
+  clientKey,
   sdkName: "my-mobile-app",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.0",
+  transport: createReactNativeFetchTransport()
 });
 
 captureScreenView(client, "Checkout", {
   platform: Platform,
-  appState: AppState,
-  timestamp: "2026-06-02T10:00:03Z"
+  appState: AppState
 });
 
 const stopListening = createAppStateListener(client, AppState, {
+  flushOnBackground: true,
   platform: Platform
 });
+
+export async function verifyLogBrewSetup() {
+  const timestamp = new Date().toISOString();
+  client.log(`evt_react_native_setup_${Date.now()}`, timestamp, {
+    level: "info",
+    message: "React Native setup check",
+    metadata: {
+      environment: __DEV__ ? "development" : "production",
+      service: "my-mobile-app"
+    }
+  });
+
+  const receipt = await client.flush();
+  return {
+    delivery: "hosted_accepted",
+    statusCode: receipt.statusCode,
+    attempts: receipt.attempts,
+    batches: receipt.batches
+  };
+}
 ```
 
-For mobile apps, prefer an app-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
+For mobile apps, prefer an app-scoped public key through `clientKey`. Expo
+inlines `EXPO_PUBLIC_*` values into the app, so never use a server key there.
+`apiKey` is still accepted for compatibility with lower-level SDK examples.
+
+Supplying `transport` enables the core SDK's bounded automatic delivery. It
+coalesces concurrent work, retries transient failures, retains rejected
+batches, and pauses repeated automatic sends after authentication, rate-limit,
+or non-retryable failures. Do not add a second app-owned flush interval.
+`flushOnBackground: true` requests one final flush when AppState becomes
+`inactive` or `background`; a failure never escapes the AppState callback.
+
+## Confirm Hosted Delivery And Event Visibility
+
+Call `verifyLogBrewSetup()` once from a development-only button or setup
+screen. A returned `hosted_accepted` receipt means the configured HTTPS intake
+accepted every batch in that flush. Then use an authenticated CLI session to
+confirm that the backend stored the event for the intended project:
+
+```bash
+logbrew read logs --project <project_id> \
+  --search "React Native setup check" --since 1h --json
+```
+
+These checks have different meanings:
+
+- `client.previewJson()` validates and displays the local queued payload.
+- `RecordingTransport.alwaysAccept()` is a local recording transport. Its
+  synthetic HTTP `202` makes no network request and never indicates hosted
+  delivery.
+- `createReactNativeFetchTransport()` returns the actual intake status to
+  `client.flush()`.
+- An authenticated CLI read confirms that the accepted event is visible in the
+  selected project. An intake `2xx` alone does not confirm event visibility.
+
+Use `client.deliveryHealth()` for content-free queue and delivery state. In
+particular, inspect `deliveryState`, `lastOutcome`, `lastStatusClass`,
+`pausedReason`, `queueEvents`, and `acceptedEvents`. A `401` pauses automatic
+delivery with `pausedReason: "authentication"`; rotate or correct the public
+client key before creating a new client. A `429` preserves the queue and
+reports `pausedReason: "rate_limit"` plus the bounded retry signal exposed by
+the failed flush.
 
 ## Product Actions And API Milestones
 

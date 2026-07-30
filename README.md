@@ -51,7 +51,7 @@ library your app already uses.
 | Vue | [`@logbrew/vue`](js/logbrew-vue) | Vue plugin/composable capture |
 | Svelte | [`@logbrew/svelte`](js/logbrew-svelte) | Svelte context and error helpers |
 | React | [`@logbrew/react`](js/logbrew-react) | Provider, hook, error boundary, handled error helpers |
-| React Native | [`@logbrew/react-native`](js/logbrew-react-native) | Mobile context, handled errors, and app-owned Promise rejection reports |
+| React Native | [`@logbrew/react-native`](js/logbrew-react-native) | Hosted fetch delivery, mobile context, handled errors, and app-owned Promise rejection reports |
 | Next.js | [`@logbrew/next`](js/logbrew-next) | App Router Route Handler capture |
 | Python | [`logbrew-sdk`](python/logbrew_py) | Core Python client, HTTP delivery, logging handler |
 | FastAPI | [`logbrew-fastapi`](python/logbrew_fastapi) | FastAPI middleware |
@@ -98,6 +98,11 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", {
 
 await client.flush(RecordingTransport.alwaysAccept());
 ```
+
+`RecordingTransport` is local-only: its synthetic HTTP `202` makes no network
+request and does not indicate hosted delivery or event visibility. Use the
+released runtime package's HTTP transport and then read the event through the
+authenticated CLI or API for end-to-end confirmation.
 
 Python:
 
