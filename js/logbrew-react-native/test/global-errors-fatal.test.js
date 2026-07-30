@@ -132,7 +132,7 @@ test("stores a privacy-bounded fatal record synchronously before chaining", asyn
     error.stack = [
       `TypeError: ${sensitivePair} hidden@example.test`,
       `    at private (https://private.example.test/index.android.bundle?${sensitivePair}:12:34)`,
-      "    at local (/Users/private/source.js:56:78)"
+      "    at local (/home/example/source.js:56:78)"
     ].join("\n");
 
     errorUtils.currentHandler()(error, true);
@@ -155,8 +155,8 @@ test("stores a privacy-bounded fatal record synchronously before chaining", asyn
       sensitivePair,
       "hidden@example.test",
       "private.example.test",
-      "/Users/",
-      "private/source.js"
+      "/home/",
+      "example/source.js"
     ]) {
       assert.equal(serialized.includes(forbidden), false);
     }
@@ -202,8 +202,8 @@ test("normalizes a single-segment URL bundle pathname before persistence", async
 test("rejects hostile replay records containing Unix or Windows absolute paths", async () => {
   await withInstalledPackage(async ({ installLogBrewReactNativeGlobalErrorHandler }) => {
     for (const filename of [
-      "/Users/private/source.js",
-      "C:/Users/private/source.js"
+      "/home/example/source.js",
+      "D:/account-data/source.js"
     ]) {
       const diagnostics = [];
       const fatalStore = createFatalStore({
@@ -511,7 +511,8 @@ test("handler removal retains the record and explicit rollback discard clears it
 
 test("public documentation states stable-id replay and excludes adjacent ownership", () => {
   const readme = fs.readFileSync(path.join(packageRoot, "README.md"), "utf8");
-  assert.match(readme, /Unhandled Promise rejections are not installed or patched/u);
+  assert.match(readme, /createLogBrewReactNativePromiseRejectionHandlers/u);
+  assert.match(readme, /LogBrew does not install, replace, or patch Promise/u);
   assert.match(readme, /stable-ID at-least-once replay/u);
   assert.match(readme, /acknowledgement happens only after local queue admission/u);
   assert.match(readme, /does not claim mathematically exactly-once delivery/u);

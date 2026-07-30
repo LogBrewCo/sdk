@@ -2,6 +2,9 @@
 
 const { createReactNativeErrorEvent } = require("./index.cjs");
 const { createFatalController } = require("./fatal-replay.cjs");
+const {
+  createLogBrewReactNativePromiseRejectionHandlers
+} = require("./promise-rejections.cjs");
 
 const AUTOMATIC_ERROR_MESSAGE = "React Native global JavaScript report";
 const MAX_STACK_BYTES = 16 * 1024;
@@ -408,6 +411,7 @@ function isObjectLike(value) {
 }
 
 const defaultExport = {
+  createLogBrewReactNativePromiseRejectionHandlers,
   installLogBrewReactNativeGlobalErrorHandler
 };
 

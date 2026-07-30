@@ -7,6 +7,19 @@ export type ReactNativeErrorUtilsLike = {
   setGlobalHandler(handler: ReactNativeGlobalErrorHandler | undefined): void;
 };
 
+export type ReactNativePromiseRejectionDiagnosticCode =
+  | "promise_rejection_capture_failed"
+  | "promise_rejection_configuration_invalid"
+  | "promise_rejection_duplicate_suppressed"
+  | "promise_rejection_handler_unavailable"
+  | "promise_rejection_id_unavailable"
+  | "promise_rejection_recursive_capture_suppressed"
+  | "promise_rejection_tracking_evicted";
+
+export type ReactNativePromiseRejectionDiagnostic = Readonly<{
+  code: ReactNativePromiseRejectionDiagnosticCode;
+}>;
+
 export type ReactNativeGlobalErrorDiagnosticCode =
   | "capture_failed"
   | "duplicate_capture_suppressed"
@@ -42,6 +55,45 @@ export type ReactNativeGlobalErrorHealth = Readonly<{
     | "removed"
     | "unavailable";
   suppressedEvents: number;
+}>;
+
+export type ReactNativePromiseRejectionHealth = Readonly<{
+  available: boolean;
+  capturedEvents: number;
+  evictedRejections: number;
+  handledLaterEvents: number;
+  lastOutcome:
+    | "capture_failed"
+    | "captured"
+    | "captured_untracked"
+    | "captured_with_eviction"
+    | "duplicate_suppressed"
+    | "handled_later"
+    | "handled_unknown"
+    | "idle"
+    | "recursive_suppressed"
+    | "unavailable";
+  maxTrackedRejections: number;
+  suppressedEvents: number;
+  trackedRejections: number;
+  unknownHandledEvents: number;
+  untrackedEvents: number;
+}>;
+
+export type CreateLogBrewReactNativePromiseRejectionHandlersOptions = {
+  client: Pick<LogBrewClient, "issue">;
+  /**
+   * Maximum number of safe runtime rejection identifiers retained for duplicate
+   * suppression and later-handled health. Defaults to 128 and must be 1-1024.
+   */
+  maxTrackedRejections?: number;
+  onDiagnostic?: (diagnostic: ReactNativePromiseRejectionDiagnostic) => void;
+};
+
+export type LogBrewReactNativePromiseRejectionHandlers = Readonly<{
+  health(): ReactNativePromiseRejectionHealth;
+  onHandled(runtimeRejectionId: unknown): void;
+  onUnhandled(runtimeRejectionId: unknown, rejection?: unknown): void;
 }>;
 
 export type ReactNativeFatalRecord = Readonly<{
@@ -113,6 +165,17 @@ export type LogBrewReactNativeGlobalErrorHandlerInstallation = Readonly<{
 }>;
 
 /**
+ * Create privacy-safe callbacks for a Promise rejection tracker owned by the app.
+ *
+ * The callbacks do not install or patch Promise, Hermes, JavaScriptCore, or globals.
+ * Automatic reports never inspect or emit the rejection value or runtime identifier.
+ * Tracking is bounded and suppresses duplicate callbacks only while an identifier is retained.
+ */
+export declare function createLogBrewReactNativePromiseRejectionHandlers(
+  options: CreateLogBrewReactNativePromiseRejectionHandlersOptions
+): LogBrewReactNativePromiseRejectionHandlers;
+
+/**
  * Install reversible automatic capture for React Native global JavaScript errors.
  *
  * The React Native conditional export injects its synchronous native fatal store by default.
@@ -125,6 +188,7 @@ export declare function installLogBrewReactNativeGlobalErrorHandler(
 ): LogBrewReactNativeGlobalErrorHandlerInstallation;
 
 declare const logBrewReactNativeGlobalErrors: {
+  createLogBrewReactNativePromiseRejectionHandlers: typeof createLogBrewReactNativePromiseRejectionHandlers;
   installLogBrewReactNativeGlobalErrorHandler: typeof installLogBrewReactNativeGlobalErrorHandler;
 };
 
