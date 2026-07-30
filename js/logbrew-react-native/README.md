@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, opt-in reversible global fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, app-owned Promise rejection reports, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, opt-in reversible global fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
 
 ## Install
 
@@ -128,7 +128,37 @@ Installation is idempotent for the active React Native `ErrorUtils` object. The 
 
 The React Native conditional export obtains LogBrew's synchronous native fatal store through the supported TurboModule or `NativeModules` seam. Before chaining a fatal report, it writes one bounded record to app-private storage that is excluded from operating-system archives. On a later installation it performs stable-ID at-least-once replay, and acknowledgement happens only after local queue admission is observable through the SDK queue counters. Filtered, dropped, unknown-admission, persistence-failed, and acknowledgement-failed records are retained. A failed acknowledgement is retried without admitting the same ID twice in one JavaScript runtime. Use `fatalHealth()` for frozen bounded counters and status, or `discardPendingFatalRecord()` for an explicit rollback discard. The Node ESM and CommonJS entries never import React Native; non-React-Native callers must inject `fatalStore` explicitly.
 
-Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This integration does not claim mathematically exactly-once delivery, backend-visible deduplication, native crash capture, Promise rejection ownership, ANR or hang detection, general offline queueing, or symbolication. Unhandled Promise rejections are not installed or patched because React Native does not expose one stable supported ownership seam across its runtimes.
+Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This integration does not claim mathematically exactly-once delivery, backend-visible deduplication, native crash capture, automatic Promise rejection tracker ownership, ANR or hang detection, general offline queueing, or symbolication.
+
+### App-owned Promise rejection reports
+
+Use the Promise rejection callbacks when your app or framework already owns rejection tracking:
+
+```js
+import {
+  createLogBrewReactNativePromiseRejectionHandlers
+} from "@logbrew/react-native/global-errors";
+
+const logBrewPromiseRejections =
+  createLogBrewReactNativePromiseRejectionHandlers({
+    client,
+    onDiagnostic({ code }) {
+      console.warn(`LogBrew Promise rejection handler: ${code}`);
+    }
+  });
+
+const promiseRejectionTrackerOptions = {
+  allRejections: true,
+  onUnhandled: logBrewPromiseRejections.onUnhandled,
+  onHandled: logBrewPromiseRejections.onHandled
+};
+
+// Pass promiseRejectionTrackerOptions to the tracker your app already owns.
+```
+
+The callbacks match the common `(id, rejection)` and `(id)` tracker shapes, but LogBrew does not install, replace, or patch Promise, Hermes, JavaScriptCore, or a global rejection tracker. If another integration already has callbacks, keep that integration as the tracker owner and call both callback sets from the app-owned composition point.
+
+`onUnhandled()` emits a fixed-content issue and deliberately does not inspect or send the rejection value, raw runtime rejection ID, error message, stack, Promise, or arbitrary metadata. Numeric IDs and bounded strings are retained only in local memory for duplicate suppression and `onHandled()` health. The set defaults to 128 entries and can be configured from 1 to 1024 with `maxTrackedRejections`; old entries are evicted. Missing or unsafe IDs still produce an untracked privacy-safe report. `onHandled()` updates local health only and cannot retract an issue that was already queued. Use `health()` for frozen counters and the last bounded outcome. Capture and diagnostic failures never escape these callbacks.
 
 When you prepare React Native release artifacts, wrap the app-owned Metro config once. Production bundles and source maps receive one matching Debug ID, while development and hot-reload serialization remain unchanged:
 

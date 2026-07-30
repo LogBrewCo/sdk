@@ -1,8 +1,13 @@
 import { NativeModules, TurboModuleRegistry } from "react-native";
 
 import {
+  createLogBrewReactNativePromiseRejectionHandlers,
   installLogBrewReactNativeGlobalErrorHandler as installPlatformNeutralHandler
 } from "./global-errors.js";
+
+export {
+  createLogBrewReactNativePromiseRejectionHandlers
+};
 
 function defaultFatalStore() {
   try {
@@ -33,6 +38,7 @@ export function installLogBrewReactNativeGlobalErrorHandler(options = {}) {
 }
 
 const logBrewReactNativeGlobalErrors = {
+  createLogBrewReactNativePromiseRejectionHandlers,
   installLogBrewReactNativeGlobalErrorHandler
 };
 

@@ -23,21 +23,26 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
             "global-errors.d.cts",
             "global-errors.d.ts",
             "global-errors.js",
+            "promise-rejections.cjs",
         ):
             self.assertIn(filename, manifest["files"])
         self.assertNotIn("./unhandled-errors", manifest["exports"])
 
-    def test_packed_smoke_proves_nonfatal_contract_without_promise_ownership(self) -> None:
+    def test_packed_smoke_proves_app_owned_promise_boundary_without_tracker_ownership(
+        self,
+    ) -> None:
         smoke = (ROOT / "scripts" / "real_user_react_native_smoke.sh").read_text(
             encoding="utf-8"
         )
 
         for expected in (
             "@logbrew/react-native/global-errors",
+            "createLogBrewReactNativePromiseRejectionHandlers",
             "installLogBrewReactNativeGlobalErrorHandler",
             "preRootError",
             "postMountError",
             "globalErrorInstallation.remove()",
+            '"promiseRejectionReports":1',
             '"globalHandlerRemoved":true',
             '"globalReports":2',
         ):
@@ -49,7 +54,10 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
         self.assertIn("stable-ID at-least-once replay", readme)
         self.assertIn("acknowledgement happens only after local queue admission", readme)
         self.assertIn("does not claim mathematically exactly-once delivery", readme)
-        self.assertIn("Unhandled Promise rejections are not installed or patched", readme)
+        self.assertIn(
+            "LogBrew does not install, replace, or patch Promise",
+            readme,
+        )
         for excluded in (
             "native crash capture",
             "ANR or hang detection",

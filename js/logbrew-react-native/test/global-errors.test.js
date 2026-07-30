@@ -58,7 +58,12 @@ test("CommonJS exposes matching named and default entry points", async () => {
       path.join(packageDir, "global-errors.cjs")
     );
 
+    assert.equal(typeof required.createLogBrewReactNativePromiseRejectionHandlers, "function");
     assert.equal(typeof required.installLogBrewReactNativeGlobalErrorHandler, "function");
+    assert.equal(
+      required.default.createLogBrewReactNativePromiseRejectionHandlers,
+      required.createLogBrewReactNativePromiseRejectionHandlers
+    );
     assert.equal(
       required.default.installLogBrewReactNativeGlobalErrorHandler,
       required.installLogBrewReactNativeGlobalErrorHandler
@@ -77,7 +82,7 @@ test("redacts error content and local or remote stack locations", async () => {
     error.stack = [
       `Error: ${sensitivePair} email@example.test`,
       `    at email@example.test (https://sensitive.example.test/index.android.bundle?${sensitivePair}#account:12:34)`,
-      "    at local (/Users/example/account-name/source.js:56:78)",
+      "    at local (/home/example/account-name/source.js:56:78)",
       "    at workspace (/workspace/account-data/workspace.js:90:12)",
       "    at opt (/opt/account-data/opt.js:91:13)",
       "    at windows (C:\\account-data\\windows.js:92:14)",
@@ -92,7 +97,7 @@ test("redacts error content and local or remote stack locations", async () => {
       "email@example.test",
       "sensitive.example.test",
       "account-name",
-      "/Users/",
+      "/home/",
       "/workspace/",
       "/opt/",
       "C:\\",
@@ -379,5 +384,185 @@ test("captured reports receive distinct content-independent IDs", async () => {
     assert.notEqual(client.issues[0].id, client.issues[1].id);
     assert.match(client.issues[0].id, /^evt_rn_global_[a-z0-9]+_[a-z0-9]+$/u);
     assert.match(client.issues[1].id, /^evt_rn_global_[a-z0-9]+_[a-z0-9]+$/u);
+  });
+});
+
+test("app-owned Promise rejection handlers capture fixed privacy-safe reports", async () => {
+  await withInstalledPackage(async ({ createLogBrewReactNativePromiseRejectionHandlers }) => {
+    const client = createClient();
+    const diagnostics = [];
+    const originalPromise = globalThis.Promise;
+    const originalHermes = globalThis.HermesInternal;
+    const handlers = createLogBrewReactNativePromiseRejectionHandlers({
+      client,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
+    });
+    const sensitivePair = `${["to", "ken"].join("")}=hidden`;
+    const hostileReason = new Proxy({}, {
+      get() {
+        throw new Error(`hidden@example.test ${sensitivePair}`);
+      }
+    });
+
+    assert.doesNotThrow(() => handlers.onUnhandled(41, { reason: hostileReason }));
+    assert.doesNotThrow(() => handlers.onUnhandled(41, { reason: "duplicate private value" }));
+    assert.doesNotThrow(() => handlers.onHandled(41));
+
+    assert.equal(globalThis.Promise, originalPromise);
+    assert.equal(globalThis.HermesInternal, originalHermes);
+    assert.equal(client.issues.length, 1);
+    assert.match(client.issues[0].id, /^evt_rn_promise_[a-z0-9]+_[a-z0-9]+$/u);
+    assert.deepEqual(
+      {
+        title: client.issues[0].attributes.title,
+        message: client.issues[0].attributes.message,
+        level: client.issues[0].attributes.level,
+        metadata: {
+          automatic: client.issues[0].attributes.metadata.automatic,
+          fatal: client.issues[0].attributes.metadata.fatal,
+          handled: client.issues[0].attributes.metadata.handled,
+          mechanism: client.issues[0].attributes.metadata.mechanism,
+          source: client.issues[0].attributes.metadata.source
+        }
+      },
+      {
+        title: "Unhandled Promise rejection",
+        message: "Unhandled Promise rejection",
+        level: "error",
+        metadata: {
+          automatic: true,
+          fatal: false,
+          handled: false,
+          mechanism: "app_owned_promise_rejection_tracker",
+          source: "react-native.promise_rejection"
+        }
+      }
+    );
+    const serialized = JSON.stringify(client.issues);
+    assert.equal(serialized.includes("hidden@example.test"), false);
+    assert.equal(serialized.includes(sensitivePair), false);
+    assert.equal(serialized.includes("duplicate private value"), false);
+    assert.deepEqual(handlers.health(), {
+      available: true,
+      capturedEvents: 1,
+      evictedRejections: 0,
+      handledLaterEvents: 1,
+      lastOutcome: "handled_later",
+      maxTrackedRejections: 128,
+      suppressedEvents: 1,
+      trackedRejections: 1,
+      unknownHandledEvents: 0,
+      untrackedEvents: 0
+    });
+    assert.equal(Object.isFrozen(handlers), true);
+    assert.equal(Object.isFrozen(handlers.health()), true);
+    assert.deepEqual(diagnostics, [{ code: "promise_rejection_duplicate_suppressed" }]);
+    assert.equal(Object.isFrozen(diagnostics[0]), true);
+  });
+});
+
+test("Promise rejection tracking stays bounded and never emits runtime identifiers", async () => {
+  await withInstalledPackage(async ({ createLogBrewReactNativePromiseRejectionHandlers }) => {
+    const client = createClient();
+    const diagnostics = [];
+    const handlers = createLogBrewReactNativePromiseRejectionHandlers({
+      client,
+      maxTrackedRejections: 2,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
+    });
+    const privateRuntimeId = "private-runtime-id@example.test";
+
+    handlers.onUnhandled(1, { reason: "first private reason" });
+    handlers.onUnhandled(2, { reason: "second private reason" });
+    handlers.onUnhandled(privateRuntimeId, { reason: "third private reason" });
+    handlers.onUnhandled(privateRuntimeId, { reason: "duplicate private reason" });
+    handlers.onHandled(1);
+    handlers.onUnhandled(undefined, { reason: "untracked private reason" });
+
+    const serialized = JSON.stringify(client.issues);
+    for (const forbidden of [
+      privateRuntimeId,
+      "first private reason",
+      "second private reason",
+      "third private reason",
+      "duplicate private reason",
+      "untracked private reason"
+    ]) {
+      assert.equal(serialized.includes(forbidden), false);
+    }
+    assert.equal(client.issues.length, 4);
+    assert.deepEqual(handlers.health(), {
+      available: true,
+      capturedEvents: 4,
+      evictedRejections: 1,
+      handledLaterEvents: 0,
+      lastOutcome: "captured_untracked",
+      maxTrackedRejections: 2,
+      suppressedEvents: 1,
+      trackedRejections: 2,
+      unknownHandledEvents: 1,
+      untrackedEvents: 1
+    });
+    assert.deepEqual(diagnostics, [
+      { code: "promise_rejection_tracking_evicted" },
+      { code: "promise_rejection_duplicate_suppressed" },
+      { code: "promise_rejection_id_unavailable" }
+    ]);
+  });
+});
+
+test("Promise rejection capture and diagnostics cannot interfere with the app", async () => {
+  await withInstalledPackage(async ({ createLogBrewReactNativePromiseRejectionHandlers }) => {
+    const handlers = createLogBrewReactNativePromiseRejectionHandlers({
+      client: createClient({ fail: true }),
+      onDiagnostic() {
+        throw new Error("private diagnostic failure");
+      }
+    });
+
+    assert.doesNotThrow(() => handlers.onUnhandled(7, {
+      get reason() {
+        throw new Error("private reason getter");
+      }
+    }));
+    assert.doesNotThrow(() => handlers.onHandled(7));
+    assert.deepEqual(handlers.health(), {
+      available: true,
+      capturedEvents: 0,
+      evictedRejections: 0,
+      handledLaterEvents: 0,
+      lastOutcome: "handled_unknown",
+      maxTrackedRejections: 128,
+      suppressedEvents: 0,
+      trackedRejections: 0,
+      unknownHandledEvents: 1,
+      untrackedEvents: 0
+    });
+  });
+});
+
+test("missing Promise rejection client returns startup-safe inert handlers", async () => {
+  await withInstalledPackage(async ({ createLogBrewReactNativePromiseRejectionHandlers }) => {
+    const diagnostics = [];
+    const handlers = createLogBrewReactNativePromiseRejectionHandlers({
+      client: {},
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
+    });
+
+    assert.doesNotThrow(() => handlers.onUnhandled(1, { reason: "private" }));
+    assert.doesNotThrow(() => handlers.onHandled(1));
+    assert.deepEqual(handlers.health(), {
+      available: false,
+      capturedEvents: 0,
+      evictedRejections: 0,
+      handledLaterEvents: 0,
+      lastOutcome: "unavailable",
+      maxTrackedRejections: 0,
+      suppressedEvents: 0,
+      trackedRejections: 0,
+      unknownHandledEvents: 0,
+      untrackedEvents: 0
+    });
+    assert.deepEqual(diagnostics, [{ code: "promise_rejection_handler_unavailable" }]);
   });
 });
