@@ -176,7 +176,9 @@ test("persistent queue factory participates in automatic delivery, health, purge
   capture(client, "automatic-persistent");
   await sent;
   for (let attempt = 0; attempt < 100 && client.pendingEvents() !== 0; attempt += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
   }
   assert.equal(client.pendingEvents(), 0);
   assert.equal(client.deliveryHealth().lastOutcome, "accepted");

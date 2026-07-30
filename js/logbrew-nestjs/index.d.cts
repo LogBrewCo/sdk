@@ -10,6 +10,7 @@ import type {
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
+import type { NodeFetchTransportConfig } from "@logbrew/node";
 
 export type CreateLogBrewNestClientConfig = {
   serverApiKey?: string;
@@ -32,7 +33,7 @@ export type LogBrewNestContext = {
 export type LogBrewTraceContext = {
   traceId: string;
   spanId: string;
-  parentSpanId: string;
+  parentSpanId?: string;
   sampled: boolean;
 };
 
@@ -89,7 +90,8 @@ export type LogBrewNestBaseLogger = {
 
 export type LogBrewNestLogger = {
   client: LogBrewClient;
-  transport?: Transport;
+  /** Delivery transport used by flush and shutdown. Defaults to the Node fetch transport. */
+  transport: Transport;
   log(message: unknown, context?: string): void;
   error(message: unknown, stack?: string, context?: string): void;
   warn(message: unknown, context?: string): void;
@@ -101,10 +103,11 @@ export type LogBrewNestLogger = {
   shutdown(): Promise<TransportResponse | null>;
 };
 
-export type LogBrewNestLoggerOptions = CreateLogBrewNestClientConfig & {
+export type LogBrewNestLoggerOptions = CreateLogBrewNestClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient;
   baseLogger?: LogBrewNestBaseLogger;
   logger?: string;
+  /** Override the default Node fetch transport. */
   transport?: Transport;
   now?: () => string;
   idFactory?: (level: LogBrewNestLoggerLevel, message: unknown, context: string | undefined, sequence: number) => string;
@@ -113,8 +116,9 @@ export type LogBrewNestLoggerOptions = CreateLogBrewNestClientConfig & {
   onCaptureError?: (error: unknown) => void | Promise<void>;
 };
 
-export type LogBrewNestOptions = CreateLogBrewNestClientConfig & {
+export type LogBrewNestOptions = CreateLogBrewNestClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
+  /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;

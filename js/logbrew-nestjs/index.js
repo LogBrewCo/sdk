@@ -2,13 +2,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { catchError, Observable, tap, throwError } from "rxjs";
 import {
   LogBrewClient,
-  RecordingTransport,
   SdkError,
   parseTraceparent
 } from "@logbrew/sdk";
+import { createNodeFetchTransport } from "@logbrew/node";
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
-const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_SDK_VERSION = "0.1.2";
 const activeTraceContext = new AsyncLocalStorage();
 
 export function createLogBrewNestClient({
@@ -31,6 +31,9 @@ export function createLogBrewNestClient({
 export class LogBrewInterceptor {
   constructor(options = {}) {
     this.options = options;
+    this.defaultTransport = options.transport === undefined
+      ? createNodeFetchTransport(options)
+      : undefined;
   }
 
   intercept(executionContext, next) {
@@ -38,7 +41,14 @@ export class LogBrewInterceptor {
     const request = http.getRequest();
     const response = http.getResponse();
     const client = resolveClient(this.options, executionContext, request, response);
-    const transport = resolveTransport(this.options, executionContext, request, response, client);
+    const transport = resolveTransport(
+      this.options,
+      executionContext,
+      request,
+      response,
+      client,
+      this.defaultTransport
+    );
     const trace = createRequestTraceContext(request, response, this.options);
     const shutdownClient = shouldShutdownClient(this.options);
     const startedAt = nowMs(this.options);
@@ -184,6 +194,7 @@ export function createRequestMetricEvent(request, response, {
 
 export function createLogBrewNestLogger(options = {}) {
   const client = options.client ?? createLogBrewNestClient(options);
+  const transport = options.transport ?? createNodeFetchTransport(options);
   const logger = options.logger ?? "nestjs";
   const now = typeof options.now === "function" ? options.now : () => new Date().toISOString();
   const idFactory = typeof options.idFactory === "function" ? options.idFactory : defaultLoggerEventId;
@@ -231,8 +242,8 @@ export function createLogBrewNestLogger(options = {}) {
         });
       }
 
-      if (options.flushOnCapture === true && options.transport) {
-        state.pendingFlush = Promise.resolve(client.flush(options.transport)).catch((error) => {
+      if (options.flushOnCapture === true) {
+        state.pendingFlush = Promise.resolve(client.flush(transport)).catch((error) => {
           notifyCaptureError(error);
           return null;
         });
@@ -244,7 +255,7 @@ export function createLogBrewNestLogger(options = {}) {
 
   return {
     client,
-    transport: options.transport,
+    transport,
     log(message, context) {
       forwardLoggerCall(baseLogger, "log", [message, context]);
       capture("info", message, context);
@@ -273,8 +284,8 @@ export function createLogBrewNestLogger(options = {}) {
       forwardLoggerCall(baseLogger, "setLogLevels", [levels]);
     },
     flush() {
-      if (options.transport && client.pendingEvents() > 0) {
-        state.pendingFlush = Promise.resolve(client.flush(options.transport)).catch((error) => {
+      if (client.pendingEvents() > 0) {
+        state.pendingFlush = Promise.resolve(client.flush(transport)).catch((error) => {
           notifyCaptureError(error);
           return null;
         });
@@ -282,12 +293,10 @@ export function createLogBrewNestLogger(options = {}) {
       return state.pendingFlush;
     },
     shutdown() {
-      if (options.transport) {
-        state.pendingFlush = Promise.resolve(client.shutdown(options.transport)).catch((error) => {
-          notifyCaptureError(error);
-          return null;
-        });
-      }
+      state.pendingFlush = Promise.resolve(client.shutdown(transport)).catch((error) => {
+        notifyCaptureError(error);
+        return null;
+      });
       return state.pendingFlush;
     }
   };
@@ -374,11 +383,11 @@ function resolveClient(options, executionContext, request, response) {
   return createLogBrewNestClient(options);
 }
 
-function resolveTransport(options, executionContext, request, response, client) {
+function resolveTransport(options, executionContext, request, response, client, defaultTransport) {
   if (typeof options.transport === "function") {
     return options.transport({ client, executionContext, request, response });
   }
-  return options.transport ?? RecordingTransport.alwaysAccept();
+  return options.transport ?? defaultTransport;
 }
 
 function shouldShutdownClient(options) {

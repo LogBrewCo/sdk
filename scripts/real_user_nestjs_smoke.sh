@@ -3,15 +3,28 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
+nestjs_package_version="$(node -p "require('${repo_root}/js/logbrew-nestjs/package.json').version")"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 core_pack_json="$tmp_dir/core-pack.json"
+node_pack_json="$tmp_dir/node-pack.json"
 nestjs_pack_json="$tmp_dir/nestjs-pack.json"
 (cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
+(cd "$repo_root/js/logbrew-node" && npm pack --json --pack-destination "$tmp_dir") > "$node_pack_json"
 (cd "$repo_root/js/logbrew-nestjs" && npm pack --json --pack-destination "$tmp_dir") > "$nestjs_pack_json"
 
 core_tgz="$(python3 - "$core_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload[0]["filename"])
+PY
+)"
+node_tgz="$(python3 - "$node_pack_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -30,8 +43,10 @@ print(payload[0]["filename"])
 PY
 )"
 core_tgz="$tmp_dir/$core_tgz"
+node_tgz="$tmp_dir/$node_tgz"
 nestjs_tgz="$tmp_dir/$nestjs_tgz"
 test -f "$core_tgz"
+test -f "$node_tgz"
 test -f "$nestjs_tgz"
 
 tar -tzf "$nestjs_tgz" > "$tmp_dir/nestjs-tarball.txt"
@@ -45,8 +60,11 @@ grep -q '^package/examples/package.json$' "$tmp_dir/nestjs-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/nestjs-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/nestjs-tarball.txt"
 tar -xOf "$nestjs_tgz" package/README.md > "$tmp_dir/nestjs-readme.md"
-grep -q 'npm install @logbrew/sdk @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs' "$tmp_dir/nestjs-readme.md"
-grep -q 'pnpm add @logbrew/sdk @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs' "$tmp_dir/nestjs-readme.md"
+tar -xOf "$nestjs_tgz" package/package.json > "$tmp_dir/nestjs-package.json"
+grep -q 'npm install @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs' "$tmp_dir/nestjs-readme.md"
+grep -q 'pnpm add @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs' "$tmp_dir/nestjs-readme.md"
+grep -q 'sends to the LogBrew ingest API by default' "$tmp_dir/nestjs-readme.md"
+grep -q 'RecordingTransport' "$tmp_dir/nestjs-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/nestjs-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/nestjs-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/nestjs-readme.md"
@@ -63,6 +81,19 @@ grep -q 'http.server.duration' "$tmp_dir/nestjs-readme.md"
 grep -q 'low-cardinality' "$tmp_dir/nestjs-readme.md"
 grep -q 'createLogBrewNestLogger' "$tmp_dir/nestjs-readme.md"
 grep -q 'app.useLogger' "$tmp_dir/nestjs-readme.md"
+python3 - "$tmp_dir/nestjs-package.json" "$node_package_version" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text())
+node_version = sys.argv[2]
+peers = manifest.get("peerDependencies", {})
+if peers.get("@logbrew/node") != f"^{node_version}":
+    raise SystemExit(f"unexpected @logbrew/node peer: {peers.get('@logbrew/node')!r}")
+if peers.get("@logbrew/sdk") != "^0.1.3":
+    raise SystemExit(f"unexpected @logbrew/sdk peer: {peers.get('@logbrew/sdk')!r}")
+PY
 
 app_dir="$tmp_dir/nestjs-smoke-app"
 mkdir -p "$app_dir"
@@ -78,6 +109,7 @@ types_express_version="$(npm view @types/express version)"
 npm install \
   --save-exact \
   "$core_tgz" \
+  "$node_tgz" \
   "$nestjs_tgz" \
   "@nestjs/common@$nest_common_version" \
   "@nestjs/core@$nest_core_version" \
@@ -90,6 +122,7 @@ npm install \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
+grep -q '"@logbrew/node": "file:' package.json
 grep -q '"@logbrew/nestjs": "file:' package.json
 grep -q '"@nestjs/common":' package.json
 grep -q '"@nestjs/core":' package.json
@@ -97,12 +130,14 @@ grep -q '"@nestjs/platform-express":' package.json
 grep -q '"reflect-metadata":' package.json
 grep -q '"rxjs":' package.json
 grep -q '"@logbrew/nestjs"' package-lock.json
+grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
-npm ls @logbrew/sdk @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs >/dev/null
+npm ls @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs >/dev/null
 npm explain @logbrew/nestjs > "$tmp_dir/npm-explain-nestjs.txt"
-grep -q '@logbrew/nestjs@0.1.1' "$tmp_dir/npm-explain-nestjs.txt"
+grep -q "@logbrew/nestjs@${nestjs_package_version}" "$tmp_dir/npm-explain-nestjs.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/nestjs@0.1.1' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/nestjs@${nestjs_package_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
@@ -114,6 +149,7 @@ payload = json.loads(Path(sys.argv[1]).read_text())
 deps = payload.get("dependencies", {})
 for name in (
     "@logbrew/nestjs",
+    "@logbrew/node",
     "@logbrew/sdk",
     "@nestjs/common",
     "@nestjs/core",
@@ -155,7 +191,7 @@ const errorSpanId = "b7ad6b7169203332";
 const explicitClient = createLogBrewNestClient({
   apiKey: "LOGBREW_API_KEY",
   sdkName: "nestjs-smoke-explicit",
-  sdkVersion: "0.1.1"
+  sdkVersion: "0.1.2"
 });
 if (explicitClient.pendingEvents() !== 0) {
   throw new Error("expected empty explicit client");
@@ -184,7 +220,7 @@ manualApp.useGlobalInterceptors(new LogBrewInterceptor({
   captureRequests: false,
   maxRetries: 1,
   sdkName: "nestjs-smoke-app",
-  sdkVersion: "0.1.1",
+  sdkVersion: "0.1.2",
   transport: requestTransport
 }));
 await manualApp.listen(0, "127.0.0.1");
@@ -198,7 +234,7 @@ const forwardedLoggerCalls: string[] = [];
 const autoClient = createLogBrewNestClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "nestjs-auto-smoke",
-  sdkVersion: "0.1.1"
+  sdkVersion: "0.1.2"
 });
 const logbrewLogger: LogBrewNestLogger = createLogBrewNestLogger({
   client: autoClient,
@@ -236,7 +272,7 @@ class AutoController {
       attributes.metadata = {
         traceId: trace.traceId,
         spanId: trace.spanId,
-        parentSpanId: trace.parentSpanId,
+        ...(trace.parentSpanId ? { parentSpanId: trace.parentSpanId } : {}),
         sampled: trace.sampled
       };
     }
@@ -404,7 +440,7 @@ traceApp.useGlobalInterceptors(new LogBrewInterceptor({
     return () => values.shift() ?? 119;
   })(),
   sdkName: "nestjs-trace-smoke",
-  sdkVersion: "0.1.1",
+  sdkVersion: "0.1.2",
   spanIdFactory: () => "b7ad6b7169203331",
   transport: traceTransport
 }));
@@ -468,7 +504,7 @@ metricsApp.useGlobalInterceptors(new LogBrewInterceptor({
     return () => values.shift() ?? 137;
   })(),
   sdkName: "nestjs-metric-smoke",
-  sdkVersion: "0.1.1",
+  sdkVersion: "0.1.2",
   transport: metricTransport
 }));
 await metricsApp.listen(0, "127.0.0.1");
@@ -632,7 +668,7 @@ import {
 const client = createLogBrewNestClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "typed-nestjs-smoke",
-  sdkVersion: "0.1.1"
+  sdkVersion: "0.1.2"
 });
 const logger: LogBrewNestLogger = createLogBrewNestLogger({
   client,
@@ -696,6 +732,195 @@ async function createApp(): Promise<unknown> {
 export { createApp };
 EOF
 
+cat > default-delivery.ts <<'EOF'
+import "reflect-metadata";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { Controller, Get, Module } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import {
+  createLogBrewNestClient,
+  createLogBrewNestLogger,
+  LogBrewInterceptor
+} from "@logbrew/nestjs";
+
+type ReceivedRequest = {
+  authorization: string | undefined;
+  body: string;
+};
+
+const received: ReceivedRequest[] = [];
+const intake = createServer(async (request, response) => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  received.push({
+    authorization: request.headers.authorization,
+    body: Buffer.concat(chunks).toString("utf8")
+  });
+  response.statusCode = 202;
+  response.end();
+});
+await listen(intake);
+const endpoint = `http://127.0.0.1:${(intake.address() as AddressInfo).port}/v1/events`;
+
+@Controller()
+class DefaultDeliveryController {
+  @Get("/default-delivery")
+  defaultDelivery(): { ok: true } {
+    return { ok: true };
+  }
+}
+
+@Module({ controllers: [DefaultDeliveryController] })
+class DefaultDeliveryModule {}
+
+let defaultApp: Awaited<ReturnType<typeof NestFactory.create>> | undefined;
+let failureApp: Awaited<ReturnType<typeof NestFactory.create>> | undefined;
+
+try {
+  const flushStatuses: number[] = [];
+  const captureErrors: string[] = [];
+  defaultApp = await NestFactory.create(DefaultDeliveryModule, { logger: false });
+  defaultApp.useGlobalInterceptors(new LogBrewInterceptor({
+    serverApiKey: "default-key",
+    endpoint,
+    idFactory: () => "evt_nestjs_default_delivery",
+    maxRetries: 0,
+    onFlush(response) {
+      flushStatuses.push(response.statusCode);
+    },
+    onCaptureError(error) {
+      captureErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  }));
+  await defaultApp.listen(0, "127.0.0.1");
+  const response = await fetch(`${await defaultApp.getUrl()}/default-delivery`);
+  await response.json();
+  await waitFor(() => received.length === 1, "default interceptor delivery");
+
+  if (captureErrors.length !== 0 || flushStatuses[0] !== 202) {
+    throw new Error(`default interceptor delivery failed: ${JSON.stringify({ captureErrors, flushStatuses })}`);
+  }
+  if (received[0]?.authorization !== "Bearer default-key") {
+    throw new Error(`default interceptor authorization changed: ${JSON.stringify(received[0])}`);
+  }
+  const defaultPayload = JSON.parse(received[0]?.body ?? "");
+  if (defaultPayload.events?.[0]?.id !== "evt_nestjs_default_delivery") {
+    throw new Error(`default interceptor payload changed: ${received[0]?.body}`);
+  }
+
+  const loggerErrors: string[] = [];
+  const loggerClient = createLogBrewNestClient({
+    serverApiKey: "logger-key",
+    sdkName: "nestjs-default-logger-smoke",
+    sdkVersion: "0.1.2",
+    maxRetries: 0
+  });
+  const logger = createLogBrewNestLogger({
+    client: loggerClient,
+    endpoint,
+    flushOnCapture: true,
+    idFactory: () => "evt_nestjs_default_logger",
+    onCaptureError(error) {
+      loggerErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  });
+  if (!logger.transport) {
+    throw new Error("default Nest logger transport is missing");
+  }
+  logger.log("default logger delivery", "DefaultDeliveryController");
+  await waitFor(() => received.length === 2, "default logger delivery");
+  await logger.shutdown();
+  if (loggerErrors.length !== 0) {
+    throw new Error(`default logger delivery failed: ${JSON.stringify(loggerErrors)}`);
+  }
+  if (received[1]?.authorization !== "Bearer logger-key") {
+    throw new Error(`default logger authorization changed: ${JSON.stringify(received[1])}`);
+  }
+  const loggerPayload = JSON.parse(received[1]?.body ?? "");
+  if (loggerPayload.events?.[0]?.id !== "evt_nestjs_default_logger") {
+    throw new Error(`default logger payload changed: ${received[1]?.body}`);
+  }
+
+  const networkErrors: string[] = [];
+  const unexpectedFlushes: number[] = [];
+  failureApp = await NestFactory.create(DefaultDeliveryModule, { logger: false });
+  failureApp.useGlobalInterceptors(new LogBrewInterceptor({
+    serverApiKey: "failure-key",
+    endpoint,
+    fetchImpl: (async () => {
+      throw new Error("network sentinel");
+    }) as typeof fetch,
+    idFactory: () => "evt_nestjs_network_failure",
+    maxRetries: 0,
+    onFlush(response) {
+      unexpectedFlushes.push(response.statusCode);
+    },
+    onCaptureError(error) {
+      networkErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  }));
+  await failureApp.listen(0, "127.0.0.1");
+  const failureResponse = await fetch(`${await failureApp.getUrl()}/default-delivery`);
+  await failureResponse.json();
+  await waitFor(() => networkErrors.length === 1, "default transport failure callback");
+
+  if (!networkErrors[0]?.includes("fetch failed: network sentinel")) {
+    throw new Error(`unexpected network failure: ${JSON.stringify(networkErrors)}`);
+  }
+  if (unexpectedFlushes.length !== 0) {
+    throw new Error(`network failure reported a successful flush: ${JSON.stringify(unexpectedFlushes)}`);
+  }
+
+  console.log(JSON.stringify({
+    defaultInterceptorDelivered: defaultPayload.events[0].id,
+    defaultLoggerDelivered: loggerPayload.events[0].id,
+    networkFailureSurfaced: true,
+    ok: true
+  }));
+} finally {
+  await failureApp?.close();
+  await defaultApp?.close();
+  await close(intake);
+}
+
+function listen(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+EOF
+
 cat > tsconfig.json <<'EOF'
 {
   "compilerOptions": {
@@ -710,10 +935,111 @@ cat > tsconfig.json <<'EOF'
     "skipLibCheck": false,
     "outDir": "dist"
   },
-  "include": ["consumer.ts", "smoke.ts"]
+  "include": ["consumer.ts", "default-delivery.ts", "smoke.ts"]
 }
 EOF
 npx tsc --project tsconfig.json
+
+node dist/default-delivery.js > "$tmp_dir/nestjs-default-delivery.json"
+grep -q '"defaultInterceptorDelivered":"evt_nestjs_default_delivery"' "$tmp_dir/nestjs-default-delivery.json"
+grep -q '"defaultLoggerDelivered":"evt_nestjs_default_logger"' "$tmp_dir/nestjs-default-delivery.json"
+grep -q '"networkFailureSurfaced":true' "$tmp_dir/nestjs-default-delivery.json"
+
+cat > default-delivery.cjs <<'EOF'
+const { of } = require("rxjs");
+const {
+  createLogBrewNestLogger,
+  LogBrewInterceptor
+} = require("@logbrew/nestjs");
+
+const deliveries = [];
+const fetchImpl = async (url, init) => {
+  deliveries.push({
+    authorization: init.headers.authorization,
+    body: init.body,
+    url: String(url)
+  });
+  return new Response(null, { status: 202 });
+};
+
+(async () => {
+  const interceptor = new LogBrewInterceptor({
+    serverApiKey: "cjs-intake",
+    endpoint: "https://intake.invalid/v1/events",
+    fetchImpl,
+    idFactory: () => "evt_nestjs_cjs_interceptor",
+    maxRetries: 0
+  });
+  const request = { method: "GET", originalUrl: "/cjs-default" };
+  const response = { statusCode: 200 };
+  const executionContext = {
+    switchToHttp() {
+      return {
+        getRequest: () => request,
+        getResponse: () => response
+      };
+    }
+  };
+  await new Promise((resolve, reject) => {
+    interceptor.intercept(executionContext, { handle: () => of({ ok: true }) }).subscribe({
+      complete: resolve,
+      error: reject
+    });
+  });
+  await waitFor(() => deliveries.length === 1, "CommonJS interceptor delivery");
+
+  const logger = createLogBrewNestLogger({
+    serverApiKey: "cjs-logger",
+    endpoint: "https://intake.invalid/v1/events",
+    fetchImpl,
+    flushOnCapture: true,
+    idFactory: () => "evt_nestjs_cjs_logger",
+    maxRetries: 0
+  });
+  logger.log("CommonJS default delivery", "CjsController");
+  await logger.flush();
+  await waitFor(() => deliveries.length === 2, "CommonJS logger delivery");
+
+  const interceptorPayload = JSON.parse(deliveries[0].body);
+  const loggerPayload = JSON.parse(deliveries[1].body);
+  if (
+    deliveries[0].authorization !== "Bearer cjs-intake" ||
+    interceptorPayload.events?.[0]?.id !== "evt_nestjs_cjs_interceptor"
+  ) {
+    throw new Error(`unexpected CommonJS interceptor delivery: ${JSON.stringify(deliveries[0])}`);
+  }
+  if (
+    deliveries[1].authorization !== "Bearer cjs-logger" ||
+    loggerPayload.events?.[0]?.id !== "evt_nestjs_cjs_logger"
+  ) {
+    throw new Error(`unexpected CommonJS logger delivery: ${JSON.stringify(deliveries[1])}`);
+  }
+
+  console.log(JSON.stringify({
+    cjsInterceptorDelivered: interceptorPayload.events[0].id,
+    cjsLoggerDelivered: loggerPayload.events[0].id,
+    ok: true
+  }));
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+
+async function waitFor(predicate, label) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+EOF
+node default-delivery.cjs > "$tmp_dir/nestjs-default-delivery-cjs.json"
+grep -q '"cjsInterceptorDelivered":"evt_nestjs_cjs_interceptor"' "$tmp_dir/nestjs-default-delivery-cjs.json"
+grep -q '"cjsLoggerDelivered":"evt_nestjs_cjs_logger"' "$tmp_dir/nestjs-default-delivery-cjs.json"
 
 node dist/smoke.js > "$tmp_dir/nestjs-smoke.stdout.json" 2> "$tmp_dir/nestjs-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/nestjs-smoke.stdout.json" >/dev/null
