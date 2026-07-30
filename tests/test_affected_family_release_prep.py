@@ -38,10 +38,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((manifest["name"], manifest["version"]), expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.5"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.6"),
-            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.1"),
-            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.3"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.6"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.7"),
+            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.2"),
+            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.4"),
         }
         for relative_path, expected in pypi_versions.items():
             project = tomllib.loads((ROOT / relative_path).read_text(encoding="utf-8"))["project"]
@@ -174,10 +174,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.5",
-                "logbrew-fastapi": "0.1.6",
-                "logbrew-flask": "0.1.1",
-                "logbrew-django": "0.1.3",
+                "logbrew-sdk": "0.1.6",
+                "logbrew-fastapi": "0.1.7",
+                "logbrew-flask": "0.1.2",
+                "logbrew-django": "0.1.4",
             },
         )
 
