@@ -87,6 +87,9 @@ grep -q 'pnpm add @logbrew/sdk @logbrew/react-native react react-native' "$tmp_d
 grep -q 'LOGBREW_CLIENT_KEY' "$tmp_dir/native-readme.md"
 grep -q 'AppState' "$tmp_dir/native-readme.md"
 grep -q 'Platform' "$tmp_dir/native-readme.md"
+grep -q 'createReactNativeFetchTransport' "$tmp_dir/native-readme.md"
+grep -q 'RecordingTransport.alwaysAccept().*local recording transport' "$tmp_dir/native-readme.md"
+grep -q 'logbrew read logs --project <project_id>' "$tmp_dir/native-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/native-readme.md"
 grep -q 'createReactNativeTraceparent' "$tmp_dir/native-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/native-readme.md"
@@ -175,7 +178,7 @@ node --check node_modules/@logbrew/react-native/native-bridge.js
 node --check node_modules/@logbrew/react-native/native-bridge.cjs
 node --check node_modules/@logbrew/react-native/resource-fetch.js
 node --check node_modules/@logbrew/react-native/resource-fetch.cjs
-node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object") process.exit(1)'
+node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createReactNativeFetchTransport !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object" || typeof native.default.createReactNativeFetchTransport !== "function") process.exit(1)'
 node -e 'const instrumentation = require("@logbrew/react-native/instrumentation"); if (typeof instrumentation.createLogBrewReactNativeInstrumentation !== "function" || typeof instrumentation.default !== "object") process.exit(1)'
 node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeof lifecycle.createAppStateLifecycleSpanListener !== "function" || typeof lifecycle.captureReactNativeLifecycleSpan !== "function" || typeof lifecycle.createReactNativeLifecycleSpanEvent !== "function") process.exit(1)'
 node -e 'const globalErrors = require("@logbrew/react-native/global-errors"); if (typeof globalErrors.createLogBrewReactNativePromiseRejectionHandlers !== "function" || typeof globalErrors.installLogBrewReactNativeGlobalErrorHandler !== "function" || typeof globalErrors.default !== "object") process.exit(1)'
@@ -197,6 +200,7 @@ import {
   createAppStateListener,
   createLogBrewReactNativeClient,
   createReactNativeActionEvent,
+  createReactNativeFetchTransport,
   createReactNativeNetworkEvent,
   createReactNativeSpanAttributes,
   createReactNativeTraceContext,
@@ -255,6 +259,43 @@ const client = createLogBrewReactNativeClient({
   sdkVersion: "0.1.0",
   maxRetries: 1
 });
+const deliveryRequests = [];
+const deliveryClient = createLogBrewReactNativeClient({
+  automaticDelivery: false,
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-hosted-delivery-smoke",
+  sdkVersion: "0.1.0",
+  transport: createReactNativeFetchTransport({
+    async fetchImpl(endpoint, init) {
+      deliveryRequests.push({ endpoint, init });
+      return {
+        status: 202,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === "retry-after" ? "2" : null;
+          }
+        }
+      };
+    }
+  })
+});
+deliveryClient.log("evt_hosted_delivery_smoke", "2026-06-02T10:00:00Z", {
+  level: "info",
+  message: "React Native hosted delivery smoke"
+});
+const deliveryResponse = await deliveryClient.flush();
+if (
+  deliveryResponse.statusCode !== 202
+  || deliveryRequests.length !== 1
+  || deliveryRequests[0].endpoint !== "https://api.logbrew.co/v1/events"
+  || deliveryRequests[0].init.headers.authorization !== "Bearer LOGBREW_CLIENT_KEY"
+  || deliveryRequests[0].init.keepalive !== undefined
+) {
+  throw new Error(`unexpected React Native hosted delivery: ${JSON.stringify({
+    deliveryResponse,
+    requests: deliveryRequests.length
+  })}`);
+}
 const globalErrorClient = createLogBrewReactNativeClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "react-native-global-error-smoke",
@@ -1017,6 +1058,7 @@ console.error(JSON.stringify({
   globalHandlerRemoved: currentGlobalHandler === previousGlobalHandler,
   globalReports: globalErrorEvents.length,
   promiseRejectionReports: promiseRejectionEvents.length,
+  hostedDeliveryStatus: deliveryResponse.statusCode,
   propagatedTraceparent
 }));
 
@@ -1072,6 +1114,7 @@ grep -q '"listenerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"globalHandlerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"globalReports":2' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"promiseRejectionReports":1' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"hostedDeliveryStatus":202' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"lifecycleEvents":3' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"lifecycleSpan":"app_state:inactive->background"' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"timelineEvents":6' "$tmp_dir/native-smoke.stderr.json"
@@ -1103,6 +1146,7 @@ import {
   captureReactNativeNetwork,
   createReactNavigationSpanListener,
   createReactNativeActionEvent,
+  createReactNativeFetchTransport,
   createReactNativeErrorEvent,
   createReactNativeNetworkEvent,
   createReactNativeNavigationSpanEvent,
@@ -1170,6 +1214,24 @@ const client = createLogBrewReactNativeClient({
   sdkName: "typed-native-smoke",
   sdkVersion: "0.1.0"
 });
+const typedDeliveryTransport = createReactNativeFetchTransport({
+  fetchImpl: async (_endpoint, init) => ({
+    status: init.method === "POST" ? 202 : 400,
+    headers: { get: () => null }
+  })
+});
+const typedDeliveryClient = createLogBrewReactNativeClient({
+  automaticDelivery: false,
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "typed-native-delivery-smoke",
+  sdkVersion: "0.1.0",
+  transport: typedDeliveryTransport
+});
+typedDeliveryClient.log("evt_typed_delivery", "2026-06-02T10:00:00Z", {
+  level: "info",
+  message: "typed delivery"
+});
+void typedDeliveryClient.flush();
 let typedGlobalHandler = (_error: unknown, _isFatal?: boolean): void => {};
 const typedErrorUtils: ReactNativeErrorUtilsLike = {
   getGlobalHandler() {
@@ -1482,6 +1544,8 @@ grep -q 'trace-correlation -> node node_modules/@logbrew/react-native/examples/i
 node node_modules/@logbrew/react-native/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/example-readme.stderr.json"
+grep -q '"mode":"local_recording"' "$tmp_dir/example-readme.stderr.json"
+grep -q '"hostedAccepted":false' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/react-native/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
