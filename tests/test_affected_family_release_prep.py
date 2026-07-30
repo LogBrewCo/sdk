@@ -85,7 +85,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )["project"]
         self.assertEqual(
             set(project["dependencies"]),
-            {"certifi>=2026.7.22", "truststore>=0.10.4,<1"},
+            {
+                "certifi>=2026.7.22",
+                "truststore>=0.10.4,<1",
+                "typing-extensions>=4.1; python_version < '3.11'",
+            },
         )
 
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")

@@ -516,6 +516,44 @@ jobs:
       - name: Leak scan
         run: python3 scripts/check_confidentiality_scan.py
 
+  python-compatibility:
+    name: Python 3.10 compatibility (Django ${{ matrix.django_version }})
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.python == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        django_version:
+          - "4.2.30"
+          - "5.2.16"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Run installed core SDK tests
+        run: |
+          python3 -m pip install --no-cache-dir --disable-pip-version-check ./python/logbrew_py
+          PYTHONPATH="" python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
+
+      - name: Run installed FastAPI and Flask package checks
+        if: ${{ matrix.django_version == '5.2.16' }}
+        run: |
+          bash scripts/check_fastapi_package.sh
+          bash scripts/check_flask_package.sh
+
+      - name: Run installed Django package checks
+        env:
+          LOGBREW_DJANGO_FRAMEWORK_VERSION: ${{ matrix.django_version }}
+        run: bash scripts/check_django_package.sh
+
   dotnet-durability:
     name: .NET durability (${{ matrix.os }}-${{ matrix.architecture }})
     needs: changed-areas

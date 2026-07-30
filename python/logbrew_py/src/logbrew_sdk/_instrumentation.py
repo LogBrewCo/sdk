@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, TypeAlias
 from uuid import uuid4
 
@@ -122,7 +122,7 @@ def duration_ms(start: float, clock: Clock) -> float:
 
 
 def now_timestamp() -> str:
-    return datetime.now(tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def capture_client_span(

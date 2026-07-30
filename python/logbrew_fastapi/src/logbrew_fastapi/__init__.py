@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from typing import Any
@@ -244,7 +244,7 @@ def _delivery_error_code(error: Exception) -> str:
 def utc_timestamp() -> str:
     """Return a LogBrew-compatible UTC timestamp."""
 
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def request_name(request: Request) -> str:

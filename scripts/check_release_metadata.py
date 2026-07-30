@@ -69,8 +69,9 @@ PYTHON_PACKAGES = {
     "python/logbrew_django": {
         "name": "logbrew-django",
         "description": "Django integration",
-        "dependencies": {"Django>=5.2", "logbrew-sdk>=0.1.1,<0.2.0"},
+        "dependencies": {"Django>=4.2.30,<6", "logbrew-sdk>=0.1.1,<0.2.0"},
         "package": "logbrew_django",
+        "requires_python": ">=3.10",
         "version": "0.1.3",
     },
     "python/logbrew_fastapi": {
@@ -78,6 +79,7 @@ PYTHON_PACKAGES = {
         "description": "FastAPI integration",
         "dependencies": {"fastapi>=0.111.1", "logbrew-sdk>=0.1.5,<0.2.0"},
         "package": "logbrew_fastapi",
+        "requires_python": ">=3.10",
         "version": "0.1.6",
     },
     "python/logbrew_flask": {
@@ -85,13 +87,19 @@ PYTHON_PACKAGES = {
         "description": "Flask integration",
         "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.1,<0.2.0"},
         "package": "logbrew_flask",
+        "requires_python": ">=3.10",
         "version": "0.1.1",
     },
     "python/logbrew_py": {
         "name": "logbrew-sdk",
         "description": "Public LogBrew Python SDK",
-        "dependencies": {"certifi>=2026.7.22", "truststore>=0.10.4,<1"},
+        "dependencies": {
+            "certifi>=2026.7.22",
+            "truststore>=0.10.4,<1",
+            "typing-extensions>=4.1; python_version < '3.11'",
+        },
         "package": "logbrew_sdk",
+        "requires_python": ">=3.10",
         "version": "0.1.5",
     },
 }
@@ -448,7 +456,13 @@ def validate_python_package(root: Path, relative_dir: str, expected: dict[str, A
     require_equal(failures, location, "project.version", project.get("version"), expected.get("version", PUBLIC_VERSION))
     require_equal(failures, location, "project.license", project.get("license"), PUBLIC_LICENSE)
     require_equal(failures, location, "project.readme", project.get("readme"), "README.md")
-    require_equal(failures, location, "project.requires-python", project.get("requires-python"), ">=3.11")
+    require_equal(
+        failures,
+        location,
+        "project.requires-python",
+        project.get("requires-python"),
+        expected["requires_python"],
+    )
     require_contains(failures, location, "project.description", project.get("description"), expected["description"])
     authors = project.get("authors", [])
     require({"name": "LogBrew"} in authors, failures, f"{location}: authors must include LogBrew")

@@ -6,10 +6,17 @@ source "$repo_root/scripts/python_package_version.sh"
 
 package_dir="$repo_root/python/logbrew_django"
 core_dir="$repo_root/python/logbrew_py"
-tmp_dir="$(mktemp -d)"
 core_package_version="$(python_package_version "$core_dir/pyproject.toml")"
 django_package_version="$(python_package_version "$package_dir/pyproject.toml")"
+django_framework_version="${LOGBREW_DJANGO_FRAMEWORK_VERSION:-}"
 export LOGBREW_DJANGO_PACKAGE_VERSION="$django_package_version"
+
+if [[ -n "$django_framework_version" && ! "$django_framework_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  printf 'LOGBREW_DJANGO_FRAMEWORK_VERSION must be an exact X.Y.Z version\n' >&2
+  exit 2
+fi
+
+tmp_dir="$(mktemp -d)"
 
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
@@ -51,8 +58,18 @@ grep -q 'traceparent' "$tmp_dir/sdist-README.md"
 grep -q 'span_id_factory' "$tmp_dir/sdist-README.md"
 grep -q 'capture_request_metrics' "$tmp_dir/sdist-README.md"
 
-"$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check "$core_wheel" "$django_wheel" >/dev/null
+install_requirements=("$core_wheel" "$django_wheel")
+if [[ -n "$django_framework_version" ]]; then
+  install_requirements+=("Django==$django_framework_version")
+fi
+"$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check "${install_requirements[@]}" >/dev/null
 "$tmp_dir/venv/bin/python" -m pip check >/dev/null
+if [[ -n "$django_framework_version" ]]; then
+  installed_django_version="$(
+    "$tmp_dir/venv/bin/python" -c 'from importlib.metadata import version; print(version("Django"))'
+  )"
+  test "$installed_django_version" = "$django_framework_version"
+fi
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m unittest discover -s "$package_dir/tests" -p 'test_*.py'
 PYTHONPATH="" "$tmp_dir/venv/bin/python" "$package_dir/examples/readme_example.py" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"

@@ -12,6 +12,8 @@ Public Python SDK for creating LogBrew event batches, validating them locally, a
 python3 -m pip install logbrew-sdk
 ```
 
+`logbrew-sdk` requires Python 3.10 or newer.
+
 The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, and `TraceparentContext`, and copyable examples for wiring LogBrew into your Python service. Keep the real key in your app configuration and use `preview_json()` when you want to inspect queued JSON before sending.
 
 ## Example

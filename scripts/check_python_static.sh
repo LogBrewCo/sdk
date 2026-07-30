@@ -24,8 +24,8 @@ python3 -m venv "$tmp_dir/venv"
   certifi==2026.7.22 \
   truststore==0.10.4 \
   celery==5.6.3 \
-  django==6.0.6 \
-  django-stubs==6.0.5 \
+  django==5.2.16 \
+  django-stubs==5.2.9 \
   fastapi==0.136.3 \
   Flask==3.1.2 \
   httpx2==2.3.0 \
@@ -35,7 +35,7 @@ cd "$repo_root"
 
 RUFF_CACHE_DIR="$tmp_dir/ruff-cache" "$tmp_dir/venv/bin/ruff" check \
   --isolated \
-  --target-version py311 \
+  --target-version py310 \
   --line-length 120 \
   --select E,F,I,UP,B,SIM,PERF,RUF,PL \
   --ignore PLR2004,PLR0913 \
@@ -55,7 +55,7 @@ RUFF_CACHE_DIR="$tmp_dir/ruff-cache" "$tmp_dir/venv/bin/ruff" check \
 
 MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src" "$tmp_dir/venv/bin/mypy" \
   --strict \
-  --python-version 3.11 \
+  --python-version 3.10 \
   --explicit-package-bases \
   --cache-dir "$tmp_dir/mypy-cache" \
   python/logbrew_py/src \
