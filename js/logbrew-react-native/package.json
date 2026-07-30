@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/react-native",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "React Native screen, error, trace, action, and network timeline helpers for LogBrew.",
   "type": "module",
   "main": "./index.cjs",
