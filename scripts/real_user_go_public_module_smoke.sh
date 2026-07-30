@@ -140,7 +140,7 @@ func main() {
 	endpoint, err := url.Parse(logbrew.DefaultHTTPEndpoint)
 	must(err)
 	if endpoint.Scheme != "https" ||
-		endpoint.Hostname() != strings.Join([]string{"api", "logbrew", "co"}, ".") ||
+		endpoint.Host != strings.Join([]string{"api", "logbrew", "co"}, ".") ||
 		endpoint.Path != "/v1/events" ||
 		endpoint.RawQuery != "" ||
 		endpoint.Fragment != "" {
