@@ -8,7 +8,7 @@ const {
 } = require("@logbrew/sdk");
 
 const DEFAULT_SDK_NAME = "logbrew-next-client";
-const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_SDK_VERSION = "0.1.2";
 
 function createLogBrewNextBrowserClient({
   apiKey,

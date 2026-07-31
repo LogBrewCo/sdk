@@ -8,7 +8,7 @@ const app = express();
 app.use(logbrewMiddleware({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "logbrew-express-readme-example",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   captureRequests: false,
   transport
 }));

@@ -8,6 +8,12 @@ import type {
   TransportResponse
 } from "@logbrew/sdk";
 
+type NodeFetchTransportConfig = {
+  endpoint?: string;
+  fetchImpl?: typeof fetch;
+  headers?: Record<string, string>;
+};
+
 export type CreateLogBrewNextClientConfig = {
   apiKey?: string;
   serverApiKey?: string;
@@ -90,8 +96,9 @@ export type LogBrewRouteMetricEvent = {
   attributes: MetricAttributes;
 };
 
-export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewNextClientConfig & {
+export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewNextClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient | LogBrewClientFactory<TContext>;
+  /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory<TContext>;
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;

@@ -11,8 +11,68 @@ This package is intentionally thin. It creates server-side LogBrew clients, wrap
 ## Install
 
 ```bash
-npm install @logbrew/sdk @logbrew/next next react react-dom
-pnpm add @logbrew/sdk @logbrew/next next react react-dom
+npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
+pnpm add @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
+```
+
+Set `LOGBREW_SERVER_API_KEY` to a project-scoped server ingest key before starting
+the app.
+
+If you are automating setup, follow the same safe path as a person.
+Do not ask a person to paste an ingest key.
+Do not treat a missing environment variable as a reason to stop setup.
+First run `logbrew status --json`. When it reports approved authentication,
+create a temporary project and key with the commands below.
+Continue without a browser handoff. Confirm authenticated readback, and then
+archive the project.
+Only stop for account authentication when the status command reports that no
+approved authentication is available.
+
+## Create a Project and Confirm Hosted Delivery
+
+Use LogBrew CLI 0.1.32 or newer with approved account authentication to create
+the project. This requires no dashboard sign-in. The destination key file must
+not already exist. The CLI creates it with owner-only permissions and never
+prints the one-time key or its file path.
+
+```bash
+logbrew status --json
+install -d -m 700 "$HOME/.logbrew"
+
+project_result="$(
+  logbrew projects create next-service \
+    --runtime node \
+    --environment development \
+    --ingest-key-file "$HOME/.logbrew/next-service.ingest" \
+    --json
+)"
+export LOGBREW_PROJECT_ID="$(jq -er '.project.id' <<<"$project_result")"
+unset project_result
+export LOGBREW_SERVER_API_KEY="$(< "$HOME/.logbrew/next-service.ingest")"
+```
+
+Start the app after wrapping the Route Handler below, then request one safe
+route that your app already owns. For example:
+
+```bash
+curl --fail --request POST http://127.0.0.1:3000/api/logbrew
+
+logbrew doctor --project "$LOGBREW_PROJECT_ID" --json
+logbrew read logs --project "$LOGBREW_PROJECT_ID" \
+  --search "POST /api/logbrew" \
+  --since 1h \
+  --json
+```
+
+A successful ingest response proves submission. The authenticated read proves
+that the event is indexed for the same project. If you no longer need the
+temporary project, archive it and remove its revoked one-time key file:
+
+```bash
+unset LOGBREW_SERVER_API_KEY
+logbrew projects archive "$LOGBREW_PROJECT_ID" --yes --json
+rm -f "$HOME/.logbrew/next-service.ingest"
+unset LOGBREW_PROJECT_ID
 ```
 
 ## Release Artifacts
@@ -47,7 +107,6 @@ The helper defaults minified URLs to `app:///_next/static/chunks/...`. Use `mini
 
 ```js
 // app/api/logbrew/route.js
-import { RecordingTransport } from "@logbrew/sdk";
 import { getActiveLogBrewTrace, withLogBrewRouteHandler } from "@logbrew/next";
 
 export const runtime = "nodejs";
@@ -68,14 +127,36 @@ export const POST = withLogBrewRouteHandler(
     return Response.json(JSON.parse(client.previewJson()));
   },
   {
-    serverApiKey: "LOGBREW_SERVER_API_KEY",
+    serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
     spanIdFactory: () => "b7ad6b7169203331",
-    transport: RecordingTransport.alwaysAccept()
+    onCaptureError(error) {
+      console.error("LogBrew route capture failed", error);
+    }
   }
 );
 ```
 
+With no `transport` option, the wrapper sends to the LogBrew ingest API by default
+through `@logbrew/node`. You can pass `endpoint`, `fetchImpl`, or `headers` to
+configure that fetch transport, or pass an explicit LogBrew `Transport`.
+Delivery failures call `onCaptureError`; they are never converted into a
+simulated successful response.
+
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples, but Next.js Route Handlers should use server-side keys only. Use the Browser, React, Vue, Svelte, Angular, or React Native packages for frontend `clientKey` setup.
+
+`RecordingTransport` remains available from `@logbrew/sdk` when you want to
+inspect serialized server events locally. It does not send data to LogBrew;
+use the default Node fetch transport for production telemetry:
+
+```js
+import { RecordingTransport } from "@logbrew/sdk";
+
+const previewTransport = RecordingTransport.alwaysAccept();
+export const POST = withLogBrewRouteHandler(handler, {
+  serverApiKey: "local-preview-key",
+  transport: previewTransport
+});
+```
 
 By default, successful Route Handler responses are captured after your handler returns. When the incoming `Request` has a valid W3C `traceparent` header, the wrapper exposes a normalized trace object through `helpers.trace` and `getActiveLogBrewTrace()`, then records the request as a LogBrew `span` that continues the incoming trace. Use that same `traceId` and `spanId` in app-owned logs, product actions, or custom event callbacks when you want route-level debugging correlation. Requests without `traceparent`, or with a malformed header, fall back to a request `log` event so bad client headers do not break your route. Use `captureRequests: false` when a route should only flush manual events, use `spanIdFactory` when your runtime needs app-provided child span IDs, and use `onCaptureError` to observe telemetry delivery failures without letting observability own the route response.
 
@@ -113,7 +194,7 @@ import {
 const client = createLogBrewNextBrowserClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.2"
 });
 
 const routePatterns = [
@@ -150,10 +231,10 @@ import { createLogBrewNextClient } from "@logbrew/next";
 const client = createLogBrewNextClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.2"
 });
 ```
 
 ## Example Source
 
-The package includes example source for App Router Route Handlers, server-side client creation, and app-owned responses. Use the snippets above as the starting point for wiring LogBrew into your Next.js application.
+The package includes example source for App Router Route Handlers, server-side client creation, and app-owned responses. The packaged server examples use an explicit `RecordingTransport` so they can run offline and print serialized event batches without sending them. Use the default network-delivery snippets above as the starting point for wiring LogBrew into your Next.js application.

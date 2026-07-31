@@ -14,7 +14,7 @@ const app = express();
 app.use("/logbrew", logbrewMiddleware({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "logbrew-express-real-user-smoke",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   maxRetries: 1,
   captureRequests: false,
   transport: requestTransport

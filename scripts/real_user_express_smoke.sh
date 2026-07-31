@@ -3,15 +3,28 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
+express_package_version="$(node -p "require('${repo_root}/js/logbrew-express/package.json').version")"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 core_pack_json="$tmp_dir/core-pack.json"
+node_pack_json="$tmp_dir/node-pack.json"
 express_pack_json="$tmp_dir/express-pack.json"
 (cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
+(cd "$repo_root/js/logbrew-node" && npm pack --json --pack-destination "$tmp_dir") > "$node_pack_json"
 (cd "$repo_root/js/logbrew-express" && npm pack --json --pack-destination "$tmp_dir") > "$express_pack_json"
 
 core_tgz="$(python3 - "$core_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload[0]["filename"])
+PY
+)"
+node_tgz="$(python3 - "$node_pack_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -30,8 +43,10 @@ print(payload[0]["filename"])
 PY
 )"
 core_tgz="$tmp_dir/$core_tgz"
+node_tgz="$tmp_dir/$node_tgz"
 express_tgz="$tmp_dir/$express_tgz"
 test -f "$core_tgz"
+test -f "$node_tgz"
 test -f "$express_tgz"
 
 tar -tzf "$express_tgz" > "$tmp_dir/express-tarball.txt"
@@ -45,8 +60,18 @@ grep -q '^package/examples/package.json$' "$tmp_dir/express-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/express-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/express-tarball.txt"
 tar -xOf "$express_tgz" package/README.md > "$tmp_dir/express-readme.md"
-grep -q 'npm install @logbrew/sdk @logbrew/express express' "$tmp_dir/express-readme.md"
-grep -q 'pnpm add @logbrew/sdk @logbrew/express express' "$tmp_dir/express-readme.md"
+tar -xOf "$express_tgz" package/package.json > "$tmp_dir/express-package.json"
+grep -q 'npm install @logbrew/sdk @logbrew/node @logbrew/express express' "$tmp_dir/express-readme.md"
+grep -q 'pnpm add @logbrew/sdk @logbrew/node @logbrew/express express' "$tmp_dir/express-readme.md"
+grep -q 'sends to the LogBrew ingest API by default' "$tmp_dir/express-readme.md"
+grep -q 'logbrew projects create' "$tmp_dir/express-readme.md"
+grep -q -- '--ingest-key-file' "$tmp_dir/express-readme.md"
+grep -q 'logbrew read logs --project' "$tmp_dir/express-readme.md"
+grep -q 'logbrew projects archive' "$tmp_dir/express-readme.md"
+grep -q 'Do not ask a person to paste an ingest key' "$tmp_dir/express-readme.md"
+grep -q 'Do not treat a missing environment variable as a reason to stop setup' "$tmp_dir/express-readme.md"
+grep -q 'Continue without a browser handoff' "$tmp_dir/express-readme.md"
+grep -q 'Only stop for account authentication' "$tmp_dir/express-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/express-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/express-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/express-readme.md"
@@ -57,6 +82,19 @@ grep -q 'spanIdFactory' "$tmp_dir/express-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/express-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/express-readme.md"
 grep -q 'low-cardinality' "$tmp_dir/express-readme.md"
+python3 - "$tmp_dir/express-package.json" "$node_package_version" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text())
+node_version = sys.argv[2]
+peers = manifest.get("peerDependencies", {})
+if peers.get("@logbrew/node") != f"^{node_version}":
+    raise SystemExit(f"unexpected @logbrew/node peer: {peers.get('@logbrew/node')!r}")
+if peers.get("@logbrew/sdk") != "^0.1.3":
+    raise SystemExit(f"unexpected @logbrew/sdk peer: {peers.get('@logbrew/sdk')!r}")
+PY
 
 app_dir="$tmp_dir/express-smoke-app"
 mkdir -p "$app_dir"
@@ -68,6 +106,7 @@ types_express_version="$(npm view @types/express version)"
 npm install \
   --save-exact \
   "$core_tgz" \
+  "$node_tgz" \
   "$express_tgz" \
   "express@$express_version" \
   "typescript" \
@@ -76,15 +115,18 @@ npm install \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
+grep -q '"@logbrew/node": "file:' package.json
 grep -q '"@logbrew/express": "file:' package.json
 grep -q '"express":' package.json
 grep -q '"@logbrew/express"' package-lock.json
+grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
-npm ls @logbrew/sdk @logbrew/express express >/dev/null
+npm ls @logbrew/sdk @logbrew/node @logbrew/express express >/dev/null
 npm explain @logbrew/express > "$tmp_dir/npm-explain-express.txt"
-grep -q '@logbrew/express@0.1.0' "$tmp_dir/npm-explain-express.txt"
+grep -q "@logbrew/express@${express_package_version}" "$tmp_dir/npm-explain-express.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/express@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/express@${express_package_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
@@ -94,7 +136,7 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text())
 deps = payload.get("dependencies", {})
-for name in ("@logbrew/express", "@logbrew/sdk", "express"):
+for name in ("@logbrew/express", "@logbrew/node", "@logbrew/sdk", "express"):
     if name not in deps:
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
@@ -389,6 +431,211 @@ grep -q 'GET /auto' "$tmp_dir/express-smoke.stderr.json"
 grep -q 'http.server.duration' "$tmp_dir/express-smoke.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/express-smoke.stderr.json"
 grep -q 'GET /fail failed' "$tmp_dir/express-smoke.stderr.json"
+
+cat > default-delivery.mjs <<'EOF'
+import express from "express";
+import { createServer } from "node:http";
+import { logbrewMiddleware } from "@logbrew/express";
+
+const received = [];
+const intake = createServer(async (request, response) => {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  received.push({
+    authorization: request.headers.authorization,
+    body: Buffer.concat(chunks).toString("utf8")
+  });
+  response.statusCode = 202;
+  response.end();
+});
+await listen(intake);
+const endpoint = `http://127.0.0.1:${intake.address().port}/v1/events`;
+
+let defaultServer;
+let failureServer;
+try {
+  const flushStatuses = [];
+  const captureErrors = [];
+  const defaultApp = express();
+  defaultApp.use(logbrewMiddleware({
+    serverApiKey: "default-key",
+    endpoint,
+    idFactory: () => "evt_express_default_delivery",
+    maxRetries: 0,
+    onFlush(response) {
+      flushStatuses.push(response.statusCode);
+    },
+    onCaptureError(error) {
+      captureErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  }));
+  defaultApp.get("/default-delivery", (_request, response) => {
+    response.json({ ok: true });
+  });
+  defaultServer = await start(defaultApp);
+  const response = await fetch(`http://127.0.0.1:${defaultServer.address().port}/default-delivery`);
+  await response.json();
+  await waitFor(() => received.length === 1, "default middleware delivery");
+
+  if (captureErrors.length !== 0 || flushStatuses[0] !== 202) {
+    throw new Error(`default middleware delivery failed: ${JSON.stringify({ captureErrors, flushStatuses })}`);
+  }
+  if (received[0]?.authorization !== "Bearer default-key") {
+    throw new Error(`default middleware authorization changed: ${JSON.stringify(received[0])}`);
+  }
+  const defaultPayload = JSON.parse(received[0]?.body ?? "");
+  if (defaultPayload.events?.[0]?.id !== "evt_express_default_delivery") {
+    throw new Error(`default middleware payload changed: ${received[0]?.body}`);
+  }
+
+  const networkErrors = [];
+  const unexpectedFlushes = [];
+  const failureApp = express();
+  failureApp.use(logbrewMiddleware({
+    serverApiKey: "failure-key",
+    endpoint,
+    fetchImpl: async () => {
+      throw new Error("network sentinel");
+    },
+    idFactory: () => "evt_express_network_failure",
+    maxRetries: 0,
+    onFlush(response) {
+      unexpectedFlushes.push(response.statusCode);
+    },
+    onCaptureError(error) {
+      networkErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  }));
+  failureApp.get("/default-delivery", (_request, response) => {
+    response.json({ ok: true });
+  });
+  failureServer = await start(failureApp);
+  const failureResponse = await fetch(`http://127.0.0.1:${failureServer.address().port}/default-delivery`);
+  await failureResponse.json();
+  await waitFor(() => networkErrors.length === 1, "default transport failure callback");
+
+  if (!networkErrors[0]?.includes("fetch failed: network sentinel")) {
+    throw new Error(`unexpected network failure: ${JSON.stringify(networkErrors)}`);
+  }
+  if (unexpectedFlushes.length !== 0) {
+    throw new Error(`network failure reported a successful flush: ${JSON.stringify(unexpectedFlushes)}`);
+  }
+
+  console.log(JSON.stringify({
+    defaultMiddlewareDelivered: defaultPayload.events[0].id,
+    networkFailureSurfaced: true,
+    ok: true
+  }));
+} finally {
+  await close(failureServer);
+  await close(defaultServer);
+  await close(intake);
+}
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function start(app) {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, "127.0.0.1", () => resolve(server));
+    server.once("error", reject);
+  });
+}
+
+function close(server) {
+  if (!server) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function waitFor(predicate, label) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+EOF
+
+node default-delivery.mjs > "$tmp_dir/express-default-delivery.json"
+grep -q '"defaultMiddlewareDelivered":"evt_express_default_delivery"' "$tmp_dir/express-default-delivery.json"
+grep -q '"networkFailureSurfaced":true' "$tmp_dir/express-default-delivery.json"
+
+cat > default-delivery.cjs <<'EOF'
+const express = require("express");
+const { logbrewMiddleware } = require("@logbrew/express");
+
+const deliveries = [];
+const fetchImpl = async (_url, init) => {
+  deliveries.push({ authorization: init.headers.authorization, body: init.body });
+  return new Response(null, { status: 202 });
+};
+
+(async () => {
+  const app = express();
+  app.use(logbrewMiddleware({
+    serverApiKey: "cjs-intake",
+    endpoint: "https://intake.invalid/v1/events",
+    fetchImpl,
+    idFactory: () => "evt_express_cjs_default",
+    maxRetries: 0
+  }));
+  app.get("/cjs-default", (_request, response) => response.json({ ok: true }));
+  const server = await new Promise((resolve, reject) => {
+    const candidate = app.listen(0, "127.0.0.1", () => resolve(candidate));
+    candidate.once("error", reject);
+  });
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/cjs-default`);
+    await response.json();
+    await waitFor(() => deliveries.length === 1);
+    const payload = JSON.parse(deliveries[0].body);
+    if (
+      deliveries[0].authorization !== "Bearer cjs-intake" ||
+      payload.events?.[0]?.id !== "evt_express_cjs_default"
+    ) {
+      throw new Error(`unexpected CommonJS delivery: ${JSON.stringify(deliveries[0])}`);
+    }
+    console.log(JSON.stringify({ cjsDefaultDelivered: payload.events[0].id, ok: true }));
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for CommonJS default delivery");
+}
+EOF
+
+node default-delivery.cjs > "$tmp_dir/express-default-delivery-cjs.json"
+grep -q '"cjsDefaultDelivered":"evt_express_cjs_default"' "$tmp_dir/express-default-delivery-cjs.json"
 
 cat > consumer.ts <<'EOF'
 import express, { type NextFunction, type Request, type Response } from "express";
