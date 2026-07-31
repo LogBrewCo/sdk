@@ -6,9 +6,17 @@ const AUTOMATIC_MESSAGE = "Unhandled Promise rejection";
 const DEFAULT_MAX_TRACKED_REJECTIONS = 128;
 const MAX_TRACKED_REJECTIONS = 1024;
 const MAX_STRING_ID_LENGTH = 128;
+const activeTrackerInstallations = new WeakMap();
 let nextEventSequence = 0;
 
 function createLogBrewReactNativePromiseRejectionHandlers(options = {}) {
+  return createPromiseRejectionHandlers(
+    options,
+    "app_owned_promise_rejection_tracker"
+  );
+}
+
+function createPromiseRejectionHandlers(options, mechanism) {
   const input = isObjectLike(options) ? options : {};
   const client = safeReadProperty(input, "client");
   const issue = safeFunction(client, "issue");
@@ -92,7 +100,7 @@ function createLogBrewReactNativePromiseRejectionHandlers(options = {}) {
         if (key === undefined) {
           emitStateDiagnostic(state, onDiagnostic, "promise_rejection_id_unavailable");
         }
-        const event = createEvent();
+        const event = createEvent(mechanism);
         issue.call(client, event.id, event.timestamp, event.attributes);
         state.capturedEvents = incrementBounded(state.capturedEvents);
 
@@ -124,7 +132,93 @@ function createLogBrewReactNativePromiseRejectionHandlers(options = {}) {
   });
 }
 
-function createEvent() {
+function installLogBrewReactNativePromiseRejectionTracker(options = {}) {
+  const input = isObjectLike(options) ? options : {};
+  const onDiagnostic = safeFunction(input, "onDiagnostic");
+  if (safeReadProperty(input, "takeOwnership") !== true) {
+    emitDiagnostic(onDiagnostic, "promise_rejection_tracker_ownership_required");
+    return inactiveTrackerInstallation("ownership_required");
+  }
+
+  const tracker = safeReadProperty(input, "tracker");
+  const enable = safeFunction(tracker, "enable");
+  const engine = safeReadProperty(input, "trackerKind") === "hermes"
+    ? "hermes"
+    : isObjectLike(tracker) ? "custom" : "unavailable";
+  if (!isObjectLike(tracker) || !enable) {
+    emitDiagnostic(onDiagnostic, "promise_rejection_tracker_unavailable");
+    return inactiveTrackerInstallation("tracker_unavailable", engine);
+  }
+
+  const existing = activeTrackerInstallations.get(tracker);
+  if (existing?.health().active) {
+    return existing;
+  }
+
+  const handlers = createPromiseRejectionHandlers(
+    input,
+    "logbrew_owned_promise_rejection_tracker"
+  );
+  if (!handlers.health().available) {
+    return inactiveTrackerInstallation("handler_unavailable", engine, handlers);
+  }
+
+  const state = {
+    active: true,
+    lastOutcome: "installed"
+  };
+  const trackerOptions = Object.freeze({
+    allRejections: true,
+    onHandled(runtimeRejectionId) {
+      if (state.active) {
+        handlers.onHandled(runtimeRejectionId);
+      }
+    },
+    onUnhandled(runtimeRejectionId, rejection) {
+      if (state.active) {
+        handlers.onUnhandled(runtimeRejectionId, rejection);
+      }
+    }
+  });
+
+  const installation = Object.freeze({
+    deactivate() {
+      if (!state.active) {
+        return false;
+      }
+      state.active = false;
+      state.lastOutcome = "deactivated";
+      if (activeTrackerInstallations.get(tracker) === installation) {
+        activeTrackerInstallations.delete(tracker);
+      }
+      return true;
+    },
+    health() {
+      return trackerHealthSnapshot(state, engine, true);
+    },
+    rejectionHealth() {
+      return handlers.health();
+    }
+  });
+
+  try {
+    enable.call(tracker, trackerOptions);
+  } catch {
+    state.active = false;
+    state.lastOutcome = "installation_failed";
+    emitDiagnostic(onDiagnostic, "promise_rejection_tracker_installation_failed");
+    return inactiveTrackerInstallation(
+      "installation_failed",
+      engine,
+      handlers
+    );
+  }
+
+  activeTrackerInstallations.set(tracker, installation);
+  return installation;
+}
+
+function createEvent(mechanism) {
   const error = new Error(AUTOMATIC_MESSAGE);
   delete error.stack;
   const event = createReactNativeErrorEvent(error, {
@@ -142,7 +236,7 @@ function createEvent() {
         automatic: true,
         fatal: false,
         handled: false,
-        mechanism: "app_owned_promise_rejection_tracker",
+        mechanism,
         source: "react-native.promise_rejection"
       }
     }
@@ -224,6 +318,35 @@ function inactiveHandlers() {
   });
 }
 
+function inactiveTrackerInstallation(
+  lastOutcome,
+  engine = "unavailable",
+  handlers = inactiveHandlers()
+) {
+  const snapshot = Object.freeze({
+    active: false,
+    available: false,
+    engine,
+    lastOutcome,
+    restoration: "deactivate_only"
+  });
+  return Object.freeze({
+    deactivate: () => false,
+    health: () => snapshot,
+    rejectionHealth: () => handlers.health()
+  });
+}
+
+function trackerHealthSnapshot(state, engine, available) {
+  return Object.freeze({
+    active: state.active,
+    available,
+    engine,
+    lastOutcome: state.lastOutcome,
+    restoration: "deactivate_only"
+  });
+}
+
 function healthSnapshot(state, trackedRejections, maxTrackedRejections) {
   return Object.freeze({
     available: true,
@@ -267,5 +390,6 @@ function isObjectLike(value) {
 }
 
 module.exports = {
-  createLogBrewReactNativePromiseRejectionHandlers
+  createLogBrewReactNativePromiseRejectionHandlers,
+  installLogBrewReactNativePromiseRejectionTracker
 };

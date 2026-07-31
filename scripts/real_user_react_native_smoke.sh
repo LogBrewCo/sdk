@@ -114,6 +114,9 @@ grep -q '@logbrew/react-native/lifecycle' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/global-errors' "$tmp_dir/native-readme.md"
 grep -q 'stable-ID at-least-once replay' "$tmp_dir/native-readme.md"
 grep -q 'createLogBrewReactNativePromiseRejectionHandlers' "$tmp_dir/native-readme.md"
+grep -q 'installLogBrewReactNativePromiseRejectionTracker' "$tmp_dir/native-readme.md"
+grep -q 'takeOwnership: true' "$tmp_dir/native-readme.md"
+grep -q 'one Promise rejection tracker slot' "$tmp_dir/native-readme.md"
 grep -q 'LogBrew does not install, replace, or patch Promise' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
@@ -182,7 +185,7 @@ node -e 'const native = require("@logbrew/react-native"); if (typeof native.crea
 node -e 'const native = require("@logbrew/react-native"); const client = native.createLogBrewReactNativeClient({ clientKey: "LOGBREW_CLIENT_KEY" }); native.captureScreenView(client, "Checkout Complete", { timestamp: "2026-06-02T10:00:00Z" }); const [event] = JSON.parse(client.previewJson()).events; if (event.attributes.name !== "screen:checkout_complete" || event.attributes.metadata.screen !== "Checkout Complete") process.exit(1)'
 node -e 'const instrumentation = require("@logbrew/react-native/instrumentation"); if (typeof instrumentation.createLogBrewReactNativeInstrumentation !== "function" || typeof instrumentation.default !== "object") process.exit(1)'
 node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeof lifecycle.createAppStateLifecycleSpanListener !== "function" || typeof lifecycle.captureReactNativeLifecycleSpan !== "function" || typeof lifecycle.createReactNativeLifecycleSpanEvent !== "function") process.exit(1)'
-node -e 'const globalErrors = require("@logbrew/react-native/global-errors"); if (typeof globalErrors.createLogBrewReactNativePromiseRejectionHandlers !== "function" || typeof globalErrors.installLogBrewReactNativeGlobalErrorHandler !== "function" || typeof globalErrors.default !== "object") process.exit(1)'
+node -e 'const globalErrors = require("@logbrew/react-native/global-errors"); if (typeof globalErrors.createLogBrewReactNativePromiseRejectionHandlers !== "function" || typeof globalErrors.installLogBrewReactNativeGlobalErrorHandler !== "function" || typeof globalErrors.installLogBrewReactNativePromiseRejectionTracker !== "function" || typeof globalErrors.default !== "object") process.exit(1)'
 node -e 'const bridge = require("@logbrew/react-native/native-bridge"); if (typeof bridge.createLogBrewNativeBridgeScope !== "function" || typeof bridge.syncLogBrewNativeBridgeScope !== "function" || typeof bridge.clearLogBrewNativeBridgeScope !== "function" || typeof bridge.withLogBrewNativeBridgeScope !== "function" || typeof bridge.default !== "object") process.exit(1)'
 node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeGraphQLMetadataFactory !== "function" || typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
 
@@ -223,7 +226,8 @@ import {
 } from "@logbrew/react-native/instrumentation";
 import {
   createLogBrewReactNativePromiseRejectionHandlers,
-  installLogBrewReactNativeGlobalErrorHandler
+  installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker
 } from "@logbrew/react-native/global-errors";
 import {
   createReactNativeGraphQLMetadataFactory,
@@ -306,6 +310,12 @@ const globalErrorClient = createLogBrewReactNativeClient({
 const promiseRejectionClient = createLogBrewReactNativeClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "react-native-promise-rejection-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const ownedPromiseRejectionClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-owned-promise-rejection-smoke",
   sdkVersion: "0.1.0",
   maxRetries: 1
 });
@@ -481,6 +491,52 @@ if (
   promiseRejectionDiagnostics[0]?.code !== "promise_rejection_duplicate_suppressed"
 ) {
   throw new Error("unexpected Promise rejection health contract");
+}
+let ownedTrackerOptions;
+const ownedPromiseRejectionInstallation =
+  installLogBrewReactNativePromiseRejectionTracker({
+    client: ownedPromiseRejectionClient,
+    takeOwnership: true,
+    tracker: {
+      enable(options) {
+        ownedTrackerOptions = options;
+      }
+    }
+  });
+if (
+  !ownedTrackerOptions ||
+  ownedPromiseRejectionInstallation.health().active !== true ||
+  ownedPromiseRejectionInstallation.health().engine !== "custom"
+) {
+  throw new Error("expected one active LogBrew-owned Promise rejection tracker");
+}
+ownedTrackerOptions.onUnhandled(92, {
+  reason: new Error(`owned private rejection hidden@example.test ${sensitivePair}`)
+});
+const ownedPromiseRejectionEvents =
+  JSON.parse(ownedPromiseRejectionClient.previewJson()).events;
+const ownedPromiseRejectionSerialized =
+  JSON.stringify(ownedPromiseRejectionEvents);
+if (
+  ownedPromiseRejectionEvents.length !== 1 ||
+  ownedPromiseRejectionEvents[0].attributes.metadata.mechanism
+    !== "logbrew_owned_promise_rejection_tracker" ||
+  ownedPromiseRejectionSerialized.includes("owned private rejection") ||
+  ownedPromiseRejectionSerialized.includes("hidden@example.test") ||
+  ownedPromiseRejectionSerialized.includes(sensitivePair)
+) {
+  throw new Error("unexpected LogBrew-owned Promise rejection contract");
+}
+if (
+  !ownedPromiseRejectionInstallation.deactivate() ||
+  ownedPromiseRejectionInstallation.deactivate() ||
+  ownedPromiseRejectionInstallation.health().active !== false
+) {
+  throw new Error("Promise rejection tracker deactivation is not idempotent");
+}
+ownedTrackerOptions.onUnhandled(93, new Error("private after deactivation"));
+if (JSON.parse(ownedPromiseRejectionClient.previewJson()).events.length !== 1) {
+  throw new Error("deactivated Promise rejection tracker captured another event");
 }
 
 const stopListening = createAppStateListener(client, appState, {
@@ -1058,6 +1114,7 @@ console.error(JSON.stringify({
   listenerRemoved: appStateListener === null,
   globalHandlerRemoved: currentGlobalHandler === previousGlobalHandler,
   globalReports: globalErrorEvents.length,
+  ownedPromiseRejectionReports: ownedPromiseRejectionEvents.length,
   promiseRejectionReports: promiseRejectionEvents.length,
   hostedDeliveryStatus: deliveryResponse.statusCode,
   propagatedTraceparent
@@ -1124,6 +1181,7 @@ grep -q '"attempts":2' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"globalHandlerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"globalReports":2' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"ownedPromiseRejectionReports":1' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"promiseRejectionReports":1' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"hostedDeliveryStatus":202' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"lifecycleEvents":3' "$tmp_dir/native-smoke.stderr.json"
@@ -1183,10 +1241,13 @@ import {
 import {
   createLogBrewReactNativePromiseRejectionHandlers,
   installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker,
   type LogBrewReactNativePromiseRejectionHandlers,
+  type LogBrewReactNativePromiseRejectionTrackerInstallation,
   type ReactNativeErrorUtilsLike,
   type ReactNativeGlobalErrorDiagnostic,
   type ReactNativePromiseRejectionDiagnostic,
+  type ReactNativePromiseRejectionTrackerLike,
   type LogBrewReactNativeGlobalErrorHandlerInstallation
 } from "@logbrew/react-native/global-errors";
 import {
@@ -1277,6 +1338,22 @@ typedPromiseRejectionHandlers.onUnhandled(1, {
 });
 typedPromiseRejectionHandlers.onHandled(1);
 typedPromiseRejectionHandlers.health();
+const typedPromiseRejectionTracker: ReactNativePromiseRejectionTrackerLike = {
+  enable(options) {
+    options.onUnhandled(2, new Error("typed tracker rejection"));
+    options.onHandled(2);
+  }
+};
+const typedPromiseRejectionInstallation:
+  LogBrewReactNativePromiseRejectionTrackerInstallation =
+  installLogBrewReactNativePromiseRejectionTracker({
+    client,
+    takeOwnership: true,
+    tracker: typedPromiseRejectionTracker
+  });
+typedPromiseRejectionInstallation.health();
+typedPromiseRejectionInstallation.rejectionHealth();
+typedPromiseRejectionInstallation.deactivate();
 const trace: ReactNativeTraceContext = createReactNativeTraceContext({
   traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
   spanId: "b7ad6b7169203331"

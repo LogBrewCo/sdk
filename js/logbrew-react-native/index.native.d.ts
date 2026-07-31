@@ -1,2 +1,5 @@
 export * from "./index";
-export { installLogBrewReactNativeGlobalErrorHandler } from "./global-errors";
+export {
+  installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker
+} from "./global-errors";

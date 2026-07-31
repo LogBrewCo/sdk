@@ -14,6 +14,9 @@ export type ReactNativePromiseRejectionDiagnosticCode =
   | "promise_rejection_handler_unavailable"
   | "promise_rejection_id_unavailable"
   | "promise_rejection_recursive_capture_suppressed"
+  | "promise_rejection_tracker_installation_failed"
+  | "promise_rejection_tracker_ownership_required"
+  | "promise_rejection_tracker_unavailable"
   | "promise_rejection_tracking_evicted";
 
 export type ReactNativePromiseRejectionDiagnostic = Readonly<{
@@ -96,6 +99,54 @@ export type LogBrewReactNativePromiseRejectionHandlers = Readonly<{
   onUnhandled(runtimeRejectionId: unknown, rejection?: unknown): void;
 }>;
 
+export type ReactNativePromiseRejectionTrackerLike = {
+  enable(options: Readonly<{
+    allRejections: true;
+    onHandled(runtimeRejectionId: unknown): void;
+    onUnhandled(runtimeRejectionId: unknown, rejection?: unknown): void;
+  }>): void;
+};
+
+export type InstallLogBrewReactNativePromiseRejectionTrackerOptions = {
+  client: Pick<LogBrewClient, "issue">;
+  /**
+   * Confirms that LogBrew may claim the runtime's single Promise rejection
+   * tracker slot. Do not install another tracker owner at the same time.
+   */
+  takeOwnership: true;
+  /**
+   * Optional tracker seam. The React Native conditional export discovers the
+   * active Hermes tracker when this is omitted.
+   */
+  tracker?: ReactNativePromiseRejectionTrackerLike;
+  maxTrackedRejections?: number;
+  onDiagnostic?: (diagnostic: ReactNativePromiseRejectionDiagnostic) => void;
+};
+
+export type ReactNativePromiseRejectionTrackerHealth = Readonly<{
+  active: boolean;
+  available: boolean;
+  engine: "custom" | "hermes" | "unavailable";
+  lastOutcome:
+    | "deactivated"
+    | "handler_unavailable"
+    | "installation_failed"
+    | "installed"
+    | "ownership_required"
+    | "tracker_unavailable";
+  restoration: "deactivate_only";
+}>;
+
+export type LogBrewReactNativePromiseRejectionTrackerInstallation = Readonly<{
+  /**
+   * Stops LogBrew capture through the installed callbacks. Hermes does not
+   * expose a previous-owner restoration API, so this cannot restore one.
+   */
+  deactivate(): boolean;
+  health(): ReactNativePromiseRejectionTrackerHealth;
+  rejectionHealth(): ReactNativePromiseRejectionHealth;
+}>;
+
 export type ReactNativeFatalRecord = Readonly<{
   corruptRecords: number;
   droppedRecords: number;
@@ -176,6 +227,17 @@ export declare function createLogBrewReactNativePromiseRejectionHandlers(
 ): LogBrewReactNativePromiseRejectionHandlers;
 
 /**
+ * Install privacy-safe automatic Promise rejection capture.
+ *
+ * Installation is opt-in because React Native runtimes expose one tracker slot.
+ * The React Native conditional export discovers Hermes without replacing the
+ * global Promise. Other runtimes can inject a compatible tracker explicitly.
+ */
+export declare function installLogBrewReactNativePromiseRejectionTracker(
+  options: InstallLogBrewReactNativePromiseRejectionTrackerOptions
+): LogBrewReactNativePromiseRejectionTrackerInstallation;
+
+/**
  * Install reversible automatic capture for React Native global JavaScript errors.
  *
  * The React Native conditional export injects its synchronous native fatal store by default.
@@ -190,6 +252,7 @@ export declare function installLogBrewReactNativeGlobalErrorHandler(
 declare const logBrewReactNativeGlobalErrors: {
   createLogBrewReactNativePromiseRejectionHandlers: typeof createLogBrewReactNativePromiseRejectionHandlers;
   installLogBrewReactNativeGlobalErrorHandler: typeof installLogBrewReactNativeGlobalErrorHandler;
+  installLogBrewReactNativePromiseRejectionTracker: typeof installLogBrewReactNativePromiseRejectionTracker;
 };
 
 export default logBrewReactNativeGlobalErrors;

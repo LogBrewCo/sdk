@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, app-owned Promise rejection reports, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, opt-in reversible global fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, opt-in Hermes Promise rejection tracking, app-owned Promise rejection callbacks, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, opt-in reversible global fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
 
 ## Install
 
@@ -202,7 +202,49 @@ Installation is idempotent for the active React Native `ErrorUtils` object. The 
 
 The React Native conditional export obtains LogBrew's synchronous native fatal store through the supported TurboModule or `NativeModules` seam. Before chaining a fatal report, it writes one bounded record to app-private storage that is excluded from operating-system archives. On a later installation it performs stable-ID at-least-once replay, and acknowledgement happens only after local queue admission is observable through the SDK queue counters. Filtered, dropped, unknown-admission, persistence-failed, and acknowledgement-failed records are retained. A failed acknowledgement is retried without admitting the same ID twice in one JavaScript runtime. Use `fatalHealth()` for frozen bounded counters and status, or `discardPendingFatalRecord()` for an explicit rollback discard. The Node ESM and CommonJS entries never import React Native; non-React-Native callers must inject `fatalStore` explicitly.
 
-Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This integration does not claim mathematically exactly-once delivery, backend-visible deduplication, native crash capture, automatic Promise rejection tracker ownership, ANR or hang detection, general offline queueing, or symbolication.
+Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This integration does not claim mathematically exactly-once delivery, backend-visible deduplication, native crash capture, ANR or hang detection, general offline queueing, or symbolication.
+
+### Opt-in Hermes Promise rejection tracking
+
+React Native exposes one Promise rejection tracker slot. Claim it explicitly
+when LogBrew is the only tracker owner:
+
+```js
+import {
+  installLogBrewReactNativePromiseRejectionTracker
+} from "@logbrew/react-native";
+
+const promiseRejectionTracker =
+  installLogBrewReactNativePromiseRejectionTracker({
+    client,
+    takeOwnership: true,
+    onDiagnostic({ code }) {
+      console.warn(`LogBrew Promise rejection tracker: ${code}`);
+    }
+  });
+
+promiseRejectionTracker.health();
+promiseRejectionTracker.rejectionHealth();
+```
+
+The React Native export discovers the active Hermes runtime and uses its
+native tracker without replacing `globalThis.Promise`. Installation is
+idempotent for that runtime slot. It records fixed-content issues without
+reading the rejection value or emitting the runtime rejection identifier.
+`rejectionHealth()` returns bounded duplicate, eviction, and later-handled
+counters.
+
+Do not install this helper while Sentry or another integration owns the same
+tracker slot. Use the app-owned callback composition below when another
+integration must remain the owner. Hermes does not expose a previous-owner
+restoration API. `deactivate()` therefore stops LogBrew capture through its
+installed callbacks but cannot reinstate an earlier tracker. Install
+the replacement owner after deactivation when switching integrations.
+
+For JavaScriptCore or another runtime, pass an explicit `tracker` with an
+`enable(options)` function that already controls the Promise implementation
+used by the app. LogBrew does not replace the global Promise or add a hidden
+Promise polyfill.
 
 ### App-owned Promise rejection reports
 
