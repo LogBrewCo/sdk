@@ -44,6 +44,14 @@ Suggested grouping:
 
 The framework path should still install only what that app needs. Do not imply that every helper package is required for the base SDK.
 
+When a Node.js framework variant generates an install command, include the
+runtime delivery peer instead of showing only the core and adapter packages:
+
+- Express: `@logbrew/sdk @logbrew/node @logbrew/express express`
+- Fastify: `@logbrew/sdk @logbrew/node @logbrew/fastify fastify`
+- NestJS: `@logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs`
+- Next.js: `@logbrew/sdk @logbrew/node @logbrew/next next react react-dom`
+
 ## Platform Families
 
 Treat Swift and Objective-C as one Apple app family. The top-level label should be `iOS / Swift` for iOS-focused flows or `Apple / Swift` when the flow covers macOS, tvOS, and watchOS too. SwiftPM `LogBrew` is the primary install path; Objective-C is an advanced source/header variant for mixed or Objective-C-only apps.

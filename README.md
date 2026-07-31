@@ -35,6 +35,16 @@ KafkaJS, RabbitMQ/amqplib, and Amazon SQS, install the matching `@logbrew/*`
 integration alongside `@logbrew/sdk`, `@logbrew/node`, and the broker or client
 library your app already uses.
 
+Node framework adapters also require the Node delivery package. Use the exact
+stack for the framework your app already owns:
+
+```bash
+npm install @logbrew/sdk @logbrew/node @logbrew/express express
+npm install @logbrew/sdk @logbrew/node @logbrew/fastify fastify
+npm install @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs
+npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
+```
+
 | Ecosystem | Package | Use it for |
 | --- | --- | --- |
 | JavaScript | [`@logbrew/sdk`](js/logbrew-js) | Core event client, transports, trace helpers, console/Pino/Winston logger adapters |

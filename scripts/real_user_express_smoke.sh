@@ -72,6 +72,8 @@ grep -q 'Do not ask a person to paste an ingest key' "$tmp_dir/express-readme.md
 grep -q 'Do not treat a missing environment variable as a reason to stop setup' "$tmp_dir/express-readme.md"
 grep -q 'Continue without a browser handoff' "$tmp_dir/express-readme.md"
 grep -q 'Only stop for account authentication' "$tmp_dir/express-readme.md"
+grep -q 'if (logbrewServerApiKey)' "$tmp_dir/express-readme.md"
+grep -q 'final 500 request event' "$tmp_dir/express-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/express-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/express-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/express-readme.md"
@@ -159,6 +161,7 @@ const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCo
 const autoTransport = RecordingTransport.alwaysAccept();
 const metricOnlyTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
+const abortedErrorTransport = RecordingTransport.alwaysAccept();
 const app = express();
 
 const explicitClient = createLogBrewExpressClient({
@@ -236,12 +239,37 @@ app.use("/fail", logbrewMiddleware({
   sdkName: "express-error-trace-smoke",
   sdkVersion: "0.1.0",
   transport: errorTransport,
-  captureRequests: false,
+  captureRequestMetrics: true,
+  metricIdFactory: () => "evt_express_error_metric_001",
+  nowMs: () => 200,
+  requestEvent(req, res, { durationMs, trace }) {
+    return createRequestEvent(req, res, {
+      durationMs,
+      idFactory: () => "evt_express_error_request_001",
+      now: () => "2026-06-02T10:00:08Z",
+      trace
+    });
+  },
   spanIdFactory: () => "b7ad6b7169203332"
 }));
 
 app.get("/fail", async () => {
   throw new Error("route exploded");
+});
+
+app.use("/abort", logbrewMiddleware({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "express-aborted-error-smoke",
+  sdkVersion: "0.1.0",
+  transport: abortedErrorTransport,
+  captureRequestMetrics: true,
+  idFactory: () => "evt_express_aborted_request_001",
+  metricIdFactory: () => "evt_express_aborted_metric_001",
+  nowMs: () => 250
+}));
+
+app.get("/abort", async () => {
+  throw new Error("aborted route exploded");
 });
 
 app.use(logbrewErrorHandler({
@@ -251,8 +279,13 @@ app.use(logbrewErrorHandler({
   idFactory: () => "evt_express_error_001"
 }));
 
-app.use((error, _req, res, _next) => {
+app.use((error, req, res, _next) => {
   void _next;
+  if (req.path === "/abort") {
+    res.statusCode = 500;
+    res.destroy();
+    return;
+  }
   res.status(500).json({ error: error.message });
 });
 
@@ -278,6 +311,8 @@ const failResponse = await fetch(`http://127.0.0.1:${port}/fail?token=secret`, {
 });
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
+await fetch(`http://127.0.0.1:${port}/abort`).catch(() => undefined);
+await waitFor(() => abortedErrorTransport.sentBodies.length === 1);
 await new Promise((resolve) => {
   server.close(resolve);
 });
@@ -330,6 +365,9 @@ if (metricOnlyPayload.events[0].attributes.metadata.routeTemplate !== "/metrics-
   throw new Error(`metrics-only capture should prefer Express route templates: ${metricOnlyTransport.lastBody()}`);
 }
 const errorPayload = JSON.parse(errorTransport.lastBody());
+if (errorPayload.events.length !== 3) {
+  throw new Error(`error capture should retain issue, request, and metric events: ${errorTransport.lastBody()}`);
+}
 if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_express_error_001") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
 }
@@ -341,6 +379,28 @@ if (errorPayload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce
 }
 if (errorPayload.events[0].attributes.metadata.spanId !== "b7ad6b7169203332") {
   throw new Error(`error capture should include request span id: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[1].type !== "span" || errorPayload.events[1].id !== "evt_express_error_request_001") {
+  throw new Error(`error capture should retain the final request span: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[1].attributes.status !== "error" || errorPayload.events[1].attributes.metadata.statusCode !== 500) {
+  throw new Error(`error request span should retain the final 500 status: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[2].type !== "metric" || errorPayload.events[2].id !== "evt_express_error_metric_001") {
+  throw new Error(`error capture should retain the final request metric: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[2].attributes.metadata.statusCodeClass !== "5xx") {
+  throw new Error(`error request metric should retain the final 5xx class: ${errorTransport.lastBody()}`);
+}
+const abortedErrorPayload = JSON.parse(abortedErrorTransport.lastBody());
+if (
+  abortedErrorPayload.events.length !== 3 ||
+  abortedErrorPayload.events[0].type !== "issue" ||
+  abortedErrorPayload.events[1].id !== "evt_express_aborted_request_001" ||
+  abortedErrorPayload.events[1].attributes.metadata.statusCode !== 500 ||
+  abortedErrorPayload.events[2].id !== "evt_express_aborted_metric_001"
+) {
+  throw new Error(`response close should flush the complete error lifecycle: ${abortedErrorTransport.lastBody()}`);
 }
 const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", originalUrl: "/manual" }, {
   now: () => "2026-06-02T10:00:08Z",
@@ -583,7 +643,7 @@ grep -q '"networkFailureSurfaced":true' "$tmp_dir/express-default-delivery.json"
 
 cat > default-delivery.cjs <<'EOF'
 const express = require("express");
-const { logbrewMiddleware } = require("@logbrew/express");
+const { logbrewErrorHandler, logbrewMiddleware } = require("@logbrew/express");
 
 const deliveries = [];
 const fetchImpl = async (_url, init) => {
@@ -593,7 +653,7 @@ const fetchImpl = async (_url, init) => {
 
 (async () => {
   const app = express();
-  app.use(logbrewMiddleware({
+  app.use("/cjs-default", logbrewMiddleware({
     serverApiKey: "cjs-intake",
     endpoint: "https://intake.invalid/v1/events",
     fetchImpl,
@@ -601,6 +661,29 @@ const fetchImpl = async (_url, init) => {
     maxRetries: 0
   }));
   app.get("/cjs-default", (_request, response) => response.json({ ok: true }));
+  app.use("/cjs-fail", logbrewMiddleware({
+    serverApiKey: "cjs-intake",
+    endpoint: "https://intake.invalid/v1/events",
+    fetchImpl,
+    idFactory: () => "evt_express_cjs_error_request",
+    captureRequestMetrics: true,
+    metricIdFactory: () => "evt_express_cjs_error_metric",
+    maxRetries: 0
+  }));
+  app.get("/cjs-fail", async () => {
+    throw new Error("cjs route exploded");
+  });
+  app.use(logbrewErrorHandler({
+    serverApiKey: "cjs-intake",
+    endpoint: "https://intake.invalid/v1/events",
+    fetchImpl,
+    idFactory: () => "evt_express_cjs_error_issue",
+    maxRetries: 0
+  }));
+  app.use((error, _request, response, _next) => {
+    void _next;
+    response.status(500).json({ error: error.message });
+  });
   const server = await new Promise((resolve, reject) => {
     const candidate = app.listen(0, "127.0.0.1", () => resolve(candidate));
     candidate.once("error", reject);
@@ -616,7 +699,25 @@ const fetchImpl = async (_url, init) => {
     ) {
       throw new Error(`unexpected CommonJS delivery: ${JSON.stringify(deliveries[0])}`);
     }
-    console.log(JSON.stringify({ cjsDefaultDelivered: payload.events[0].id, ok: true }));
+    const errorResponse = await fetch(`http://127.0.0.1:${server.address().port}/cjs-fail`);
+    await errorResponse.json();
+    await waitFor(() => deliveries.length === 2);
+    const errorPayload = JSON.parse(deliveries[1].body);
+    if (
+      errorPayload.events?.length !== 3 ||
+      errorPayload.events[0]?.id !== "evt_express_cjs_error_issue" ||
+      errorPayload.events[1]?.id !== "evt_express_cjs_error_request" ||
+      errorPayload.events[1]?.attributes?.metadata?.statusCode !== 500 ||
+      errorPayload.events[2]?.id !== "evt_express_cjs_error_metric" ||
+      errorPayload.events[2]?.attributes?.metadata?.statusCodeClass !== "5xx"
+    ) {
+      throw new Error(`CommonJS error lifecycle dropped final events: ${deliveries[1].body}`);
+    }
+    console.log(JSON.stringify({
+      cjsDefaultDelivered: payload.events[0].id,
+      cjsErrorLifecycleDelivered: errorPayload.events.length,
+      ok: true
+    }));
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -636,6 +737,7 @@ EOF
 
 node default-delivery.cjs > "$tmp_dir/express-default-delivery-cjs.json"
 grep -q '"cjsDefaultDelivered":"evt_express_cjs_default"' "$tmp_dir/express-default-delivery-cjs.json"
+grep -q '"cjsErrorLifecycleDelivered":3' "$tmp_dir/express-default-delivery-cjs.json"
 
 cat > consumer.ts <<'EOF'
 import express, { type NextFunction, type Request, type Response } from "express";

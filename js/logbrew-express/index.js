@@ -7,8 +7,9 @@ import { createNodeFetchTransport } from "@logbrew/node";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const DEFAULT_SDK_NAME = "logbrew-express";
-const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_SDK_VERSION = "0.1.2";
 const activeTraceContext = new AsyncLocalStorage();
+const requestLifecycles = new WeakMap();
 
 export function createLogBrewExpressClient({
   serverApiKey,
@@ -36,13 +37,22 @@ export function logbrewMiddleware(options = {}) {
     const transport = resolveTransport(options, req, res, client, defaultTransport);
     const startedAt = nowMs(options);
     const trace = createRequestTraceContext(req, res, options);
+    const capturesOnFinish = options.captureRequests !== false || options.captureRequestMetrics === true;
 
     req.logbrew = createRequestContext(client, transport, trace);
+    const lifecycle = createRequestLifecycle({
+      captureOptions: capturesOnFinish ? options : undefined,
+      client,
+      observers: capturesOnFinish ? [options] : [],
+      req,
+      res,
+      startedAt,
+      transport
+    });
+    requestLifecycles.set(req, lifecycle);
 
-    if (options.captureRequests !== false || options.captureRequestMetrics === true) {
-      res.once("finish", () => {
-        void captureRequestFinish(options, { req, res, client, transport, startedAt });
-      });
+    if (capturesOnFinish) {
+      ensureFinishFinalizer(lifecycle);
     }
 
     activeTraceContext.run(trace, next);
@@ -64,9 +74,18 @@ export function logbrewErrorHandler(options = {}) {
 
     try {
       client.issue(event.id, event.timestamp, event.attributes);
-      void client.shutdown(transport)
-        .then((response) => notifyFlush(options, response, { req, res, client, trace }))
-        .catch((flushError) => notifyFailure(options, flushError, { req, res, client, trace }));
+      const lifecycle = requestLifecycles.get(req);
+      if (lifecycle && !lifecycle.finalized && lifecycle.client === client && lifecycle.transport === transport) {
+        if (!lifecycle.observers.includes(options)) {
+          lifecycle.observers.push(options);
+        }
+        ensureFinishFinalizer(lifecycle);
+        ensureCloseFinalizer(lifecycle);
+      } else {
+        void client.shutdown(transport)
+          .then((response) => notifyFlush(options, response, { req, res, client, trace }))
+          .catch((flushError) => notifyFailure(options, flushError, { req, res, client, trace }));
+      }
     } catch (captureError) {
       void notifyFailure(options, captureError, { req, res, client, trace });
     }
@@ -188,30 +207,106 @@ function createRequestContext(client, transport, trace) {
   };
 }
 
-async function captureRequestFinish(options, { req, res, client, transport, startedAt }) {
+function createRequestLifecycle({ captureOptions, client, observers, req, res, startedAt, transport }) {
+  return {
+    captureOptions,
+    client,
+    closeAttached: false,
+    finalized: false,
+    finishAttached: false,
+    observers,
+    req,
+    res,
+    startedAt,
+    transport
+  };
+}
+
+function ensureFinishFinalizer(lifecycle) {
+  if (lifecycle.finishAttached) {
+    return;
+  }
+  lifecycle.finishAttached = true;
+  lifecycle.res.once("finish", () => {
+    void finalizeRequestLifecycle(lifecycle);
+  });
+}
+
+function ensureCloseFinalizer(lifecycle) {
+  if (lifecycle.closeAttached) {
+    return;
+  }
+  lifecycle.closeAttached = true;
+  lifecycle.res.once("close", () => {
+    void finalizeRequestLifecycle(lifecycle);
+  });
+}
+
+async function finalizeRequestLifecycle(lifecycle) {
+  if (lifecycle.finalized) {
+    return;
+  }
+  lifecycle.finalized = true;
+  requestLifecycles.delete(lifecycle.req);
+
+  const { captureOptions: options, client, observers, req, res, startedAt, transport } = lifecycle;
   const trace = getRequestTraceContext(req);
+  const context = { req, res, client, trace };
+  let captureError;
+
+  if (options) {
+    try {
+      const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
+      if (options.captureRequests !== false) {
+        const event = typeof options.requestEvent === "function"
+          ? options.requestEvent(req, res, { client, durationMs, trace })
+          : createRequestEvent(req, res, { ...options, durationMs, trace });
+        captureRequestEvent(client, event);
+      }
+      if (options.captureRequestMetrics === true) {
+        const metricEvent = typeof options.requestMetricEvent === "function"
+          ? options.requestMetricEvent(req, res, { client, durationMs, trace })
+          : createRequestMetricEvent(req, res, {
+            ...options,
+            durationMs,
+            idFactory: options.metricIdFactory
+          });
+        captureRequestMetricEvent(client, metricEvent);
+      }
+    } catch (error) {
+      captureError = error;
+    }
+  }
+
+  if (captureError) {
+    await notifyLifecycleFailure(observers, captureError, context);
+  }
+
   try {
-    const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
-    if (options.captureRequests !== false) {
-      const event = typeof options.requestEvent === "function"
-        ? options.requestEvent(req, res, { client, durationMs, trace })
-        : createRequestEvent(req, res, { ...options, durationMs, trace });
-      captureRequestEvent(client, event);
-    }
-    if (options.captureRequestMetrics === true) {
-      const metricEvent = typeof options.requestMetricEvent === "function"
-        ? options.requestMetricEvent(req, res, { client, durationMs, trace })
-        : createRequestMetricEvent(req, res, {
-          ...options,
-          durationMs,
-          idFactory: options.metricIdFactory
-        });
-      captureRequestMetricEvent(client, metricEvent);
-    }
     const response = await client.shutdown(transport);
-    await notifyFlush(options, response, { req, res, client, trace });
+    await notifyLifecycleFlush(observers, response, context);
   } catch (error) {
-    await notifyFailure(options, error, { req, res, client, trace });
+    await notifyLifecycleFailure(observers, error, context);
+  }
+}
+
+async function notifyLifecycleFlush(observers, response, context) {
+  for (const options of observers) {
+    try {
+      await notifyFlush(options, response, context);
+    } catch (error) {
+      await notifyLifecycleFailure([options], error, context);
+    }
+  }
+}
+
+async function notifyLifecycleFailure(observers, error, context) {
+  for (const options of observers) {
+    try {
+      await notifyFailure(options, error, context);
+    } catch {
+      // App callbacks must not turn a response lifecycle callback into an unhandled rejection.
+    }
   }
 }
 
