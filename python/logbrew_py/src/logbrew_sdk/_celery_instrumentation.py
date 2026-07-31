@@ -337,6 +337,7 @@ class LogBrewCeleryInstrumentation:
             state = self._active_state(sender)
             if state is not None and isinstance(exception, BaseException):
                 state.error_type = type(exception).__name__
+                state.capture_failure_issue = not _is_declared_task_exception(sender, exception)
         except Exception as error:
             _notify_capture_error(self._on_capture_error, error)
 
@@ -361,9 +362,45 @@ class LogBrewCeleryInstrumentation:
                 active = self._active_tasks.pop(id(request_context), None)
             if active is None:
                 return
-            active.finish(_normalized_task_state(state))
+            task_state = _normalized_task_state(state)
+            if task_state == "failure" and active.capture_failure_issue:
+                try:
+                    self._capture_task_failure_issue(active)
+                except Exception as error:
+                    _notify_capture_error(self._on_capture_error, error)
+            active.finish(task_state)
         except Exception as error:
             _notify_capture_error(self._on_capture_error, error)
+
+    def _capture_task_failure_issue(self, state: _CeleryTaskSpanState) -> None:
+        request = state.request
+        task_name = request.task_name or "unknown"
+        error_type = state.error_type or "Exception"
+        service = _safe_issue_service(request.metadata)
+        issue_metadata: dict[str, Any] = {
+            "framework": "celery",
+            "source": "queue",
+            "taskName": task_name,
+            "taskState": "failure",
+            "errorName": error_type,
+            **request.trace.metadata(),
+        }
+        if request.queue_name is not None:
+            issue_metadata["queueName"] = request.queue_name
+        if request.attempt is not None:
+            issue_metadata["attempt"] = request.attempt
+        if service is not None:
+            issue_metadata["service"] = service
+        request.client.issue(
+            self._event_id_factory(),
+            request.timestamp or _instrumentation.now_timestamp(),
+            {
+                "title": f"Celery task {task_name} failed",
+                "level": "error",
+                "message": error_type,
+                "metadata": issue_metadata,
+            },
+        )
 
     def _new_span_request(
         self,
@@ -431,6 +468,7 @@ class _CeleryTaskSpanState:
     trace_scope: AbstractContextManager[Any]
     metadata: dict[str, Any]
     error_type: str | None = None
+    capture_failure_issue: bool = False
 
     def finish(self, task_state: str) -> None:
         self.metadata["taskState"] = task_state
@@ -445,6 +483,20 @@ class _CeleryTaskSpanState:
 
 class _CeleryInstrumentationError(RuntimeError):
     pass
+
+
+def _is_declared_task_exception(task: Any, exception: BaseException) -> bool:
+    with suppress(Exception):
+        return isinstance(exception, getattr(task, "throws", ()))
+    return False
+
+
+def _safe_issue_service(metadata: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    with suppress(Exception):
+        return _instrumentation.optional_label(metadata.get("service"))
+    return None
 
 
 def _require_celery_signals() -> Any:

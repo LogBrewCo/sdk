@@ -41,8 +41,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((manifest["name"], manifest["version"]), expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.6"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.7"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.7"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.8"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.2"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.4"),
         }
@@ -104,6 +104,18 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn(install, workflow)
         self.assertIn(source_tests, workflow)
         self.assertLess(workflow.index(install), workflow.index(source_tests))
+
+    def test_fastapi_celery_extra_requires_the_fixed_core_without_bloating_base_install(self) -> None:
+        project = tomllib.loads(
+            (ROOT / "python/logbrew_fastapi/pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+
+        self.assertEqual(
+            project["optional-dependencies"]["celery"],
+            ["logbrew-sdk[celery]>=0.1.7,<0.2.0"],
+        )
+        self.assertNotIn("celery>=5,<6", project["dependencies"])
+        self.assertIn("logbrew-sdk>=0.1.7,<0.2.0", project["dependencies"])
 
     def test_react_native_bundle_smoke_matches_package_version(self) -> None:
         manifest = json.loads(
@@ -177,8 +189,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.6",
-                "logbrew-fastapi": "0.1.7",
+                "logbrew-sdk": "0.1.7",
+                "logbrew-fastapi": "0.1.8",
                 "logbrew-flask": "0.1.2",
                 "logbrew-django": "0.1.4",
             },
@@ -214,10 +226,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.0",
             ),
             "scripts/real_user_python_public_pypi_smoke.sh": (
-                "LOGBREW_PYPI_SDK_VERSION:-0.1.3",
-                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.2",
-                "LOGBREW_PYPI_FLASK_VERSION:-0.1.0",
-                "LOGBREW_PYPI_DJANGO_VERSION:-0.1.2",
+                "LOGBREW_PYPI_SDK_VERSION:-0.1.6",
+                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.7",
+                "LOGBREW_PYPI_FLASK_VERSION:-0.1.2",
+                "LOGBREW_PYPI_DJANGO_VERSION:-0.1.4",
             ),
         }
         for relative_path, expected_values in receipt_defaults.items():

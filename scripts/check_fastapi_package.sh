@@ -53,10 +53,15 @@ grep -q 'capture_request_metrics' "$tmp_dir/sdist-README.md"
 grep -q 'init_logbrew' "$tmp_dir/sdist-README.md"
 grep -q 'HttpTransport' "$tmp_dir/sdist-README.md"
 grep -q 'custom FastAPI lifespan' "$tmp_dir/sdist-README.md"
+grep -q 'logbrew-fastapi\[celery\]' "$tmp_dir/sdist-README.md"
 
 "$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check \
   "$core_wheel" "$fastapi_wheel" httpx2==2.3.0 >/dev/null
 "$tmp_dir/venv/bin/python" -m pip check >/dev/null
+if "$tmp_dir/venv/bin/python" -c 'import celery' 2>/dev/null; then
+  printf '%s\n' "base logbrew-fastapi install unexpectedly included Celery" >&2
+  exit 1
+fi
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m unittest discover -s "$package_dir/tests" -p 'test_*.py'
 PYTHONPATH="" "$tmp_dir/venv/bin/python" "$package_dir/examples/readme_example.py" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"

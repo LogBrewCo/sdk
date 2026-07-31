@@ -119,6 +119,38 @@ def load_probe(value: int) -> int:
     return value + 1
 
 
+class PrivateUnexpectedFailure(RuntimeError):
+    pass
+
+
+class PrivateDeclaredFailure(ValueError):
+    pass
+
+
+class PrivateRetryFailure(OSError):
+    pass
+
+
+@app.task(name="checkout.unexpected_failure")
+def unexpected_failure() -> None:
+    raise PrivateUnexpectedFailure("private unexpected task detail")
+
+
+@app.task(name="checkout.declared_failure", throws=(PrivateDeclaredFailure,))
+def declared_failure() -> None:
+    raise PrivateDeclaredFailure("private declared task detail")
+
+
+@app.task(bind=True, name="checkout.retry_once", max_retries=1)
+def retry_once(self: Any) -> str:
+    if self.request.retries == 0:
+        raise self.retry(
+            exc=PrivateRetryFailure("private retry task detail"),
+            countdown=0,
+        )
+    return "retried"
+
+
 instrumentation = instrument_celery_app_with_logbrew_spans(
     app,
     client=client,
@@ -153,6 +185,20 @@ with start_worker(
     }:
         raise SystemExit(f"unexpected propagated worker trace result: {probe!r}")
 
+    unexpected_result = unexpected_failure.apply_async(queue="critical")
+    declared_result = declared_failure.apply_async(queue="critical")
+    retry_result = retry_once.apply_async(queue="critical")
+    with allow_join_result():
+        unexpected_value = unexpected_result.get(timeout=15, propagate=False)
+        declared_value = declared_result.get(timeout=15, propagate=False)
+        retry_value = retry_result.get(timeout=15)
+    if not isinstance(unexpected_value, PrivateUnexpectedFailure):
+        raise SystemExit("unexpected Celery failure changed under instrumentation")
+    if not isinstance(declared_value, PrivateDeclaredFailure):
+        raise SystemExit("declared Celery failure changed under instrumentation")
+    if retry_value != "retried":
+        raise SystemExit("Celery retry behavior changed under instrumentation")
+
     results = [
         load_probe.apply_async(args=[index], queue="critical")
         for index in range(load_tasks)
@@ -168,20 +214,23 @@ instrumentation.uninstall()
 if instrumentation.installed:
     raise SystemExit("Celery instrumentation did not uninstall")
 
-attempted_spans = (load_tasks + 1) * 2
-if client.pending_events() + client.dropped_events() != attempted_spans:
+attempted_spans = (load_tasks + 1) * 2 + 8
+attempted_events = attempted_spans + 1
+if client.pending_events() + client.dropped_events() != attempted_events:
     raise SystemExit(
-        "Celery instrumentation did not account for every producer and worker span: "
-        f"pending={client.pending_events()} dropped={client.dropped_events()} expected={attempted_spans}"
+        "Celery instrumentation did not account for every producer, worker, and issue event: "
+        f"pending={client.pending_events()} dropped={client.dropped_events()} expected={attempted_events}"
     )
 
 payload = client.preview_json()
 events = json.loads(payload)["events"]
+spans = [event for event in events if event["type"] == "span"]
+issues = [event for event in events if event["type"] == "issue"]
 probe_publish = next(
-    event for event in events if event["attributes"]["name"] == "celery publish checkout.trace_probe"
+    event for event in spans if event["attributes"]["name"] == "celery publish checkout.trace_probe"
 )
 probe_process = next(
-    event for event in events if event["attributes"]["name"] == "celery process checkout.trace_probe"
+    event for event in spans if event["attributes"]["name"] == "celery process checkout.trace_probe"
 )
 if probe_process["attributes"]["parentSpanId"] != probe_publish["attributes"]["spanId"]:
     raise SystemExit("installed Celery worker span did not continue the emitted producer span")
@@ -189,6 +238,30 @@ if probe_process["attributes"]["metadata"]["taskState"] != "success":
     raise SystemExit("installed Celery worker span did not capture successful completion")
 if probe_process["attributes"]["metadata"]["queueName"] != "critical":
     raise SystemExit("installed Celery worker span did not capture the safe routing key")
+if len(issues) != 1:
+    raise SystemExit(f"installed Celery integration captured {len(issues)} issues instead of one")
+failure_issue = issues[0]["attributes"]
+if failure_issue["title"] != "Celery task checkout.unexpected_failure failed":
+    raise SystemExit(f"unexpected Celery failure issue title: {failure_issue['title']!r}")
+if failure_issue["message"] != "PrivateUnexpectedFailure":
+    raise SystemExit(f"unexpected Celery failure issue message: {failure_issue['message']!r}")
+if failure_issue["metadata"]["errorName"] != "PrivateUnexpectedFailure":
+    raise SystemExit("Celery failure issue did not expose the bounded exception type")
+unexpected_process = next(
+    event
+    for event in spans
+    if event["attributes"]["name"] == "celery process checkout.unexpected_failure"
+)
+if failure_issue["metadata"]["traceId"] != unexpected_process["attributes"]["traceId"]:
+    raise SystemExit("Celery failure issue did not preserve the worker trace id")
+if failure_issue["metadata"]["spanId"] != unexpected_process["attributes"]["spanId"]:
+    raise SystemExit("Celery failure issue did not preserve the worker span id")
+if any(
+    issue["attributes"]["metadata"]["taskName"]
+    in {"checkout.declared_failure", "checkout.retry_once"}
+    for issue in issues
+):
+    raise SystemExit("Celery expected failure or retry created issue noise")
 
 for forbidden in (
     "must-not-be-captured",
@@ -198,6 +271,9 @@ for forbidden in (
     "memory://",
     "task_id",
     "worker_node",
+    "private unexpected task detail",
+    "private declared task detail",
+    "private retry task detail",
 ):
     if forbidden in payload:
         raise SystemExit(f"Celery telemetry leaked private runtime data: {forbidden}")
@@ -255,13 +331,15 @@ if not any(
 print(
     json.dumps(
         {
+            "attemptedEvents": attempted_events,
             "attemptedSpans": attempted_spans,
-            "droppedSpans": client.dropped_events(),
+            "droppedEvents": client.dropped_events(),
             "fakeIntakeAttempts": response.attempts,
             "installedExtra": True,
+            "issueCount": len(issues),
             "loadTasks": load_tasks,
             "ok": True,
-            "queuedSpans": len(events),
+            "queuedEvents": len(events),
             "shutdownStatus": shutdown.status_code,
         },
         sort_keys=True,

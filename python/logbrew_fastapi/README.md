@@ -163,6 +163,30 @@ def checkout(order_id: str) -> dict[str, object]:
 
 Run `python -m logbrew_fastapi.examples dependency-spans` to see a local request span parenting SQLite, cache, and queue child spans from an installed package. LogBrew does not patch database drivers, cache clients, queue frameworks, or broker metadata globally, and the helpers avoid SQL values, cache keys/values, queue bodies, headers, baggage, and tracestate.
 
+## Celery background jobs
+
+Install the optional Celery path when a FastAPI service publishes or processes Celery jobs:
+
+```bash
+python3 -m pip install "logbrew-fastapi[celery]"
+```
+
+The base FastAPI install stays Celery-free. The extra installs the compatible core Celery integration, which you attach only to the Celery app your service owns:
+
+```python
+from celery import Celery
+from logbrew_sdk import instrument_celery_app_with_logbrew_spans
+
+celery_app = Celery("checkout")
+celery_telemetry = instrument_celery_app_with_logbrew_spans(
+    celery_app,
+    client=client,
+    metadata={"service": "checkout-worker"},
+)
+```
+
+Producer and worker spans share W3C trace context. An unexpected final task failure emits one trace-correlated issue with task name and exception type only; retries and exception types declared through `task.throws` stay span-only. Task IDs, arguments, results, headers, exception messages, and stack traces are excluded. Uninstall direct instrumentation after tasks drain and before shutting down its client. Separate prefork workers need child-owned clients; follow the [core Celery lifecycle and encrypted persistence setup](https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_py#automatic-celery-spans) instead of sharing the FastAPI process client across forks.
+
 Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
 
 ```python
