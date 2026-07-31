@@ -200,7 +200,7 @@ const errorSpanId = "b7ad6b7169203332";
 const explicitClient = createLogBrewNestClient({
   apiKey: "LOGBREW_API_KEY",
   sdkName: "nestjs-smoke-explicit",
-  sdkVersion: "0.1.3"
+  sdkVersion: "0.1.4"
 });
 if (explicitClient.pendingEvents() !== 0) {
   throw new Error("expected empty explicit client");
@@ -229,7 +229,7 @@ manualApp.useGlobalInterceptors(new LogBrewInterceptor({
   captureRequests: false,
   maxRetries: 1,
   sdkName: "nestjs-smoke-app",
-  sdkVersion: "0.1.3",
+  sdkVersion: "0.1.4",
   transport: requestTransport
 }));
 await manualApp.listen(0, "127.0.0.1");
@@ -243,7 +243,7 @@ const forwardedLoggerCalls: string[] = [];
 const autoClient = createLogBrewNestClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "nestjs-auto-smoke",
-  sdkVersion: "0.1.3"
+  sdkVersion: "0.1.4"
 });
 const logbrewLogger: LogBrewNestLogger = createLogBrewNestLogger({
   client: autoClient,
@@ -449,7 +449,7 @@ traceApp.useGlobalInterceptors(new LogBrewInterceptor({
     return () => values.shift() ?? 119;
   })(),
   sdkName: "nestjs-trace-smoke",
-  sdkVersion: "0.1.3",
+  sdkVersion: "0.1.4",
   spanIdFactory: () => "b7ad6b7169203331",
   transport: traceTransport
 }));
@@ -513,7 +513,7 @@ metricsApp.useGlobalInterceptors(new LogBrewInterceptor({
     return () => values.shift() ?? 137;
   })(),
   sdkName: "nestjs-metric-smoke",
-  sdkVersion: "0.1.3",
+  sdkVersion: "0.1.4",
   transport: metricTransport
 }));
 await metricsApp.listen(0, "127.0.0.1");
@@ -677,7 +677,7 @@ import {
 const client = createLogBrewNestClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "typed-nestjs-smoke",
-  sdkVersion: "0.1.3"
+  sdkVersion: "0.1.4"
 });
 const logger: LogBrewNestLogger = createLogBrewNestLogger({
   client,
@@ -824,7 +824,7 @@ try {
   const loggerClient = createLogBrewNestClient({
     serverApiKey: "logger-key",
     sdkName: "nestjs-default-logger-smoke",
-    sdkVersion: "0.1.3",
+    sdkVersion: "0.1.4",
     maxRetries: 0
   });
   const logger = createLogBrewNestLogger({

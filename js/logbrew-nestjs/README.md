@@ -203,7 +203,7 @@ const transport = createNodeFetchTransport();
 const client = createLogBrewNestClient({
   serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
   sdkName: "logbrew-nestjs",
-  sdkVersion: "0.1.3"
+  sdkVersion: "0.1.4"
 });
 
 const logger = createLogBrewNestLogger({

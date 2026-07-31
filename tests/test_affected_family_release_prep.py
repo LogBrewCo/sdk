@@ -30,7 +30,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.5"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.1"),
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.2"),
-            "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.3"),
+            "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.4"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.1"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.9"),
         }
