@@ -1,13 +1,13 @@
 const { AsyncLocalStorage } = require("node:async_hooks");
 const {
   LogBrewClient,
-  RecordingTransport,
   SdkError,
   parseTraceparent
 } = require("@logbrew/sdk");
+const { createNodeFetchTransport } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-next";
-const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_SDK_VERSION = "0.1.2";
 const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewNextClient({
@@ -32,9 +32,13 @@ function withLogBrewRouteHandler(handler, options = {}) {
     throw new SdkError("configuration_error", "withLogBrewRouteHandler requires a handler function");
   }
 
+  const defaultTransport = options.transport === undefined
+    ? createNodeFetchTransport(options)
+    : undefined;
+
   return async function logBrewRouteHandler(request, context = {}) {
     const client = resolveClient(options, request, context);
-    const transport = resolveTransport(options, request, context, client);
+    const transport = resolveTransport(options, request, context, client, defaultTransport);
     const trace = createRouteTraceContext(request, undefined, options);
     const helpers = createRouteHelpers(client, transport, trace);
     const startedAt = nowMs(options);
@@ -168,11 +172,11 @@ function resolveClient(options, request, context) {
   return createLogBrewNextClient(options);
 }
 
-function resolveTransport(options, request, context, client) {
+function resolveTransport(options, request, context, client, defaultTransport) {
   if (typeof options.transport === "function") {
     return options.transport({ request, context, client });
   }
-  return options.transport ?? RecordingTransport.alwaysAccept();
+  return options.transport ?? defaultTransport;
 }
 
 function createRouteHelpers(client, transport, trace) {

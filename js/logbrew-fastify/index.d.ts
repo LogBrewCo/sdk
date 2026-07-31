@@ -14,6 +14,12 @@ import type {
   TransportResponse
 } from "@logbrew/sdk";
 
+type NodeFetchTransportConfig = {
+  endpoint?: string;
+  fetchImpl?: typeof fetch;
+  headers?: Record<string, string>;
+};
+
 export type CreateLogBrewFastifyClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
@@ -77,8 +83,9 @@ export type LogBrewRequestMetricEvent = {
   attributes: MetricAttributes;
 };
 
-export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & {
+export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
+  /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;

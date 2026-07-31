@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
 next_package_version="$(
   node -e '
 const version = require(process.argv[1]).version;
@@ -14,11 +15,22 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 core_pack_json="$tmp_dir/core-pack.json"
+node_pack_json="$tmp_dir/node-pack.json"
 next_pack_json="$tmp_dir/next-pack.json"
 (cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
+(cd "$repo_root/js/logbrew-node" && npm pack --json --pack-destination "$tmp_dir") > "$node_pack_json"
 (cd "$repo_root/js/logbrew-next" && npm pack --json --pack-destination "$tmp_dir") > "$next_pack_json"
 
 core_tgz="$(python3 - "$core_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload[0]["filename"])
+PY
+)"
+node_tgz="$(python3 - "$node_pack_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -37,8 +49,10 @@ print(payload[0]["filename"])
 PY
 )"
 core_tgz="$tmp_dir/$core_tgz"
+node_tgz="$tmp_dir/$node_tgz"
 next_tgz="$tmp_dir/$next_tgz"
 test -f "$core_tgz"
+test -f "$node_tgz"
 test -f "$next_tgz"
 
 tar -tzf "$next_tgz" > "$tmp_dir/next-tarball.txt"
@@ -57,8 +71,18 @@ grep -q '^package/examples/client-route-spans.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/next-tarball.txt"
 tar -xOf "$next_tgz" package/README.md > "$tmp_dir/next-readme.md"
-grep -q 'npm install @logbrew/sdk @logbrew/next next react react-dom' "$tmp_dir/next-readme.md"
-grep -q 'pnpm add @logbrew/sdk @logbrew/next next react react-dom' "$tmp_dir/next-readme.md"
+tar -xOf "$next_tgz" package/package.json > "$tmp_dir/next-package.json"
+grep -q 'npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom' "$tmp_dir/next-readme.md"
+grep -q 'pnpm add @logbrew/sdk @logbrew/node @logbrew/next next react react-dom' "$tmp_dir/next-readme.md"
+grep -q 'sends to the LogBrew ingest API by default' "$tmp_dir/next-readme.md"
+grep -q 'logbrew projects create' "$tmp_dir/next-readme.md"
+grep -q -- '--ingest-key-file' "$tmp_dir/next-readme.md"
+grep -q 'logbrew read logs --project' "$tmp_dir/next-readme.md"
+grep -q 'logbrew projects archive' "$tmp_dir/next-readme.md"
+grep -q 'Do not ask a person to paste an ingest key' "$tmp_dir/next-readme.md"
+grep -q 'Do not treat a missing environment variable as a reason to stop setup' "$tmp_dir/next-readme.md"
+grep -q 'Continue without a browser handoff' "$tmp_dir/next-readme.md"
+grep -q 'Only stop for account authentication' "$tmp_dir/next-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/next-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/next-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/next-readme.md"
@@ -73,6 +97,19 @@ grep -q 'onCaptureError' "$tmp_dir/next-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/next-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/next-readme.md"
 grep -q 'routeTemplate' "$tmp_dir/next-readme.md"
+python3 - "$tmp_dir/next-package.json" "$node_package_version" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text())
+node_version = sys.argv[2]
+peers = manifest.get("peerDependencies", {})
+if peers.get("@logbrew/node") != f"^{node_version}":
+    raise SystemExit(f"unexpected @logbrew/node peer: {peers.get('@logbrew/node')!r}")
+if peers.get("@logbrew/sdk") != "^0.1.3":
+    raise SystemExit(f"unexpected @logbrew/sdk peer: {peers.get('@logbrew/sdk')!r}")
+PY
 grep -q '@logbrew/next/client' "$tmp_dir/next-readme.md"
 grep -q 'createLogBrewNextBrowserClient' "$tmp_dir/next-readme.md"
 grep -q 'useLogBrewNextNavigation' "$tmp_dir/next-readme.md"
@@ -91,6 +128,7 @@ react_dom_version="$(npm view react-dom version)"
 npm install \
   --save-exact \
   "$core_tgz" \
+  "$node_tgz" \
   "$next_tgz" \
   "next@$next_version" \
   "react@$react_version" \
@@ -101,18 +139,21 @@ npm install \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
+grep -q '"@logbrew/node": "file:' package.json
 grep -q '"@logbrew/next": "file:' package.json
 grep -q '"next":' package.json
 grep -q '"react":' package.json
 grep -q '"react-dom":' package.json
 grep -q '"react-test-renderer":' package.json
 grep -q '"@logbrew/next"' package-lock.json
+grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
-npm ls @logbrew/sdk @logbrew/next next react react-dom >/dev/null
+npm ls @logbrew/sdk @logbrew/node @logbrew/next next react react-dom >/dev/null
 npm explain @logbrew/next > "$tmp_dir/npm-explain-next.txt"
 grep -Fq "@logbrew/next@${next_package_version}" "$tmp_dir/npm-explain-next.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -Fq "@logbrew/next@${next_package_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
@@ -122,7 +163,7 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text())
 deps = payload.get("dependencies", {})
-for name in ("@logbrew/next", "@logbrew/sdk", "next", "react", "react-dom", "react-test-renderer"):
+for name in ("@logbrew/next", "@logbrew/node", "@logbrew/sdk", "next", "react", "react-dom", "react-test-renderer"):
     if name not in deps:
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
@@ -456,6 +497,155 @@ grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/capture-check.stderr.json"
 grep -q 'http.server.duration' "$tmp_dir/capture-check.stderr.json"
 grep -q '/api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
 grep -q 'GET /api/bad 200' "$tmp_dir/capture-check.stderr.json"
+
+cat > default-delivery.mjs <<'EOF'
+import { createServer } from "node:http";
+import { withLogBrewRouteHandler } from "@logbrew/next";
+
+const received = [];
+const intake = createServer(async (request, response) => {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  received.push({
+    authorization: request.headers.authorization,
+    body: Buffer.concat(chunks).toString("utf8")
+  });
+  response.statusCode = 202;
+  response.end();
+});
+await listen(intake);
+const endpoint = `http://127.0.0.1:${intake.address().port}/v1/events`;
+
+try {
+  const flushStatuses = [];
+  const captureErrors = [];
+  const route = withLogBrewRouteHandler(
+    async () => Response.json({ ok: true }),
+    {
+      serverApiKey: "default-key",
+      endpoint,
+      requestIdFactory: () => "evt_next_default_delivery",
+      maxRetries: 0,
+      onFlush(response) {
+        flushStatuses.push(response.statusCode);
+      },
+      onCaptureError(error) {
+        captureErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+  );
+  const response = await route(new Request("https://example.com/api/default-delivery"), {});
+  await response.json();
+
+  if (captureErrors.length !== 0 || flushStatuses[0] !== 202 || received.length !== 1) {
+    throw new Error(`default route delivery failed: ${JSON.stringify({ captureErrors, flushStatuses, received })}`);
+  }
+  if (received[0]?.authorization !== "Bearer default-key") {
+    throw new Error(`default route authorization changed: ${JSON.stringify(received[0])}`);
+  }
+  const defaultPayload = JSON.parse(received[0]?.body ?? "");
+  if (defaultPayload.events?.[0]?.id !== "evt_next_default_delivery") {
+    throw new Error(`default route payload changed: ${received[0]?.body}`);
+  }
+
+  const networkErrors = [];
+  const unexpectedFlushes = [];
+  const failureRoute = withLogBrewRouteHandler(
+    async () => Response.json({ ok: true }),
+    {
+      serverApiKey: "failure-key",
+      endpoint,
+      fetchImpl: async () => {
+        throw new Error("network sentinel");
+      },
+      requestIdFactory: () => "evt_next_network_failure",
+      maxRetries: 0,
+      onFlush(response) {
+        unexpectedFlushes.push(response.statusCode);
+      },
+      onCaptureError(error) {
+        networkErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+  );
+  const failureResponse = await failureRoute(new Request("https://example.com/api/default-delivery"), {});
+  await failureResponse.json();
+
+  if (!networkErrors[0]?.includes("fetch failed: network sentinel")) {
+    throw new Error(`unexpected network failure: ${JSON.stringify(networkErrors)}`);
+  }
+  if (unexpectedFlushes.length !== 0) {
+    throw new Error(`network failure reported a successful flush: ${JSON.stringify(unexpectedFlushes)}`);
+  }
+
+  console.log(JSON.stringify({
+    defaultRouteDelivered: defaultPayload.events[0].id,
+    networkFailureSurfaced: true,
+    ok: true
+  }));
+} finally {
+  await close(intake);
+}
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function close(server) {
+  return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+EOF
+
+node default-delivery.mjs > "$tmp_dir/next-default-delivery.json"
+grep -q '"defaultRouteDelivered":"evt_next_default_delivery"' "$tmp_dir/next-default-delivery.json"
+grep -q '"networkFailureSurfaced":true' "$tmp_dir/next-default-delivery.json"
+
+cat > default-delivery.cjs <<'EOF'
+const { withLogBrewRouteHandler } = require("@logbrew/next");
+
+const deliveries = [];
+const fetchImpl = async (_url, init) => {
+  deliveries.push({ authorization: init.headers.authorization, body: init.body });
+  return new Response(null, { status: 202 });
+};
+
+(async () => {
+  const route = withLogBrewRouteHandler(
+    async () => Response.json({ ok: true }),
+    {
+      serverApiKey: "cjs-intake",
+      endpoint: "https://intake.invalid/v1/events",
+      fetchImpl,
+      requestIdFactory: () => "evt_next_cjs_default",
+      maxRetries: 0
+    }
+  );
+  const response = await route(new Request("https://example.com/api/cjs-default"), {});
+  await response.json();
+  const payload = JSON.parse(deliveries[0]?.body ?? "");
+  if (
+    deliveries[0]?.authorization !== "Bearer cjs-intake" ||
+    payload.events?.[0]?.id !== "evt_next_cjs_default"
+  ) {
+    throw new Error(`unexpected CommonJS delivery: ${JSON.stringify(deliveries[0])}`);
+  }
+  console.log(JSON.stringify({ cjsDefaultDelivered: payload.events[0].id, ok: true }));
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+EOF
+
+node default-delivery.cjs > "$tmp_dir/next-default-delivery-cjs.json"
+grep -q '"cjsDefaultDelivered":"evt_next_cjs_default"' "$tmp_dir/next-default-delivery-cjs.json"
 
 cat > client-route-check.mjs <<'EOF'
 import React from "react";

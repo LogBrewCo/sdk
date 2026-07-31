@@ -18,7 +18,7 @@ let activeTraceFromAuto;
 const explicitClient = createLogBrewFastifyClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "fastify-smoke-explicit",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.1"
 });
 if (explicitClient.pendingEvents() !== 0) {
   throw new Error("expected empty explicit client");
@@ -30,7 +30,7 @@ await app.register(async (scope) => {
     captureRequests: false,
     maxRetries: 1,
     sdkName: "fastify-smoke-app",
-    sdkVersion: "0.1.0",
+    sdkVersion: "0.1.1",
     transport: requestTransport
   });
 
@@ -56,7 +56,7 @@ await app.register(async (scope) => {
       });
     },
     sdkName: "fastify-auto-smoke",
-    sdkVersion: "0.1.0",
+    sdkVersion: "0.1.1",
     transport: autoTransport
   });
 
@@ -83,7 +83,7 @@ await app.register(async (scope) => {
       });
     },
     sdkName: "fastify-error-smoke",
-    sdkVersion: "0.1.0",
+    sdkVersion: "0.1.1",
     transport: errorTransport
   });
 

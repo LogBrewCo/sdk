@@ -3,14 +3,14 @@
 const fp = require("fastify-plugin");
 const {
   LogBrewClient,
-  RecordingTransport,
   parseTraceparent,
   SdkError
 } = require("@logbrew/sdk");
+const { createNodeFetchTransport } = require("@logbrew/node");
 const { AsyncLocalStorage } = require("node:async_hooks");
 
 const DEFAULT_SDK_NAME = "logbrew-fastify";
-const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_SDK_VERSION = "0.1.1";
 const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewFastifyClient({
@@ -33,11 +33,14 @@ function createLogBrewFastifyClient({
 async function logbrewFastifyPluginImpl(fastify, options = {}) {
   ensureRequestDecorator(fastify);
 
+  const defaultTransport = options.transport === undefined
+    ? createNodeFetchTransport(options)
+    : undefined;
   const startedAtByRequest = new WeakMap();
 
   fastify.addHook("onRequest", async (request, reply) => {
     const client = resolveClient(options, request, reply);
-    const transport = resolveTransport(options, request, reply, client);
+    const transport = resolveTransport(options, request, reply, client, defaultTransport);
     const trace = createRequestTraceContext(request, reply, options);
     startedAtByRequest.set(request, nowMs(options));
     request.logbrew = createRequestContext(client, transport, trace);
@@ -58,7 +61,7 @@ async function logbrewFastifyPluginImpl(fastify, options = {}) {
 
   fastify.addHook("onError", async (request, reply, error) => {
     enterRequestTraceContext(request);
-    await captureRequestError(options, { request, reply, error });
+    await captureRequestError(options, { request, reply, error, defaultTransport });
   });
 }
 
@@ -226,10 +229,10 @@ async function captureRequestFinish(options, { request, reply, startedAt }) {
   }
 }
 
-async function captureRequestError(options, { request, reply, error }) {
+async function captureRequestError(options, { request, reply, error, defaultTransport }) {
   const existing = request.logbrew;
   const client = existing?.client ?? resolveClient(options, request, reply);
-  const transport = existing?.transport ?? resolveTransport(options, request, reply, client);
+  const transport = existing?.transport ?? resolveTransport(options, request, reply, client, defaultTransport);
   const trace = existing?.trace ?? getActiveLogBrewTrace();
   const event = typeof options.errorEvent === "function"
     ? options.errorEvent(error, { request, reply, client, trace })
@@ -254,11 +257,11 @@ function resolveClient(options, request, reply) {
   return createLogBrewFastifyClient(options);
 }
 
-function resolveTransport(options, request, reply, client) {
+function resolveTransport(options, request, reply, client, defaultTransport) {
   if (typeof options.transport === "function") {
     return options.transport({ request, reply, client });
   }
-  return options.transport ?? RecordingTransport.alwaysAccept();
+  return options.transport ?? defaultTransport;
 }
 
 async function notifyFlush(options, response, context) {

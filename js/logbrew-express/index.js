@@ -1,13 +1,13 @@
 import {
   LogBrewClient,
-  RecordingTransport,
   parseTraceparent,
   SdkError
 } from "@logbrew/sdk";
+import { createNodeFetchTransport } from "@logbrew/node";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const DEFAULT_SDK_NAME = "logbrew-express";
-const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_SDK_VERSION = "0.1.1";
 const activeTraceContext = new AsyncLocalStorage();
 
 export function createLogBrewExpressClient({
@@ -28,9 +28,12 @@ export function createLogBrewExpressClient({
 }
 
 export function logbrewMiddleware(options = {}) {
+  const defaultTransport = options.transport === undefined
+    ? createNodeFetchTransport(options)
+    : undefined;
   return function logBrewExpressMiddleware(req, res, next) {
     const client = resolveClient(options, req, res);
-    const transport = resolveTransport(options, req, res, client);
+    const transport = resolveTransport(options, req, res, client, defaultTransport);
     const startedAt = nowMs(options);
     const trace = createRequestTraceContext(req, res, options);
 
@@ -47,10 +50,13 @@ export function logbrewMiddleware(options = {}) {
 }
 
 export function logbrewErrorHandler(options = {}) {
+  const defaultTransport = options.transport === undefined
+    ? createNodeFetchTransport(options)
+    : undefined;
   return function logBrewExpressErrorHandler(error, req, res, next) {
     const existing = req.logbrew;
     const client = existing?.client ?? resolveClient(options, req, res);
-    const transport = existing?.transport ?? resolveTransport(options, req, res, client);
+    const transport = existing?.transport ?? resolveTransport(options, req, res, client, defaultTransport);
     const trace = existing?.trace ?? getActiveLogBrewTrace();
     const event = typeof options.errorEvent === "function"
       ? options.errorEvent(error, { req, res, client, trace })
@@ -219,11 +225,11 @@ function resolveClient(options, req, res) {
   return createLogBrewExpressClient(options);
 }
 
-function resolveTransport(options, req, res, client) {
+function resolveTransport(options, req, res, client, defaultTransport) {
   if (typeof options.transport === "function") {
     return options.transport({ req, res, client });
   }
-  return options.transport ?? RecordingTransport.alwaysAccept();
+  return options.transport ?? defaultTransport;
 }
 
 async function notifyFlush(options, response, context) {
