@@ -18,6 +18,53 @@ pnpm add @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core 
 Set `LOGBREW_SERVER_API_KEY` to a project-scoped server ingest key before starting
 the app.
 
+## Create a Project and Confirm Hosted Delivery
+
+Use LogBrew CLI 0.1.32 or newer with approved account authentication to create
+the project. This requires no dashboard sign-in. The destination key file must
+not already exist. The CLI creates it with owner-only permissions and never
+prints the one-time key or its file path.
+
+```bash
+logbrew status --json
+install -d -m 700 "$HOME/.logbrew"
+
+project_result="$(
+  logbrew projects create nestjs-service \
+    --runtime node \
+    --environment development \
+    --ingest-key-file "$HOME/.logbrew/nestjs-service.ingest" \
+    --json
+)"
+export LOGBREW_PROJECT_ID="$(jq -er '.project.id' <<<"$project_result")"
+unset project_result
+export LOGBREW_SERVER_API_KEY="$(< "$HOME/.logbrew/nestjs-service.ingest")"
+```
+
+Start the app after registering the interceptor below, then request one safe
+route that your app already owns. For example:
+
+```bash
+curl --fail http://127.0.0.1:3000/health
+
+logbrew doctor --project "$LOGBREW_PROJECT_ID" --json
+logbrew read logs --project "$LOGBREW_PROJECT_ID" \
+  --search "GET /health" \
+  --since 1h \
+  --json
+```
+
+A successful ingest response proves submission. The authenticated read proves
+that the event is indexed for the same project. If you no longer need the
+temporary project, archive it and remove its revoked one-time key file:
+
+```bash
+unset LOGBREW_SERVER_API_KEY
+logbrew projects archive "$LOGBREW_PROJECT_ID" --yes --json
+rm -f "$HOME/.logbrew/nestjs-service.ingest"
+unset LOGBREW_PROJECT_ID
+```
+
 ## Global Interceptor
 
 ```ts
