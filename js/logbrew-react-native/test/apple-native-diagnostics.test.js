@@ -222,6 +222,8 @@ test("keeps the native bridge version and public Apple diagnostics contract alig
     )
   );
   assert.match(podspec, /:tag => "js\/logbrew-react-native\/v#\{spec\.version\}"/u);
+  assert.match(podspec, /core\.source_files = "ios\/\*\*\/\*\.\{h,m,mm\}"/u);
+  assert.match(podspec, /"ios\/AppleDiagnostics\/\*\*\/\*"/u);
   assert.match(readme, /@logbrew\/react-native\/expo/u);
   assert.match(readme, /LogBrewReactNative\/AppleNativeDiagnostics/u);
   assert.match(readme, /Expo Go cannot load this native\s+module/u);

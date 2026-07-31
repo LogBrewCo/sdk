@@ -19,8 +19,11 @@ Pod::Spec.new do |spec|
   spec.dependency "React-Core"
 
   spec.subspec "Core" do |core|
-    core.source_files = "ios/*.{h,m,mm}"
-    core.exclude_files = "ios/Tests/**/*"
+    core.source_files = "ios/**/*.{h,m,mm}"
+    core.exclude_files = [
+      "ios/AppleDiagnostics/**/*",
+      "ios/Tests/**/*"
+    ]
   end
 
   spec.subspec "AppleNativeDiagnostics" do |diagnostics|
