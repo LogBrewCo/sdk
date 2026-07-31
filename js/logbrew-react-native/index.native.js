@@ -11,6 +11,11 @@ import {
 } from "./index.js";
 import baseDefault from "./index.js";
 import {
+  getLogBrewAppleNativeDiagnosticsStatus,
+  installLogBrewAppleNativeDiagnostics,
+  replayLogBrewAppleNativeDiagnostics
+} from "./apple-native-diagnostics.js";
+import {
   purgeReactNativePersistentQueue,
   resolveReactNativePersistentEventStore
 } from "./persistent-delivery.native.js";
@@ -18,6 +23,11 @@ export {
   installLogBrewReactNativeGlobalErrorHandler,
   installLogBrewReactNativePromiseRejectionTracker
 } from "./global-errors.native.js";
+export {
+  getLogBrewAppleNativeDiagnosticsStatus,
+  installLogBrewAppleNativeDiagnostics,
+  replayLogBrewAppleNativeDiagnostics
+};
 
 export * from "./index.js";
 
@@ -133,7 +143,10 @@ const defaultExport = {
   createDefaultLogBrewReactNativeClient,
   createLogBrewReactNativeClient,
   getDefaultReactNativeContext,
-  purgeLogBrewReactNativePersistentQueue
+  getLogBrewAppleNativeDiagnosticsStatus,
+  installLogBrewAppleNativeDiagnostics,
+  purgeLogBrewReactNativePersistentQueue,
+  replayLogBrewAppleNativeDiagnostics
 };
 
 export default defaultExport;

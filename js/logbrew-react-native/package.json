@@ -1,7 +1,7 @@
 {
   "name": "@logbrew/react-native",
-  "version": "0.1.11",
-  "description": "React Native offline delivery, screen, error, trace, action, and network timeline helpers for LogBrew.",
+  "version": "0.1.12",
+  "description": "React Native offline delivery, Apple native diagnostics, screen, error, trace, action, and network timeline helpers for LogBrew.",
   "type": "module",
   "main": "./index.cjs",
   "module": "./index.js",
@@ -114,6 +114,28 @@
         "default": "./metro.cjs"
       },
       "default": "./metro.js"
+    },
+    "./apple-native-diagnostics": {
+      "react-native": {
+        "types": "./apple-native-diagnostics.d.ts",
+        "default": "./apple-native-diagnostics.js"
+      },
+      "import": {
+        "types": "./apple-native-diagnostics.d.ts",
+        "default": "./apple-native-diagnostics.js"
+      },
+      "default": "./apple-native-diagnostics.js"
+    },
+    "./expo": {
+      "import": {
+        "types": "./expo.d.ts",
+        "default": "./expo.js"
+      },
+      "require": {
+        "types": "./expo.d.ts",
+        "default": "./expo.cjs"
+      },
+      "default": "./expo.cjs"
     }
   },
   "files": [
@@ -161,6 +183,11 @@
     "metro.js",
     "metro.d.ts",
     "metro.d.cts",
+    "apple-native-diagnostics.js",
+    "apple-native-diagnostics.d.ts",
+    "expo.cjs",
+    "expo.js",
+    "expo.d.ts",
     "LogBrewReactNative.podspec",
     "android/build.gradle",
     "android/src/main",
@@ -174,8 +201,11 @@
     "ios/LBRNPrivateStorage.m",
     "ios/LBRNEventRecordStore.h",
     "ios/LBRNEventRecordStore.m",
+    "ios/AppleDiagnostics",
+    "ios/GeneratedAppleDiagnostics",
     "react-native.config.js",
     "src",
+    "scripts/sync-apple-native-sources.mjs",
     "README.md",
     "examples"
   ],
@@ -188,7 +218,9 @@
     "logs",
     "traces",
     "events",
-    "source-maps"
+    "source-maps",
+    "crash-reporting",
+    "app-hangs"
   ],
   "sideEffects": false,
   "codegenConfig": {
@@ -209,10 +241,16 @@
   },
   "peerDependencies": {
     "@logbrew/sdk": "^0.1.5",
+    "expo": ">=49",
     "react": ">=18",
     "react-native": ">=0.72"
   },
+  "peerDependenciesMeta": {
+    "expo": {
+      "optional": true
+    }
+  },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check apollo.js && node --check apollo.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check global-errors.js && node --check global-errors.native.js && node --check global-errors.cjs && node --check promise-rejections.cjs && node --check fatal-replay.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check metro.js && node --check metro.cjs && node --check examples/index.mjs && node --check examples/apollo-link-spans.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
+    "test": "node scripts/sync-apple-native-sources.mjs --check && node --check index.js && node --check index.cjs && node --check index.native.js && node --check apple-native-diagnostics.js && node --check expo.js && node --check expo.cjs && node --check apollo.js && node --check apollo.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check global-errors.js && node --check global-errors.native.js && node --check global-errors.cjs && node --check promise-rejections.cjs && node --check fatal-replay.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check metro.js && node --check metro.cjs && node --check examples/index.mjs && node --check examples/apollo-link-spans.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
   }
 }

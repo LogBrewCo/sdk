@@ -56,10 +56,20 @@ class ConfidentialityScanTests(unittest.TestCase):
                 / "LogBrewCrashTests"
                 / "NativeHangIncidentStoreTests.swift"
             )
+            generated_swift_path = (
+                root
+                / "js"
+                / "logbrew-react-native"
+                / "ios"
+                / "GeneratedAppleDiagnostics"
+                / "LogBrewCrash"
+                / "CrashStorageDirectory.swift"
+            )
             android_path.parent.mkdir(parents=True)
             apple_path.parent.mkdir(parents=True)
             swift_path.parent.mkdir(parents=True)
             swift_test_path.parent.mkdir(parents=True)
+            generated_swift_path.parent.mkdir(parents=True)
             archive_term = "back" + "up"
             android_path.write_text(
                 f"File root = context.getNo{archive_term.title()}FilesDir();\n",
@@ -80,7 +90,10 @@ class ConfidentialityScanTests(unittest.TestCase):
                 f"#expect(values.isExcludedFrom{archive_term.title()} == true)\n",
                 encoding="utf-8",
             )
-
+            generated_swift_path.write_text(
+                f"values.isExcludedFrom{archive_term.title()} = true\n",
+                encoding="utf-8",
+            )
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
             android_path.write_text(
@@ -339,8 +352,21 @@ class ConfidentialityScanTests(unittest.TestCase):
             root = Path(tmp)
             source_dir = root / "swift" / "logbrew-swift" / "Sources" / "LogBrewCrash"
             source_dir.mkdir(parents=True)
+            generated_dir = (
+                root
+                / "js"
+                / "logbrew-react-native"
+                / "ios"
+                / "GeneratedAppleDiagnostics"
+                / "LogBrewCrash"
+            )
+            generated_dir.mkdir(parents=True)
             policy = "reportClean" + "upPolicy"
             (source_dir / "CrashEngine.swift").write_text(
+                f"configuration.{policy} = .never\n",
+                encoding="utf-8",
+            )
+            (generated_dir / "CrashEngine.swift").write_text(
                 f"configuration.{policy} = .never\n",
                 encoding="utf-8",
             )
@@ -364,6 +390,19 @@ class ConfidentialityScanTests(unittest.TestCase):
             archive_label = "back" + "up"
             cleaner_name = "clean" + "up"
             allowed.write_text(
+                f"exclude durable files from {archive_label} and {cleaner_name} invalid records\n",
+                encoding="utf-8",
+            )
+            generated_dir = (
+                root
+                / "js"
+                / "logbrew-react-native"
+                / "ios"
+                / "GeneratedAppleDiagnostics"
+                / "LogBrew"
+            )
+            generated_dir.mkdir(parents=True)
+            (generated_dir / "DurableDeliveryStoreRecovery.swift").write_text(
                 f"exclude durable files from {archive_label} and {cleaner_name} invalid records\n",
                 encoding="utf-8",
             )
@@ -423,6 +462,29 @@ class ConfidentialityScanTests(unittest.TestCase):
             )
             (next_dir / "release-artifacts.d.ts").write_text(
                 f"{auth_option}?: string;\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+    def test_allows_exact_react_native_diagnostics_endpoint_guards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            js_path = root / "js" / "logbrew-react-native" / "apple-native-diagnostics.js"
+            swift_path = (
+                root
+                / "js"
+                / "logbrew-react-native"
+                / "ios"
+                / "AppleDiagnostics"
+                / "LBRNAppleNativeDiagnostics.swift"
+            )
+            js_path.parent.mkdir(parents=True)
+            swift_path.parent.mkdir(parents=True)
+            field = "pass" + "word"
+            js_path.write_text(f"if (parsed.{field}) reject();\n", encoding="utf-8")
+            swift_path.write_text(
+                f"components.{field} == nil,\n",
                 encoding="utf-8",
             )
 

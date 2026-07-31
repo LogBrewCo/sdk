@@ -1425,6 +1425,37 @@ jobs:
             failures,
         )
 
+    def test_react_native_package_requires_apple_diagnostics_release_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "js" / "logbrew-react-native"
+            package_dir.mkdir(parents=True)
+            (package_dir / "README.md").write_text("# LogBrew React Native\n", encoding="utf-8")
+            manifest = json.loads(
+                (ROOT / "js" / "logbrew-react-native" / "package.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            manifest["files"].remove("apple-native-diagnostics.js")
+            del manifest["exports"]["./expo"]["require"]
+            manifest["peerDependenciesMeta"]["expo"]["optional"] = False
+            (package_dir / "package.json").write_text(
+                json.dumps(manifest),
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_js_package(
+                root,
+                "js/logbrew-react-native",
+                "@logbrew/react-native",
+                failures,
+            )
+
+        self.assertTrue(any("apple-native-diagnostics.js" in failure for failure in failures))
+        self.assertTrue(any("exports['./expo'].require.default" in failure for failure in failures))
+        self.assertTrue(any("peerDependenciesMeta.expo.optional" in failure for failure in failures))
+
     def test_js_package_accepts_expected_version_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

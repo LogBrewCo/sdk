@@ -12,11 +12,30 @@ Pod::Spec.new do |spec|
   spec.platforms = { :ios => "13.0" }
   spec.source = {
     :git => "https://github.com/LogBrewCo/sdk.git",
-    :tag => "react-native-v#{spec.version}"
+    :tag => "js/logbrew-react-native/v#{spec.version}"
   }
-  spec.source_files = "ios/**/*.{h,m,mm}"
-  spec.exclude_files = "ios/Tests/**/*"
+  spec.default_subspecs = "Core"
+  spec.swift_versions = ["5.0"]
   spec.dependency "React-Core"
+
+  spec.subspec "Core" do |core|
+    core.source_files = "ios/*.{h,m,mm}"
+    core.exclude_files = "ios/Tests/**/*"
+  end
+
+  spec.subspec "AppleNativeDiagnostics" do |diagnostics|
+    diagnostics.ios.deployment_target = "15.0"
+    diagnostics.source_files = [
+      "ios/AppleDiagnostics/**/*.{h,m,mm,swift}",
+      "ios/GeneratedAppleDiagnostics/**/*.swift"
+    ]
+    diagnostics.dependency "#{spec.name}/Core"
+    diagnostics.dependency "KSCrash/Recording", "2.5.1"
+    diagnostics.pod_target_xcconfig = {
+      "DEFINES_MODULE" => "YES",
+      "SWIFT_VERSION" => "5.0"
+    }
+  end
 
   install_modules_dependencies(spec) if respond_to?(:install_modules_dependencies, true)
 end
