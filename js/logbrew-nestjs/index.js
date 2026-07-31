@@ -8,7 +8,7 @@ import {
 import { createNodeFetchTransport } from "@logbrew/node";
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
-const DEFAULT_SDK_VERSION = "0.1.3";
+const DEFAULT_SDK_VERSION = "0.1.4";
 const activeTraceContext = new AsyncLocalStorage();
 
 export function createLogBrewNestClient({
