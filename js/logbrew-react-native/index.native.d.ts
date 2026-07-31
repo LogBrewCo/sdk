@@ -2,6 +2,7 @@ import type { EventStore, LogBrewClient } from "@logbrew/sdk";
 import type { CreateLogBrewReactNativeClientConfig } from "./index.js";
 
 export * from "./index.js";
+export * from "./apple-native-diagnostics.js";
 export {
   installLogBrewReactNativeGlobalErrorHandler,
   installLogBrewReactNativePromiseRejectionTracker
@@ -41,7 +42,10 @@ declare const defaultExport: Omit<
 > & {
   createLogBrewReactNativeClient: typeof createLogBrewReactNativeClient;
   createDefaultLogBrewReactNativeClient: typeof createDefaultLogBrewReactNativeClient;
+  getLogBrewAppleNativeDiagnosticsStatus: typeof import("./apple-native-diagnostics.js").getLogBrewAppleNativeDiagnosticsStatus;
+  installLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").installLogBrewAppleNativeDiagnostics;
   purgeLogBrewReactNativePersistentQueue: typeof purgeLogBrewReactNativePersistentQueue;
+  replayLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").replayLogBrewAppleNativeDiagnostics;
 };
 
 export default defaultExport;

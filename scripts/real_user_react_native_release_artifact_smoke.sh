@@ -63,6 +63,10 @@ from pathlib import Path
 pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
 files = {entry["path"] for entry in pack["files"]}
 for expected in {
+    "apple-native-diagnostics.js",
+    "expo.cjs",
+    "ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift",
+    "ios/GeneratedAppleDiagnostics/SOURCE-MANIFEST.json",
     "metro.cjs",
     "metro.js",
     "metro.d.ts",

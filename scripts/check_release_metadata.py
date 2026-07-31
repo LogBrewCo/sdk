@@ -333,6 +333,14 @@ def validate_js_package(
     if expected_name == "@logbrew/react-native":
         require("index.native.js" in files, failures, f"{location}: files must include 'index.native.js'")
         for expected_file in (
+            "apple-native-diagnostics.js",
+            "apple-native-diagnostics.d.ts",
+            "expo.cjs",
+            "expo.js",
+            "expo.d.ts",
+            "ios/AppleDiagnostics",
+            "ios/GeneratedAppleDiagnostics",
+            "scripts/sync-apple-native-sources.mjs",
             "release-artifacts.cjs",
             "release-artifacts.js",
             "release-artifacts.d.ts",
@@ -348,6 +356,56 @@ def validate_js_package(
             import_default="./release-artifacts.js",
             require_types="./release-artifacts.d.cts",
             require_default="./release-artifacts.cjs",
+        )
+        require_equal(
+            failures,
+            location,
+            "exports['./apple-native-diagnostics'].react-native.types",
+            path_text_from_dict(
+                manifest,
+                "exports",
+                "./apple-native-diagnostics",
+                "react-native",
+                "types",
+            ),
+            "./apple-native-diagnostics.d.ts",
+        )
+        require_equal(
+            failures,
+            location,
+            "exports['./apple-native-diagnostics'].react-native.default",
+            path_text_from_dict(
+                manifest,
+                "exports",
+                "./apple-native-diagnostics",
+                "react-native",
+                "default",
+            ),
+            "./apple-native-diagnostics.js",
+        )
+        require_js_export_entry(
+            failures,
+            location,
+            manifest,
+            "./expo",
+            import_types="./expo.d.ts",
+            import_default="./expo.js",
+            require_types="./expo.d.ts",
+            require_default="./expo.cjs",
+        )
+        require_equal(
+            failures,
+            location,
+            "peerDependencies.expo",
+            path_text_from_dict(manifest, "peerDependencies", "expo"),
+            ">=49",
+        )
+        require_equal(
+            failures,
+            location,
+            "peerDependenciesMeta.expo.optional",
+            path_text_from_dict(manifest, "peerDependenciesMeta", "expo", "optional"),
+            True,
         )
 
     if expected_name == "@logbrew/amqplib":

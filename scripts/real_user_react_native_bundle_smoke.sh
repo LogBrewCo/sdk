@@ -8,7 +8,7 @@ react_native_cli_version="20.1.0"
 expo_version="57.0.8"
 worklets_version="0.10.0"
 expected_sdk_version="0.1.5"
-expected_react_native_package_version="0.1.11"
+expected_react_native_package_version="0.1.12"
 expected_sdk_peer="^0.1.5"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rn-bundle.XXXXXX")"
 
@@ -128,6 +128,16 @@ requireEqual(
   "./index.native.js",
   "React Native modern mobile entry"
 );
+requireEqual(
+  reactNativeManifest.exports?.["./apple-native-diagnostics"]?.["react-native"]?.default,
+  "./apple-native-diagnostics.js",
+  "Apple native diagnostics entry"
+);
+requireEqual(
+  reactNativeManifest.exports?.["./expo"]?.require?.default,
+  "./expo.cjs",
+  "Expo plugin CommonJS entry"
+);
 
 for (const relativePath of [
   "core.cjs",
@@ -140,12 +150,32 @@ for (const relativePath of [
 for (const relativePath of [
   "index.native.d.ts",
   "index.native.js",
+  "apple-native-diagnostics.d.ts",
+  "apple-native-diagnostics.js",
+  "expo.cjs",
+  "expo.d.ts",
+  "expo.js",
+  "ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift",
+  "ios/GeneratedAppleDiagnostics/SOURCE-MANIFEST.json",
   "metro.cjs",
   "metro.d.cts",
   "metro.d.ts",
   "metro.js"
 ]) {
   requirePackedFile("@logbrew/react-native", relativePath);
+}
+NODE
+
+  node <<'NODE'
+const expo = require("@logbrew/react-native/expo");
+const podfile = "target 'Example' do\n  use_expo_modules!\nend\n";
+const once = expo.modifyPodfile(podfile);
+if (
+  typeof expo !== "function"
+  || !once.includes("LogBrewReactNative/AppleNativeDiagnostics")
+  || expo.modifyPodfile(once) !== once
+) {
+  throw new Error("installed Expo plugin did not add one idempotent diagnostics pod");
 }
 NODE
 

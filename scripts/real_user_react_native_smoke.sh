@@ -63,6 +63,13 @@ grep -q '^package/global-errors.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/global-errors.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/global-errors.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/promise-rejections.cjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/apple-native-diagnostics.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/apple-native-diagnostics.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/expo.cjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/expo.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/expo.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/ios/GeneratedAppleDiagnostics/SOURCE-MANIFEST.json$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/android/src/main/java/co/logbrew/reactnative/EventRecordStore.java$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/ios/LBRNEventRecordStore.m$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/ios/LBRNPrivateStorage.m$' "$tmp_dir/native-tarball.txt"
@@ -126,6 +133,9 @@ grep -q 'installLogBrewReactNativePromiseRejectionTracker' "$tmp_dir/native-read
 grep -q 'takeOwnership: true' "$tmp_dir/native-readme.md"
 grep -q 'one Promise rejection tracker slot' "$tmp_dir/native-readme.md"
 grep -q 'LogBrew does not install, replace, or patch Promise' "$tmp_dir/native-readme.md"
+grep -q '@logbrew/react-native/expo' "$tmp_dir/native-readme.md"
+grep -q 'fatalHandlerOwnership: "logbrew"' "$tmp_dir/native-readme.md"
+grep -q 'partitioned by project' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
 mkdir -p "$app_dir"
@@ -157,6 +167,8 @@ grep -q '"./instrumentation"' node_modules/@logbrew/react-native/package.json
 grep -q '"./lifecycle"' node_modules/@logbrew/react-native/package.json
 grep -q '"./global-errors"' node_modules/@logbrew/react-native/package.json
 grep -q '"./native-bridge"' node_modules/@logbrew/react-native/package.json
+grep -q '"./apple-native-diagnostics"' node_modules/@logbrew/react-native/package.json
+grep -q '"./expo"' node_modules/@logbrew/react-native/package.json
 npm ls @logbrew/sdk @logbrew/react-native react react-native react-test-renderer >/dev/null
 npm explain @logbrew/react-native > "$tmp_dir/npm-explain-native.txt"
 grep -Fq "@logbrew/react-native@${react_native_package_version}" "$tmp_dir/npm-explain-native.txt"
@@ -189,6 +201,9 @@ node --check node_modules/@logbrew/react-native/native-bridge.js
 node --check node_modules/@logbrew/react-native/native-bridge.cjs
 node --check node_modules/@logbrew/react-native/resource-fetch.js
 node --check node_modules/@logbrew/react-native/resource-fetch.cjs
+node --check node_modules/@logbrew/react-native/apple-native-diagnostics.js
+node --check node_modules/@logbrew/react-native/expo.js
+node --check node_modules/@logbrew/react-native/expo.cjs
 node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createReactNativeFetchTransport !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object" || typeof native.default.createReactNativeFetchTransport !== "function") process.exit(1)'
 node -e 'const native = require("@logbrew/react-native"); const client = native.createLogBrewReactNativeClient({ clientKey: "LOGBREW_CLIENT_KEY" }); native.captureScreenView(client, "Checkout Complete", { timestamp: "2026-06-02T10:00:00Z" }); const [event] = JSON.parse(client.previewJson()).events; if (event.attributes.name !== "screen:checkout_complete" || event.attributes.metadata.screen !== "Checkout Complete") process.exit(1)'
 node -e 'const instrumentation = require("@logbrew/react-native/instrumentation"); if (typeof instrumentation.createLogBrewReactNativeInstrumentation !== "function" || typeof instrumentation.default !== "object") process.exit(1)'
@@ -196,6 +211,7 @@ node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeo
 node -e 'const globalErrors = require("@logbrew/react-native/global-errors"); if (typeof globalErrors.createLogBrewReactNativePromiseRejectionHandlers !== "function" || typeof globalErrors.installLogBrewReactNativeGlobalErrorHandler !== "function" || typeof globalErrors.installLogBrewReactNativePromiseRejectionTracker !== "function" || typeof globalErrors.default !== "object") process.exit(1)'
 node -e 'const bridge = require("@logbrew/react-native/native-bridge"); if (typeof bridge.createLogBrewNativeBridgeScope !== "function" || typeof bridge.syncLogBrewNativeBridgeScope !== "function" || typeof bridge.clearLogBrewNativeBridgeScope !== "function" || typeof bridge.withLogBrewNativeBridgeScope !== "function" || typeof bridge.default !== "object") process.exit(1)'
 node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeGraphQLMetadataFactory !== "function" || typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
+node -e 'const expo = require("@logbrew/react-native/expo"); const podfile = "target \"Example\" do\nend\n"; const once = expo.modifyPodfile(podfile); if (typeof expo !== "function" || !once.includes("LogBrewReactNative/AppleNativeDiagnostics") || expo.modifyPodfile(once) !== once) process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
 import React from "react";

@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, opt-in Hermes Promise rejection tracking, app-owned Promise rejection callbacks, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, opt-in reversible global fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
+This package keeps event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`. It adds mobile helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, Promise rejection tracking, provider and hook usage, W3C trace correlation and propagation, lifecycle spans, resource spans, reversible instrumentation, and opt-in Apple native crash and app-hang diagnostics.
 
 ## Install
 
@@ -270,6 +270,100 @@ Installation is idempotent for the active React Native `ErrorUtils` object. The 
 The React Native conditional export obtains LogBrew's synchronous native fatal store through the supported TurboModule or `NativeModules` seam. Before chaining a fatal report, it writes one bounded record to app-private storage that is excluded from operating-system archives. On a later installation it performs stable-ID at-least-once replay, and acknowledgement happens only after local queue admission is observable through the SDK queue counters. Filtered, dropped, unknown-admission, persistence-failed, and acknowledgement-failed records are retained. A failed acknowledgement is retried without admitting the same ID twice in one JavaScript runtime. Use `fatalHealth()` for frozen bounded counters and status, or `discardPendingFatalRecord()` for an explicit rollback discard. The Node ESM and CommonJS entries never import React Native; non-React-Native callers must inject `fatalStore` explicitly.
 
 Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This error-handler integration does not claim mathematically exactly-once delivery, native crash capture, ANR or hang detection, general offline queueing by the fatal-record slot, or symbolication. The client-level persistent queue above owns normal event restart delivery.
+
+### Apple native crash and app-hang diagnostics
+
+Apple native diagnostics are an iOS-only, opt-in build feature. They capture a
+fatal native process crash and replay one privacy-bounded issue after the next
+launch. Set `hangThresholdSeconds` to also capture recovered or ongoing UIKit
+main-thread hangs. Android native crash and ANR capture are not included.
+
+For Expo prebuild or development builds, add the config plugin:
+
+```json
+{
+  "expo": {
+    "plugins": ["@logbrew/react-native/expo"]
+  }
+}
+```
+
+Then run your normal Expo prebuild or EAS build. Expo Go cannot load this native
+module. For a bare React Native app, add the optional subspec inside the app
+target in `ios/Podfile`, then run `pod install`:
+
+```ruby
+logbrew_react_native_path = File.dirname(`node --print "require.resolve('@logbrew/react-native')"`)
+pod 'LogBrewReactNative/AppleNativeDiagnostics', :path => logbrew_react_native_path
+```
+
+The default `LogBrewReactNative/Core` subspec remains unchanged and supports
+iOS 13. `AppleNativeDiagnostics` requires iOS 15. Install it on the main thread
+before root registration, then start replay:
+
+```js
+import {
+  installLogBrewAppleNativeDiagnostics,
+  replayLogBrewAppleNativeDiagnostics
+} from "@logbrew/react-native/apple-native-diagnostics";
+
+const nativeStatus = installLogBrewAppleNativeDiagnostics({
+  clientKey: process.env.EXPO_PUBLIC_LOGBREW_CLIENT_KEY,
+  projectId: "550e8400-e29b-41d4-a716-446655440000",
+  release: "com.example.app@1.2.3+45",
+  environment: "production",
+  service: "ios-app",
+  fatalHandlerOwnership: "logbrew",
+  hangThresholdSeconds: 2
+});
+
+void replayLogBrewAppleNativeDiagnostics().catch((error) => {
+  console.warn(error?.code ?? "native_diagnostics_failed");
+});
+```
+
+`fatalHandlerOwnership: "logbrew"` is an explicit process-lifetime ownership
+claim. Do not install these diagnostics while Sentry or another integration
+owns the native fatal signal or Mach exception handlers. Linking both SDKs is
+allowed, but only one integration may install native fatal capture in a given
+process. LogBrew cannot transfer or remove that ownership before process
+restart.
+
+Installation creates app-private, data-protected storage that iOS excludes from
+device data archives. Pending reports are partitioned by project, so changing
+the configured project does not replay an earlier project's records with the
+new project's key. The raw local KSCrash report can still contain sensitive
+process details, so apply the app's consent and retention policy to it. Hosted
+replay uploads only the bounded crash or hang issue described by the Swift
+`LogBrewCrash` contract. Status and error results expose fixed codes and bounded
+counters, not keys, paths, raw reports, or native error text. A custom endpoint
+must be a plain HTTPS path without embedded authentication, a query, or a fragment.
+
+Use the same project, release, environment, and service values for the runtime
+and its Apple dSYM. After signing in with `logbrew login`, upload and inspect
+the exact debug object with the released CLI:
+
+```bash
+logbrew debug-artifacts upload ios/build/MyApp.app.dSYM \
+  --project 550e8400-e29b-41d4-a716-446655440000 \
+  --release com.example.app@1.2.3+45 \
+  --environment production \
+  --service ios-app \
+  --json
+
+logbrew debug-artifacts lookup \
+  --project 550e8400-e29b-41d4-a716-446655440000 \
+  --release com.example.app@1.2.3+45 \
+  --environment production \
+  --service ios-app \
+  --image-uuid <mach_o_uuid> \
+  --architecture arm64 \
+  --json
+```
+
+The SDK does not upload debug objects during a build or at runtime. Hosted
+symbolication begins only after the exact Mach-O UUID and architecture lookup
+succeeds.
 
 ### Opt-in Hermes Promise rejection tracking
 
@@ -781,7 +875,14 @@ uploadLogBrewReactNativeReleaseArtifacts({
 
 The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. Hosted uploads also require a UUID `projectId`; local preparation and loopback upload remain valid without it. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. Hosted endpoints must use HTTPS and must not include embedded auth values, query strings, or fragments. The helper never uses normal SDK ingest keys or account/session API auth values. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map, so stale packager-map comments do not block manifest generation. The explicit Metro wrapper changes only app-owned serialization and one bounded runtime Debug-ID registry; neither helper patches Gradle, Xcode, global fetch/XHR, request payloads, or transport behavior.
 
-React Native native symbols are handled as release artifacts, not runtime telemetry. For local dry-run validation, use the repo release-artifact tooling against app-owned build outputs such as `ios/build/.../*.dSYM`, `android/app/build/outputs/mapping/release/mapping.txt`, and `android/app/build/intermediates/merged_native_libs/.../*.so`. The current public SDK validates metadata and privacy boundaries only; backend upload, storage, lookup, and native symbolication are still backend-owned future support, so do not rely on normal runtime error capture for native crash symbolication yet.
+React Native native symbols are release artifacts, not runtime telemetry. Use
+the repository release-artifact tooling for local dry-run checks of app-owned
+outputs such as `ios/build/.../*.dSYM`, Android mapping files, and native shared
+objects. Apple dSYM upload, storage, exact UUID and architecture lookup, and
+hosted symbolication are available through `logbrew debug-artifacts`. The SDK
+does not upload those artifacts automatically. Normal JavaScript error capture
+does not produce native crash symbolication; use the opt-in Apple diagnostics
+flow above with an exact uploaded dSYM.
 
 ## Example Source
 

@@ -208,6 +208,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
+    if is_react_native_diagnostics_endpoint_guard(relative_text, line, terms):
+        return True
+
     if is_support_ticket_diagnostics_reference(relative_text, line):
         return True
 
@@ -296,9 +299,15 @@ def is_kscrash_report_deletion_policy_reference(
     line: str,
     terms: set[str],
 ) -> bool:
+    allowed_paths = {
+        "swift/logbrew-swift/Sources/LogBrewCrash/CrashEngine.swift",
+        (
+            "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/"
+            "LogBrewCrash/CrashEngine.swift"
+        ),
+    }
     return (
-        relative_text
-        == "swift/logbrew-swift/Sources/LogBrewCrash/CrashEngine.swift"
+        relative_text in allowed_paths
         and terms == {"cleanup"}
         and "reportCleanupPolicy" in line
     )
@@ -313,6 +322,10 @@ def is_apple_durable_storage_reference(relative_text: str, terms: set[str]) -> b
         "swift/logbrew-swift/README.md",
         "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift",
         "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift",
+        (
+            "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/"
+            "LogBrew/DurableDeliveryStoreRecovery.swift"
+        ),
     }
     return relative_text in durable_paths and terms.issubset({"backup", "cleanup"})
 
@@ -325,6 +338,10 @@ def is_apple_crash_storage_reference(
     symbol = "isExcludedFromBackup"
     allowed_paths = {
         "swift/logbrew-swift/Sources/LogBrewCrash/CrashStorageDirectory.swift",
+        (
+            "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/"
+            "LogBrewCrash/CrashStorageDirectory.swift"
+        ),
         (
             "swift/logbrew-swift/Tests/LogBrewCrashTests/"
             "NativeHangIncidentStoreTests.swift"
@@ -598,6 +615,22 @@ def is_python_opentelemetry_privacy_denylist_literal(relative_text: str, line: s
         or 'r"(^|[._-])(' in line
         or 'r"private[-_]?key|' in line
     )
+
+
+def is_react_native_diagnostics_endpoint_guard(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    allowed_fragments = {
+        "js/logbrew-react-native/apple-native-diagnostics.js": "parsed.password",
+        (
+            "js/logbrew-react-native/ios/AppleDiagnostics/"
+            "LBRNAppleNativeDiagnostics.swift"
+        ): "components.password == nil",
+    }
+    fragment = allowed_fragments.get(relative_text)
+    return terms == {"password"} and fragment is not None and fragment in line
 
 
 def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:
