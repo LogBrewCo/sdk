@@ -57,7 +57,7 @@ test_client_requirement="httpx2==2.3.0"
 if [[ -n "$LOGBREW_FASTAPI_HTTPX_VERSION" ]]; then
   test_client_requirement="httpx==${LOGBREW_FASTAPI_HTTPX_VERSION}"
 fi
-app_dependencies=("$core_wheel" "$fastapi_wheel" mypy "$test_client_requirement")
+app_dependencies=("$core_wheel" "$fastapi_wheel[celery]" mypy "$test_client_requirement")
 if [[ -n "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" ]]; then
   app_dependencies=("fastapi==${LOGBREW_FASTAPI_FRAMEWORK_VERSION}" "${app_dependencies[@]}")
 fi
@@ -69,14 +69,15 @@ grep -q '^Name: logbrew-fastapi$' "$tmp_dir/pip-show-fastapi.txt"
 grep -q "^Version: ${fastapi_package_version}$" "$tmp_dir/pip-show-fastapi.txt"
 grep -q '^Summary: FastAPI integration for capturing LogBrew request spans and exceptions\.$' "$tmp_dir/pip-show-fastapi.txt"
 "$tmp_dir/app/bin/python" -m pip list --format=json > "$tmp_dir/pip-list.json"
-python3 - "$tmp_dir/pip-list.json" <<'PY'
+"$tmp_dir/app/bin/python" - "$tmp_dir/pip-list.json" <<'PY'
+import importlib.metadata
 import json
 import os
 import sys
 from pathlib import Path
 
 packages = {package["name"].lower(): package["version"] for package in json.loads(Path(sys.argv[1]).read_text())}
-for name in ("fastapi", "logbrew-fastapi", "logbrew-sdk", "starlette"):
+for name in ("celery", "fastapi", "logbrew-fastapi", "logbrew-sdk", "starlette"):
     if name not in packages:
         raise SystemExit(f"missing installed package: {name}")
 expected_fastapi_version = os.environ["LOGBREW_FASTAPI_PACKAGE_VERSION"]
@@ -93,6 +94,9 @@ if expected_httpx_version:
         raise SystemExit("legacy httpx compatibility lane unexpectedly installed httpx2")
 elif packages.get("httpx2") != "2.3.0":
     raise SystemExit(f"unexpected httpx2 version: {packages.get('httpx2')}")
+requirements = importlib.metadata.requires("logbrew-fastapi") or []
+if not any("logbrew-sdk[celery]" in requirement and "extra == \"celery\"" in requirement for requirement in requirements):
+    raise SystemExit("installed FastAPI wheel does not expose the celery extra")
 PY
 
 app_dir="$tmp_dir/consumer"

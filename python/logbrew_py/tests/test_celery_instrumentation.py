@@ -120,9 +120,11 @@ class FakeCeleryTask:
         *,
         headers: dict[str, Any] | None = None,
         retries: int = 0,
+        throws: tuple[type[BaseException], ...] = (),
     ) -> None:
         self.app = app
         self.name = name
+        self.throws = throws
         self.request = SimpleNamespace(
             headers=headers or {},
             retries=retries,
@@ -313,7 +315,9 @@ class CeleryAppInstrumentationTests(unittest.TestCase):
             instrumentation = instrument_celery_app(
                 app,
                 client=client,
-                event_id_factory=iter(["evt_publish_error", "evt_process_error"]).__next__,
+                event_id_factory=iter(
+                    ["evt_publish_error", "evt_process_error", "evt_failure_issue"]
+                ).__next__,
                 timestamp="2026-07-12T08:00:01Z",
                 span_id_factory=lambda: next(span_ids),
                 clock=lambda: next(clock_values),
@@ -336,9 +340,11 @@ class CeleryAppInstrumentationTests(unittest.TestCase):
             signals.task_postrun.send(sender=task, task_id="private-task-id", state="FAILURE")
 
             payload = json.loads(client.preview_json())
-            self.assertEqual(len(payload["events"]), 2)
+            self.assertEqual(len(payload["events"]), 3)
             publish = payload["events"][0]["attributes"]
-            process = payload["events"][1]["attributes"]
+            issue_event = payload["events"][1]
+            issue = issue_event["attributes"]
+            process = payload["events"][2]["attributes"]
             self.assertEqual(publish["status"], "error")
             self.assertEqual(publish["metadata"]["errorType"], "PrivateBrokerError")
             self.assertEqual(process["status"], "error")
@@ -356,10 +362,24 @@ class CeleryAppInstrumentationTests(unittest.TestCase):
                     }
                 ],
             )
+            self.assertEqual(issue_event["type"], "issue")
+            self.assertEqual(issue["title"], "Celery task checkout.fail_receipt failed")
+            self.assertEqual(issue["level"], "error")
+            self.assertEqual(issue["message"], "PrivateTaskError")
+            self.assertEqual(issue["metadata"]["framework"], "celery")
+            self.assertEqual(issue["metadata"]["source"], "queue")
+            self.assertEqual(issue["metadata"]["taskName"], "checkout.fail_receipt")
+            self.assertEqual(issue["metadata"]["taskState"], "failure")
+            self.assertEqual(issue["metadata"]["errorName"], "PrivateTaskError")
+            self.assertEqual(issue["metadata"]["queueName"], "critical")
+            self.assertEqual(issue["metadata"]["attempt"], 0)
+            self.assertEqual(issue["metadata"]["traceId"], process["traceId"])
+            self.assertEqual(issue["metadata"]["spanId"], process["spanId"])
+            self.assertTrue(issue["metadata"]["sampled"])
             serialized = client.preview_json()
             for private_value in (
                 "sensitive broker value",
-                "private@example.test",
+                "sensitive@example.test",
                 "private-order-id",
                 "private-body",
                 "opaque-value",
@@ -408,6 +428,115 @@ class CeleryAppInstrumentationTests(unittest.TestCase):
             self.assertEqual(event["metadata"]["taskState"], "retry")
             self.assertEqual(event["metadata"]["attempt"], 2)
             self.assertNotIn("private retry destination", client.preview_json())
+            instrumentation.uninstall()
+
+    def test_declared_task_exceptions_remain_error_spans_without_issue_events(self) -> None:
+        class DeclaredTaskError(ValueError):
+            pass
+
+        with fake_celery_module() as signals:
+            client = sample_client()
+            app = FakeCeleryApp("checkout")
+            task = FakeCeleryTask(
+                app,
+                "checkout.expected_failure",
+                throws=(DeclaredTaskError,),
+            )
+            instrumentation = instrument_celery_app(
+                app,
+                client=client,
+                event_id_factory=lambda: "evt_process_expected_failure",
+                timestamp="2026-07-12T08:00:03Z",
+                span_id_factory=lambda: "b7ad6b7169203393",
+                clock=iter([305.0, 305.004]).__next__,
+                wall_clock=lambda: 3_050.0,
+            )
+
+            signals.task_prerun.send(sender=task, task_id="private-expected-id")
+            signals.task_failure.send(
+                sender=task,
+                task_id="private-expected-id",
+                exception=DeclaredTaskError("private expected detail"),
+            )
+            signals.task_postrun.send(
+                sender=task,
+                task_id="private-expected-id",
+                state="FAILURE",
+            )
+
+            events = json.loads(client.preview_json())["events"]
+            self.assertEqual([event["type"] for event in events], ["span"])
+            self.assertEqual(events[0]["attributes"]["metadata"]["errorType"], "DeclaredTaskError")
+            self.assertNotIn("private expected detail", client.preview_json())
+            instrumentation.uninstall()
+
+    def test_failure_issue_capture_errors_fail_open_and_keep_the_error_span(self) -> None:
+        class IssueRejectingClient:
+            def __init__(self) -> None:
+                self.delegate = sample_client()
+
+            def issue(self, *args: Any, **kwargs: Any) -> None:
+                raise RuntimeError("issue intake unavailable")
+
+            def span(self, *args: Any, **kwargs: Any) -> None:
+                self.delegate.span(*args, **kwargs)
+
+        with fake_celery_module() as signals:
+            client = IssueRejectingClient()
+            app = FakeCeleryApp("checkout")
+            task = FakeCeleryTask(app, "checkout.failure_capture")
+            capture_errors: list[str] = []
+            instrumentation = instrument_celery_app(
+                app,
+                client=client,
+                event_id_factory=iter(["evt_process_failure", "evt_issue_failure"]).__next__,
+                span_id_factory=lambda: "b7ad6b7169203394",
+                clock=iter([306.0, 306.004]).__next__,
+                wall_clock=lambda: 3_060.0,
+                on_capture_error=lambda error: capture_errors.append(str(error)),
+            )
+
+            signals.task_prerun.send(sender=task, task_id="private-capture-id")
+            signals.task_failure.send(
+                sender=task,
+                task_id="private-capture-id",
+                exception=RuntimeError("private failure detail"),
+            )
+            signals.task_postrun.send(sender=task, task_id="private-capture-id", state="FAILURE")
+
+            events = json.loads(client.delegate.preview_json())["events"]
+            self.assertEqual([event["type"] for event in events], ["span"])
+            self.assertEqual(events[0]["attributes"]["status"], "error")
+            self.assertEqual(capture_errors, ["issue intake unavailable"])
+            self.assertNotIn("private failure detail", client.delegate.preview_json())
+            instrumentation.uninstall()
+
+    def test_failure_issue_is_retained_before_span_when_the_queue_is_full(self) -> None:
+        with fake_celery_module() as signals:
+            client = sample_client(max_queue_size=1)
+            app = FakeCeleryApp("checkout")
+            task = FakeCeleryTask(app, "checkout.priority_failure")
+            instrumentation = instrument_celery_app(
+                app,
+                client=client,
+                event_id_factory=iter(["evt_process_priority", "evt_issue_priority"]).__next__,
+                span_id_factory=lambda: "b7ad6b7169203395",
+                clock=iter([307.0, 307.004]).__next__,
+                wall_clock=lambda: 3_070.0,
+            )
+
+            signals.task_prerun.send(sender=task, task_id="private-priority-id")
+            signals.task_failure.send(
+                sender=task,
+                task_id="private-priority-id",
+                exception=RuntimeError("private priority detail"),
+            )
+            signals.task_postrun.send(sender=task, task_id="private-priority-id", state="FAILURE")
+
+            events = json.loads(client.preview_json())["events"]
+            self.assertEqual([event["type"] for event in events], ["issue"])
+            self.assertEqual(client.dropped_events(), 1)
+            self.assertNotIn("private priority detail", client.preview_json())
             instrumentation.uninstall()
 
     def test_unknown_task_state_and_oversized_enqueue_time_are_not_serialized(self) -> None:

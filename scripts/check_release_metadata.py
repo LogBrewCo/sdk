@@ -77,10 +77,11 @@ PYTHON_PACKAGES = {
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
         "description": "FastAPI integration",
-        "dependencies": {"fastapi>=0.111.1", "logbrew-sdk>=0.1.6,<0.2.0"},
+        "dependencies": {"fastapi>=0.111.1", "logbrew-sdk>=0.1.7,<0.2.0"},
+        "optional_dependencies": {"celery": {"logbrew-sdk[celery]>=0.1.7,<0.2.0"}},
         "package": "logbrew_fastapi",
         "requires_python": ">=3.10",
-        "version": "0.1.7",
+        "version": "0.1.8",
     },
     "python/logbrew_flask": {
         "name": "logbrew-flask",
@@ -98,9 +99,13 @@ PYTHON_PACKAGES = {
             "truststore>=0.10.4,<1",
             "typing-extensions>=4.1; python_version < '3.11'",
         },
+        "optional_dependencies": {
+            "celery": {"celery>=5,<6"},
+            "persistence": {"cryptography>=49,<50"},
+        },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.6",
+        "version": "0.1.7",
     },
 }
 
@@ -526,6 +531,19 @@ def validate_python_package(root: Path, relative_dir: str, expected: dict[str, A
     require({"name": "LogBrew"} in authors, failures, f"{location}: authors must include LogBrew")
     require("logbrew" in project.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
     require_equal(failures, location, "project.dependencies", set(project.get("dependencies", [])), expected["dependencies"])
+    expected_optional_dependencies = expected.get("optional_dependencies")
+    if expected_optional_dependencies is not None:
+        actual_optional_dependencies = {
+            extra: set(requirements)
+            for extra, requirements in project.get("optional-dependencies", {}).items()
+        }
+        require_equal(
+            failures,
+            location,
+            "project.optional-dependencies",
+            actual_optional_dependencies,
+            expected_optional_dependencies,
+        )
     urls = project.get("urls", {})
     if urls:
         require_equal(failures, location, "project.urls.Repository", urls.get("Repository"), REPO_URL)
