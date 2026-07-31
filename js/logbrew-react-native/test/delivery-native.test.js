@@ -381,7 +381,7 @@ function installRuntime(root, name, linked) {
   fs.writeFileSync(
     path.join(reactNativeDir, "index.js"),
     [
-      "const linked = " + JSON.stringify(linked) + ";",
+      `const linked = ${JSON.stringify(linked)};`,
       "const store = linked === true ? globalThis.__LOGBREW_REACT_NATIVE_TEST_STORE__ : linked === 'legacy' ? {readFatalRecord(){return {status: 'empty'}}} : undefined;",
       "export const AppState = {currentState: 'active'};",
       "export const Platform = {OS: 'ios', Version: '26.0'};",
