@@ -4,6 +4,7 @@ import type {
   DeliveryHealthSnapshot,
   DroppedEvent,
   EnvironmentAttributes,
+  EventStore,
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
@@ -37,6 +38,8 @@ export type CreateLogBrewReactNativeClientConfig = {
   clientKey?: string;
   deliveryIntervalMs?: number;
   deliveryQueueThreshold?: number;
+  /** Advanced synchronous persistence seam. React Native apps normally use the native entry's persistentQueue mode. */
+  eventStore?: EventStore;
   maxBatchBytes?: number;
   maxBatchEvents?: number;
   maxQueueBytes?: number;

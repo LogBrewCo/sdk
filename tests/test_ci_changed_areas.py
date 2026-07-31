@@ -60,6 +60,24 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertFalse(areas["maven"])
         self.assertFalse(areas["rust"])
 
+    def test_react_native_native_paths_enable_native_durability_checks(self) -> None:
+        for path in (
+            "js/logbrew-react-native/ios/LBRNEventRecordStore.m",
+            "js/logbrew-react-native/android/src/main/java/co/logbrew/reactnative/EventRecordStore.java",
+            "js/logbrew-react-native/src/NativeLogBrewFatalStore.ts",
+            "js/logbrew-react-native/persistent-delivery.native.js",
+        ):
+            with self.subTest(path=path):
+                areas = ci_changed_areas.classify([path])
+                self.assertTrue(areas["javascript"])
+                self.assertTrue(areas["react_native_native"])
+
+    def test_react_native_docs_do_not_start_native_durability_checks(self) -> None:
+        areas = ci_changed_areas.classify(["js/logbrew-react-native/README.md"])
+
+        self.assertTrue(areas["javascript"])
+        self.assertFalse(areas["react_native_native"])
+
     def test_native_release_public_smoke_enables_only_c_area(self) -> None:
         areas = ci_changed_areas.classify(
             ["scripts/real_user_native_release_public_smoke.sh"]
@@ -86,6 +104,8 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertIn("Run Maven Central public install smoke", workflow)
         self.assertIn("needs.changed-areas.outputs.rust == 'true'", workflow)
         self.assertIn("needs.changed-areas.outputs.javascript == 'true'", workflow)
+        self.assertIn("needs.changed-areas.outputs.react_native_native == 'true'", workflow)
+        self.assertIn("Run React Native native persistence checks", workflow)
         self.assertIn("needs.changed-areas.outputs.swift == 'true'", workflow)
         self.assertIn("needs.changed-areas.outputs.objc == 'true'", workflow)
         self.assertIn("needs.changed-areas.outputs.kotlin == 'true'", workflow)

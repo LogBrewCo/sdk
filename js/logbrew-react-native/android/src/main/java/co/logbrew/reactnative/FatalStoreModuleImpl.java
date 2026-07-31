@@ -9,10 +9,15 @@ import com.facebook.react.bridge.ReadableType;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 final class FatalStoreModuleImpl {
@@ -32,15 +37,78 @@ final class FatalStoreModuleImpl {
       new HashSet<>(Arrays.asList("filename", "line", "column"));
 
   private final FatalRecordStore store;
+  private final File eventStoreParent;
+  private final Map<String, EventRecordStore> eventStores = new HashMap<>();
 
   FatalStoreModuleImpl(ReactApplicationContext context) {
     File root = context.getNoBackupFilesDir();
+    eventStoreParent = root;
     store =
         root == null
             ? null
             : new FatalRecordStore(
                 new File(root, "logbrew-fatal-js"),
                 new AndroidParentDirectorySync());
+  }
+
+  WritableMap loadEventRecords(String queueKey) {
+    try {
+      EventRecordStore eventStore = eventStore(queueKey);
+      return eventStore == null ? status("storage_error") : eventResultMap(eventStore.load());
+    } catch (RuntimeException error) {
+      return status("storage_error");
+    }
+  }
+
+  WritableMap appendEventRecord(String queueKey, String serializedEvent, double eventBytes) {
+    try {
+      EventRecordStore eventStore = eventStore(queueKey);
+      Integer byteCount = integer(eventBytes);
+      return eventStore == null || byteCount == null
+          ? status("storage_error")
+          : eventResultMap(eventStore.append(serializedEvent, byteCount));
+    } catch (RuntimeException error) {
+      return status("storage_error");
+    }
+  }
+
+  WritableMap acknowledgeEventRecords(String queueKey, double count) {
+    try {
+      EventRecordStore eventStore = eventStore(queueKey);
+      Integer recordCount = integer(count);
+      return eventStore == null || recordCount == null
+          ? status("storage_error")
+          : eventResultMap(eventStore.acknowledge(recordCount));
+    } catch (RuntimeException error) {
+      return status("storage_error");
+    }
+  }
+
+  WritableMap purgeEventRecords(String queueKey) {
+    try {
+      EventRecordStore eventStore = eventStore(queueKey);
+      return eventStore == null ? status("storage_error") : eventResultMap(eventStore.purge());
+    } catch (RuntimeException error) {
+      return status("storage_error");
+    }
+  }
+
+  synchronized WritableMap closeEventStore(String queueKey) {
+    String queueHash = queueHash(queueKey);
+    if (queueHash == null) {
+      return status("storage_error");
+    }
+    EventRecordStore eventStore = eventStores.get(queueHash);
+    if (eventStore == null) {
+      return status("closed");
+    }
+    try {
+      return eventResultMap(eventStore.close());
+    } catch (RuntimeException error) {
+      return status("storage_error");
+    } finally {
+      eventStores.remove(queueHash);
+    }
   }
 
   WritableMap writeFatalRecord(ReadableMap input) {
@@ -225,6 +293,67 @@ final class FatalStoreModuleImpl {
   private static WritableMap status(String value) {
     WritableMap output = Arguments.createMap();
     output.putString("status", value);
+    return output;
+  }
+
+  private synchronized EventRecordStore eventStore(String queueKey) {
+    String queueHash = queueHash(queueKey);
+    if (eventStoreParent == null || queueHash == null) {
+      return null;
+    }
+    EventRecordStore existing = eventStores.get(queueHash);
+    if (existing != null) {
+      return existing;
+    }
+    EventRecordStore created =
+        new EventRecordStore(
+            new File(eventStoreParent, "logbrew-events-v1-" + queueHash),
+            new AndroidParentDirectorySync());
+    eventStores.put(queueHash, created);
+    return created;
+  }
+
+  private static String queueHash(String queueKey) {
+    if (queueKey == null || queueKey.trim().isEmpty()) {
+      return null;
+    }
+    byte[] keyBytes = queueKey.getBytes(StandardCharsets.UTF_8);
+    if (keyBytes.length == 0 || keyBytes.length > 4096) {
+      return null;
+    }
+    try {
+      byte[] digest = MessageDigest.getInstance("SHA-256").digest(keyBytes);
+      StringBuilder value = new StringBuilder(digest.length * 2);
+      for (byte item : digest) {
+        value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));
+      }
+      return value.toString();
+    } catch (NoSuchAlgorithmException impossible) {
+      return null;
+    }
+  }
+
+  private static Integer integer(double value) {
+    return Double.isFinite(value)
+            && value >= 0
+            && value <= Integer.MAX_VALUE
+            && value == Math.rint(value)
+        ? (int) value
+        : null;
+  }
+
+  private static WritableMap eventResultMap(EventRecordStore.Result result) {
+    WritableMap output = status(result.status);
+    if ("loaded".equals(result.status)) {
+      WritableArray records = Arguments.createArray();
+      for (EventRecordStore.Record record : result.records) {
+        WritableMap value = Arguments.createMap();
+        value.putString("serializedEvent", record.serializedEvent);
+        value.putInt("eventBytes", record.eventBytes);
+        records.pushMap(value);
+      }
+      output.putArray("records", records);
+    }
     return output;
   }
 }

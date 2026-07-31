@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_artifacts: ${{ steps.areas.outputs.release_artifacts }}
+      react_native_native: ${{ steps.areas.outputs.react_native_native }}
       rust: ${{ steps.areas.outputs.rust }}
       javascript: ${{ steps.areas.outputs.javascript }}
       python: ${{ steps.areas.outputs.python }}
@@ -636,6 +637,26 @@ jobs:
 
       - name: Run Swift real-user smoke test
         run: bash scripts/real_user_swift_smoke.sh
+
+  react-native-native-checks:
+    name: React Native native durability checks
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.react_native_native == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Run React Native native persistence checks
+        run: bash js/logbrew-react-native/test/run-native-store-tests.sh
 
   objc-checks:
     name: Objective-C SDK checks
