@@ -226,8 +226,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.0",
             ),
             "scripts/real_user_python_public_pypi_smoke.sh": (
-                "LOGBREW_PYPI_SDK_VERSION:-0.1.6",
-                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.7",
+                "LOGBREW_PYPI_SDK_VERSION:-0.1.7",
+                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.8",
                 "LOGBREW_PYPI_FLASK_VERSION:-0.1.2",
                 "LOGBREW_PYPI_DJANGO_VERSION:-0.1.4",
             ),
