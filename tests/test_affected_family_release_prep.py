@@ -32,7 +32,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.2"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.4"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.1"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.9"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.10"),
         }
         for relative_path, expected in npm_versions.items():
             manifest = json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
