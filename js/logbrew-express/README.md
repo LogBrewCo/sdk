@@ -82,16 +82,19 @@ import express from "express";
 import { logbrewMiddleware } from "@logbrew/express";
 
 const app = express();
+const logbrewServerApiKey = process.env.LOGBREW_SERVER_API_KEY;
 
-app.use(logbrewMiddleware({
-  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
-  onCaptureError(error) {
-    console.error("LogBrew request capture failed", error);
-  }
-}));
+if (logbrewServerApiKey) {
+  app.use(logbrewMiddleware({
+    serverApiKey: logbrewServerApiKey,
+    onCaptureError(error) {
+      console.error("LogBrew request capture failed", error);
+    }
+  }));
+}
 
 app.get("/health", (req, res) => {
-  req.logbrew.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
+  req.logbrew?.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
     message: "health check reached",
     level: "info",
     logger: "express"
@@ -99,6 +102,11 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 ```
+
+Guard both middleware registrations when local or non-telemetry environments
+are intentionally allowed to run without LogBrew configuration. Keep the
+guard explicit and app-owned so production configuration validation can still
+fail closed when your deployment requires telemetry.
 
 With no `transport` option, the middleware sends to the LogBrew ingest API by default
 through `@logbrew/node`. You can pass `endpoint`, `fetchImpl`, or `headers` to
@@ -174,19 +182,23 @@ The metric includes primitive, low-cardinality metadata: `framework`, `method`, 
 ```js
 import { logbrewErrorHandler } from "@logbrew/express";
 
-app.use(logbrewErrorHandler({
-  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
-  onCaptureError(error) {
-    console.error("LogBrew error capture failed", error);
-  }
-}));
+const logbrewServerApiKey = process.env.LOGBREW_SERVER_API_KEY;
+
+if (logbrewServerApiKey) {
+  app.use(logbrewErrorHandler({
+    serverApiKey: logbrewServerApiKey,
+    onCaptureError(error) {
+      console.error("LogBrew error capture failed", error);
+    }
+  }));
+}
 
 app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message });
 });
 ```
 
-Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler. When the failing request passed through `logbrewMiddleware()` with a valid `traceparent`, the default error event includes trace correlation metadata without echoing the raw propagation header.
+Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler. When the failing request passed through `logbrewMiddleware()`, the issue stays on that request client until the response finishes, so the issue, final 500 request event, and optional duration metric are sent together before one shutdown. An aborted response uses its close lifecycle as a flush fallback. When the request has a valid `traceparent`, the default error event includes trace correlation metadata without echoing the raw propagation header.
 
 ## Example Source
 
