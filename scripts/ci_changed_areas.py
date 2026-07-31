@@ -16,6 +16,7 @@ from collections.abc import Iterable
 
 AREA_NAMES = (
     "release_artifacts",
+    "react_native_native",
     "rust",
     "javascript",
     "python",
@@ -160,6 +161,19 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
             enabled.add("javascript")
             if "release-artifact" in path or "release_artifact" in path:
                 enabled.add("release_artifacts")
+        if (
+            path.startswith("js/logbrew-react-native/android/")
+            or path.startswith("js/logbrew-react-native/ios/")
+            or path.startswith("js/logbrew-react-native/src/")
+            or path
+            in {
+                "js/logbrew-react-native/index.native.js",
+                "js/logbrew-react-native/index.native.d.ts",
+                "js/logbrew-react-native/persistent-delivery.native.js",
+                "js/logbrew-react-native/test/run-native-store-tests.sh",
+            }
+        ):
+            enabled.add("react_native_native")
         if path.startswith("python/"):
             enabled.add("python")
         if path.startswith("go/"):

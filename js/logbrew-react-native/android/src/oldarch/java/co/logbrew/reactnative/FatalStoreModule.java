@@ -38,4 +38,30 @@ final class FatalStoreModule extends ReactContextBaseJavaModule {
   public WritableMap discardFatalRecord() {
     return implementation.discardFatalRecord();
   }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap loadEventRecords(String queueKey) {
+    return implementation.loadEventRecords(queueKey);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap appendEventRecord(
+      String queueKey, String serializedEvent, double eventBytes) {
+    return implementation.appendEventRecord(queueKey, serializedEvent, eventBytes);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap acknowledgeEventRecords(String queueKey, double count) {
+    return implementation.acknowledgeEventRecords(queueKey, count);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap purgeEventRecords(String queueKey) {
+    return implementation.purgeEventRecords(queueKey);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap closeEventStore(String queueKey) {
+    return implementation.closeEventStore(queueKey);
+  }
 }

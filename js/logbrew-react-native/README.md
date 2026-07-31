@@ -118,6 +118,73 @@ client key before creating a new client. A `429` preserves the queue and
 reports `pausedReason: "rate_limit"` plus the bounded retry signal exposed by
 the failed flush.
 
+## Offline And Restart Delivery
+
+The React Native entry uses an app-private native queue by default when the
+current app binary contains the linked LogBrew module. Each accepted event is
+written before it enters memory. After a JavaScript runtime or app restart,
+the client loads pending events oldest first with their original IDs. A
+successful intake response commits which records were accepted before removing
+them, so an interrupted removal can cause a duplicate but cannot silently lose
+an unaccepted event. Replayed events keep their stable IDs. Delivery is at
+least once, so apps must tolerate duplicates, including when retries regroup
+events into different batches.
+
+Inspect the delivery health snapshot to observe the active behavior:
+
+```js
+const health = client.deliveryHealth();
+if (health.storage !== "persistent") {
+  // The app is running without the linked native queue.
+}
+```
+
+The default `persistentQueue: "auto"` mode uses memory when the native module
+is absent, including Expo Go and an older app binary after a JavaScript-only
+update. For a production build that must not start without restart recovery,
+set `persistentQueue: "required"`. Use `persistentQueue: "disabled"` only
+when the app intentionally accepts a memory-only queue.
+
+```js
+const client = createLogBrewReactNativeClient({
+  clientKey,
+  persistentQueue: "required",
+  transport: createReactNativeFetchTransport()
+});
+```
+
+The native queue stores one compact event per atomic record, is limited to
+1,000 events and 4 MiB of compact event data, and uses the same smaller limits
+when you configure them on the client. Both platforms use app-private storage.
+The client key is not written to disk; its SHA-256 digest separates queues
+after key rotation. The queue does not provide mathematically exactly-once
+delivery.
+
+A successful `shutdown()` drains and closes the queue. A failed flush or
+shutdown leaves the exact remainder available to the same client and the next
+app start. Call `client.purgePendingEvents()` only when no flush or shutdown is
+active. To retire an active key without sending its remainder, purge that
+client first and then close it:
+
+```js
+client.purgePendingEvents();
+await client.shutdown();
+```
+
+When no client owns the key, remove any remaining records explicitly with:
+
+```js
+import { purgeLogBrewReactNativePersistentQueue } from "@logbrew/react-native";
+
+purgeLogBrewReactNativePersistentQueue({ clientKey: previousClientKey });
+```
+
+Use only one active persistent client for a given key across an app process.
+The SDK rejects duplicates within one JavaScript runtime; apps with multiple
+React Native runtimes or platform processes must coordinate that ownership.
+Different client keys use separate native queues. The Node ESM and CommonJS
+entries remain platform-neutral and never load React Native.
+
 ## Product Actions And API Milestones
 
 Use explicit action and network helpers for important mobile funnel steps your app already understands. These events are designed for timelines and agent analysis without enabling broad automatic replay:
@@ -202,7 +269,7 @@ Installation is idempotent for the active React Native `ErrorUtils` object. The 
 
 The React Native conditional export obtains LogBrew's synchronous native fatal store through the supported TurboModule or `NativeModules` seam. Before chaining a fatal report, it writes one bounded record to app-private storage that is excluded from operating-system archives. On a later installation it performs stable-ID at-least-once replay, and acknowledgement happens only after local queue admission is observable through the SDK queue counters. Filtered, dropped, unknown-admission, persistence-failed, and acknowledgement-failed records are retained. A failed acknowledgement is retried without admitting the same ID twice in one JavaScript runtime. Use `fatalHealth()` for frozen bounded counters and status, or `discardPendingFatalRecord()` for an explicit rollback discard. The Node ESM and CommonJS entries never import React Native; non-React-Native callers must inject `fatalStore` explicitly.
 
-Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This integration does not claim mathematically exactly-once delivery, backend-visible deduplication, native crash capture, ANR or hang detection, general offline queueing, or symbolication.
+Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This error-handler integration does not claim mathematically exactly-once delivery, native crash capture, ANR or hang detection, general offline queueing by the fatal-record slot, or symbolication. The client-level persistent queue above owns normal event restart delivery.
 
 ### Opt-in Hermes Promise rejection tracking
 

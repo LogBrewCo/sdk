@@ -46,6 +46,8 @@ grep -q '^package/README.md$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.native.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/index.native.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/persistent-delivery.native.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/instrumentation.js$' "$tmp_dir/native-tarball.txt"
@@ -61,6 +63,9 @@ grep -q '^package/global-errors.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/global-errors.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/global-errors.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/promise-rejections.cjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/android/src/main/java/co/logbrew/reactnative/EventRecordStore.java$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/ios/LBRNEventRecordStore.m$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/ios/LBRNPrivateStorage.m$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/metadata.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/metadata.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/native-bridge.js$' "$tmp_dir/native-tarball.txt"
@@ -113,6 +118,9 @@ grep -q '@logbrew/react-native/resource-fetch' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/lifecycle' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/global-errors' "$tmp_dir/native-readme.md"
 grep -q 'stable-ID at-least-once replay' "$tmp_dir/native-readme.md"
+grep -q 'Offline And Restart Delivery' "$tmp_dir/native-readme.md"
+grep -q 'persistentQueue: "required"' "$tmp_dir/native-readme.md"
+grep -q 'purgeLogBrewReactNativePersistentQueue' "$tmp_dir/native-readme.md"
 grep -q 'createLogBrewReactNativePromiseRejectionHandlers' "$tmp_dir/native-readme.md"
 grep -q 'installLogBrewReactNativePromiseRejectionTracker' "$tmp_dir/native-readme.md"
 grep -q 'takeOwnership: true' "$tmp_dir/native-readme.md"
@@ -1200,8 +1208,8 @@ grep -q '"resourceSpan":"POST /api/checkout"' "$tmp_dir/navigation-resource-span
 cat > consumer.ts <<'EOF'
 import React from "react";
 import type { AppStateStatus } from "react-native";
-import { RecordingTransport } from "@logbrew/sdk";
-import {
+import { RecordingTransport, type EventStore } from "@logbrew/sdk";
+import LogBrewReactNative, {
   LogBrewNativeProvider,
   bindLogBrewTrace,
   captureAppStateChange,
@@ -1227,8 +1235,10 @@ import {
   createTraceparentFetch,
   getActiveLogBrewTrace,
   getReactNativeTraceMetadata,
+  purgeLogBrewReactNativePersistentQueue,
   useLogBrewNativeActions,
   withLogBrewTrace,
+  type CreateNativeLogBrewReactNativeClientConfig,
   type ReactNativeAppStateLike,
   type ReactNativePlatformLike,
   type ReactNativeTraceContext,
@@ -1298,6 +1308,32 @@ const typedDeliveryClient = createLogBrewReactNativeClient({
   sdkName: "typed-native-delivery-smoke",
   sdkVersion: "0.1.0",
   transport: typedDeliveryTransport
+});
+const persistentConfig: CreateNativeLogBrewReactNativeClientConfig = {
+  automaticDelivery: false,
+  clientKey: "LOGBREW_PERSISTENT_CLIENT_KEY",
+  persistentQueue: "required"
+};
+createLogBrewReactNativeClient(persistentConfig);
+purgeLogBrewReactNativePersistentQueue({ clientKey: "LOGBREW_RETIRED_CLIENT_KEY" });
+const typedStore: EventStore = {
+  load: () => [],
+  append: () => {},
+  acknowledge: () => {},
+  purge: () => {},
+  close: () => {}
+};
+createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  eventStore: typedStore,
+  // @ts-expect-error eventStore and persistentQueue are mutually exclusive.
+  persistentQueue: "auto"
+});
+LogBrewReactNative.createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  eventStore: typedStore,
+  // @ts-expect-error the default export preserves the same mutual exclusion.
+  persistentQueue: "required"
 });
 typedDeliveryClient.log("evt_typed_delivery", "2026-06-02T10:00:00Z", {
   level: "info",
@@ -1601,6 +1637,7 @@ cat > tsconfig.json <<'EOF'
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "customConditions": ["react-native"],
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
     "strict": true,
