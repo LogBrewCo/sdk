@@ -10,7 +10,8 @@ import {
   getReactNativeContext
 } from "./index.js";
 export {
-  installLogBrewReactNativeGlobalErrorHandler
+  installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker
 } from "./global-errors.native.js";
 
 export * from "./index.js";

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   createClient,
   createErrorUtils,
@@ -60,6 +61,7 @@ test("CommonJS exposes matching named and default entry points", async () => {
 
     assert.equal(typeof required.createLogBrewReactNativePromiseRejectionHandlers, "function");
     assert.equal(typeof required.installLogBrewReactNativeGlobalErrorHandler, "function");
+    assert.equal(typeof required.installLogBrewReactNativePromiseRejectionTracker, "function");
     assert.equal(
       required.default.createLogBrewReactNativePromiseRejectionHandlers,
       required.createLogBrewReactNativePromiseRejectionHandlers
@@ -67,6 +69,10 @@ test("CommonJS exposes matching named and default entry points", async () => {
     assert.equal(
       required.default.installLogBrewReactNativeGlobalErrorHandler,
       required.installLogBrewReactNativeGlobalErrorHandler
+    );
+    assert.equal(
+      required.default.installLogBrewReactNativePromiseRejectionTracker,
+      required.installLogBrewReactNativePromiseRejectionTracker
     );
   });
 });
@@ -458,6 +464,204 @@ test("app-owned Promise rejection handlers capture fixed privacy-safe reports", 
     assert.equal(Object.isFrozen(handlers.health()), true);
     assert.deepEqual(diagnostics, [{ code: "promise_rejection_duplicate_suppressed" }]);
     assert.equal(Object.isFrozen(diagnostics[0]), true);
+  });
+});
+
+test("Promise rejection tracker installation requires explicit exclusive ownership", async () => {
+  await withInstalledPackage(async ({ installLogBrewReactNativePromiseRejectionTracker }) => {
+    const diagnostics = [];
+    let enableCalls = 0;
+    const installation = installLogBrewReactNativePromiseRejectionTracker({
+      client: createClient(),
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      tracker: {
+        enable() {
+          enableCalls += 1;
+        }
+      }
+    });
+
+    assert.equal(enableCalls, 0);
+    assert.deepEqual(installation.health(), {
+      active: false,
+      available: false,
+      engine: "unavailable",
+      lastOutcome: "ownership_required",
+      restoration: "deactivate_only"
+    });
+    assert.deepEqual(diagnostics, [
+      { code: "promise_rejection_tracker_ownership_required" }
+    ]);
+    assert.equal(Object.isFrozen(installation), true);
+    assert.equal(Object.isFrozen(installation.health()), true);
+  });
+});
+
+test("Promise rejection tracker owns one slot idempotently and deactivates privacy-safe capture", async () => {
+  await withInstalledPackage(async ({ installLogBrewReactNativePromiseRejectionTracker }) => {
+    const client = createClient();
+    const diagnostics = [];
+    const enabledOptions = [];
+    const tracker = {
+      enable(options) {
+        enabledOptions.push(options);
+      }
+    };
+    const options = {
+      client,
+      maxTrackedRejections: 2,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      takeOwnership: true,
+      tracker
+    };
+
+    const first = installLogBrewReactNativePromiseRejectionTracker(options);
+    const second = installLogBrewReactNativePromiseRejectionTracker(options);
+
+    assert.equal(first, second);
+    assert.equal(enabledOptions.length, 1);
+    assert.equal(enabledOptions[0].allRejections, true);
+    assert.equal(typeof enabledOptions[0].onUnhandled, "function");
+    assert.equal(typeof enabledOptions[0].onHandled, "function");
+    assert.deepEqual(first.health(), {
+      active: true,
+      available: true,
+      engine: "custom",
+      lastOutcome: "installed",
+      restoration: "deactivate_only"
+    });
+
+    const sensitivePair = `${["to", "ken"].join("")}=hidden`;
+    const hostileReason = new Proxy({}, {
+      get() {
+        throw new Error(`hidden@example.test ${sensitivePair}`);
+      }
+    });
+    assert.doesNotThrow(() => enabledOptions[0].onUnhandled(
+      "private-runtime-id@example.test",
+      hostileReason
+    ));
+    assert.doesNotThrow(() => enabledOptions[0].onHandled(
+      "private-runtime-id@example.test"
+    ));
+
+    assert.equal(client.issues.length, 1);
+    assert.equal(
+      client.issues[0].attributes.metadata.mechanism,
+      "logbrew_owned_promise_rejection_tracker"
+    );
+    const serialized = JSON.stringify(client.issues);
+    assert.equal(serialized.includes("hidden@example.test"), false);
+    assert.equal(serialized.includes(sensitivePair), false);
+    assert.equal(serialized.includes("private-runtime-id@example.test"), false);
+    assert.deepEqual(first.rejectionHealth(), {
+      available: true,
+      capturedEvents: 1,
+      evictedRejections: 0,
+      handledLaterEvents: 1,
+      lastOutcome: "handled_later",
+      maxTrackedRejections: 2,
+      suppressedEvents: 0,
+      trackedRejections: 1,
+      unknownHandledEvents: 0,
+      untrackedEvents: 0
+    });
+
+    assert.equal(first.deactivate(), true);
+    assert.equal(first.deactivate(), false);
+    enabledOptions[0].onUnhandled(7, new Error("private after deactivation"));
+    assert.equal(client.issues.length, 1);
+    assert.deepEqual(first.health(), {
+      active: false,
+      available: true,
+      engine: "custom",
+      lastOutcome: "deactivated",
+      restoration: "deactivate_only"
+    });
+    assert.deepEqual(diagnostics, []);
+  });
+});
+
+test("Promise rejection tracker setup fails closed without replacing global Promise", async () => {
+  await withInstalledPackage(async ({ installLogBrewReactNativePromiseRejectionTracker }) => {
+    const diagnostics = [];
+    const originalPromise = globalThis.Promise;
+    const installation = installLogBrewReactNativePromiseRejectionTracker({
+      client: createClient(),
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      takeOwnership: true,
+      tracker: {
+        enable() {
+          throw new Error("private tracker setup failure");
+        }
+      }
+    });
+
+    assert.equal(globalThis.Promise, originalPromise);
+    assert.deepEqual(installation.health(), {
+      active: false,
+      available: false,
+      engine: "custom",
+      lastOutcome: "installation_failed",
+      restoration: "deactivate_only"
+    });
+    assert.deepEqual(diagnostics, [
+      { code: "promise_rejection_tracker_installation_failed" }
+    ]);
+  });
+});
+
+test("React Native entry discovers the active Hermes tracker without replacing Promise", async () => {
+  await withInstalledPackage(async (_module, packageDir) => {
+    const client = createClient();
+    const originalHermes = globalThis.HermesInternal;
+    const originalPromise = globalThis.Promise;
+    let trackerOptions;
+    globalThis.HermesInternal = {
+      enablePromiseRejectionTracker(options) {
+        trackerOptions = options;
+      },
+      hasPromise() {
+        return true;
+      }
+    };
+
+    try {
+      const nativeModule = await import(pathToFileURL(
+        path.join(packageDir, "global-errors.native.js")
+      ));
+      const installation =
+        nativeModule.installLogBrewReactNativePromiseRejectionTracker({
+          client,
+          takeOwnership: true
+        });
+
+      assert.equal(globalThis.Promise, originalPromise);
+      assert.deepEqual(installation.health(), {
+        active: true,
+        available: true,
+        engine: "hermes",
+        lastOutcome: "installed",
+        restoration: "deactivate_only"
+      });
+      assert.equal(trackerOptions.allRejections, true);
+      trackerOptions.onUnhandled(91, new Error("private Hermes rejection"));
+      assert.equal(client.issues.length, 1);
+      assert.equal(
+        client.issues[0].attributes.metadata.mechanism,
+        "logbrew_owned_promise_rejection_tracker"
+      );
+      assert.equal(
+        JSON.stringify(client.issues).includes("private Hermes rejection"),
+        false
+      );
+    } finally {
+      if (originalHermes === undefined) {
+        delete globalThis.HermesInternal;
+      } else {
+        globalThis.HermesInternal = originalHermes;
+      }
+    }
   });
 });
 

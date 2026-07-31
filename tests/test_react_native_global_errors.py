@@ -28,7 +28,7 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
             self.assertIn(filename, manifest["files"])
         self.assertNotIn("./unhandled-errors", manifest["exports"])
 
-    def test_packed_smoke_proves_app_owned_promise_boundary_without_tracker_ownership(
+    def test_packed_smoke_proves_app_owned_and_opt_in_tracker_boundaries(
         self,
     ) -> None:
         smoke = (ROOT / "scripts" / "real_user_react_native_smoke.sh").read_text(
@@ -39,9 +39,12 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
             "@logbrew/react-native/global-errors",
             "createLogBrewReactNativePromiseRejectionHandlers",
             "installLogBrewReactNativeGlobalErrorHandler",
+            "installLogBrewReactNativePromiseRejectionTracker",
+            "takeOwnership: true",
             "preRootError",
             "postMountError",
             "globalErrorInstallation.remove()",
+            '"ownedPromiseRejectionReports":1',
             '"promiseRejectionReports":1',
             '"globalHandlerRemoved":true',
             '"globalReports":2',
@@ -58,6 +61,8 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
             "LogBrew does not install, replace, or patch Promise",
             readme,
         )
+        self.assertIn("one Promise rejection tracker slot", readme)
+        self.assertIn("cannot reinstate an earlier tracker", readme)
         for excluded in (
             "native crash capture",
             "ANR or hang detection",

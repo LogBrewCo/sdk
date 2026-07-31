@@ -3,7 +3,8 @@
 const { createReactNativeErrorEvent } = require("./index.cjs");
 const { createFatalController } = require("./fatal-replay.cjs");
 const {
-  createLogBrewReactNativePromiseRejectionHandlers
+  createLogBrewReactNativePromiseRejectionHandlers,
+  installLogBrewReactNativePromiseRejectionTracker
 } = require("./promise-rejections.cjs");
 
 const AUTOMATIC_ERROR_MESSAGE = "React Native global JavaScript report";
@@ -412,7 +413,8 @@ function isObjectLike(value) {
 
 const defaultExport = {
   createLogBrewReactNativePromiseRejectionHandlers,
-  installLogBrewReactNativeGlobalErrorHandler
+  installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker
 };
 
 module.exports = { ...defaultExport, default: defaultExport };

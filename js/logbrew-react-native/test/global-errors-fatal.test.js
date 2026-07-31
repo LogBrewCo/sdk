@@ -512,6 +512,10 @@ test("handler removal retains the record and explicit rollback discard clears it
 test("public documentation states stable-id replay and excludes adjacent ownership", () => {
   const readme = fs.readFileSync(path.join(packageRoot, "README.md"), "utf8");
   assert.match(readme, /createLogBrewReactNativePromiseRejectionHandlers/u);
+  assert.match(readme, /installLogBrewReactNativePromiseRejectionTracker/u);
+  assert.match(readme, /takeOwnership: true/u);
+  assert.match(readme, /one Promise rejection tracker slot/u);
+  assert.match(readme, /cannot reinstate an earlier tracker/u);
   assert.match(readme, /LogBrew does not install, replace, or patch Promise/u);
   assert.match(readme, /stable-ID at-least-once replay/u);
   assert.match(readme, /acknowledgement happens only after local queue admission/u);

@@ -32,6 +32,27 @@ export async function withInstalledPackage(callback) {
       "module.exports={createContext(value){return {_currentValue:value,Provider(){},Consumer(){}}},createElement(type,props,...children){return {type,props:{...(props||{}),children}}}};\n",
       "utf8"
     );
+    const reactNativeDir = path.join(nodeModules, "react-native");
+    fs.mkdirSync(reactNativeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(reactNativeDir, "package.json"),
+      JSON.stringify({
+        name: "react-native",
+        version: "0.86.2",
+        type: "module",
+        main: "index.js"
+      }),
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(reactNativeDir, "index.js"),
+      [
+        "export const NativeModules = {};",
+        "export const TurboModuleRegistry = { get() { return undefined; } };",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
     return await callback(
       await import(pathToFileURL(path.join(packageDir, "global-errors.js"))),
       packageDir,
