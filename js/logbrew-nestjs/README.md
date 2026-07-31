@@ -18,6 +18,16 @@ pnpm add @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core 
 Set `LOGBREW_SERVER_API_KEY` to a project-scoped server ingest key before starting
 the app.
 
+If you are automating setup, follow the same safe path as a person.
+Do not ask a person to paste an ingest key.
+Do not treat a missing environment variable as a reason to stop setup.
+First run `logbrew status --json`. When it reports approved authentication,
+create a temporary project and key with the commands below.
+Continue without a browser handoff. Confirm authenticated readback, and then
+archive the project.
+Only stop for account authentication when the status command reports that no
+approved authentication is available.
+
 ## Create a Project and Confirm Hosted Delivery
 
 Use LogBrew CLI 0.1.32 or newer with approved account authentication to create
