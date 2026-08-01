@@ -399,6 +399,7 @@ const packageJsonPath = path.join("node_modules", "@logbrew", "sdk", "package.js
 const readmePath = path.join("node_modules", "@logbrew", "sdk", "README.md");
 const declarationsPath = path.join("node_modules", "@logbrew", "sdk", "index.d.ts");
 const commonJsDeclarationsPath = path.join("node_modules", "@logbrew", "sdk", "index.d.cts");
+const telemetryContextRuntimePath = path.join("node_modules", "@logbrew", "sdk", "telemetry-context.cjs");
 const examplesPackageJsonPath = path.join("node_modules", "@logbrew", "sdk", "examples", "package.json");
 const examplesLauncherPath = path.join("node_modules", "@logbrew", "sdk", "examples", "index.mjs");
 const agentTimelineEsmExamplePath = path.join("node_modules", "@logbrew", "sdk", "examples", "agent-timeline.mjs");
@@ -415,6 +416,9 @@ if (!fs.existsSync(declarationsPath)) {
 }
 if (!fs.existsSync(commonJsDeclarationsPath)) {
   throw new Error("expected installed index.d.cts");
+}
+if (!fs.existsSync(telemetryContextRuntimePath)) {
+  throw new Error("expected installed telemetry-context.cjs");
 }
 if (!fs.existsSync(examplesPackageJsonPath)) {
   throw new Error("expected installed examples/package.json");
@@ -538,6 +542,9 @@ if (!readme.includes("LOGBREW_API_KEY")) {
 if (!readme.includes("previewJson()")) {
   throw new Error("missing installed README previewJson guidance");
 }
+if (!readme.includes("Shared Telemetry Context")) {
+  throw new Error("missing installed README shared telemetry context guidance");
+}
 if (!readme.includes("parseTraceparent")) {
   throw new Error("missing installed README traceparent parse guidance");
 }
@@ -589,6 +596,9 @@ if (!commonJsDeclarations.includes("Buffered public client for validating, previ
 }
 if (!declarations.includes("Structured metadata map shared by public LogBrew event attribute types.")) {
   throw new Error("missing installed Metadata declaration docs");
+}
+if (!declarations.includes("Versioned shared context available on every LogBrew event type.")) {
+  throw new Error("missing installed TelemetryContext declaration docs");
 }
 if (!declarations.includes("Parsed W3C trace context from a traceparent value.")) {
   throw new Error("missing installed TraceparentContext declaration docs");
@@ -1073,6 +1083,7 @@ grep -q '^package/package.json$' package-contents.txt
 grep -q '^package/README.md$' package-contents.txt
 grep -q '^package/index.d.ts$' package-contents.txt
 grep -q '^package/index.d.cts$' package-contents.txt
+grep -q '^package/telemetry-context.cjs$' package-contents.txt
 grep -q '^package/issue-stack.cjs$' package-contents.txt
 grep -q '^package/support-ticket.cjs$' package-contents.txt
 grep -q '^package/examples/package.json$' package-contents.txt
@@ -1112,7 +1123,7 @@ function validatePackMetadata(payload, label) {
     throw new Error(`missing ${label} file list`);
   }
   const packedPaths = new Set(entry.files.map((item) => item.path));
-  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "index.js", "index.cjs", "support-ticket.cjs", "examples/package.json", "examples/index.mjs", "examples/agent-timeline.mjs", "examples/agent-timeline.cjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
+  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "index.js", "index.cjs", "support-ticket.cjs", "telemetry-context.cjs", "examples/package.json", "examples/index.mjs", "examples/agent-timeline.mjs", "examples/agent-timeline.cjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
     if (!packedPaths.has(requiredPath)) {
       throw new Error(`missing ${label} file metadata for ${requiredPath}`);
     }
@@ -1237,6 +1248,9 @@ if (!readme.includes("LOGBREW_API_KEY")) {
 if (!readme.includes("previewJson()")) {
   throw new Error("missing packed README previewJson guidance");
 }
+if (!readme.includes("Shared Telemetry Context")) {
+  throw new Error("missing packed README shared telemetry context guidance");
+}
 if (!readme.includes("parseTraceparent")) {
   throw new Error("missing packed README traceparent parse guidance");
 }
@@ -1288,6 +1302,9 @@ if (!commonJsDeclarations.includes("Buffered public client for validating, previ
 }
 if (!declarations.includes("Structured metadata map shared by public LogBrew event attribute types.")) {
   throw new Error("missing packed Metadata declaration docs");
+}
+if (!declarations.includes("Versioned shared context available on every LogBrew event type.")) {
+  throw new Error("missing packed TelemetryContext declaration docs");
 }
 if (!declarations.includes("Parsed W3C trace context from a traceparent value.")) {
   throw new Error("missing packed TraceparentContext declaration docs");
@@ -1722,6 +1739,7 @@ import {
   type SpanAttributes,
   type SupportTicketDraft,
   type SupportTicketDraftInput,
+  type TelemetryContext,
   type TimelineAttributesOptions,
   type TraceparentContext,
   type TraceparentInput,
@@ -1822,6 +1840,17 @@ const metric: MetricAttributes = {
   metadata: { service: "checkout" }
 };
 const eventFilter: EventFilter = (event) => event.type !== "log" || event.attributes.level !== "info";
+const telemetryContext: TelemetryContext = {
+  schemaVersion: 1,
+  resource: {
+    service: { name: "checkout-api", version: "1.2.3" },
+    deployment: { environment: "production", release: "checkout@1.2.3" },
+    runtime: { name: "node", version: "24" }
+  },
+  session: { id: "session_01" },
+  subject: { id: "subject_01", kind: "anonymous" },
+  tags: { plan: "team" }
+};
 const loggerTrace: LogCorrelationTraceContext = {
   traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
   spanId: "b7ad6b7169203331",
@@ -1845,6 +1874,7 @@ async function main() {
     apiKey: "LOGBREW_API_KEY",
     sdkName: "smoke-app-types",
     sdkVersion: "0.1.0",
+    context: telemetryContext,
     eventFilter
   });
   client.release("evt_release_001", "2026-06-02T10:00:00Z", release);
@@ -1956,6 +1986,12 @@ const client = sdk.LogBrewClient.create({
   apiKey: "LOGBREW_API_KEY",
   sdkName: "smoke-app-cjs-types",
   sdkVersion: "0.1.0",
+  context: {
+    schemaVersion: 1,
+    resource: { service: { name: "checkout-api" } },
+    session: { id: "session_01" },
+    subject: { id: "subject_01", kind: "anonymous" }
+  } satisfies sdk.TelemetryContext,
   eventFilter: ((event) => event.type !== "log" || event.attributes.level !== "info") satisfies sdk.EventFilter
 });
 const transport = sdk.RecordingTransport.alwaysAccept();
@@ -2158,6 +2194,63 @@ test("installed client preview contains release event", () => {
 
   const payload = client.previewJson();
   assert.match(payload, /"type": "release"/);
+});
+
+test("installed client merges bounded shared context across signal types", () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "smoke-app-context",
+    sdkVersion: "0.1.0",
+    context: {
+      schemaVersion: 1,
+      resource: {
+        service: { name: "checkout-api", version: "1.2.3" },
+        deployment: { environment: "production", release: "checkout@1.2.3" }
+      },
+      session: { id: "session_01" },
+      subject: { id: "subject_01", kind: "anonymous" },
+      tags: { plan: "team", region: "global" }
+    }
+  });
+
+  client.log("evt_context_log", "2026-06-02T10:00:03Z", {
+    message: "checkout started",
+    level: "info",
+    context: {
+      schemaVersion: 1,
+      trace: {
+        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+        spanId: "b7ad6b7169203331",
+        sampled: true
+      },
+      tags: { funnel: "checkout", region: "eu" }
+    }
+  });
+
+  const [event] = JSON.parse(client.previewJson()).events;
+  assert.deepEqual(event.attributes.context, {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "checkout-api", version: "1.2.3" },
+      deployment: { environment: "production", release: "checkout@1.2.3" }
+    },
+    trace: {
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "b7ad6b7169203331",
+      sampled: true
+    },
+    session: { id: "session_01" },
+    subject: { id: "subject_01", kind: "anonymous" },
+    tags: { funnel: "checkout", plan: "team", region: "eu" }
+  });
+  assert.throws(
+    () => client.action("evt_bad_context", "2026-06-02T10:00:04Z", {
+      name: "checkout.failed",
+      status: "failure",
+      context: { schemaVersion: 1, subject: { id: "subject_01", kind: "person" } }
+    }),
+    /subject kind must be anonymous or user/
+  );
 });
 
 test("installed traceparent helpers continue W3C trace context", () => {

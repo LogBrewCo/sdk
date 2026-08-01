@@ -16,6 +16,7 @@ This repository contains the public SDK packages, framework integrations, event 
 - Spans and W3C `traceparent` context for request tracing.
 - Actions for important user or system events.
 - Explicit metrics when your application already knows the measurement name, value, unit, kind, and temporality.
+- A shared, versioned context for privacy-bounded resource, deployment, trace, session, opaque subject, and low-cardinality tag correlation across every signal.
 
 User-facing severity categories are `info`, `warning`, `error`, and `critical`. SDKs keep accepting common runtime aliases where they are idiomatic, such as `trace`, `debug`, `warn`, and `fatal`, but queued payloads normalize those aliases to the canonical categories before they are sent. See the [LogBrew severity contract](docs/severity-contract.md) for the full mapping.
 
@@ -99,7 +100,14 @@ import { LogBrewClient, RecordingTransport } from "@logbrew/sdk";
 const client = LogBrewClient.create({
   apiKey: "LOGBREW_API_KEY",
   sdkName: "checkout-api",
-  sdkVersion: "1.0.0"
+  sdkVersion: "1.0.0",
+  context: {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "checkout-api" },
+      deployment: { environment: "production", release: "checkout@1.0.0" }
+    }
+  }
 });
 
 client.log("evt_log_001", "2026-06-02T10:00:03Z", {
@@ -110,6 +118,8 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", {
 
 await client.flush(RecordingTransport.alwaysAccept());
 ```
+
+The JavaScript core and framework clients merge this bounded context into every event. Session and subject identifiers are explicit, app-owned, and opaque; LogBrew does not automatically collect profile fields or personal data. See the [`@logbrew/sdk` shared telemetry context guide](js/logbrew-js#shared-telemetry-context) for the complete shape and privacy rules.
 
 `RecordingTransport` is local-only: its synthetic HTTP `202` makes no network
 request and does not indicate hosted delivery or event visibility. Use the

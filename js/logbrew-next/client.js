@@ -13,6 +13,7 @@ const DEFAULT_SDK_VERSION = "0.1.3";
 export function createLogBrewNextBrowserClient({
   apiKey,
   clientKey,
+  context,
   eventFilter,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
@@ -26,6 +27,7 @@ export function createLogBrewNextBrowserClient({
   }
   return LogBrewClient.create({
     apiKey: authKey,
+    context,
     eventFilter,
     maxQueueSize,
     maxRetries,

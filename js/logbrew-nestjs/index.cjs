@@ -16,6 +16,7 @@ const activeTraceContext = new AsyncLocalStorage();
 function createLogBrewNestClient({
   serverApiKey,
   apiKey,
+  context,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
   maxRetries = 2
@@ -27,7 +28,7 @@ function createLogBrewNestClient({
       "createLogBrewNestClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
 }
 
 class LogBrewInterceptor {

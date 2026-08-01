@@ -85,6 +85,93 @@ class ValidateFixturesTests(unittest.TestCase):
         ):
             validate_payload(payload)
 
+    def test_shared_telemetry_context_passes_for_every_signal(self) -> None:
+        payload = self.load_valid_payload()
+        context = {
+            "schemaVersion": 1,
+            "resource": {
+                "service": {"name": "checkout-api", "version": "2.4.0"},
+                "deployment": {
+                    "environment": "production",
+                    "release": "checkout@2.4.0",
+                },
+                "runtime": {"name": "node", "version": "22"},
+                "framework": {"name": "fastify", "version": "5"},
+                "operatingSystem": {"name": "linux", "version": "6"},
+                "device": {"architecture": "arm64"},
+                "application": {"name": "checkout", "build": "240"},
+            },
+            "trace": {
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "spanId": "b7ad6b7169203331",
+                "sampled": True,
+            },
+            "session": {"id": "session_01", "previousId": "session_00"},
+            "subject": {"id": "subject_01", "kind": "user"},
+            "tags": {"plan": "team", "region": "eu"},
+        }
+
+        for event in payload["events"]:
+            event["attributes"]["context"] = context
+
+        validate_payload(payload)
+
+    def test_schema_exposes_one_bounded_context_contract_on_every_signal(self) -> None:
+        schema = self.load_schema()
+        definitions = schema["$defs"]
+        for event_definition in (
+            "releaseEvent",
+            "environmentEvent",
+            "issueEvent",
+            "logEvent",
+            "spanEvent",
+            "actionEvent",
+            "metricEvent",
+        ):
+            with self.subTest(event=event_definition):
+                attributes = definitions[event_definition]["allOf"][1]["properties"][
+                    "attributes"
+                ]
+                self.assertEqual(
+                    {"$ref": "#/$defs/telemetryContext"},
+                    attributes["properties"]["context"],
+                )
+
+        context = definitions["telemetryContext"]
+        self.assertFalse(context["additionalProperties"])
+        self.assertEqual(["schemaVersion"], context["required"])
+        self.assertEqual(2, context["minProperties"])
+        self.assertEqual(32, definitions["telemetryTags"]["maxProperties"])
+
+    def test_rejects_invalid_shared_telemetry_context(self) -> None:
+        invalid_contexts = (
+            {"schemaVersion": 2, "tags": {"plan": "team"}},
+            {"schemaVersion": 1, "email": "person@example.test"},
+            {"schemaVersion": 1, "resource": {"device": {}}},
+            {
+                "schemaVersion": 1,
+                "trace": {"traceId": "00000000000000000000000000000000"},
+            },
+            {"schemaVersion": 1, "session": {"id": "same", "previousId": "same"}},
+            {
+                "schemaVersion": 1,
+                "subject": {"id": "subject_01", "kind": "identified"},
+            },
+            {
+                "schemaVersion": 1,
+                "tags": {f"tag_{index}": "value" for index in range(33)},
+            },
+            {"schemaVersion": 1, "tags": {"unsafe key": "value"}},
+            {"schemaVersion": 1, "tags": {"plan": "safe\u0085unsafe"}},
+        )
+
+        for context in invalid_contexts:
+            with self.subTest(context=context):
+                payload = self.load_valid_payload()
+                payload["events"][0]["attributes"]["context"] = context
+                with self.assertRaises(ValidationError):
+                    validate_payload(payload)
+
     def test_rejects_timestamp_without_timezone(self) -> None:
         payload = self.load_valid_payload()
         payload["events"][0]["timestamp"] = "2026-06-02T10:00:00"

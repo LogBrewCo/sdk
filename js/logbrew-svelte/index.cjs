@@ -16,6 +16,7 @@ const LOG_BREW_SVELTE_KEY = Symbol.for("logbrew.svelte");
 function createLogBrewSvelteClient({
   apiKey = readEnvApiKey(),
   clientKey = readEnvClientKey(),
+  context,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
   maxRetries = 2
@@ -27,7 +28,7 @@ function createLogBrewSvelteClient({
       "createLogBrewSvelteClient requires clientKey, apiKey, LOGBREW_CLIENT_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
 }
 
 function createSvelteTraceparent({

@@ -57,6 +57,116 @@ function sampleClient() {
   });
 }
 
+test("shared telemetry context survives every event boundary and isolates caller mutation", () => {
+  const clientContext = {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "checkout-api", version: "2.4.0" },
+      deployment: { environment: "production", release: "checkout@2.4.0" },
+      runtime: { name: "node", version: "22" },
+      framework: { name: "fastify", version: "5" }
+    },
+    subject: { id: "subject_01", kind: "user" },
+    tags: { plan: "team", region: "eu" }
+  };
+  const eventContext = {
+    schemaVersion: 1,
+    trace: {
+      traceId: LOGGER_TRACE.traceId,
+      spanId: LOGGER_TRACE.spanId,
+      sampled: true
+    },
+    session: { id: "session_01", previousId: "session_00" },
+    tags: { route: "checkout.submit" }
+  };
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    context: clientContext,
+    eventFilter(event) {
+      event.attributes.context.resource.service.name = "filter-mutated";
+      event.attributes.context.tags.plan = "filter-mutated";
+      return true;
+    },
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0"
+  });
+
+  client.log("evt_context_log", "2026-08-01T10:00:00Z", {
+    message: "checkout started",
+    level: "info",
+    context: eventContext
+  });
+  client.action("evt_context_action", "2026-08-01T10:00:01Z", {
+    name: "checkout.submit",
+    status: "success",
+    context: eventContext
+  });
+
+  clientContext.resource.service.name = "caller-mutated";
+  clientContext.tags.plan = "caller-mutated";
+  eventContext.session.id = "caller-mutated";
+  eventContext.tags.route = "caller-mutated";
+
+  const [log, action] = JSON.parse(client.previewJson()).events;
+  for (const event of [log, action]) {
+    assert.deepEqual(event.attributes.context, {
+      schemaVersion: 1,
+      resource: {
+        service: { name: "checkout-api", version: "2.4.0" },
+        deployment: { environment: "production", release: "checkout@2.4.0" },
+        runtime: { name: "node", version: "22" },
+        framework: { name: "fastify", version: "5" }
+      },
+      trace: {
+        traceId: LOGGER_TRACE.traceId,
+        spanId: LOGGER_TRACE.spanId,
+        sampled: true
+      },
+      session: { id: "session_01", previousId: "session_00" },
+      subject: { id: "subject_01", kind: "user" },
+      tags: { plan: "team", region: "eu", route: "checkout.submit" }
+    });
+  }
+});
+
+test("shared telemetry context rejects ambiguous, unsafe, and unbounded shapes", () => {
+  const invalidContexts = [
+    { schemaVersion: 2, tags: { plan: "team" } },
+    { schemaVersion: 1, email: "person@example.test" },
+    { schemaVersion: 1, resource: { device: {} } },
+    {
+      schemaVersion: 1,
+      trace: { traceId: "00000000000000000000000000000000" }
+    },
+    {
+      schemaVersion: 1,
+      session: { id: "same", previousId: "same" }
+    },
+    {
+      schemaVersion: 1,
+      subject: { id: "person@example.test", kind: "identified" }
+    },
+    {
+      schemaVersion: 1,
+      tags: Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`tag_${index}`, "value"]))
+    },
+    { schemaVersion: 1, tags: { "unsafe key": "value" } },
+    { schemaVersion: 1, tags: { plan: "safe\u0085unsafe" } }
+  ];
+
+  for (const context of invalidContexts) {
+    assert.throws(
+      () => LogBrewClient.create({
+        apiKey: "LOGBREW_API_KEY",
+        context,
+        sdkName: "logbrew-js",
+        sdkVersion: "0.1.0"
+      }),
+      (error) => error instanceof SdkError && error.code === "validation_error"
+    );
+  }
+});
+
 function sampleOpenTelemetryReadableSpan(overrides = {}) {
   return {
     name: "GET /orders/:id",

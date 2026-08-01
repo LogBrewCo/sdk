@@ -40,6 +40,147 @@
         "type": ["string", "number", "integer", "boolean", "null"]
       }
     },
+    "contextString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "contextId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "telemetryNamedVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/contextString" },
+        "version": { "$ref": "#/$defs/contextString" }
+      }
+    },
+    "telemetryResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "service": { "$ref": "#/$defs/telemetryNamedVersion" },
+        "deployment": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "environment": { "$ref": "#/$defs/contextString" },
+            "release": { "$ref": "#/$defs/contextString" }
+          }
+        },
+        "runtime": { "$ref": "#/$defs/telemetryNamedVersion" },
+        "framework": { "$ref": "#/$defs/telemetryNamedVersion" },
+        "operatingSystem": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": { "$ref": "#/$defs/contextString" },
+            "version": { "$ref": "#/$defs/contextString" },
+            "build": { "$ref": "#/$defs/contextString" }
+          }
+        },
+        "device": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "family": { "$ref": "#/$defs/contextString" },
+            "model": { "$ref": "#/$defs/contextString" },
+            "architecture": { "$ref": "#/$defs/contextString" }
+          }
+        },
+        "application": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "name": { "$ref": "#/$defs/contextString" },
+            "version": { "$ref": "#/$defs/contextString" },
+            "build": { "$ref": "#/$defs/contextString" }
+          }
+        }
+      }
+    },
+    "telemetryTraceContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traceId"],
+      "properties": {
+        "traceId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{32}$",
+          "not": { "const": "00000000000000000000000000000000" }
+        },
+        "spanId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{16}$",
+          "not": { "const": "0000000000000000" }
+        },
+        "parentSpanId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{16}$",
+          "not": { "const": "0000000000000000" }
+        },
+        "sampled": { "type": "boolean" }
+      }
+    },
+    "telemetrySessionContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/contextId" },
+        "previousId": { "$ref": "#/$defs/contextId" }
+      }
+    },
+    "telemetrySubjectContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/contextId" },
+        "kind": { "type": "string", "enum": ["anonymous", "user"] }
+      }
+    },
+    "telemetryTags": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "propertyNames": {
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+      }
+    },
+    "telemetryContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion"],
+      "minProperties": 2,
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "resource": { "$ref": "#/$defs/telemetryResource" },
+        "trace": { "$ref": "#/$defs/telemetryTraceContext" },
+        "session": { "$ref": "#/$defs/telemetrySessionContext" },
+        "subject": { "$ref": "#/$defs/telemetrySubjectContext" },
+        "tags": { "$ref": "#/$defs/telemetryTags" }
+      }
+    },
     "spanEventSummary": {
       "type": "object",
       "additionalProperties": false,
@@ -128,7 +269,8 @@
                 "version": { "type": "string", "minLength": 1 },
                 "commit": { "type": "string", "minLength": 1 },
                 "notes": { "type": "string" },
-                "metadata": { "$ref": "#/$defs/metadata" }
+                "metadata": { "$ref": "#/$defs/metadata" },
+                "context": { "$ref": "#/$defs/telemetryContext" }
               }
             }
           }
@@ -148,7 +290,8 @@
               "properties": {
                 "name": { "type": "string", "minLength": 1 },
                 "region": { "type": "string" },
-                "metadata": { "$ref": "#/$defs/metadata" }
+                "metadata": { "$ref": "#/$defs/metadata" },
+                "context": { "$ref": "#/$defs/telemetryContext" }
               }
             }
           }
@@ -178,7 +321,8 @@
                   "maxItems": 32,
                   "items": { "$ref": "#/$defs/issueStackFrame" }
                 },
-                "metadata": { "$ref": "#/$defs/metadata" }
+                "metadata": { "$ref": "#/$defs/metadata" },
+                "context": { "$ref": "#/$defs/telemetryContext" }
               }
             }
           }
@@ -202,7 +346,8 @@
                   "enum": ["debug", "info", "warning", "error"]
                 },
                 "logger": { "type": "string" },
-                "metadata": { "$ref": "#/$defs/metadata" }
+                "metadata": { "$ref": "#/$defs/metadata" },
+                "context": { "$ref": "#/$defs/telemetryContext" }
               }
             }
           }
@@ -234,7 +379,8 @@
                   "maxItems": 8,
                   "items": { "$ref": "#/$defs/spanEventSummary" }
                 },
-                "metadata": { "$ref": "#/$defs/metadata" }
+                "metadata": { "$ref": "#/$defs/metadata" },
+                "context": { "$ref": "#/$defs/telemetryContext" }
               }
             }
           }
@@ -257,7 +403,8 @@
                   "type": "string",
                   "enum": ["queued", "running", "success", "failure"]
                 },
-                "metadata": { "$ref": "#/$defs/metadata" }
+                "metadata": { "$ref": "#/$defs/metadata" },
+                "context": { "$ref": "#/$defs/telemetryContext" }
               }
             }
           }
@@ -286,7 +433,8 @@
                   "type": "string",
                   "enum": ["delta", "cumulative", "instant"]
                 },
-                "metadata": { "$ref": "#/$defs/metadata" }
+                "metadata": { "$ref": "#/$defs/metadata" },
+                "context": { "$ref": "#/$defs/telemetryContext" }
               },
               "allOf": [
                 {

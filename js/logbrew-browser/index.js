@@ -88,6 +88,7 @@ const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 export function createLogBrewBrowserClient({
   apiKey,
   clientKey,
+  context,
   maxBatchBytes = DEFAULT_MAX_KEEPALIVE_BODY_BYTES,
   maxBatchEvents,
   maxQueueBytes,
@@ -103,6 +104,7 @@ export function createLogBrewBrowserClient({
   }
   return LogBrewClient.create({
     apiKey: authKey,
+    context,
     maxBatchBytes,
     maxBatchEvents,
     maxQueueBytes,

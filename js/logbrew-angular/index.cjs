@@ -17,6 +17,7 @@ const LOG_BREW_ANGULAR_CONTEXT = new InjectionToken("LogBrew Angular context");
 function createLogBrewAngularClient({
   apiKey = readEnvApiKey(),
   clientKey = readEnvClientKey(),
+  context,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
   maxRetries = 2
@@ -28,7 +29,7 @@ function createLogBrewAngularClient({
       "createLogBrewAngularClient requires clientKey, apiKey, LOGBREW_CLIENT_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
 }
 
 function createAngularTraceparent({

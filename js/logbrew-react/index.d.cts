@@ -10,6 +10,7 @@ import type {
   Metadata,
   ReleaseAttributes,
   SpanAttributes,
+  TelemetryContext,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
@@ -17,6 +18,7 @@ import type {
 export type CreateLogBrewReactClientConfig = {
   apiKey?: string;
   clientKey?: string;
+  context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;

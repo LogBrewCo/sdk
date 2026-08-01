@@ -5,6 +5,7 @@ import type {
   LogBrewClient,
   Metadata,
   SpanAttributes,
+  TelemetryContext,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
@@ -12,6 +13,7 @@ import type {
 export type CreateLogBrewBrowserClientConfig = {
   apiKey?: string;
   clientKey?: string;
+  context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   /** Retry attempts after the first send. Must be a non-negative integer. */
