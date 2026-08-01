@@ -8,6 +8,11 @@ Public Go SDK for creating LogBrew event batches, validating them locally, and f
 
 ## Install
 
+The current public module declares Go 1.24.0. If an existing application's
+`go.mod` declares an older Go version, review its compiler and deployment
+support policy and upgrade intentionally before installing LogBrew. Automated
+setup must not silently raise an application's Go version.
+
 ```bash
 go get github.com/LogBrewCo/sdk/go/logbrew@latest
 ```
@@ -16,7 +21,111 @@ The explicit `@latest` query keeps copied setup snippets on the current public
 module release. Run the same command to upgrade an existing requirement before
 debugging an endpoint or transport failure.
 
-## Example
+Set `LOGBREW_SERVER_API_KEY` to a project-scoped server ingest key before
+starting the app.
+
+If you are automating setup, follow the same safe path as a person. Do not ask a
+person to paste an ingest key, and do not treat a missing environment variable
+as a reason to stop setup. First run `logbrew status --json`. When it reports
+approved authentication, create a temporary project and key with the commands
+below, continue without a dashboard handoff, and confirm authenticated
+readback. Only stop for account authentication when the status command reports
+that no approved authentication is available.
+
+## Create a Project and Confirm Hosted Delivery
+
+Use LogBrew CLI 0.1.32 or newer with approved account authentication to create
+the project. This requires no dashboard sign-in. The destination key file must
+not already exist. The CLI creates it with owner-only permissions and never
+prints the one-time key or its file path. The shell flow below targets macOS
+and Linux; the CLI stops before creating a project when it cannot confirm
+owner-only storage for the one-time key.
+
+```bash
+logbrew status --json
+install -d -m 700 "$HOME/.logbrew"
+
+project_result="$(
+  logbrew projects create go-service \
+    --runtime go \
+    --environment development \
+    --ingest-key-file "$HOME/.logbrew/go-service.ingest" \
+    --json
+)"
+export LOGBREW_PROJECT_ID="$(jq -er '.project.id' <<<"$project_result")"
+unset project_result
+export LOGBREW_SERVER_API_KEY="$(< "$HOME/.logbrew/go-service.ingest")"
+```
+
+Send one safe application-owned log through the hosted HTTP transport:
+
+```go
+package main
+
+import (
+  "fmt"
+  "os"
+  "strings"
+  "time"
+
+  "github.com/LogBrewCo/sdk/go/logbrew"
+)
+
+func main() {
+  apiKey := strings.TrimSpace(os.Getenv("LOGBREW_SERVER_API_KEY"))
+  if apiKey == "" {
+    panic("LOGBREW_SERVER_API_KEY is required")
+  }
+
+  transport, err := logbrew.NewHTTPTransport(logbrew.HTTPTransportConfig{})
+  must(err)
+  client, err := logbrew.NewClient(logbrew.Config{
+    APIKey:     apiKey,
+    SDKName:    "go-service",
+    SDKVersion: "1.0.0",
+  })
+  must(err)
+
+  must(client.Log("evt_go_first_event", time.Now().UTC().Format(time.RFC3339Nano), logbrew.LogAttributes{
+    Message: "go first event",
+    Level:   "info",
+    Logger:  "go-service",
+  }))
+  response, err := client.Shutdown(transport)
+  must(err)
+  fmt.Printf("hosted delivery accepted: %d\n", response.StatusCode)
+}
+
+func must(err error) {
+  if err != nil {
+    panic(err)
+  }
+}
+```
+
+Run the app, then check setup and read the same project through the
+authenticated CLI session:
+
+```bash
+logbrew doctor --project "$LOGBREW_PROJECT_ID" --json
+logbrew read logs --project "$LOGBREW_PROJECT_ID" \
+  --search "go first event" \
+  --since 1h \
+  --json
+```
+
+A successful ingest response confirms submission. The authenticated read
+confirms that the event is indexed for the same project. If you no longer need
+the temporary project, archive it and remove its revoked one-time key file:
+
+```bash
+unset LOGBREW_SERVER_API_KEY
+logbrew projects archive "$LOGBREW_PROJECT_ID" --yes --json
+rm -f "$HOME/.logbrew/go-service.ingest"
+unset LOGBREW_PROJECT_ID
+```
+
+## Local Preview Example
 
 ```go
 package main
@@ -92,7 +201,12 @@ func must(err error) {
 }
 ```
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `Flush` or `Shutdown` to send queued events through a transport, and use `PreviewJSON` when you want a stable local JSON preview before sending anything.
+This example intentionally uses the in-memory `AlwaysAcceptTransport`. It makes
+no network request and never proves hosted delivery or event visibility. Use a
+clearly fake placeholder like `LOGBREW_API_KEY` only in local examples. Call
+`Flush` or `Shutdown` to send queued events through a transport, and use
+`PreviewJSON` when you want a stable local JSON preview before sending anything.
+For production delivery and authenticated readback, use the hosted flow above.
 
 ## High-Load Behavior
 
