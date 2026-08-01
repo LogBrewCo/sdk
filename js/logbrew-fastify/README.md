@@ -81,21 +81,26 @@ unset LOGBREW_PROJECT_ID
 import Fastify from "fastify";
 import { logbrewFastifyPlugin } from "@logbrew/fastify";
 
-const app = Fastify();
+const app = Fastify({
+  logger: {
+    level: process.env.LOG_LEVEL ?? "info",
+    redact: ["authorization", "cookie", "password", "token"]
+  }
+});
 
 await app.register(logbrewFastifyPlugin, {
   serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
+  captureApplicationLogs: true,
   onCaptureError(error) {
     console.error("LogBrew request capture failed", error);
+  },
+  onApplicationLogCaptureError(error) {
+    console.error("LogBrew application-log capture failed", error);
   }
 });
 
 app.get("/health", async (request) => {
-  request.logbrew.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
-    message: "health check reached",
-    level: "info",
-    logger: "fastify"
-  });
+  request.log.info({ routeTemplate: "/health" }, "health check reached");
   return { ok: true };
 });
 ```
@@ -124,53 +129,13 @@ await app.register(logbrewFastifyPlugin, {
 
 ## Existing Fastify/Pino Application Logs
 
-The request plugin captures request completion and route failures. To also capture existing `app.log` and `request.log` calls without replacing Fastify's Pino destination, install the Node Pino integration once and keep its client separate from the plugin's per-request lifecycle:
+Set `captureApplicationLogs: true` on the same plugin registration to capture existing `app.log` and `request.log` calls. The plugin owns a separate automatically delivered Node client, preserves Fastify's original Pino stream or transport (including `pino-pretty`), filters Fastify's built-in request lifecycle records so the request hook remains the single request event, and flushes/uninstalls capture during Fastify close.
 
-```js
-import Fastify from "fastify";
-import {
-  createLogBrewNodeClient,
-  installLogBrewPinoInstrumentation
-} from "@logbrew/node";
-import {
-  getActiveLogBrewTrace,
-  logbrewFastifyPlugin
-} from "@logbrew/fastify";
+This opt-in requires Fastify logging to be enabled, Node.js 18.19 or newer, and Pino 9.11+ or 10.1+. Registration fails with an actionable configuration error when Fastify's logger is disabled or its Pino version is too old; request-only capture continues to support the package's normal Fastify and Node ranges.
 
-const applicationLogClient = createLogBrewNodeClient({
-  sdkName: "checkout-api",
-  sdkVersion: "1.4.0"
-});
-const pinoCapture = installLogBrewPinoInstrumentation({
-  client: applicationLogClient,
-  metadata: { framework: "fastify", service: "checkout-api" },
-  traceProvider: getActiveLogBrewTrace,
-  onError(error) {
-    console.error("LogBrew Pino capture failed", error);
-  }
-});
+Primitive structured fields become bounded LogBrew metadata. Credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text are excluded automatically. Keep normal Pino redaction enabled because the log message itself is telemetry.
 
-const app = Fastify({
-  logger: {
-    level: process.env.LOG_LEVEL ?? "info",
-    redact: ["authorization", "cookie", "password", "token"]
-  }
-});
-
-await app.register(logbrewFastifyPlugin);
-
-app.get("/checkout/:cartId", async (request) => {
-  request.log.info({ routeTemplate: "/checkout/:cartId" }, "checkout queued");
-  return { ok: true };
-});
-
-app.addHook("onClose", async () => {
-  pinoCapture.uninstall();
-  await applicationLogClient.shutdown();
-});
-```
-
-This works with Fastify's existing JSON stream or transport, including `pino-pretty`; LogBrew observes the finalized JSON before Pino writes to that destination. Automatic capture requires Node.js 18.19 or newer and Pino 9.11+ or 10.1+. It captures primitive structured fields but automatically excludes credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text. Keep normal Pino redaction enabled because the log message itself is telemetry. Use `shouldCapture` for app-specific filtering and `includeErrorStack: true` only under an explicit stack-data policy.
+`onApplicationLogCaptureError` observes advisory delivery or conversion failures without interrupting Pino or app shutdown. Use `applicationLogClient` or `applicationLogTransport` for an app-owned delivery boundary. For custom filtering, metadata, or explicit stack policy, use the lower-level `installLogBrewPinoInstrumentation()` API documented by [`@logbrew/node`](../logbrew-node/README.md#existing-pino-logs) instead of `captureApplicationLogs`.
 
 When an incoming request has a valid W3C `traceparent` header, the plugin attaches `request.logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by Fastify after the plugin's `onRequest` hook. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 

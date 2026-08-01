@@ -52,6 +52,10 @@ export type LogBrewFastifyRuntimeContext = {
   trace?: LogBrewTraceContext;
 };
 
+export type LogBrewFastifyApplicationLogContext = {
+  client: LogBrewClient;
+};
+
 export type LogBrewClientFactory = (context: Omit<LogBrewFastifyRuntimeContext, "client">) => LogBrewClient;
 export type LogBrewTransportFactory = (context: LogBrewFastifyRuntimeContext) => Transport;
 
@@ -87,6 +91,17 @@ export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & NodeFetch
   client?: LogBrewClient | LogBrewClientFactory;
   /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory;
+  /** Capture existing app.log and request.log Pino records without replacing Fastify's destination. */
+  captureApplicationLogs?: boolean;
+  /** Override the dedicated application-log client. */
+  applicationLogClient?: LogBrewClient;
+  /** Override delivery for application logs when request transport is a factory or uses another destination. */
+  applicationLogTransport?: Transport;
+  /** Observe advisory application-log capture failures without interrupting Fastify or Pino. */
+  onApplicationLogCaptureError?: (
+    error: unknown,
+    context: LogBrewFastifyApplicationLogContext
+  ) => void | Promise<void>;
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;
   now?: () => string;
