@@ -105,6 +105,14 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn(source_tests, workflow)
         self.assertLess(workflow.index(install), workflow.index(source_tests))
 
+        readiness = (
+            ROOT / ".github/workflows/release-readiness.yml"
+        ).read_text(encoding="utf-8")
+        metadata_install = "python3 -m pip install ./python/logbrew_py"
+        self.assertIn(metadata_install, readiness)
+        self.assertIn(source_tests, readiness)
+        self.assertLess(readiness.index(metadata_install), readiness.index(source_tests))
+
     def test_fastapi_celery_extra_requires_the_fixed_core_without_bloating_base_install(self) -> None:
         project = tomllib.loads(
             (ROOT / "python/logbrew_fastapi/pyproject.toml").read_text(encoding="utf-8")
