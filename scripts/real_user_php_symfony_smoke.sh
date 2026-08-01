@@ -433,7 +433,16 @@ for _ in $(seq 1 100); do
 done
 curl --silent --fail "http://127.0.0.1:$port/health" >/dev/null
 
+set +e
 php "$app_dir/bin/console" logbrew:status --send-probe --json > "$tmp_dir/status.json"
+status_exit="$?"
+set -e
+if [[ "$status_exit" -ne 0 ]]; then
+  echo "Symfony status probe failed with exit $status_exit" >&2
+  cat "$tmp_dir/status.json" >&2
+  cat "$tmp_dir/intake-server.log" >&2
+  exit "$status_exit"
+fi
 php "$app_dir/probe.php"
 
 php -r '

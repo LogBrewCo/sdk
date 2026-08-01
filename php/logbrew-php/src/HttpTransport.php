@@ -111,14 +111,22 @@ final class HttpTransport implements Transport
      */
     private function sendWithStreams($context): int
     {
+        $legacyHeadersVariable = 'http_response_header';
+        if (!function_exists('http_get_last_response_headers')) {
+            // Predeclare the PHP <8.4 special local dynamically. That makes the
+            // HTTP wrapper populate it without compiling the syntax deprecated
+            // by PHP 8.5.
+            ${$legacyHeadersVariable} = null;
+        }
+
         $responseBody = @file_get_contents($this->endpoint, false, $context);
 
         if (function_exists('http_get_last_response_headers')) {
             $headers = http_get_last_response_headers() ?? [];
         } else {
             $definedVariables = get_defined_vars();
-            $headers = is_array($definedVariables['http_response_header'] ?? null)
-                ? $definedVariables['http_response_header']
+            $headers = is_array($definedVariables[$legacyHeadersVariable] ?? null)
+                ? $definedVariables[$legacyHeadersVariable]
                 : [];
         }
         $statusCode = $this->statusCodeFromHeaders($headers);
