@@ -991,5 +991,6 @@ require __DIR__ . '/trace_correlation.php';
 require __DIR__ . '/http_client_tracing.php';
 require __DIR__ . '/worker_lifecycle.php';
 require __DIR__ . '/persistent_delivery.php';
+require __DIR__ . '/symfony_integration.php';
 
 fwrite(STDOUT, "php sdk checks passed\n");

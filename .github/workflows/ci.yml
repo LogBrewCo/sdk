@@ -520,8 +520,32 @@ jobs:
         if: ${{ needs.changed-areas.outputs.php == 'true' }}
         run: bash scripts/real_user_php_smoke.sh
 
+      - name: Run PHP Symfony installed-app smoke test
+        if: ${{ needs.changed-areas.outputs.php == 'true' }}
+        run: bash scripts/real_user_php_symfony_smoke.sh
+
       - name: Leak scan
         run: python3 scripts/check_confidentiality_scan.py
+
+  php-compatibility:
+    name: PHP 8.2 / Symfony 6.4 compatibility
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.php == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer
+
+      - name: Run installed Symfony compatibility smoke test
+        run: LOGBREW_SYMFONY_CONSTRAINT='^6.4' bash scripts/real_user_php_symfony_smoke.sh
 
   python-compatibility:
     name: Python 3.10 compatibility (Django ${{ matrix.django_version }})

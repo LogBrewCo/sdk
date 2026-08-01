@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public PHP SDK for creating LogBrew event batches, validating them locally, and flushing them through dependency-free HTTP delivery, with opt-in request trace correlation plus PSR-3, Monolog, and a config-cache-safe Laravel logger factory.
+Public PHP SDK for creating LogBrew event batches, validating them locally, and flushing them through dependency-free HTTP delivery, with opt-in request trace correlation plus PSR-3, Monolog, a native Symfony bundle, and a config-cache-safe Laravel logger factory.
 
 ## Install
 
@@ -12,7 +12,7 @@ Public PHP SDK for creating LogBrew event batches, validating them locally, and 
 composer require logbrew/sdk
 ```
 
-The public API is annotated with shaped-array PHPDoc, including `MetricAttributes`, so static-analysis tools can understand common consumer calls directly. The package includes copyable examples for PHP services, PSR-3 loggers, Monolog, and Laravel. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in app configuration, and call `previewJson()` when you want to inspect queued JSON before sending.
+The public API is annotated with shaped-array PHPDoc, including `MetricAttributes`, so static-analysis tools can understand common consumer calls directly. The package includes copyable examples for PHP services, PSR-3 loggers, Monolog, Symfony, and Laravel. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in app configuration, and call `previewJson()` when you want to inspect queued JSON before sending.
 
 ## Support Ticket Drafts
 
@@ -572,6 +572,68 @@ $client->flush($transport);
 ```
 
 `LogBrewPsrLogger` interpolates PSR-3 placeholders, maps `debug`/`info`/`notice` to LogBrew `info`, `warning` to `warning`, `error` to `error`, and `critical`/`alert`/`emergency` to `critical`, captures primitive context values under `context.*`, and records exception type/message when the `exception` context value is a `Throwable`. When `LogBrewTrace::current()` is active, the logger automatically adds trace correlation metadata to each record. Exception trace text is omitted unless `includeExceptionTrace` is enabled. Logs are queued by default; pass both `transport` and `flushOnLog: true` only when each logger call should flush immediately.
+
+## Symfony Quick Start
+
+Symfony applications can use the native bundle without an application-owned handler factory, service definition, or Monolog handler block. Install `logbrew/sdk`, then register the bundle beside the application's existing bundles:
+
+```php
+// config/bundles.php
+return [
+    // Keep the application's existing bundles.
+    LogBrew\Symfony\LogBrewBundle::class => ['all' => true],
+];
+```
+
+Set a project-scoped server/SDK ingest key in the deployment environment or an uncommitted `.env.local` file:
+
+```dotenv
+LOGBREW_SERVER_API_KEY=
+```
+
+If the application does not have a project yet, the authenticated CLI can create both the project and an owner-only key file without a dashboard step:
+
+```shell
+logbrew login
+logbrew projects create "Symfony App" \
+  --runtime php \
+  --environment development \
+  --ingest-key-file "$HOME/.logbrew/symfony-app.key" \
+  --json
+```
+
+Load that file through the deployment's environment mechanism. For a local confirmation that does not print the key:
+
+```shell
+LOGBREW_SERVER_API_KEY="$(<"$HOME/.logbrew/symfony-app.key")" \
+  php bin/console logbrew:status --send-probe --json
+```
+
+That is enough to preserve the existing Monolog handlers while adding warning-and-higher LogBrew delivery, stable route-name request spans, W3C `traceparent` continuation, and issues for uncaught exceptions that produce 5xx responses. A missing key makes the bundle a safe no-op instead of preventing the application from booting.
+
+Confirm configuration and perform an intake probe without adding an application route:
+
+```shell
+php bin/console logbrew:status --send-probe --json
+```
+
+The JSON output reports `ready`, `missing_api_key`, or `disabled`; `--send-probe` reports the accepted intake status without printing the key. Accepted warning logs and completed requests use immediate delivery with a 2-second timeout and zero in-call retries. A failed batch remains bounded in the client and is retried before newer telemetry on the next accepted log or request event. Capture failures do not change the application response or normal logging behavior.
+
+Optional configuration can name the service/release and adjust capture policy:
+
+```yaml
+# config/packages/log_brew.yaml
+log_brew:
+  service: checkout-api
+  release: 'unversioned'
+  level: warning
+  capture_requests: true
+  capture_exceptions: true
+  include_exception_message: false
+  include_exception_trace: false
+```
+
+Automatic request telemetry records only the method, bounded Symfony route name, status, duration, framework/service/release/environment, and normalized trace identifiers. It does not record concrete paths, query strings, request or response bodies, arbitrary headers, or the raw `traceparent` value. Automatic exception issues include the exception type, mechanism, unhandled state, and source basename/line plus a hashed type/route/file grouping key; absolute source paths, messages, and traces remain off unless explicitly enabled. The handler excludes Symfony's `request`, `event`, `doctrine`, and `deprecation` channels to avoid duplicating framework exception reports or copying Symfony's formatted exception message. Application-authored log messages and primitive context remain under the application's control.
 
 ## Laravel Quick Start
 
