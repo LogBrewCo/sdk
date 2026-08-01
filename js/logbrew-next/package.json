@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/next",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Next.js App Router helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
@@ -28,6 +28,17 @@
       },
       "default": "./client.js"
     },
+    "./instrumentation": {
+      "import": {
+        "types": "./instrumentation.d.ts",
+        "default": "./instrumentation.js"
+      },
+      "require": {
+        "types": "./instrumentation.d.cts",
+        "default": "./instrumentation.cjs"
+      },
+      "default": "./instrumentation.js"
+    },
     "./release-artifacts": {
       "import": {
         "types": "./release-artifacts.d.ts",
@@ -49,6 +60,10 @@
     "client.js",
     "client.d.ts",
     "client.d.cts",
+    "instrumentation.cjs",
+    "instrumentation.js",
+    "instrumentation.d.ts",
+    "instrumentation.d.cts",
     "release-artifacts.cjs",
     "release-artifacts.js",
     "release-artifacts.d.ts",
@@ -82,6 +97,6 @@
     "react-dom": ">=18"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check client.js && node --check client.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/client-route-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test"
+    "test": "node --check index.js && node --check index.cjs && node --check client.js && node --check client.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/client-route-spans.mjs && node --check examples/readme-example.mjs && node --check examples/request-errors.mjs && node --check examples/real-user-smoke.mjs && node --test"
   }
 }

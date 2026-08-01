@@ -8,7 +8,7 @@ import {
 } from "@logbrew/sdk";
 
 const DEFAULT_SDK_NAME = "logbrew-next-client";
-const DEFAULT_SDK_VERSION = "0.1.2";
+const DEFAULT_SDK_VERSION = "0.1.3";
 
 export function createLogBrewNextBrowserClient({
   apiKey,

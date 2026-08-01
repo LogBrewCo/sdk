@@ -33,7 +33,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.4"),
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.3"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.4"),
-            "js/logbrew-next/package.json": ("@logbrew/next", "0.1.2"),
+            "js/logbrew-next/package.json": ("@logbrew/next", "0.1.3"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.12"),
         }
         for relative_path, expected in npm_versions.items():
@@ -277,6 +277,16 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 fixed_assertion = f'grep -Fq "{package_name}@${{{variable}}}"'
                 self.assertEqual(body.count(fixed_assertion), assertions)
                 self.assertIsNone(stale_version.search(body), script_path)
+
+    def test_next_instrumentation_type_smoke_installs_framework_types(self) -> None:
+        smoke = (ROOT / "scripts/real_user_next_smoke.sh").read_text(encoding="utf-8")
+
+        self.assertIn("@types/react", smoke)
+        self.assertIn("@types/react-dom", smoke)
+        self.assertIn("cat > instrumentation-consumer.ts", smoke)
+        self.assertIn("--lib ESNext,DOM,DOM.Iterable", smoke)
+        self.assertIn("--skipLibCheck true", smoke)
+        self.assertIn("Instrumentation.onRequestError", smoke)
 
     def test_repo_wide_guard_includes_newly_publishable_flask_and_httpclient(self) -> None:
         labels = {

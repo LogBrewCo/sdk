@@ -1456,6 +1456,37 @@ jobs:
         self.assertTrue(any("exports['./expo'].require.default" in failure for failure in failures))
         self.assertTrue(any("peerDependenciesMeta.expo.optional" in failure for failure in failures))
 
+    def test_next_package_requires_request_error_instrumentation_release_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "js" / "logbrew-next"
+            package_dir.mkdir(parents=True)
+            (package_dir / "README.md").write_text("# LogBrew Next.js\n", encoding="utf-8")
+            manifest = json.loads(
+                (ROOT / "js" / "logbrew-next" / "package.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            manifest["files"].remove("instrumentation.js")
+            del manifest["exports"]["./instrumentation"]["require"]
+            (package_dir / "package.json").write_text(
+                json.dumps(manifest),
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_js_package(
+                root,
+                "js/logbrew-next",
+                "@logbrew/next",
+                failures,
+            )
+
+        self.assertTrue(any("instrumentation.js" in failure for failure in failures))
+        self.assertTrue(
+            any("exports['./instrumentation'].require.default" in failure for failure in failures)
+        )
+
     def test_js_package_accepts_expected_version_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

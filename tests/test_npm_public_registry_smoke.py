@@ -44,25 +44,37 @@ def _package_archive(
     leave_active_timer: bool = False,
 ) -> bytes:
     entrypoint = "index.js" if subpath == "." else "release-artifacts.js"
+    exports = {subpath: f"./{entrypoint}"}
+    sources = [(entrypoint, f"export function {exported_name}() {{ return true; }}\n")]
+    if name == "@logbrew/next":
+        exports["./instrumentation"] = "./instrumentation.js"
+        sources.append(
+            (
+                "instrumentation.js",
+                "export function createLogBrewNextRequestErrorHandler() { return async () => {}; }\n",
+            )
+        )
     package_json = json.dumps(
         {
             "name": name,
             "version": version,
             "type": "module",
-            "exports": {subpath: f"./{entrypoint}"},
+            "exports": exports,
         },
         separators=(",", ":"),
     ).encode()
-    source_text = f"export function {exported_name}() {{ return true; }}\n"
+    source_text = sources[0][1]
     if leave_active_timer:
         source_text += "setInterval(() => {}, 60_000);\n"
-    source = source_text.encode()
+    sources[0] = (sources[0][0], source_text)
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
-        for relative_path, content in (
-            ("package/package.json", package_json),
-            (f"package/{entrypoint}", source),
-        ):
+        archive_files = [("package/package.json", package_json)]
+        archive_files.extend(
+            (f"package/{relative_path}", source.encode())
+            for relative_path, source in sources
+        )
+        for relative_path, content in archive_files:
             info = tarfile.TarInfo(relative_path)
             info.mode = 0o644
             info.mtime = 0
@@ -250,6 +262,7 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             "package-lock.json",
             "RecordingTransport",
             "createLogBrewNodeClient",
+            "createLogBrewNextRequestErrorHandler",
             "instrumentLogBrewBullMqQueue",
             "instrumentLogBrewKafkaJsProducer",
             "amqplibPublishWithLogBrewSpan",

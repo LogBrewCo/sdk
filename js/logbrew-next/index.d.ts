@@ -22,6 +22,77 @@ export type CreateLogBrewNextClientConfig = {
   maxRetries?: number;
 };
 
+export type LogBrewNextRequestError = unknown;
+
+export type LogBrewNextRequestErrorRequest = Readonly<{
+  path: string;
+  method: string;
+  headers: Readonly<Record<string, string | string[] | undefined>>;
+}>;
+
+export type LogBrewNextRequestErrorContext = Readonly<{
+  routerKind: "App Router" | "Pages Router";
+  routePath: string;
+  routeType: "action" | "middleware" | "proxy" | "render" | "route";
+  renderSource?: "react-server-components" | "react-server-components-payload" | "server-rendering";
+  revalidateReason?: "on-demand" | "stale";
+  renderType?: "dynamic" | "dynamic-resume";
+}>;
+
+export type LogBrewNextRequestErrorInput = {
+  error: LogBrewNextRequestError;
+  request: LogBrewNextRequestErrorRequest;
+  context: LogBrewNextRequestErrorContext;
+};
+
+export type LogBrewNextRequestErrorRuntimeContext = LogBrewNextRequestErrorInput & {
+  client?: LogBrewClient;
+  transport?: Transport;
+};
+
+export type LogBrewNextRequestErrorCaptureContext = LogBrewNextRequestErrorInput & {
+  client: LogBrewClient;
+  transport: Transport;
+};
+
+export type LogBrewNextRequestErrorEvent = {
+  id: string;
+  timestamp: string;
+  attributes: IssueAttributes;
+};
+
+export type LogBrewNextRequestErrorHandler = (
+  error: LogBrewNextRequestError,
+  request: LogBrewNextRequestErrorRequest,
+  context: LogBrewNextRequestErrorContext
+) => Promise<void>;
+
+export type LogBrewNextRequestErrorOptions = CreateLogBrewNextClientConfig & NodeFetchTransportConfig & {
+  /** A fixed client stays caller-owned and is flushed, not shut down. A factory must return a fresh client per error. */
+  client?: LogBrewClient | ((input: LogBrewNextRequestErrorInput) => LogBrewClient);
+  transport?: Transport | ((context: LogBrewNextRequestErrorInput & { client: LogBrewClient }) => Transport);
+  /** Opt into a query-free concrete pathname. Stable routePath metadata remains the default. */
+  includePathname?: boolean;
+  now?: () => string;
+  idFactory?: (
+    error: LogBrewNextRequestError,
+    request: LogBrewNextRequestErrorRequest,
+    context: LogBrewNextRequestErrorContext
+  ) => string;
+  errorEvent?: (
+    error: LogBrewNextRequestError,
+    context: LogBrewNextRequestErrorCaptureContext
+  ) => LogBrewNextRequestErrorEvent;
+  onFlush?: (
+    response: TransportResponse,
+    context: LogBrewNextRequestErrorCaptureContext
+  ) => void | Promise<void>;
+  onCaptureError?: (
+    error: unknown,
+    context: LogBrewNextRequestErrorRuntimeContext
+  ) => void | Promise<void>;
+};
+
 export type LogBrewRouteContext = Record<string, unknown>;
 
 export type LogBrewTraceContext = {
@@ -140,6 +211,25 @@ export declare function createLogBrewNextClient(
   config?: CreateLogBrewNextClientConfig
 ): LogBrewClient;
 
+export declare function createLogBrewNextRequestErrorHandler(
+  options?: LogBrewNextRequestErrorOptions
+): LogBrewNextRequestErrorHandler;
+
+export declare function createNextRequestErrorEvent(
+  error: LogBrewNextRequestError,
+  request: LogBrewNextRequestErrorRequest,
+  context: LogBrewNextRequestErrorContext,
+  options?: {
+    includePathname?: boolean;
+    now?: () => string;
+    idFactory?: (
+      error: LogBrewNextRequestError,
+      request: LogBrewNextRequestErrorRequest,
+      context: LogBrewNextRequestErrorContext
+    ) => string;
+  }
+): LogBrewNextRequestErrorEvent;
+
 export declare function withLogBrewRouteHandler<TContext = LogBrewRouteContext>(
   handler: LogBrewRouteHandler<TContext>,
   options?: LogBrewRouteOptions<TContext>
@@ -184,6 +274,8 @@ export declare function createRouteErrorEvent(
 
 declare const defaultExport: {
   createLogBrewNextClient: typeof createLogBrewNextClient;
+  createLogBrewNextRequestErrorHandler: typeof createLogBrewNextRequestErrorHandler;
+  createNextRequestErrorEvent: typeof createNextRequestErrorEvent;
   createRequestMetricEvent: typeof createRequestMetricEvent;
   createRouteErrorEvent: typeof createRouteErrorEvent;
   createRouteRequestEvent: typeof createRouteRequestEvent;

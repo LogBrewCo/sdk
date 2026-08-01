@@ -7,7 +7,18 @@ import {
 import { createNodeFetchTransport } from "@logbrew/node";
 
 const DEFAULT_SDK_NAME = "logbrew-next";
-const DEFAULT_SDK_VERSION = "0.1.2";
+const DEFAULT_SDK_VERSION = "0.1.3";
+const MAX_REQUEST_ERROR_MESSAGE_LENGTH = 2048;
+const MAX_REQUEST_ROUTE_PATH_LENGTH = 512;
+const NEXT_RENDER_SOURCES = new Set([
+  "react-server-components",
+  "react-server-components-payload",
+  "server-rendering"
+]);
+const NEXT_RENDER_TYPES = new Set(["dynamic", "dynamic-resume"]);
+const NEXT_REVALIDATE_REASONS = new Set(["on-demand", "stale"]);
+const NEXT_ROUTE_TYPES = new Set(["action", "middleware", "proxy", "render", "route"]);
+const NEXT_ROUTER_KINDS = new Set(["App Router", "Pages Router"]);
 const activeTraceContext = new AsyncLocalStorage();
 
 export function createLogBrewNextClient({
@@ -25,6 +36,69 @@ export function createLogBrewNextClient({
     );
   }
   return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+}
+
+export function createLogBrewNextRequestErrorHandler(options = {}) {
+  const defaultTransport = options.transport === undefined
+    ? createNodeFetchTransport(options)
+    : undefined;
+
+  return async function logBrewNextRequestErrorHandler(error, request = {}, context = {}) {
+    let runtime = { error, request, context };
+    try {
+      const resolvedClient = resolveRequestErrorClient(options, runtime);
+      const client = resolvedClient.client;
+      const transport = resolveRequestErrorTransport(options, { ...runtime, client }, defaultTransport);
+      runtime = { ...runtime, client, transport };
+      const event = typeof options.errorEvent === "function"
+        ? options.errorEvent(error, runtime)
+        : createNextRequestErrorEvent(error, request, context, options);
+
+      client.issue(event.id, event.timestamp, event.attributes);
+      const response = resolvedClient.owned
+        ? await client.shutdown(transport)
+        : await client.flush(transport);
+      await notifyFlush(options, response, runtime);
+    } catch (captureError) {
+      try {
+        await notifyFailure(options, captureError, runtime);
+      } catch {
+        // Observability callbacks must not replace the application error Next.js is handling.
+      }
+    }
+  };
+}
+
+export function createNextRequestErrorEvent(error, request = {}, context = {}, {
+  includePathname = false,
+  now = () => new Date().toISOString(),
+  idFactory = defaultNextRequestErrorId
+} = {}) {
+  const method = nextRequestMethod(request);
+  const routePath = nextRoutePath(context?.routePath);
+  const pathname = includePathname ? nextRoutePath(request?.path) : undefined;
+  const errorDigest = nextErrorDigest(error);
+  return {
+    id: idFactory(error, request, context),
+    timestamp: now(),
+    attributes: {
+      title: `${method} ${routePath} failed`,
+      level: "error",
+      message: nextErrorMessage(error),
+      metadata: {
+        framework: "nextjs",
+        method,
+        routePath,
+        ...nextCategoricalMetadata("routerKind", context?.routerKind, NEXT_ROUTER_KINDS),
+        ...nextCategoricalMetadata("routeType", context?.routeType, NEXT_ROUTE_TYPES),
+        ...nextCategoricalMetadata("renderSource", context?.renderSource, NEXT_RENDER_SOURCES),
+        ...nextCategoricalMetadata("revalidateReason", context?.revalidateReason, NEXT_REVALIDATE_REASONS),
+        ...nextCategoricalMetadata("renderType", context?.renderType, NEXT_RENDER_TYPES),
+        ...(errorDigest ? { errorDigest } : {}),
+        ...(pathname ? { pathname } : {})
+      }
+    }
+  };
 }
 
 export function withLogBrewRouteHandler(handler, options = {}) {
@@ -179,6 +253,23 @@ function resolveTransport(options, request, context, client, defaultTransport) {
   return options.transport ?? defaultTransport;
 }
 
+function resolveRequestErrorClient(options, runtime) {
+  if (typeof options.client === "function") {
+    return { client: options.client(runtime), owned: true };
+  }
+  if (options.client) {
+    return { client: options.client, owned: false };
+  }
+  return { client: createLogBrewNextClient(options), owned: true };
+}
+
+function resolveRequestErrorTransport(options, runtime, defaultTransport) {
+  if (typeof options.transport === "function") {
+    return options.transport(runtime);
+  }
+  return options.transport ?? defaultTransport;
+}
+
 function createRouteHelpers(client, transport, trace) {
   return {
     client,
@@ -302,6 +393,10 @@ function defaultRouteErrorId(request) {
   return `evt_next_error_${slug || "route"}`;
 }
 
+function defaultNextRequestErrorId() {
+  return `evt_next_request_error_${randomHex(8)}`;
+}
+
 function defaultRouteMetricId(request, response, routeTemplate = safeUrl(request).pathname) {
   const sanitizedRouteTemplate = routeTemplateOnly(routeTemplate);
   const slug = `${request?.method ?? "GET"}-${sanitizedRouteTemplate}-${response?.status ?? 0}`
@@ -317,6 +412,55 @@ function safeUrl(request) {
   } catch {
     return new URL("http://localhost/");
   }
+}
+
+function nextRequestMethod(request) {
+  const method = typeof request?.method === "string" ? request.method.trim().toUpperCase() : "";
+  return /^[A-Z]{1,16}$/u.test(method) ? method : "UNKNOWN";
+}
+
+function nextRoutePath(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return "/";
+  }
+  let pathname;
+  try {
+    pathname = new URL(value, "http://localhost").pathname;
+  } catch {
+    pathname = value.split(/[?#]/u)[0];
+  }
+  if (typeof pathname !== "string" || pathname === "") {
+    return "/";
+  }
+  const normalized = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  return normalized.length <= MAX_REQUEST_ROUTE_PATH_LENGTH ? normalized : "/";
+}
+
+function nextCategoricalMetadata(key, value, allowed) {
+  return typeof value === "string" && allowed.has(value) ? { [key]: value } : {};
+}
+
+function nextErrorDigest(error) {
+  const digest = error && typeof error === "object" ? error.digest : undefined;
+  if (typeof digest !== "string" || !/^[a-zA-Z0-9._:-]{1,128}$/u.test(digest)) {
+    return undefined;
+  }
+  return digest;
+}
+
+function nextErrorMessage(error) {
+  let message;
+  try {
+    message = error instanceof Error ? error.message : String(error);
+  } catch {
+    message = "Next.js request failed";
+  }
+  const normalized = typeof message === "string" && message.trim() !== ""
+    ? message
+    : "Next.js request failed";
+  return normalized.length <= MAX_REQUEST_ERROR_MESSAGE_LENGTH
+    ? normalized
+    : `${normalized.slice(0, MAX_REQUEST_ERROR_MESSAGE_LENGTH - 1)}…`;
 }
 
 function getTraceparentHeader(request) {
@@ -468,6 +612,8 @@ function readEnvServerApiKey() {
 
 export default {
   createLogBrewNextClient,
+  createLogBrewNextRequestErrorHandler,
+  createNextRequestErrorEvent,
   createRequestMetricEvent,
   createRouteErrorEvent,
   createRouteRequestEvent,

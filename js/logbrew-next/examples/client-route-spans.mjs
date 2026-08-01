@@ -13,7 +13,7 @@ const routeTemplate = createNextRouteTemplate({
 const client = createLogBrewNextBrowserClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-next-client-route-example",
-  sdkVersion: "0.1.2"
+  sdkVersion: "0.1.3"
 });
 
 const event = captureNextNavigation(client, {

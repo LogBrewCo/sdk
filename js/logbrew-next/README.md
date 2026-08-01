@@ -6,7 +6,7 @@
 
 Next.js App Router helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It creates server-side LogBrew clients, wraps App Router Route Handlers, captures successful route requests and thrown route errors, and still keeps manual event creation available through the route helpers.
+This package is intentionally thin. It creates server-side LogBrew clients, observes App Router request errors through Next.js instrumentation, wraps Route Handlers, captures successful route requests and thrown route errors, and still keeps manual event creation available through the route helpers.
 
 ## Install
 
@@ -103,6 +103,44 @@ export default withLogBrewNextReleaseArtifacts(
 
 The helper defaults minified URLs to `app:///_next/static/chunks/...`. Use `minifiedPathPrefix`, `manifestPath`, `repositoryUrl`, `commitSha`, or `stripSourcePrefix` when your deploy needs explicit paths or source-link metadata. Set `LOGBREW_RELEASE_ARTIFACT_TOKEN` in the build environment to a dedicated release-artifact token. Use `tokenEnv` for a different CI variable, or `dryRun: true` to prepare the complete build output without a network request. Existing `compiler.runAfterProductionCompile` work runs first. Upload is disabled when `upload` is omitted, and any unsafe preparation or upload result fails the production build without exposing response text or secret values.
 
+## App Router Request Errors
+
+Use Next.js's root `instrumentation.ts` file when you want one server error hook
+for React Server Components, Route Handlers, Server Actions, and Proxy. The
+instrumentation subpath stays safe to import in mixed-runtime applications and
+delivers only from the Node.js runtime:
+
+```ts
+// instrumentation.ts
+import { createLogBrewNextRequestErrorHandler } from "@logbrew/next/instrumentation";
+
+export const onRequestError = createLogBrewNextRequestErrorHandler({
+  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
+  onCaptureError(error) {
+    console.error("LogBrew request-error capture failed", error);
+  }
+});
+```
+
+Next.js awaits `onRequestError`, and the LogBrew adapter awaits delivery before
+it returns. A delivery or callback failure is reported through
+`onCaptureError` but never replaces the application error that Next.js is
+already handling. The Edge runtime is left unchanged; use a Node.js route or
+server boundary for LogBrew server delivery.
+
+By default, the issue includes the error message, Next.js error digest, method,
+stable route file path, router kind, route type, render source, revalidation
+reason, and render type when Next.js supplies them. It does not capture request
+headers, authorization values, cookies, request bodies, query strings, URL
+fragments, concrete dynamic path values, or raw stack text. Set
+`includePathname: true` only when a query-free concrete pathname is intentional
+and acceptable for that application.
+
+If the same Route Handler also uses `withLogBrewRouteHandler`, set
+`captureErrors: false` on that wrapper so the global request-error hook is the
+single issue owner. The wrapper can continue to capture successful requests,
+metrics, and trace context.
+
 ## App Router Route Handler
 
 ```js
@@ -194,7 +232,7 @@ import {
 const client = createLogBrewNextBrowserClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.2"
+  sdkVersion: "0.1.3"
 });
 
 const routePatterns = [
@@ -231,10 +269,15 @@ import { createLogBrewNextClient } from "@logbrew/next";
 const client = createLogBrewNextClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.2"
+  sdkVersion: "0.1.3"
 });
 ```
 
 ## Example Source
 
-The package includes example source for App Router Route Handlers, server-side client creation, and app-owned responses. The packaged server examples use an explicit `RecordingTransport` so they can run offline and print serialized event batches without sending them. Use the default network-delivery snippets above as the starting point for wiring LogBrew into your Next.js application.
+The package includes example source for App Router request-error instrumentation, Route Handlers, server-side client creation, and app-owned responses. The packaged server examples use an explicit `RecordingTransport` so they can run offline and print serialized event batches without sending them. Use the default network-delivery snippets above as the starting point for wiring LogBrew into your Next.js application.
+
+```bash
+node node_modules/@logbrew/next/examples/index.mjs request-errors
+npm --prefix node_modules/@logbrew/next/examples run request-errors
+```

@@ -319,12 +319,26 @@ def validate_js_package(
         )
     if expected_name == "@logbrew/next":
         for expected_file in (
+            "instrumentation.cjs",
+            "instrumentation.js",
+            "instrumentation.d.ts",
+            "instrumentation.d.cts",
             "release-artifacts.cjs",
             "release-artifacts.js",
             "release-artifacts.d.ts",
             "release-artifacts.d.cts",
         ):
             require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+        require_js_export_entry(
+            failures,
+            location,
+            manifest,
+            "./instrumentation",
+            import_types="./instrumentation.d.ts",
+            import_default="./instrumentation.js",
+            require_types="./instrumentation.d.cts",
+            require_default="./instrumentation.cjs",
+        )
         require_js_export_entry(
             failures,
             location,

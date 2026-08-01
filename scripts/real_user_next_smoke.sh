@@ -65,10 +65,15 @@ grep -q '^package/client.js$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/client.cjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/client.d.ts$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/client.d.cts$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/instrumentation.js$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/instrumentation.cjs$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/instrumentation.d.ts$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/instrumentation.d.cts$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/client-route-spans.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/examples/request-errors.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/next-tarball.txt"
 tar -xOf "$next_tgz" package/README.md > "$tmp_dir/next-readme.md"
 tar -xOf "$next_tgz" package/package.json > "$tmp_dir/next-package.json"
@@ -97,6 +102,10 @@ grep -q 'onCaptureError' "$tmp_dir/next-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/next-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/next-readme.md"
 grep -q 'routeTemplate' "$tmp_dir/next-readme.md"
+grep -q '@logbrew/next/instrumentation' "$tmp_dir/next-readme.md"
+grep -q 'createLogBrewNextRequestErrorHandler' "$tmp_dir/next-readme.md"
+grep -q 'React Server Components, Route Handlers, Server Actions, and Proxy' "$tmp_dir/next-readme.md"
+grep -q 'does not capture request' "$tmp_dir/next-readme.md"
 python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
   "$tmp_dir/next-package.json" \
   "@logbrew/node=$node_package_version" \
@@ -127,6 +136,8 @@ npm install \
   "react-test-renderer@$react_version" \
   typescript \
   @types/node \
+  @types/react \
+  @types/react-dom \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
@@ -173,6 +184,24 @@ cat > app/page.jsx <<'EOF'
 export default function Page() {
   return "LogBrew Next smoke";
 }
+EOF
+
+cat > instrumentation-transport.js <<'EOF'
+import { RecordingTransport } from "@logbrew/sdk";
+
+export const requestErrorTransport = RecordingTransport.alwaysAccept();
+EOF
+
+cat > instrumentation.js <<'EOF'
+import { createLogBrewNextRequestErrorHandler } from "@logbrew/next/instrumentation";
+import { requestErrorTransport } from "./instrumentation-transport.js";
+
+export const onRequestError = createLogBrewNextRequestErrorHandler({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  transport: requestErrorTransport,
+  idFactory: () => "evt_next_instrumentation_error_001",
+  now: () => "2026-08-01T10:00:00Z"
+});
 EOF
 
 cat > app/api/logbrew/transport.js <<'EOF'
@@ -247,6 +276,62 @@ console.error(JSON.stringify({
 EOF
 
 NEXT_TELEMETRY_DISABLED=1 npm run build >/dev/null
+
+cat > instrumentation-check.mjs <<'EOF'
+import { onRequestError } from "./instrumentation.js";
+import { requestErrorTransport } from "./instrumentation-transport.js";
+
+const error = Object.assign(new Error("checkout render failed"), {
+  digest: "next_digest_123"
+});
+await onRequestError(
+  error,
+  {
+    path: "/orders/order-42?debug=sample#receipt",
+    method: "POST",
+    headers: {
+      authorization: "Bearer sample",
+      cookie: "session=sample"
+    }
+  },
+  {
+    routerKind: "App Router",
+    routePath: "/app/orders/[orderId]/page",
+    routeType: "render",
+    renderSource: "react-server-components",
+    revalidateReason: "stale",
+    renderType: "dynamic"
+  }
+);
+
+const payload = JSON.parse(requestErrorTransport.lastBody());
+const event = payload.events?.[0];
+if (event?.type !== "issue" || event.id !== "evt_next_instrumentation_error_001") {
+  throw new Error(`unexpected instrumentation event: ${requestErrorTransport.lastBody()}`);
+}
+if (event.attributes.metadata.routePath !== "/app/orders/[orderId]/page") {
+  throw new Error(`missing stable route path: ${requestErrorTransport.lastBody()}`);
+}
+if (event.attributes.metadata.errorDigest !== "next_digest_123") {
+  throw new Error(`missing Next.js error digest: ${requestErrorTransport.lastBody()}`);
+}
+for (const unsafeValue of ["order-42", "debug=", "Bearer", "session=", "#receipt"]) {
+  if (requestErrorTransport.lastBody().includes(unsafeValue)) {
+    throw new Error(`instrumentation payload leaked ${unsafeValue}: ${requestErrorTransport.lastBody()}`);
+  }
+}
+console.log(JSON.stringify({
+  ok: true,
+  captured: event.attributes.title,
+  routeType: event.attributes.metadata.routeType
+}));
+EOF
+
+node instrumentation-check.mjs > "$tmp_dir/instrumentation-check.json"
+grep -q '"ok":true' "$tmp_dir/instrumentation-check.json"
+grep -q 'POST /app/orders/\[orderId\]/page failed' "$tmp_dir/instrumentation-check.json"
+grep -q '"routeType":"render"' "$tmp_dir/instrumentation-check.json"
+
 node invoke-route.mjs > "$tmp_dir/next-route.stdout.json" 2> "$tmp_dir/next-route.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/next-route.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/next-route.stdout.json" >/dev/null
@@ -915,6 +1000,35 @@ cat > tsconfig.json <<'EOF'
 EOF
 npx tsc --project tsconfig.json
 
+cat > instrumentation-consumer.ts <<'EOF'
+import type { Instrumentation } from "next";
+import { RecordingTransport } from "@logbrew/sdk";
+import {
+  createLogBrewNextRequestErrorHandler,
+  type LogBrewNextRequestErrorOptions
+} from "@logbrew/next/instrumentation";
+
+const requestErrorOptions: LogBrewNextRequestErrorOptions = {
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  transport: RecordingTransport.alwaysAccept(),
+  includePathname: false,
+  idFactory: (_error, _request, context) => `evt_typed_${context.routeType}`
+};
+
+export const onRequestError: Instrumentation.onRequestError =
+  createLogBrewNextRequestErrorHandler(requestErrorOptions);
+EOF
+npx tsc \
+  --ignoreConfig \
+  --module NodeNext \
+  --moduleResolution NodeNext \
+  --target ES2022 \
+  --lib ESNext,DOM,DOM.Iterable \
+  --strict \
+  --skipLibCheck true \
+  --noEmit \
+  instrumentation-consumer.ts
+
 cat > client-consumer.ts <<'EOF'
 import {
   captureNextNavigation,
@@ -1028,12 +1142,15 @@ grep -q '"optInSearch":"?unsafe=sample"' "$tmp_dir/error-check.json"
 
 node -e 'const next = require("@logbrew/next"); if (typeof next.withLogBrewRouteHandler !== "function" || typeof next.createRouteRequestEvent !== "function" || typeof next.createRequestMetricEvent !== "function" || typeof next.getActiveLogBrewTrace !== "function") process.exit(1)'
 node -e 'const nextClient = require("@logbrew/next/client"); if (typeof nextClient.createLogBrewNextBrowserClient !== "function" || typeof nextClient.useLogBrewNextNavigation !== "function" || typeof nextClient.createNextRouteTemplate !== "function" || typeof nextClient.captureNextNavigation !== "function") process.exit(1)'
+node -e 'const nextInstrumentation = require("@logbrew/next/instrumentation"); if (typeof nextInstrumentation.createLogBrewNextRequestErrorHandler !== "function") process.exit(1)'
 
 node node_modules/@logbrew/next/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/next/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/next/examples/index.mjs client-route-spans' "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/next/examples/index.mjs request-errors' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/next/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
 grep -q 'client-route-spans -> node node_modules/@logbrew/next/examples/index.mjs client-route-spans' "$tmp_dir/launcher-list.txt"
+grep -q 'request-errors -> node node_modules/@logbrew/next/examples/index.mjs request-errors' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/next/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/next/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
@@ -1043,10 +1160,16 @@ node node_modules/@logbrew/next/examples/index.mjs > "$tmp_dir/example-default.s
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
+node node_modules/@logbrew/next/examples/index.mjs request-errors > "$tmp_dir/example-request-errors.stdout.json" 2> "$tmp_dir/example-request-errors.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-request-errors.stdout.json" >/dev/null
+grep -q 'POST /app/orders/\[orderId\]/page failed' "$tmp_dir/example-request-errors.stdout.json"
+grep -q '"ok":true' "$tmp_dir/example-request-errors.stderr.json"
 npm --prefix node_modules/@logbrew/next/examples run list > "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/next/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
+grep -q 'request-errors -> node node_modules/@logbrew/next/examples/index.mjs request-errors' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/next/examples run help > "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/next/examples run client-route-spans' "$tmp_dir/npm-helper-help.txt"
+grep -q 'npm --prefix node_modules/@logbrew/next/examples run request-errors' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/next/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/next/examples run --silent client-route-spans > "$tmp_dir/npm-helper-client.stdout.json" 2> "$tmp_dir/npm-helper-client.stderr.json"
 python3 - "$tmp_dir/npm-helper-client.stdout.json" <<'PY'
@@ -1061,6 +1184,10 @@ if payload.get("pendingEvents") != 1:
     raise SystemExit(payload)
 PY
 grep -q '"ok":true' "$tmp_dir/npm-helper-client.stderr.json"
+npm --prefix node_modules/@logbrew/next/examples run --silent request-errors > "$tmp_dir/npm-helper-request-errors.stdout.json" 2> "$tmp_dir/npm-helper-request-errors.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-request-errors.stdout.json" >/dev/null
+grep -q 'POST /app/orders/\[orderId\]/page failed' "$tmp_dir/npm-helper-request-errors.stdout.json"
+grep -q '"ok":true' "$tmp_dir/npm-helper-request-errors.stderr.json"
 npm --prefix node_modules/@logbrew/next/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null

@@ -62,7 +62,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Svelte | [`@logbrew/svelte`](js/logbrew-svelte) | Svelte context and error helpers |
 | React | [`@logbrew/react`](js/logbrew-react) | Provider, hook, error boundary, handled error helpers |
 | React Native | [`@logbrew/react-native`](js/logbrew-react-native) | Hosted fetch delivery, app-private offline/restart queueing, mobile context, handled errors, and app-owned Promise rejection reports |
-| Next.js | [`@logbrew/next`](js/logbrew-next) | App Router Route Handler capture |
+| Next.js | [`@logbrew/next`](js/logbrew-next) | App Router request-error instrumentation, Route Handler capture, and release artifacts |
 | Python | [`logbrew-sdk`](python/logbrew_py) | Core Python client, HTTP delivery, logging handler |
 | Python / Celery | [`logbrew-sdk[celery]`](python/logbrew_py#automatic-celery-spans) | App-scoped producer/worker spans and privacy-bounded unexpected-failure issues |
 | FastAPI | [`logbrew-fastapi`](python/logbrew_fastapi) | FastAPI middleware |
