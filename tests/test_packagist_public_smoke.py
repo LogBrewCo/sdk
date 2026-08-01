@@ -29,8 +29,8 @@ class PackagistPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_PACKAGIST_VERSION",
-            'version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.6}}"',
-            "getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.6'",
+            'version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.7}}"',
+            "getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.7'",
             "https://repo.packagist.org",
             "composer config license proprietary",
             "composer require",
