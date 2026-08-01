@@ -6,6 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use LogBrew\ActionAttributes;
 use LogBrew\HttpTransport;
+use LogBrew\LaravelLoggerFactory;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewMonologHandler;
 use LogBrew\LogBrewPsrLogger;
@@ -804,6 +805,73 @@ $monolog->pushHandler(new LogBrewMonologHandler(
 $monolog->warning('this should not interrupt app logging');
 assertTrue(count($capturedErrors) === 1, 'expected Monolog handler to report capture failure');
 assertTrue(str_contains($capturedErrors[0], 'client is already shut down'), 'expected Monolog handler capture failure message');
+
+$laravelConfig = LaravelLoggerFactory::configuration(
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    service: 'pterodactyl-panel',
+    release: '1.11.0',
+    environment: 'testing'
+);
+assertTrue($laravelConfig['driver'] === 'custom', 'expected Laravel custom log driver');
+assertTrue($laravelConfig['via'] === LaravelLoggerFactory::class, 'expected SDK-owned Laravel logger factory');
+assertTrue($laravelConfig['timeout'] === 2.0, 'expected bounded Laravel timeout');
+assertTrue($laravelConfig['max_retries'] === 0, 'expected no Laravel delivery retries by default');
+assertTrue($laravelConfig['level'] === 'warning', 'expected warning Laravel level by default');
+$exportedLaravelConfig = var_export($laravelConfig, true);
+$encodedLaravelConfig = json_encode($laravelConfig, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
+$roundTrippedLaravelConfig = json_decode($encodedLaravelConfig, true, flags: JSON_THROW_ON_ERROR);
+assertTrue(!str_contains($exportedLaravelConfig, '::__set_state'), 'expected no object state in Laravel channel values');
+assertTrue($roundTrippedLaravelConfig === $laravelConfig, 'expected config-cache-safe Laravel channel values');
+
+$transport = RecordingTransport::alwaysAccept();
+$laravelLogger = (new LaravelLoggerFactory($transport))($laravelConfig + [
+    'event_id_prefix' => 'laravel_test',
+]);
+$laravelLogger->warning('Server {server} could not start.', [
+    'server' => 'srv_123',
+    'attempt' => 2,
+]);
+assertTrue(count($transport->sentBodies) === 1, 'expected Laravel logger to deliver each accepted record');
+$laravelBody = $transport->lastBody();
+if ($laravelBody === null) {
+    fwrite(STDERR, 'expected Laravel logger transport body' . PHP_EOL);
+    exit(1);
+}
+foreach ([
+    '"id":"laravel_test_1"',
+    '"logger":"pterodactyl-panel"',
+    '"level":"warning"',
+    '"message":"Server srv_123 could not start."',
+    '"context.server":"srv_123"',
+    '"context.attempt":2',
+    '"framework":"laravel"',
+    '"service":"pterodactyl-panel"',
+    '"release":"1.11.0"',
+    '"environment":"testing"',
+] as $needle) {
+    assertTrue(str_contains($laravelBody, $needle), "missing Laravel logger payload: {$needle}");
+}
+assertTrue(!str_contains($laravelBody, 'LOGBREW_SERVER_API_KEY'), 'expected Laravel API key to stay out of payload');
+
+$transport = RecordingTransport::alwaysAccept();
+$errorOnlyLogger = (new LaravelLoggerFactory($transport))(LaravelLoggerFactory::configuration(
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    level: 'error'
+));
+$errorOnlyLogger->warning('below the configured threshold');
+assertTrue(count($transport->sentBodies) === 0, 'expected Laravel logger to honor configured level');
+$errorOnlyLogger->error('accepted at the configured threshold');
+assertTrue(count($transport->sentBodies) === 1, 'expected Laravel logger error delivery');
+
+$failedTransport = new RecordingTransport([TransportError::network('LogBrew is unavailable.')]);
+$failureIsolatedLogger = (new LaravelLoggerFactory($failedTransport))($laravelConfig);
+$failureIsolatedLogger->error('application logging must continue');
+assertTrue(count($failedTransport->sentBodies) === 1, 'expected Laravel delivery attempt without app failure');
+
+expectThrows(
+    fn () => (new LaravelLoggerFactory())(LaravelLoggerFactory::configuration(apiKey: null)),
+    'LOGBREW_SERVER_API_KEY must be configured'
+);
 
 $packageRoot = realpath(__DIR__ . '/..');
 if ($packageRoot === false) {

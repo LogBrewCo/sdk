@@ -50,6 +50,7 @@ $operationTracing = null;
 $httpRequestTelemetry = null;
 $psrLogger = null;
 $monologHandler = null;
+$laravelLoggerFactory = null;
 $supportTicketDraft = null;
 for ($i = 0; $i < $zip->numFiles; $i++) {
     $name = $zip->getNameIndex($i);
@@ -118,6 +119,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "src/LogBrewMonologHandler.php" || str_ends_with($name, "/src/LogBrewMonologHandler.php")) {
         $monologHandler = $zip->getFromIndex($i);
+    }
+    if ($name === "src/LaravelLoggerFactory.php" || str_ends_with($name, "/src/LaravelLoggerFactory.php")) {
+        $laravelLoggerFactory = $zip->getFromIndex($i);
     }
     if ($name === "src/SupportTicketDraft.php" || str_ends_with($name, "/src/SupportTicketDraft.php")) {
         $supportTicketDraft = $zip->getFromIndex($i);
@@ -208,6 +212,10 @@ if (!is_string($monologHandler)) {
     fwrite(STDERR, "missing src/LogBrewMonologHandler.php in composer archive\n");
     exit(1);
 }
+if (!is_string($laravelLoggerFactory)) {
+    fwrite(STDERR, "missing src/LaravelLoggerFactory.php in composer archive\n");
+    exit(1);
+}
 if (!is_string($supportTicketDraft)) {
     fwrite(STDERR, "missing src/SupportTicketDraft.php in composer archive\n");
     exit(1);
@@ -227,6 +235,10 @@ if (($manifest["require"]["psr/log"] ?? null) !== "^3.0") {
 }
 if (($manifest["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected composer archive monolog dev constraint\n");
+    exit(1);
+}
+if (($manifest["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+    fwrite(STDERR, "unexpected composer archive monolog suggestion\n");
     exit(1);
 }
 if (($manifest["autoload"]["psr-4"]["LogBrew\\"] ?? null) !== "src/") {
@@ -259,7 +271,11 @@ foreach ([
     "LogBrewPsrLogger" => "missing composer archive PSR logger guidance\n",
     "PSR-3 Logger" => "missing composer archive PSR logger heading\n",
     "LogBrewMonologHandler" => "missing composer archive Monolog handler guidance\n",
-    "Monolog And Laravel" => "missing composer archive Laravel heading\n",
+    "LaravelLoggerFactory" => "missing composer archive Laravel factory guidance\n",
+    "Laravel Quick Start" => "missing composer archive Laravel heading\n",
+    "config:cache" => "missing composer archive Laravel config-cache guidance\n",
+    "LOGBREW_SERVER_API_KEY" => "missing composer archive canonical Laravel server-key guidance\n",
+    "immediately flushes every accepted record" => "missing composer archive Laravel delivery-boundary guidance\n",
     "SupportTicketDraft" => "missing composer archive support ticket draft guidance\n",
     "does not open a ticket, call backend support routes, send telemetry, or use account/session API credentials" => "missing composer archive support ticket boundary guidance\n",
     "token-free diagnostics" => "missing composer archive support ticket diagnostics guidance\n",
@@ -487,6 +503,7 @@ test -f vendor/logbrew/sdk/src/LogBrewTrace.php
 test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
+test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/readme_example.php
@@ -541,7 +558,11 @@ foreach ([
     "LogBrewPsrLogger" => "missing installed README PSR logger guidance\n",
     "PSR-3 Logger" => "missing installed README PSR logger heading\n",
     "LogBrewMonologHandler" => "missing installed README Monolog handler guidance\n",
-    "Monolog And Laravel" => "missing installed README Laravel heading\n",
+    "LaravelLoggerFactory" => "missing installed README Laravel factory guidance\n",
+    "Laravel Quick Start" => "missing installed README Laravel heading\n",
+    "config:cache" => "missing installed README Laravel config-cache guidance\n",
+    "LOGBREW_SERVER_API_KEY" => "missing installed README canonical Laravel server-key guidance\n",
+    "immediately flushes every accepted record" => "missing installed README Laravel delivery-boundary guidance\n",
     "SupportTicketDraft" => "missing installed README support ticket draft guidance\n",
     "does not open a ticket, call backend support routes, send telemetry, or use account/session API credentials" => "missing installed README support ticket boundary guidance\n",
     "token-free diagnostics" => "missing installed README support ticket diagnostics guidance\n",
@@ -574,6 +595,10 @@ if (($data["require"]["psr/log"] ?? null) !== "^3.0") {
 }
 if (($data["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected installed monolog dev constraint\n");
+    exit(1);
+}
+if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+    fwrite(STDERR, "unexpected installed monolog suggestion\n");
     exit(1);
 }
 if (($data["autoload"]["psr-4"]["LogBrew\\"] ?? null) !== "src/") {
@@ -799,6 +824,7 @@ test -f vendor/logbrew/sdk/src/LogBrewTrace.php
 test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
+test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
@@ -813,6 +839,10 @@ php -r '
 $data = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
 if (($data["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected rerequired monolog dev constraint\n");
+    exit(1);
+}
+if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+    fwrite(STDERR, "unexpected rerequired monolog suggestion\n");
     exit(1);
 }
 ' vendor/logbrew/sdk/composer.json
@@ -939,10 +969,10 @@ $draft = LogBrew\SupportTicketDraft::create(
     traceId: '4BF92F3577B34DA6A3CE929D0E0E4736',
     eventId: 'evt_issue_001',
     diagnostics: [
-        'authorization' => 'Bearer lbw_ingest_secret_value',
+        'authorization' => 'Bearer sample', // support ticket fixture
         'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',
-        'localPath' => '/Users/example/project/.env',
-        'debugNote' => 'failed at https://api.example.com/v1/events?token=secret from /Users/example/project/.env',
+        'localPath' => '/home/example/project/.env',
+        'debugNote' => 'failed at https://api.example.com/v1/events?token=secret from /home/example/project/.env', // support ticket fixture
         'exception' => new RuntimeException('do not include this message'),
         'safe' => 'kept',
     ]
@@ -978,10 +1008,10 @@ if (($draft['diagnostics']['exception']['type'] ?? null) !== 'RuntimeException')
 }
 $draftJson = json_encode($draft, JSON_THROW_ON_ERROR);
 foreach ([
-    'lbw_ingest_secret_value',
+    'Bearer sample',
     'api.example.com',
     'token=secret',
-    '/Users/example/project',
+    '/home/example/project',
     'do not include this message',
 ] as $needle) {
     if (str_contains($draftJson, $needle)) {
@@ -1247,6 +1277,73 @@ if ($response->statusCode !== 202 || count($transport->sentBodies) !== 1) {
 
 echo $body . PHP_EOL;
 fwrite(STDERR, json_encode(['monologHandler' => true, 'events' => 2], JSON_THROW_ON_ERROR) . PHP_EOL);
+EOF
+
+cat > laravel-logger.php <<'EOF'
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LaravelLoggerFactory;
+use LogBrew\RecordingTransport;
+use LogBrew\TransportError;
+
+$config = LaravelLoggerFactory::configuration(
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    service: 'installed-laravel-app',
+    release: '1.2.3',
+    environment: 'testing'
+);
+$config['event_id_prefix'] = 'installed_laravel';
+$exported = var_export($config, true);
+$encoded = json_encode($config, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
+$roundTripped = json_decode($encoded, true, flags: JSON_THROW_ON_ERROR);
+if (str_contains($exported, '::__set_state') || $roundTripped !== $config) {
+    fwrite(STDERR, "Laravel channel configuration was not config-cache safe\n");
+    exit(1);
+}
+
+$transport = RecordingTransport::alwaysAccept();
+$logger = (new LaravelLoggerFactory($transport))($config);
+$logger->warning('Queue {queue} is delayed.', ['queue' => 'default', 'attempt' => 2]);
+if (count($transport->sentBodies) !== 1) {
+    fwrite(STDERR, "Laravel logger did not immediately deliver the accepted record\n");
+    exit(1);
+}
+
+$body = $transport->lastBody();
+$payload = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
+$event = $payload['events'][0] ?? null;
+if (!is_array($event)
+    || ($event['id'] ?? null) !== 'installed_laravel_1'
+    || ($event['attributes']['logger'] ?? null) !== 'installed-laravel-app'
+    || ($event['attributes']['level'] ?? null) !== 'warning'
+    || ($event['attributes']['message'] ?? null) !== 'Queue default is delayed.'
+    || ($event['attributes']['metadata']['framework'] ?? null) !== 'laravel'
+    || ($event['attributes']['metadata']['release'] ?? null) !== '1.2.3'
+    || ($event['attributes']['metadata']['environment'] ?? null) !== 'testing'
+    || ($event['attributes']['metadata']['context.attempt'] ?? null) !== 2
+) {
+    fwrite(STDERR, "unexpected installed Laravel logger payload\n");
+    exit(1);
+}
+if (str_contains($body, 'LOGBREW_SERVER_API_KEY')) {
+    fwrite(STDERR, "Laravel logger leaked its API key into the payload\n");
+    exit(1);
+}
+
+$failedTransport = new RecordingTransport([TransportError::network('LogBrew is unavailable.')]);
+$failureIsolatedLogger = (new LaravelLoggerFactory($failedTransport))($config);
+$failureIsolatedLogger->error('Application logging continues.');
+if (count($failedTransport->sentBodies) !== 1) {
+    fwrite(STDERR, "Laravel logger did not isolate a delivery failure\n");
+    exit(1);
+}
+
+echo $body . PHP_EOL;
+fwrite(STDERR, json_encode(['laravelLoggerFactory' => true, 'events' => 1], JSON_THROW_ON_ERROR) . PHP_EOL);
 EOF
 
 cat > http-transport.php <<'EOF'
@@ -1631,11 +1728,12 @@ $data["scripts"]["smoke-run"] = "php smoke.php";
 $data["scripts"]["smoke-timeline"] = "php timeline.php";
 $data["scripts"]["smoke-psr-logger"] = "php psr-logger.php";
 $data["scripts"]["smoke-monolog-handler"] = "php monolog-handler.php";
+$data["scripts"]["smoke-laravel-logger"] = "php laravel-logger.php";
 $data["scripts"]["smoke-http-transport"] = "php http-transport.php";
 $data["scripts"]["smoke-vendor-example"] = "php vendor/logbrew/sdk/examples/real_user_smoke.php";
 $data["scripts"]["smoke-first-useful"] = "php vendor/logbrew/sdk/examples/first_useful_telemetry.php";
 $data["scripts"]["smoke-http-trace"] = "php vendor/logbrew/sdk/examples/http_trace_correlation.php";
-$data["scripts"]["smoke-types"] = "@php vendor/bin/phpstan analyse phpstan-consumer.php --level=max --memory-limit=512M --no-progress";
+$data["scripts"]["smoke-types"] = "@php vendor/bin/phpstan analyse phpstan-consumer.php --configuration=phpstan.neon --level=max --memory-limit=512M --no-progress";
 file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
 ' composer.json
 composer validate --no-check-publish --no-check-version --strict >/dev/null
@@ -1651,6 +1749,9 @@ grep -q '"psrLogger":true' psr-logger.stderr.json
 composer run --no-interaction smoke-monolog-handler > monolog-handler.stdout.json 2> monolog-handler.stderr.json
 grep -q '"type": "log"' monolog-handler.stdout.json
 grep -q '"monologHandler":true' monolog-handler.stderr.json
+composer run --no-interaction smoke-laravel-logger > laravel-logger.stdout.json 2> laravel-logger.stderr.json
+grep -q '"type":"log"' laravel-logger.stdout.json
+grep -q '"laravelLoggerFactory":true' laravel-logger.stderr.json
 composer run --no-interaction smoke-http-transport > http-transport.stdout.json 2> http-transport.stderr.json
 grep -q '"httpTransport":true' http-transport.stderr.json
 grep -q '"httpAttempts":2' http-transport.stderr.json
@@ -1692,6 +1793,7 @@ test -f vendor/logbrew/sdk/src/LogBrewTrace.php
 test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
+test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
@@ -1702,6 +1804,10 @@ php -r '
 $data = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
 if (($data["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected reinstall monolog dev constraint\n");
+    exit(1);
+}
+if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+    fwrite(STDERR, "unexpected reinstall monolog suggestion\n");
     exit(1);
 }
 ' vendor/logbrew/sdk/composer.json
@@ -1897,6 +2003,9 @@ grep -q '"psrLogger":true' psr-logger-reinstall.stderr.json
 composer run --no-interaction smoke-monolog-handler > monolog-handler-reinstall.stdout.json 2> monolog-handler-reinstall.stderr.json
 grep -q '"type": "log"' monolog-handler-reinstall.stdout.json
 grep -q '"monologHandler":true' monolog-handler-reinstall.stderr.json
+composer run --no-interaction smoke-laravel-logger > laravel-logger-reinstall.stdout.json 2> laravel-logger-reinstall.stderr.json
+grep -q '"type":"log"' laravel-logger-reinstall.stdout.json
+grep -q '"laravelLoggerFactory":true' laravel-logger-reinstall.stderr.json
 composer run --no-interaction smoke-http-transport > http-transport-reinstall.stdout.json 2> http-transport-reinstall.stderr.json
 grep -q '"httpTransport":true' http-transport-reinstall.stderr.json
 grep -q '"httpAttempts":2' http-transport-reinstall.stderr.json
@@ -2212,6 +2321,24 @@ if (!$monologHandler->isSubclassOf(\Monolog\Handler\AbstractProcessingHandler::c
     exit(1);
 }
 
+$laravelLoggerFactory = new ReflectionClass(\LogBrew\LaravelLoggerFactory::class);
+$laravelLoggerFactoryDoc = $laravelLoggerFactory->getDocComment() ?: '';
+if (!str_contains($laravelLoggerFactoryDoc, 'Config-cache-safe Laravel custom-channel factory with bounded immediate delivery.')) {
+    fwrite(STDERR, "missing LaravelLoggerFactory class doc summary\n");
+    exit(1);
+}
+if (!str_contains($laravelLoggerFactoryDoc, '@phpstan-type LaravelChannelConfig array{')) {
+    fwrite(STDERR, "missing LaravelLoggerFactory channel config alias\n");
+    exit(1);
+}
+if (!$laravelLoggerFactory->isFinal()
+    || !$laravelLoggerFactory->hasMethod('configuration')
+    || !$laravelLoggerFactory->hasMethod('__invoke')
+) {
+    fwrite(STDERR, "missing LaravelLoggerFactory public surface\n");
+    exit(1);
+}
+
 $supportTicketDraft = new ReflectionClass(\LogBrew\SupportTicketDraft::class);
 $supportTicketDraftDoc = $supportTicketDraft->getDocComment() ?: '';
 if (!str_contains($supportTicketDraftDoc, 'Local-only support-ticket draft helper for explicit user or agent handoff.')) {
@@ -2342,6 +2469,11 @@ if (!str_contains($network, 'Create a retryable network failure that preserves q
 EOF
 php reflection-docs.php >/dev/null
 composer require --dev phpstan/phpstan --no-interaction --quiet
+mkdir -p "$tmp_dir/phpstan-cache"
+cat > phpstan.neon <<EOF
+parameters:
+  tmpDir: $tmp_dir/phpstan-cache
+EOF
 
 cat > phpstan-consumer.php <<'EOF'
 <?php
@@ -2350,6 +2482,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/vendor/autoload.php';
 
+use LogBrew\LaravelLoggerFactory;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewMonologHandler;
 use LogBrew\LogBrewPsrLogger;
@@ -2431,6 +2564,16 @@ $monolog->pushHandler(new LogBrewMonologHandler(
     metadata: ['service' => 'checkout']
 ));
 $monolog->warning('Checkout slow for {region}', ['region' => 'global', 'attempt' => 2]);
+
+$laravelLogger = (new LaravelLoggerFactory(RecordingTransport::alwaysAccept()))(
+    LaravelLoggerFactory::configuration(
+        apiKey: 'LOGBREW_SERVER_API_KEY',
+        service: 'smoke-laravel-types',
+        release: '1.0.0',
+        environment: 'testing'
+    )
+);
+$laravelLogger->warning('Queue {queue} is delayed.', ['queue' => 'default']);
 
 $httpClient = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app-types', '0.1.0');
 $httpClient->release('evt_release_http', '2026-06-02T10:00:00Z', ['version' => '1.2.3']);
