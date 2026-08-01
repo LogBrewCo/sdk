@@ -50,6 +50,7 @@ test -f "$node_tgz"
 test -f "$fastify_tgz"
 
 tar -tzf "$fastify_tgz" > "$tmp_dir/fastify-tarball.txt"
+tar -tzf "$node_tgz" > "$tmp_dir/node-tarball.txt"
 grep -q '^package/README.md$' "$tmp_dir/fastify-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/fastify-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/fastify-tarball.txt"
@@ -59,7 +60,11 @@ grep -q '^package/examples/index.mjs$' "$tmp_dir/fastify-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/fastify-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/fastify-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/fastify-tarball.txt"
+grep -q '^package/pino.js$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/pino.cjs$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/test/pino-instrumentation.test.js$' "$tmp_dir/node-tarball.txt"
 tar -xOf "$fastify_tgz" package/README.md > "$tmp_dir/fastify-readme.md"
+tar -xOf "$node_tgz" package/README.md > "$tmp_dir/node-readme.md"
 tar -xOf "$fastify_tgz" package/package.json > "$tmp_dir/fastify-package.json"
 grep -q 'npm install @logbrew/sdk @logbrew/node @logbrew/fastify fastify' "$tmp_dir/fastify-readme.md"
 grep -q 'pnpm add @logbrew/sdk @logbrew/node @logbrew/fastify fastify' "$tmp_dir/fastify-readme.md"
@@ -82,7 +87,10 @@ grep -q 'traceparent' "$tmp_dir/fastify-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/fastify-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/fastify-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/fastify-readme.md"
-python3 - "$tmp_dir/fastify-package.json" "$node_package_version" <<'PY'
+grep -q 'installLogBrewPinoInstrumentation' "$tmp_dir/fastify-readme.md"
+grep -q 'preserves the original serialized output' "$tmp_dir/node-readme.md"
+grep -q 'Pino 9.11' "$tmp_dir/node-readme.md"
+python3 - "$tmp_dir/fastify-package.json" "$node_package_version" "$sdk_package_version" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -92,7 +100,7 @@ node_version = sys.argv[2]
 peers = manifest.get("peerDependencies", {})
 if peers.get("@logbrew/node") != f"^{node_version}":
     raise SystemExit(f"unexpected @logbrew/node peer: {peers.get('@logbrew/node')!r}")
-if peers.get("@logbrew/sdk") != "^0.1.3":
+if peers.get("@logbrew/sdk") != f"^{sys.argv[3]}":
     raise SystemExit(f"unexpected @logbrew/sdk peer: {peers.get('@logbrew/sdk')!r}")
 PY
 grep -q 'low-cardinality' "$tmp_dir/fastify-readme.md"
@@ -103,12 +111,14 @@ cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
 fastify_version="$(npm view fastify version)"
+pino_version="$(npm view pino version)"
 npm install \
   --save-exact \
   "$core_tgz" \
   "$node_tgz" \
   "$fastify_tgz" \
   "fastify@$fastify_version" \
+  "pino@$pino_version" \
   "typescript" \
   "@types/node@22" \
   >/dev/null
@@ -120,7 +130,7 @@ grep -q '"fastify":' package.json
 grep -q '"@logbrew/fastify"' package-lock.json
 grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
-npm ls @logbrew/sdk @logbrew/node @logbrew/fastify fastify >/dev/null
+npm ls @logbrew/sdk @logbrew/node @logbrew/fastify fastify pino >/dev/null
 npm explain @logbrew/fastify > "$tmp_dir/npm-explain-fastify.txt"
 grep -q "@logbrew/fastify@${fastify_package_version}" "$tmp_dir/npm-explain-fastify.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
@@ -135,14 +145,19 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text())
 deps = payload.get("dependencies", {})
-for name in ("@logbrew/fastify", "@logbrew/node", "@logbrew/sdk", "fastify"):
+for name in ("@logbrew/fastify", "@logbrew/node", "@logbrew/sdk", "fastify", "pino"):
     if name not in deps:
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
 
 cat > smoke.mjs <<'EOF'
 import Fastify from "fastify";
+import { Writable } from "node:stream";
 import { RecordingTransport } from "@logbrew/sdk";
+import {
+  createLogBrewNodeClient,
+  installLogBrewPinoInstrumentation
+} from "@logbrew/node";
 import {
   createErrorEvent,
   createLogBrewFastifyClient,
@@ -157,7 +172,39 @@ const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCo
 const autoTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
 const metricOnlyTransport = RecordingTransport.alwaysAccept();
-const app = Fastify();
+const pinoTransport = RecordingTransport.alwaysAccept();
+const pinoDrops = [];
+const pinoClient = createLogBrewNodeClient({
+  automaticDelivery: false,
+  maxQueueSize: 64,
+  onEventDropped(drop) {
+    pinoDrops.push(drop.reason);
+  },
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  transport: pinoTransport
+});
+const pinoErrors = [];
+const pinoOutput = [];
+const pinoCapture = installLogBrewPinoInstrumentation({
+  client: pinoClient,
+  metadata: { framework: "fastify", service: "checkout" },
+  onError(error) {
+    pinoErrors.push(error instanceof Error ? error.message : String(error));
+  },
+  traceProvider: getActiveLogBrewTrace,
+  transport: pinoTransport
+});
+const app = Fastify({
+  logger: {
+    level: "warn",
+    stream: new Writable({
+      write(chunk, _encoding, callback) {
+        pinoOutput.push(Buffer.from(chunk).toString("utf8"));
+        callback();
+      }
+    })
+  }
+});
 let activeTraceFromAuto;
 
 const explicitClient = createLogBrewFastifyClient({
@@ -233,6 +280,13 @@ await app.register(async (scope) => {
     if (request.logbrew.trace?.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
       throw new Error(`missing Fastify request trace context: ${JSON.stringify(request.logbrew.trace)}`);
     }
+    request.log.warn({
+      authorization: "Bearer hidden",
+      orderId: 42,
+      requestBody: "hidden payload",
+      requestUrl: "/auto?token=hidden",
+      nested: { token: "hidden" }
+    }, "checkout queued");
     return { ok: true };
   });
 });
@@ -272,6 +326,23 @@ const autoResponse = await fetch(`${address}/auto?token=secret`, {
 });
 await autoResponse.json();
 await waitFor(() => autoTransport.sentBodies.length === 1 && activeTraceFromAuto);
+await waitFor(() => pinoClient.pendingEvents() === 1);
+const pinoFlush = await pinoCapture.flush();
+if (pinoFlush?.statusCode !== 202 || pinoErrors.length !== 0) {
+  throw new Error(`unexpected Pino capture result: ${JSON.stringify({ pinoErrors, pinoFlush })}`);
+}
+const pinoFirstBody = pinoTransport.lastBody();
+for (let sequence = 0; sequence < 250; sequence += 1) {
+  app.log.warn({ sequence }, "Pino load probe");
+}
+if (pinoClient.pendingEvents() !== 64 || pinoDrops.length !== 186) {
+  throw new Error(`Pino queue bounds changed: ${JSON.stringify({ drops: pinoDrops.length, pending: pinoClient.pendingEvents() })}`);
+}
+await pinoCapture.flush();
+const pinoLoadPayload = JSON.parse(pinoTransport.lastBody());
+if (pinoLoadPayload.events.length !== 64 || pinoLoadPayload.events.some((event) => event.attributes.message !== "Pino load probe")) {
+  throw new Error(`Pino load payload changed: ${pinoTransport.lastBody()}`);
+}
 const metricResponse = await fetch(`${address}/metrics-only/42?token=secret#hidden`);
 await metricResponse.json();
 await waitFor(() => metricOnlyTransport.sentBodies.length === 1);
@@ -282,7 +353,14 @@ const failResponse = await fetch(`${address}/fail?token=secret`, {
 });
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
+pinoCapture.uninstall();
+app.log.warn("after Pino uninstall");
+await pinoCapture.flush();
+if (pinoTransport.sentBodies.length !== 2) {
+  throw new Error(`Pino uninstall did not stop capture: ${pinoTransport.sentBodies.length}`);
+}
 await app.close();
+await pinoClient.shutdown();
 
 const autoPayload = JSON.parse(autoTransport.lastBody());
 if (autoPayload.events[0].type !== "span" || autoPayload.events[0].id !== "evt_fastify_request_001") {
@@ -308,6 +386,32 @@ if (autoPayload.events[0].attributes.metadata.path !== "/auto") {
 }
 if (activeTraceFromAuto?.spanId !== "b7ad6b7169203331") {
   throw new Error(`async trace context was not preserved: ${JSON.stringify(activeTraceFromAuto)}`);
+}
+const pinoPayload = JSON.parse(pinoFirstBody);
+const pinoEvent = pinoPayload.events[0];
+const originalPinoOutput = pinoOutput.join("");
+if (pinoPayload.events.length !== 1 || pinoEvent?.attributes.message !== "checkout queued") {
+  throw new Error(`unexpected Pino payload: ${pinoTransport.lastBody()}`);
+}
+if (!originalPinoOutput.includes("checkout queued") || !originalPinoOutput.includes("Bearer hidden")) {
+  throw new Error(`app-owned Pino output was replaced or rewritten: ${originalPinoOutput}`);
+}
+if (pinoEvent.attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`Pino log was not trace-correlated: ${pinoTransport.lastBody()}`);
+}
+if (pinoEvent.attributes.metadata.spanId !== "b7ad6b7169203331") {
+  throw new Error(`Pino log was not span-correlated: ${pinoTransport.lastBody()}`);
+}
+if (
+  pinoEvent.attributes.metadata["context.orderId"] !== 42
+  || pinoEvent.attributes.metadata["context.authorization"] !== undefined
+  || pinoEvent.attributes.metadata["context.requestBody"] !== undefined
+  || pinoEvent.attributes.metadata["context.requestUrl"] !== undefined
+) {
+  throw new Error(`Pino privacy filtering changed: ${pinoTransport.lastBody()}`);
+}
+if (JSON.stringify(pinoPayload).includes("Bearer hidden") || JSON.stringify(pinoPayload).includes("token=hidden")) {
+  throw new Error(`Pino payload leaked excluded values: ${pinoTransport.lastBody()}`);
 }
 const metricPayload = JSON.parse(metricOnlyTransport.lastBody());
 const metricEvent = metricPayload.events[0];
@@ -380,6 +484,9 @@ console.error(JSON.stringify({
   events: 6,
   metricCaptured: metricEvent.attributes.name,
   metricRouteTemplate: metricEvent.attributes.metadata.routeTemplate,
+  pinoCaptured: pinoEvent.attributes.message,
+  pinoOriginalDestinationPreserved: true,
+  pinoTraceId: pinoEvent.attributes.metadata.traceId,
   status: okResponse.status
 }));
 
@@ -438,6 +545,8 @@ grep -q '"errorStatus":500' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q 'GET /auto' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q 'GET /fail failed' "$tmp_dir/fastify-smoke.stderr.json"
+grep -q '"pinoCaptured":"checkout queued"' "$tmp_dir/fastify-smoke.stderr.json"
+grep -q '"pinoOriginalDestinationPreserved":true' "$tmp_dir/fastify-smoke.stderr.json"
 
 cat > default-delivery.mjs <<'EOF'
 import Fastify from "fastify";
@@ -615,6 +724,90 @@ EOF
 node default-delivery.cjs > "$tmp_dir/fastify-default-delivery-cjs.json"
 grep -q '"cjsDefaultDelivered":"evt_fastify_cjs_default"' "$tmp_dir/fastify-default-delivery-cjs.json"
 
+for pino_minimum in 9.11.0 10.1.0; do
+  matrix_dir="$tmp_dir/pino-$pino_minimum"
+  mkdir -p "$matrix_dir"
+  cd "$matrix_dir"
+  npm init -y >/dev/null
+  npm pkg set type=module >/dev/null
+  npm install --save-exact --no-audit --fund=false \
+    "$core_tgz" \
+    "$node_tgz" \
+    "pino@$pino_minimum" \
+    >/dev/null
+
+  cat > pino-matrix.mjs <<'EOF'
+import { Writable } from "node:stream";
+import pino from "pino";
+import { RecordingTransport } from "@logbrew/sdk";
+import {
+  createLogBrewNodeClient,
+  installLogBrewPinoInstrumentation
+} from "@logbrew/node";
+
+const transport = RecordingTransport.alwaysAccept();
+const client = createLogBrewNodeClient({
+  automaticDelivery: false,
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  transport
+});
+const original = [];
+const destination = new Writable({
+  write(chunk, _encoding, callback) {
+    original.push(Buffer.from(chunk).toString("utf8"));
+    callback();
+  }
+});
+const capture = installLogBrewPinoInstrumentation({
+  client,
+  traceProvider: () => ({
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    sampled: true
+  }),
+  transport
+});
+const logger = pino({ errorKey: "failure", messageKey: "messageText" }, destination);
+
+logger.child({ component: "worker" }).warn({
+  authorization: "Bearer hidden",
+  orderId: 7
+}, "minimum Pino capture works");
+
+if (client.pendingEvents() !== 1) {
+  throw new Error(`Pino ${pino.version} did not emit one diagnostics record`);
+}
+await capture.flush();
+const payload = JSON.parse(transport.lastBody());
+const event = payload.events[0];
+if (
+  event.attributes.message !== "minimum Pino capture works"
+  || event.attributes.metadata["context.component"] !== "worker"
+  || event.attributes.metadata["context.orderId"] !== 7
+  || event.attributes.metadata["context.authorization"] !== undefined
+  || event.attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736"
+) {
+  throw new Error(`Pino ${pino.version} payload mismatch: ${transport.lastBody()}`);
+}
+if (!original.join("").includes("Bearer hidden")) {
+  throw new Error(`Pino ${pino.version} original destination was changed`);
+}
+
+capture.uninstall();
+logger.error("after uninstall");
+if (client.pendingEvents() !== 0) {
+  throw new Error(`Pino ${pino.version} uninstall did not stop capture`);
+}
+await client.shutdown();
+console.log(JSON.stringify({ captured: event.attributes.message, ok: true, pinoVersion: pino.version }));
+EOF
+
+  node pino-matrix.mjs > "$tmp_dir/pino-$pino_minimum.json"
+  grep -q "\"pinoVersion\":\"$pino_minimum\"" "$tmp_dir/pino-$pino_minimum.json"
+done
+
+cd "$app_dir"
+
 cat > consumer.ts <<'EOF'
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { RecordingTransport } from "@logbrew/sdk";
@@ -626,6 +819,11 @@ import {
   type LogBrewTraceContext,
   logbrewFastifyPlugin
 } from "@logbrew/fastify";
+import {
+  createLogBrewNodeClient,
+  installLogBrewPinoInstrumentation,
+  type LogBrewPinoInstrumentationHandle
+} from "@logbrew/node";
 
 const app = Fastify();
 const client = createLogBrewFastifyClient({
@@ -633,6 +831,15 @@ const client = createLogBrewFastifyClient({
   sdkName: "typed-fastify-smoke",
   sdkVersion: "0.1.0"
 });
+const pinoClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY" });
+const pinoCapture: LogBrewPinoInstrumentationHandle = installLogBrewPinoInstrumentation({
+  client: pinoClient,
+  traceProvider: getActiveLogBrewTrace,
+  shouldCapture(record, { level }) {
+    return record.msg !== "skip" && level !== 10;
+  }
+});
+pinoCapture.uninstall();
 
 app.register(logbrewFastifyPlugin, {
   client,
@@ -699,6 +906,7 @@ EOF
 npx tsc --project tsconfig.json
 
 node -e 'const fastify = require("@logbrew/fastify"); if (typeof fastify.logbrewFastifyPlugin !== "function") process.exit(1)'
+node -e 'const nodeSdk = require("@logbrew/node"); if (typeof nodeSdk.installLogBrewPinoInstrumentation !== "function") process.exit(1)'
 
 node node_modules/@logbrew/fastify/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/fastify/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
@@ -722,4 +930,4 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.std
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
-echo "fastify real-user smoke passed with fastify@$fastify_version"
+echo "fastify real-user smoke passed with fastify@$fastify_version and pino@$pino_version"

@@ -24,6 +24,7 @@ const { instrumentLogBrewMongooseModel: instrumentMongooseModel } = require("./m
 const { instrumentLogBrewPgClient: instrumentPgClient } = require("./pg.cjs");
 const { instrumentLogBrewRedisClient: instrumentRedisClient } = require("./redis.cjs");
 const { installLogBrewUndiciInstrumentation: installUndiciInstrumentation } = require("./undici.cjs");
+const { installLogBrewPinoInstrumentation: installPinoInstrumentation } = require("./pino.cjs");
 const { buildNodePersistentEventStore } = require("./persistent-event-store.cjs");
 const {
   createPersistentEventQueue,
@@ -31,7 +32,7 @@ const {
 } = require("./persistent-queue.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-node";
-const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_SDK_VERSION = "0.1.3";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
@@ -663,6 +664,13 @@ function installLogBrewUndiciInstrumentation(options = {}) {
   return installUndiciInstrumentation({
     ...options,
     activeTraceProvider: getActiveLogBrewTrace
+  });
+}
+
+function installLogBrewPinoInstrumentation(options = {}) {
+  return installPinoInstrumentation({
+    ...options,
+    traceProvider: options.traceProvider ?? getActiveLogBrewTrace
   });
 }
 
@@ -2087,6 +2095,7 @@ const exported = {
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
   installLogBrewHttpClientInstrumentation,
+  installLogBrewPinoInstrumentation,
   installLogBrewUndiciInstrumentation,
   instrumentLogBrewAxiosInstance,
   instrumentLogBrewMongoCollection,

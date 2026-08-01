@@ -585,7 +585,7 @@ logger.error(new Error("payment failed"), "checkout failed");
 await destination.flush();
 ```
 
-The Pino adapter reads JSON log lines, maps Pino `trace`/`debug` to LogBrew `info`, `warn` to `warning`, `error` to `error`, and `fatal` to `critical`, captures primitive Pino fields as `context.*`, captures serialized error name/message, skips noisy runtime defaults, and omits stack text unless `includeErrorStack: true` is set. It does not patch Pino or replace application logger ownership.
+The Pino adapter reads JSON log lines, maps Pino `trace`/`debug` to LogBrew `info`, `warn` to `warning`, `error` to `error`, and `fatal` to `critical`, captures safe primitive Pino fields as `context.*`, captures serialized error name/message, skips noisy runtime defaults, and omits stack text unless `includeErrorStack: true` is set. Credential, authorization, cookie, body, payload, query, raw-URL, propagation-header, local-path, and stack fields are excluded even when they are primitive. It does not patch Pino or replace application logger ownership. The log message itself is telemetry, so retain normal Pino redaction and keep secrets or user-entered text out of messages.
 
 When the app also uses a LogBrew Node or framework request helper, pass `traceProvider: getActiveLogBrewTrace` from `@logbrew/node` to add the current active `traceId`, `spanId`, optional `parentSpanId`, and `sampled` flag to each captured log. The provider is called per record, invalid or missing contexts are ignored, and no raw propagation headers, request data, payloads, or stack traces are captured.
 

@@ -49,7 +49,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | --- | --- | --- |
 | JavaScript | [`@logbrew/sdk`](js/logbrew-js) | Core event client, transports, trace helpers, console/Pino/Winston logger adapters |
 | Browser | [`@logbrew/browser`](js/logbrew-browser) | Browser page views, handled errors, lifecycle flushing, fetch delivery, target-scoped trace propagation |
-| Node.js | [`@logbrew/node`](js/logbrew-node) | Built-in `node:http` request capture and server delivery |
+| Node.js | [`@logbrew/node`](js/logbrew-node) | Built-in `node:http` request capture, server delivery, and reversible existing-Pino instrumentation |
 | BullMQ | [`@logbrew/bullmq`](js/logbrew-bullmq) | Explicit BullMQ producer/worker trace correlation |
 | KafkaJS | [`@logbrew/kafkajs`](js/logbrew-kafkajs) | Explicit KafkaJS producer/consumer trace correlation |
 | RabbitMQ / amqplib | [`@logbrew/amqplib`](js/logbrew-amqplib) | Explicit RabbitMQ publish/consume trace correlation |
@@ -218,6 +218,7 @@ LogBrew SDKs favor conservative defaults:
 
 - No query strings or URL hashes in automatic request metadata by default.
 - No raw stack text unless explicitly enabled.
+- Automatic Pino metadata excludes credentials, cookies, bodies, payloads, query text, raw URLs, propagation headers, local file paths, and stack text by default.
 - No document title or user agent in browser metadata unless explicitly enabled.
 - No global logger, console, fetch, or framework behavior changes unless the integration explicitly documents that opt-in behavior.
 - App-owned transports, loggers, and framework versions remain under application control.

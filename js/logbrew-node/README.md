@@ -6,7 +6,7 @@
 
 Node.js runtime helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch`, opt-in reversible global fetch instrumentation, optional crash-safe delivery storage, database/cache/queue operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch`, opt-in reversible global fetch and existing-Pino instrumentation, optional crash-safe delivery storage, database/cache/queue operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -171,6 +171,49 @@ server.listen(3000);
 ```
 
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
+
+## Existing Pino Logs
+
+If a Node service already uses Pino, install the opt-in diagnostics-channel integration once before the logs you want to capture. It observes Pino's finalized JSON record without replacing its destination, patching the logger, or adding Pino as an SDK dependency:
+
+```js
+import pino from "pino";
+import {
+  createLogBrewNodeClient,
+  installLogBrewPinoInstrumentation
+} from "@logbrew/node";
+
+const client = createLogBrewNodeClient({
+  sdkName: "checkout-api",
+  sdkVersion: "1.4.0"
+});
+const pinoCapture = installLogBrewPinoInstrumentation({
+  client,
+  metadata: { service: "checkout-api" },
+  onError(error) {
+    console.error("LogBrew Pino capture failed", error);
+  }
+});
+
+const logger = pino({
+  level: "info",
+  redact: ["authorization", "cookie", "password", "token"]
+});
+
+logger.info({ orderState: "queued" }, "checkout queued");
+
+// At the app-owned graceful lifecycle boundary:
+pinoCapture.uninstall();
+await client.shutdown();
+```
+
+Automatic capture requires Node.js 18.19 or newer and a Pino line with tracing-channel support: Pino 9.11 or newer in the 9.x line, or Pino 10.1 or newer. Older Pino versions can still use `createLogBrewPinoDestination()` from `@logbrew/sdk` as an app-owned destination or multistream target.
+
+The integration captures root and child loggers, respects custom Pino message/error keys, preserves the original serialized output, exposes `uninstall()` and `flush()`, and permits only one process-wide owner so accidental double installation cannot duplicate logs. `shouldCapture(record, context)` can skip records before they enter the LogBrew queue. Capture and callback failures are advisory and never throw through the Pino call.
+
+Primitive structured fields become `context.*` metadata. Runtime defaults and nested objects are omitted. Credentials, authorization and cookie fields, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack fields are also excluded automatically; serialized error name/message remain available, while stack text requires `includeErrorStack: true`. The log message itself is telemetry, so keep secrets and user-entered text out of messages and retain your normal Pino redaction policy.
+
+Inside `withLogBrewHttpHandler()`, active W3C trace IDs are added automatically. Framework adapters can pass their own `getActiveLogBrewTrace` as `traceProvider` so application logs join the framework request trace without copying request headers or payloads.
 
 ## Delivery Bounds
 

@@ -10,7 +10,7 @@ const { createNodeFetchTransport } = require("@logbrew/node");
 const { AsyncLocalStorage } = require("node:async_hooks");
 
 const DEFAULT_SDK_NAME = "logbrew-fastify";
-const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_SDK_VERSION = "0.1.2";
 const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewFastifyClient({

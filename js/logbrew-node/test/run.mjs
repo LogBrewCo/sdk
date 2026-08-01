@@ -27,7 +27,7 @@ try {
   }
   const result = spawnSync(
     process.execPath,
-    ["--test", ...process.argv.slice(2), "persistent-delivery.test.js"],
+    ["--test", ...process.argv.slice(2), "persistent-delivery.test.js", "pino-instrumentation.test.js"],
     {
     cwd: testDirectory,
     stdio: "inherit"

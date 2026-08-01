@@ -4,6 +4,8 @@ import type {
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
+  Metadata,
+  PinoLogRecord,
   SpanAttributes,
   SpanEventSummary,
   SpanLinkSummary,
@@ -64,6 +66,33 @@ export type LogBrewTraceContext = {
   spanId: string;
   parentSpanId?: string;
   sampled: boolean;
+};
+
+export type LogBrewPinoInstrumentationConfig = {
+  client: LogBrewClient;
+  /** Optional explicit transport for flush(); createLogBrewNodeClient owns one by default. */
+  transport?: Transport;
+  logger?: string;
+  metadata?: Metadata;
+  /** Defaults to the active node:http trace; pass a framework trace provider when needed. */
+  traceProvider?: () => LogBrewTraceContext | null | undefined;
+  /** Error stacks remain excluded unless explicitly enabled. */
+  includeErrorStack?: boolean;
+  eventIdPrefix?: string;
+  /** Fallback timestamp used only when the finalized Pino record has no valid timestamp. */
+  timestamp?: () => string;
+  /** Return false to skip one finalized record without changing Pino output. */
+  shouldCapture?: (
+    record: PinoLogRecord,
+    context: { instance: unknown; level?: number }
+  ) => boolean;
+  /** Advisory capture diagnostics; callback failures never interrupt application logging. */
+  onError?: (error: unknown) => void | Promise<void>;
+};
+
+export type LogBrewPinoInstrumentationHandle = {
+  flush(): Promise<TransportResponse | null>;
+  uninstall(): void;
 };
 
 export type LogBrewQueueTraceHeaders = {
@@ -790,6 +819,10 @@ export declare function installLogBrewHttpClientInstrumentation(
   options: LogBrewHttpClientInstrumentationOptions
 ): LogBrewHttpClientInstrumentation;
 
+export declare function installLogBrewPinoInstrumentation(
+  options: LogBrewPinoInstrumentationConfig
+): LogBrewPinoInstrumentationHandle;
+
 export declare function installLogBrewUndiciInstrumentation(
   options: LogBrewUndiciInstrumentationOptions
 ): LogBrewUndiciInstrumentationHandle;
@@ -886,6 +919,7 @@ declare const defaultExport: {
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   installLogBrewFetchInstrumentation: typeof installLogBrewFetchInstrumentation;
   installLogBrewHttpClientInstrumentation: typeof installLogBrewHttpClientInstrumentation;
+  installLogBrewPinoInstrumentation: typeof installLogBrewPinoInstrumentation;
   installLogBrewUndiciInstrumentation: typeof installLogBrewUndiciInstrumentation;
   instrumentLogBrewAxiosInstance: typeof instrumentLogBrewAxiosInstance;
   instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;
