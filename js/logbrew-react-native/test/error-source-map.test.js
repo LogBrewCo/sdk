@@ -151,12 +151,14 @@ test("React Native error events preserve an ordered bounded Metro stack", async 
           filename: "/react-native/index.android.bundle",
           line: 12,
           column: 34,
+          function: "checkoutFailureSignal",
           debugId
         },
         {
           filename: "/react-native/index.android.bundle",
           line: 45,
           column: 6,
+          function: "submitOrder",
           debugId
         }
       ]);
