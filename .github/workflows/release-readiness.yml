@@ -370,8 +370,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install build tooling
-        run: python3 -m pip install --upgrade build twine
+      - name: Install build tooling and core SDK dependencies
+        run: |
+          python3 -m pip install --upgrade build twine
+          python3 -m pip install ./python/logbrew_py
 
       - name: Run Python package tests
         shell: bash
