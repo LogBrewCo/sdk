@@ -82,6 +82,7 @@ STEP_LABELS=(
   "Python public PyPI install smoke"
   "Go real-user smoke"
   "Go OpenTelemetry installed-artifact smoke"
+  "Go Gin installed-artifact smoke"
   "Go high-load installed-artifact smoke"
   "Go delivery lifecycle installed-artifact smoke"
   "Go support-ticket real-user smoke"
@@ -665,6 +666,10 @@ mark_step_complete
 
 begin_next_step "Go OpenTelemetry installed-artifact smoke"
 run_shell_step "bash scripts/real_user_go_opentelemetry_smoke.sh"
+mark_step_complete
+
+begin_next_step "Go Gin installed-artifact smoke"
+run_shell_step "bash scripts/real_user_go_gin_smoke.sh"
 mark_step_complete
 
 begin_next_step "Go high-load installed-artifact smoke"

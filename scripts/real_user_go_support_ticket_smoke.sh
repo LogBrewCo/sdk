@@ -54,7 +54,7 @@ with zipfile.ZipFile(
 ) as archive:
     for path in repo.rglob("*"):
         relative = path.relative_to(repo)
-        if path.is_file() and ".git" not in path.parts and (not relative.parts or relative.parts[0] != "otel"):
+        if path.is_file() and ".git" not in path.parts and (not relative.parts or relative.parts[0] not in {"gin", "otel"}):
             archive.write(path, zip_prefix + relative.as_posix())
 PY
 
@@ -98,7 +98,7 @@ func main() {
 			"attemptCount": 2,
 			"apiKey":      token,
 			"endpoint":    "https://api.example/ingest?debug=true#frag",
-			"localPath":   "/Users/example/app/.env",
+			"localPath":   "/home/example/app/.env",
 			"error":       errors.New("contains hidden message"),
 			"headers": map[string]any{
 				"authorization": strings.Join([]string{"Bearer", "hidden"}, " "),
@@ -155,7 +155,7 @@ headers = diagnostics.get("headers") or {}
 if headers.get("authorization") != "[redacted]" or headers.get("accept") != "application/json":
     raise SystemExit(f"headers were not sanitized: {headers!r}")
 text = json.dumps(payload, sort_keys=True)
-for unsafe in ("hidden", "api.example", "/Users/example", "traceparent", "contains hidden message"):
+for unsafe in ("hidden", "api.example", "/home/example", "traceparent", "contains hidden message"):
     if unsafe in text:
         raise SystemExit(f"support draft leaked {unsafe!r}: {text}")
 PY

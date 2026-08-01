@@ -483,6 +483,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertIn('"Go high-load installed-artifact smoke"', script)
         self.assertIn('"Go delivery lifecycle installed-artifact smoke"', script)
         self.assertIn('"Go OpenTelemetry installed-artifact smoke"', script)
+        self.assertIn('"Go Gin installed-artifact smoke"', script)
         self.assertRegex(
             script,
             r'begin_next_step "Go real-user smoke"\n'
@@ -490,6 +491,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Go OpenTelemetry installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_go_opentelemetry_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go Gin installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_gin_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Go high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_go_high_load_smoke\.sh"\n'
@@ -511,6 +515,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Go OpenTelemetry installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_go_opentelemetry_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go Gin installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_gin_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Go high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_go_high_load_smoke\.sh"\n'

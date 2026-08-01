@@ -208,6 +208,28 @@ class ConfidentialityScanTests(unittest.TestCase):
             )
         )
 
+    def test_go_gin_privacy_allowlist_is_path_and_line_scoped(self) -> None:
+        sensitive_name = "to" + "ken"
+        allowed_line = (
+            'request := httptest.NewRequest(http.MethodGet, '
+            f'"/profiles/private-user?{sensitive_name}=private", nil)'
+        )
+        path = "go/logbrew/gin/middleware_test.go"
+
+        self.assertTrue(
+            check_confidentiality_scan.is_go_gin_privacy_reference(path, allowed_line)
+        )
+        self.assertFalse(
+            check_confidentiality_scan.is_go_gin_privacy_reference(
+                "go/logbrew/gin/unrelated.go", allowed_line
+            )
+        )
+        self.assertFalse(
+            check_confidentiality_scan.is_go_gin_privacy_reference(
+                path, allowed_line + " // extra"
+            )
+        )
+
     def test_allows_only_exact_dotnet_release_compatibility_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

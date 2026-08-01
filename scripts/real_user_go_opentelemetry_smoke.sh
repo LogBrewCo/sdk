@@ -37,7 +37,7 @@ def escape_path(path: str) -> str:
     return "".join(escaped)
 
 
-def write_module(module_path: str, module_root: Path, *, exclude_otel: bool = False) -> None:
+def write_module(module_path: str, module_root: Path, *, exclude_nested: bool = False) -> None:
     version_dir = proxy / escape_path(module_path) / "@v"
     version_dir.mkdir(parents=True, exist_ok=True)
     (version_dir / "list").write_text(version + "\n")
@@ -51,7 +51,7 @@ def write_module(module_path: str, module_root: Path, *, exclude_otel: bool = Fa
             if not path.is_file() or ".git" in path.parts:
                 continue
             relative = path.relative_to(module_root)
-            if exclude_otel and relative.parts and relative.parts[0] == "otel":
+            if exclude_nested and relative.parts and relative.parts[0] in {"gin", "otel"}:
                 continue
             archive.write(path, zip_prefix + relative.as_posix())
 
@@ -59,7 +59,7 @@ def write_module(module_path: str, module_root: Path, *, exclude_otel: bool = Fa
 write_module(
     "github.com/LogBrewCo/sdk/go/logbrew",
     repo_root / "go/logbrew",
-    exclude_otel=True,
+    exclude_nested=True,
 )
 write_module(
     "github.com/LogBrewCo/sdk/go/logbrew/otel",
@@ -80,8 +80,9 @@ parent_zip = Path(sys.argv[1])
 otel_zip = Path(sys.argv[2])
 with zipfile.ZipFile(parent_zip) as archive:
     names = set(archive.namelist())
-    if "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/otel/go.mod" in names:
-        raise SystemExit("root Go module zip should not include nested OTel module")
+    for nested in ("gin", "otel"):
+        if f"github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/{nested}/go.mod" in names:
+            raise SystemExit(f"root Go module zip should not include nested {nested} module")
     readme = archive.read("github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/README.md").decode("utf-8")
     if "github.com/LogBrewCo/sdk/go/logbrew/otel" not in readme:
         raise SystemExit("root README missing OTel bridge guidance")

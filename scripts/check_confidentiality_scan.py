@@ -229,6 +229,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_go_structured_url_hostname_reference(relative_text, line, terms):
         return True
 
+    if is_go_gin_privacy_reference(relative_text, line):
+        return True
+
     if is_python_public_registry_hostname_reference(relative_text, line, terms):
         return True
 
@@ -1122,6 +1125,31 @@ def is_go_structured_url_hostname_reference(
         and line.strip()
         == 'host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(request.URL.Hostname()), "."))'
     )
+
+
+def is_go_gin_privacy_reference(relative_text: str, line: str) -> bool:
+    allowed_lines = {
+        "go/logbrew/gin/README.md": {
+            "values and drops keys that suggest credentials, payloads, URLs, headers,",
+        },
+        "go/logbrew/gin/middleware.go": {
+            "// credentials, payloads, URLs, headers, queries, or raw propagation are",
+            '"host", "hostname", "ipaddress", "key", "message", "params", "parameters", "password", "path",',
+            '"payload", "query", "remoteaddress", "secret", "sql", "stack", "statement", "token",',
+        },
+        "go/logbrew/gin/middleware_test.go": {
+            '"https://private.example.test/articles/private-article?token=private-query-value",',
+            'request := httptest.NewRequest(http.MethodGet, "/profiles/private-user?token=private", nil)',
+            'for _, unsafe := range append([]string{"private-user", "token=private", "traceparent"}, testCase.headers...) {',
+            'request := httptest.NewRequest(http.MethodGet, "/panic/private-id?token=private", nil)',
+            'for _, unsafe := range []string{"private panic value", "private-id", "token=private", "Bearer private", "Authorization"} {',
+        },
+        "scripts/real_user_go_gin_smoke.sh": {
+            '"https://private.example.test/articles/private-article?token=private-query",',
+            'httptest.NewRequest(http.MethodGet, "/panic/private-id?token=private-panic-query", nil),',
+        },
+    }
+    return line.strip() in allowed_lines.get(relative_text, set())
 
 
 def is_python_public_registry_hostname_reference(
