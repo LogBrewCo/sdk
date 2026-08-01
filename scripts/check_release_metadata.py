@@ -22,6 +22,7 @@ RUST_VERSION = "0.1.2"
 RUBYGEMS_VERSION = "0.1.3"
 PACKAGIST_VERSION = "0.1.6"
 DOTNET_VERSION = "0.1.5"
+DOTNET_ASPNETCORE_VERSION = "0.1.1"
 DOTNET_OTEL_VERSION = "0.1.1"
 DOTNET_HTTPCLIENT_VERSION = "0.1.0"
 UNITY_VERSION = "0.1.1"
@@ -1080,6 +1081,7 @@ def validate_root(root: Path, failures: list[str]) -> None:
 
 
 def validate_release_workflows(root: Path, failures: list[str]) -> None:
+    require_path(root, "scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh", failures)
     reconcile_path = require_path(root, RECONCILE_PUBLIC_WORKFLOW, failures)
     if reconcile_path.exists():
         reconcile = reconcile_path.read_text(encoding="utf-8")
@@ -1308,6 +1310,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet duplicate-safe publish": "--skip-duplicate",
             "NuGet symbol publish": "--symbol-source https://api.nuget.org/v3/index.json",
             "NuGet public install smoke": "bash scripts/real_user_dotnet_selected_public_nuget_smoke.sh",
+            "NuGet ASP.NET Core lifecycle smoke": (
+                "bash scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh"
+            ),
             "Python artifact manifest": "check_python_release_artifacts.py create",
             "Python packed install receipt": (
                 "real_user_python_public_pypi_smoke.sh --manifest"
@@ -1542,7 +1547,7 @@ def validate(
         root,
         failures,
         nuget_versions.get("LogBrew", DOTNET_VERSION),
-        nuget_versions.get("LogBrew.AspNetCore", PUBLIC_VERSION),
+        nuget_versions.get("LogBrew.AspNetCore", DOTNET_ASPNETCORE_VERSION),
         nuget_versions.get("LogBrew.EntityFrameworkCore", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.StackExchangeRedis", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.OpenTelemetry", DOTNET_OTEL_VERSION),

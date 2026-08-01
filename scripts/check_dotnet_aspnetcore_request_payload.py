@@ -98,6 +98,16 @@ def main() -> int:
     require(metric_meta.get("routeTemplate") == "/checkout/{cartId}", "metric route metadata mismatch")
     require(metadata(log).get("dotnetCategory") == "Program", "logger category mismatch")
     if expect_dependency:
+        for unsafe in (
+            "cart_123",
+            "card=dropme",
+            "payments.example.test",
+            "local-preview-only",
+            "scope.RequestPath",
+            "scope.ConnectionId",
+            "scope.RequestId",
+        ):
+            require(unsafe not in payload_text, f"automatic ASP.NET telemetry leaked unsafe text: {unsafe}")
         dependency_span = event_by_id_prefix(events, "aspnetcore_dependency_span_")
         dependency_attrs = dependency_span["attributes"]
         dependency_meta = metadata(dependency_span)
