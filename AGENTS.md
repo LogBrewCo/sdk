@@ -54,6 +54,19 @@ This public guide applies to the whole repository.
   unrelated packages unless they are in scope. Follow the public release docs
   and tear down only resources created by the check.
 
+## Code Review Rules
+
+- Flag framework code that duplicates a canonical core or shared runtime, and
+  flag cross-family wire changes that bypass the schema, fixtures, or contract
+  tests.
+- Flag unscoped public API or runtime-floor breaks, telemetry that broadens
+  collection without explicit bounds and redaction, and release claims not
+  tied to the exact installed public artifact.
+- The safe path is to change the canonical owner, add the closest focused
+  regression, fan out contract changes to every affected family, and run the
+  checks selected for those paths. Keep fully mechanical policy in scripts or
+  CI rather than expanding this guide.
+
 ## Public history and data boundaries
 
 - Branch names, commits, PR text, fixtures, and CI logs are public. Use only the
