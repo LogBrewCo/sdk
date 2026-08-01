@@ -278,6 +278,16 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 self.assertEqual(body.count(fixed_assertion), assertions)
                 self.assertIsNone(stale_version.search(body), script_path)
 
+    def test_next_instrumentation_type_smoke_installs_framework_types(self) -> None:
+        smoke = (ROOT / "scripts/real_user_next_smoke.sh").read_text(encoding="utf-8")
+
+        self.assertIn("@types/react", smoke)
+        self.assertIn("@types/react-dom", smoke)
+        self.assertIn("cat > instrumentation-consumer.ts", smoke)
+        self.assertIn("--lib ESNext,DOM,DOM.Iterable", smoke)
+        self.assertIn("--skipLibCheck true", smoke)
+        self.assertIn("Instrumentation.onRequestError", smoke)
+
     def test_repo_wide_guard_includes_newly_publishable_flask_and_httpclient(self) -> None:
         labels = {
             manifest.label

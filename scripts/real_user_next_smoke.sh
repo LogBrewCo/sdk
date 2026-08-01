@@ -136,6 +136,8 @@ npm install \
   "react-test-renderer@$react_version" \
   typescript \
   @types/node \
+  @types/react \
+  @types/react-dom \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
@@ -906,7 +908,6 @@ grep -q '"heavyDropped":55' "$tmp_dir/client-route-check.stderr.json"
 
 cat > consumer.ts <<'EOF'
 import { RecordingTransport, type TransportResponse } from "@logbrew/sdk";
-import type { Instrumentation } from "next";
 import {
   createRequestMetricEvent,
   createRouteRequestEvent,
@@ -918,10 +919,6 @@ import {
   type LogBrewRouteRequestEvent,
   type LogBrewTraceContext
 } from "@logbrew/next";
-import {
-  createLogBrewNextRequestErrorHandler,
-  type LogBrewNextRequestErrorOptions
-} from "@logbrew/next/instrumentation";
 
 const transport = RecordingTransport.alwaysAccept();
 let lastFlush: TransportResponse | null = null;
@@ -932,15 +929,6 @@ const typedClient = createLogBrewNextClient({
   sdkName: "typed-next-smoke",
   sdkVersion: "0.1.0"
 });
-
-const requestErrorOptions: LogBrewNextRequestErrorOptions = {
-  serverApiKey: "LOGBREW_SERVER_API_KEY",
-  transport,
-  includePathname: false,
-  idFactory: (_error, _request, context) => `evt_typed_${context.routeType}`
-};
-export const onRequestError: Instrumentation.onRequestError =
-  createLogBrewNextRequestErrorHandler(requestErrorOptions);
 
 export const POST = withLogBrewRouteHandler(
   async (request: Request, _context: { params?: Promise<Record<string, string>> }, helpers: LogBrewRouteHelpers) => {
@@ -1011,6 +999,35 @@ cat > tsconfig.json <<'EOF'
 }
 EOF
 npx tsc --project tsconfig.json
+
+cat > instrumentation-consumer.ts <<'EOF'
+import type { Instrumentation } from "next";
+import { RecordingTransport } from "@logbrew/sdk";
+import {
+  createLogBrewNextRequestErrorHandler,
+  type LogBrewNextRequestErrorOptions
+} from "@logbrew/next/instrumentation";
+
+const requestErrorOptions: LogBrewNextRequestErrorOptions = {
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  transport: RecordingTransport.alwaysAccept(),
+  includePathname: false,
+  idFactory: (_error, _request, context) => `evt_typed_${context.routeType}`
+};
+
+export const onRequestError: Instrumentation.onRequestError =
+  createLogBrewNextRequestErrorHandler(requestErrorOptions);
+EOF
+npx tsc \
+  --ignoreConfig \
+  --module NodeNext \
+  --moduleResolution NodeNext \
+  --target ES2022 \
+  --lib ESNext,DOM,DOM.Iterable \
+  --strict \
+  --skipLibCheck true \
+  --noEmit \
+  instrumentation-consumer.ts
 
 cat > client-consumer.ts <<'EOF'
 import {
