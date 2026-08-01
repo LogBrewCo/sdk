@@ -776,6 +776,9 @@ jobs:
       - name: Run PHP real-user smoke test
         run: bash scripts/real_user_php_smoke.sh
 
+      - name: Run PHP Symfony installed-app smoke test
+        run: bash scripts/real_user_php_symfony_smoke.sh
+
   swift-dry-run:
     name: Swift package checks
     runs-on: macos-latest

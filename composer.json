@@ -20,10 +20,16 @@
     "psr/log": "^3.0"
   },
   "require-dev": {
-    "monolog/monolog": "^3.0"
+    "monolog/monolog": "^3.0",
+    "symfony/console": "^6.4 || ^7.0 || ^8.0",
+    "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
+    "symfony/monolog-bundle": "^3.10 || ^4.0"
   },
   "suggest": {
-    "monolog/monolog": "Required for Monolog and Laravel logging channels."
+    "monolog/monolog": "Required for Monolog and Laravel logging channels.",
+    "symfony/console": "Required for the optional Symfony status and delivery-probe command.",
+    "symfony/framework-bundle": "Required for the native Symfony bundle and request telemetry.",
+    "symfony/monolog-bundle": "Required for automatic Symfony Monolog capture."
   },
   "autoload": {
     "psr-4": {

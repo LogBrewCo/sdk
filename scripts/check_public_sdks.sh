@@ -112,6 +112,7 @@ STEP_LABELS=(
   "PHP package install"
   "PHP package tests"
   "PHP real-user smoke"
+  "PHP Symfony installed-app smoke"
   "Packagist public install smoke"
   "Python package build checks"
   "Objective-C package checks"
@@ -786,6 +787,10 @@ mark_step_complete
 
 begin_next_step "PHP real-user smoke"
 run_shell_step "bash scripts/real_user_php_smoke.sh"
+mark_step_complete
+
+begin_next_step "PHP Symfony installed-app smoke"
+run_shell_step "bash scripts/real_user_php_symfony_smoke.sh"
 mark_step_complete
 
 begin_next_step "Packagist public install smoke"

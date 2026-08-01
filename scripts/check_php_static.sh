@@ -19,12 +19,15 @@ cat > "$tmp_dir/composer.json" <<'EOF'
     "guzzlehttp/guzzle": "7.15.1",
     "phpstan/phpstan": "2.2.1",
     "monolog/monolog": "3.9.0",
-    "psr/log": "3.0.2"
+    "psr/log": "3.0.2",
+    "symfony/console": "8.1.2",
+    "symfony/framework-bundle": "8.1.2",
+    "symfony/monolog-bundle": "4.0.2"
   }
 }
 EOF
 
-COMPOSER_CACHE_DIR="$tmp_dir/composer-cache" composer install \
+COMPOSER_CACHE_DIR="$tmp_dir/composer-cache" COMPOSER_NO_AUDIT=1 composer install \
   --working-dir="$tmp_dir" \
   --no-interaction \
   --no-progress \

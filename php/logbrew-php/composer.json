@@ -9,13 +9,19 @@
   },
   "require-dev": {
     "guzzlehttp/guzzle": "^7.9",
-    "monolog/monolog": "^3.0"
+    "monolog/monolog": "^3.0",
+    "symfony/console": "^6.4 || ^7.0 || ^8.0",
+    "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
+    "symfony/monolog-bundle": "^3.10 || ^4.0"
   },
   "suggest": {
     "guzzlehttp/guzzle": "Required for Guzzle 7 outbound HTTP tracing.",
     "monolog/monolog": "Required for Monolog and Laravel logging channels.",
+    "symfony/console": "Required for the optional Symfony status and delivery-probe command.",
     "psr/http-client": "Required to wrap an app-owned PSR-18 client.",
-    "psr/http-message": "Required for outbound HTTP request and response interfaces."
+    "psr/http-message": "Required for outbound HTTP request and response interfaces.",
+    "symfony/framework-bundle": "Required for the native Symfony bundle and request telemetry.",
+    "symfony/monolog-bundle": "Required for automatic Symfony Monolog capture."
   },
   "autoload": {
     "psr-4": {

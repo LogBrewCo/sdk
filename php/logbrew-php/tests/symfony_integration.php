@@ -1,0 +1,397 @@
+<?php
+
+declare(strict_types=1);
+
+use LogBrew\LogBrewTrace;
+use LogBrew\RecordingTransport;
+use LogBrew\Symfony\LogBrewBundle;
+use LogBrew\Symfony\SymfonyRequestSubscriber;
+use LogBrew\Symfony\SymfonyStatusCommand;
+use LogBrew\Symfony\SymfonyTelemetry;
+use LogBrew\TransportError;
+use Monolog\Handler\NoopHandler;
+use Monolog\Logger;
+use Symfony\Bundle\MonologBundle\DependencyInjection\MonologExtension;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Event\ExceptionEvent;
+use Symfony\Component\HttpKernel\Event\RequestEvent;
+use Symfony\Component\HttpKernel\Event\ResponseEvent;
+use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\HttpKernel\KernelEvents;
+
+final class SymfonyTestKernel implements HttpKernelInterface
+{
+    public function handle(Request $request, int $type = self::MAIN_REQUEST, bool $catch = true): Response
+    {
+        return new Response('', 200);
+    }
+}
+
+/** @return array<string, mixed> */
+function symfonyPayload(RecordingTransport $transport): array
+{
+    $body = $transport->lastBody();
+    if ($body === null) {
+        throw new RuntimeException('expected Symfony transport body');
+    }
+
+    $payload = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
+    if (!is_array($payload)) {
+        throw new RuntimeException('expected Symfony JSON payload');
+    }
+
+    $copied = [];
+    foreach ($payload as $key => $value) {
+        if (!is_string($key)) {
+            throw new RuntimeException('expected Symfony payload string keys');
+        }
+        $copied[$key] = $value;
+    }
+
+    return $copied;
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return list<array<string, mixed>>
+ */
+function symfonyEvents(array $payload): array
+{
+    $events = $payload['events'] ?? null;
+    if (!is_array($events)) {
+        throw new RuntimeException('expected Symfony events');
+    }
+
+    $copied = [];
+    foreach ($events as $event) {
+        if (!is_array($event)) {
+            throw new RuntimeException('expected Symfony event object');
+        }
+        $copiedEvent = [];
+        foreach ($event as $key => $value) {
+            if (!is_string($key)) {
+                throw new RuntimeException('expected Symfony event string keys');
+            }
+            $copiedEvent[$key] = $value;
+        }
+        $copied[] = $copiedEvent;
+    }
+
+    return $copied;
+}
+
+/**
+ * @param array<string, mixed> $event
+ * @return array<string, mixed>
+ */
+function symfonyAttributes(array $event): array
+{
+    $attributes = $event['attributes'] ?? null;
+    if (!is_array($attributes)) {
+        throw new RuntimeException('expected Symfony event attributes');
+    }
+
+    $copied = [];
+    foreach ($attributes as $key => $value) {
+        if (!is_string($key)) {
+            throw new RuntimeException('expected Symfony attribute string keys');
+        }
+        $copied[$key] = $value;
+    }
+
+    return $copied;
+}
+
+/**
+ * @param array<string, mixed> $event
+ * @return array<string, mixed>
+ */
+function symfonyMetadata(array $event): array
+{
+    $metadata = symfonyAttributes($event)['metadata'] ?? null;
+    if (!is_array($metadata)) {
+        throw new RuntimeException('expected Symfony event metadata');
+    }
+
+    $copied = [];
+    foreach ($metadata as $key => $value) {
+        if (!is_string($key)) {
+            throw new RuntimeException('expected Symfony metadata string keys');
+        }
+        $copied[$key] = $value;
+    }
+
+    return $copied;
+}
+
+/** @return array<string, mixed> */
+function symfonyJsonObject(string $json): array
+{
+    $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+    if (!is_array($decoded)) {
+        throw new RuntimeException('expected Symfony JSON object');
+    }
+
+    $copied = [];
+    foreach ($decoded as $key => $value) {
+        if (!is_string($key)) {
+            throw new RuntimeException('expected Symfony JSON object string keys');
+        }
+        $copied[$key] = $value;
+    }
+
+    return $copied;
+}
+
+$disabledTelemetry = new SymfonyTelemetry(
+    enabled: true,
+    apiKey: '',
+    service: 'symfony-demo',
+    release: '1.0.0',
+    environment: 'test'
+);
+assertTrue(!$disabledTelemetry->active(), 'expected missing Symfony key to disable capture safely');
+assertTrue($disabledTelemetry->status()['reason'] === 'missing_api_key', 'expected actionable missing-key status');
+assertTrue($disabledTelemetry->monologHandler() instanceof NoopHandler, 'expected missing-key Symfony no-op handler');
+$disabledCommand = new CommandTester(new SymfonyStatusCommand($disabledTelemetry));
+assertTrue($disabledCommand->execute(['--json' => true]) === 2, 'expected missing-key Symfony status exit');
+$disabledStatus = symfonyJsonObject(trim($disabledCommand->getDisplay()));
+assertTrue($disabledStatus['reason'] === 'missing_api_key', 'expected machine-readable missing-key status');
+
+$transport = RecordingTransport::alwaysAccept();
+$telemetry = new SymfonyTelemetry(
+    enabled: true,
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    service: 'symfony-demo',
+    release: '1.2.3',
+    environment: 'test',
+    transport: $transport,
+    timestampProvider: static fn (): DateTimeImmutable => new DateTimeImmutable('2026-08-01T14:00:00+00:00'),
+    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_{$kind}_{$sequence}"
+);
+assertTrue($telemetry->active(), 'expected configured Symfony telemetry to be active');
+$logger = new Logger('app', [$telemetry->monologHandler()]);
+$logger->info('below threshold');
+assertTrue(count($transport->sentBodies) === 0, 'expected Symfony warning threshold by default');
+$logger->warning('Order {order} failed.', ['order' => 'ord_123']);
+assertTrue(count($transport->sentBodies) === 1, 'expected immediate Symfony log delivery');
+$logPayload = symfonyPayload($transport);
+$logEvent = symfonyEvents($logPayload)[0];
+assertTrue($logEvent['type'] === 'log', 'expected Symfony Monolog event');
+$logMetadata = symfonyMetadata($logEvent);
+assertTrue($logMetadata['framework'] === 'symfony', 'expected Symfony framework metadata');
+assertTrue($logMetadata['service'] === 'symfony-demo', 'expected Symfony service metadata');
+$logSdk = $logPayload['sdk'] ?? null;
+if (!is_array($logSdk)) {
+    throw new RuntimeException('expected Symfony SDK identity');
+}
+assertTrue(($logSdk['name'] ?? null) === 'logbrew-php-symfony', 'expected Symfony SDK integration identity');
+assertTrue(!str_contains(json_encode($logPayload, JSON_THROW_ON_ERROR), 'LOGBREW_SERVER_API_KEY'), 'expected Symfony key to stay out of payload');
+
+$exceptionLogger = new Logger('app', [$telemetry->monologHandler()]);
+$exceptionLogger->error('Safe exception record', ['exception' => new RuntimeException('sensitive monolog exception')]);
+$exceptionLogPayload = symfonyPayload($transport);
+$encodedExceptionLog = json_encode($exceptionLogPayload, JSON_THROW_ON_ERROR);
+assertTrue(str_contains($encodedExceptionLog, RuntimeException::class), 'expected Symfony Monolog exception type');
+assertTrue(!str_contains($encodedExceptionLog, 'sensitive monolog exception'), 'expected Symfony Monolog exception message exclusion');
+
+$testTransport = RecordingTransport::alwaysAccept();
+$testTelemetry = new SymfonyTelemetry(
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    service: 'symfony-demo',
+    release: '1.2.3',
+    environment: 'test',
+    transport: $testTransport,
+    timestampProvider: static fn (): DateTimeImmutable => new DateTimeImmutable('2026-08-01T14:00:00+00:00'),
+    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_{$kind}_{$sequence}"
+);
+$statusCommand = new CommandTester(new SymfonyStatusCommand($testTelemetry));
+assertTrue($statusCommand->execute(['--send-probe' => true, '--json' => true]) === 0, 'expected Symfony delivery-probe success');
+$statusPayload = symfonyJsonObject(trim($statusCommand->getDisplay()));
+assertTrue($statusPayload['delivery'] === 'accepted', 'expected Symfony accepted delivery status');
+assertTrue($statusPayload['statusCode'] === 202, 'expected Symfony delivery response code');
+assertTrue(count($testTransport->sentBodies) === 1, 'expected one Symfony delivery-probe request');
+
+$requestTransport = RecordingTransport::alwaysAccept();
+$requestTelemetry = new SymfonyTelemetry(
+    enabled: true,
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    service: 'symfony-demo',
+    release: '1.2.3',
+    environment: 'test',
+    transport: $requestTransport,
+    timestampProvider: static fn (): DateTimeImmutable => new DateTimeImmutable('2026-08-01T14:00:00+00:00'),
+    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_{$kind}_{$sequence}"
+);
+$subscriber = new SymfonyRequestSubscriber($requestTelemetry);
+$kernel = new SymfonyTestKernel();
+$request = Request::create('/en/blog/posts/concrete-path-marker?query_key=query-value-marker', 'GET');
+$request->attributes->set('_route', 'blog_index');
+$request->headers->set('traceparent', '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01');
+$subscriber->onKernelRequest(new RequestEvent($kernel, $request, HttpKernelInterface::MAIN_REQUEST));
+assertTrue(LogBrewTrace::current()?->traceId === '4bf92f3577b34da6a3ce929d0e0e4736', 'expected Symfony trace continuation');
+$subscriber->onKernelResponse(new ResponseEvent($kernel, $request, HttpKernelInterface::MAIN_REQUEST, new Response('', 200)));
+assertTrue(LogBrewTrace::current() === null, 'expected Symfony request trace scope reset');
+assertTrue(count($requestTransport->sentBodies) === 1, 'expected one Symfony request delivery');
+$requestPayload = symfonyPayload($requestTransport);
+assertTrue(count(symfonyEvents($requestPayload)) === 1, 'expected one successful Symfony request span');
+$span = symfonyEvents($requestPayload)[0];
+assertTrue($span['type'] === 'span', 'expected Symfony request span');
+assertTrue((symfonyAttributes($span)['name'] ?? null) === 'GET symfony.route.blog_index', 'expected stable Symfony route name');
+$encodedRequest = json_encode($requestPayload, JSON_THROW_ON_ERROR);
+assertTrue(!str_contains($encodedRequest, 'concrete-path-marker'), 'expected concrete Symfony path exclusion');
+assertTrue(!str_contains($encodedRequest, 'query-value-marker'), 'expected Symfony query value exclusion');
+assertTrue(!str_contains($encodedRequest, '00-4bf92'), 'expected raw traceparent exclusion');
+
+$exceptionTransport = RecordingTransport::alwaysAccept();
+$exceptionTelemetry = new SymfonyTelemetry(
+    enabled: true,
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    service: 'symfony-demo',
+    release: '1.2.3',
+    environment: 'test',
+    transport: $exceptionTransport,
+    timestampProvider: static fn (): DateTimeImmutable => new DateTimeImmutable('2026-08-01T14:00:00+00:00'),
+    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_{$kind}_{$sequence}"
+);
+$exceptionSubscriber = new SymfonyRequestSubscriber($exceptionTelemetry);
+$exceptionRequest = Request::create('/admin/accounts/concrete-account?authorization=fixture-value', 'POST');
+$exceptionRequest->attributes->set('_route', 'admin_user_delete');
+$exceptionSubscriber->onKernelRequest(new RequestEvent($kernel, $exceptionRequest, HttpKernelInterface::MAIN_REQUEST));
+$exceptionSubscriber->onKernelException(new ExceptionEvent(
+    $kernel,
+    $exceptionRequest,
+    HttpKernelInterface::MAIN_REQUEST,
+    new RuntimeException('sensitive database message')
+));
+$exceptionSubscriber->onKernelResponse(new ResponseEvent(
+    $kernel,
+    $exceptionRequest,
+    HttpKernelInterface::MAIN_REQUEST,
+    new Response('', 500)
+));
+assertTrue(count($exceptionTransport->sentBodies) === 1, 'expected one batched Symfony failure delivery');
+$exceptionPayload = symfonyPayload($exceptionTransport);
+assertTrue(count(symfonyEvents($exceptionPayload)) === 2, 'expected Symfony issue and request span');
+$exceptionEvents = symfonyEvents($exceptionPayload);
+assertTrue($exceptionEvents[0]['type'] === 'issue', 'expected Symfony exception issue');
+assertTrue($exceptionEvents[1]['type'] === 'span', 'expected failed Symfony request span');
+assertTrue(
+    (symfonyAttributes($exceptionEvents[0])['title'] ?? null) === RuntimeException::class,
+    'expected useful Symfony exception title'
+);
+$issueMetadata = symfonyMetadata($exceptionEvents[0]);
+assertTrue($issueMetadata['exceptionType'] === RuntimeException::class, 'expected Symfony exception type');
+assertTrue($issueMetadata['errorName'] === RuntimeException::class, 'expected backend-native Symfony exception type');
+$issueGroupingKey = $issueMetadata['issueGroupingKey'] ?? null;
+assertTrue(
+    is_string($issueGroupingKey)
+        && preg_match('/^symfony-exception-[0-9a-f]{64}$/', $issueGroupingKey) === 1,
+    'expected privacy-safe Symfony issue grouping key'
+);
+assertTrue(
+    $issueMetadata['issueGroupingSource'] === 'exception_type_route_file',
+    'expected explicit Symfony grouping source'
+);
+assertTrue(
+    $issueMetadata['errorFrameFile'] === basename(__FILE__),
+    'expected basename-only Symfony exception frame'
+);
+assertTrue(
+    is_int($issueMetadata['errorFrameLine']) && $issueMetadata['errorFrameLine'] > 0,
+    'expected positive Symfony exception frame line'
+);
+assertTrue($issueMetadata['handled'] === false, 'expected unhandled Symfony mechanism state');
+assertTrue($issueMetadata['mechanism'] === 'symfony.kernel_exception', 'expected Symfony mechanism');
+$encodedException = json_encode($exceptionPayload, JSON_THROW_ON_ERROR);
+assertTrue(!str_contains($encodedException, 'sensitive database message'), 'expected exception message exclusion by default');
+assertTrue(!str_contains($encodedException, 'concrete-account'), 'expected concrete Symfony path exclusion on failure');
+assertTrue(!str_contains($encodedException, 'authorization'), 'expected Symfony query key exclusion on failure');
+assertTrue(!str_contains($encodedException, dirname(__DIR__)), 'expected absolute Symfony source path exclusion');
+
+$isolatedErrors = [];
+$failingTransport = new RecordingTransport([
+    TransportError::network('sensitive transport failure'),
+    202,
+]);
+$failingTelemetry = new SymfonyTelemetry(
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    service: 'symfony-demo',
+    release: '1.2.3',
+    environment: 'test',
+    transport: $failingTransport,
+    timestampProvider: static fn (): DateTimeImmutable => new DateTimeImmutable('2026-08-01T14:00:00+00:00'),
+    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_{$kind}_{$sequence}",
+    onError: static function (Throwable $error) use (&$isolatedErrors): void {
+        $isolatedErrors[] = $error;
+    }
+);
+$failingSubscriber = new SymfonyRequestSubscriber($failingTelemetry);
+$firstFailingRequest = Request::create('/concrete/first?query_key=query-value-marker', 'GET');
+$firstFailingRequest->attributes->set('_route', 'failure_probe');
+$failingSubscriber->onKernelRequest(new RequestEvent($kernel, $firstFailingRequest, HttpKernelInterface::MAIN_REQUEST));
+$failingSubscriber->onKernelResponse(new ResponseEvent(
+    $kernel,
+    $firstFailingRequest,
+    HttpKernelInterface::MAIN_REQUEST,
+    new Response('', 200)
+));
+assertTrue(LogBrewTrace::current() === null, 'expected Symfony trace scope reset after transport failure');
+assertTrue(count($isolatedErrors) === 1, 'expected isolated Symfony transport failure callback');
+
+$secondFailingRequest = Request::create('/concrete/second?query_key=query-value-marker', 'GET');
+$secondFailingRequest->attributes->set('_route', 'failure_probe');
+$failingSubscriber->onKernelRequest(new RequestEvent($kernel, $secondFailingRequest, HttpKernelInterface::MAIN_REQUEST));
+$failingSubscriber->onKernelResponse(new ResponseEvent(
+    $kernel,
+    $secondFailingRequest,
+    HttpKernelInterface::MAIN_REQUEST,
+    new Response('', 200)
+));
+assertTrue(count($failingTransport->sentBodies) === 3, 'expected failed Symfony batch retry before new request span');
+assertTrue($failingTransport->sentBodies[0] === $failingTransport->sentBodies[1], 'expected byte-identical Symfony retry');
+assertTrue(!str_contains(implode('', $failingTransport->sentBodies), '/concrete/'), 'expected Symfony failure retry path exclusion');
+
+$container = new ContainerBuilder();
+$container->setParameter('kernel.environment', 'test');
+$container->setParameter('kernel.bundles', ['MonologBundle' => 'Symfony\\Bundle\\MonologBundle\\MonologBundle']);
+$container->registerExtension(new MonologExtension());
+$bundle = new LogBrewBundle();
+$extension = $bundle->getContainerExtension();
+if (!$extension instanceof PrependExtensionInterface) {
+    throw new RuntimeException('expected Symfony prepend extension');
+}
+$extension->prepend($container);
+$monologConfig = $container->getExtensionConfig('monolog');
+$firstMonologConfig = $monologConfig[0] ?? null;
+if (!is_array($firstMonologConfig)) {
+    throw new RuntimeException('expected Symfony Monolog config');
+}
+$monologHandlers = $firstMonologConfig['handlers'] ?? null;
+if (!is_array($monologHandlers)) {
+    throw new RuntimeException('expected Symfony Monolog handlers');
+}
+$logBrewHandler = $monologHandlers['logbrew'] ?? null;
+if (!is_array($logBrewHandler)) {
+    throw new RuntimeException('expected Symfony LogBrew handler config');
+}
+assertTrue(($logBrewHandler['type'] ?? null) === 'service', 'expected automatic Symfony Monolog handler');
+assertTrue(($logBrewHandler['id'] ?? null) === 'logbrew.symfony.monolog_handler', 'expected SDK-owned Symfony handler service');
+$logBrewChannels = $logBrewHandler['channels'] ?? null;
+if (!is_array($logBrewChannels)) {
+    throw new RuntimeException('expected Symfony channel exclusions');
+}
+assertTrue(in_array('!request', $logBrewChannels, true), 'expected Symfony formatted exception-log exclusion');
+$extension->load([[]], $container);
+assertTrue($container->hasDefinition('logbrew.symfony.telemetry'), 'expected Symfony telemetry service');
+assertTrue($container->hasDefinition('logbrew.symfony.request_subscriber'), 'expected Symfony request subscriber');
+assertTrue($container->hasDefinition('logbrew.symfony.status_command'), 'expected Symfony status command');
+
+$events = SymfonyRequestSubscriber::getSubscribedEvents();
+assertTrue(isset($events[KernelEvents::REQUEST], $events[KernelEvents::EXCEPTION], $events[KernelEvents::RESPONSE]), 'expected Symfony request lifecycle subscriptions');
+
+fwrite(STDOUT, "php Symfony integration checks passed\n");

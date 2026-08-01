@@ -401,14 +401,18 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Swift real-user smoke"',
         )
 
-    def test_public_verifier_runs_packagist_public_install_smoke(self) -> None:
+    def test_public_verifier_runs_symfony_before_packagist_public_install_smoke(self) -> None:
         script = SCRIPT.read_text()
 
+        self.assertIn('"PHP Symfony installed-app smoke"', script)
         self.assertIn('"Packagist public install smoke"', script)
         self.assertRegex(
             script,
             r'begin_next_step "PHP real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_php_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "PHP Symfony installed-app smoke"\n'
+            r'run_shell_step "bash scripts/real_user_php_symfony_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Packagist public install smoke"\n'
             r'run_shell_step "bash scripts/real_user_packagist_public_smoke\.sh"\n'

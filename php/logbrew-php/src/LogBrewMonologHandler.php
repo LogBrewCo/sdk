@@ -43,7 +43,8 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
         int|string|Level $level = Level::Debug,
         bool $bubble = true,
         private readonly mixed $onError = null,
-        private readonly bool $raiseErrors = false
+        private readonly bool $raiseErrors = false,
+        private readonly bool $includeExceptionMessage = true
     ) {
         parent::__construct($level, $bubble);
         LogBrewClient::requireNonEmpty('logger name', $this->loggerName);
@@ -144,7 +145,9 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
         }
 
         $metadata['exceptionType'] = $value::class;
-        $metadata['exceptionMessage'] = $value->getMessage();
+        if ($this->includeExceptionMessage) {
+            $metadata['exceptionMessage'] = $value->getMessage();
+        }
         if ($this->includeExceptionTrace) {
             $metadata['exceptionTrace'] = $value->getTraceAsString();
         }
