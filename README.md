@@ -55,7 +55,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | RabbitMQ / amqplib | [`@logbrew/amqplib`](js/logbrew-amqplib) | Explicit RabbitMQ publish/consume trace correlation |
 | Amazon SQS | [`@logbrew/aws-sqs`](js/logbrew-aws-sqs) | Explicit SQS send/receive/process trace correlation |
 | Express | [`@logbrew/express`](js/logbrew-express) | Express request/error middleware |
-| Fastify | [`@logbrew/fastify`](js/logbrew-fastify) | Fastify plugin and request hooks |
+| Fastify | [`@logbrew/fastify`](js/logbrew-fastify) | Fastify request/error hooks and opt-in existing application-log capture |
 | NestJS | [`@logbrew/nestjs`](js/logbrew-nestjs) | NestJS interceptor capture |
 | Angular | [`@logbrew/angular`](js/logbrew-angular) | Angular providers, injection helpers, optional error capture |
 | Vue | [`@logbrew/vue`](js/logbrew-vue) | Vue plugin/composable capture |

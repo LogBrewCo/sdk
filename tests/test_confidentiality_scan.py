@@ -189,6 +189,24 @@ class ConfidentialityScanTests(unittest.TestCase):
                 f'console.log("arbitrary {sensitive_name}")',
             )
         )
+        fastify_readme = ROOT / "js" / "logbrew-fastify" / "README.md"
+        fastify_line = next(
+            line
+            for line in fastify_readme.read_text(encoding="utf-8").splitlines()
+            if line.startswith("Primitive structured fields become bounded LogBrew metadata.")
+        )
+        self.assertTrue(
+            check_confidentiality_scan.is_js_pino_privacy_reference(
+                "js/logbrew-fastify/README.md",
+                fastify_line,
+            )
+        )
+        self.assertFalse(
+            check_confidentiality_scan.is_js_pino_privacy_reference(
+                "js/logbrew-fastify/README.md",
+                fastify_line + " Extra text.",
+            )
+        )
 
     def test_allows_only_exact_dotnet_release_compatibility_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

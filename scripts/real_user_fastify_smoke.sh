@@ -87,7 +87,9 @@ grep -q 'traceparent' "$tmp_dir/fastify-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/fastify-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/fastify-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/fastify-readme.md"
-grep -q 'installLogBrewPinoInstrumentation' "$tmp_dir/fastify-readme.md"
+grep -q 'captureApplicationLogs: true' "$tmp_dir/fastify-readme.md"
+grep -q 'onApplicationLogCaptureError' "$tmp_dir/fastify-readme.md"
+grep -q 'installLogBrewPinoInstrumentation()' "$tmp_dir/fastify-readme.md"
 grep -q 'preserves the original serialized output' "$tmp_dir/node-readme.md"
 grep -q 'Pino 9.11' "$tmp_dir/node-readme.md"
 python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
@@ -146,10 +148,6 @@ import Fastify from "fastify";
 import { Writable } from "node:stream";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
-  createLogBrewNodeClient,
-  installLogBrewPinoInstrumentation
-} from "@logbrew/node";
-import {
   createErrorEvent,
   createLogBrewFastifyClient,
   createRequestMetricEvent,
@@ -164,27 +162,8 @@ const autoTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
 const metricOnlyTransport = RecordingTransport.alwaysAccept();
 const pinoTransport = RecordingTransport.alwaysAccept();
-const pinoDrops = [];
-const pinoClient = createLogBrewNodeClient({
-  automaticDelivery: false,
-  maxQueueSize: 64,
-  onEventDropped(drop) {
-    pinoDrops.push(drop.reason);
-  },
-  serverApiKey: "LOGBREW_SERVER_API_KEY",
-  transport: pinoTransport
-});
 const pinoErrors = [];
 const pinoOutput = [];
-const pinoCapture = installLogBrewPinoInstrumentation({
-  client: pinoClient,
-  metadata: { framework: "fastify", service: "checkout" },
-  onError(error) {
-    pinoErrors.push(error instanceof Error ? error.message : String(error));
-  },
-  traceProvider: getActiveLogBrewTrace,
-  transport: pinoTransport
-});
 const app = Fastify({
   logger: {
     level: "warn",
@@ -249,8 +228,13 @@ await app.register(async (scope) => {
 await app.register(async (scope) => {
   await scope.register(logbrewFastifyPlugin, {
     serverApiKey: "LOGBREW_SERVER_API_KEY",
+    applicationLogTransport: pinoTransport,
+    captureApplicationLogs: true,
     now: () => "2026-06-02T10:00:06Z",
     nowMs: () => 100,
+    onApplicationLogCaptureError(error) {
+      pinoErrors.push(error instanceof Error ? error.message : String(error));
+    },
     spanIdFactory: () => "b7ad6b7169203331",
     requestEvent(request, reply, { durationMs }) {
       return createRequestEvent(request, reply, {
@@ -308,6 +292,7 @@ await app.register(async (scope) => {
 });
 
 const address = await app.listen({ host: "127.0.0.1", port: 0 });
+app.log.warn({ workerState: "ready" }, "cache worker ready");
 const okResponse = await fetch(`${address}/logbrew`);
 const okText = await okResponse.text();
 const autoResponse = await fetch(`${address}/auto?token=secret`, {
@@ -317,23 +302,6 @@ const autoResponse = await fetch(`${address}/auto?token=secret`, {
 });
 await autoResponse.json();
 await waitFor(() => autoTransport.sentBodies.length === 1 && activeTraceFromAuto);
-await waitFor(() => pinoClient.pendingEvents() === 1);
-const pinoFlush = await pinoCapture.flush();
-if (pinoFlush?.statusCode !== 202 || pinoErrors.length !== 0) {
-  throw new Error(`unexpected Pino capture result: ${JSON.stringify({ pinoErrors, pinoFlush })}`);
-}
-const pinoFirstBody = pinoTransport.lastBody();
-for (let sequence = 0; sequence < 250; sequence += 1) {
-  app.log.warn({ sequence }, "Pino load probe");
-}
-if (pinoClient.pendingEvents() !== 64 || pinoDrops.length !== 186) {
-  throw new Error(`Pino queue bounds changed: ${JSON.stringify({ drops: pinoDrops.length, pending: pinoClient.pendingEvents() })}`);
-}
-await pinoCapture.flush();
-const pinoLoadPayload = JSON.parse(pinoTransport.lastBody());
-if (pinoLoadPayload.events.length !== 64 || pinoLoadPayload.events.some((event) => event.attributes.message !== "Pino load probe")) {
-  throw new Error(`Pino load payload changed: ${pinoTransport.lastBody()}`);
-}
 const metricResponse = await fetch(`${address}/metrics-only/42?token=secret#hidden`);
 await metricResponse.json();
 await waitFor(() => metricOnlyTransport.sentBodies.length === 1);
@@ -344,14 +312,16 @@ const failResponse = await fetch(`${address}/fail?token=secret`, {
 });
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
-pinoCapture.uninstall();
-app.log.warn("after Pino uninstall");
-await pinoCapture.flush();
-if (pinoTransport.sentBodies.length !== 2) {
-  throw new Error(`Pino uninstall did not stop capture: ${pinoTransport.sentBodies.length}`);
-}
 await app.close();
-await pinoClient.shutdown();
+if (pinoErrors.length !== 0 || pinoTransport.sentBodies.length !== 1) {
+  throw new Error(`unexpected Fastify application-log capture result: ${JSON.stringify({ pinoErrors, sent: pinoTransport.sentBodies.length })}`);
+}
+const pinoFirstBody = pinoTransport.lastBody();
+app.log.warn("after Fastify application-log capture closed");
+await new Promise((resolve) => setTimeout(resolve, 20));
+if (pinoTransport.sentBodies.length !== 1) {
+  throw new Error(`Fastify close did not uninstall application-log capture: ${pinoTransport.sentBodies.length}`);
+}
 
 const autoPayload = JSON.parse(autoTransport.lastBody());
 if (autoPayload.events[0].type !== "span" || autoPayload.events[0].id !== "evt_fastify_request_001") {
@@ -379,13 +349,17 @@ if (activeTraceFromAuto?.spanId !== "b7ad6b7169203331") {
   throw new Error(`async trace context was not preserved: ${JSON.stringify(activeTraceFromAuto)}`);
 }
 const pinoPayload = JSON.parse(pinoFirstBody);
-const pinoEvent = pinoPayload.events[0];
+const pinoEvent = pinoPayload.events.find((event) => event.attributes.message === "checkout queued");
+const appPinoEvent = pinoPayload.events.find((event) => event.attributes.message === "cache worker ready");
 const originalPinoOutput = pinoOutput.join("");
-if (pinoPayload.events.length !== 1 || pinoEvent?.attributes.message !== "checkout queued") {
+if (pinoPayload.events.length !== 2 || !pinoEvent || !appPinoEvent) {
   throw new Error(`unexpected Pino payload: ${pinoTransport.lastBody()}`);
 }
 if (!originalPinoOutput.includes("checkout queued") || !originalPinoOutput.includes("Bearer hidden")) {
   throw new Error(`app-owned Pino output was replaced or rewritten: ${originalPinoOutput}`);
+}
+if (appPinoEvent.attributes.metadata["context.workerState"] !== "ready") {
+  throw new Error(`Fastify app.log metadata changed: ${pinoTransport.lastBody()}`);
 }
 if (pinoEvent.attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`Pino log was not trace-correlated: ${pinoTransport.lastBody()}`);
@@ -527,7 +501,10 @@ async function waitFor(predicate) {
 }
 EOF
 
-node smoke.mjs > "$tmp_dir/fastify-smoke.stdout.json" 2> "$tmp_dir/fastify-smoke.stderr.json"
+if ! node smoke.mjs > "$tmp_dir/fastify-smoke.stdout.json" 2> "$tmp_dir/fastify-smoke.stderr.json"; then
+  cat "$tmp_dir/fastify-smoke.stderr.json" >&2
+  exit 1
+fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/fastify-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/fastify-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/fastify-smoke.stderr.json"
@@ -538,6 +515,62 @@ grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q 'GET /fail failed' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q '"pinoCaptured":"checkout queued"' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q '"pinoOriginalDestinationPreserved":true' "$tmp_dir/fastify-smoke.stderr.json"
+
+cat > application-log-guards.mjs <<'EOF'
+import assert from "node:assert/strict";
+import Fastify from "fastify";
+import { logbrewFastifyPlugin } from "@logbrew/fastify";
+
+const callbackErrors = [];
+const failingApp = Fastify({ logger: { level: "warn" } });
+await failingApp.register(logbrewFastifyPlugin, {
+  applicationLogTransport: {
+    async send() {
+      throw new Error("application-log delivery sentinel");
+    }
+  },
+  captureApplicationLogs: true,
+  captureRequests: false,
+  onApplicationLogCaptureError(error, { client }) {
+    callbackErrors.push({
+      message: error instanceof Error ? error.message : String(error),
+      pending: client.pendingEvents()
+    });
+    throw new Error("callback sentinel");
+  },
+  serverApiKey: "failing-application-log-key"
+});
+await failingApp.ready();
+failingApp.log.warn("application-log failure probe");
+await failingApp.close();
+
+assert.equal(callbackErrors.length, 1);
+assert.match(callbackErrors[0].message, /application-log delivery sentinel/);
+console.log(JSON.stringify({ applicationLogGuards: true, ok: true }));
+EOF
+
+node application-log-guards.mjs > "$tmp_dir/fastify-application-log-guards.json"
+grep -q '"applicationLogGuards":true' "$tmp_dir/fastify-application-log-guards.json"
+
+cat > application-log-disabled.mjs <<'EOF'
+import Fastify from "fastify";
+import { RecordingTransport } from "@logbrew/sdk";
+import { logbrewFastifyPlugin } from "@logbrew/fastify";
+
+const app = Fastify();
+await app.register(logbrewFastifyPlugin, {
+  captureApplicationLogs: true,
+  serverApiKey: "disabled-logger-key",
+  transport: RecordingTransport.alwaysAccept()
+});
+await app.ready();
+EOF
+
+if node application-log-disabled.mjs > "$tmp_dir/fastify-application-log-disabled.stdout" 2> "$tmp_dir/fastify-application-log-disabled.stderr"; then
+  echo "captureApplicationLogs unexpectedly accepted a disabled Fastify logger" >&2
+  exit 1
+fi
+grep -q "captureApplicationLogs requires Fastify's Pino logger to be enabled" "$tmp_dir/fastify-application-log-disabled.stderr"
 
 cat > default-delivery.mjs <<'EOF'
 import Fastify from "fastify";
@@ -715,6 +748,43 @@ EOF
 node default-delivery.cjs > "$tmp_dir/fastify-default-delivery-cjs.json"
 grep -q '"cjsDefaultDelivered":"evt_fastify_cjs_default"' "$tmp_dir/fastify-default-delivery-cjs.json"
 
+cat > application-log.cjs <<'EOF'
+const Fastify = require("fastify");
+const { RecordingTransport } = require("@logbrew/sdk");
+const { logbrewFastifyPlugin } = require("@logbrew/fastify");
+
+(async () => {
+  const transport = RecordingTransport.alwaysAccept();
+  const app = Fastify({ logger: { level: "warn" } });
+  await app.register(logbrewFastifyPlugin, {
+    applicationLogTransport: transport,
+    captureApplicationLogs: true,
+    captureRequests: false,
+    serverApiKey: "cjs-application-log-key"
+  });
+  await app.ready();
+  app.log.warn({ module: "cache" }, "CommonJS application log");
+  await app.close();
+
+  const payload = JSON.parse(transport.lastBody());
+  const event = payload.events[0];
+  if (
+    payload.events.length !== 1
+    || event.attributes.message !== "CommonJS application log"
+    || event.attributes.metadata["context.module"] !== "cache"
+  ) {
+    throw new Error(`unexpected CommonJS application-log payload: ${transport.lastBody()}`);
+  }
+  console.log(JSON.stringify({ cjsApplicationLog: event.attributes.message, ok: true }));
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+EOF
+
+node application-log.cjs > "$tmp_dir/fastify-application-log-cjs.json"
+grep -q '"cjsApplicationLog":"CommonJS application log"' "$tmp_dir/fastify-application-log-cjs.json"
+
 for pino_minimum in 9.11.0 10.1.0; do
   matrix_dir="$tmp_dir/pino-$pino_minimum"
   mkdir -p "$matrix_dir"
@@ -816,7 +886,7 @@ import {
   type LogBrewPinoInstrumentationHandle
 } from "@logbrew/node";
 
-const app = Fastify();
+const app = Fastify({ logger: true });
 const client = createLogBrewFastifyClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "typed-fastify-smoke",
@@ -833,6 +903,9 @@ const pinoCapture: LogBrewPinoInstrumentationHandle = installLogBrewPinoInstrume
 pinoCapture.uninstall();
 
 app.register(logbrewFastifyPlugin, {
+  applicationLogClient: pinoClient,
+  applicationLogTransport: RecordingTransport.alwaysAccept(),
+  captureApplicationLogs: true,
   client,
   captureRequestMetrics: true,
   metricIdFactory(request, reply) {
@@ -856,6 +929,10 @@ app.register(logbrewFastifyPlugin, {
       event.attributes.parentSpanId?.toUpperCase();
     }
     return event;
+  },
+  onApplicationLogCaptureError(error, { client: applicationLogClient }) {
+    String(error);
+    applicationLogClient.pendingEvents();
   },
   transport: RecordingTransport.alwaysAccept()
 });

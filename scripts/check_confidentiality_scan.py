@@ -617,7 +617,7 @@ def is_js_pino_privacy_reference(relative_text: str, line: str) -> bool:
         },
         "js/logbrew-fastify/README.md": {
             'redact: ["authorization", "cookie", "password", "token"]',
-            "This works with Fastify's existing JSON stream or transport, including `pino-pretty`; LogBrew observes the finalized JSON before Pino writes to that destination. Automatic capture requires Node.js 18.19 or newer and Pino 9.11+ or 10.1+. It captures primitive structured fields but automatically excludes credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text. Keep normal Pino redaction enabled because the log message itself is telemetry. Use `shouldCapture` for app-specific filtering and `includeErrorStack: true` only under an explicit stack-data policy.",
+            "Primitive structured fields become bounded LogBrew metadata. Credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text are excluded automatically. Keep normal Pino redaction enabled because the log message itself is telemetry.",
         },
         "js/logbrew-js/core.cjs": {
             '"credentials",',

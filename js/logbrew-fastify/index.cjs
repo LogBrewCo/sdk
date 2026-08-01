@@ -6,11 +6,15 @@ const {
   parseTraceparent,
   SdkError
 } = require("@logbrew/sdk");
-const { createNodeFetchTransport } = require("@logbrew/node");
+const {
+  createLogBrewNodeClient,
+  createNodeFetchTransport,
+  installLogBrewPinoInstrumentation
+} = require("@logbrew/node");
 const { AsyncLocalStorage } = require("node:async_hooks");
 
 const DEFAULT_SDK_NAME = "logbrew-fastify";
-const DEFAULT_SDK_VERSION = "0.1.2";
+const DEFAULT_SDK_VERSION = "0.1.3";
 const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewFastifyClient({
@@ -36,7 +40,25 @@ async function logbrewFastifyPluginImpl(fastify, options = {}) {
   const defaultTransport = options.transport === undefined
     ? createNodeFetchTransport(options)
     : undefined;
+  const applicationLogCapture = installFastifyApplicationLogCapture(
+    fastify,
+    options,
+    defaultTransport
+  );
   const startedAtByRequest = new WeakMap();
+
+  if (applicationLogCapture) {
+    fastify.addHook("onClose", async () => {
+      applicationLogCapture.uninstall();
+      try {
+        await applicationLogCapture.client.shutdown(applicationLogCapture.transport);
+      } catch (error) {
+        await notifyApplicationLogFailure(options, error, {
+          client: applicationLogCapture.client
+        });
+      }
+    });
+  }
 
   fastify.addHook("onRequest", async (request, reply) => {
     const client = resolveClient(options, request, reply);
@@ -264,6 +286,82 @@ function resolveTransport(options, request, reply, client, defaultTransport) {
   return options.transport ?? defaultTransport;
 }
 
+function installFastifyApplicationLogCapture(fastify, options, defaultTransport) {
+  if (
+    options.captureApplicationLogs !== undefined
+    && typeof options.captureApplicationLogs !== "boolean"
+  ) {
+    throw new SdkError("configuration_error", "captureApplicationLogs must be a boolean");
+  }
+  if (
+    options.onApplicationLogCaptureError !== undefined
+    && typeof options.onApplicationLogCaptureError !== "function"
+  ) {
+    throw new SdkError(
+      "configuration_error",
+      "onApplicationLogCaptureError must be a function"
+    );
+  }
+  if (options.captureApplicationLogs !== true) {
+    return undefined;
+  }
+
+  assertCompatibleFastifyPino(fastify.log?.version);
+  const transport = options.applicationLogTransport
+    ?? (typeof options.transport === "function" ? undefined : options.transport)
+    ?? defaultTransport;
+  const client = options.applicationLogClient
+    ?? createLogBrewNodeClient({
+      ...options,
+      sdkName: options.sdkName ?? DEFAULT_SDK_NAME,
+      sdkVersion: options.sdkVersion ?? DEFAULT_SDK_VERSION,
+      transport
+    });
+  const capture = installLogBrewPinoInstrumentation({
+    client,
+    metadata: { framework: "fastify" },
+    onError(error) {
+      return notifyApplicationLogFailure(options, error, { client });
+    },
+    shouldCapture: shouldCaptureFastifyApplicationLog,
+    traceProvider: getActiveLogBrewTrace,
+    transport
+  });
+  return { ...capture, client, transport };
+}
+
+function assertCompatibleFastifyPino(version) {
+  if (typeof version !== "string") {
+    throw new SdkError(
+      "configuration_error",
+      "captureApplicationLogs requires Fastify's Pino logger to be enabled"
+    );
+  }
+  const match = /^(\d+)\.(\d+)(?:\.|$)/u.exec(version);
+  const major = Number(match?.[1]);
+  const minor = Number(match?.[2]);
+  if (
+    !Number.isInteger(major)
+    || !Number.isInteger(minor)
+    || major < 9
+    || (major === 9 && minor < 11)
+    || (major === 10 && minor < 1)
+  ) {
+    throw new SdkError(
+      "configuration_error",
+      `captureApplicationLogs requires Pino 9.11+ or 10.1+; Fastify is using ${version}`
+    );
+  }
+}
+
+function shouldCaptureFastifyApplicationLog(record) {
+  return !isObjectRecord(record?.req) && !isObjectRecord(record?.res);
+}
+
+function isObjectRecord(value) {
+  return value !== null && typeof value === "object";
+}
+
 async function notifyFlush(options, response, context) {
   if (typeof options.onFlush === "function") {
     await options.onFlush(response, context);
@@ -273,6 +371,17 @@ async function notifyFlush(options, response, context) {
 async function notifyFailure(options, error, context) {
   if (typeof options.onCaptureError === "function") {
     await options.onCaptureError(error, context);
+  }
+}
+
+async function notifyApplicationLogFailure(options, error, context) {
+  if (typeof options.onApplicationLogCaptureError !== "function") {
+    return;
+  }
+  try {
+    await options.onApplicationLogCaptureError(error, context);
+  } catch {
+    // Application-log capture diagnostics must never interrupt the app lifecycle.
   }
 }
 
