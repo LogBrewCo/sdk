@@ -1786,12 +1786,38 @@ jobs:
             root = Path(tmp)
             package_dir = root / "ruby" / "logbrew-ruby"
             package_dir.mkdir(parents=True)
-            (package_dir / "README.md").write_text("# LogBrew Ruby\n", encoding="utf-8")
+            (package_dir / "README.md").write_text(
+                "# LogBrew Ruby\n"
+                "Rails Quick Start\n"
+                "LOGBREW_SERVER_API_KEY\n"
+                "logbrew projects create rails-service\n"
+                "logbrew doctor --project\n"
+                "logbrew traces --project\n",
+                encoding="utf-8",
+            )
+            (package_dir / "lib" / "logbrew").mkdir(parents=True)
+            (package_dir / "tests").mkdir()
+            (root / "scripts").mkdir()
+            for relative in (
+                "lib/logbrew-sdk.rb",
+                "lib/logbrew/rails.rb",
+                "lib/logbrew/rails_integration.rb",
+                "tests/rails_integration.rb",
+            ):
+                (package_dir / relative).write_text("# fixture\n", encoding="utf-8")
+            (package_dir / "lib" / "logbrew" / "version.rb").write_text(
+                'VERSION = "0.1.3"\n',
+                encoding="utf-8",
+            )
+            (root / "scripts" / "real_user_ruby_rails_smoke.sh").write_text(
+                "#!/usr/bin/env bash\n",
+                encoding="utf-8",
+            )
             (package_dir / "logbrew-sdk.gemspec").write_text(
                 """
 Gem::Specification.new do |spec|
   spec.name = "logbrew-sdk"
-  spec.version = "0.1.2"
+  spec.version = "0.1.3"
   spec.summary = "Public LogBrew Ruby SDK"
   spec.description = "Public LogBrew Ruby SDK for building, validating, and flushing event batches."
   spec.authors = ["LogBrew"]

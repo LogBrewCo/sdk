@@ -76,7 +76,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Entity Framework Core | [`LogBrew.EntityFrameworkCore`](dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore) | Optional EF Core command span interceptor |
 | StackExchange.Redis | [`LogBrew.StackExchangeRedis`](dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis) | Optional Redis command spans without key/value capture |
 | PHP | [`logbrew/sdk`](php/logbrew-php) | Core PHP client, HTTP delivery, PSR-3 and Monolog/Laravel support |
-| Ruby | [`logbrew-sdk`](ruby/logbrew-ruby) | Core Ruby client, HTTP delivery, stdlib `Logger`, Rack/Rails-compatible helpers |
+| Ruby / Rails | [`logbrew-sdk`](ruby/logbrew-ruby) | Automatic Rails request/error capture and delivery; core Ruby client, stdlib `Logger`, and manual Rack helpers |
 | Rust | [`logbrew`](rust/logbrew) | Core Rust client and optional blocking HTTP delivery |
 | Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product for iOS, macOS, tvOS, watchOS, Apple-style logger ergonomics, URLSession delivery; opt-in `LogBrewCrash` product for bounded native fatal-crash replay; Objective-C vendoring for mixed or Objective-C-only apps |
 | Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client, Android-style helper APIs, HTTP delivery |

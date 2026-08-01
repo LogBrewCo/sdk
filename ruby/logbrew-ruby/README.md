@@ -4,14 +4,108 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with standard-library `Net::HTTP` delivery, opt-in standard-library `Logger` support, Rack-compatible middleware, and a Rails error subscriber for Rails apps.
+Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request/error capture, standard-library `Net::HTTP` delivery, opt-in standard-library `Logger` support, and manual Rack helpers.
 
-The package uses only Ruby standard-library features at runtime.
+The core package has no runtime gem dependencies. Its automatic integration
+activates only inside an application that has already loaded Rails.
 
 ## Install
 
 ```bash
 gem install logbrew-sdk
+```
+
+## Rails Quick Start
+
+Add the gem normally. Its package-name require shim loads the Rails integration
+when Rails is present, so `require: "logbrew"` and a custom initializer are not
+needed:
+
+```ruby
+# Gemfile
+gem "logbrew-sdk", "~> 0.1.3"
+```
+
+```bash
+bundle install
+export LOGBREW_SERVER_API_KEY="your project-scoped server ingest key"
+bin/rails server
+```
+
+That is the complete Rails application change. The Railtie installs one
+request middleware, subscribes to handled Rails errors, creates a fresh client
+inside each server process, delivers in the background, and performs one
+bounded shutdown drain. Without `LOGBREW_SERVER_API_KEY`, the integration stays
+disabled and the application behaves normally. Set `LOGBREW_ENABLED=false` to
+disable it explicitly. If the Gemfile uses `require: false`, load
+`logbrew/rails` yourself after Rails.
+
+The automatic integration records route-template request spans and type-only
+issues. It does not record concrete request paths, query strings, request or
+response bodies, arbitrary headers, authorization values, cookies, user IDs,
+exception messages, or exception backtraces. Exception messages and backtraces
+are separate opt-ins:
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `LOGBREW_ENABLED` | inferred | Optional explicit `true` or `false` override |
+| `LOGBREW_SERVER_API_KEY` | unset | Project-scoped server ingest key; enables the integration |
+| `LOGBREW_SERVICE_NAME` | Rails application name | Bounded service metadata |
+| `LOGBREW_ENVIRONMENT` | `Rails.env` | Bounded environment metadata |
+| `LOGBREW_RELEASE` | unset | Optional release identifier |
+| `LOGBREW_ENDPOINT` | `https://api.logbrew.co/v1/events` | HTTPS intake URL; loopback HTTP is accepted for local development |
+| `LOGBREW_REQUEST_TIMEOUT_MS` | `10000` | Per-request delivery timeout from 1 to 600000 ms |
+| `LOGBREW_FLUSH_INTERVAL_MS` | `5000` | Automatic delivery interval from 10 to 3600000 ms |
+| `LOGBREW_FLUSH_THRESHOLD` | `100` | Queue size from 1 to 1000 that requests an earlier flush |
+| `LOGBREW_CAPTURE_EXCEPTION_MESSAGES` | `false` | Opt in to exception message capture |
+| `LOGBREW_INCLUDE_EXCEPTION_BACKTRACE` | `false` | Opt in to exception backtrace capture |
+
+`LOGBREW_API_KEY` and `LOGBREW_INGEST_KEY` are not Rails aliases. If either is
+set without the canonical server key, startup reports the exact
+`LOGBREW_SERVER_API_KEY` correction without printing any key value.
+
+### Create a Project and Confirm Hosted Rails Delivery
+
+LogBrew CLI 0.1.32 or newer can create a project and one-time key without a
+dashboard handoff. The destination key file must not already exist:
+
+```bash
+logbrew status --json
+install -d -m 700 "$HOME/.logbrew"
+
+project_result="$(
+  logbrew projects create rails-service \
+    --runtime ruby \
+    --environment development \
+    --ingest-key-file "$HOME/.logbrew/rails-service.ingest" \
+    --json
+)"
+export LOGBREW_PROJECT_ID="$(jq -er '.project.id' <<<"$project_result")"
+unset project_result
+export LOGBREW_SERVER_API_KEY="$(< "$HOME/.logbrew/rails-service.ingest")"
+export LOGBREW_SERVICE_NAME="rails-service"
+```
+
+Start Rails and request one application route. Then inspect the same project
+through the approved CLI session:
+
+```bash
+logbrew doctor --project "$LOGBREW_PROJECT_ID" --json
+logbrew traces --project "$LOGBREW_PROJECT_ID" \
+  --service rails-service \
+  --since 1h \
+  --json
+```
+
+When the temporary project is no longer needed, archive it and remove the
+revoked one-time key:
+
+```bash
+unset LOGBREW_SERVER_API_KEY
+unset LOGBREW_SERVICE_NAME
+logbrew projects archive "$LOGBREW_PROJECT_ID" --yes --json
+rm -f "$HOME/.logbrew/rails-service.ingest"
+unset LOGBREW_PROJECT_ID
 ```
 
 ## Usage
@@ -20,7 +114,7 @@ gem install logbrew-sdk
 require "logbrew"
 
 client = LogBrew::Client.create(
-  api_key: "LOGBREW_API_KEY",
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "my-ruby-app",
   sdk_version: "1.0.0"
 )
@@ -50,7 +144,7 @@ one work item at a time and needs an explicit telemetry boundary:
 
 ```ruby
 client = LogBrew::Client.create(
-  api_key: "LOGBREW_API_KEY",
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "checkout-worker",
   sdk_version: "1.0.0"
 )
@@ -339,7 +433,7 @@ Use `LogBrew::HttpTransport` when you want the SDK to POST queued batches to Log
 require "logbrew"
 
 client = LogBrew::Client.create(
-  api_key: "LOGBREW_API_KEY",
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "my-ruby-app",
   sdk_version: "1.0.0"
 )
@@ -364,7 +458,7 @@ The client bounds queued telemetry and each transport request independently. Que
 ```ruby
 dropped = 0
 client = LogBrew::Client.create(
-  api_key: "LOGBREW_API_KEY",
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "my-ruby-app",
   sdk_version: "1.0.0",
   max_queue_size: 1_000,
@@ -393,7 +487,7 @@ Applications that own their transport can opt into one lazy delivery worker. Man
 ```ruby
 transport = LogBrew::HttpTransport.new(timeout: 10)
 client = LogBrew::Client.create_automatic(
-  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "checkout-worker",
   sdk_version: "1.0.0",
   transport: transport,
@@ -428,7 +522,7 @@ require "sidekiq"
 
 transport = LogBrew::HttpTransport.new(timeout: 10)
 client = LogBrew::Client.create_automatic(
-  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "checkout-worker",
   sdk_version: "1.0.0",
   transport: transport
@@ -461,7 +555,7 @@ Server workers that need restart recovery can opt into an app-owned persistent q
 queue_path = ENV.fetch("LOGBREW_PERSISTENT_QUEUE_PATH")
 
 client = LogBrew::Client.create(
-  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "checkout-worker",
   sdk_version: "1.0.0",
   persistent_queue_path: queue_path,
@@ -492,7 +586,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 require "logbrew"
 
 client = LogBrew::Client.create(
-  api_key: "LOGBREW_API_KEY",
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "my-ruby-app",
   sdk_version: "1.0.0"
 )
@@ -514,13 +608,15 @@ The adapter respects Ruby logger levels and lazy block messages, maps `DEBUG`/`I
 
 ## Rack And Rails Middleware
 
-Use `LogBrew::RackMiddleware` when a Rails, Sinatra, or Rack app should capture request spans and unhandled app exceptions without adding a framework dependency to the SDK.
+Rails applications should use the automatic Rails quick start above. Use
+`LogBrew::RackMiddleware` directly only for Sinatra, plain Rack, or a Rails app
+that intentionally owns custom middleware wiring.
 
 ```ruby
 require "logbrew"
 
 client = LogBrew::Client.create(
-  api_key: "LOGBREW_API_KEY",
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "my-rails-app",
   sdk_version: "1.0.0"
 )
@@ -544,17 +640,26 @@ app = LogBrew::RackMiddleware.new(
 )
 ```
 
-The middleware records successful responses as span events, records unhandled app exceptions as issue plus error-span events, and re-raises app exceptions so Rails or Rack keeps normal response handling. It captures method, path without query text, status code, request id when present, primitive base metadata, exception type/message, and duration. Exception backtrace text is omitted unless `include_exception_backtrace: true` is set. Events queue by default; pass `transport:` plus `flush_on_response: true` when each response should flush.
+The manual middleware records successful responses as span events, records
+unhandled app exceptions as issue plus error-span events, and re-raises app
+exceptions so Rack keeps normal response handling. Its compatibility defaults
+retain path, request-ID, and exception-message capture. Set
+`include_exception_message: false` for type-only issues. Exception backtrace
+text is omitted unless `include_exception_backtrace: true` is set. Events queue
+by default; pass `transport:` plus `flush_on_response: true` when each response
+should flush.
 
 ## Rails Error Subscriber
 
-Use `LogBrew::RailsErrorSubscriber` when handled or manually reported Rails errors should queue LogBrew issue events through Rails' own error reporter.
+The automatic Rails integration already subscribes to handled Rails errors.
+Use `LogBrew::RailsErrorSubscriber` directly only when an application owns a
+custom Rails error-reporting lifecycle.
 
 ```ruby
 require "logbrew"
 
 client = LogBrew::Client.create(
-  api_key: "LOGBREW_API_KEY",
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "my-rails-app",
   sdk_version: "1.0.0"
 )
@@ -570,7 +675,13 @@ Rails.error.subscribe(
 )
 ```
 
-The subscriber implements `report(error, handled:, severity:, context:, source:, **options)`, captures handled state, severity, Rails source, primitive context values, primitive base metadata, and exception type/message, and omits exception backtrace text unless `include_exception_backtrace: true` is set. It queues by default; pass `transport:` plus `flush_on_report: true` when each report should flush. If you also use `LogBrew::RackMiddleware`, keep the subscriber focused on handled/manual reports so unhandled request exceptions are not captured twice.
+The manual subscriber implements
+`report(error, handled:, severity:, context:, source:, **options)`. Its
+compatibility default includes primitive context values and exception messages;
+set `include_exception_message: false` for type-only issues. Backtrace text is
+omitted unless `include_exception_backtrace: true` is set. If you also use the
+manual Rack middleware, keep this subscriber focused on handled reports so
+unhandled request exceptions are not captured twice.
 
 ## Behavior
 
@@ -586,6 +697,7 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 - `LogBrew::HttpTransport` sends queued batches through Ruby's standard `Net::HTTP` with configurable endpoint, headers, timeout, and app-owned HTTP client support.
 - `LogBrew::RackMiddleware` captures Rack request spans and unhandled app exceptions without requiring Rails or Rack at runtime.
 - `LogBrew::RailsErrorSubscriber` captures handled/manual Rails error reports without requiring Rails at runtime.
+- `LogBrew::Rails` automatically installs privacy-bounded Rails request spans, handled-error issues, per-process delivery, health access, and idempotent shutdown when the canonical server key is configured.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `LogBrew::RecordingTransport.always_accept` is useful when you want to inspect queued JSON before network delivery.
 - `LogBrew::SdkError` exposes stable `code` and `message` values for user-facing failure handling.

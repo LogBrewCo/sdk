@@ -20,12 +20,18 @@ find "$package_dir" -name '*.rb' -not -path '*/.bundle/*' -print0 | while IFS= r
 done
 
 (cd "$package_dir" && ruby tests/run.rb)
+(cd "$package_dir" && ruby tests/rails_integration.rb)
 test -f "$package_dir/tests/http_client_tracing_support.rb"
-rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
+rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/rails.rb" "$package_dir/lib/logbrew/rails_integration.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$tmp_dir/rdoc/LogBrew/Client.html"
 test -f "$tmp_dir/rdoc/LogBrew/Logger.html"
 test -f "$tmp_dir/rdoc/LogBrew/RackMiddleware.html"
 test -f "$tmp_dir/rdoc/LogBrew/RailsErrorSubscriber.html"
+test -f "$tmp_dir/rdoc/LogBrew/Rails/Configuration.html"
+test -f "$tmp_dir/rdoc/LogBrew/Rails/Runtime.html"
+test -f "$tmp_dir/rdoc/LogBrew/Rails/RequestMiddleware.html"
+test -f "$tmp_dir/rdoc/LogBrew/Rails/ErrorReporter.html"
+test -f "$tmp_dir/rdoc/LogBrew/RailsRailtie.html"
 test -f "$tmp_dir/rdoc/LogBrew/HttpTransport.html"
 test -f "$tmp_dir/rdoc/LogBrew/RecordingTransport.html"
 test -f "$tmp_dir/rdoc/LogBrew/SdkError.html"
@@ -47,6 +53,10 @@ grep -q '^summary: Public LogBrew Ruby SDK$' "$tmp_dir/spec.yaml"
 gem unpack "$tmp_dir/logbrew-sdk-${package_version}.gem" --target "$tmp_dir/unpacked" >/dev/null
 unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-${package_version}"
 test -f "$unpacked_dir/lib/logbrew.rb"
+test -f "$unpacked_dir/lib/logbrew-sdk.rb"
+test -f "$unpacked_dir/lib/logbrew/version.rb"
+test -f "$unpacked_dir/lib/logbrew/rails.rb"
+test -f "$unpacked_dir/lib/logbrew/rails_integration.rb"
 test -f "$unpacked_dir/lib/logbrew/bounded_event_queue.rb"
 test -f "$unpacked_dir/lib/logbrew/event_batcher.rb"
 test -f "$unpacked_dir/lib/logbrew/persistent_event_store.rb"
@@ -66,7 +76,12 @@ test -f "$unpacked_dir/examples/automatic_delivery.rb"
 test -f "$unpacked_dir/examples/sidekiq_tracing.rb"
 test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
-grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
+grep -q 'LOGBREW_API_KEY.*not Rails aliases' "$unpacked_dir/README.md"
+grep -q 'Rails Quick Start' "$unpacked_dir/README.md"
+grep -q 'LOGBREW_SERVER_API_KEY' "$unpacked_dir/README.md"
+grep -q 'logbrew projects create rails-service' "$unpacked_dir/README.md"
+grep -q 'logbrew doctor --project' "$unpacked_dir/README.md"
+grep -q 'logbrew traces --project' "$unpacked_dir/README.md"
 grep -q 'preview_json' "$unpacked_dir/README.md"
 grep -q 'client.metric' "$unpacked_dir/README.md"
 grep -q 'Metric' "$unpacked_dir/README.md"
@@ -107,6 +122,12 @@ grep -q 'Sidekiq Tracing' "$unpacked_dir/README.md"
 grep -q 'LogBrew::Sidekiq::Instrumentation.create' "$unpacked_dir/README.md"
 grep -q 'config.on(:quiet)' "$unpacked_dir/README.md"
 
+ruby -I "$unpacked_dir/lib" -e '
+  require "logbrew-sdk"
+  abort "package require shim did not load core" unless LogBrew::VERSION == ARGV.fetch(0)
+  abort "package require shim loaded Rails unexpectedly" if defined?(::LogBrew::RailsRailtie)
+' "$package_version"
+
 ruby -I "$package_dir/lib" "$package_dir/examples/readme_example.rb" > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
@@ -131,7 +152,7 @@ test -f "$tmp_dir/persistent-example-queue/.ack"
 test -f "$tmp_dir/persistent-example-queue/.lock"
 test -z "$(find "$tmp_dir/persistent-example-queue" -name '*.event' -print -quit)"
 
-LOGBREW_API_KEY="package-example-key" \
+LOGBREW_SERVER_API_KEY="package-example-key" \
   ruby -I "$package_dir/lib" "$package_dir/examples/automatic_delivery.rb" > "$tmp_dir/automatic-example.json"
 grep -q '"ok":true' "$tmp_dir/automatic-example.json"
 grep -q '"state":"closed"' "$tmp_dir/automatic-example.json"
@@ -150,5 +171,9 @@ grep -qx 'run-sidekiq-tracing -> make run-sidekiq-tracing' "$tmp_dir/examples-he
 sidekiq_smoke_output="$(bash "$repo_root/scripts/real_user_ruby_sidekiq_smoke.sh")"
 grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:[0-9a-f]{64} requests=1 spans=5 issues=1$' <<< "$sidekiq_smoke_output"
 printf '%s\n' "$sidekiq_smoke_output"
+
+rails_smoke_output="$(bash "$repo_root/scripts/real_user_ruby_rails_smoke.sh")"
+grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=1 spans=1 issues=1 environments=1$' <<< "$rails_smoke_output"
+printf '%s\n' "$rails_smoke_output"
 
 echo "ruby package checks passed"

@@ -17,6 +17,28 @@ SPEC.loader.exec_module(check_confidentiality_scan)
 
 
 class ConfidentialityScanTests(unittest.TestCase):
+    def test_allows_only_exact_rails_key_base_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script_path = root / "scripts" / "real_user_ruby_rails_smoke.sh"
+            script_path.parent.mkdir(parents=True)
+            sensitive_name = "sec" + "ret"
+            script_path.write_text(
+                f'      config.{sensitive_name}_key_base = "installed-rails-smoke-{sensitive_name}-key-base"\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            script_path.write_text(
+                script_path.read_text(encoding="utf-8")
+                + f"# arbitrary {sensitive_name} text remains forbidden\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("arbitrary", failures[0])
+
     def test_allows_only_exact_native_archive_exclusion_symbols(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
