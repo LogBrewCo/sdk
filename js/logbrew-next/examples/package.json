@@ -6,6 +6,7 @@
     "help": "node ./index.mjs --help",
     "list": "node ./index.mjs --list",
     "readme-example": "node ./index.mjs readme-example",
+    "request-errors": "node ./index.mjs request-errors",
     "real-user-smoke": "node ./index.mjs real-user-smoke"
   }
 }

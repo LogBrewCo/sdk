@@ -3,6 +3,7 @@
 const commands = new Map([
   ["client-route-spans", new URL("./client-route-spans.mjs", import.meta.url)],
   ["readme-example", new URL("./readme-example.mjs", import.meta.url)],
+  ["request-errors", new URL("./request-errors.mjs", import.meta.url)],
   ["real-user-smoke", new URL("./real-user-smoke.mjs", import.meta.url)]
 ]);
 
@@ -25,16 +26,19 @@ function printHelp() {
   console.log("node node_modules/@logbrew/next/examples/index.mjs --list");
   console.log("node node_modules/@logbrew/next/examples/index.mjs client-route-spans");
   console.log("node node_modules/@logbrew/next/examples/index.mjs readme-example");
+  console.log("node node_modules/@logbrew/next/examples/index.mjs request-errors");
   console.log("node node_modules/@logbrew/next/examples/index.mjs real-user-smoke");
   console.log("node node_modules/@logbrew/next/examples/index.mjs");
   console.log("npm --prefix node_modules/@logbrew/next/examples run list");
   console.log("npm --prefix node_modules/@logbrew/next/examples run client-route-spans");
   console.log("npm --prefix node_modules/@logbrew/next/examples run readme-example");
+  console.log("npm --prefix node_modules/@logbrew/next/examples run request-errors");
   console.log("npm --prefix node_modules/@logbrew/next/examples run real-user-smoke");
 }
 
 function printList() {
   console.log("client-route-spans -> node node_modules/@logbrew/next/examples/index.mjs client-route-spans");
   console.log("readme-example -> node node_modules/@logbrew/next/examples/index.mjs readme-example");
+  console.log("request-errors -> node node_modules/@logbrew/next/examples/index.mjs request-errors");
   console.log("real-user-smoke -> node node_modules/@logbrew/next/examples/index.mjs real-user-smoke");
 }

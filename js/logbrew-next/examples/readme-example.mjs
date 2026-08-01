@@ -12,7 +12,7 @@ const POST = withLogBrewRouteHandler(
     serverApiKey: "LOGBREW_SERVER_API_KEY",
     captureRequests: false,
     sdkName: "logbrew-next-readme-example",
-    sdkVersion: "0.1.2",
+    sdkVersion: "0.1.3",
     transport
   }
 );

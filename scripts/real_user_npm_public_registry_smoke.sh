@@ -191,6 +191,7 @@ JS
 import { RecordingTransport } from "@logbrew/sdk";
 import { createLogBrewBrowserClient } from "@logbrew/browser";
 import { createLogBrewNodeClient } from "@logbrew/node";
+import { createLogBrewNextRequestErrorHandler } from "@logbrew/next/instrumentation";
 import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
 import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
 
@@ -198,6 +199,7 @@ for (const exportedValue of [
   RecordingTransport,
   createLogBrewBrowserClient,
   createLogBrewNodeClient,
+  createLogBrewNextRequestErrorHandler,
   withLogBrewNextReleaseArtifacts,
   prepareLogBrewReactNativeReleaseArtifacts
 ]) {
