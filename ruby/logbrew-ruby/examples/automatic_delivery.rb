@@ -5,7 +5,7 @@ require "logbrew"
 
 transport = LogBrew::RecordingTransport.always_accept
 client = LogBrew::Client.create_automatic(
-  api_key: ENV.fetch("LOGBREW_API_KEY", "local-example-key"),
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY", "local-example-key"),
   sdk_name: "automatic-delivery-example",
   sdk_version: "1.0.0",
   transport: transport,

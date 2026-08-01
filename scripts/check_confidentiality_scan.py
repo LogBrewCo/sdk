@@ -232,6 +232,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_go_gin_privacy_reference(relative_text, line):
         return True
 
+    if is_ruby_rails_smoke_reference(relative_text, line):
+        return True
+
     if is_python_public_registry_hostname_reference(relative_text, line, terms):
         return True
 
@@ -1150,6 +1153,14 @@ def is_go_gin_privacy_reference(relative_text: str, line: str) -> bool:
         },
     }
     return line.strip() in allowed_lines.get(relative_text, set())
+
+
+def is_ruby_rails_smoke_reference(relative_text: str, line: str) -> bool:
+    return (
+        relative_text == "scripts/real_user_ruby_rails_smoke.sh"
+        and line.strip()
+        == 'config.secret_key_base = "installed-rails-smoke-secret-key-base"'
+    )
 
 
 def is_python_public_registry_hostname_reference(

@@ -54,7 +54,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(rust["package"]["version"], "0.1.2")
         ruby = (ROOT / "ruby/logbrew-ruby/logbrew-sdk.gemspec").read_text(encoding="utf-8")
         self.assertIsNotNone(
-            re.search(r'^\s*spec\.version\s*=\s*"0\.1\.2"$', ruby, re.MULTILINE),
+            re.search(r'^\s*spec\.version\s*=\s*"0\.1\.3"$', ruby, re.MULTILINE),
             ruby,
         )
         self.assertEqual(maven_version(ROOT / "java/logbrew-java/pom.xml"), "0.1.2")
@@ -172,7 +172,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
         self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.2")
-        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.2")
+        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.3")
         self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.6")
         self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.5")
         self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.0")

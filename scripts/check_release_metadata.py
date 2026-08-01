@@ -19,7 +19,7 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_pac
 
 PUBLIC_VERSION = "0.1.0"
 RUST_VERSION = "0.1.2"
-RUBYGEMS_VERSION = "0.1.2"
+RUBYGEMS_VERSION = "0.1.3"
 PACKAGIST_VERSION = "0.1.6"
 DOTNET_VERSION = "0.1.5"
 DOTNET_OTEL_VERSION = "0.1.1"
@@ -919,7 +919,13 @@ def validate_unity_openupm(manifest: dict[str, Any], openupm_path: Path, failure
 
 def validate_ruby(root: Path, failures: list[str]) -> None:
     gemspec_path = require_path(root, "ruby/logbrew-ruby/logbrew-sdk.gemspec", failures)
-    require_path(root, "ruby/logbrew-ruby/README.md", failures)
+    readme_path = require_path(root, "ruby/logbrew-ruby/README.md", failures)
+    require_path(root, "ruby/logbrew-ruby/lib/logbrew-sdk.rb", failures)
+    version_path = require_path(root, "ruby/logbrew-ruby/lib/logbrew/version.rb", failures)
+    require_path(root, "ruby/logbrew-ruby/lib/logbrew/rails.rb", failures)
+    require_path(root, "ruby/logbrew-ruby/lib/logbrew/rails_integration.rb", failures)
+    require_path(root, "ruby/logbrew-ruby/tests/rails_integration.rb", failures)
+    require_path(root, "scripts/real_user_ruby_rails_smoke.sh", failures)
     if not gemspec_path.exists():
         return
     text = gemspec_path.read_text(encoding="utf-8")
@@ -937,6 +943,23 @@ def validate_ruby(root: Path, failures: list[str]) -> None:
         require(re.search(pattern, text) is not None, failures, f"{location}: missing {field} metadata")
     require("README.md" in text, failures, f"{location}: files must include README.md")
     require("examples/Makefile" in text, failures, f"{location}: files must include examples/Makefile")
+    if version_path.exists():
+        version_text = version_path.read_text(encoding="utf-8")
+        require(
+            f'VERSION = "{RUBYGEMS_VERSION}"' in version_text,
+            failures,
+            "ruby/logbrew-ruby/lib/logbrew/version.rb: version must match the gemspec",
+        )
+    if readme_path.exists():
+        readme = readme_path.read_text(encoding="utf-8")
+        for needle in (
+            "Rails Quick Start",
+            "LOGBREW_SERVER_API_KEY",
+            "logbrew projects create rails-service",
+            "logbrew doctor --project",
+            "logbrew traces --project",
+        ):
+            require(needle in readme, failures, f"ruby/logbrew-ruby/README.md: missing guidance {needle}")
 
 
 def validate_php_manifest(

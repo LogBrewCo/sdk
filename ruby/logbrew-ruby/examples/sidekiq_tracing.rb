@@ -6,7 +6,7 @@ require "sidekiq"
 
 transport = LogBrew::HttpTransport.new(timeout: 10)
 client = LogBrew::Client.create_automatic(
-  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
   sdk_name: "checkout-worker",
   sdk_version: "1.0.0",
   transport: transport

@@ -8,6 +8,8 @@ require "time"
 require "timeout"
 require "uri"
 
+require_relative "logbrew/version"
+
 module LogBrew
   SEVERITY_VALUES = %w[trace debug info warn warning error fatal critical].freeze
   SEVERITY_ALIASES = {
@@ -369,6 +371,7 @@ module LogBrew
       event_id_prefix: DEFAULT_EVENT_ID_PREFIX,
       metadata: nil,
       timestamp_provider: nil,
+      include_exception_message: true,
       include_exception_backtrace: false,
       on_error: nil,
       raise_errors: false
@@ -384,10 +387,12 @@ module LogBrew
       @event_id_prefix = event_id_prefix
       @metadata = metadata || {}
       @timestamp_provider = timestamp_provider
+      @include_exception_message = include_exception_message
       @include_exception_backtrace = include_exception_backtrace
       @on_error = on_error
       @raise_errors = raise_errors
       @next_event_number = 0
+      @event_id_mutex = Mutex.new
     end
 
     def call(env)
@@ -428,19 +433,20 @@ module LogBrew
     end
 
     def capture_exception_issue(env, error)
-      @client.issue(
-        next_event_id("issue"),
-        logbrew_timestamp,
+      attributes = {
         title: error.class.name,
         level: "error",
-        message: error.message,
         metadata: exception_metadata(env, error)
-      )
+      }
+      attributes[:message] = error.message if @include_exception_message
+      @client.issue(next_event_id("issue"), logbrew_timestamp, attributes)
     end
 
     def next_event_id(kind)
-      @next_event_number += 1
-      "#{@event_id_prefix}_#{kind}_#{@next_event_number}"
+      @event_id_mutex.synchronize do
+        @next_event_number += 1
+        "#{@event_id_prefix}_#{kind}_#{@next_event_number}"
+      end
     end
 
     def logbrew_timestamp
@@ -492,7 +498,7 @@ module LogBrew
     def exception_metadata(env, error)
       request_metadata(env, 500).tap do |metadata|
         metadata["exceptionType"] = error.class.name
-        metadata["exceptionMessage"] = error.message
+        metadata["exceptionMessage"] = error.message if @include_exception_message
         metadata["exceptionBacktrace"] = error.backtrace.join("\n") if @include_exception_backtrace && error.backtrace
       end
     end
@@ -573,6 +579,7 @@ module LogBrew
       event_id_prefix: DEFAULT_EVENT_ID_PREFIX,
       metadata: nil,
       timestamp_provider: nil,
+      include_exception_message: true,
       include_exception_backtrace: false,
       on_error: nil,
       raise_errors: false
@@ -586,23 +593,23 @@ module LogBrew
       @event_id_prefix = event_id_prefix
       @metadata = metadata || {}
       @timestamp_provider = timestamp_provider
+      @include_exception_message = include_exception_message
       @include_exception_backtrace = include_exception_backtrace
       @on_error = on_error
       @raise_errors = raise_errors
       @next_event_number = 0
+      @event_id_mutex = Mutex.new
     end
 
     def report(error, handled: true, severity: :error, context: nil, source: nil, **_options)
       capture_safely do
-        @next_event_number += 1
-        @client.issue(
-          "#{@event_id_prefix}_#{@next_event_number}",
-          logbrew_timestamp,
+        attributes = {
           title: error_title(error),
           level: issue_level(severity),
-          message: error_message(error),
           metadata: rails_metadata(error, handled, severity, context, source)
-        )
+        }
+        attributes[:message] = error_message(error) if @include_exception_message
+        @client.issue(next_event_id, logbrew_timestamp, attributes)
         flush_if_configured
       end
     end
@@ -627,6 +634,13 @@ module LogBrew
       return error if error.is_a?(String)
 
       error.inspect
+    end
+
+    def next_event_id
+      @event_id_mutex.synchronize do
+        @next_event_number += 1
+        "#{@event_id_prefix}_#{@next_event_number}"
+      end
     end
 
     def issue_level(severity)
@@ -655,7 +669,7 @@ module LogBrew
 
     def add_exception_metadata(metadata, exception)
       metadata["exceptionType"] = exception.class.name
-      metadata["exceptionMessage"] = exception.message
+      metadata["exceptionMessage"] = exception.message if @include_exception_message
       metadata["exceptionBacktrace"] = exception.backtrace.join("\n") if @include_exception_backtrace && exception.backtrace
     end
 
