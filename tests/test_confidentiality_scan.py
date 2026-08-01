@@ -174,6 +174,22 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_pino_privacy_allowlist_is_exact(self) -> None:
+        sensitive_name = "to" + "ken"
+        allowed_line = f'requestUrl: "/checkout/42?{sensitive_name}=hidden",'
+        self.assertTrue(
+            check_confidentiality_scan.is_js_pino_privacy_reference(
+                "js/logbrew-js/test/sdk.test.js",
+                allowed_line,
+            )
+        )
+        self.assertFalse(
+            check_confidentiality_scan.is_js_pino_privacy_reference(
+                "js/logbrew-js/test/sdk.test.js",
+                f'console.log("arbitrary {sensitive_name}")',
+            )
+        )
+
     def test_allows_only_exact_dotnet_release_compatibility_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -202,6 +202,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_js_opentelemetry_privacy_denylist_literal(relative_text, line):
         return True
 
+    if is_js_pino_privacy_reference(relative_text, line):
+        return True
+
     if is_python_opentelemetry_privacy_denylist_literal(relative_text, line):
         return True
 
@@ -605,6 +608,45 @@ def is_js_opentelemetry_privacy_denylist_literal(relative_text: str, line: str) 
     if relative_text != "js/logbrew-js/opentelemetry.cjs":
         return False
     return "SENSITIVE_OTEL_ATTRIBUTE_PATTERN" in line
+
+
+def is_js_pino_privacy_reference(relative_text: str, line: str) -> bool:
+    allowed_lines = {
+        "README.md": {
+            "- Automatic Pino metadata excludes credentials, cookies, bodies, payloads, query text, raw URLs, propagation headers, local file paths, and stack text by default.",
+        },
+        "js/logbrew-fastify/README.md": {
+            'redact: ["authorization", "cookie", "password", "token"]',
+            "This works with Fastify's existing JSON stream or transport, including `pino-pretty`; LogBrew observes the finalized JSON before Pino writes to that destination. Automatic capture requires Node.js 18.19 or newer and Pino 9.11+ or 10.1+. It captures primitive structured fields but automatically excludes credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text. Keep normal Pino redaction enabled because the log message itself is telemetry. Use `shouldCapture` for app-specific filtering and `includeErrorStack: true` only under an explicit stack-data policy.",
+        },
+        "js/logbrew-js/core.cjs": {
+            '"credentials",',
+            '"password",',
+            '"secret",',
+            '"token",',
+            '|| normalized.endsWith("credentials")',
+            '|| normalized.endsWith("password")',
+            '|| normalized.endsWith("secret")',
+            '|| normalized.endsWith("token")',
+        },
+        "js/logbrew-js/test/sdk.test.js": {
+            'requestUrl: "/checkout/42?token=hidden",',
+        },
+        "js/logbrew-node/README.md": {
+            'redact: ["authorization", "cookie", "password", "token"]',
+            "Primitive structured fields become `context.*` metadata. Runtime defaults and nested objects are omitted. Credentials, authorization and cookie fields, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack fields are also excluded automatically; serialized error name/message remain available, while stack text requires `includeErrorStack: true`. The log message itself is telemetry, so keep secrets and user-entered text out of messages and retain your normal Pino redaction policy.",
+        },
+        "js/logbrew-node/test/pino-instrumentation.test.js": {
+            'hostname: "host.local",',
+            'requestUrl: "/checkout/42?token=hidden",',
+        },
+        "scripts/real_user_fastify_smoke.sh": {
+            'requestUrl: "/auto?token=hidden",',
+            'nested: { token: "hidden" }',
+            'if (JSON.stringify(pinoPayload).includes("Bearer hidden") || JSON.stringify(pinoPayload).includes("token=hidden")) {',
+        },
+    }
+    return line.strip() in allowed_lines.get(relative_text, set())
 
 
 def is_python_opentelemetry_privacy_denylist_literal(relative_text: str, line: str) -> bool:
