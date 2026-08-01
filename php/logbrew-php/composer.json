@@ -13,6 +13,7 @@
   },
   "suggest": {
     "guzzlehttp/guzzle": "Required for Guzzle 7 outbound HTTP tracing.",
+    "monolog/monolog": "Required for Monolog and Laravel logging channels.",
     "psr/http-client": "Required to wrap an app-owned PSR-18 client.",
     "psr/http-message": "Required for outbound HTTP request and response interfaces."
   },

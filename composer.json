@@ -22,6 +22,9 @@
   "require-dev": {
     "monolog/monolog": "^3.0"
   },
+  "suggest": {
+    "monolog/monolog": "Required for Monolog and Laravel logging channels."
+  },
   "autoload": {
     "psr-4": {
       "LogBrew\\": "php/logbrew-php/src/"

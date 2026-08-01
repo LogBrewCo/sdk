@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public PHP SDK for creating LogBrew event batches, validating them locally, and flushing them through dependency-free HTTP delivery, with opt-in request trace correlation plus PSR-3 and Monolog/Laravel logger support.
+Public PHP SDK for creating LogBrew event batches, validating them locally, and flushing them through dependency-free HTTP delivery, with opt-in request trace correlation plus PSR-3, Monolog, and a config-cache-safe Laravel logger factory.
 
 ## Install
 
@@ -573,35 +573,38 @@ $client->flush($transport);
 
 `LogBrewPsrLogger` interpolates PSR-3 placeholders, maps `debug`/`info`/`notice` to LogBrew `info`, `warning` to `warning`, `error` to `error`, and `critical`/`alert`/`emergency` to `critical`, captures primitive context values under `context.*`, and records exception type/message when the `exception` context value is a `Throwable`. When `LogBrewTrace::current()` is active, the logger automatically adds trace correlation metadata to each record. Exception trace text is omitted unless `includeExceptionTrace` is enabled. Logs are queued by default; pass both `transport` and `flushOnLog: true` only when each logger call should flush immediately.
 
-## Monolog And Laravel
+## Laravel Quick Start
 
-Use `LogBrewMonologHandler` when a PHP app already logs through Monolog. Laravel apps can wire it as a normal `monolog` channel in `config/logging.php`:
+Laravel already owns Monolog, so `logbrew/sdk` keeps it optional and supplies the framework glue. Add this scalar-only channel to `config/logging.php`; it is safe to persist with `php artisan config:cache`:
 
 ```php
-'logbrew' => [
-    'driver' => 'monolog',
-    'handler' => LogBrew\LogBrewMonologHandler::class,
-    'with' => [
-        'client' => LogBrew\LogBrewClient::create(
-            env('LOGBREW_API_KEY', 'LOGBREW_API_KEY'),
-            config('app.name', 'laravel-app'),
-            config('app.version', '1.0.0')
-        ),
-        'transport' => new LogBrew\HttpTransport(
-            endpoint: LogBrew\HttpTransport::DEFAULT_ENDPOINT,
-            timeout: 10.0
-        ),
-        'flushOnLog' => false,
-        'metadata' => [
-            'framework' => 'laravel',
-            'environment' => app()->environment(),
-        ],
-    ],
+use LogBrew\LaravelLoggerFactory;
+
+'channels' => [
+    // Keep the application's existing channels.
+    'logbrew' => LaravelLoggerFactory::configuration(
+        apiKey: env('LOGBREW_SERVER_API_KEY'),
+        service: env('APP_NAME', 'laravel-app'),
+        release: env('APP_VERSION', 'unversioned'),
+        environment: env('APP_ENV', 'production'),
+    ),
 ],
 ```
 
-Then include `logbrew` in the Laravel logging stack or write to it directly with `Log::channel('logbrew')->warning(...)`.
+Keep the existing local log channel in the stack and opt in through environment configuration:
 
-`LogBrewMonologHandler` captures the Monolog channel, level, message template, primitive context fields, primitive `extra` fields, active LogBrew trace metadata, and exception type/message. Exception trace text is omitted unless `includeExceptionTrace` is enabled. The handler preserves normal app logging by default: capture failures are reported through `onError` when provided, and only rethrown when `raiseErrors` is enabled.
+```dotenv
+LOG_CHANNEL=stack
+LOG_STACK=single,logbrew
+LOGBREW_SERVER_API_KEY=
+```
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview before sending anything.
+Use a project-scoped server/SDK ingest key, never a user login key. The channel is not resolved when it is absent from the active stack; if the channel is enabled without a key, the factory raises an actionable configuration error.
+
+The Laravel factory accepts warning-and-higher records by default and immediately flushes every accepted record with a 2-second timeout and zero retries. Delivery failures stay inside the handler and do not interrupt application logging; a retained failed record is retried with the next accepted record. Override `level`, `timeout`, or `maxRetries` through named arguments to `configuration(...)` when the application has a different bounded policy. Write directly with `Log::channel('logbrew')->warning(...)` or include `logbrew` beside the existing channel in Laravel's stack.
+
+## Custom Monolog Integration
+
+Use `LogBrewMonologHandler` directly when a non-Laravel PHP app already logs through Monolog. Install `monolog/monolog:^3.0` in the application, construct a client and transport, and choose an explicit delivery boundary. The generic handler queues by default; pass both `transport` and `flushOnLog: true` for immediate delivery, or call the client's `flush()` or `shutdown()` at an application-owned lifecycle boundary.
+
+`LogBrewMonologHandler` captures the Monolog channel, level, message template, primitive context fields, primitive `extra` fields, active LogBrew trace metadata, and exception type/message. Exception trace text is omitted unless `includeExceptionTrace` is enabled. The handler preserves normal app logging by default: capture failures are reported through `onError` when provided, and only rethrown when `raiseErrors` is enabled. Use `previewJson()` when you want a stable local JSON preview before sending anything.
