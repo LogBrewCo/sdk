@@ -90,19 +90,10 @@ grep -q 'http.server.duration' "$tmp_dir/fastify-readme.md"
 grep -q 'installLogBrewPinoInstrumentation' "$tmp_dir/fastify-readme.md"
 grep -q 'preserves the original serialized output' "$tmp_dir/node-readme.md"
 grep -q 'Pino 9.11' "$tmp_dir/node-readme.md"
-python3 - "$tmp_dir/fastify-package.json" "$node_package_version" "$sdk_package_version" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-manifest = json.loads(Path(sys.argv[1]).read_text())
-node_version = sys.argv[2]
-peers = manifest.get("peerDependencies", {})
-if peers.get("@logbrew/node") != f"^{node_version}":
-    raise SystemExit(f"unexpected @logbrew/node peer: {peers.get('@logbrew/node')!r}")
-if peers.get("@logbrew/sdk") != f"^{sys.argv[3]}":
-    raise SystemExit(f"unexpected @logbrew/sdk peer: {peers.get('@logbrew/sdk')!r}")
-PY
+python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
+  "$tmp_dir/fastify-package.json" \
+  "@logbrew/node=$node_package_version" \
+  "@logbrew/sdk=$sdk_package_version"
 grep -q 'low-cardinality' "$tmp_dir/fastify-readme.md"
 
 app_dir="$tmp_dir/fastify-smoke-app"
