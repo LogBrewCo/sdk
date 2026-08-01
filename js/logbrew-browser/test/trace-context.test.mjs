@@ -210,12 +210,14 @@ test("installed browser errors attach release artifact Debug ID metadata without
         filename: "/assets/app.js",
         line: 12,
         column: 34,
+        function: "checkout",
         debugId: "11111111-2222-4333-8444-555555555555"
       },
       {
         filename: "/assets/vendor.js",
         line: 1,
-        column: 2
+        column: 2,
+        function: "ignored"
       }
     ]);
 

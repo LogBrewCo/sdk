@@ -1743,7 +1743,15 @@ const environment: EnvironmentAttributes = {
 const issue: IssueAttributes = {
   title: "Checkout timeout",
   level: "error",
-  message: "Request timed out after retry budget"
+  message: "Request timed out after retry budget",
+  stackFrames: [{
+    filename: "/assets/app.js",
+    line: 12,
+    column: 34,
+    function: "checkout",
+    module: "@example/checkout",
+    inApp: true
+  }]
 };
 const log: LogAttributes = {
   message: "worker started",
@@ -1802,7 +1810,7 @@ const supportTicketInput: SupportTicketDraftInput = {
     retryable: false,
     apiKey: "lbw_ingest_hidden",
     endpoint: "https://api.example/ingest?debug=true",
-    localPath: "/Users/example/app/.env"
+    localPath: "/home/example/app/.env"
   }
 };
 const metric: MetricAttributes = {
@@ -2219,12 +2227,14 @@ test("installed JavaScript error helper attaches bounded release-artifact metada
       filename: "https://cdn.example/assets/app.js",
       line: 12,
       column: 34,
+      function: "checkout",
       debugId: "11111111-2222-4333-8444-555555555555"
     },
     {
       filename: "https://cdn.example/assets/vendor.js",
       line: 1,
-      column: 2
+      column: 2,
+      function: "ignored"
     }
   ]);
   assert.equal(attributes.metadata.errorFrameFile, "https://cdn.example/assets/app.js");
@@ -2258,7 +2268,7 @@ test("installed support ticket draft stays local and redacts diagnostics", () =>
     diagnostics: {
       apiKey: "lbw_ingest_hidden",
       endpoint: "https://api.example/ingest?debug=true#frag",
-      localPath: "/Users/example/app/.env",
+      localPath: "/home/example/app/.env",
       authHeader: "Bearer hidden",
       error: new Error("hidden message")
     }
@@ -2273,7 +2283,7 @@ test("installed support ticket draft stays local and redacts diagnostics", () =>
   assert.equal(draft.diagnostics.error.name, "Error");
   assert.equal(serialized.includes("hidden"), false);
   assert.equal(serialized.includes("api.example"), false);
-  assert.equal(serialized.includes("/Users/example"), false);
+  assert.equal(serialized.includes("/home/example"), false);
   assert.equal(serialized.includes("traceparent"), false);
 });
 

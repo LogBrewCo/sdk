@@ -228,6 +228,12 @@ export type IssueStackFrame = {
   line: number;
   /** One-based generated source column. */
   column: number;
+  /** Optional bounded function or method identity. */
+  function?: string;
+  /** Optional bounded module, package, or namespace identity. */
+  module?: string;
+  /** Whether application code classified this frame as app-owned. */
+  inApp?: boolean;
   /** Optional release-artifact Debug ID matched to this generated file. */
   debugId?: string;
 };

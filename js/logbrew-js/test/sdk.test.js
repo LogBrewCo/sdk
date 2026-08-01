@@ -1328,12 +1328,14 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
         filename: "https://cdn.example/assets/app.js",
         line: 12,
         column: 34,
+        function: "checkout",
         debugId: "11111111-2222-4333-8444-555555555555"
       },
       {
         filename: "https://cdn.example/assets/vendor.js",
         line: 1,
-        column: 2
+        column: 2,
+        function: "ignored"
       }
     ],
     metadata: {
@@ -1386,12 +1388,14 @@ test("createIssueAttributesFromError bounds and sanitizes structured stack frame
   assert.deepEqual(attributes.stackFrames[0], {
     filename: "frame-0.js",
     line: 1,
-    column: 2
+    column: 2,
+    function: "frame0"
   });
   assert.deepEqual(attributes.stackFrames[31], {
     filename: "frame-31.js",
     line: 32,
-    column: 2
+    column: 2,
+    function: "frame31"
   });
   assert.equal(attributes.metadata.errorFrameFile, "frame-0.js");
   assert.doesNotMatch(JSON.stringify(attributes), /C:\\workspace|debug=value|fragment|frame-32/u);
@@ -1420,6 +1424,92 @@ test("issue stack frames reject non-string filenames", () => {
     }),
     (error) => error instanceof SdkError && error.code === "validation_error"
   );
+});
+
+test("issue stack frames preserve bounded code identity", () => {
+  const client = sampleClient();
+  client.issue("evt_identity_stack", "2026-07-17T12:00:00Z", {
+    title: "Identity stack",
+    level: "error",
+    stackFrames: [{
+      filename: "/assets/app.js",
+      line: 12,
+      column: 34,
+      function: "Checkout.submit",
+      module: "@example/checkout",
+      inApp: true
+    }]
+  });
+
+  const queued = JSON.parse(client.previewJson()).events[0].attributes.stackFrames;
+  assert.deepEqual(queued, [{
+    filename: "/assets/app.js",
+    line: 12,
+    column: 34,
+    function: "Checkout.submit",
+    module: "@example/checkout",
+    inApp: true
+  }]);
+
+  const unicodeClient = sampleClient();
+  unicodeClient.issue("evt_unicode_identity", "2026-07-17T12:00:00Z", {
+    title: "Unicode identity",
+    level: "error",
+    stackFrames: [{
+      filename: "/assets/app.js",
+      line: 12,
+      column: 34,
+      function: "🧪".repeat(256)
+    }]
+  });
+  const unicodeFrame = JSON.parse(unicodeClient.previewJson()).events[0].attributes.stackFrames[0];
+  assert.equal(Array.from(unicodeFrame.function).length, 256);
+});
+
+test("issue stack frames reject invalid code identity", () => {
+  const invalidFields = [
+    { function: "x".repeat(257) },
+    { function: "🧪".repeat(257) },
+    { module: "@example/checkout?private=value" },
+    { inApp: "yes" }
+  ];
+
+  for (const invalid of invalidFields) {
+    const client = sampleClient();
+    assert.throws(
+      () => client.issue("evt_invalid_identity", "2026-07-17T12:00:00Z", {
+        title: "Invalid identity",
+        level: "error",
+        stackFrames: [{ filename: "/assets/app.js", line: 1, column: 2, ...invalid }]
+      }),
+      (error) => error instanceof SdkError && error.code === "validation_error"
+    );
+  }
+});
+
+test("generated stack frames omit PII-like function labels", () => {
+  const error = new Error("Safe function identity");
+  error.stack = [
+    "Error: Safe function identity",
+    "checkout@https://cdn.example/assets/app.js:12:34",
+    "hidden@example.test@https://cdn.example/assets/vendor.js:56:78"
+  ].join("\n");
+
+  const attributes = createIssueAttributesFromError(error);
+  assert.deepEqual(attributes.stackFrames, [
+    {
+      filename: "https://cdn.example/assets/app.js",
+      line: 12,
+      column: 34,
+      function: "checkout"
+    },
+    {
+      filename: "https://cdn.example/assets/vendor.js",
+      line: 56,
+      column: 78
+    }
+  ]);
+  assert.doesNotMatch(JSON.stringify(attributes), /hidden@example\.test/u);
 });
 
 test("createIssueAttributesFromError supports explicit privacy-bounded grouping fingerprint", () => {

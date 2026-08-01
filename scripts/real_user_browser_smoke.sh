@@ -338,12 +338,14 @@ if (JSON.stringify(syncPayload.events[0].attributes.stackFrames) !== JSON.string
     filename: "/assets/app.js",
     line: 12,
     column: 34,
+    function: "checkout",
     debugId: "11111111-2222-4333-8444-555555555555"
   },
   {
     filename: "/assets/vendor.js",
     line: 1,
-    column: 2
+    column: 2,
+    function: "ignored"
   }
 ])) {
   throw new Error(`browser issue stack frames should be path-only: ${transport.sentBodies[3]}`);

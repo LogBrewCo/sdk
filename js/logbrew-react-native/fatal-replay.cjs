@@ -293,7 +293,11 @@ function fatalStackFrames(error, stackFrame) {
     const frame = stackFrame(line);
     const filename = frame ? normalizedStoredFatalFilename(frame.filename) : undefined;
     if (filename && validFatalFilename(filename)) {
-      frames.push(Object.freeze({ ...frame, filename }));
+      frames.push(Object.freeze({
+        column: frame.column,
+        filename,
+        line: frame.line
+      }));
       if (frames.length === MAX_FATAL_STACK_FRAMES) {
         break;
       }

@@ -1,6 +1,8 @@
 "use strict";
 
 const MAX_ISSUE_STACK_FRAMES = 32;
+const MAX_ISSUE_STACK_FUNCTION_LENGTH = 256;
+const MAX_ISSUE_STACK_MODULE_LENGTH = 512;
 const SAFE_DEBUG_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const LOCAL_ABSOLUTE_PATH_PATTERN = /^(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
 
@@ -54,7 +56,31 @@ function buildIssueStackHelpers({ SdkError }) {
       if (debugId === null) {
         throw new SdkError("validation_error", "issue stack frame debugId is invalid");
       }
-      return { filename, line, column, ...(debugId ? { debugId } : {}) };
+      const functionName = optionalFrameIdentity(frame.function, MAX_ISSUE_STACK_FUNCTION_LENGTH);
+      if (functionName === null) {
+        throw new SdkError("validation_error", "issue stack frame function is invalid");
+      }
+      const moduleName = optionalFrameIdentity(frame.module, MAX_ISSUE_STACK_MODULE_LENGTH, true);
+      if (moduleName === null) {
+        throw new SdkError("validation_error", "issue stack frame module is invalid");
+      }
+      const inApp = frame.inApp === undefined
+        ? undefined
+        : typeof frame.inApp === "boolean"
+          ? frame.inApp
+          : null;
+      if (inApp === null) {
+        throw new SdkError("validation_error", "issue stack frame inApp is invalid");
+      }
+      return {
+        filename,
+        line,
+        column,
+        ...(functionName ? { function: functionName } : {}),
+        ...(moduleName ? { module: moduleName } : {}),
+        ...(inApp !== undefined ? { inApp } : {}),
+        ...(debugId ? { debugId } : {})
+      };
     });
   }
 
@@ -67,13 +93,18 @@ function parseJavaScriptStackFrame(rawLine) {
     return null;
   }
   let location = line;
+  let functionName;
   if (location.startsWith("at ")) {
     location = location.slice(3).trim();
     if (location.endsWith(")") && location.includes("(")) {
-      location = location.slice(location.lastIndexOf("(") + 1, -1);
+      const marker = location.lastIndexOf("(");
+      functionName = generatedFrameFunction(location.slice(0, marker));
+      location = location.slice(marker + 1, -1);
     }
   } else if (location.includes("@")) {
-    location = location.slice(location.lastIndexOf("@") + 1);
+    const marker = location.lastIndexOf("@");
+    functionName = generatedFrameFunction(location.slice(0, marker));
+    location = location.slice(marker + 1);
   }
   const parts = location.split(":");
   if (parts.length < 3) {
@@ -85,7 +116,42 @@ function parseJavaScriptStackFrame(rawLine) {
   if (!filename || lineNumber === null || column === null) {
     return null;
   }
-  return { filename, line: lineNumber, column };
+  return {
+    filename,
+    line: lineNumber,
+    column,
+    ...(functionName ? { function: functionName } : {})
+  };
+}
+
+function optionalFrameIdentity(value, maxLength, rejectLocationText = false) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const identity = value.trim();
+  if (!identity
+    || Array.from(identity).length > maxLength
+    || hasControlCharacter(identity)
+    || (rejectLocationText && (identity.includes("?") || identity.includes("#")))) {
+    return null;
+  }
+  return identity;
+}
+
+function generatedFrameFunction(value) {
+  const functionName = optionalFrameIdentity(value, MAX_ISSUE_STACK_FUNCTION_LENGTH);
+  if (!functionName
+    || functionName.includes("@")
+    || functionName.includes("/")
+    || functionName.includes("\\")
+    || functionName.includes("?")
+    || functionName.includes("#")) {
+    return undefined;
+  }
+  return functionName;
 }
 
 function positiveIntegerFromText(value) {

@@ -191,7 +191,11 @@ def _validate_issue_stack_frames(index: int, attributes: dict[str, Any]) -> None
         label = f"event {index} issue stack frame {frame_index}"
         if not isinstance(frame, dict):
             raise ValidationError(f"{label} must be an object")
-        _reject_unknown_keys(frame, {"filename", "line", "column", "debugId"}, label)
+        _reject_unknown_keys(
+            frame,
+            {"filename", "line", "column", "function", "module", "inApp", "debugId"},
+            label,
+        )
         filename = frame.get("filename")
         if (
             not isinstance(filename, str)
@@ -210,6 +214,28 @@ def _validate_issue_stack_frames(index: int, attributes: dict[str, Any]) -> None
                 or not 1 <= value <= 2_147_483_647
             ):
                 raise ValidationError(f"{label} {coordinate} must be a positive integer")
+        if "function" in frame:
+            function = frame["function"]
+            if (
+                not isinstance(function, str)
+                or not function.strip()
+                or len(function) > 256
+                or any(ord(character) <= 31 or ord(character) == 127 for character in function)
+            ):
+                raise ValidationError(f"{label} function is invalid")
+        if "module" in frame:
+            module = frame["module"]
+            if (
+                not isinstance(module, str)
+                or not module.strip()
+                or len(module) > 512
+                or "?" in module
+                or "#" in module
+                or any(ord(character) <= 31 or ord(character) == 127 for character in module)
+            ):
+                raise ValidationError(f"{label} module is invalid")
+        if "inApp" in frame and not isinstance(frame["inApp"], bool):
+            raise ValidationError(f"{label} inApp must be a boolean")
         debug_id = frame.get("debugId")
         if debug_id is not None and (
             not isinstance(debug_id, str) or DEBUG_ID_PATTERN.fullmatch(debug_id) is None

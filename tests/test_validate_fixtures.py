@@ -110,11 +110,17 @@ class ValidateFixturesTests(unittest.TestCase):
                 "filename": "/assets/app.js",
                 "line": 12,
                 "column": 34,
+                "function": "checkout",
+                "module": "@example/checkout",
+                "inApp": True,
                 "debugId": "11111111-2222-4333-8444-555555555555",
             },
             {"filename": "/assets/vendor.js", "line": 1, "column": 2},
         ]
 
+        validate_payload(payload)
+
+        self.issue_attributes(payload)["stackFrames"][0]["function"] = "🧪" * 256
         validate_payload(payload)
 
     def test_rejects_invalid_issue_stack_frame_shape(self) -> None:
@@ -128,6 +134,27 @@ class ValidateFixturesTests(unittest.TestCase):
             "event 2 issue stack frame 0 filename is invalid",
         ):
             validate_payload(payload)
+
+    def test_rejects_invalid_issue_stack_frame_identity(self) -> None:
+        cases = (
+            ({"function": "x" * 257}, "function is invalid"),
+            ({"function": "🧪" * 257}, "function is invalid"),
+            ({"function": None}, "function is invalid"),
+            ({"function": "   "}, "function is invalid"),
+            ({"module": "@example/checkout?private=value"}, "module is invalid"),
+            ({"module": None}, "module is invalid"),
+            ({"module": "   "}, "module is invalid"),
+            ({"inApp": "yes"}, "inApp must be a boolean"),
+            ({"inApp": None}, "inApp must be a boolean"),
+        )
+        for extra, expected in cases:
+            with self.subTest(extra=extra):
+                payload = self.load_valid_payload()
+                self.issue_attributes(payload)["stackFrames"] = [
+                    {"filename": "/assets/app.js", "line": 1, "column": 2, **extra}
+                ]
+                with self.assertRaisesRegex(ValidationError, expected):
+                    validate_payload(payload)
 
     def test_rejects_too_many_issue_stack_frames(self) -> None:
         payload = self.load_valid_payload()
@@ -378,6 +405,19 @@ class ValidateFixturesTests(unittest.TestCase):
                 },
                 "line": {"type": "integer", "minimum": 1, "maximum": 2_147_483_647},
                 "column": {"type": "integer", "minimum": 1, "maximum": 2_147_483_647},
+                "function": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": r"^(?=.*\S)[^\u0000-\u001f\u007f]+$",
+                },
+                "module": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": r"^(?=.*\S)[^?#\u0000-\u001f\u007f]+$",
+                },
+                "inApp": {"type": "boolean"},
                 "debugId": {
                     "type": "string",
                     "pattern": (
