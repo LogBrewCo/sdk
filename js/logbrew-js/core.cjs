@@ -2,6 +2,7 @@ const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
 const { buildIssueStackHelpers } = require("./issue-stack.cjs");
 const { buildLogContextHelpers } = require("./log-context.cjs");
 const { buildOpenTelemetryHelpers } = require("./opentelemetry.cjs");
+const { buildTelemetryContextHelpers } = require("./telemetry-context.cjs");
 const { buildTraceContextHelpers } = require("./trace-context.cjs");
 
 const SEVERITY_ALIASES = new Map([
@@ -124,6 +125,11 @@ const {
 } = buildLogContextHelpers({ SdkError });
 
 const { javascriptStackFrames, validateIssueStackFrames } = buildIssueStackHelpers({ SdkError });
+const {
+  cloneTelemetryContext,
+  mergeTelemetryContexts,
+  validateTelemetryContext
+} = buildTelemetryContextHelpers({ SdkError });
 
 class TransportError extends Error {
   constructor(code, message, retryable = false) {
@@ -176,6 +182,7 @@ class LogBrewClient {
     apiKey,
     sdkName,
     sdkVersion,
+    context,
     maxRetries = 2,
     eventFilter,
     maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
@@ -193,6 +200,7 @@ class LogBrewClient {
     requireNonEmpty("apiKey", apiKey);
     requireNonEmpty("sdkName", sdkName);
     requireNonEmpty("sdkVersion", sdkVersion);
+    const clientContext = validateTelemetryContext(context, "client telemetry context");
     requireNonNegativeInteger("maxRetries", maxRetries);
     if (eventFilter !== undefined && typeof eventFilter !== "function") {
       throw new SdkError("validation_error", "eventFilter must be a function");
@@ -240,6 +248,7 @@ class LogBrewClient {
       maxQueueBytes,
       maxQueueSize,
       onEventDropped,
+      context: clientContext,
       sdk: {
         name: sdkName,
         language: "javascript",
@@ -260,6 +269,7 @@ class LogBrewClient {
     maxQueueBytes,
     maxQueueSize,
     onEventDropped,
+    context,
     eventStore,
     eventQueueFactory,
     transport,
@@ -277,6 +287,7 @@ class LogBrewClient {
     this.maxQueueBytes = maxQueueBytes;
     this.maxQueueSize = maxQueueSize;
     this.onEventDropped = onEventDropped;
+    this.context = cloneTelemetryContext(context);
     this.transport = transport;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
@@ -561,7 +572,11 @@ class LogBrewClient {
     }
     requireNonEmpty("event id", id);
     requireTimestamp(timestamp);
-    const event = { type: eventType, id, timestamp, attributes };
+    const context = mergeTelemetryContexts(this.context, attributes.context);
+    const eventAttributes = context === undefined
+      ? attributes
+      : { ...attributes, context };
+    const event = { type: eventType, id, timestamp, attributes: eventAttributes };
     if (this.eventFilter && this.eventFilter(cloneEvent(event)) === false) {
       return;
     }
@@ -2012,6 +2027,9 @@ function cloneEvent(event) {
   if (Array.isArray(event.attributes.links)) {
     attributes.links = cloneSpanLinks(event.attributes.links);
   }
+  if (event.attributes.context !== undefined) {
+    attributes.context = cloneTelemetryContext(event.attributes.context);
+  }
   return { ...event, attributes };
 }
 
@@ -2024,7 +2042,7 @@ function validateRelease(attributes) {
     version: attributes.version,
     ...(attributes.commit ? { commit: attributes.commit } : {}),
     ...(attributes.notes !== undefined ? { notes: attributes.notes } : {})
-  }, attributes.metadata);
+  }, attributes.metadata, attributes.context);
 }
 
 function validateEnvironment(attributes) {
@@ -2032,7 +2050,7 @@ function validateEnvironment(attributes) {
   return withMetadata({
     name: attributes.name,
     ...(attributes.region !== undefined ? { region: attributes.region } : {})
-  }, attributes.metadata);
+  }, attributes.metadata, attributes.context);
 }
 
 function validateIssue(attributes) {
@@ -2044,7 +2062,7 @@ function validateIssue(attributes) {
     level,
     ...(attributes.message !== undefined ? { message: attributes.message } : {}),
     ...(stackFrames !== undefined ? { stackFrames } : {})
-  }, attributes.metadata);
+  }, attributes.metadata, attributes.context);
 }
 
 function validateLog(attributes) {
@@ -2054,7 +2072,7 @@ function validateLog(attributes) {
     message: attributes.message,
     level,
     ...(attributes.logger !== undefined ? { logger: attributes.logger } : {})
-  }, attributes.metadata);
+  }, attributes.metadata, attributes.context);
 }
 
 function normalizeSeverity(label, value) {
@@ -2086,7 +2104,7 @@ function validateSpan(attributes) {
     ...(attributes.durationMs !== undefined ? { durationMs: attributes.durationMs } : {}),
     ...(events !== undefined ? { events } : {}),
     ...(links !== undefined ? { links } : {})
-  }, attributes.metadata);
+  }, attributes.metadata, attributes.context);
 }
 
 function validateSpanEvents(events) {
@@ -2169,7 +2187,7 @@ function validateAction(attributes) {
   return withMetadata({
     name: attributes.name,
     status: attributes.status
-  }, attributes.metadata);
+  }, attributes.metadata, attributes.context);
 }
 
 function validateMetric(attributes) {
@@ -2190,7 +2208,7 @@ function validateMetric(attributes) {
     value: attributes.value,
     unit: attributes.unit,
     temporality: attributes.temporality
-  }, attributes.metadata);
+  }, attributes.metadata, attributes.context);
 }
 
 function productActionDetails(action) {
@@ -2312,11 +2330,14 @@ function stringOrUndefined(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function withMetadata(attributes, metadata) {
+function withMetadata(attributes, metadata, context) {
   const safeMetadata = cloneMetadata(metadata);
-  return safeMetadata === undefined
-    ? attributes
-    : { ...attributes, metadata: safeMetadata };
+  const safeContext = validateTelemetryContext(context);
+  return {
+    ...attributes,
+    ...(safeMetadata === undefined ? {} : { metadata: safeMetadata }),
+    ...(safeContext === undefined ? {} : { context: safeContext })
+  };
 }
 
 function normalizeConsoleLevels(levels) {

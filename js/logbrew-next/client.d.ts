@@ -3,12 +3,14 @@ import type {
   EventFilter,
   LogBrewClient,
   Metadata,
-  SpanAttributes
+  SpanAttributes,
+  TelemetryContext
 } from "@logbrew/sdk";
 
 export type CreateLogBrewNextBrowserClientConfig = {
   apiKey?: string;
   clientKey?: string;
+  context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;

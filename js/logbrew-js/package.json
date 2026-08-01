@@ -49,6 +49,7 @@
     "react-native.js",
     "react-native.d.ts",
     "support-ticket.cjs",
+    "telemetry-context.cjs",
     "trace-context.cjs",
     "winston.cjs",
     "release-artifacts-common.js",

@@ -5,6 +5,7 @@ import type {
   LogBrewClient,
   MetricAttributes,
   SpanAttributes,
+  TelemetryContext,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
@@ -18,6 +19,7 @@ type NodeFetchTransportConfig = {
 export type CreateLogBrewExpressClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
+  context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;

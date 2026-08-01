@@ -11,6 +11,7 @@ import type {
   Metadata,
   ReleaseAttributes,
   SpanAttributes,
+  TelemetryContext,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
@@ -36,6 +37,7 @@ export type CreateLogBrewReactNativeClientConfig = {
   automaticDelivery?: boolean;
   apiKey?: string;
   clientKey?: string;
+  context?: TelemetryContext;
   deliveryIntervalMs?: number;
   deliveryQueueThreshold?: number;
   /** Advanced synchronous persistence seam. React Native apps normally use the native entry's persistentQueue mode. */

@@ -2,6 +2,48 @@
 export type MetadataValue = string | number | boolean | null;
 /** Structured metadata map shared by public LogBrew event attribute types. */
 export type Metadata = Record<string, MetadataValue>;
+/** Bounded service, runtime, or framework identity shared by telemetry signals. */
+export type TelemetryNamedVersion = {
+  name: string;
+  version?: string;
+};
+/** Privacy-bounded resource identity shared by telemetry signals. */
+export type TelemetryResource = {
+  service?: TelemetryNamedVersion;
+  deployment?: { environment?: string; release?: string };
+  runtime?: TelemetryNamedVersion;
+  framework?: TelemetryNamedVersion;
+  operatingSystem?: TelemetryNamedVersion & { build?: string };
+  device?: { family?: string; model?: string; architecture?: string };
+  application?: { name?: string; version?: string; build?: string };
+};
+/** W3C-compatible correlation identity shared by non-span telemetry. */
+export type TelemetryTraceContext = {
+  traceId: string;
+  spanId?: string;
+  parentSpanId?: string;
+  sampled?: boolean;
+};
+/** Opaque application session identity. */
+export type TelemetrySessionContext = {
+  id: string;
+  previousId?: string;
+};
+/** Explicit app-owned subject identity; do not send names, email addresses, or IP addresses. */
+export type TelemetrySubjectContext = {
+  id: string;
+  kind: "anonymous" | "user";
+};
+/** Versioned shared context available on every LogBrew event type. */
+export type TelemetryContext = {
+  schemaVersion: 1;
+  resource?: TelemetryResource;
+  trace?: TelemetryTraceContext;
+  session?: TelemetrySessionContext;
+  subject?: TelemetrySubjectContext;
+  /** Up to 32 low-cardinality string dimensions with safe machine keys. */
+  tags?: Record<string, string>;
+};
 /** Canonical user-facing severity categories accepted by LogBrew. */
 export type Severity = "info" | "warning" | "error" | "critical";
 /** Runtime-level aliases accepted for compatibility and normalized before send. */
@@ -211,6 +253,7 @@ export type ReleaseAttributes = {
   commit?: string;
   notes?: string;
   metadata?: Metadata;
+  context?: TelemetryContext;
 };
 
 /** Public environment event attributes. */
@@ -218,6 +261,7 @@ export type EnvironmentAttributes = {
   name: string;
   region?: string;
   metadata?: Metadata;
+  context?: TelemetryContext;
 };
 
 /** Privacy-bounded generated JavaScript frame attached to an issue. */
@@ -246,6 +290,7 @@ export type IssueAttributes = {
   /** Ordered privacy-bounded generated frames, capped at 32. */
   stackFrames?: IssueStackFrame[];
   metadata?: Metadata;
+  context?: TelemetryContext;
 };
 
 /** Options for creating privacy-bounded issue attributes from a JavaScript error. */
@@ -282,6 +327,7 @@ export type LogAttributes = {
   level: SeverityInput;
   logger?: string;
   metadata?: Metadata;
+  context?: TelemetryContext;
 };
 
 /** Console method names supported by the opt-in console capture helper. */
@@ -412,6 +458,7 @@ export type SpanAttributes = {
   events?: SpanEventSummary[];
   links?: SpanLinkSummary[];
   metadata?: Metadata;
+  context?: TelemetryContext;
 };
 
 /** Public action event attributes. */
@@ -419,6 +466,7 @@ export type ActionAttributes = {
   name: string;
   status: "queued" | "running" | "success" | "failure";
   metadata?: Metadata;
+  context?: TelemetryContext;
 };
 
 /** App-owned product step input for agent-readable action timelines. */
@@ -521,6 +569,7 @@ export type MetricAttributes = {
   unit: string;
   temporality: "delta" | "cumulative";
   metadata?: Metadata;
+  context?: TelemetryContext;
 } | {
   name: string;
   kind: "gauge";
@@ -662,6 +711,8 @@ export declare class LogBrewClient {
     apiKey: string;
     sdkName: string;
     sdkVersion: string;
+    /** Versioned context merged into every captured event; event context can override dynamic fields. */
+    context?: TelemetryContext;
     /** Retry attempts after the first send. Must be a non-negative integer; defaults to 2. */
     maxRetries?: number;
     eventFilter?: EventFilter;

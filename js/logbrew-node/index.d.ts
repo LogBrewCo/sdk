@@ -9,6 +9,7 @@ import type {
   SpanAttributes,
   SpanEventSummary,
   SpanLinkSummary,
+  TelemetryContext,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
@@ -16,6 +17,7 @@ import type {
 export type CreateLogBrewNodeClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
+  context?: TelemetryContext;
   /** Owned transport used for automatic delivery. Defaults to the Node fetch transport. */
   transport?: Transport;
   /** Disable to retain manual flush-only behavior. Defaults to true. */

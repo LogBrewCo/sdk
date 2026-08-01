@@ -2,6 +2,7 @@ import type {
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
+  TelemetryContext,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
@@ -9,6 +10,7 @@ import type {
 export type CreateLogBrewSvelteClientConfig = {
   apiKey?: string;
   clientKey?: string;
+  context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;

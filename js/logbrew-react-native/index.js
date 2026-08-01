@@ -27,6 +27,7 @@ export function createLogBrewReactNativeClient({
   automaticDelivery,
   apiKey,
   clientKey,
+  context,
   deliveryIntervalMs,
   deliveryQueueThreshold,
   eventStore,
@@ -47,6 +48,7 @@ export function createLogBrewReactNativeClient({
   return LogBrewClient.create({
     apiKey: authKey,
     automaticDelivery,
+    context,
     deliveryIntervalMs,
     deliveryQueueThreshold,
     eventStore,

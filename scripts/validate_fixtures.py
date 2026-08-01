@@ -37,13 +37,13 @@ METRIC_TEMPORALITIES_BY_KIND = {
 }
 NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 OPTIONAL_ATTRIBUTES = {
-    "release": {"commit", "notes", "metadata"},
-    "environment": {"region", "metadata"},
-    "issue": {"message", "metadata", "stackFrames"},
-    "log": {"logger", "metadata"},
-    "span": {"parentSpanId", "durationMs", "metadata", "events", "links"},
-    "action": {"metadata"},
-    "metric": {"metadata"},
+    "release": {"commit", "notes", "metadata", "context"},
+    "environment": {"region", "metadata", "context"},
+    "issue": {"message", "metadata", "stackFrames", "context"},
+    "log": {"logger", "metadata", "context"},
+    "span": {"parentSpanId", "durationMs", "metadata", "events", "links", "context"},
+    "action": {"metadata", "context"},
+    "metric": {"metadata", "context"},
 }
 REQUIRED_STRING_ATTRIBUTES = {
     event_type: required_attributes - {"value"}
@@ -64,6 +64,17 @@ DEBUG_ID_PATTERN = re.compile(
 )
 ZERO_TRACE_ID = "0" * 32
 ZERO_SPAN_ID = "0" * 16
+CONTEXT_KEYS = {"schemaVersion", "resource", "trace", "session", "subject", "tags"}
+RESOURCE_FIELDS = {
+    "service": ({"name", "version"}, {"name"}),
+    "deployment": ({"environment", "release"}, set()),
+    "runtime": ({"name", "version"}, {"name"}),
+    "framework": ({"name", "version"}, {"name"}),
+    "operatingSystem": ({"name", "version", "build"}, {"name"}),
+    "device": ({"family", "model", "architecture"}, set()),
+    "application": ({"name", "version", "build"}, set()),
+}
+CONTEXT_TAG_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 
 
 class ValidationError(Exception):
@@ -105,6 +116,124 @@ def _validate_metadata(index: int, attributes: dict[str, Any]) -> None:
             raise ValidationError(
                 f"event {index} metadata value for {key} must be a string, number, boolean, or null"
             )
+
+
+def _context_string(value: Any, label: str, max_length: int = 256) -> str:
+    if not isinstance(value, str):
+        raise ValidationError(f"{label} must be a string")
+    normalized = value.strip()
+    if (
+        not normalized
+        or len(normalized) > max_length
+        or any(
+            ord(character) <= 31 or 127 <= ord(character) <= 159
+            for character in normalized
+        )
+    ):
+        raise ValidationError(f"{label} is invalid")
+    return normalized
+
+
+def _validate_resource_context(index: int, value: Any) -> None:
+    label = f"event {index} telemetry context resource"
+    if not isinstance(value, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(value, set(RESOURCE_FIELDS), label)
+    if not value:
+        raise ValidationError(f"{label} must not be empty")
+    for section_name, section in value.items():
+        section_label = f"{label} {section_name}"
+        if not isinstance(section, dict):
+            raise ValidationError(f"{section_label} must be an object")
+        allowed, required = RESOURCE_FIELDS[section_name]
+        _reject_unknown_keys(section, allowed, section_label)
+        if not section:
+            raise ValidationError(f"{section_label} must not be empty")
+        missing = required - section.keys()
+        if missing:
+            raise ValidationError(f"{section_label} missing fields: {', '.join(sorted(missing))}")
+        for field, field_value in section.items():
+            _context_string(field_value, f"{section_label} {field}")
+
+
+def _validate_trace_context(index: int, value: Any) -> None:
+    label = f"event {index} telemetry context trace"
+    if not isinstance(value, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(value, {"traceId", "spanId", "parentSpanId", "sampled"}, label)
+    trace_id = value.get("traceId")
+    if not isinstance(trace_id, str) or TRACE_ID_PATTERN.fullmatch(trace_id) is None:
+        raise ValidationError(f"{label} traceId must be 32 hex characters")
+    if trace_id.lower() == ZERO_TRACE_ID:
+        raise ValidationError(f"{label} traceId must not be all zeros")
+    for field in ("spanId", "parentSpanId"):
+        span_id = value.get(field)
+        if span_id is None:
+            continue
+        if not isinstance(span_id, str) or SPAN_ID_PATTERN.fullmatch(span_id) is None:
+            raise ValidationError(f"{label} {field} must be 16 hex characters")
+        if span_id.lower() == ZERO_SPAN_ID:
+            raise ValidationError(f"{label} {field} must not be all zeros")
+    if "sampled" in value and not isinstance(value["sampled"], bool):
+        raise ValidationError(f"{label} sampled must be a boolean")
+
+
+def _validate_session_context(index: int, value: Any) -> None:
+    label = f"event {index} telemetry context session"
+    if not isinstance(value, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(value, {"id", "previousId"}, label)
+    session_id = _context_string(value.get("id"), f"{label} id", 200)
+    if "previousId" in value:
+        previous_id = _context_string(value["previousId"], f"{label} previousId", 200)
+        if previous_id == session_id:
+            raise ValidationError(f"{label} previousId must differ from id")
+
+
+def _validate_subject_context(index: int, value: Any) -> None:
+    label = f"event {index} telemetry context subject"
+    if not isinstance(value, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(value, {"id", "kind"}, label)
+    _context_string(value.get("id"), f"{label} id", 200)
+    if value.get("kind") not in {"anonymous", "user"}:
+        raise ValidationError(f"{label} kind must be anonymous or user")
+
+
+def _validate_context_tags(index: int, value: Any) -> None:
+    label = f"event {index} telemetry context tags"
+    if not isinstance(value, dict):
+        raise ValidationError(f"{label} must be an object")
+    if not 1 <= len(value) <= 32:
+        raise ValidationError(f"{label} must contain 1-32 entries")
+    for key, tag_value in value.items():
+        if not isinstance(key, str) or CONTEXT_TAG_KEY_PATTERN.fullmatch(key) is None:
+            raise ValidationError(f"{label} key is invalid")
+        _context_string(tag_value, f"{label} value for {key}")
+
+
+def _validate_telemetry_context(index: int, attributes: dict[str, Any]) -> None:
+    context = attributes.get("context")
+    if context is None:
+        return
+    label = f"event {index} telemetry context"
+    if not isinstance(context, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(context, CONTEXT_KEYS, label)
+    if context.get("schemaVersion") != 1 or isinstance(context.get("schemaVersion"), bool):
+        raise ValidationError(f"{label} schemaVersion must be 1")
+    if len(context) == 1:
+        raise ValidationError(f"{label} must include resource, trace, session, subject, or tags")
+    if "resource" in context:
+        _validate_resource_context(index, context["resource"])
+    if "trace" in context:
+        _validate_trace_context(index, context["trace"])
+    if "session" in context:
+        _validate_session_context(index, context["session"])
+    if "subject" in context:
+        _validate_subject_context(index, context["subject"])
+    if "tags" in context:
+        _validate_context_tags(index, context["tags"])
 
 
 def _validate_span_events(index: int, attributes: dict[str, Any]) -> None:
@@ -343,6 +472,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
 
         _validate_optional_attributes(index, event_type, attributes)
         _validate_metadata(index, attributes)
+        _validate_telemetry_context(index, attributes)
 
 
 def _result_payload(ok: bool, message: str, fixture: Path) -> dict[str, Any]:

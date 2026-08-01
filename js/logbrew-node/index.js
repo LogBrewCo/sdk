@@ -67,6 +67,7 @@ export function createLogBrewNodeClient({
   serverApiKey,
   apiKey,
   automaticDelivery,
+  context,
   deliveryIntervalMs,
   deliveryQueueThreshold,
   endpoint,
@@ -118,6 +119,7 @@ export function createLogBrewNodeClient({
     return LogBrewClient.create({
       apiKey: authKey,
       automaticDelivery,
+      context,
       deliveryIntervalMs,
       deliveryQueueThreshold,
       eventStore,

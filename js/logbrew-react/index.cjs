@@ -11,6 +11,7 @@ const LogBrewContext = React.createContext(null);
 function createLogBrewReactClient({
   apiKey,
   clientKey,
+  context,
   eventFilter,
   sdkName = "logbrew-react",
   sdkVersion = "0.1.0",
@@ -24,6 +25,7 @@ function createLogBrewReactClient({
   }
   return LogBrewClient.create({
     apiKey: authKey,
+    context,
     eventFilter,
     maxQueueSize,
     maxRetries,

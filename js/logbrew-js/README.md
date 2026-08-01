@@ -136,6 +136,50 @@ try {
 
 The helper records the error name/message and up to 32 ordered generated `stackFrames`, with query strings, hashes, and local absolute prefixes removed. Each frame carries filename, positive line/column, a conservatively parsed function name when the runtime provides one, and an optional matched Debug ID. Applications that create frames directly may also provide bounded `function`, `module`, and `inApp` identity. Existing first-frame metadata remains available for compatible grouping and tooling. The helper also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Nested `Error.cause` chains and `AggregateError.errors` are summarized as bounded cause counts, types, and sources without copying nested messages or stacks. Raw stack text is included only with `includeErrorStack: true`.
 
+## Shared Telemetry Context
+
+Give issues, logs, spans, actions, metrics, releases, and environments the same bounded identity and correlation data with the versioned `context` option. The JavaScript framework clients accept the same option, so middleware-generated and app-created events share one resource, deployment, session, subject, trace, and tag vocabulary.
+
+```js
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-web",
+  sdkVersion: "1.0.0",
+  context: {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "checkout-web", version: "1.0.0" },
+      deployment: { environment: "production", release: "web@1.0.0" },
+      runtime: { name: "browser" },
+      framework: { name: "react", version: "19" }
+    },
+    session: { id: "session_01" },
+    subject: { id: "subject_01", kind: "anonymous" },
+    tags: { plan: "team", region: "eu" }
+  }
+});
+
+client.action("evt_checkout_started", new Date().toISOString(), {
+  name: "checkout.started",
+  status: "success",
+  context: {
+    schemaVersion: 1,
+    trace: {
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "b7ad6b7169203331",
+      sampled: true
+    },
+    tags: { funnel: "checkout" }
+  }
+});
+```
+
+Client context is copied at creation and merged into every event. Event context can replace the current trace, session, or subject and can add or override individual resource fields and tags. Inputs are validated before queueing: unknown fields, all-zero trace identifiers, empty sections, oversized values, and more than 32 tags are rejected.
+
+For span events, the span's required top-level `traceId`, `spanId`, and optional `parentSpanId` remain the canonical span identity. Shared `context.trace` is intended to correlate issues, logs, actions, metrics, releases, and environments that do not already carry a required span identity.
+
+`subject.id` and `session.id` are app-owned correlation identifiers, not profile fields. Use opaque identifiers and never put names, email addresses, IP addresses, authentication values, free-form user input, or other personal data in context or tags. The SDK does not discover a user, device, location, session, or product interaction automatically. Capture only the fields your application has deliberately approved, rotate anonymous identifiers according to your privacy policy, and keep tags low-cardinality.
+
 ## Example
 
 ```js
