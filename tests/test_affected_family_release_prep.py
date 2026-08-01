@@ -27,11 +27,11 @@ def maven_version(path: Path) -> str | None:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.5"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.6"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.1"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.2"),
-            "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.1"),
-            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.2"),
+            "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.2"),
+            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.3"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.4"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.2"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.12"),
@@ -117,23 +117,18 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertNotIn("celery>=5,<6", project["dependencies"])
         self.assertIn("logbrew-sdk>=0.1.7,<0.2.0", project["dependencies"])
 
-    def test_react_native_bundle_smoke_matches_package_version(self) -> None:
-        manifest = json.loads(
-            (ROOT / "js/logbrew-react-native/package.json").read_text(
-                encoding="utf-8"
-            )
-        )
+    def test_react_native_bundle_smoke_reads_package_versions(self) -> None:
         smoke = (
             ROOT / "scripts/real_user_react_native_bundle_smoke.sh"
         ).read_text(encoding="utf-8")
-        expected_version = re.search(
-            r'^expected_react_native_package_version="([^"]+)"$',
+        self.assertIn(
+            "expected_sdk_version=\"$(node -p \"require('${repo_root}/js/logbrew-js/package.json').version\")\"",
             smoke,
-            re.MULTILINE,
         )
-
-        self.assertIsNotNone(expected_version)
-        self.assertEqual(expected_version.group(1), manifest["version"])
+        self.assertIn(
+            "expected_react_native_package_version=\"$(node -p \"require('${repo_root}/js/logbrew-react-native/package.json').version\")\"",
+            smoke,
+        )
 
     def test_react_native_release_selector_accepts_name_and_package_directory(
         self,

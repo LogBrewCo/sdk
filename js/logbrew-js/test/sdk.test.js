@@ -1524,12 +1524,12 @@ test("createIssueAttributesFromError omits local paths and stack text by default
   const error = new Error("Local build failed");
   error.stack = [
     "Error: Local build failed",
-    "    at compile (/Users/example/private/project/dist/app.js:4:5)"
+    "    at compile (/home/example/project/dist/app.js:4:5)"
   ].join("\n");
 
   const attributes = createIssueAttributesFromError(error, {
     debugIdMap: {
-      "/Users/example/private/project/dist/app.js": "22222222-3333-4444-8555-666666666666"
+      "/home/example/project/dist/app.js": "22222222-3333-4444-8555-666666666666"
     },
     metadata: { flow: "build" }
   });
@@ -1540,7 +1540,7 @@ test("createIssueAttributesFromError omits local paths and stack text by default
   assert.equal(attributes.metadata.releaseArtifactDebugId, "22222222-3333-4444-8555-666666666666");
 
   const serialized = JSON.stringify(attributes);
-  assert.doesNotMatch(serialized, /\/Users\/example|private\/project|errorStack/u);
+  assert.doesNotMatch(serialized, /\/home\/example|example\/project|errorStack/u);
 });
 
 test("createIssueAttributesFromError includes stack only when explicitly requested", () => {
@@ -3130,7 +3130,7 @@ test("support ticket draft creates planned payload and redacts diagnostics", () 
       retryable: false,
       apiKey: ["lbw", "ingest", "hidden"].join("_"),
       endpoint: "https://api.example/ingest?debug=true#frag",
-      localPath: "/Users/example/app/.env",
+      localPath: "/home/example/app/.env",
       error: new Error("contains hidden message"),
       headers: {
         authorization: ["Bearer", "hidden"].join(" "),
@@ -3180,7 +3180,7 @@ test("support ticket draft creates planned payload and redacts diagnostics", () 
   const serialized = JSON.stringify(draft);
   assert.equal(serialized.includes("hidden"), false);
   assert.equal(serialized.includes("api.example"), false);
-  assert.equal(serialized.includes("/Users/example"), false);
+  assert.equal(serialized.includes("/home/example"), false);
   assert.equal(serialized.includes("traceparent"), false);
 });
 
@@ -3303,6 +3303,14 @@ test("Pino record helper maps safe log attributes", () => {
     [["host", "name"].join("")]: "host.local",
     service: "checkout",
     orderId: 42,
+    authorization: "Bearer hidden",
+    cookie: "session=hidden",
+    requestBody: "hidden payload",
+    rawBody: "hidden raw payload",
+    responseHeaders: "hidden headers",
+    accessKey: "hidden access key",
+    privateKey: "hidden key",
+    requestUrl: "/checkout/42?token=hidden",
     ignoredObject: { nested: true },
     err: {
       type: "TypeError",

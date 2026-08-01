@@ -7,9 +7,8 @@ react_version="19.2.3"
 react_native_cli_version="20.1.0"
 expo_version="57.0.8"
 worklets_version="0.10.0"
-expected_sdk_version="0.1.5"
-expected_react_native_package_version="0.1.12"
-expected_sdk_peer="^0.1.5"
+expected_sdk_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+expected_react_native_package_version="$(node -p "require('${repo_root}/js/logbrew-react-native/package.json').version")"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rn-bundle.XXXXXX")"
 
 remove_fixture() {
@@ -68,8 +67,7 @@ mkdir "$app_root"
 
   node --input-type=module - \
     "$expected_sdk_version" \
-    "$expected_react_native_package_version" \
-    "$expected_sdk_peer" <<'NODE'
+    "$expected_react_native_package_version" <<'NODE'
 import fs from "node:fs";
 
 function readManifest(packageName) {
@@ -96,7 +94,6 @@ function requirePackedFile(packageName, relativePath) {
 
 const expectedSdkVersion = process.argv[2];
 const expectedReactNativeVersion = process.argv[3];
-const expectedSdkPeer = process.argv[4];
 const sdkManifest = readManifest("@logbrew/sdk");
 const reactNativeManifest = readManifest("@logbrew/react-native");
 
@@ -105,11 +102,6 @@ requireEqual(
   reactNativeManifest.version,
   expectedReactNativeVersion,
   "React Native package version"
-);
-requireEqual(
-  reactNativeManifest.peerDependencies?.["@logbrew/sdk"],
-  expectedSdkPeer,
-  "React Native SDK peer"
 );
 requireEqual(sdkManifest.reactNative, undefined, "SDK camel-case mobile field");
 requireEqual(sdkManifest["react-native"], "./react-native.js", "SDK legacy mobile entry");
@@ -165,6 +157,10 @@ for (const relativePath of [
   requirePackedFile("@logbrew/react-native", relativePath);
 }
 NODE
+
+  python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
+    "./node_modules/@logbrew/react-native/package.json" \
+    "@logbrew/sdk=$expected_sdk_version"
 
   node <<'NODE'
 const expo = require("@logbrew/react-native/expo");

@@ -28,6 +28,44 @@ const CONSOLE_METHODS = new Set(["debug", "info", "log", "warn", "error"]);
 const DEFAULT_CONSOLE_LEVELS = ["debug", "info", "log", "warn", "error"];
 const PINO_HOST_FIELD = ["host", "name"].join("");
 const PINO_RESERVED_FIELDS = new Set(["level", "time", "timestamp", "msg", "message", "err", "error", "pid", PINO_HOST_FIELD, "v"]);
+const PINO_SENSITIVE_CONTEXT_FIELDS = new Set([
+  "apikey",
+  "authorization",
+  "baggage",
+  "body",
+  "cookie",
+  "credentials",
+  "cwd",
+  "directory",
+  "dirname",
+  "errorstack",
+  "file",
+  "filename",
+  "filepath",
+  "headers",
+  "href",
+  "key",
+  "password",
+  "payload",
+  "proxyauthorization",
+  "query",
+  "querystring",
+  "requestbody",
+  "requestheaders",
+  "requesturl",
+  "responsebody",
+  "responseheaders",
+  "responseurl",
+  "search",
+  "secret",
+  "setcookie",
+  "stack",
+  "token",
+  "traceparent",
+  "tracestate",
+  "uri",
+  "url"
+]);
 const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$/u;
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
@@ -1798,11 +1836,33 @@ function pinoMessage(record) {
 function pinoContextMetadata(record) {
   const metadata = {};
   for (const [key, value] of Object.entries(record)) {
-    if (!PINO_RESERVED_FIELDS.has(key) && isMetadataValue(value)) {
+    if (!PINO_RESERVED_FIELDS.has(key) && !isSensitivePinoContextField(key) && isMetadataValue(value)) {
       metadata[`context.${key}`] = value;
     }
   }
   return metadata;
+}
+
+function isSensitivePinoContextField(key) {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+  return (
+    PINO_SENSITIVE_CONTEXT_FIELDS.has(normalized)
+    || normalized.endsWith("accesskey")
+    || normalized.endsWith("apikey")
+    || normalized.endsWith("authorization")
+    || normalized.endsWith("body")
+    || normalized.endsWith("cookie")
+    || normalized.endsWith("credentials")
+    || normalized.endsWith("headers")
+    || normalized.endsWith("password")
+    || normalized.endsWith("payload")
+    || normalized.endsWith("privatekey")
+    || normalized.endsWith("query")
+    || normalized.endsWith("secret")
+    || normalized.endsWith("stack")
+    || normalized.endsWith("token")
+    || normalized.endsWith("url")
+  );
 }
 
 function addPinoErrorMetadata(metadata, error, includeErrorStack) {

@@ -122,6 +122,56 @@ await app.register(logbrewFastifyPlugin, {
 });
 ```
 
+## Existing Fastify/Pino Application Logs
+
+The request plugin captures request completion and route failures. To also capture existing `app.log` and `request.log` calls without replacing Fastify's Pino destination, install the Node Pino integration once and keep its client separate from the plugin's per-request lifecycle:
+
+```js
+import Fastify from "fastify";
+import {
+  createLogBrewNodeClient,
+  installLogBrewPinoInstrumentation
+} from "@logbrew/node";
+import {
+  getActiveLogBrewTrace,
+  logbrewFastifyPlugin
+} from "@logbrew/fastify";
+
+const applicationLogClient = createLogBrewNodeClient({
+  sdkName: "checkout-api",
+  sdkVersion: "1.4.0"
+});
+const pinoCapture = installLogBrewPinoInstrumentation({
+  client: applicationLogClient,
+  metadata: { framework: "fastify", service: "checkout-api" },
+  traceProvider: getActiveLogBrewTrace,
+  onError(error) {
+    console.error("LogBrew Pino capture failed", error);
+  }
+});
+
+const app = Fastify({
+  logger: {
+    level: process.env.LOG_LEVEL ?? "info",
+    redact: ["authorization", "cookie", "password", "token"]
+  }
+});
+
+await app.register(logbrewFastifyPlugin);
+
+app.get("/checkout/:cartId", async (request) => {
+  request.log.info({ routeTemplate: "/checkout/:cartId" }, "checkout queued");
+  return { ok: true };
+});
+
+app.addHook("onClose", async () => {
+  pinoCapture.uninstall();
+  await applicationLogClient.shutdown();
+});
+```
+
+This works with Fastify's existing JSON stream or transport, including `pino-pretty`; LogBrew observes the finalized JSON before Pino writes to that destination. Automatic capture requires Node.js 18.19 or newer and Pino 9.11+ or 10.1+. It captures primitive structured fields but automatically excludes credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text. Keep normal Pino redaction enabled because the log message itself is telemetry. Use `shouldCapture` for app-specific filtering and `includeErrorStack: true` only under an explicit stack-data policy.
+
 When an incoming request has a valid W3C `traceparent` header, the plugin attaches `request.logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by Fastify after the plugin's `onRequest` hook. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js

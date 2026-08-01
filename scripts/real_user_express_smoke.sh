@@ -84,19 +84,10 @@ grep -q 'spanIdFactory' "$tmp_dir/express-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/express-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/express-readme.md"
 grep -q 'low-cardinality' "$tmp_dir/express-readme.md"
-python3 - "$tmp_dir/express-package.json" "$node_package_version" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-manifest = json.loads(Path(sys.argv[1]).read_text())
-node_version = sys.argv[2]
-peers = manifest.get("peerDependencies", {})
-if peers.get("@logbrew/node") != f"^{node_version}":
-    raise SystemExit(f"unexpected @logbrew/node peer: {peers.get('@logbrew/node')!r}")
-if peers.get("@logbrew/sdk") != "^0.1.3":
-    raise SystemExit(f"unexpected @logbrew/sdk peer: {peers.get('@logbrew/sdk')!r}")
-PY
+python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
+  "$tmp_dir/express-package.json" \
+  "@logbrew/node=$node_package_version" \
+  "@logbrew/sdk=$sdk_package_version"
 
 app_dir="$tmp_dir/express-smoke-app"
 mkdir -p "$app_dir"
