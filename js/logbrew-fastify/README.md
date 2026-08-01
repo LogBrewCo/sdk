@@ -203,7 +203,7 @@ app.setErrorHandler((error, _request, reply) => {
 });
 ```
 
-The plugin uses Fastify's `onRequest`, `preHandler`, `onResponse`, and `onError` hooks. `onResponse` runs after the response has been sent, which makes it a good place to flush request telemetry without changing the response body; `onError` captures thrown route errors before your normal error response handler finishes the request. When the failing request passed through `logbrewFastifyPlugin` with a valid `traceparent`, the default error event includes trace correlation metadata without echoing the raw propagation header.
+The plugin uses Fastify's `onRequest`, `preHandler`, `onResponse`, and `onError` hooks. `onResponse` runs after the response has been sent, which makes it a good place to flush request telemetry without changing the response body; `onError` queues thrown route errors before your normal error response handler finishes the request. When request capture or request metrics are enabled, the completed error response and its issue are delivered together once from `onResponse`. When both are disabled, `onError` delivers the issue directly. A failing request with a valid `traceparent` includes trace correlation metadata without echoing the raw propagation header.
 
 ## Example Source
 

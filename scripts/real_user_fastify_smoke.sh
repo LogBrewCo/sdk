@@ -516,6 +516,102 @@ grep -q 'GET /fail failed' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q '"pinoCaptured":"checkout queued"' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q '"pinoOriginalDestinationPreserved":true' "$tmp_dir/fastify-smoke.stderr.json"
 
+cat > error-lifecycle.mjs <<'EOF'
+import assert from "node:assert/strict";
+import Fastify from "fastify";
+import { RecordingTransport } from "@logbrew/sdk";
+import { logbrewFastifyPlugin } from "@logbrew/fastify";
+
+const captureErrors = [];
+const transport = RecordingTransport.alwaysAccept();
+const app = Fastify();
+await app.register(logbrewFastifyPlugin, {
+  serverApiKey: "error-lifecycle-key",
+  spanIdFactory: () => "b7ad6b7169203331",
+  transport,
+  onCaptureError(error) {
+    captureErrors.push(error instanceof Error ? error.message : String(error));
+  }
+});
+app.get("/failure", async () => {
+  throw new Error("expected route failure");
+});
+app.setErrorHandler((_error, _request, reply) => {
+  reply.code(503).send({ ok: false });
+});
+
+const response = await app.inject({
+  headers: {
+    traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+  },
+  method: "GET",
+  url: "/failure?view=compact"
+});
+await app.close();
+
+assert.equal(response.statusCode, 503);
+assert.deepEqual(captureErrors, []);
+assert.equal(transport.sentBodies.length, 1);
+const payload = JSON.parse(transport.lastBody());
+assert.equal(payload.events.length, 2);
+assert.deepEqual(payload.events.map((event) => event.type).sort(), ["issue", "span"]);
+const issue = payload.events.find((event) => event.type === "issue");
+const span = payload.events.find((event) => event.type === "span");
+assert.equal(issue.attributes.title, "GET /failure failed");
+assert.equal(issue.attributes.metadata.traceId, "4bf92f3577b34da6a3ce929d0e0e4736");
+assert.equal(span.attributes.name, "GET /failure");
+assert.equal(span.attributes.status, "error");
+assert.equal(span.attributes.metadata.path, "/failure");
+assert.equal(JSON.stringify(payload).includes("view=compact"), false);
+console.log(JSON.stringify({ errorLifecycle: true, ok: true }));
+EOF
+
+node error-lifecycle.mjs > "$tmp_dir/fastify-error-lifecycle.json"
+grep -q '"errorLifecycle":true' "$tmp_dir/fastify-error-lifecycle.json"
+
+cat > error-lifecycle.cjs <<'EOF'
+const assert = require("node:assert/strict");
+const Fastify = require("fastify");
+const { RecordingTransport } = require("@logbrew/sdk");
+const { logbrewFastifyPlugin } = require("@logbrew/fastify");
+
+(async () => {
+  const captureErrors = [];
+  const transport = RecordingTransport.alwaysAccept();
+  const app = Fastify();
+  await app.register(logbrewFastifyPlugin, {
+    serverApiKey: "cjs-error-lifecycle-key",
+    transport,
+    onCaptureError(error) {
+      captureErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  });
+  app.get("/failure", async () => {
+    throw new Error("expected CommonJS route failure");
+  });
+  app.setErrorHandler((_error, _request, reply) => {
+    reply.code(503).send({ ok: false });
+  });
+
+  const response = await app.inject({ method: "GET", url: "/failure?view=compact" });
+  await app.close();
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(captureErrors, []);
+  assert.equal(transport.sentBodies.length, 1);
+  const payload = JSON.parse(transport.lastBody());
+  assert.equal(payload.events.length, 2);
+  assert.deepEqual(payload.events.map((event) => event.type).sort(), ["issue", "log"]);
+  assert.equal(JSON.stringify(payload).includes("view=compact"), false);
+  console.log(JSON.stringify({ cjsErrorLifecycle: true, ok: true }));
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+EOF
+
+node error-lifecycle.cjs > "$tmp_dir/fastify-error-lifecycle-cjs.json"
+grep -q '"cjsErrorLifecycle":true' "$tmp_dir/fastify-error-lifecycle-cjs.json"
+
 cat > application-log-guards.mjs <<'EOF'
 import assert from "node:assert/strict";
 import Fastify from "fastify";

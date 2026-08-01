@@ -14,7 +14,7 @@ const {
 const { AsyncLocalStorage } = require("node:async_hooks");
 
 const DEFAULT_SDK_NAME = "logbrew-fastify";
-const DEFAULT_SDK_VERSION = "0.1.3";
+const DEFAULT_SDK_VERSION = "0.1.4";
 const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewFastifyClient({
@@ -46,6 +46,8 @@ async function logbrewFastifyPluginImpl(fastify, options = {}) {
     defaultTransport
   );
   const startedAtByRequest = new WeakMap();
+  const capturesRequestFinish = options.captureRequests !== false
+    || options.captureRequestMetrics === true;
 
   if (applicationLogCapture) {
     fastify.addHook("onClose", async () => {
@@ -73,7 +75,7 @@ async function logbrewFastifyPluginImpl(fastify, options = {}) {
     enterRequestTraceContext(request);
   });
 
-  if (options.captureRequests !== false || options.captureRequestMetrics === true) {
+  if (capturesRequestFinish) {
     fastify.addHook("onResponse", async (request, reply) => {
       enterRequestTraceContext(request);
       const startedAt = startedAtByRequest.get(request) ?? nowMs(options);
@@ -83,7 +85,13 @@ async function logbrewFastifyPluginImpl(fastify, options = {}) {
 
   fastify.addHook("onError", async (request, reply, error) => {
     enterRequestTraceContext(request);
-    await captureRequestError(options, { request, reply, error, defaultTransport });
+    await captureRequestError(options, {
+      request,
+      reply,
+      error,
+      defaultTransport,
+      deferShutdown: capturesRequestFinish
+    });
   });
 }
 
@@ -251,7 +259,13 @@ async function captureRequestFinish(options, { request, reply, startedAt }) {
   }
 }
 
-async function captureRequestError(options, { request, reply, error, defaultTransport }) {
+async function captureRequestError(options, {
+  request,
+  reply,
+  error,
+  defaultTransport,
+  deferShutdown = false
+}) {
   const existing = request.logbrew;
   const client = existing?.client ?? resolveClient(options, request, reply);
   const transport = existing?.transport ?? resolveTransport(options, request, reply, client, defaultTransport);
@@ -262,6 +276,9 @@ async function captureRequestError(options, { request, reply, error, defaultTran
 
   try {
     client.issue(event.id, event.timestamp, event.attributes);
+    if (deferShutdown) {
+      return;
+    }
     const response = await client.shutdown(transport);
     await notifyFlush(options, response, { request, reply, client, trace });
   } catch (captureError) {
