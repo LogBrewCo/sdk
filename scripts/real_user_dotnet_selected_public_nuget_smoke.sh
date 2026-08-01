@@ -155,7 +155,10 @@ python3 "$repo_root/scripts/nuget_release_plan.py" validate \
   --root "$repo_root" \
   --plan "$plan" >/dev/null
 
-mapfile -t selected < <(
+selected=()
+while IFS= read -r item; do
+  selected+=("$item")
+done < <(
   python3 "$repo_root/scripts/nuget_release_plan.py" entries \
     --root "$repo_root" \
     --plan "$plan" \
@@ -187,7 +190,10 @@ if [[ -n "$artifact_root" ]]; then
     "LogBrew.${core_version}.nupkg"
     "LogBrew.HttpClient.${httpclient_version}.nupkg"
   )
-  mapfile -t artifact_entries < <(
+  artifact_entries=()
+  while IFS= read -r entry; do
+    artifact_entries+=("$entry")
+  done < <(
     find "$artifact_root" -mindepth 1 -maxdepth 1 -print | sort
   )
   actual=()
@@ -198,7 +204,10 @@ if [[ -n "$artifact_root" ]]; then
     fi
     actual+=("$(basename "$entry")")
   done
-  mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+  expected_sorted=()
+  while IFS= read -r entry; do
+    expected_sorted+=("$entry")
+  done < <(printf '%s\n' "${expected[@]}" | sort)
   if [[ ${#actual[@]} -ne 2 || "${actual[*]}" != "${expected_sorted[*]}" ]]; then
     echo "NuGet public artifact selection is invalid" >&2
     exit 1
@@ -241,7 +250,10 @@ Console.WriteLine($"selected NuGet install ok ({args.Length} packages)");
 return 0;
 CS
 
-mapfile -t selected_ids < <(
+selected_ids=()
+while IFS= read -r package_id; do
+  selected_ids+=("$package_id")
+done < <(
   python3 "$repo_root/scripts/nuget_release_plan.py" entries \
     --root "$repo_root" \
     --plan "$plan" \

@@ -497,6 +497,9 @@ jobs:
       - name: Run Go OpenTelemetry installed-artifact smoke test
         run: bash scripts/real_user_go_opentelemetry_smoke.sh
 
+      - name: Run Go Gin installed-artifact smoke test
+        run: bash scripts/real_user_go_gin_smoke.sh
+
       - name: Run Go high-load installed-artifact smoke test
         run: bash scripts/real_user_go_high_load_smoke.sh
 

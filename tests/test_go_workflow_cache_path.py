@@ -6,6 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GO_MODULE_PATH = "go/logbrew/go.mod"
+GO_GIN_MODULE_PATH = "go/logbrew/gin/go.mod"
+GO_GIN_SUM_PATH = "go/logbrew/gin/go.sum"
 GO_OTEL_MODULE_PATH = "go/logbrew/otel/go.mod"
 GO_OTEL_SUM_PATH = "go/logbrew/otel/go.sum"
 
@@ -17,6 +19,8 @@ class GoWorkflowCachePathTests(unittest.TestCase):
 
         self.assertIn("cache-dependency-path:", text)
         self.assertIn(GO_MODULE_PATH, text)
+        self.assertIn(GO_GIN_MODULE_PATH, text)
+        self.assertIn(GO_GIN_SUM_PATH, text)
         self.assertIn(GO_OTEL_MODULE_PATH, text)
         self.assertIn(GO_OTEL_SUM_PATH, text)
 

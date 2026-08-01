@@ -586,6 +586,8 @@ def validate_go(root: Path, failures: list[str]) -> None:
     require_path(root, "go/logbrew/README.md", failures)
     otel_mod_path = require_path(root, "go/logbrew/otel/go.mod", failures)
     require_path(root, "go/logbrew/otel/README.md", failures)
+    gin_mod_path = require_path(root, "go/logbrew/gin/go.mod", failures)
+    require_path(root, "go/logbrew/gin/README.md", failures)
     if not go_mod_path.exists():
         return
     content = go_mod_path.read_text(encoding="utf-8")
@@ -621,6 +623,29 @@ def validate_go(root: Path, failures: list[str]) -> None:
         "go.opentelemetry.io/otel/sdk v1.41.0" in otel_content,
         failures,
         "go/logbrew/otel/go.mod: expected OpenTelemetry SDK requirement",
+    )
+    if not gin_mod_path.exists():
+        return
+    gin_content = gin_mod_path.read_text(encoding="utf-8")
+    require(
+        re.search(r"^module github\.com/LogBrewCo/sdk/go/logbrew/gin$", gin_content, re.MULTILINE) is not None,
+        failures,
+        "go/logbrew/gin/go.mod: unexpected module path",
+    )
+    require(
+        re.search(r"^go 1\.24\.0$", gin_content, re.MULTILINE) is not None,
+        failures,
+        "go/logbrew/gin/go.mod: expected go 1.24.0",
+    )
+    require(
+        "github.com/LogBrewCo/sdk/go/logbrew v0.1.5" in gin_content,
+        failures,
+        "go/logbrew/gin/go.mod: expected parent LogBrew module requirement",
+    )
+    require(
+        "github.com/gin-gonic/gin v1.11.0" in gin_content,
+        failures,
+        "go/logbrew/gin/go.mod: expected Gin module requirement",
     )
 
 

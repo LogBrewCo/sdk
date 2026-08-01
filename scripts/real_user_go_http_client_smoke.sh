@@ -48,7 +48,7 @@ prefix = f"{module_path}@{version}/"
 with ZipFile(version_dir / f"{version}.zip", "w", compression=ZIP_DEFLATED) as archive:
     for path in sorted(repo.rglob("*")):
         relative = path.relative_to(repo)
-        if not path.is_file() or ".git" in path.parts or (relative.parts and relative.parts[0] == "otel"):
+        if not path.is_file() or ".git" in path.parts or (relative.parts and relative.parts[0] in {"gin", "otel"}):
             continue
         info = ZipInfo(prefix + relative.as_posix(), (2026, 7, 20, 0, 0, 0))
         info.compress_type = ZIP_DEFLATED

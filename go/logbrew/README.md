@@ -433,6 +433,46 @@ _ = provider
 
 `TraceContextFromContext` and `TraceContextFromSpanContext` copy only valid OTel trace ID, span ID, and sampled flags into LogBrew child trace context. `NewSpanExporter` queues ended OTel spans as LogBrew span events with safe method/route/status, database, messaging, RPC, exception-type, span-kind, instrumentation-scope, and span-link summaries. It does not install global providers, own exporters/processors, retry, flush, capture full URLs, headers, payloads, SQL statements, exception messages, stacks, baggage, tracestate, or raw propagation values. Keep using `client.Flush` or `client.Shutdown` with your app-owned transport.
 
+## Gin Middleware
+
+Gin applications can add the optional framework module without adding Gin to
+the dependency-free core package:
+
+```bash
+go get github.com/LogBrewCo/sdk/go/logbrew/gin@latest
+```
+
+```go
+import (
+  logbrewgin "github.com/LogBrewCo/sdk/go/logbrew/gin"
+  "github.com/gin-gonic/gin"
+)
+
+middleware, err := logbrewgin.NewMiddleware(logbrewgin.Config{
+  Client:                   client,
+  CaptureRequestMetrics:   true,
+  CaptureServerErrorIssues: true,
+  Metadata:                 map[string]any{"service": "checkout-api"},
+})
+if err != nil {
+  panic(err)
+}
+
+router := gin.New()
+router.Use(gin.Recovery(), middleware)
+```
+
+The middleware records matched Gin route templates, continues one valid W3C
+`traceparent`, and makes the LogBrew trace available through the request
+`context.Context`. It uses a fixed `<unmatched>` label instead of a concrete
+404 path. Panics produce a generic type-only issue and are re-panicked so Gin's
+existing recovery retains response ownership. Metrics and generic ordinary
+5xx issues are opt-in. The adapter never captures bodies, concrete URLs, query
+strings, hosts, IPs, user identity, cookies, authorization values, arbitrary
+headers, raw propagation, error messages, panic values, or stacks, and it never
+owns transport or flush behavior. See the [Gin module guide](gin/README.md) for
+the complete setup and privacy contract.
+
 `NewHTTPHandler` wraps an app-owned `net/http` handler, accepts exactly one valid W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. It uses the matched `http.ServeMux` pattern or an explicit `RouteTemplate`; when neither is available it records `/` instead of the raw request path. The outermost LogBrew wrapper owns nested instrumentation so the same request is emitted once. If the handler panics, LogBrew records one failed request span and one generic correlated issue with type-only panic metadata, then re-panics with the original value. Ordinary 5xx responses remain span-only unless `NewHTTPHandlerWithOptions` receives `WithHTTPServerErrorIssues()`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
 
 ```go
