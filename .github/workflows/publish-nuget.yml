@@ -284,6 +284,15 @@ jobs:
               "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
           else
             bash scripts/real_user_dotnet_selected_public_nuget_smoke.sh "$plan"
+            mapfile -t selected_ids < <(
+              python3 scripts/nuget_release_plan.py entries \
+                --root "$GITHUB_WORKSPACE" --plan "$plan" --format ids
+            )
+            if [[ ${#selected_ids[@]} -eq 1 && "${selected_ids[0]}" == "LogBrew.AspNetCore" ]]; then
+              bash scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh \
+                "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
+                "${{ steps.nuget-artifacts.outputs.source_commit }}"
+            fi
           fi
 
       - name: Verify public HttpClient package compatibility

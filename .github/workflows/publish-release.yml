@@ -41,7 +41,7 @@ on:
         type: string
         default: ""
       nuget_packages:
-        description: "Exact LogBrew,LogBrew.HttpClient selection passed to publish-packages.yml; empty means all"
+        description: "Approved comma-separated NuGet release set passed to publish-packages.yml; empty means all"
         required: false
         type: string
         default: ""

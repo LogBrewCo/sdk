@@ -493,7 +493,22 @@ If you want package-owned ASP.NET Core middleware instead of copying the wrapper
 dotnet add package LogBrew.AspNetCore
 ```
 
-`LogBrew.AspNetCore` adds `app.UseLogBrewRequestTelemetry(client, options => ...)`, uses the same privacy-bounded request span/metric/issue path as the explicit helper, keeps `LogBrewTrace.Current` active for downstream `ILogger` calls, and still avoids body/header/query/raw propagation capture. It also adds `builder.Services.AddLogBrewDependencyActivitySourceTelemetry(client, options => ...)`, which registers a host-lifetime-managed `LogBrewActivitySourceListener` for common dependency `ActivitySource` names such as `System.Net.Http`, Entity Framework Core, SqlClient, and StackExchange.Redis. The app-builder fallback `app.UseLogBrewDependencyActivitySourceTelemetry(client, options => ...)` is available when service registration is not convenient. These dependency bridges are off until called, dispose when the ASP.NET Core host stops, and do not add OpenTelemetry exporters/processors, subscribe to arbitrary `DiagnosticSource` events, or patch HTTP/database clients. The packaged `examples/AspNetCoreMiddlewareTelemetry.cs` file in that integration package shows the complete middleware plus dependency ActivitySource version.
+For normal hosted applications, set `LOGBREW_SERVER_API_KEY` and use the host-owned lifecycle:
+
+```csharp
+using LogBrew;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.AddLogBrew();
+
+var app = builder.Build();
+app.UseRouting();
+app.UseLogBrew();
+```
+
+`builder.AddLogBrew()` creates one automatic-delivery client, adds privacy-bounded application logging, and registers one start/stop lifecycle. `app.UseLogBrew()` captures route-template request spans, duration metrics, and unhandled request issues. Missing `LOGBREW_SERVER_API_KEY` disables the integration safely; `LOGBREW_ENABLED=false` is the explicit override. Host shutdown drains and closes delivery, while `LogBrewAspNetCoreRuntime.Health()` reports privacy-safe state without keys, endpoints, event contents, or exception messages. The package README includes CLI-first project creation, owner-only key handling, hosted `doctor`/`traces` readback, and project archival without requiring a dashboard.
+
+Existing app-owned client integrations remain compatible. `LogBrew.AspNetCore` still provides `app.UseLogBrewRequestTelemetry(client, options => ...)`, uses the same privacy-bounded request span/metric/issue path as the explicit helper, keeps `LogBrewTrace.Current` active for downstream `ILogger` calls, and avoids body/header/query/raw propagation capture. It also provides `builder.Services.AddLogBrewDependencyActivitySourceTelemetry(client, options => ...)`, which registers a host-lifetime-managed `LogBrewActivitySourceListener` for common dependency `ActivitySource` names such as `System.Net.Http`, Entity Framework Core, SqlClient, and StackExchange.Redis. The app-builder fallback `app.UseLogBrewDependencyActivitySourceTelemetry(client, options => ...)` is available when service registration is not convenient. These dependency bridges are off until called, dispose when the ASP.NET Core host stops, and do not add OpenTelemetry exporters/processors, subscribe to arbitrary `DiagnosticSource` events, or patch HTTP/database clients. The packaged `examples/AspNetCoreMiddlewareTelemetry.cs` file in that integration package shows automatic lifecycle, request/log correlation, local preview, and dependency ActivitySource telemetry.
 
 ## Dependency Spans
 

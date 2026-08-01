@@ -330,8 +330,7 @@ namespace LogBrew
                 return NormalizeRouteCandidate(endpoint.RoutePattern.RawText!);
             }
 
-            var path = context.Request.PathBase.Add(context.Request.Path).Value;
-            return string.IsNullOrWhiteSpace(path) ? "/" : path!;
+            return "/unmatched";
         }
 
         private Dictionary<string, object?>? BuildMetadata(HttpContext context)

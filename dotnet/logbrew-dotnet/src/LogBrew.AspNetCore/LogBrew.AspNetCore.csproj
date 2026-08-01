@@ -9,10 +9,10 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <PackageId>LogBrew.AspNetCore</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
-    <Description>Public LogBrew ASP.NET Core integration for privacy-bounded request telemetry middleware.</Description>
+    <Description>Host-managed LogBrew delivery, logging, and privacy-bounded request telemetry for ASP.NET Core.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
     <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>

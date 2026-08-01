@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_dotnet_public_nuget_smoke.sh"
+ASPNETCORE_SCRIPT = ROOT / "scripts" / "real_user_dotnet_aspnetcore_public_nuget_smoke.sh"
 
 
 class DotnetPublicNugetSmokeTests(unittest.TestCase):
@@ -66,6 +67,27 @@ class DotnetPublicNugetSmokeTests(unittest.TestCase):
         prefix = "LOGBREW_"
         for suffix in ("".join(chr(value) for value in (84, 79, 75, 69, 78)), "API_URL"):
             self.assertNotIn(prefix + suffix, body)
+
+    def test_aspnetcore_script_proves_the_published_host_lifecycle(self) -> None:
+        body = ASPNETCORE_SCRIPT.read_text(encoding="utf-8")
+
+        for expected in (
+            "https://api.nuget.org/v3/index.json",
+            "LogBrew.AspNetCore",
+            "repository.attrib.get(\"commit\")",
+            "builder.AddLogBrew",
+            "app.UseLogBrew",
+            "app.StartAsync",
+            "app.StopAsync",
+            "LogBrewAspNetCoreRuntime",
+            "LastShutdownStatusCode",
+            "GET /orders/{orderId}",
+            "scope.RequestPath",
+            "public-smoke-key",
+        ):
+            self.assertIn(expected, body)
+
+        self.assertNotIn("api.logbrew.co", body)
 
 
 if __name__ == "__main__":
