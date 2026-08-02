@@ -48,7 +48,7 @@ configure_logbrew(
 )
 ```
 
-`LogBrewDjangoMiddleware` records successful requests as span events, records unhandled view exceptions as issue plus error-span events, and flushes through the configured transport after each response. If no transport is provided, events stay queued on the core client so the project can flush them itself.
+`LogBrewDjangoMiddleware` records successful requests as span events, records unhandled view exceptions as issue plus error-span events, and flushes through the configured transport after each response. Exception issues include first-class exception type, `django.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Exception messages keep the integration's existing `str(error)` behavior, so applications should avoid sensitive values in exception text. If no transport is provided, events stay queued on the core client so the project can flush them itself.
 
 When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. The same request-local trace is available from `get_active_logbrew_trace()` while your view runs, and `LogBrewLoggingHandler` automatically adds `traceId`, `spanId`, `parentSpanId`, and `sampled` metadata to standard-library logs emitted inside that context:
 

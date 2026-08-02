@@ -89,6 +89,39 @@ print(
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `preview_json()` when you want a stable local JSON preview before sending anything.
 
+## Issue Diagnostics
+
+Use `create_issue_attributes_from_exception()` to attach structured exception identity and privacy-bounded traceback frames. The frame projection never sends traceback text, source code, local variables, or absolute paths:
+
+```python
+from logbrew_sdk import create_issue_attributes_from_exception
+
+try:
+    submit_checkout()
+except CheckoutError as error:
+    client.issue(
+        "evt_checkout_failed",
+        "2026-07-17T12:00:00Z",
+        create_issue_attributes_from_exception(
+            error,
+            title="Checkout failed",
+            mechanism="checkout.handler",
+            handled=False,
+            breadcrumbs=[
+                {
+                    "timestamp": "2026-07-17T11:59:58Z",
+                    "category": "checkout.payment",
+                    "level": "info",
+                    "message": "Payment submission started",
+                    "data": {"attempt": 2},
+                }
+            ],
+        ),
+    )
+```
+
+Structured frames are newest-first, capped at 32, and retain only a basename, line, column, and bounded function/module identity. Set `include_stack_frames=False` when even that code identity is not appropriate. The default issue message remains `str(error)` for compatibility and troubleshooting; pass an explicitly redacted `message=` when exception text may contain paths, identifiers, or personal data. Explicit breadcrumbs are oldest-to-newest, capped at 64, and accept at most eight flat primitive data fields per entry. The core Python client deliberately has no process-global breadcrumb ring: one client is commonly shared across concurrent requests and users, so each issue receives only the caller's explicit request-, task-, or context-local snapshot.
+
 ## Queue Pressure
 
 `LogBrewClient` keeps a bounded in-memory queue so a transport outage or burst of logs cannot grow without limit. The default capacity is `10_000` events. Pass `max_queue_size` when a service needs a smaller or larger cap:
@@ -1027,7 +1060,7 @@ The factories run once in each worker child after fork, and only when Celery's c
 
 Use a separate producer-owned Celery app with `instrument_celery_app_with_logbrew_spans()` when the producer and prefork worker run in different processes. Direct app instrumentation and worker-process lifecycle ownership cannot be mixed on the same app instance. Without `persistent_queue_directory`, delivery is limited to retries that complete during graceful Celery process shutdown. Billiard exits prefork children without running Python `atexit`; enable the persistent queue when committed events must survive an exhausted retry, hard kill, or native process crash.
 
-Each brokered task gets a producer span and a worker span connected by one W3C `traceparent`. The worker span keeps its trace active during task code and records bounded task name, routing key, zero-based retry attempt, task state, queue wait, duration, sampled state, and exception type. An unexpected final task failure also records exactly one `error` issue correlated to that worker span. Retry attempts, non-failure control states, and exception types declared through Celery's `task.throws` remain span-only so expected control flow does not create issue noise. Failure issue titles and messages contain only the bounded task name and exception type.
+Each brokered task gets a producer span and a worker span connected by one W3C `traceparent`. The worker span keeps its trace active during task code and records bounded task name, routing key, zero-based retry attempt, task state, queue wait, duration, sampled state, and exception type. An unexpected final task failure also records exactly one `error` issue correlated to that worker span with first-class exception type, `celery.task` mechanism, and unhandled state. Retry attempts, non-failure control states, and exception types declared through Celery's `task.throws` remain span-only so expected control flow does not create issue noise. Failure issue titles and messages contain only the bounded task name and exception type.
 
 The integration copies caller headers before adding `traceparent` and `logbrew-enqueued-at-ms`, so the caller's mapping is unchanged. It never captures or serializes task IDs, arguments, keyword arguments, results, message bodies, existing headers, broker URLs, exchanges, worker machine names, exception messages, stack traces, baggage, or tracestate. Instrumentation and telemetry-capture failures are reported through `on_capture_error` and do not replace Celery results or exceptions. Under queue pressure, an unexpected-failure issue is admitted before its worker span so the actionable signal has priority; all events still follow `LogBrewClient.max_queue_size`. Inspect `dropped_events()` and flush in bounded batches instead of deriving hosted usage locally.
 
