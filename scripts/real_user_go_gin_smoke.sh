@@ -246,6 +246,11 @@ func TestInstalledGinMiddlewareRequestTracePanicAndPrivacy(t *testing.T) {
 		!strings.Contains(payload, `"name": "GET /panic/:id"`) ||
 		!strings.Contains(payload, `"title": "Gin request panicked"`) ||
 		!strings.Contains(payload, `"panicType": "string"`) ||
+		!strings.Contains(payload, `"exception": {`) ||
+		!strings.Contains(payload, `"type": "gin.recovery"`) ||
+		!strings.Contains(payload, `"handled": false`) ||
+		!strings.Contains(payload, `"stackFrames": [`) ||
+		!strings.Contains(payload, `"filename": "gin_integration_test.go"`) ||
 		!strings.Contains(payload, `"name": "http.server.duration"`) ||
 		!strings.Contains(payload, `"service": "checkout-api"`) {
 		t.Fatalf("installed Gin telemetry missing expected correlation: %s", payload)

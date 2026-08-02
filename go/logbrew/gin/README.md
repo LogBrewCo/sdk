@@ -81,8 +81,10 @@ func must(err error) {
 `gin.Default()` already installs Gin recovery before application-added
 middleware, so use `router.Use(middleware)` with that constructor. With
 `gin.New()`, install `gin.Recovery()` before the LogBrew middleware as shown.
-LogBrew records the failed span and a generic type-only issue, then re-panics so
-Gin's existing recovery keeps ownership of the response and logging behavior.
+LogBrew records the failed span and a generic type-only exception with the
+`gin.recovery` mechanism, unhandled state, and bounded structured call frames.
+It then re-panics so Gin's existing recovery keeps ownership of the response
+and logging behavior.
 
 The middleware always captures one request span. Duration metrics and generic
 issues for ordinary 5xx responses are opt-in. Panics observed by the middleware
@@ -123,6 +125,8 @@ use the fixed `<unmatched>` label instead of the concrete request path.
 It does not capture request or response bodies, concrete URLs, query strings,
 fragments, hosts, client IPs, user identity, cookies, authorization values,
 arbitrary headers, raw `traceparent`, baggage, tracestate, error messages,
-panic values, or stacks. Custom metadata accepts primitive low-cardinality
-values and drops keys that suggest credentials, payloads, URLs, headers,
-queries, or raw propagation.
+panic values, raw stack text, source lines, locals, or absolute frame paths.
+Generated frames contain only basename, coordinates, and bounded code identity.
+Custom metadata accepts primitive low-cardinality values and drops keys that
+suggest authentication material, payloads, URLs, headers, queries, or raw
+propagation.

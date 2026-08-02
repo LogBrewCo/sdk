@@ -273,6 +273,35 @@ func TestMiddlewareCapturesGenericPanicIssueAndPreservesGinRecovery(t *testing.T
 	if issue["title"] != "Gin request panicked" || issue["level"] != "error" || issue["message"] != nil {
 		t.Fatalf("unexpected generic panic issue: %#v", issue)
 	}
+	exception, ok := issue["exception"].(map[string]any)
+	if !ok || exception["type"] != "string" {
+		t.Fatalf("panic issue missing type-only exception identity: %#v", issue)
+	}
+	mechanism, ok := exception["mechanism"].(map[string]any)
+	if !ok || mechanism["type"] != "gin.recovery" || mechanism["handled"] != false {
+		t.Fatalf("panic issue missing escape mechanism: %#v", exception)
+	}
+	frames, ok := issue["stackFrames"].([]any)
+	if !ok || len(frames) == 0 || len(frames) > 32 {
+		t.Fatalf("panic issue missing bounded structured frames: %#v", issue)
+	}
+	foundHandlerFrame := false
+	for _, value := range frames {
+		frame, frameOK := value.(map[string]any)
+		if !frameOK {
+			t.Fatalf("panic issue has invalid frame: %#v", value)
+		}
+		filename, _ := frame["filename"].(string)
+		if filename == "middleware_test.go" {
+			foundHandlerFrame = true
+		}
+		if strings.ContainsAny(filename, `/\\?#`) {
+			t.Fatalf("panic frame leaked a path: %#v", frame)
+		}
+	}
+	if !foundHandlerFrame {
+		t.Fatalf("panic frames omitted the application handler: %#v", frames)
+	}
 	issueMetadata := requireMetadata(t, issue)
 	if issueMetadata["traceId"] != span["traceId"] || issueMetadata["spanId"] != span["spanId"] {
 		t.Fatalf("panic issue missing trace correlation: %#v", issueMetadata)
@@ -353,6 +382,9 @@ func TestMiddlewareServerErrorIssuesAreOptIn(t *testing.T) {
 			if testCase.captureIssues {
 				if events[1].Type != "issue" || events[1].Attributes["title"] != "Gin request returned a server error" {
 					t.Fatalf("unexpected server error issue: %#v", events[1])
+				}
+				if events[1].Attributes["exception"] != nil || events[1].Attributes["stackFrames"] != nil {
+					t.Fatalf("ordinary 5xx issue should not invent panic diagnostics: %#v", events[1])
 				}
 			}
 		})

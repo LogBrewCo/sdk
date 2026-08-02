@@ -93,6 +93,9 @@ with zipfile.ZipFile(zip_path) as archive:
     operation_trace_source_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/operation_trace.go"
     if operation_trace_source_path not in names:
         raise SystemExit("missing operation_trace.go in proxy module zip")
+    issue_diagnostics_source_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/issue_diagnostics.go"
+    if issue_diagnostics_source_path not in names:
+        raise SystemExit("missing issue_diagnostics.go in proxy module zip")
     readme_example_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/readme_example/main.go"
     if readme_example_path not in names:
         raise SystemExit("missing examples/readme_example/main.go in proxy module zip")
@@ -137,6 +140,10 @@ for needle in (
     "LogBrewTraceFromContext",
     "LogAttributesWithTrace",
     "IssueAttributesWithTrace",
+    "Structured Issue Diagnostics",
+    "IssueException",
+    "IssueBreadcrumb",
+    "CaptureIssueStackFrames",
     "NewHTTPHandler",
     "type-only panic metadata",
     "NewHTTPClientTransport",
@@ -655,6 +662,60 @@ func TestInstalledClientMetricPreview(t *testing.T) {
 	}
 	if !strings.Contains(payload, "\"temporality\": \"instant\"") {
 		t.Fatalf("preview missing metric temporality: %s", payload)
+	}
+}
+
+func TestInstalledIssueDiagnosticsPreview(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "smoke-app-test",
+		SDKVersion: "0.1.0",
+	})
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	frames := logbrew.CaptureIssueStackFrames()
+	if len(frames) == 0 || frames[0].Filename != "smoke_test.go" {
+		t.Fatalf("unexpected installed structured frames: %#v", frames)
+	}
+	inApp := true
+	frames[0].InApp = &inApp
+	if err := client.Issue(
+		"evt_issue_diagnostics_test",
+		"2026-08-02T08:15:31Z",
+		logbrew.IssueAttributes{
+			Title: "Checkout failed",
+			Level: "error",
+			Exception: &logbrew.IssueException{
+				Type: "CheckoutError",
+				Mechanism: &logbrew.IssueExceptionMechanism{
+					Type:    "go.recover",
+					Handled: true,
+				},
+			},
+			StackFrames: frames[:1],
+			Breadcrumbs: []logbrew.IssueBreadcrumb{{
+				Timestamp: "2026-08-02T08:15:30Z",
+				Category:  "checkout.request",
+				Level:     "warn",
+				Data:      map[string]any{"attempt": 2},
+			}},
+		},
+	); err != nil {
+		t.Fatalf("queue issue diagnostics: %v", err)
+	}
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview json: %v", err)
+	}
+	for _, expected := range []string{
+		`"exception"`, `"type": "CheckoutError"`, `"type": "go.recover"`,
+		`"handled": true`, `"stackFrames"`, `"filename": "smoke_test.go"`,
+		`"breadcrumbs"`, `"level": "warning"`,
+	} {
+		if !strings.Contains(payload, expected) {
+			t.Fatalf("installed diagnostics missing %q: %s", expected, payload)
+		}
 	}
 }
 
@@ -1643,6 +1704,10 @@ for needle in (
     "LogBrewTraceFromContext",
     "LogAttributesWithTrace",
     "IssueAttributesWithTrace",
+    "Structured Issue Diagnostics",
+    "IssueException",
+    "IssueBreadcrumb",
+    "CaptureIssueStackFrames",
     "NewHTTPHandler",
     "type-only panic metadata",
     "NewSlogHandler",
@@ -1734,6 +1799,18 @@ GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.IssueAttributes
 grep -q '^type IssueAttributes struct {' issue-attributes-doc.txt
 grep -q 'IssueAttributes describes the public payload fields for an issue' issue-attributes-doc.txt
 grep -q 'event' issue-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.IssueException > issue-exception-doc.txt
+grep -q '^type IssueException struct {' issue-exception-doc.txt
+grep -q 'IssueException is a privacy-bounded exception identity' issue-exception-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.IssueStackFrame > issue-stack-frame-doc.txt
+grep -q '^type IssueStackFrame struct {' issue-stack-frame-doc.txt
+grep -q 'IssueStackFrame is one structured code location' issue-stack-frame-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.IssueBreadcrumb > issue-breadcrumb-doc.txt
+grep -q '^type IssueBreadcrumb struct {' issue-breadcrumb-doc.txt
+grep -q 'IssueBreadcrumb is one application-supplied' issue-breadcrumb-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CaptureIssueStackFrames > capture-issue-stack-frames-doc.txt
+grep -Fq 'func CaptureIssueStackFrames() []IssueStackFrame' capture-issue-stack-frames-doc.txt
+grep -q 'snapshots the current goroutine' capture-issue-stack-frames-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.LogAttributes > log-attributes-doc.txt
 grep -q '^type LogAttributes struct {' log-attributes-doc.txt
 grep -q 'LogAttributes describes the public payload fields for a log' log-attributes-doc.txt
