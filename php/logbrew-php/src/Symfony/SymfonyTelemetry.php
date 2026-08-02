@@ -9,6 +9,7 @@ use Composer\InstalledVersions;
 use DateTimeImmutable;
 use DateTimeInterface;
 use LogBrew\HttpTransport;
+use LogBrew\IssueDiagnostics;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewHttpRequestTelemetry;
 use LogBrew\LogBrewMonologHandler;
@@ -317,12 +318,18 @@ final class SymfonyTelemetry
             $metadata['exceptionTrace'] = self::boundedString($state->exception->getTraceAsString(), 16_384);
         }
 
-        $this->client->issue($this->eventId('issue'), $this->timestamp(), [
-            'title' => $exceptionType,
-            'level' => 'error',
-            'message' => 'A Symfony request ended with an unhandled exception.',
-            'metadata' => LogBrewTrace::metadataWithTrace($state->request->trace, $metadata),
-        ]);
+        $this->client->issue(
+            $this->eventId('issue'),
+            $this->timestamp(),
+            IssueDiagnostics::fromThrowable(
+                $state->exception,
+                title: $exceptionType,
+                message: 'A Symfony request ended with an unhandled exception.',
+                mechanismType: 'symfony.kernel_exception',
+                handled: false,
+                metadata: LogBrewTrace::metadataWithTrace($state->request->trace, $metadata)
+            )
+        );
     }
 
     /** @return array<string, string> */

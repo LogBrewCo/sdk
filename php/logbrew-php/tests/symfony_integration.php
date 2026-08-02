@@ -284,6 +284,23 @@ assertTrue(
     (symfonyAttributes($exceptionEvents[0])['title'] ?? null) === RuntimeException::class,
     'expected useful Symfony exception title'
 );
+$issueAttributes = symfonyAttributes($exceptionEvents[0]);
+assertTrue($issueAttributes['exception'] === [
+    'type' => RuntimeException::class,
+    'mechanism' => ['type' => 'symfony.kernel_exception', 'handled' => false],
+], 'expected first-class Symfony exception mechanism');
+assertTrue(
+    is_array($issueAttributes['stackFrames'] ?? null)
+        && count($issueAttributes['stackFrames']) >= 1
+        && count($issueAttributes['stackFrames']) <= 32,
+    'expected bounded first-class Symfony stack frames'
+);
+assertTrue(
+    ($issueAttributes['stackFrames'][0]['filename'] ?? null) === basename(__FILE__)
+        && ($issueAttributes['stackFrames'][0]['line'] ?? 0) > 0
+        && ($issueAttributes['stackFrames'][0]['column'] ?? null) === 1,
+    'expected newest-first basename-only Symfony throw frame'
+);
 $issueMetadata = symfonyMetadata($exceptionEvents[0]);
 assertTrue($issueMetadata['exceptionType'] === RuntimeException::class, 'expected Symfony exception type');
 assertTrue($issueMetadata['errorName'] === RuntimeException::class, 'expected backend-native Symfony exception type');

@@ -6,6 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use LogBrew\ActionAttributes;
 use LogBrew\HttpTransport;
+use LogBrew\IssueDiagnostics;
 use LogBrew\LaravelLoggerFactory;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewMonologHandler;
@@ -355,6 +356,136 @@ $preview = $client->previewJson();
 foreach (['"level": "critical"', '"level": "info"', '"level": "warning"'] as $needle) {
     assertTrue(str_contains($preview, $needle), "missing severity alias normalization: {$needle}");
 }
+
+$caughtIssue = null;
+try {
+    (static function (): void {
+        (static function (): void {
+            throw new RuntimeException('sensitive checkout failure');
+        })();
+    })();
+} catch (Throwable $error) {
+    $caughtIssue = $error;
+}
+assertTrue($caughtIssue instanceof RuntimeException, 'expected throwable fixture');
+
+$firstBreadcrumb = IssueDiagnostics::breadcrumb(
+    timestamp: '2026-06-02T09:59:58.125+00:00',
+    category: 'checkout.navigation',
+    type: 'navigation',
+    level: 'warn',
+    message: 'User reached payment review',
+    data: ['attempt' => 2, 'cached' => false]
+);
+$secondBreadcrumb = IssueDiagnostics::breadcrumb(
+    timestamp: '2026-06-02T09:59:59Z',
+    category: 'checkout.request',
+    type: 'http',
+    level: 'info',
+    data: ['method' => 'POST', 'statusCode' => 503]
+);
+$issueAttributes = IssueDiagnostics::fromThrowable(
+    $caughtIssue,
+    mechanismType: 'php.exception',
+    handled: true,
+    breadcrumbs: [$firstBreadcrumb, $secondBreadcrumb],
+    breadcrumbsTruncated: true,
+    metadata: ['routeTemplate' => '/checkout/:cart_id']
+);
+$diagnosticClient = sampleClient();
+$diagnosticClient->issue('evt_issue_diagnostics', '2026-06-02T10:00:02Z', $issueAttributes);
+$issueAttributes['exception']['type'] = 'MutatedException';
+$issueAttributes['stackFrames'][0]['filename'] = 'mutated.php';
+$issueAttributes['breadcrumbs'][0]['data']['attempt'] = 99;
+$diagnosticPayload = json_decode($diagnosticClient->previewJson(), true, 512, JSON_THROW_ON_ERROR);
+$diagnosticAttributes = $diagnosticPayload['events'][0]['attributes'];
+assertTrue($diagnosticAttributes['title'] === RuntimeException::class, 'expected safe PHP exception title');
+assertTrue($diagnosticAttributes['level'] === 'error', 'expected PHP exception error level');
+assertTrue(!array_key_exists('message', $diagnosticAttributes), 'expected throwable message to remain opt-in');
+assertTrue($diagnosticAttributes['exception'] === [
+    'type' => RuntimeException::class,
+    'mechanism' => ['type' => 'php.exception', 'handled' => true],
+], 'expected typed PHP exception mechanism');
+assertTrue(
+    is_array($diagnosticAttributes['stackFrames'])
+        && count($diagnosticAttributes['stackFrames']) >= 1
+        && count($diagnosticAttributes['stackFrames']) <= 32,
+    'expected bounded PHP stack frame projection'
+);
+assertTrue(
+    $diagnosticAttributes['stackFrames'][0]['filename'] === basename(__FILE__)
+        && $diagnosticAttributes['stackFrames'][0]['line'] > 0
+        && $diagnosticAttributes['stackFrames'][0]['column'] === 1,
+    'expected newest-first basename-only PHP throw frame'
+);
+assertTrue(
+    ($diagnosticAttributes['breadcrumbs'][0]['level'] ?? null) === 'warning'
+        && ($diagnosticAttributes['breadcrumbs'][0]['data']['attempt'] ?? null) === 2
+        && ($diagnosticAttributes['breadcrumbs'][1]['category'] ?? null) === 'checkout.request',
+    'expected detached oldest-first PHP breadcrumbs'
+);
+assertTrue($diagnosticAttributes['breadcrumbsTruncated'] === true, 'expected PHP breadcrumb truncation signal');
+$encodedDiagnostics = json_encode($diagnosticPayload, JSON_THROW_ON_ERROR);
+assertTrue(!str_contains($encodedDiagnostics, 'sensitive checkout failure'), 'expected PHP throwable message exclusion');
+assertTrue(!str_contains($encodedDiagnostics, dirname(__DIR__)), 'expected PHP absolute source path exclusion');
+assertTrue(!str_contains($encodedDiagnostics, 'MutatedException'), 'expected detached PHP issue diagnostics');
+
+$explicitFrame = IssueDiagnostics::stackFrame(
+    '/opt/example/src/CheckoutService.php?debug=fixture#payment',
+    41,
+    7,
+    'capturePayment',
+    'App\\CheckoutService',
+    true,
+    '123E4567-E89B-12D3-A456-426614174000'
+);
+assertTrue(
+    $explicitFrame['filename'] === 'CheckoutService.php'
+        && $explicitFrame['debugId'] === '123e4567-e89b-12d3-a456-426614174000'
+        && $explicitFrame['inApp'] === true,
+    'expected sanitized explicit PHP stack frame'
+);
+
+$anonymousIssue = new class('anonymous detail') extends RuntimeException {
+};
+$anonymousAttributes = IssueDiagnostics::fromThrowable($anonymousIssue, includeStackFrames: false);
+assertTrue(
+    $anonymousAttributes['title'] === 'anonymous_exception'
+        && $anonymousAttributes['exception']['type'] === 'anonymous_exception'
+        && !array_key_exists('stackFrames', $anonymousAttributes),
+    'expected privacy-safe anonymous PHP exception identity'
+);
+
+expectThrows(
+    fn () => IssueDiagnostics::fromThrowable(
+        $caughtIssue,
+        breadcrumbs: array_fill(0, 65, $firstBreadcrumb)
+    ),
+    'issue breadcrumbs must contain 1-64 entries'
+);
+expectThrows(
+    fn () => IssueDiagnostics::breadcrumb(
+        '2026-06-02T09:59:58',
+        'checkout.request'
+    ),
+    'issue breadcrumb timestamp must be RFC 3339 with an explicit timezone'
+);
+expectThrows(
+    fn () => IssueDiagnostics::breadcrumb(
+        '2026-06-02T09:59:58Z',
+        'checkout.request',
+        data: ['duration' => NAN]
+    ),
+    'issue breadcrumb data value for duration must be a finite primitive'
+);
+expectThrows(
+    fn () => sampleClient()->issue('evt_bad_diagnostics', '2026-06-02T10:00:02Z', [
+        'title' => 'Bad diagnostics',
+        'level' => 'error',
+        'exception' => ['type' => 'RuntimeException', 'value' => 'must not pass'],
+    ]),
+    'issue exception has unsupported fields: value'
+);
 expectThrows(
     fn () => sampleClient()->span('evt_span_001', '2026-06-02T10:00:04Z', ['name' => 'GET /health', 'traceId' => 'trace_001', 'spanId' => 'span_001', 'status' => 'ok', 'durationMs' => -1]),
     'span durationMs must be non-negative'
@@ -913,6 +1044,7 @@ assertTrue($helpLines === [
     'run (real-user-smoke) -> make run',
     'run-real-user-smoke -> make run-real-user-smoke',
     'run-first-useful-telemetry -> make run-first-useful-telemetry',
+    'run-issue-diagnostics -> make run-issue-diagnostics',
     'run-http-trace-correlation -> make run-http-trace-correlation',
     'run-worker-lifecycle -> make run-worker-lifecycle',
     'run-persistent-worker-delivery -> make run-persistent-worker-delivery',
@@ -963,6 +1095,37 @@ assertTrue(str_contains($firstUseful['stderr'], '"outgoingTraceparent":"00-4bf92
 $makeFirstUseful = runCommand($examplesDir, ['make', 'run-first-useful-telemetry']);
 assertTrue(str_contains($makeFirstUseful['stdout'], '"type":"metric"') || str_contains($makeFirstUseful['stdout'], '"type": "metric"'), 'expected metric event in PHP make run-first-useful-telemetry output');
 assertTrue(str_contains($makeFirstUseful['stderr'], '"events":7') || str_contains($makeFirstUseful['stderr'], '"events": 7'), 'expected first-useful make event count');
+
+$issueDiagnosticsExample = runCommand($packageRoot, [PHP_BINARY, 'examples/issue_diagnostics.php']);
+$issueDiagnosticsPayload = json_decode($issueDiagnosticsExample['stdout'], true, 512, JSON_THROW_ON_ERROR);
+$issueDiagnosticsAttributes = $issueDiagnosticsPayload['events'][0]['attributes'] ?? null;
+assertTrue(is_array($issueDiagnosticsAttributes), 'expected issue diagnostics example attributes');
+assertTrue(
+    ($issueDiagnosticsAttributes['exception']['mechanism'] ?? null) === [
+        'type' => 'php.exception',
+        'handled' => true,
+    ],
+    'expected issue diagnostics example mechanism'
+);
+assertTrue(
+    ($issueDiagnosticsAttributes['stackFrames'][0]['filename'] ?? null) === 'issue_diagnostics.php'
+        && ($issueDiagnosticsAttributes['stackFrames'][0]['function'] ?? null) === 'fail'
+        && ($issueDiagnosticsAttributes['stackFrames'][0]['module'] ?? null) === 'CheckoutFailureFixture',
+    'expected useful issue diagnostics example frame identity'
+);
+assertTrue(
+    ($issueDiagnosticsAttributes['breadcrumbs'][0]['category'] ?? null) === 'checkout.navigation'
+        && ($issueDiagnosticsAttributes['breadcrumbs'][1]['level'] ?? null) === 'warning',
+    'expected oldest-first normalized issue diagnostics breadcrumbs'
+);
+assertTrue(!str_contains($issueDiagnosticsExample['stdout'], 'sensitive provider response fixture'), 'expected issue diagnostics example message exclusion');
+assertTrue(!str_contains($issueDiagnosticsExample['stdout'], dirname($packageRoot)), 'expected issue diagnostics example absolute path exclusion');
+assertTrue(str_contains($issueDiagnosticsExample['stderr'], '"events":1'), 'expected issue diagnostics example event count');
+
+$makeIssueDiagnostics = runCommand($examplesDir, ['make', 'run-issue-diagnostics']);
+assertTrue(str_contains($makeIssueDiagnostics['stdout'], '"type":"issue"') || str_contains($makeIssueDiagnostics['stdout'], '"type": "issue"'), 'expected issue event in PHP make run-issue-diagnostics output');
+assertTrue(str_contains($makeIssueDiagnostics['stderr'], '"events":1') || str_contains($makeIssueDiagnostics['stderr'], '"events": 1'), 'expected issue diagnostics make event count');
+assertTrue(!str_contains($makeIssueDiagnostics['stdout'], 'sensitive provider response fixture'), 'expected make issue diagnostics message exclusion');
 
 $workerLifecycle = runCommand($packageRoot, [PHP_BINARY, 'examples/worker_lifecycle.php']);
 assertTrue(str_contains($workerLifecycle['stdout'], '"workResult":"job-result"'), 'expected worker lifecycle app result');
