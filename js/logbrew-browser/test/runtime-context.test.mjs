@@ -1,13 +1,42 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { cp, mkdtemp, mkdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import test from "node:test";
-
-import { RecordingTransport } from "@logbrew/sdk";
-import { createLogBrewBrowserClient } from "../index.js";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import test, { after } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const FIXED_TIMESTAMP = "2026-08-03T01:00:00Z";
 const require = createRequire(import.meta.url);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, "../../..");
+
+async function importBrowserPackage() {
+  const tempDir = await mkdtemp(join(tmpdir(), "logbrew-browser-runtime-context-test-"));
+  const packageRoot = join(tempDir, "node_modules", "@logbrew");
+  const browserRoot = join(packageRoot, "browser");
+  await mkdir(packageRoot, { recursive: true });
+  await cp(resolve(repoRoot, "js/logbrew-js"), join(packageRoot, "sdk"), { recursive: true });
+  await cp(resolve(repoRoot, "js/logbrew-browser"), browserRoot, { recursive: true });
+  return {
+    commonJs: require(join(browserRoot, "index.cjs")),
+    esm: await import(pathToFileURL(join(browserRoot, "index.js"))),
+    async removeTempDir() {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  };
+}
+
+const browserPackage = await importBrowserPackage();
+const { createLogBrewBrowserClient } = browserPackage.esm;
+after(browserPackage.removeTempDir);
+
+const acceptingTransport = {
+  async send() {
+    return { statusCode: 202 };
+  }
+};
 
 test("browser package requires a typed-context-capable core", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -50,7 +79,7 @@ async function capturedAttributes(createClient, config = {}) {
     message: "runtime context"
   });
   const attributes = JSON.parse(client.previewJson()).events[0].attributes;
-  await client.shutdown(RecordingTransport.alwaysAccept());
+  await client.shutdown(acceptingTransport);
   return attributes;
 }
 
@@ -111,7 +140,7 @@ test("browser client applies default runtime context to every signal type", asyn
   for (const event of preview.events) {
     assert.deepEqual(event.attributes.context, expectedContext());
   }
-  await client.shutdown(RecordingTransport.alwaysAccept());
+  await client.shutdown(acceptingTransport);
 });
 
 test("browser defaults never read legacy or high-entropy navigator fields", async () => {
@@ -229,9 +258,8 @@ test("browser runtime controls do not hide invalid explicit configuration", () =
 });
 
 test("CommonJS and ESM browser clients expose the same default runtime context", async () => {
-  const commonJs = require("../index.cjs");
   const esm = await capturedAttributes(createLogBrewBrowserClient);
-  const cjs = await capturedAttributes(commonJs.createLogBrewBrowserClient);
+  const cjs = await capturedAttributes(browserPackage.commonJs.createLogBrewBrowserClient);
 
   assert.deepEqual(cjs.context, esm.context);
   assert.deepEqual(cjs.context, expectedContext());
