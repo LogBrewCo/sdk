@@ -56,6 +56,12 @@ test("installed browser capture uses one explicit W3C trace context across page 
       clientKey: CLIENT_KEY,
       flushOnCapture: false,
       now: () => `2026-07-03T10:00:0${++tick}Z`,
+      metadata: {
+        analyticsKind: "interaction",
+        analyticsSchemaVersion: 99,
+        analyticsSurface: "private-selector",
+        routeTemplate: "/checkout/:step"
+      },
       traceContext,
       transport: {
         async send() {
@@ -68,6 +74,9 @@ test("installed browser capture uses one explicit W3C trace context across page 
       name: "checkout.clicked",
       status: "success",
       metadata: {
+        analyticsKind: "screen_view",
+        analyticsSchemaVersion: 99,
+        analyticsSurface: "private-selector",
         routeTemplate: "/checkout",
         nestedDropped: { value: "private" }
       }
@@ -100,9 +109,15 @@ test("installed browser capture uses one explicit W3C trace context across page 
     assert.equal(pageView.attributes.traceId, TRACE_ID);
     assert.equal(pageView.attributes.spanId, SPAN_ID);
     assert.equal(pageView.attributes.metadata.path, "/checkout");
+    assert.equal(pageView.attributes.metadata.analyticsSchemaVersion, 1);
+    assert.equal(pageView.attributes.metadata.analyticsKind, "page_view");
+    assert.equal(pageView.attributes.metadata.analyticsSurface, "/checkout/:step");
     assert.equal(action.attributes.metadata.traceId, TRACE_ID);
     assert.equal(action.attributes.metadata.spanId, SPAN_ID);
     assert.equal(action.attributes.metadata.nestedDropped, undefined);
+    assert.equal(action.attributes.metadata.analyticsSchemaVersion, 1);
+    assert.equal(action.attributes.metadata.analyticsKind, "interaction");
+    assert.equal(action.attributes.metadata.analyticsSurface, "/checkout");
     assert.equal(network.attributes.metadata.traceId, TRACE_ID);
     assert.equal(network.attributes.metadata.spanId, SPAN_ID);
     assert.equal(network.attributes.metadata.routeTemplate, "/api/checkout");

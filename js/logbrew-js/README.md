@@ -563,7 +563,9 @@ client.action("evt_payment_api", new Date().toISOString(), createNetworkMileston
 }));
 ```
 
-Timeline helpers keep only primitive metadata, strip query strings and hashes from route templates, normalize HTTP methods, infer failed network milestones from status codes `400` and above, and serialize through the existing `action` event type. Keep metadata low-cardinality, such as `sessionId`, `traceId`, `routeTemplate`, `method`, `statusCode`, `durationMs`, `screen`, `funnel`, and `step`.
+Timeline helpers keep only primitive metadata, strip query strings and hashes from route templates, normalize HTTP methods, infer failed network milestones from status codes `400` and above, and serialize through the existing `action` event type. Product actions also carry the reserved version-1 `interaction` analytics classification; network milestones do not. Keep metadata low-cardinality, such as `sessionId`, `traceId`, `routeTemplate`, `method`, `statusCode`, `durationMs`, `screen`, `funnel`, and `step`.
+
+`PRODUCT_ANALYTICS_SCHEMA_VERSION` and `PRODUCT_ANALYTICS_KINDS` expose the classification values supported by the installed package. The reserved analytics fields cannot be replaced through caller metadata. See the repository [product analytics capture contract](../../docs/product-analytics-contract.md) before constructing those fields directly.
 
 The packaged `agent-timeline` example shows a two-event checkout timeline that an AI assistant can inspect without session replay or payload capture. It combines product action metadata, network milestone metadata, explicit `traceparent` propagation, and a drop-only `eventFilter` that removes low-value info logs:
 

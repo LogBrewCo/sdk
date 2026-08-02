@@ -40,6 +40,7 @@ export type {
   PinoDestinationConfig,
   PinoDestinationHandle,
   PinoLogRecord,
+  ProductAnalyticsKind,
   ProductActionInput,
   ReleaseAttributes,
   Severity,
@@ -65,6 +66,8 @@ export type {
 } from "./index.js";
 
 export {
+  PRODUCT_ANALYTICS_KINDS,
+  PRODUCT_ANALYTICS_SCHEMA_VERSION,
   createBaggage,
   createIssueAttributesFromError,
   createLogBrewOpenTelemetrySpanExporter,

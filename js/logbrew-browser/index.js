@@ -1,5 +1,6 @@
 import {
   LogBrewClient,
+  PRODUCT_ANALYTICS_SCHEMA_VERSION,
   RecordingTransport,
   SdkError,
   TransportError,
@@ -84,6 +85,7 @@ const DEFAULT_SDK_NAME = "logbrew-browser";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
+const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 
 export function createLogBrewBrowserClient({
   apiKey,
@@ -444,12 +446,16 @@ export function createPageViewEvent(browserWindow = defaultWindow(), {
     source: "browser.page_view"
   });
   const safeMetadata = sanitizeMetadata(mergeMetadata(baseMetadata, metadata), "page_view");
+  const analyticsMetadata = productAnalyticsMetadata(
+    "page_view",
+    safeMetadata.routeTemplate || path
+  );
   return {
     id: idFactory({ browserWindow, path }),
     timestamp: now(),
     attributes: {
       durationMs: 0,
-      metadata: safeMetadata,
+      metadata: mergeMetadata(safeMetadata, analyticsMetadata),
       name: `page_view ${path}`,
       spanId: browserTraceContext?.spanId ?? `span_browser_${slugify(path)}`,
       status: "ok",
@@ -478,12 +484,16 @@ export function createBrowserActionEvent(action, browserWindow = defaultWindow()
     path,
     source: "browser.action"
   });
-  const safeMetadata = sanitizeMetadata(
+  const sanitizedMetadata = sanitizeMetadata(
     mergeMetadata(
       mergeMetadata(mergeMetadata(baseMetadata, metadata), details.metadata),
       browserTraceMetadata(browserTraceContext)
     ),
     "action"
+  );
+  const safeMetadata = mergeMetadata(
+    sanitizedMetadata,
+    productAnalyticsMetadata("interaction", details.metadata?.routeTemplate || path)
   );
   return {
     id: idFactory({ action, browserWindow, message: details.name, path, source: "action" }),
@@ -1195,6 +1205,34 @@ function routeTemplatePath(routeTemplate) {
   } catch {
     return "/";
   }
+}
+
+function productAnalyticsMetadata(kind, surface) {
+  const normalizedSurface = boundedProductAnalyticsSurface(surface);
+  return {
+    analyticsSchemaVersion: PRODUCT_ANALYTICS_SCHEMA_VERSION,
+    analyticsKind: kind,
+    analyticsSurface: normalizedSurface
+  };
+}
+
+function boundedProductAnalyticsSurface(surface) {
+  if (typeof surface !== "string") {
+    return undefined;
+  }
+  const normalized = routeTemplatePath(surface).trim();
+  const characters = Array.from(normalized);
+  if (
+    normalized === ""
+    || characters.length > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+    })
+  ) {
+    return undefined;
+  }
+  return normalized;
 }
 
 function defaultPageViewEventId({ path }) {

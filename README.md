@@ -209,6 +209,12 @@ Use metric helpers when your application already has a bounded measurement:
 - `gauge` values use `instant` temporality and may go up or down.
 - Metadata should be primitive and low-cardinality, such as service, region, route template, queue, or worker name.
 
+## Product Analytics Capture
+
+Product analytics reuses explicit action events and existing page-view telemetry. Supported JavaScript, browser, and React Native helpers attach a reserved versioned classification for page views, screen views, and interactions without installing automatic click capture or collecting user-entered values. Use explicit opaque subject and session IDs in the shared telemetry context when user- or session-level analysis is required.
+
+See the [product analytics capture contract](docs/product-analytics-contract.md) for the exact fields, privacy rules, and compatibility behavior.
+
 ## Trace Context
 
 SDK trace helpers follow W3C `traceparent` conventions where supported. They validate IDs, reject all-zero trace/span IDs, preserve sampled flags, and avoid global HTTP client patching by default.
@@ -244,4 +250,5 @@ The canonical schema is [`spec/event-batch.schema.json`](spec/event-batch.schema
 
 - [`docs/sdk-readiness-checklist.md`](docs/sdk-readiness-checklist.md) describes public SDK quality expectations.
 - [`docs/github-actions.md`](docs/github-actions.md) describes the repository Actions layout.
+- [`docs/product-analytics-contract.md`](docs/product-analytics-contract.md) defines the versioned page-view, screen-view, and interaction vocabulary.
 - Package READMEs contain ecosystem-specific examples and install commands.
