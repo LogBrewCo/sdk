@@ -57,6 +57,56 @@ test("Node client adds only bounded non-unique runtime context by default", asyn
   ]);
 });
 
+test("Node client applies default runtime context to every signal type", async () => {
+  const client = createLogBrewNodeClient({
+    apiKey: "TEST_API_KEY",
+    automaticDelivery: false
+  });
+  client.release("runtime-release", FIXED_TIMESTAMP, { version: "1.0.0" });
+  client.environment("runtime-environment", FIXED_TIMESTAMP, { name: "test" });
+  client.issue("runtime-issue", FIXED_TIMESTAMP, {
+    title: "Runtime context issue",
+    level: "error",
+    message: "runtime context"
+  });
+  client.log("runtime-log", FIXED_TIMESTAMP, {
+    level: "info",
+    message: "runtime context"
+  });
+  client.span("runtime-span", FIXED_TIMESTAMP, {
+    name: "runtime context",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "00f067aa0ba902b7",
+    status: "ok"
+  });
+  client.action("runtime-action", FIXED_TIMESTAMP, {
+    name: "runtime context",
+    status: "success"
+  });
+  client.metric("runtime-metric", FIXED_TIMESTAMP, {
+    name: "runtime.context",
+    kind: "gauge",
+    value: 1,
+    unit: "1",
+    temporality: "instant"
+  });
+
+  const preview = JSON.parse(client.previewJson());
+  assert.deepEqual(preview.events.map((event) => event.type), [
+    "release",
+    "environment",
+    "issue",
+    "log",
+    "span",
+    "action",
+    "metric"
+  ]);
+  for (const event of preview.events) {
+    assert.deepEqual(event.attributes.context, expectedDefaultContext());
+  }
+  await client.shutdown(RecordingTransport.alwaysAccept());
+});
+
 test("explicit context replaces named defaults and extends device classification", async () => {
   const callerContext = Object.freeze({
     schemaVersion: 1,

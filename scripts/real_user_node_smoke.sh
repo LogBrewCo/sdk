@@ -275,16 +275,24 @@ if (response.status !== 200) {
   throw new Error(`unexpected status: ${response.status}`);
 }
 const payload = client.previewJson();
-const runtimeContext = JSON.parse(payload).events[0]?.attributes?.context;
-if (
-  runtimeContext?.schemaVersion !== 1 ||
-  runtimeContext.resource?.runtime?.name !== "node" ||
-  runtimeContext.resource?.runtime?.version !== process.versions.node ||
-  runtimeContext.resource?.operatingSystem?.name !== type() ||
-  runtimeContext.resource?.operatingSystem?.version !== release() ||
-  runtimeContext.resource?.device?.architecture !== arch()
-) {
-  throw new Error(`unexpected default Node runtime context: ${JSON.stringify(runtimeContext)}`);
+const capturedEvents = JSON.parse(payload).events;
+if (capturedEvents.length === 0) {
+  throw new Error("expected installed Node smoke events");
+}
+for (const event of capturedEvents) {
+  const runtimeContext = event.attributes?.context;
+  if (
+    runtimeContext?.schemaVersion !== 1 ||
+    runtimeContext.resource?.runtime?.name !== "node" ||
+    runtimeContext.resource?.runtime?.version !== process.versions.node ||
+    runtimeContext.resource?.operatingSystem?.name !== type() ||
+    runtimeContext.resource?.operatingSystem?.version !== release() ||
+    runtimeContext.resource?.device?.architecture !== arch()
+  ) {
+    throw new Error(
+      `unexpected default Node runtime context for ${event.type}: ${JSON.stringify(runtimeContext)}`
+    );
+  }
 }
 const contextOptOutClient = createLogBrewNodeClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
