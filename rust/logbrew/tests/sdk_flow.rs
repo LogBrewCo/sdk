@@ -433,6 +433,15 @@ fn product_timeline_builds_product_action_event() {
     metadata.insert("plan".to_string(), Value::String("pro".to_string()));
     metadata.insert("attempt".to_string(), Value::from(2));
     metadata.insert("source".to_string(), Value::String("caller".to_string()));
+    metadata.insert("analyticsSchemaVersion".to_string(), Value::from(99));
+    metadata.insert(
+        "analyticsKind".to_string(),
+        Value::String("page_view".to_string()),
+    );
+    metadata.insert(
+        "analyticsSurface".to_string(),
+        Value::String("/spoofed".to_string()),
+    );
 
     client
         .action(
@@ -466,6 +475,9 @@ fn product_timeline_builds_product_action_event() {
     assert_eq!(timeline_metadata["step"], "submit");
     assert_eq!(timeline_metadata["plan"], "pro");
     assert_eq!(timeline_metadata["attempt"], 2);
+    assert_eq!(timeline_metadata["analyticsSchemaVersion"], 1);
+    assert_eq!(timeline_metadata["analyticsKind"], "interaction");
+    assert_eq!(timeline_metadata["analyticsSurface"], "/checkout");
 }
 
 #[test]

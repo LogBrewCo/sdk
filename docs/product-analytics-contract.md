@@ -19,8 +19,8 @@ The three fields are reserved. SDK helpers write them after app metadata, so app
 ## Signal Mapping
 
 - Browser page-view spans use `page_view` and a path-only surface.
-- Mobile screen-view actions use `screen_view` and the app-owned screen name.
-- Explicit product actions use `interaction`. A sanitized route template or screen name can become the surface when the helper has one.
+- React Native and Kotlin/Android screen-view actions use `screen_view` and the app-owned screen name.
+- Explicit product-action helpers across C, C++, .NET, Go, Java, JavaScript, Kotlin, Objective-C, PHP, Python, React Native, Ruby, Rust, and Swift use `interaction`. A sanitized route template or screen name becomes the surface when the helper has one.
 - Network milestones, app lifecycle events, logs, issues, and ordinary performance spans are not product interactions and do not receive these annotations.
 
 Existing unannotated events remain valid. Consumers must report classified and unclassified coverage separately instead of assuming that every action is a click or product event.

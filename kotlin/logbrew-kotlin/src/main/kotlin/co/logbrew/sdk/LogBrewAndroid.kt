@@ -97,6 +97,8 @@ class AndroidLifecycleTracker internal constructor(
 
 object LogBrewAndroid {
     private const val SDK_VERSION: String = "0.1.0"
+    private const val PRODUCT_ANALYTICS_SCHEMA_VERSION: Int = 1
+    private const val MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH: Int = 256
 
     val sdkVersion: String
         get() = SDK_VERSION
@@ -127,7 +129,13 @@ object LogBrewAndroid {
         context: AndroidContext = AndroidContext.create(),
     ) {
         Validation.requireNonEmpty("android screenName", screenName)
-        val metadata = context.toMetadata() + mapOf("screenName" to screenName)
+        val analyticsMetadata = productAnalyticsMetadata("screen_view", screenName)
+        val mergedMetadata =
+            context.toMetadata() +
+                mapOf("screenName" to screenName) +
+                analyticsMetadata
+        val metadata =
+            if ("analyticsSurface" in analyticsMetadata) mergedMetadata else mergedMetadata - "analyticsSurface"
         client.action(id, timestamp, ActionAttributes.create("screen_view", "success").withMetadata(metadata))
     }
 
@@ -140,10 +148,16 @@ object LogBrewAndroid {
         context: AndroidContext = AndroidContext.create(),
         metadata: Map<String, Any?> = emptyMap(),
     ) {
-        val safeMetadata =
+        val appMetadata = compactMetadata(metadata)
+        val surface = context.toMetadata()["screenName"] as? String
+        val analyticsMetadata = productAnalyticsMetadata("interaction", surface)
+        val mergedMetadata =
             context.toMetadata() +
-                compactMetadata(metadata) +
-                mapOf("source" to "android.action")
+                appMetadata +
+                mapOf("source" to "android.action") +
+                analyticsMetadata
+        val safeMetadata =
+            if ("analyticsSurface" in analyticsMetadata) mergedMetadata else mergedMetadata - "analyticsSurface"
         client.action(id, timestamp, ActionAttributes.create(name, status).withMetadata(safeMetadata))
     }
 
@@ -474,6 +488,27 @@ object LogBrewAndroid {
         key: String,
         value: Any?,
     ): Map<String, Any?> = if (value == null) emptyMap() else mapOf(key to value)
+
+    private fun productAnalyticsMetadata(
+        kind: String,
+        surface: String?,
+    ): Map<String, Any?> =
+        mapOf(
+            "analyticsSchemaVersion" to PRODUCT_ANALYTICS_SCHEMA_VERSION,
+            "analyticsKind" to kind,
+        ) + optionalMetadata("analyticsSurface", boundedProductAnalyticsSurface(surface))
+
+    private fun boundedProductAnalyticsSurface(surface: String?): String? {
+        val normalized = surface?.trim() ?: return null
+        if (
+            normalized.isEmpty() ||
+            normalized.codePointCount(0, normalized.length) > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH ||
+            normalized.any { character -> character.code <= 31 || character.code in 127..159 }
+        ) {
+            return null
+        }
+        return normalized
+    }
 
     private fun requestErrorMetadata(error: Throwable): Map<String, Any?> =
         mapOf(

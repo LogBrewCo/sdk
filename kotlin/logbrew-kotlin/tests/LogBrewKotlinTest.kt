@@ -429,6 +429,9 @@ private fun androidHelpersAddContextMetadata() {
     check("\"deviceModel\": \"Pixel\"" in body)
     check("\"androidPriority\": \"WARN\"" in body)
     check("\"source\": \"android\"" in body)
+    check("\"analyticsSchemaVersion\": 1" in body)
+    check("\"analyticsKind\": \"screen_view\"" in body)
+    check("\"analyticsSurface\": \"Checkout\"" in body)
 }
 
 private fun androidTimelineHelpersSanitizeProductAndNetworkMetadata() {
@@ -447,7 +450,15 @@ private fun androidTimelineHelpersSanitizeProductAndNetworkMetadata() {
         timestamp = "2026-06-02T10:00:10Z",
         name = "checkout.submit",
         context = context,
-        metadata = mapOf("funnel" to "checkout", "step" to "submit", "traceId" to "trace_android_001"),
+        metadata =
+            mapOf(
+                "funnel" to "checkout",
+                "step" to "submit",
+                "traceId" to "trace_android_001",
+                "analyticsSchemaVersion" to 99,
+                "analyticsKind" to "page_view",
+                "analyticsSurface" to "/spoofed",
+            ),
     )
     LogBrewAndroid.captureNetworkMilestone(
         client = client,
@@ -470,6 +481,10 @@ private fun androidTimelineHelpersSanitizeProductAndNetworkMetadata() {
     check("\"routeTemplate\": \"/api/checkout\"" in body)
     check("\"durationMs\": 42.5" in body)
     check("\"sessionId\": \"session_android_001\"" in body)
+    check("\"analyticsSchemaVersion\": 1" in body)
+    check("\"analyticsKind\": \"interaction\"" in body)
+    check("\"analyticsSurface\": \"Checkout\"" in body)
+    check("\"analyticsSchemaVersion\": 99" !in body)
     check("?itemId" !in body)
     check("#pay" !in body)
 

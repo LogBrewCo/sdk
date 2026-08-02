@@ -1,5 +1,8 @@
 import Foundation
 
+private let productAnalyticsSchemaVersion = 1
+private let maxProductAnalyticsSurfaceLength = 256
+
 public struct ProductTimelineContext: Equatable, Sendable {
     public let sessionId: String?
     public let screen: String?
@@ -34,17 +37,25 @@ public extension LogBrewClient {
         context: ProductTimelineContext = ProductTimelineContext(),
         metadata: Metadata? = nil,
     ) throws {
+        var eventMetadata = try productTimelineMetadata(
+            source: "swift.action",
+            context: context,
+            metadata: metadata,
+        )
+        eventMetadata["analyticsSchemaVersion"] = .int(productAnalyticsSchemaVersion)
+        eventMetadata["analyticsKind"] = .string("interaction")
+        if let surface = boundedProductAnalyticsSurface(context.screen) {
+            eventMetadata["analyticsSurface"] = .string(surface)
+        } else {
+            eventMetadata.removeValue(forKey: "analyticsSurface")
+        }
         try action(
             id,
             timestamp: timestamp,
             attributes: ActionAttributes(
                 name: name,
                 status: status,
-                metadata: productTimelineMetadata(
-                    source: "swift.action",
-                    context: context,
-                    metadata: metadata,
-                ),
+                metadata: eventMetadata,
             ),
         )
     }
@@ -88,6 +99,22 @@ public extension LogBrewClient {
             ),
         )
     }
+}
+
+private func boundedProductAnalyticsSurface(_ surface: String?) -> String? {
+    guard let surface else {
+        return nil
+    }
+    let normalized = surface.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty,
+          normalized.unicodeScalars.count <= maxProductAnalyticsSurfaceLength
+    else {
+        return nil
+    }
+    let hasControlCharacter = normalized.unicodeScalars.contains { scalar in
+        scalar.value <= 31 || (scalar.value >= 127 && scalar.value <= 159)
+    }
+    return hasControlCharacter ? nil : normalized
 }
 
 private func productTimelineMetadata(

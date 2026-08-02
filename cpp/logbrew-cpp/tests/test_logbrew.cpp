@@ -159,6 +159,9 @@ void product_timeline_helpers_capture_safe_metadata() {
       {"component", "pay-button"},
       {"attempt", 2},
       {"retryable", false},
+      {"analyticsSchemaVersion", 99},
+      {"analyticsKind", "page_view"},
+      {"analyticsSurface", "/spoofed"},
   };
   client.capture_product_action("evt_product_action_001", "2026-06-02T10:00:06Z", product_action);
 
@@ -178,6 +181,10 @@ void product_timeline_helpers_capture_safe_metadata() {
   EXPECT_TRUE(json.find("\"screen\":\"Checkout\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"attempt\":2") != std::string::npos);
   EXPECT_TRUE(json.find("\"retryable\":false") != std::string::npos);
+  EXPECT_TRUE(json.find("\"analyticsSchemaVersion\":1") != std::string::npos);
+  EXPECT_TRUE(json.find("\"analyticsKind\":\"interaction\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"analyticsSurface\":\"Checkout\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"analyticsSchemaVersion\":99") == std::string::npos);
   EXPECT_TRUE(json.find("\"name\":\"POST /checkout/confirm\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"source\":\"cpp.network\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"routeTemplate\":\"/checkout/confirm\"") != std::string::npos);

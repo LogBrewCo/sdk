@@ -242,6 +242,7 @@ static LogBrewStatus append_named_bool(
 static LogBrewStatus append_metadata(
     LogBrewTimelineBuffer *buffer,
     LogBrewMetadata metadata,
+    bool skip_product_analytics,
     bool *needs_comma,
     LogBrewError *error) {
   size_t index;
@@ -254,6 +255,12 @@ static LogBrewStatus append_metadata(
     LogBrewStatus status = require_text("metadata key", entry.key, error);
     if (status != LOGBREW_OK) {
       return status;
+    }
+    if (skip_product_analytics &&
+        (strcmp(entry.key, "analyticsSchemaVersion") == 0 ||
+         strcmp(entry.key, "analyticsKind") == 0 ||
+         strcmp(entry.key, "analyticsSurface") == 0)) {
+      continue;
     }
     if (entry.kind == LOGBREW_METADATA_STRING) {
       status = require_text("metadata string value", entry.string_value, error);
@@ -323,12 +330,22 @@ static LogBrewStatus append_timeline_metadata(
     const char *source,
     LogBrewProductTimelineContext context,
     LogBrewMetadata metadata,
+    const char *analytics_surface,
     bool *needs_comma,
     LogBrewError *error) {
   bool metadata_needs_comma = false;
   LogBrewStatus status = append_timeline_metadata_start(buffer, source, context, needs_comma, &metadata_needs_comma, error);
   if (status == LOGBREW_OK) {
-    status = append_metadata(buffer, metadata, &metadata_needs_comma, error);
+    status = append_metadata(buffer, metadata, true, &metadata_needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_named_number(buffer, "analyticsSchemaVersion", 1.0, &metadata_needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_named_string(buffer, "analyticsKind", "interaction", &metadata_needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_optional_string(buffer, "analyticsSurface", analytics_surface, &metadata_needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = append_timeline_metadata_finish(buffer, needs_comma, error);
@@ -359,7 +376,7 @@ static LogBrewStatus append_network_timeline_metadata(
     status = append_named_number(buffer, "durationMs", attributes.duration_ms, &metadata_needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_metadata(buffer, attributes.metadata, &metadata_needs_comma, error);
+    status = append_metadata(buffer, attributes.metadata, true, &metadata_needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = append_timeline_metadata_finish(buffer, needs_comma, error);
@@ -401,6 +418,57 @@ static LogBrewStatus copy_sanitized_route(const char *route_template, char **out
   return LOGBREW_OK;
 }
 
+static LogBrewStatus copy_bounded_product_analytics_surface(
+    const char *surface,
+    char **out_surface,
+    LogBrewError *error) {
+  const unsigned char *start = (const unsigned char *)surface;
+  const unsigned char *end;
+  const unsigned char *cursor;
+  size_t character_count = 0U;
+  size_t length;
+  char *copy;
+  *out_surface = NULL;
+  if (surface == NULL) {
+    return LOGBREW_OK;
+  }
+  while (*start != '\0' && isspace(*start)) {
+    start++;
+  }
+  end = start + strlen((const char *)start);
+  while (end > start && isspace(*(end - 1))) {
+    end--;
+  }
+  if (end == start) {
+    return LOGBREW_OK;
+  }
+  for (cursor = start; cursor < end; cursor++) {
+    if (*cursor < 0x20U || *cursor == 0x7FU) {
+      return LOGBREW_OK;
+    }
+    if (*cursor == 0xC2U && cursor + 1 < end &&
+        *(cursor + 1) >= 0x80U && *(cursor + 1) <= 0x9FU) {
+      return LOGBREW_OK;
+    }
+    if ((*cursor & 0xC0U) != 0x80U) {
+      character_count++;
+      if (character_count > 256U) {
+        return LOGBREW_OK;
+      }
+    }
+  }
+  length = (size_t)(end - start);
+  copy = (char *)malloc(length + 1U);
+  if (copy == NULL) {
+    set_timeline_error(error, "allocation_error", "out of memory");
+    return LOGBREW_ALLOCATION_ERROR;
+  }
+  memcpy(copy, start, length);
+  copy[length] = '\0';
+  *out_surface = copy;
+  return LOGBREW_OK;
+}
+
 static LogBrewStatus copy_upper_method(const char *method, char out_method[16], LogBrewError *error) {
   size_t index;
   LogBrewStatus status = require_text("method", method, error);
@@ -432,6 +500,7 @@ LogBrewStatus logbrew_client_product_action(
   LogBrewTimelineBuffer buffer = {0};
   bool needs_comma = false;
   char *sanitized_route = NULL;
+  char *analytics_surface = NULL;
   LogBrewProductTimelineContext context = attributes.context;
   LogBrewStatus status = require_text("action name", attributes.name, error);
   if (status == LOGBREW_OK) {
@@ -446,6 +515,12 @@ LogBrewStatus logbrew_client_product_action(
     context.route_template = sanitized_route;
   }
   if (status == LOGBREW_OK) {
+    status = copy_bounded_product_analytics_surface(
+        sanitized_route != NULL ? sanitized_route : context.screen,
+        &analytics_surface,
+        error);
+  }
+  if (status == LOGBREW_OK) {
     status = timeline_append_char(&buffer, '{', error);
   }
   if (status == LOGBREW_OK) {
@@ -455,12 +530,20 @@ LogBrewStatus logbrew_client_product_action(
     status = append_named_string(&buffer, "status", attributes.status, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_timeline_metadata(&buffer, "c.action", context, attributes.metadata, &needs_comma, error);
+    status = append_timeline_metadata(
+        &buffer,
+        "c.action",
+        context,
+        attributes.metadata,
+        analytics_surface,
+        &needs_comma,
+        error);
   }
   if (status == LOGBREW_OK) {
     status = timeline_append_char(&buffer, '}', error);
   }
   free(sanitized_route);
+  free(analytics_surface);
   if (status != LOGBREW_OK) {
     free(buffer.data);
     return status;

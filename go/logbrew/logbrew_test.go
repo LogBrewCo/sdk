@@ -488,9 +488,12 @@ func TestTimelineHelpersCreateSafeActionAttributes(t *testing.T) {
 		Funnel:        "checkout",
 		Step:          "submit",
 		Metadata: map[string]any{
-			"service":       "checkout",
-			"region":        "global",
-			"ignoredObject": map[string]any{"nested": true},
+			"service":                "checkout",
+			"region":                 "global",
+			"ignoredObject":          map[string]any{"nested": true},
+			"analyticsSchemaVersion": 99,
+			"analyticsKind":          "page_view",
+			"analyticsSurface":       "/spoofed",
 		},
 	})
 	if err != nil {
@@ -518,15 +521,18 @@ func TestTimelineHelpersCreateSafeActionAttributes(t *testing.T) {
 		Name:   "checkout.submit",
 		Status: "running",
 		Metadata: map[string]any{
-			"source":        "product.action",
-			"region":        "global",
-			"service":       "checkout",
-			"routeTemplate": "/checkout/:step",
-			"sessionId":     "sess_123",
-			"traceId":       "4bf92f3577b34da6a3ce929d0e0e4736",
-			"screen":        "Checkout",
-			"funnel":        "checkout",
-			"step":          "submit",
+			"source":                 "product.action",
+			"region":                 "global",
+			"service":                "checkout",
+			"routeTemplate":          "/checkout/:step",
+			"sessionId":              "sess_123",
+			"traceId":                "4bf92f3577b34da6a3ce929d0e0e4736",
+			"screen":                 "Checkout",
+			"funnel":                 "checkout",
+			"step":                   "submit",
+			"analyticsSchemaVersion": 1,
+			"analyticsKind":          "interaction",
+			"analyticsSurface":       "/checkout/:step",
 		},
 	}
 	expectedNetwork := ActionAttributes{

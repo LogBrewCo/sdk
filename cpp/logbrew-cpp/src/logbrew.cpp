@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <iomanip>
 #include <random>
@@ -12,6 +13,8 @@ namespace logbrew {
 namespace {
 
 thread_local const TraceContext *active_trace_context = nullptr;
+
+constexpr std::size_t max_product_analytics_surface_length = 256U;
 
 [[nodiscard]] bool is_blank(const std::string &value) {
   return std::all_of(value.begin(), value.end(), [](unsigned char character) {
@@ -213,6 +216,59 @@ void require_finite(const std::string &label, double value) {
   route = strip_query_and_fragment(route);
   require_non_empty("network route_template", route);
   return route;
+}
+
+[[nodiscard]] std::optional<std::string> bounded_product_analytics_surface(
+    const std::optional<std::string> &surface) {
+  if (!surface.has_value()) {
+    return std::nullopt;
+  }
+  const std::string normalized = trim_copy(*surface);
+  if (normalized.empty()) {
+    return std::nullopt;
+  }
+
+  std::size_t index = 0U;
+  std::size_t character_count = 0U;
+  while (index < normalized.size()) {
+    const auto first = static_cast<unsigned char>(normalized[index]);
+    std::uint32_t code_point = 0U;
+    std::size_t width = 0U;
+    if (first <= 0x7FU) {
+      code_point = first;
+      width = 1U;
+    } else if ((first & 0xE0U) == 0xC0U) {
+      code_point = first & 0x1FU;
+      width = 2U;
+    } else if ((first & 0xF0U) == 0xE0U) {
+      code_point = first & 0x0FU;
+      width = 3U;
+    } else if ((first & 0xF8U) == 0xF0U) {
+      code_point = first & 0x07U;
+      width = 4U;
+    } else {
+      return std::nullopt;
+    }
+    if (index + width > normalized.size()) {
+      return std::nullopt;
+    }
+    for (std::size_t offset = 1U; offset < width; offset++) {
+      const auto continuation = static_cast<unsigned char>(normalized[index + offset]);
+      if ((continuation & 0xC0U) != 0x80U) {
+        return std::nullopt;
+      }
+      code_point = (code_point << 6U) | (continuation & 0x3FU);
+    }
+    if (code_point <= 31U || (code_point >= 127U && code_point <= 159U)) {
+      return std::nullopt;
+    }
+    character_count++;
+    if (character_count > max_product_analytics_surface_length) {
+      return std::nullopt;
+    }
+    index += width;
+  }
+  return normalized;
 }
 
 [[nodiscard]] std::string json_string(const std::string &value) {
@@ -808,13 +864,22 @@ void LogBrewClient::capture_product_action(
     std::string timestamp,
     ProductActionAttributes attributes) {
   require_non_empty("product action name", attributes.name);
+  Metadata metadata = timeline_metadata("cpp.product_action", attributes.context, attributes.metadata);
+  metadata["analyticsSchemaVersion"] = 1;
+  metadata["analyticsKind"] = "interaction";
+  const auto surface = bounded_product_analytics_surface(attributes.context.screen);
+  if (surface.has_value()) {
+    metadata["analyticsSurface"] = *surface;
+  } else {
+    metadata.erase("analyticsSurface");
+  }
   action(
       std::move(id),
       std::move(timestamp),
       ActionAttributes{
           attributes.name,
           attributes.status.value_or("success"),
-          timeline_metadata("cpp.product_action", attributes.context, attributes.metadata),
+          std::move(metadata),
       });
 }
 

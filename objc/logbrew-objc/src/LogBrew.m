@@ -265,6 +265,45 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   return @"success";
 }
 
+static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
+    NSDictionary<NSString *, id> *_Nullable context) {
+  id routeValue = context[@"routeTemplate"];
+  id screenValue = context[@"screen"];
+  NSString *surface = nil;
+  if ([routeValue isKindOfClass:[NSString class]]) {
+    surface = LBWNetworkNormalizedRouteTemplate(
+        (NSString *)routeValue,
+        @"product routeTemplate",
+        nil);
+  }
+  if (surface == nil && [screenValue isKindOfClass:[NSString class]]) {
+    surface = (NSString *)screenValue;
+  }
+  if (surface == nil) {
+    return nil;
+  }
+  NSString *normalized = [surface stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized length] == 0U ||
+      [normalized rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound) {
+    return nil;
+  }
+  NSUInteger index = 0U;
+  NSUInteger characterCount = 0U;
+  while (index < [normalized length]) {
+    unichar character = [normalized characterAtIndex:index];
+    index++;
+    if (CFStringIsSurrogateHighCharacter(character) && index < [normalized length] &&
+        CFStringIsSurrogateLowCharacter([normalized characterAtIndex:index])) {
+      index++;
+    }
+    characterCount++;
+    if (characterCount > 256U) {
+      return nil;
+    }
+  }
+  return normalized;
+}
+
 @implementation LBWConfig
 
 - (instancetype)init {
@@ -692,6 +731,14 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
     return NO;
   }
   timelineMetadata[@"source"] = @"objc.action";
+  timelineMetadata[@"analyticsSchemaVersion"] = @1;
+  timelineMetadata[@"analyticsKind"] = @"interaction";
+  NSString *analyticsSurface = LBWBoundedProductAnalyticsSurface(context);
+  if (analyticsSurface == nil) {
+    [timelineMetadata removeObjectForKey:@"analyticsSurface"];
+  } else {
+    timelineMetadata[@"analyticsSurface"] = analyticsSurface;
+  }
   return [self actionWithID:eventID
                  timestamp:timestamp
                 attributes:@{
