@@ -149,10 +149,8 @@ func TestAutomaticDeliveryFlushesAtThreshold(t *testing.T) {
 	queueLifecycleLog(t, client, "evt_threshold_001")
 	queueLifecycleLog(t, client, "evt_threshold_002")
 	transport.waitForSends(t, 1)
+	waitForPendingEvents(t, client, 0)
 
-	if pending := client.PendingEvents(); pending != 0 {
-		t.Fatalf("expected automatic threshold flush, pending=%d", pending)
-	}
 	health := client.DeliveryHealth()
 	if health.State != DeliveryStateRunning || health.LastOutcome != DeliveryOutcomeAccepted || health.AcceptedEvents != 2 {
 		t.Fatalf("unexpected threshold health: %#v", health)
@@ -168,10 +166,7 @@ func TestAutomaticDeliveryFlushesOnInterval(t *testing.T) {
 	})
 	queueLifecycleLog(t, client, "evt_interval_001")
 	transport.waitForSends(t, 1)
-
-	if pending := client.PendingEvents(); pending != 0 {
-		t.Fatalf("expected automatic interval flush, pending=%d", pending)
-	}
+	waitForPendingEvents(t, client, 0)
 }
 
 func TestAutomaticDeliveryRetainsLaterCaptureAndCoalescesOneWake(t *testing.T) {
