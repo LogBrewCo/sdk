@@ -190,8 +190,11 @@ namespace LogBrew
             client.Issue(
                 options.EventIdPrefix + "_issue_" + request.Trace.SpanId,
                 timestamp,
-                IssueAttributes.Create("ASP.NET Core request failed", "error")
-                    .WithMessage(handlerError.Message)
+                IssueAttributes.FromException(
+                        handlerError,
+                        "ASP.NET Core request failed",
+                        "aspnetcore.middleware",
+                        false)
                     .WithMetadata(metadata));
         }
 

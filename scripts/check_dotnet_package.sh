@@ -75,6 +75,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "logbrew-logo-transparent-128.png",
         "examples/ReadmeExample.cs",
         "examples/RealUserSmoke.cs",
+        "examples/IssueDiagnostics.cs",
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
         "examples/ActivityTraceCorrelation.cs",
@@ -116,6 +117,10 @@ for needle in (
     "dotnet add package LogBrew",
     "LOGBREW_API_KEY",
     "PreviewJson()",
+    "IssueAttributes.FromException",
+    "IssueExceptionInfo",
+    "IssueDiagnostics.cs",
+    "raw stack text",
     "MetricAttributes",
     "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
     "ProductTimeline",
@@ -271,6 +276,8 @@ for needle in (
     "WithRequestFilter",
     "WithRouteTemplateSelector",
     "does not read request or response bodies",
+    "mechanism `aspnetcore.middleware`",
+    "omits exception messages, raw stack text",
     "AspNetCoreMiddlewareTelemetry.cs",
 ):
     if needle not in readme:
@@ -349,6 +356,10 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdo
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/real-user-smoke.stderr.json"
+
+run_example IssueDiagnostics.cs IssueDiagnostics "$tmp_dir/issue-diagnostics.stdout.json" "$tmp_dir/issue-diagnostics.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/issue-diagnostics.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_issue_diagnostics_payload.py" "$tmp_dir/issue-diagnostics.stdout.json" "$tmp_dir/issue-diagnostics.stderr.json" >/dev/null
 
 run_example FirstUsefulTelemetry.cs FirstUsefulTelemetry "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/first-useful.stdout.json" >/dev/null
@@ -485,6 +496,7 @@ make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' "$tmp_dir/examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-activity-trace-correlation -> make run-activity-trace-correlation' "$tmp_dir/examples-help.txt"

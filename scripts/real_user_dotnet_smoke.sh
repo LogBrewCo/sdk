@@ -78,6 +78,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "README.md",
         "examples/ReadmeExample.cs",
         "examples/RealUserSmoke.cs",
+        "examples/IssueDiagnostics.cs",
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
         "examples/ActivityTraceCorrelation.cs",
@@ -97,6 +98,10 @@ for needle in (
     "dotnet add package LogBrew",
     "LOGBREW_API_KEY",
     "PreviewJson()",
+    "IssueAttributes.FromException",
+    "IssueExceptionInfo",
+    "IssueDiagnostics.cs",
+    "raw stack text",
     "MetricAttributes",
     "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
     "ProductTimeline",
@@ -236,6 +241,8 @@ for needle in (
     "WithRequestFilter",
     "WithRouteTemplateSelector",
     "does not read request or response bodies",
+    "mechanism `aspnetcore.middleware`",
+    "omits exception messages, raw stack text",
     "AspNetCoreMiddlewareTelemetry.cs",
 ):
     if needle not in readme:
@@ -302,6 +309,10 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdou
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/packaged-smoke.stderr.json"
+
+run_packaged_example IssueDiagnostics.cs PackagedIssueDiagnostics "$tmp_dir/packaged-issue-diagnostics.stdout.json" "$tmp_dir/packaged-issue-diagnostics.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-issue-diagnostics.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_issue_diagnostics_payload.py" "$tmp_dir/packaged-issue-diagnostics.stdout.json" "$tmp_dir/packaged-issue-diagnostics.stderr.json" >/dev/null
 
 run_packaged_example FirstUsefulTelemetry.cs PackagedFirstUseful "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
@@ -430,6 +441,16 @@ python3 "$repo_root/scripts/check_dotnet_aspnetcore_request_payload.py" \
   "$tmp_dir/aspnetcore-middleware-preview.json" \
   "$tmp_dir/aspnetcore-middleware-response.json" \
   --expect-dependency >/dev/null
+curl -sS \
+  -o "$tmp_dir/aspnetcore-middleware-failure-response.txt" \
+  -w '%{http_code}' \
+  -H 'traceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01' \
+  "$server_url/checkout/failure?coupon=dropme" \
+  > "$tmp_dir/aspnetcore-middleware-failure-status.txt"
+curl -fsS "$server_url/logbrew-preview" > "$tmp_dir/aspnetcore-middleware-failure-preview.json"
+python3 "$repo_root/scripts/check_dotnet_aspnetcore_issue_payload.py" \
+  "$tmp_dir/aspnetcore-middleware-failure-preview.json" \
+  "$tmp_dir/aspnetcore-middleware-failure-status.txt" >/dev/null
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
 server_pid=""
@@ -921,7 +942,7 @@ var supportDraft = SupportTicketDraft.Create(
         {
             ["apiKey"] = string.Concat("lbw", "_ingest_", "sample"),
             ["endpoint"] = "https://api.example/ingest?debug=true#fragment",
-            ["localPath"] = "/Users/example/app/.env",
+            ["localPath"] = "/home/example/app/.env",
             ["error"] = new InvalidOperationException("raw message is omitted")
         }));
 var supportJson = supportDraft.ToJson();
@@ -930,7 +951,7 @@ Require(supportJson.Contains("\"endpoint\": \"[redacted-url]/ingest\"", StringCo
 Require(supportJson.Contains("\"localPath\": \"[redacted-path]\"", StringComparison.Ordinal), "expected support local path redaction");
 Require(supportJson.Contains("\"trace_id\": \"4bf92f3577b34da6a3ce929d0e0e4736\"", StringComparison.Ordinal), "expected support trace normalization");
 Require(supportJson.Contains("\"type\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected support exception type");
-foreach (var blocked in new[] { "lbw_ingest_sample", "api.example", "/Users/example", "raw message" })
+foreach (var blocked in new[] { "lbw_ingest_sample", "api.example", "/home/example", "raw message" })
 {
     Require(!supportJson.Contains(blocked, StringComparison.Ordinal), "expected support draft to omit " + blocked);
 }

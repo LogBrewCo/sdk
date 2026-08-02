@@ -145,9 +145,15 @@ static async Task AspNetCoreMiddlewarePreservesOriginalExceptionAndCapturesIssue
     Require(preview.Contains("\"id\": \"dotnet_aspnetcore_error_span_", StringComparison.Ordinal), "expected failed request span");
     Require(preview.Contains("\"title\": \"ASP.NET Core request failed\"", StringComparison.Ordinal), "expected issue title");
     Require(preview.Contains("\"exceptionType\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected exception type");
+    Require(preview.Contains("\"exception\"", StringComparison.Ordinal), "expected typed exception diagnostics");
+    Require(preview.Contains("\"type\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected typed exception identity");
+    Require(preview.Contains("\"type\": \"aspnetcore.middleware\"", StringComparison.Ordinal), "expected ASP.NET Core exception mechanism");
+    Require(preview.Contains("\"handled\": false", StringComparison.Ordinal), "expected escaped exception handled state");
+    Require(preview.Contains("\"stackFrames\"", StringComparison.Ordinal), "expected bounded structured frames");
     Require(preview.Contains("\"statusCode\": 500", StringComparison.Ordinal), "expected failed request status");
     Require(preview.Contains("\"status\": \"error\"", StringComparison.Ordinal), "expected error span status");
     Require(!preview.Contains("exceptionStackTrace", StringComparison.Ordinal), "middleware must not capture stack traces by default");
+    Require(!preview.Contains("payment provider failed", StringComparison.Ordinal), "middleware must not copy the raw exception message");
 }
 
 static async Task AspNetCoreMiddlewareRouteSelectorStripsAbsoluteUrls()

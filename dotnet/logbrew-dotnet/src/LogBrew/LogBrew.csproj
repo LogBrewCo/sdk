@@ -36,6 +36,7 @@
     <None Include="../../../../assets/brand/logbrew-logo-transparent-128.png" Pack="true" PackagePath="\" />
     <None Include="../../examples/ReadmeExample.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/RealUserSmoke.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/IssueDiagnostics.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/FirstUsefulTelemetry.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/HttpTraceCorrelation.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/ActivityTraceCorrelation.cs" Pack="true" PackagePath="examples/" />

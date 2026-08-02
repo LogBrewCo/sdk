@@ -66,7 +66,7 @@ public static class Program
                 {
                     ["apiKey"] = string.Concat("lbw", "_ingest_", "sample"),
                     ["endpoint"] = "https://api.example/ingest?debug=true#fragment",
-                    ["localPath"] = "/Users/example/app/.env",
+                    ["localPath"] = "/home/example/app/.env",
                     ["error"] = new InvalidOperationException("raw message is omitted")
                 }));
         var json = draft.ToJson();
@@ -77,7 +77,7 @@ public static class Program
             && json.Contains("\"type\": \"System.InvalidOperationException\"", StringComparison.Ordinal)
             && !json.Contains("lbw_ingest_sample", StringComparison.Ordinal)
             && !json.Contains("api.example", StringComparison.Ordinal)
-            && !json.Contains("/Users/example", StringComparison.Ordinal)
+            && !json.Contains("/home/example", StringComparison.Ordinal)
             && !json.Contains("raw message", StringComparison.Ordinal);
     }
 }
