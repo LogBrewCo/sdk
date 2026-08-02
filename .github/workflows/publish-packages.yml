@@ -187,6 +187,7 @@ jobs:
             js/logbrew-react-native
             js/logbrew-next
           )
+          workspace_package_dirs=("${package_dirs[@]}")
 
           select_npm_package_dirs() {
             local selectors="$1"
@@ -236,7 +237,17 @@ jobs:
 
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             package_dirs+=(unity/logbrew-unity)
+            workspace_package_dirs+=(unity/logbrew-unity)
           fi
+
+          peer_release_args=(--registry "https://registry.npmjs.org")
+          for package_dir in "${workspace_package_dirs[@]}"; do
+            peer_release_args+=(--workspace-dir "$package_dir")
+          done
+          for package_dir in "${package_dirs[@]}"; do
+            peer_release_args+=(--selected-dir "$package_dir")
+          done
+          python3 scripts/check_npm_workspace_peer_release.py "${peer_release_args[@]}"
 
           metadata_args=()
           selected_package_names=()

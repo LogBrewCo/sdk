@@ -27,11 +27,11 @@ def maven_version(path: Path) -> str | None:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.6"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.7"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.1"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.2"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.4"),
-            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.4"),
+            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.5"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.4"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.3"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.12"),
@@ -94,6 +94,19 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             )
             with self.subTest(entrypoint=entrypoint):
                 self.assertIn(declaration, source)
+
+    def test_node_runtime_context_requires_the_current_core_release(self) -> None:
+        core_manifest = json.loads(
+            (ROOT / "js/logbrew-js/package.json").read_text(encoding="utf-8")
+        )
+        node_manifest = json.loads(
+            (ROOT / "js/logbrew-node/package.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            node_manifest["peerDependencies"]["@logbrew/sdk"],
+            f'^{core_manifest["version"]}',
+        )
 
     def test_python_core_declares_and_ci_installs_tls_trust_dependencies(self) -> None:
         project = tomllib.loads(
