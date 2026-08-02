@@ -33,6 +33,25 @@ namespace LogBrew;
  *   title: string,
  *   level: Severity|SeverityAlias,
  *   message?: string,
+ *   exception?: array{type: string, mechanism?: array{type: string, handled: bool}},
+ *   stackFrames?: list<array{
+ *     filename: string,
+ *     line: int,
+ *     column: int,
+ *     function?: string,
+ *     module?: string,
+ *     inApp?: bool,
+ *     debugId?: string
+ *   }>,
+ *   breadcrumbs?: list<array{
+ *     timestamp: string,
+ *     category: string,
+ *     type?: string,
+ *     level?: string,
+ *     message?: string,
+ *     data?: array<string, MetadataValue>
+ *   }>,
+ *   breadcrumbsTruncated?: bool,
  *   metadata?: Metadata
  * }
  * @phpstan-type LogAttributes array{
@@ -689,14 +708,7 @@ final class LogBrewClient
      */
     private function validateIssue(array $attributes): array
     {
-        $title = self::requireStringAttribute($attributes, 'title', 'issue title');
-        $level = self::normalizeSeverity('issue level', self::requireStringAttribute($attributes, 'level', 'issue level'));
-        $message = self::optionalStringAttribute($attributes, 'message', 'issue message');
-        return $this->withMetadata(array_filter([
-            'title' => $title,
-            'level' => $level,
-            'message' => $message,
-        ], static fn (mixed $value): bool => $value !== null), $attributes['metadata'] ?? null);
+        return IssueDiagnostics::validateIssueAttributes($attributes);
     }
 
     /**

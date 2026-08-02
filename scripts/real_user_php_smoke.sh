@@ -34,11 +34,13 @@ $readme = null;
 $readmeExample = null;
 $example = null;
 $firstUsefulExample = null;
+$issueDiagnosticsExample = null;
 $httpTraceExample = null;
 $workerLifecycleExample = null;
 $persistentWorkerDeliveryExample = null;
 $exampleMakefile = null;
 $httpTransport = null;
+$issueDiagnostics = null;
 $productTimeline = null;
 $traceparent = null;
 $traceparentContext = null;
@@ -72,6 +74,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     if ($name === "examples/first_useful_telemetry.php" || str_ends_with($name, "/examples/first_useful_telemetry.php")) {
         $firstUsefulExample = $zip->getFromIndex($i);
     }
+    if ($name === "examples/issue_diagnostics.php" || str_ends_with($name, "/examples/issue_diagnostics.php")) {
+        $issueDiagnosticsExample = $zip->getFromIndex($i);
+    }
     if ($name === "examples/http_trace_correlation.php" || str_ends_with($name, "/examples/http_trace_correlation.php")) {
         $httpTraceExample = $zip->getFromIndex($i);
     }
@@ -86,6 +91,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "src/HttpTransport.php" || str_ends_with($name, "/src/HttpTransport.php")) {
         $httpTransport = $zip->getFromIndex($i);
+    }
+    if ($name === "src/IssueDiagnostics.php" || str_ends_with($name, "/src/IssueDiagnostics.php")) {
+        $issueDiagnostics = $zip->getFromIndex($i);
     }
     if ($name === "src/ProductTimeline.php" || str_ends_with($name, "/src/ProductTimeline.php")) {
         $productTimeline = $zip->getFromIndex($i);
@@ -148,6 +156,10 @@ if (!is_string($firstUsefulExample)) {
     fwrite(STDERR, "missing examples/first_useful_telemetry.php in composer archive\n");
     exit(1);
 }
+if (!is_string($issueDiagnosticsExample)) {
+    fwrite(STDERR, "missing examples/issue_diagnostics.php in composer archive\n");
+    exit(1);
+}
 if (!is_string($httpTraceExample)) {
     fwrite(STDERR, "missing examples/http_trace_correlation.php in composer archive\n");
     exit(1);
@@ -166,6 +178,10 @@ if (!is_string($exampleMakefile)) {
 }
 if (!is_string($httpTransport)) {
     fwrite(STDERR, "missing src/HttpTransport.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($issueDiagnostics)) {
+    fwrite(STDERR, "missing src/IssueDiagnostics.php in composer archive\n");
     exit(1);
 }
 if (!is_string($productTimeline)) {
@@ -249,6 +265,9 @@ foreach ([
     "composer require logbrew/sdk" => "missing composer archive README install command\n",
     "LOGBREW_API_KEY" => "missing composer archive fake API key placeholder\n",
     "previewJson()" => "missing composer archive previewJson guidance\n",
+    "IssueDiagnostics::fromThrowable" => "missing composer archive typed issue diagnostics guidance\n",
+    "make run-issue-diagnostics" => "missing composer archive issue diagnostics example guidance\n",
+    "never copies raw trace text, arguments, locals, source text, or absolute source paths" => "missing composer archive issue diagnostics privacy guidance\n",
     "MetricAttributes" => "missing composer archive metric guidance\n",
     "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing composer archive metric auto-capture guidance\n",
     "ProductTimeline" => "missing composer archive timeline guidance\n",
@@ -303,11 +322,15 @@ if (!str_contains($firstUsefulExample, "../vendor/autoload.php") || !str_contain
     fwrite(STDERR, "missing composer archive dual-context autoload support in first-useful example\n");
     exit(1);
 }
+if (!str_contains($issueDiagnosticsExample, "../vendor/autoload.php") || !str_contains($issueDiagnosticsExample, "../../../autoload.php")) {
+    fwrite(STDERR, "missing composer archive dual-context autoload support in issue diagnostics example\n");
+    exit(1);
+}
 if (!str_contains($httpTraceExample, "../vendor/autoload.php") || !str_contains($httpTraceExample, "../../../autoload.php")) {
     fwrite(STDERR, "missing composer archive dual-context autoload support in HTTP trace example\n");
     exit(1);
 }
-if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-worker-lifecycle run-persistent-worker-delivery")
+if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-issue-diagnostics run-http-trace-correlation run-worker-lifecycle run-persistent-worker-delivery")
     || !str_contains($exampleMakefile, "help:")
     || !str_contains($exampleMakefile, "run: run-real-user-smoke")
     || !str_contains($exampleMakefile, "run-readme-example:")
@@ -316,6 +339,8 @@ if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-rea
     || !str_contains($exampleMakefile, "@php real_user_smoke.php")
     || !str_contains($exampleMakefile, "run-first-useful-telemetry:")
     || !str_contains($exampleMakefile, "@php first_useful_telemetry.php")
+    || !str_contains($exampleMakefile, "run-issue-diagnostics:")
+    || !str_contains($exampleMakefile, "@php issue_diagnostics.php")
     || !str_contains($exampleMakefile, "run-http-trace-correlation:")
     || !str_contains($exampleMakefile, "@php http_trace_correlation.php")
     || !str_contains($exampleMakefile, "run-worker-lifecycle:")
@@ -326,6 +351,7 @@ if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-rea
     || !str_contains($exampleMakefile, "run (real-user-smoke) -> make run")
     || !str_contains($exampleMakefile, "run-real-user-smoke -> make run-real-user-smoke")
     || !str_contains($exampleMakefile, "run-first-useful-telemetry -> make run-first-useful-telemetry")
+    || !str_contains($exampleMakefile, "run-issue-diagnostics -> make run-issue-diagnostics")
     || !str_contains($exampleMakefile, "run-http-trace-correlation -> make run-http-trace-correlation")
     || !str_contains($exampleMakefile, "run-worker-lifecycle -> make run-worker-lifecycle")
     || !str_contains($exampleMakefile, "run-persistent-worker-delivery -> make run-persistent-worker-delivery")) {
@@ -493,6 +519,7 @@ if (!is_array($psrLog)) {
 test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
+test -f vendor/logbrew/sdk/src/IssueDiagnostics.php
 test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/Traceparent.php
 test -f vendor/logbrew/sdk/src/TraceparentContext.php
@@ -509,12 +536,14 @@ test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/readme_example.php
 test -f vendor/logbrew/sdk/examples/real_user_smoke.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
+test -f vendor/logbrew/sdk/examples/issue_diagnostics.php
 test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/logbrew/sdk/examples/worker_lifecycle.php
 test -f vendor/logbrew/sdk/examples/persistent_worker_delivery.php
 test -f vendor/logbrew/sdk/examples/Makefile
 php -l vendor/logbrew/sdk/examples/worker_lifecycle.php >/dev/null
 php -l vendor/logbrew/sdk/examples/persistent_worker_delivery.php >/dev/null
+php -l vendor/logbrew/sdk/examples/issue_diagnostics.php >/dev/null
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 (cd vendor/logbrew/sdk/examples && make) > vendor-example-make-help.txt
@@ -522,10 +551,11 @@ grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-ex
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-help.txt)
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-help.txt)
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-help.txt)
-grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '5p' vendor-example-make-help.txt)
-grep -qx 'run-worker-lifecycle -> make run-worker-lifecycle' <(sed -n '6p' vendor-example-make-help.txt)
-grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' <(sed -n '7p' vendor-example-make-help.txt)
-test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "7"
+grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' <(sed -n '5p' vendor-example-make-help.txt)
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '6p' vendor-example-make-help.txt)
+grep -qx 'run-worker-lifecycle -> make run-worker-lifecycle' <(sed -n '7p' vendor-example-make-help.txt)
+grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' <(sed -n '8p' vendor-example-make-help.txt)
+test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "8"
 php -r '
 $readme = file_get_contents($argv[1]);
 if ($readme === false) {
@@ -536,6 +566,9 @@ foreach ([
     "composer require logbrew/sdk" => "missing installed README composer install command\n",
     "LOGBREW_API_KEY" => "missing installed README fake API key placeholder\n",
     "previewJson()" => "missing installed README previewJson guidance\n",
+    "IssueDiagnostics::fromThrowable" => "missing installed README typed issue diagnostics guidance\n",
+    "make run-issue-diagnostics" => "missing installed README issue diagnostics example guidance\n",
+    "never copies raw trace text, arguments, locals, source text, or absolute source paths" => "missing installed README issue diagnostics privacy guidance\n",
     "MetricAttributes" => "missing installed README metric guidance\n",
     "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing installed README metric auto-capture guidance\n",
     "ProductTimeline" => "missing installed README timeline guidance\n",
@@ -672,6 +705,15 @@ python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-usef
 grep -q '"type": "metric"' vendor-first-useful-make.stdout.json
 grep -q '"events":7' vendor-first-useful-make.stderr.json
 python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-make.stdout.json vendor-first-useful-make.stderr.json >/dev/null
+php vendor/logbrew/sdk/examples/issue_diagnostics.php > vendor-issue-diagnostics.stdout.json 2> vendor-issue-diagnostics.stderr.json
+grep -q '"type": "issue"' vendor-issue-diagnostics.stdout.json
+grep -q '"events":1' vendor-issue-diagnostics.stderr.json
+python3 "$repo_root/scripts/validate_fixtures.py" vendor-issue-diagnostics.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_php_issue_diagnostics_payload.py" vendor-issue-diagnostics.stdout.json vendor-issue-diagnostics.stderr.json >/dev/null
+(cd vendor/logbrew/sdk/examples && make run-issue-diagnostics) > vendor-issue-diagnostics-make.stdout.json 2> vendor-issue-diagnostics-make.stderr.json
+grep -q '"type": "issue"' vendor-issue-diagnostics-make.stdout.json
+grep -q '"events":1' vendor-issue-diagnostics-make.stderr.json
+python3 "$repo_root/scripts/check_php_issue_diagnostics_payload.py" vendor-issue-diagnostics-make.stdout.json vendor-issue-diagnostics-make.stderr.json >/dev/null
 php vendor/logbrew/sdk/examples/http_trace_correlation.php > vendor-http-trace.stdout.json 2> vendor-http-trace.stderr.json
 grep -q '"type": "metric"' vendor-http-trace.stdout.json
 grep -q '"type": "span"' vendor-http-trace.stdout.json
@@ -814,6 +856,7 @@ composer validate --no-check-publish --no-check-version --strict >/dev/null
 test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
+test -f vendor/logbrew/sdk/src/IssueDiagnostics.php
 test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/Traceparent.php
 test -f vendor/logbrew/sdk/src/TraceparentContext.php
@@ -828,11 +871,13 @@ test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
+test -f vendor/logbrew/sdk/examples/issue_diagnostics.php
 test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/logbrew/sdk/examples/worker_lifecycle.php
 test -f vendor/logbrew/sdk/examples/persistent_worker_delivery.php
 php -l vendor/logbrew/sdk/examples/worker_lifecycle.php >/dev/null
 php -l vendor/logbrew/sdk/examples/persistent_worker_delivery.php >/dev/null
+php -l vendor/logbrew/sdk/examples/issue_diagnostics.php >/dev/null
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 php -r '
@@ -1783,6 +1828,7 @@ composer validate --no-check-publish --no-check-version --strict >/dev/null
 test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
+test -f vendor/logbrew/sdk/src/IssueDiagnostics.php
 test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/Traceparent.php
 test -f vendor/logbrew/sdk/src/TraceparentContext.php
@@ -1797,6 +1843,7 @@ test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
+test -f vendor/logbrew/sdk/examples/issue_diagnostics.php
 test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
@@ -2051,10 +2098,11 @@ grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-ex
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-reinstall-help.txt)
-grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '5p' vendor-example-make-reinstall-help.txt)
-grep -qx 'run-worker-lifecycle -> make run-worker-lifecycle' <(sed -n '6p' vendor-example-make-reinstall-help.txt)
-grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' <(sed -n '7p' vendor-example-make-reinstall-help.txt)
-test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "7"
+grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' <(sed -n '5p' vendor-example-make-reinstall-help.txt)
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '6p' vendor-example-make-reinstall-help.txt)
+grep -qx 'run-worker-lifecycle -> make run-worker-lifecycle' <(sed -n '7p' vendor-example-make-reinstall-help.txt)
+grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' <(sed -n '8p' vendor-example-make-reinstall-help.txt)
+test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "8"
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make-reinstall.stdout.json 2> vendor-readme-example-make-reinstall.stderr.json
 grep -q '"type": "release"' vendor-readme-example-make-reinstall.stdout.json
 grep -q '"type": "environment"' vendor-readme-example-make-reinstall.stdout.json
@@ -2097,6 +2145,15 @@ python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-usef
 grep -q '"type": "metric"' vendor-first-useful-make-reinstall.stdout.json
 grep -q '"events":7' vendor-first-useful-make-reinstall.stderr.json
 python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-make-reinstall.stdout.json vendor-first-useful-make-reinstall.stderr.json >/dev/null
+php vendor/logbrew/sdk/examples/issue_diagnostics.php > vendor-issue-diagnostics-reinstall.stdout.json 2> vendor-issue-diagnostics-reinstall.stderr.json
+grep -q '"type": "issue"' vendor-issue-diagnostics-reinstall.stdout.json
+grep -q '"events":1' vendor-issue-diagnostics-reinstall.stderr.json
+python3 "$repo_root/scripts/validate_fixtures.py" vendor-issue-diagnostics-reinstall.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_php_issue_diagnostics_payload.py" vendor-issue-diagnostics-reinstall.stdout.json vendor-issue-diagnostics-reinstall.stderr.json >/dev/null
+(cd vendor/logbrew/sdk/examples && make run-issue-diagnostics) > vendor-issue-diagnostics-make-reinstall.stdout.json 2> vendor-issue-diagnostics-make-reinstall.stderr.json
+grep -q '"type": "issue"' vendor-issue-diagnostics-make-reinstall.stdout.json
+grep -q '"events":1' vendor-issue-diagnostics-make-reinstall.stderr.json
+python3 "$repo_root/scripts/check_php_issue_diagnostics_payload.py" vendor-issue-diagnostics-make-reinstall.stdout.json vendor-issue-diagnostics-make-reinstall.stderr.json >/dev/null
 php vendor/logbrew/sdk/examples/http_trace_correlation.php > vendor-http-trace-reinstall.stdout.json 2> vendor-http-trace-reinstall.stderr.json
 grep -q '"type": "metric"' vendor-http-trace-reinstall.stdout.json
 grep -q '"type": "span"' vendor-http-trace-reinstall.stdout.json
@@ -2174,6 +2231,30 @@ if (!str_contains($classDoc, '@phpstan-type MetricAttributes array{')) {
 }
 if (!str_contains($classDoc, '@phpstan-type ActionAttributes array{')) {
     fwrite(STDERR, "missing ActionAttributes alias definition\n");
+    exit(1);
+}
+
+$issueDiagnostics = new ReflectionClass(\LogBrew\IssueDiagnostics::class);
+$issueDiagnosticsDoc = $issueDiagnostics->getDocComment() ?: '';
+if (!str_contains($issueDiagnosticsDoc, 'Typed, privacy-bounded issue diagnostics for explicit and framework capture.')) {
+    fwrite(STDERR, "missing IssueDiagnostics class doc summary\n");
+    exit(1);
+}
+if (!str_contains($issueDiagnosticsDoc, '@phpstan-type IssueStackFrame array{')) {
+    fwrite(STDERR, "missing IssueStackFrame alias definition\n");
+    exit(1);
+}
+if (!str_contains($issueDiagnosticsDoc, '@phpstan-type IssueBreadcrumb array{')) {
+    fwrite(STDERR, "missing IssueBreadcrumb alias definition\n");
+    exit(1);
+}
+$fromThrowable = $issueDiagnostics->getMethod('fromThrowable')->getDocComment() ?: '';
+if (!str_contains($fromThrowable, 'Build complete issue attributes from a throwable without copying sensitive content.')) {
+    fwrite(STDERR, "missing IssueDiagnostics::fromThrowable doc summary\n");
+    exit(1);
+}
+if (!str_contains($fromThrowable, '@return IssueAttributes')) {
+    fwrite(STDERR, "missing IssueDiagnostics::fromThrowable return docblock\n");
     exit(1);
 }
 
@@ -2483,6 +2564,7 @@ declare(strict_types=1);
 require __DIR__ . '/vendor/autoload.php';
 
 use LogBrew\LaravelLoggerFactory;
+use LogBrew\IssueDiagnostics;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewMonologHandler;
 use LogBrew\LogBrewPsrLogger;
@@ -2505,6 +2587,20 @@ $client->issue('evt_issue_001', '2026-06-02T10:00:02Z', [
     'level' => 'error',
     'message' => 'Request timed out after retry budget',
 ]);
+$diagnosticError = new RuntimeException('message remains local');
+$client->issue(
+    'evt_issue_diagnostics',
+    '2026-06-02T10:00:02Z',
+    IssueDiagnostics::fromThrowable(
+        $diagnosticError,
+        breadcrumbs: [IssueDiagnostics::breadcrumb(
+            '2026-06-02T09:59:59Z',
+            'checkout.request',
+            level: 'warn',
+            data: ['attempt' => 2]
+        )]
+    )
+);
 $client->log('evt_log_001', '2026-06-02T10:00:03Z', [
     'message' => 'worker started',
     'level' => 'info',

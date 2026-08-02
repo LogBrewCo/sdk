@@ -511,9 +511,24 @@ if (!is_array($issue)) {
     fwrite(STDERR, "missing Symfony exception issue\n");
     exit(1);
 }
+$attributes = $issue["attributes"] ?? [];
 $metadata = $issue["attributes"]["metadata"] ?? [];
+$exception = $attributes["exception"] ?? null;
+$stackFrames = $attributes["stackFrames"] ?? null;
 if (
-    ($issue["attributes"]["title"] ?? null) !== RuntimeException::class
+    ($attributes["title"] ?? null) !== RuntimeException::class
+    || $exception !== [
+        "type" => RuntimeException::class,
+        "mechanism" => ["type" => "symfony.kernel_exception", "handled" => false],
+    ]
+    || !is_array($stackFrames)
+    || count($stackFrames) < 1
+    || count($stackFrames) > 32
+    || ($stackFrames[0]["filename"] ?? null) !== "SmokeController.php"
+    || ($stackFrames[0]["function"] ?? null) !== "failure"
+    || ($stackFrames[0]["module"] ?? null) !== "App\\Controller\\SmokeController"
+    || !is_int($stackFrames[0]["line"] ?? null)
+    || ($stackFrames[0]["column"] ?? null) !== 1
     || ($metadata["exceptionType"] ?? null) !== RuntimeException::class
     || ($metadata["errorName"] ?? null) !== RuntimeException::class
     || preg_match("/^symfony-exception-[0-9a-f]{64}$/", (string) ($metadata["issueGroupingKey"] ?? "")) !== 1

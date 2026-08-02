@@ -12,7 +12,7 @@ Public PHP SDK for creating LogBrew event batches, validating them locally, and 
 composer require logbrew/sdk
 ```
 
-The public API is annotated with shaped-array PHPDoc, including `MetricAttributes`, so static-analysis tools can understand common consumer calls directly. The package includes copyable examples for PHP services, PSR-3 loggers, Monolog, Symfony, and Laravel. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in app configuration, and call `previewJson()` when you want to inspect queued JSON before sending.
+The public API is annotated with shaped-array PHPDoc, including `IssueAttributes` and `MetricAttributes`, so static-analysis tools can understand common consumer calls directly. The package includes copyable examples for PHP services, issue diagnostics, PSR-3 loggers, Monolog, Symfony, and Laravel. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in app configuration, and call `previewJson()` when you want to inspect queued JSON before sending.
 
 ## Support Ticket Drafts
 
@@ -103,6 +103,57 @@ fwrite(STDERR, json_encode([
     'events' => 6,
 ], JSON_THROW_ON_ERROR) . PHP_EOL);
 ```
+
+## Typed Issue Diagnostics
+
+Use `IssueDiagnostics::fromThrowable(...)` when the application catches or reports a PHP failure and wants a useful issue rather than a title-only event. It builds first-class exception identity, mechanism and handled state, up to 32 newest-first frames with function/module identity, and up to 64 application-supplied breadcrumbs in oldest-first order.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\IssueDiagnostics;
+use LogBrew\LogBrewClient;
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-php-service', '1.4.2');
+$breadcrumbs = [
+    IssueDiagnostics::breadcrumb(
+        timestamp: '2026-08-02T10:14:58.125+00:00',
+        category: 'checkout.navigation',
+        type: 'navigation',
+        level: 'info',
+        message: 'User reached payment review',
+        data: ['step' => 'payment']
+    ),
+    IssueDiagnostics::breadcrumb(
+        timestamp: '2026-08-02T10:14:59Z',
+        category: 'checkout.request',
+        type: 'http',
+        level: 'warn',
+        data: ['method' => 'POST', 'statusCode' => 503]
+    ),
+];
+
+try {
+    runCheckout();
+} catch (Throwable $error) {
+    $client->issue(
+        'evt_issue_checkout_failure',
+        '2026-08-02T10:15:00Z',
+        IssueDiagnostics::fromThrowable(
+            $error,
+            message: 'Checkout could not be completed.',
+            mechanismType: 'php.exception',
+            handled: true,
+            metadata: ['routeTemplate' => '/checkout/:cart_id'],
+            breadcrumbs: $breadcrumbs
+        )
+    );
+}
+```
+
+Throwable capture deliberately omits the throwable message by default. It also never copies raw trace text, arguments, locals, source text, or absolute source paths; generated filenames are basename-only. Pass a deliberately safe `message` only when it adds user-facing value. Use `IssueDiagnostics::stackFrame(...)` for an explicit frame, and set `breadcrumbsTruncated: true` when the application retained only the newest 64 breadcrumbs. Run the shipped example with `php vendor/logbrew/sdk/examples/issue_diagnostics.php` or `make run-issue-diagnostics` from `vendor/logbrew/sdk/examples`.
 
 ## Explicit Metrics
 
@@ -238,6 +289,7 @@ require __DIR__ . '/vendor/autoload.php';
 
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewHttpRequestTelemetry;
+use LogBrew\IssueDiagnostics;
 use LogBrew\LogBrewPsrLogger;
 use LogBrew\LogBrewTrace;
 use Psr\Log\LogLevel;
@@ -254,16 +306,22 @@ $logger = new LogBrewPsrLogger($client, loggerName: 'checkout');
 $scope = $request->activate();
 try {
     $logger->log(LogLevel::WARNING, 'checkout slow for {cartId}', ['cartId' => 'cart_123']);
-    $client->issue('evt_issue_checkout_trace', '2026-06-02T10:00:04Z', [
-        'title' => 'Checkout handler failed',
-        'level' => 'error',
-        'message' => 'payment provider failed',
-        'metadata' => LogBrewTrace::metadataWithCurrentTrace([
-            'routeTemplate' => $request->routeTemplate,
-            'exceptionType' => RuntimeException::class,
-            'exceptionMessage' => 'payment provider failed',
-        ]),
-    ]);
+    try {
+        runCheckout();
+    } catch (RuntimeException $error) {
+        $client->issue(
+            'evt_issue_checkout_trace',
+            '2026-06-02T10:00:04Z',
+            IssueDiagnostics::fromThrowable(
+                $error,
+                title: 'Checkout handler failed',
+                message: 'Payment provider failed.',
+                metadata: LogBrewTrace::metadataWithCurrentTrace([
+                    'routeTemplate' => $request->routeTemplate,
+                ])
+            )
+        );
+    }
 } finally {
     $scope->close();
 }
@@ -633,7 +691,7 @@ log_brew:
   include_exception_trace: false
 ```
 
-Automatic request telemetry records only the method, bounded Symfony route name, status, duration, framework/service/release/environment, and normalized trace identifiers. It does not record concrete paths, query strings, request or response bodies, arbitrary headers, or the raw `traceparent` value. Automatic exception issues include the exception type, mechanism, unhandled state, and source basename/line plus a hashed type/route/file grouping key; absolute source paths, messages, and traces remain off unless explicitly enabled. The handler excludes Symfony's `request`, `event`, `doctrine`, and `deprecation` channels to avoid duplicating framework exception reports or copying Symfony's formatted exception message. Application-authored log messages and primitive context remain under the application's control.
+Automatic request telemetry records only the method, bounded Symfony route name, status, duration, framework/service/release/environment, and normalized trace identifiers. It does not record concrete paths, query strings, request or response bodies, arbitrary headers, or the raw `traceparent` value. Automatic exception issues include a first-class exception type, `symfony.kernel_exception` mechanism with `handled: false`, up to 32 newest-first basename-only frames with safe function/module identity, and a hashed type/route/file grouping key. Arguments, locals, source text, and absolute paths are never captured; exception messages and raw trace text remain off unless explicitly enabled. The handler excludes Symfony's `request`, `event`, `doctrine`, and `deprecation` channels to avoid duplicating framework exception reports or copying Symfony's formatted exception message. Application-authored log messages and primitive context remain under the application's control.
 
 ## Laravel Quick Start
 

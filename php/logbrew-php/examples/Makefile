@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-worker-lifecycle run-persistent-worker-delivery
+.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-issue-diagnostics run-http-trace-correlation run-worker-lifecycle run-persistent-worker-delivery
 
 help:
 	@printf '%s\n' \
@@ -6,6 +6,7 @@ help:
 		'run (real-user-smoke) -> make run' \
 		'run-real-user-smoke -> make run-real-user-smoke' \
 		'run-first-useful-telemetry -> make run-first-useful-telemetry' \
+		'run-issue-diagnostics -> make run-issue-diagnostics' \
 		'run-http-trace-correlation -> make run-http-trace-correlation' \
 		'run-worker-lifecycle -> make run-worker-lifecycle' \
 		'run-persistent-worker-delivery -> make run-persistent-worker-delivery'
@@ -20,6 +21,9 @@ run-real-user-smoke:
 
 run-first-useful-telemetry:
 	@php first_useful_telemetry.php
+
+run-issue-diagnostics:
+	@php issue_diagnostics.php
 
 run-http-trace-correlation:
 	@php http_trace_correlation.php
