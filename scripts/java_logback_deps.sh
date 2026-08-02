@@ -139,6 +139,9 @@ fetch_java_spring_web_deps() {
     "org/springframework/spring-web/$spring_framework_version/spring-web-$spring_framework_version" \
     "$deps_dir"
   fetch_maven_jar \
+    "org/springframework/spring-webmvc/$spring_framework_version/spring-webmvc-$spring_framework_version" \
+    "$deps_dir"
+  fetch_maven_jar \
     "org/springframework/spring-webflux/$spring_framework_version/spring-webflux-$spring_framework_version" \
     "$deps_dir"
   fetch_maven_jar \
@@ -154,8 +157,9 @@ fetch_java_spring_web_deps() {
     "io/micrometer/micrometer-commons/$micrometer_version/micrometer-commons-$micrometer_version" \
     "$deps_dir"
 
-  printf '%s:%s:%s:%s:%s:%s\n' \
+  printf '%s:%s:%s:%s:%s:%s:%s\n' \
     "$deps_dir/spring-web-$spring_framework_version.jar" \
+    "$deps_dir/spring-webmvc-$spring_framework_version.jar" \
     "$deps_dir/spring-webflux-$spring_framework_version.jar" \
     "$deps_dir/spring-test-$spring_framework_version.jar" \
     "$deps_dir/reactor-core-$reactor_version.jar" \

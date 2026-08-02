@@ -50,7 +50,7 @@ public class LogBrewSpringBootAutoConfiguration {
         return registration;
     }
 
-    private static String eventIdPrefix(Environment environment) {
+    static String eventIdPrefix(Environment environment) {
         String value = environment.getProperty("logbrew.servlet.event-id-prefix");
         if (value == null || value.trim().isEmpty()) {
             return DEFAULT_EVENT_ID_PREFIX;
@@ -70,7 +70,7 @@ public class LogBrewSpringBootAutoConfiguration {
         }
     }
 
-    private static Map<String, Object> springMetadata(Environment environment) {
+    static Map<String, Object> springMetadata(Environment environment) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("springApplicationName", environment.getProperty("spring.application.name", "application"));
         String[] activeProfiles = environment.getActiveProfiles();

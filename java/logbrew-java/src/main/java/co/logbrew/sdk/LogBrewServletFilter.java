@@ -20,8 +20,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>The filter reads only W3C {@code traceparent}, activates the request trace while the
  * downstream filter chain runs, then records one request span and one
- * {@code http.server.duration} metric. It does not capture request bodies, response bodies,
- * arbitrary headers, cookies, query strings, full URLs, baggage, or tracestate.</p>
+ * {@code http.server.duration} metric. An exception that escapes the chain also records one
+ * correlated, type-only issue with bounded structured frames. The filter does not capture
+ * exception messages, raw stack text, request bodies, response bodies, arbitrary headers,
+ * cookies, query strings, full URLs, baggage, or tracestate.</p>
  */
 public final class LogBrewServletFilter implements Filter {
     /**
@@ -34,6 +36,8 @@ public final class LogBrewServletFilter implements Filter {
      */
     public static final String SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE =
         "org.springframework.web.servlet.HandlerMapping.bestMatchingPattern";
+
+    static final String EXCEPTION_CAPTURED_ATTRIBUTE = "co.logbrew.issueExceptionCaptured";
 
     private static final String TRACEPARENT_HEADER = "traceparent";
     private static final String DEFAULT_EVENT_ID_PREFIX = "servlet_request";
@@ -96,7 +100,8 @@ public final class LogBrewServletFilter implements Filter {
                 httpRequest,
                 traceContext,
                 responseStatus(httpResponse, failure),
-                elapsedMs(startedNanos)
+                elapsedMs(startedNanos),
+                failure
             );
         }
     }
@@ -105,9 +110,11 @@ public final class LogBrewServletFilter implements Filter {
         HttpServletRequest request,
         LogBrewTraceContext traceContext,
         int statusCode,
-        double durationMs
+        double durationMs,
+        Throwable failure
     ) {
         long eventNumber = nextEventNumber.incrementAndGet();
+        captureUnhandledIssue(request, traceContext, statusCode, failure, eventNumber);
         try {
             LogBrewHttpRequestTelemetry telemetry = LogBrewHttpRequestTelemetry.start(
                 client,
@@ -128,6 +135,42 @@ public final class LogBrewServletFilter implements Filter {
         }
     }
 
+    private void captureUnhandledIssue(
+        HttpServletRequest request,
+        LogBrewTraceContext traceContext,
+        int statusCode,
+        Throwable failure,
+        long eventNumber
+    ) {
+        if (failure == null) {
+            return;
+        }
+        try {
+            if (Boolean.TRUE.equals(request.getAttribute(EXCEPTION_CAPTURED_ATTRIBUTE))) {
+                return;
+            }
+            String method = requestMethod(request);
+            String route = exceptionRouteTemplate(request);
+            Map<String, Object> metadata = requestMetadata(exceptionRouteSource(request));
+            metadata.put("method", method);
+            metadata.put("routeTemplate", route);
+            metadata.put("statusCode", Integer.valueOf(statusCode));
+            client.issue(
+                eventIdPrefix + "_issue_" + eventNumber,
+                Instant.now().toString(),
+                IssueAttributes.fromThrowable(
+                    method + " " + route + " failed",
+                    failure,
+                    "jakarta_servlet.filter",
+                    false
+                ).metadata(LogBrewTrace.metadataWithTrace(traceContext, metadata))
+            );
+            request.setAttribute(EXCEPTION_CAPTURED_ATTRIBUTE, Boolean.TRUE);
+        } catch (RuntimeException error) {
+            // Exception diagnostics must never change servlet request behavior.
+        }
+    }
+
     private Map<String, Object> requestMetadata(String routeSource) {
         Map<String, Object> values = new LinkedHashMap<>(baseMetadata);
         values.put("source", "jakarta-servlet");
@@ -135,15 +178,10 @@ public final class LogBrewServletFilter implements Filter {
         return values;
     }
 
-    private static String routeTemplate(HttpServletRequest request) {
-        Object explicitRoute = request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE);
-        if (isUsableRoute(explicitRoute)) {
-            return explicitRoute.toString();
-        }
-
-        Object springRoute = request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE);
-        if (isUsableRoute(springRoute)) {
-            return springRoute.toString();
+    static String routeTemplate(HttpServletRequest request) {
+        String resolvedRoute = resolvedRouteTemplate(request);
+        if (resolvedRoute != null) {
+            return resolvedRoute;
         }
 
         String servletPath = request.getServletPath();
@@ -159,7 +197,7 @@ public final class LogBrewServletFilter implements Filter {
         return "/";
     }
 
-    private static String routeSource(HttpServletRequest request) {
+    static String routeSource(HttpServletRequest request) {
         if (isUsableRoute(request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE))) {
             return "logbrew_attribute";
         }
@@ -170,6 +208,42 @@ public final class LogBrewServletFilter implements Filter {
             return "servlet_path";
         }
         return "request_uri";
+    }
+
+    static String exceptionRouteTemplate(HttpServletRequest request) {
+        String resolvedRoute = resolvedRouteTemplate(request);
+        return resolvedRoute == null ? "/" : resolvedRoute;
+    }
+
+    static String exceptionRouteSource(HttpServletRequest request) {
+        if (isUsableRoute(request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE))) {
+            return "logbrew_attribute";
+        }
+        if (isUsableRoute(request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE))) {
+            return "spring_best_matching_pattern";
+        }
+        return "unmatched";
+    }
+
+    static String requestMethod(HttpServletRequest request) {
+        String method = request.getMethod();
+        if (method == null || method.trim().isEmpty()) {
+            return "HTTP";
+        }
+        String normalized = method.trim().toUpperCase(java.util.Locale.ROOT);
+        return normalized.matches("[A-Z]+") ? normalized : "HTTP";
+    }
+
+    private static String resolvedRouteTemplate(HttpServletRequest request) {
+        Object explicitRoute = request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE);
+        if (isUsableRoute(explicitRoute)) {
+            return explicitRoute.toString().trim();
+        }
+        Object springRoute = request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if (isUsableRoute(springRoute)) {
+            return springRoute.toString().trim();
+        }
+        return null;
     }
 
     private static boolean isUsableRoute(Object value) {

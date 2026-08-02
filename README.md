@@ -11,7 +11,7 @@ This repository contains the public SDK packages, framework integrations, event 
 ## What You Can Capture
 
 - Releases and environments for deployment context.
-- Issues and handled errors without raw stack traces by default.
+- Issues and handled errors with typed exception, mechanism, handled-state, bounded frame, and breadcrumb fields without raw stack text by default.
 - Logs from direct calls or app-owned logger integrations.
 - Spans and W3C `traceparent` context for request tracing.
 - Actions for important user or system events.
@@ -71,7 +71,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Django | [`logbrew-django`](python/logbrew_django) | Request spans plus typed unhandled-exception diagnostics |
 | Go | [`github.com/LogBrewCo/sdk/go/logbrew`](go/logbrew) | Core client, delivery, tracing, and typed exception/stack/breadcrumb diagnostics |
 | Go / Gin | [`github.com/LogBrewCo/sdk/go/logbrew/gin`](go/logbrew/gin) | Gin request spans, typed panic diagnostics, and optional request metrics |
-| Java | [`co.logbrew:logbrew-sdk`](java/logbrew-java) | Core Java client, HTTP delivery, JUL and Logback support |
+| Java | [`co.logbrew:logbrew-sdk`](java/logbrew-java) | Core client, typed issue diagnostics, servlet/Spring exception capture, HTTP delivery, JUL, and Logback support |
 | .NET | [`LogBrew`](dotnet/logbrew-dotnet) | Core .NET client, HTTP delivery, `ILogger` provider |
 | ASP.NET Core | [`LogBrew.AspNetCore`](dotnet/logbrew-dotnet/src/LogBrew.AspNetCore) | Optional ASP.NET Core request telemetry middleware |
 | Entity Framework Core | [`LogBrew.EntityFrameworkCore`](dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore) | Optional EF Core command span interceptor |

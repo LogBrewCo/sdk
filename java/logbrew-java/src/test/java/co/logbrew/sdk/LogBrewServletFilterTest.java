@@ -31,7 +31,8 @@ public final class LogBrewServletFilterTest {
 
     private void run() throws Exception {
         testServletFilterCorrelatesLogsSpanAndMetric();
-        testServletFilterRethrowsAndRecordsServerError();
+        testServletFilterRethrowsAndRecordsUnhandledIssue();
+        testServletFilterDoesNotInventIssueForStatusOnlyServerError();
         System.out.println("java servlet filter tests ok (" + testsRun + " tests)");
     }
 
@@ -78,14 +79,22 @@ public final class LogBrewServletFilterTest {
         testsRun++;
     }
 
-    private void testServletFilterRethrowsAndRecordsServerError() throws Exception {
+    private void testServletFilterRethrowsAndRecordsUnhandledIssue() throws Exception {
         LogBrewClient client = sampleClient();
         LogBrewServletFilter filter = new LogBrewServletFilter(client);
         FakeHttpServletRequest request = new FakeHttpServletRequest("GET", "/orders/123")
             .queryString("debug=private")
-            .header("traceparent", "not-a-traceparent");
+            .header("traceparent", TRACEPARENT);
         FakeHttpServletResponse response = new FakeHttpServletResponse();
         IOException expected = new IOException("socket contains private host");
+        expected.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement(
+                "app.orders.OrderController",
+                "load",
+                "file:///opt/example/private/OrderController.java?debug=private",
+                73
+            )
+        });
 
         try {
             filter.doFilter(request.proxy(), response.proxy(), chain((servletRequest, servletResponse) -> {
@@ -104,13 +113,45 @@ public final class LogBrewServletFilterTest {
         String payload = client.previewJson();
         assertContains(payload, "\"type\": \"span\"");
         assertContains(payload, "\"type\": \"metric\"");
+        assertContains(payload, "\"type\": \"issue\"");
         assertContains(payload, "\"name\": \"GET /orders/{orderId}\"");
         assertContains(payload, "\"status\": \"error\"");
         assertContains(payload, "\"statusCode\": 500");
+        assertContains(payload, "\"title\": \"GET /orders/{orderId} failed\"");
+        assertContains(payload, "\"type\": \"IOException\"");
+        assertContains(payload, "\"type\": \"jakarta_servlet.filter\"");
+        assertContains(payload, "\"handled\": false");
+        assertContains(payload, "\"filename\": \"OrderController.java\"");
+        assertContains(payload, "\"function\": \"load\"");
+        assertContains(payload, "\"module\": \"app.orders.OrderController\"");
+        assertContains(payload, "\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"");
         assertNotContains(payload, "socket contains private host");
+        assertNotContains(payload, "/opt/example/private");
         assertNotContains(payload, "debug=private");
         assertNotContains(payload, "traceparent");
         assertTrue(LogBrewTrace.current().isEmpty(), "servlet filter closes trace after error");
+        testsRun++;
+    }
+
+    private void testServletFilterDoesNotInventIssueForStatusOnlyServerError() throws Exception {
+        LogBrewClient client = sampleClient();
+        LogBrewServletFilter filter = new LogBrewServletFilter(client);
+        FakeHttpServletRequest request = new FakeHttpServletRequest("GET", "/reports/private")
+            .attribute(LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE, "/reports/{reportId}");
+        FakeHttpServletResponse response = new FakeHttpServletResponse();
+
+        filter.doFilter(request.proxy(), response.proxy(), chain((servletRequest, servletResponse) ->
+            ((HttpServletResponse) servletResponse).setStatus(500)
+        ));
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"type\": \"span\"");
+        assertContains(payload, "\"type\": \"metric\"");
+        assertContains(payload, "\"statusCode\": 500");
+        assertNotContains(payload, "\"type\": \"issue\"");
+        assertNotContains(payload, "\"exception\"");
+        assertNotContains(payload, "\"stackFrames\"");
+        assertNotContains(payload, "reports/private");
         testsRun++;
     }
 
