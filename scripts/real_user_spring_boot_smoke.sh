@@ -131,6 +131,7 @@ package app;
 import ch.qos.logback.classic.LoggerContext;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewLogbackAppender;
+import co.logbrew.sdk.LogBrewSpringExceptionResolver;
 import co.logbrew.sdk.RecordingTransport;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -158,15 +159,19 @@ import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @SpringBootApplication
 public class Main implements CommandLineRunner {
     private static final String TRACEPARENT =
         "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+    private static final String FAILURE_TRACEPARENT =
+        "00-11111111111111111111111111111111-2222222222222222-01";
     private static final LogBrewClient CLIENT = LogBrewClient.create("LOGBREW_API_KEY", "spring-boot-smoke", "0.1.0");
     private static final RecordingTransport TRANSPORT = RecordingTransport.alwaysAccept();
 
@@ -190,6 +195,14 @@ public class Main implements CommandLineRunner {
             "Spring Boot cache auto-configuration registers CacheManager post-processor"
         );
         require(
+            context.containsBean("logBrewSpringExceptionResolver"),
+            "Spring Boot exception auto-configuration registers resolver"
+        );
+        require(
+            context.getBean(LogBrewSpringExceptionResolver.class) != null,
+            "Spring Boot exception resolver bean has public integration type"
+        );
+        require(
             context.getBean(DataSource.class).toString().contains("LogBrewJdbcTracing"),
             "Spring Boot JDBC auto-configuration wraps the DataSource bean"
         );
@@ -204,8 +217,9 @@ public class Main implements CommandLineRunner {
         require(CLIENT.pendingEvents() == 0, "Spring Boot appender stop flush clears queue");
         require(TRANSPORT.sentBodies().size() == 1, "Spring Boot appender sends one batch");
         require(occurrences(body, "\"type\": \"log\"") == 3, "Spring Boot appender captures three logs");
-        require(occurrences(body, "\"type\": \"span\"") == 7, "Spring Boot captures request, JDBC, and cache spans");
-        require(occurrences(body, "\"type\": \"metric\"") == 1, "Spring Boot servlet filter captures one metric");
+        require(occurrences(body, "\"type\": \"span\"") == 8, "Spring Boot captures two requests, JDBC, and cache spans");
+        require(occurrences(body, "\"type\": \"metric\"") == 2, "Spring Boot servlet filter captures two metrics");
+        require(occurrences(body, "\"type\": \"issue\"") == 1, "Spring Boot captures one controller issue");
         require(body.contains("\"logger\": \"app.checkout\""), "captures app logger");
         require(body.contains("\"source\": \"logback\""), "records Logback source");
         require(body.contains("\"source\": \"jakarta-servlet\""), "records servlet source");
@@ -237,10 +251,21 @@ public class Main implements CommandLineRunner {
         require(body.contains("\"routeTemplate\": \"/checkout/{cartId}\""), "records route template metadata");
         require(body.contains("\"routeSource\": \"spring_best_matching_pattern\""), "records Spring route source");
         require(body.contains("\"statusCode\": 202"), "captures HTTP status");
+        require(body.contains("\"title\": \"POST /checkout/{cartId}/fail failed\""), "records safe controller issue title");
+        require(body.contains("\"type\": \"CheckoutFailure\""), "records typed controller exception");
+        require(body.contains("\"type\": \"spring.mvc.exception_resolver\""), "records Spring exception mechanism");
+        require(body.contains("\"handled\": false"), "records escaped controller state");
+        require(body.contains("\"filename\": \"Main.java\""), "records basename-only controller frame");
+        require(body.contains("\"function\": \"failCheckout\""), "records controller frame function");
+        require(body.contains("\"module\": \"app.Main$CheckoutController\""), "records controller frame module");
+        require(body.contains("\"source\": \"spring-mvc\""), "records Spring MVC issue source");
         require(body.contains("\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\""), "continues incoming trace id");
         require(body.contains("\"parentSpanId\": \"00f067aa0ba902b7\""), "links incoming parent span");
+        require(body.contains("\"traceId\": \"11111111111111111111111111111111\""), "continues failure trace id");
+        require(body.contains("\"parentSpanId\": \"2222222222222222\""), "links failure parent span");
         require(!body.contains("checkout/42"), "omits raw high-cardinality request path");
         require(!body.contains("debug=hidden"), "omits query string");
+        require(!body.contains("user-entered checkout value"), "omits controller exception message");
         require(!body.contains("traceparent"), "omits raw propagation header");
         require(!body.contains("synthetic_column"), "omits raw JDBC query column");
         require(!body.contains("synthetic_value"), "omits raw JDBC query literal");
@@ -251,7 +276,7 @@ public class Main implements CommandLineRunner {
         require(!body.contains("cart:private-cache-key"), "omits raw cache key");
         require(!body.contains("cache-fixture-value"), "omits raw cache value");
         require(!body.contains("logbackStackTrace"), "omits stack text by default");
-        System.err.println("{\"ok\":true,\"springBootVersion\":\"" + SpringBootVersion.getVersion() + "\",\"events\":11}");
+        System.err.println("{\"ok\":true,\"springBootVersion\":\"" + SpringBootVersion.getVersion() + "\",\"events\":14}");
     }
 
     @Override
@@ -271,7 +296,7 @@ public class Main implements CommandLineRunner {
             MDC.put("traceId", "trace_123");
             logger.atWarn().addKeyValue("cartId", Integer.valueOf(42)).log("spring boot checkout");
             logger.error("spring boot checkout failed", new IllegalStateException("database unavailable"));
-            exerciseRequest();
+            exerciseRequests();
         } finally {
             MDC.remove("traceId");
             logger.detachAppender(appender);
@@ -313,7 +338,7 @@ public class Main implements CommandLineRunner {
         return values;
     }
 
-    private void exerciseRequest() throws Exception {
+    private void exerciseRequests() throws Exception {
         int port = Integer.parseInt(environment.getRequiredProperty("local.server.port"));
         HttpRequest request = HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + port + "/checkout/42?debug=hidden"))
@@ -325,6 +350,18 @@ public class Main implements CommandLineRunner {
         require(
             response.statusCode() == 202,
             "Spring Boot request returns 202, got " + response.statusCode() + " body=" + response.body()
+        );
+
+        HttpRequest failureRequest = HttpRequest.newBuilder(
+                URI.create("http://127.0.0.1:" + port + "/checkout/42/fail?debug=hidden_failure"))
+            .header("traceparent", FAILURE_TRACEPARENT)
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build();
+        HttpResponse<String> failureResponse =
+            HttpClient.newHttpClient().send(failureRequest, HttpResponse.BodyHandlers.ofString());
+        require(
+            failureResponse.statusCode() == 500,
+            "Spring Boot controller failure returns 500, got " + failureResponse.statusCode()
         );
     }
 
@@ -402,6 +439,21 @@ public class Main implements CommandLineRunner {
                 .addKeyValue("routeVerified", Boolean.TRUE)
                 .log("spring boot checkout request");
             return ResponseEntity.accepted().body("accepted");
+        }
+
+        @PostMapping("/checkout/{cartId}/fail")
+        ResponseEntity<String> failCheckout(@PathVariable("cartId") String cartId) {
+            require(!cartId.isEmpty(), "Spring failure path variable is available to app code");
+            throw new CheckoutFailure("user-entered checkout value checkout/42");
+        }
+    }
+
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    static final class CheckoutFailure extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        CheckoutFailure(String message) {
+            super(message);
         }
     }
 
@@ -523,7 +575,9 @@ grep -q '"source": "jdbc.statement"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"name": "jdbc:SELECT"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"source": "cache.operation"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"name": "cache:get"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"type": "spring.mvc.exception_resolver"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"function": "failCheckout"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"ok":true' "$tmp_dir/spring-boot.stderr.json"
-grep -q '"events":11' "$tmp_dir/spring-boot.stderr.json"
+grep -q '"events":14' "$tmp_dir/spring-boot.stderr.json"
 
 echo "spring boot real-user smoke passed with spring-boot@$spring_boot_version"

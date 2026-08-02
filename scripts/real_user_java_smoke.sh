@@ -62,6 +62,11 @@ grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/binary-jar-c
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDroppedHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport\$Builder.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueAttributes.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueBreadcrumb.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueException.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueExceptionMechanism.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueStackFrame.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline\$ProductAction.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -82,6 +87,8 @@ while IFS= read -r expected; do
   grep -Fxq "$expected" "$tmp_dir/binary-jar-contents.txt"
 done < <(printf '%s\n' \
   'co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class' \
+  'co/logbrew/sdk/LogBrewSpringBootExceptionAutoConfiguration.class' \
+  'co/logbrew/sdk/LogBrewSpringExceptionResolver.class' \
   'co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.class' \
   'co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.class' \
   'co/logbrew/sdk/LogBrewSpringCacheTracing.class' \
@@ -117,6 +124,11 @@ grep -q '^pom.xml$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/IssueAttributes.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/IssueBreadcrumb.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/IssueException.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/IssueExceptionMechanism.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/IssueStackFrame.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/Traceparent.java$' "$tmp_dir/source-jar-contents.txt"
@@ -131,6 +143,8 @@ while IFS= read -r expected; do
   grep -Fxq "$expected" "$tmp_dir/source-jar-contents.txt"
 done < <(printf '%s\n' \
   'src/main/java/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootExceptionAutoConfiguration.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringExceptionResolver.java' \
   'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.java' \
   'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.java' \
   'src/main/java/co/logbrew/sdk/LogBrewSpringCacheTracing.java' \
@@ -271,6 +285,10 @@ import co.logbrew.sdk.ActionAttributes;
 import co.logbrew.sdk.EnvironmentAttributes;
 import co.logbrew.sdk.HttpTransport;
 import co.logbrew.sdk.IssueAttributes;
+import co.logbrew.sdk.IssueBreadcrumb;
+import co.logbrew.sdk.IssueException;
+import co.logbrew.sdk.IssueExceptionMechanism;
+import co.logbrew.sdk.IssueStackFrame;
 import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewHttpClientTracing;
@@ -352,6 +370,57 @@ public final class Main {
 
         TransportResponse empty = client.flush(RecordingTransport.alwaysAccept());
         require(empty.statusCode() == 204 && empty.attempts() == 0, "empty flush");
+
+        LogBrewClient diagnostics = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        IllegalStateException diagnosticFailure = new IllegalStateException("private checkout value");
+        diagnosticFailure.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement(
+                "app.checkout.CheckoutHandler",
+                "submit",
+                "file:///opt/example/private/CheckoutHandler.java?debug=hidden",
+                42
+            )
+        });
+        diagnostics.issue(
+            "evt_issue_diagnostic_exception",
+            "2026-06-02T10:00:02Z",
+            IssueAttributes.fromThrowable(diagnosticFailure)
+        );
+        diagnostics.issue(
+            "evt_issue_diagnostic_manual",
+            "2026-06-02T10:00:03Z",
+            IssueAttributes.create("Checkout retry exhausted", "error")
+                .exception(
+                    IssueException.create("CheckoutFailure")
+                        .mechanism(IssueExceptionMechanism.create("application.capture", true))
+                )
+                .stackFrame(
+                    IssueStackFrame.create("Checkout.java", 21, 3)
+                        .function("retry")
+                        .module("app.checkout.Checkout")
+                        .inApp(true)
+                )
+                .breadcrumb(
+                    IssueBreadcrumb.create("2026-06-02T10:00:01Z", "checkout.retry")
+                        .type("state")
+                        .level("warn")
+                        .message("Retry budget reached")
+                        .data(Map.of("attempt", Integer.valueOf(2)))
+                )
+        );
+        String diagnosticPayload = diagnostics.previewJson();
+        require(diagnostics.pendingEvents() == 2, "typed diagnostics queue two issues");
+        require(diagnosticPayload.contains("\"type\": \"IllegalStateException\""), "typed exception identity");
+        require(diagnosticPayload.contains("\"type\": \"java.exception\""), "typed exception mechanism");
+        require(diagnosticPayload.contains("\"filename\": \"CheckoutHandler.java\""), "basename frame");
+        require(diagnosticPayload.contains("\"function\": \"submit\""), "frame function");
+        require(diagnosticPayload.contains("\"category\": \"checkout.retry\""), "typed breadcrumb");
+        require(diagnosticPayload.contains("\"level\": \"warning\""), "breadcrumb severity normalization");
+        require(!diagnosticPayload.contains("private checkout value"), "exception message omitted");
+        require(!diagnosticPayload.contains("/opt/example/private"), "absolute frame path omitted");
+        require(!diagnosticPayload.contains("debug=hidden"), "frame query omitted");
+        TransportResponse diagnosticResponse = diagnostics.flush(RecordingTransport.alwaysAccept());
+        require(diagnosticResponse.acceptedEvents() == 2, "typed diagnostics deliver from packaged jar");
 
         SupportTicketDraft supportDraft = SupportTicketDraft.create(SupportTicketDraft.Input
             .create("sdk", "ingest_failure", "Telemetry flush failed", "Flush returned usage_limit_exceeded")
@@ -884,7 +953,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"httpClientEvents\":2,\"jdbcEvents\":6,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"issueDiagnosticEvents\":2,\"metricEvents\":1,\"timelineEvents\":2,\"httpClientEvents\":2,\"jdbcEvents\":6,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -1285,6 +1354,7 @@ java -cp "$smoke_app/lib/logbrew-sdk-$java_version.jar:$smoke_app/classes:$java_
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"issueDiagnosticEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"

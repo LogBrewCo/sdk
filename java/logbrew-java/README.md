@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style message helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring HTTP clients, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
+The core client, typed issue diagnostics, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style message helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot/MVC, Spring HTTP clients, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -60,7 +60,7 @@ If you also register the optional LogBrew OpenTelemetry span exporter or process
 </dependency>
 ```
 
-If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` by exposing an app-owned `LogBrewClient` bean. Spring Boot apps with a `CacheManager` or `DataSource` bean can also use `LogBrewSpringBootCacheAutoConfiguration` and `LogBrewSpringBootJdbcAutoConfiguration` from the same package path; no extra starter or ingest-property client setup is required.
+If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this and Spring MVC from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` and `LogBrewSpringBootExceptionAutoConfiguration` by exposing an app-owned `LogBrewClient` bean. Spring Boot apps with a `CacheManager` or `DataSource` bean can also use `LogBrewSpringBootCacheAutoConfiguration` and `LogBrewSpringBootJdbcAutoConfiguration` from the same package path; no extra starter or ingest-property client setup is required.
 
 ```xml
 <dependency>
@@ -141,6 +141,28 @@ client.metric(
 ```
 
 Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect JVM, runtime, or framework metrics yet.
+
+## Typed Issue Diagnostics
+
+Use `IssueAttributes.fromThrowable(...)` for a privacy-bounded Java exception snapshot. The default mechanism is `java.exception` with `handled=true`; framework integrations supply their own mechanism and escape state.
+
+```java
+import co.logbrew.sdk.IssueAttributes;
+
+try {
+    checkoutService.submit();
+} catch (IllegalStateException error) {
+    client.issue(
+        "evt_issue_checkout",
+        "2026-06-02T10:00:03Z",
+        IssueAttributes.fromThrowable(error)
+    );
+}
+```
+
+The automatic projection records the exception type plus at most 32 newest-first frames with basename, line, column, function, and module identity. It never records the exception message, raw stack text, source lines, local variables, or absolute paths. Add a display-safe issue message explicitly only when your application has approved it.
+
+For app-owned diagnostics, `IssueException`, `IssueExceptionMechanism`, `IssueStackFrame`, and `IssueBreadcrumb` expose the same validated event contract. Frame lists are capped at 32. Breadcrumb lists are capped at 64 and stay caller-supplied rather than process-global; each breadcrumb accepts an RFC 3339 timestamp, stable category/type, normalized level, bounded message, and at most eight flat finite primitive data fields. Use `breadcrumbsTruncated(true)` when older entries were evicted before the snapshot.
 
 ## Product and Network Timelines
 
@@ -370,7 +392,7 @@ and `RestTemplate` beans, and `LogBrewSpringBootWebClientAutoConfiguration` inst
 
 ## Jakarta Servlet and Spring Requests
 
-Spring Boot 3+/4+ apps only need to expose the `LogBrewClient` they already own. When Spring Boot, Jakarta Servlet, and that client bean are present, `LogBrewSpringBootAutoConfiguration` registers the servlet filter automatically:
+Spring Boot 3+/4+ apps only need to expose the `LogBrewClient` they already own. When Spring Boot, Jakarta Servlet, and that client bean are present, `LogBrewSpringBootAutoConfiguration` registers the servlet filter automatically. When Spring MVC is also present, `LogBrewSpringBootExceptionAutoConfiguration` registers a non-resolving controller exception observer:
 
 ```java
 import co.logbrew.sdk.LogBrewClient;
@@ -382,7 +404,7 @@ LogBrewClient logBrewClient() {
 }
 ```
 
-The auto-configuration does not create clients from properties, load ingest config, patch servlet containers, or capture request bodies, arbitrary headers, cookies, query strings, full URLs, baggage, or tracestate. Set `logbrew.servlet.enabled=false` to disable registration, `logbrew.servlet.event-id-prefix` to change event IDs, and `logbrew.servlet.order` to tune filter order.
+The auto-configuration does not create clients from properties, load ingest config, patch servlet containers, or capture request bodies, arbitrary headers, cookies, query strings, full URLs, baggage, or tracestate. Set `logbrew.servlet.enabled=false` to disable both request integrations, `logbrew.servlet.capture-exceptions=false` to keep request spans/metrics but disable controller exception issues, `logbrew.servlet.event-id-prefix` to change event IDs, and `logbrew.servlet.order` to tune filter order.
 
 For non-Boot Jakarta Servlet apps, register `LogBrewServletFilter` yourself. For Boot apps that want a fully custom registration, set `logbrew.servlet.enabled=false` before registering your own filter:
 
@@ -406,7 +428,9 @@ FilterRegistrationBean<LogBrewServletFilter> logbrewServletFilter(LogBrewClient 
 }
 ```
 
-The filter reads only the incoming `traceparent` header, makes the request trace active while your handler/logger code runs, and emits one span plus one `http.server.duration` metric after the chain completes. Route naming prefers `LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE`, then Spring's best-matching route attribute, then servlet path/request URI fallback. It rethrows the original handler error, records a 500 status for unhandled failures when possible, strips query strings through the request helper, and never captures bodies, arbitrary headers, cookies, full URLs, baggage, tracestate, exception messages, or stack traces.
+The filter reads only the incoming `traceparent` header, makes the request trace active while your handler/logger code runs, and emits one span plus one `http.server.duration` metric after the chain completes. Route naming prefers `LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE`, then Spring's best-matching route attribute, then servlet path/request URI fallback for the legacy request span. An exception that escapes the filter also emits one correlated type-only issue with `jakarta_servlet.filter`, `handled=false`, and bounded basename-only frames before the original error is rethrown. When no low-cardinality route template is available, that issue uses `/` rather than the raw request path. A plain 500 response does not invent exception diagnostics.
+
+Spring can resolve controller exceptions before they escape a servlet filter. `LogBrewSpringExceptionResolver` observes that earlier MVC boundary, records the same correlated typed issue with `spring.mvc.exception_resolver`, and returns `null` so the application's remaining resolvers keep normal control. The request marker shared with the filter prevents duplicate issues if an exception later escapes. Both paths omit exception messages, raw stack text, source code, local variables, bodies, arbitrary headers, cookies, full URLs, baggage, and tracestate.
 
 ## Dependency Spans
 
@@ -1003,9 +1027,11 @@ The `examples` directory contains copyable snippets for creating a client, confi
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.
 - `LogBrewHttpClientTracing` wraps app-owned Java 11 `HttpClient.send(...)` and `sendAsync(...)` calls with one W3C `traceparent` and one privacy-bounded `http.client` span.
+- `IssueAttributes.fromThrowable(...)` and the typed issue builders produce bounded exception identity, mechanism/handled state, structured frames, and caller-owned breadcrumbs without automatic exception messages or raw stacks.
 - `LogBrewSpringHttpTracing` and `LogBrewSpringWebClientTracing` add privacy-bounded outbound spans to app-owned Spring HTTP clients without global hooks; Boot auto-configuration instruments matching builder/template beans once and honors `logbrew.http-client.enabled=false`.
-- `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
+- `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers, emits one request span plus one duration metric, and records typed diagnostics only when an exception escapes.
 - `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
+- `LogBrewSpringExceptionResolver` observes controller exceptions without resolving them; `LogBrewSpringBootExceptionAutoConfiguration` registers it only when Spring MVC and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringCacheTracing` wraps app-owned Spring `CacheManager` or `Cache` objects with privacy-bounded cache hit/write spans under an active trace by default.
 - `LogBrewSpringBootCacheAutoConfiguration` wraps app-owned Spring `CacheManager` beans when Spring Boot, Spring Cache, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringBootJdbcAutoConfiguration` wraps app-owned Spring `DataSource` beans with privacy-bounded JDBC statement spans when Spring Boot, `DataSource`, and an app-owned `LogBrewClient` bean are present.
