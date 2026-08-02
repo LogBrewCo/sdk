@@ -12,6 +12,16 @@ import type {
 
 export type CreateLogBrewBrowserClientConfig = {
   apiKey?: string;
+  /** Low-entropy browser context source. Defaults to the active browser navigator. */
+  browserNavigator?: {
+    readonly userAgentData?: {
+      readonly brands?: ReadonlyArray<{ readonly brand?: string; readonly version?: string }>;
+      readonly mobile?: boolean;
+      readonly platform?: string;
+    };
+  };
+  /** Add low-entropy browser brand/version, platform, and device-family context. Defaults to true. */
+  captureRuntimeContext?: boolean;
   clientKey?: string;
   context?: TelemetryContext;
   sdkName?: string;
