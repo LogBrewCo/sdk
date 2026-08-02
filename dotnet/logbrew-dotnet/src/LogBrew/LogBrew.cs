@@ -511,50 +511,6 @@ namespace LogBrew
         }
     }
 
-    public sealed class IssueAttributes
-    {
-        private IssueAttributes(string title, string level)
-        {
-            Title = title;
-            Level = level;
-        }
-
-        public string Title { get; }
-
-        public string Level { get; }
-
-        public string? Message { get; private set; }
-
-        public IDictionary<string, object?>? Metadata { get; private set; }
-
-        public static IssueAttributes Create(string title, string level)
-        {
-            return new IssueAttributes(title, level);
-        }
-
-        public IssueAttributes WithMessage(string message)
-        {
-            Message = message;
-            return this;
-        }
-
-        public IssueAttributes WithMetadata(IDictionary<string, object?> metadata)
-        {
-            Metadata = metadata;
-            return this;
-        }
-
-        internal OrderedJsonObject ToJsonObject()
-        {
-            Validation.RequireNonEmpty("issue title", Title);
-            var level = Validation.NormalizeSeverity("issue level", Level);
-            var payload = new OrderedJsonObject().Add("title", Title).Add("level", level);
-            payload.AddIfNotNull("message", Message);
-            payload.AddMetadata(Metadata);
-            return payload;
-        }
-    }
-
     public sealed class LogAttributes
     {
         private LogAttributes(string message, string level)

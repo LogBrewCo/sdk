@@ -756,6 +756,7 @@ tests += ServerRequestTelemetryTests.Run();
 tests += HttpClientTelemetryTests.Run();
 tests += ActivitySpanTelemetryTests.Run();
 tests += ActivitySourceListenerTests.Run();
+tests += IssueDiagnosticsTests.Run();
 tests += AutomaticDeliveryTests.Run();
 tests += DurableDeliveryContractTests.Run();
 

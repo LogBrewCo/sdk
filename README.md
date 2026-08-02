@@ -72,8 +72,8 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Go | [`github.com/LogBrewCo/sdk/go/logbrew`](go/logbrew) | Core client, delivery, tracing, and typed exception/stack/breadcrumb diagnostics |
 | Go / Gin | [`github.com/LogBrewCo/sdk/go/logbrew/gin`](go/logbrew/gin) | Gin request spans, typed panic diagnostics, and optional request metrics |
 | Java | [`co.logbrew:logbrew-sdk`](java/logbrew-java) | Core client, typed issue diagnostics, servlet/Spring exception capture, HTTP delivery, JUL, and Logback support |
-| .NET | [`LogBrew`](dotnet/logbrew-dotnet) | Core .NET client, HTTP delivery, `ILogger` provider |
-| ASP.NET Core | [`LogBrew.AspNetCore`](dotnet/logbrew-dotnet/src/LogBrew.AspNetCore) | Optional ASP.NET Core request telemetry middleware |
+| .NET | [`LogBrew`](dotnet/logbrew-dotnet) | Core .NET client, typed exception/stack/breadcrumb diagnostics, HTTP delivery, and `ILogger` provider |
+| ASP.NET Core | [`LogBrew.AspNetCore`](dotnet/logbrew-dotnet/src/LogBrew.AspNetCore) | Optional request telemetry and typed unhandled-exception capture middleware |
 | Entity Framework Core | [`LogBrew.EntityFrameworkCore`](dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore) | Optional EF Core command span interceptor |
 | StackExchange.Redis | [`LogBrew.StackExchangeRedis`](dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis) | Optional Redis command spans without key/value capture |
 | PHP | [`logbrew/sdk`](php/logbrew-php) | Core PHP client, HTTP delivery, PSR-3/Monolog, native Symfony request/error capture, and a config-cache-safe Laravel channel |

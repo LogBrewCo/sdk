@@ -94,11 +94,16 @@ internal static class ServerRequestTelemetryTests
         Require(preview.Contains("\"id\": \"dotnet_server_error_issue_", StringComparison.Ordinal), "expected exception issue");
         Require(preview.Contains("\"id\": \"dotnet_server_error_span_", StringComparison.Ordinal), "expected failed request span");
         Require(preview.Contains("\"title\": \"ASP.NET Core request failed\"", StringComparison.Ordinal), "expected issue title");
-        Require(preview.Contains("\"message\": \"payment provider failed\"", StringComparison.Ordinal), "expected exception message");
         Require(preview.Contains("\"exceptionType\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected exception type");
+        Require(preview.Contains("\"exception\"", StringComparison.Ordinal), "expected typed exception diagnostics");
+        Require(preview.Contains("\"type\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected typed exception identity");
+        Require(preview.Contains("\"type\": \"aspnetcore.middleware\"", StringComparison.Ordinal), "expected ASP.NET Core mechanism");
+        Require(preview.Contains("\"handled\": false", StringComparison.Ordinal), "expected escaped exception handled state");
+        Require(preview.Contains("\"stackFrames\"", StringComparison.Ordinal), "expected bounded structured frames");
         Require(preview.Contains("\"statusCode\": 500", StringComparison.Ordinal), "expected error status metadata");
         Require(preview.Contains("\"status\": \"error\"", StringComparison.Ordinal), "expected error span status");
         Require(!preview.Contains("exceptionStackTrace", StringComparison.Ordinal), "stack trace should stay opt-in");
+        Require(!preview.Contains("payment provider failed", StringComparison.Ordinal), "automatic issue capture must omit exception messages");
     }
 
     private static void CaptureFailuresDoNotBreakSuccessfulRequest()

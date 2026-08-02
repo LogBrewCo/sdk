@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using LogBrew;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -70,6 +71,7 @@ app.MapGet("/checkout/{cartId}", (ILogger<Program> logger, string cartId) =>
     logger.LogWarning("checkout route accepted");
     return Results.Ok(new { ok = true, cartId });
 });
+app.MapGet("/checkout/failure", ThrowCheckoutFailure);
 
 var runtime = app.Services.GetRequiredService<LogBrewAspNetCoreRuntime>();
 app.MapGet(
@@ -83,4 +85,10 @@ static bool IsLocalVerificationRoute(HttpContext context)
     var path = context.Request.Path.Value ?? string.Empty;
     return string.Equals(path, "/ready", StringComparison.Ordinal)
         || string.Equals(path, "/logbrew-preview", StringComparison.Ordinal);
+}
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+static IResult ThrowCheckoutFailure()
+{
+    throw new InvalidOperationException("private runtime detail");
 }

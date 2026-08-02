@@ -48,6 +48,56 @@ TransportResponse response = client.Shutdown(RecordingTransport.AlwaysAccept());
 Console.Error.WriteLine(response.StatusCode);
 ```
 
+## Typed Issue Diagnostics
+
+Use `IssueAttributes.FromException(...)` for privacy-bounded exception identity,
+capture mechanism and handled state, and up to 32 newest-first structured
+frames. Automatic projection keeps basename-only source identity plus bounded
+function and module names. It deliberately omits the exception message, raw
+stack text, source snippets, locals, and absolute paths; add an approved issue
+message explicitly only when your application has a suitable data policy.
+
+```csharp
+using System;
+using System.Collections.Generic;
+using LogBrew;
+
+try
+{
+    SubmitCheckout();
+}
+catch (InvalidOperationException error)
+{
+    client.Issue(
+        "evt_issue_checkout",
+        "2026-08-02T08:15:31Z",
+        IssueAttributes.FromException(
+                error,
+                "Checkout failed",
+                "dotnet.exception_handler",
+                true)
+            .WithBreadcrumb(
+                IssueBreadcrumb.Create("2026-08-02T08:15:30Z", "checkout.retry")
+                    .WithType("http")
+                    .WithLevel("warning")
+                    .WithData(new Dictionary<string, object?>
+                    {
+                        ["attempt"] = 2,
+                        ["retryable"] = true
+                    })));
+}
+```
+
+For app-owned payloads, use `IssueExceptionInfo`,
+`IssueExceptionMechanism`, `IssueStackFrame`, and `IssueBreadcrumb` directly.
+Frames are capped at 32; breadcrumbs are capped at 64 and stay
+oldest-to-newest. Breadcrumb data accepts at most eight flat finite primitive
+fields. `WithBreadcrumbsTruncated(true)` records that older entries were
+evicted. Filenames, coordinates, exception/mechanism names, timestamps,
+breadcrumb fields, Debug IDs, and severity aliases are validated against the
+shared event contract. The packaged `examples/IssueDiagnostics.cs` file proves
+the same API from an installed package.
+
 ## Automatic Delivery
 
 `LogBrewClient.Create(...)` remains manual and starts no worker. Use `CreateAutomatic(...)` only when this client should own delivery scheduling through one transport:
@@ -120,6 +170,7 @@ Storage failures pause automatic delivery with `DeliveryPauseReason.Storage`. Af
 Use `MetricAttributes` when your application already knows the measurement it wants to report:
 
 ```csharp
+using System;
 using System.Collections.Generic;
 using LogBrew;
 
@@ -242,6 +293,7 @@ var outgoingHeaders = Traceparent.CreateHeaders(context.TraceId, childSpanId, co
 Use `LogBrewHttpRequestTelemetry` when your service owns request handling and wants one W3C request span to connect request logs, handler errors, metrics, and outgoing propagation. The helper keeps capture explicit: it does not patch global HTTP clients, read payloads, or collect request headers.
 
 ```csharp
+using System;
 using System.Collections.Generic;
 using LogBrew;
 using Microsoft.Extensions.Logging;
@@ -265,17 +317,25 @@ using (request.Activate())
     ILogger logger = factory.CreateLogger("CheckoutTrace");
     logger.LogWarning("checkout slow for {CartId}", "cart_123");
 
-    client.Issue(
-        "evt_issue_checkout_trace",
-        "2026-06-02T10:00:04Z",
-        IssueAttributes.Create("Checkout handler failed", "error")
-            .WithMessage("payment provider failed")
-            .WithMetadata(LogBrewTrace.MetadataWithCurrentTrace(new Dictionary<string, object?>
-            {
-                ["routeTemplate"] = request.RouteTemplate,
-                ["exceptionType"] = "System.InvalidOperationException",
-                ["exceptionMessage"] = "payment provider failed"
-            })));
+    try
+    {
+        SubmitCheckout();
+    }
+    catch (InvalidOperationException error)
+    {
+        client.Issue(
+            "evt_issue_checkout_trace",
+            "2026-06-02T10:00:04Z",
+            IssueAttributes.FromException(
+                    error,
+                    "Checkout handler failed",
+                    "dotnet.request_handler",
+                    true)
+                .WithMetadata(LogBrewTrace.MetadataWithCurrentTrace(new Dictionary<string, object?>
+                {
+                    ["routeTemplate"] = request.RouteTemplate
+                })));
+    }
 }
 
 request.FinishSpanAndMetric(
@@ -287,7 +347,7 @@ request.FinishSpanAndMetric(
 IReadOnlyDictionary<string, string> outgoingHeaders = request.OutgoingHeaders;
 ```
 
-`LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` uses .NET `AsyncLocal` so standard async work keeps the active trace context. The `ILogger` provider automatically adds `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a trace is active. `MetadataWithCurrentTrace()` is useful for app-owned errors or product events that should join the same request. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
+`LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` uses .NET `AsyncLocal` so standard async work keeps the active trace context. The `ILogger` provider automatically adds `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a trace is active. `MetadataWithCurrentTrace()` is useful for app-owned errors or product events that should join the same request. `FromException(...)` adds typed diagnostics without copying the raw exception message or stack text. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
 
 If your service already creates `System.Diagnostics.Activity` spans through OpenTelemetry or framework instrumentation, create a LogBrew child context from the current Activity instead of reparsing headers:
 
@@ -506,7 +566,7 @@ app.UseRouting();
 app.UseLogBrew();
 ```
 
-`builder.AddLogBrew()` creates one automatic-delivery client, adds privacy-bounded application logging, and registers one start/stop lifecycle. `app.UseLogBrew()` captures route-template request spans, duration metrics, and unhandled request issues. Missing `LOGBREW_SERVER_API_KEY` disables the integration safely; `LOGBREW_ENABLED=false` is the explicit override. Host shutdown drains and closes delivery, while `LogBrewAspNetCoreRuntime.Health()` reports privacy-safe state without keys, endpoints, event contents, or exception messages. The package README includes CLI-first project creation, owner-only key handling, hosted `doctor`/`traces` readback, and project archival without requiring a dashboard.
+`builder.AddLogBrew()` creates one automatic-delivery client, adds privacy-bounded application logging, and registers one start/stop lifecycle. `app.UseLogBrew()` captures route-template request spans, duration metrics, and unhandled request issues with mechanism `aspnetcore.middleware`, handled `false`, and bounded structured frames. It rethrows the original exception and omits its raw message, raw stack text, locals, source snippets, and absolute paths. Missing `LOGBREW_SERVER_API_KEY` disables the integration safely; `LOGBREW_ENABLED=false` is the explicit override. Host shutdown drains and closes delivery, while `LogBrewAspNetCoreRuntime.Health()` reports privacy-safe state without keys, endpoints, event contents, or exception messages. The package README includes CLI-first project creation, owner-only key handling, hosted `doctor`/`traces` readback, and project archival without requiring a dashboard.
 
 Existing app-owned client integrations remain compatible. `LogBrew.AspNetCore` still provides `app.UseLogBrewRequestTelemetry(client, options => ...)`, uses the same privacy-bounded request span/metric/issue path as the explicit helper, keeps `LogBrewTrace.Current` active for downstream `ILogger` calls, and avoids body/header/query/raw propagation capture. It also provides `builder.Services.AddLogBrewDependencyActivitySourceTelemetry(client, options => ...)`, which registers a host-lifetime-managed `LogBrewActivitySourceListener` for common dependency `ActivitySource` names such as `System.Net.Http`, Entity Framework Core, SqlClient, and StackExchange.Redis. The app-builder fallback `app.UseLogBrewDependencyActivitySourceTelemetry(client, options => ...)` is available when service registration is not convenient. These dependency bridges are off until called, dispose when the ASP.NET Core host stops, and do not add OpenTelemetry exporters/processors, subscribe to arbitrary `DiagnosticSource` events, or patch HTTP/database clients. The packaged `examples/AspNetCoreMiddlewareTelemetry.cs` file in that integration package shows automatic lifecycle, request/log correlation, local preview, and dependency ActivitySource telemetry.
 
@@ -803,6 +863,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 ## Behavior
 
 - `PreviewJson()` returns the queued batch as pretty JSON.
+- `IssueAttributes.FromException(...)` creates typed mechanism/handled state and bounded basename-only frames without automatically copying exception messages or raw stack text.
 - The in-memory queue is capped at 1,000 events by default; tune it with `maxQueueSize`, observe local `queue_overflow` loss with `DroppedEvents()` or `onEventDropped`, and keep usage/quota/history backend-owned.
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.

@@ -39,7 +39,7 @@ internal static class SupportTicketDraftTests
                     ["retryable"] = false,
                     ["apiKey"] = string.Concat("lbw", "_ingest_", "hidden"),
                     ["endpoint"] = "https://api.example/ingest?debug=true#frag",
-                    ["localPath"] = "/Users/example/app/.env",
+                    ["localPath"] = "/home/example/app/.env",
                     ["error"] = new InvalidOperationException("contains hidden message"),
                     ["headers"] = new Dictionary<string, object?>
                     {
@@ -84,7 +84,7 @@ internal static class SupportTicketDraftTests
         Require(!diagnostics.ContainsKey("callback"), "expected unsupported callback omission");
 
         var json = draft.ToJson();
-        foreach (var blocked in new[] { "hidden", "api.example", "/Users/example", "traceparent", "contains hidden message" })
+        foreach (var blocked in new[] { "hidden", "api.example", "/home/example", "traceparent", "contains hidden message" })
         {
             Require(!json.Contains(blocked, StringComparison.Ordinal), "expected JSON to omit " + blocked);
         }
