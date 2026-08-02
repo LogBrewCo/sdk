@@ -17,6 +17,8 @@ import type {
 export type CreateLogBrewNodeClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
+  /** Add bounded Node version, OS type/release, and architecture context. Defaults to true. */
+  captureRuntimeContext?: boolean;
   context?: TelemetryContext;
   /** Owned transport used for automatic delivery. Defaults to the Node fetch transport. */
   transport?: Transport;

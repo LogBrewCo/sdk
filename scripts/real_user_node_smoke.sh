@@ -45,6 +45,7 @@ grep -q '^package/pg.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/pg.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/redis.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/redis.cjs$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/runtime-context.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/mongo.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/mongo.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/undici.js$' "$tmp_dir/node-tarball.txt"
@@ -76,6 +77,29 @@ grep -q 'withLogBrewHttpHandler' "$tmp_dir/node-readme.md"
 grep -q 'node:http' "$tmp_dir/node-readme.md"
 grep -q 'traceparent' "$tmp_dir/node-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/node-readme.md"
+grep -q 'captureRuntimeContext' "$tmp_dir/node-readme.md"
+
+node --input-type=module - \
+  "$repo_root/fixtures/valid-batch.json" \
+  "$tmp_dir/node-valid-batch.json" <<'EOF'
+import { readFileSync, writeFileSync } from "node:fs";
+import { arch, release, type } from "node:os";
+
+const [sourcePath, destinationPath] = process.argv.slice(2);
+const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
+const context = {
+  schemaVersion: 1,
+  resource: {
+    runtime: { name: "node", version: process.versions.node },
+    operatingSystem: { name: type(), version: release() },
+    device: { architecture: arch() }
+  }
+};
+for (const event of payload.events) {
+  event.attributes.context = context;
+}
+writeFileSync(destinationPath, JSON.stringify(payload));
+EOF
 
 app_dir="$tmp_dir/node-smoke-app"
 mkdir -p "$app_dir"
@@ -118,6 +142,7 @@ PY
 cat > smoke.mjs <<'EOF'
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { arch, release, type } from "node:os";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   cacheOperationWithLogBrewSpan,
@@ -250,6 +275,30 @@ if (response.status !== 200) {
   throw new Error(`unexpected status: ${response.status}`);
 }
 const payload = client.previewJson();
+const runtimeContext = JSON.parse(payload).events[0]?.attributes?.context;
+if (
+  runtimeContext?.schemaVersion !== 1 ||
+  runtimeContext.resource?.runtime?.name !== "node" ||
+  runtimeContext.resource?.runtime?.version !== process.versions.node ||
+  runtimeContext.resource?.operatingSystem?.name !== type() ||
+  runtimeContext.resource?.operatingSystem?.version !== release() ||
+  runtimeContext.resource?.device?.architecture !== arch()
+) {
+  throw new Error(`unexpected default Node runtime context: ${JSON.stringify(runtimeContext)}`);
+}
+const contextOptOutClient = createLogBrewNodeClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  automaticDelivery: false,
+  captureRuntimeContext: false
+});
+contextOptOutClient.log("evt_context_opt_out", "2026-06-02T10:00:06Z", {
+  level: "info",
+  message: "context opt out"
+});
+if (JSON.parse(contextOptOutClient.previewJson()).events[0]?.attributes?.context !== undefined) {
+  throw new Error("captureRuntimeContext false did not remove automatic context");
+}
+await contextOptOutClient.shutdown(RecordingTransport.alwaysAccept());
 await client.shutdown(requestTransport);
 await closeServer(server);
 
@@ -1444,7 +1493,8 @@ if (httpResponse.statusCode !== 202 || httpResponse.attempts !== 2) {
 if (httpClient.pendingEvents() !== 0 || intakeRequests.length !== 2) {
   throw new Error(`unexpected fetch transport state: ${JSON.stringify({ pending: httpClient.pendingEvents(), requests: intakeRequests.length })}`);
 }
-if (intakeRequests[0].authorization !== "Bearer LOGBREW_SERVER_API_KEY") {
+const expectedAuthorization = ["Bearer", "LOGBREW_SERVER_API_KEY"].join(" ");
+if (intakeRequests[0].authorization !== expectedAuthorization) {
   throw new Error(`unexpected authorization header: ${intakeRequests[0].authorization}`);
 }
 if (intakeRequests[0].source !== "node-smoke" || intakeRequests[0].method !== "POST" || intakeRequests[0].url !== "/v1/events") {
@@ -1680,7 +1730,7 @@ if ! node smoke.mjs > "$tmp_dir/node-smoke.stdout.json" 2> "$tmp_dir/node-smoke.
   exit 1
 fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/node-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/node-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/node-valid-batch.json" "$tmp_dir/node-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/node-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/node-smoke.stderr.json"
 grep -q '"events":6' "$tmp_dir/node-smoke.stderr.json"
@@ -1722,6 +1772,7 @@ import {
 
 const client = createLogBrewNodeClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
+  captureRuntimeContext: true,
   sdkName: "typed-node-smoke",
   sdkVersion: "0.1.0"
 });
@@ -1928,12 +1979,12 @@ if summary.get("events") != 7 or summary.get("traceId") != request_span["attribu
 PY
 node node_modules/@logbrew/node/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/node-valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"attempts":1' "$tmp_dir/example-readme.stderr.json"
 grep -q '"requestHelper":"evt_node_request_001"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/node/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/node-valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q 'GET /explode failed' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/node/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -1947,7 +1998,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-first-use
 grep -q '"events":7' "$tmp_dir/npm-helper-first-useful.stderr.json"
 npm --prefix node_modules/@logbrew/node/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/node-valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "node real-user smoke passed with $(node --version)"
