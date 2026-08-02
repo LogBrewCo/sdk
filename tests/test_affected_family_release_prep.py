@@ -28,7 +28,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
             "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.7"),
-            "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.1"),
+            "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.2"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.2"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.4"),
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.5"),
@@ -90,6 +90,19 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         for entrypoint in ("index.js", "index.cjs"):
             source = (ROOT / "js/logbrew-node" / entrypoint).read_text(
+                encoding="utf-8"
+            )
+            with self.subTest(entrypoint=entrypoint):
+                self.assertIn(declaration, source)
+
+    def test_browser_runtime_metadata_matches_the_package_release(self) -> None:
+        manifest = json.loads(
+            (ROOT / "js/logbrew-browser/package.json").read_text(encoding="utf-8")
+        )
+        declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
+
+        for entrypoint in ("index.js", "index.cjs"):
+            source = (ROOT / "js/logbrew-browser" / entrypoint).read_text(
                 encoding="utf-8"
             )
             with self.subTest(entrypoint=entrypoint):
