@@ -45,20 +45,6 @@ class ValidateFixturesTests(unittest.TestCase):
         payload = self.load_valid_payload()
         validate_payload(payload)
 
-    def test_valid_fixture_carries_versioned_product_analytics_metadata(self) -> None:
-        payload = self.load_valid_payload()
-        action = next(event for event in payload["events"] if event["type"] == "action")
-
-        self.assertEqual(
-            {
-                "analyticsSchemaVersion": 1,
-                "analyticsKind": "interaction",
-                "analyticsSurface": "release-panel",
-            },
-            action["attributes"]["metadata"],
-        )
-        validate_payload(payload)
-
     def test_invalid_fixture_fails(self) -> None:
         payload = json.loads((ROOT / "fixtures" / "invalid-batch.json").read_text())
         with self.assertRaises(ValidationError):

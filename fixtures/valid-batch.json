@@ -62,12 +62,7 @@
       "id": "evt_action_001",
       "attributes": {
         "name": "deploy",
-        "status": "success",
-        "metadata": {
-          "analyticsSchemaVersion": 1,
-          "analyticsKind": "interaction",
-          "analyticsSurface": "release-panel"
-        }
+        "status": "success"
       }
     }
   ]
