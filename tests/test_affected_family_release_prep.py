@@ -31,7 +31,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.1"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.2"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.4"),
-            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.3"),
+            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.4"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.4"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.3"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.12"),
@@ -81,6 +81,19 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             manifest["peerDependencies"]["@logbrew/sdk"],
             "^0.1.5",
         )
+
+    def test_node_runtime_metadata_matches_the_package_release(self) -> None:
+        manifest = json.loads(
+            (ROOT / "js/logbrew-node/package.json").read_text(encoding="utf-8")
+        )
+        declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
+
+        for entrypoint in ("index.js", "index.cjs"):
+            source = (ROOT / "js/logbrew-node" / entrypoint).read_text(
+                encoding="utf-8"
+            )
+            with self.subTest(entrypoint=entrypoint):
+                self.assertIn(declaration, source)
 
     def test_python_core_declares_and_ci_installs_tls_trust_dependencies(self) -> None:
         project = tomllib.loads(
