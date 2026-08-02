@@ -45,6 +45,41 @@ Set `flushOnOnline: false`, `flushOnPageHide: false`, or `flushOnVisibilityHidde
 
 Lifecycle delivery never uses `sendBeacon`, a custom transport, or a fetch transport configured with `keepalive: false`. Unsupported or oversized work remains in the existing queue; it is not silently dropped. After importing `createFetchTransport`, an app can deliver work that exceeds a deliberately lowered keepalive limit with `logbrew.client.flush(createFetchTransport({ keepalive: false }))`. Authentication, rate-limit, and nonretryable responses pause additional lifecycle sends until an explicit successful `flush()`. The client key stays in the `Authorization` header and is never added to the endpoint, query string, request body, persistence metadata, or delivery health.
 
+## Default Runtime Context
+
+`installLogBrewBrowser()` and `createLogBrewBrowserClient()` add a small typed
+runtime context to every release, environment, issue, log, span, action, and
+metric. When the browser exposes low-entropy User-Agent Client Hints, the
+context contains the browser brand and significant version, platform name, and
+`mobile` or `desktop` device family. Browsers without those hints send only
+`runtime.name: "browser"`.
+
+This default reads only `navigator.userAgentData.brands`, `platform`, and
+`mobile`. It never reads the legacy user-agent string, calls
+`getHighEntropyValues()`, or collects a device model, architecture, OS version,
+screen, language, memory, CPU, document value, host, network identifier, or
+user identity. Caller-provided shared context remains authoritative and can add
+explicit service, deployment, application, trace, session, opaque subject, or
+safe tag context:
+
+```js
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  context: {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "checkout-web" },
+      deployment: { environment: "production", release: "web@2026.07.04" }
+    }
+  }
+});
+```
+
+Set `captureRuntimeContext: false` to disable only the automatic browser
+defaults. Explicit `context` remains intact. When an app passes an already
+created `client` to `installLogBrewBrowser()`, that client keeps the context
+chosen when it was created.
+
 ## Browser Error Source-Map Hints
 
 If your frontend build injects JavaScript source-map Debug IDs, pass the app-owned map into browser setup so captured `error` and `unhandledrejection` issues carry release-artifact metadata alongside release, environment, service, and trace correlation:

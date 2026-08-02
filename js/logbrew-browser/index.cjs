@@ -9,6 +9,7 @@ const {
   createIssueAttributesFromError
 } = require("@logbrew/sdk");
 const { createBeaconTransport } = require("./beacon-transport.cjs");
+const { addBrowserRuntimeContext } = require("./runtime-context.cjs");
 const {
   captureBrowserFetchSpan,
   createBrowserFetchSpanEvent,
@@ -62,6 +63,8 @@ const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 
 function createLogBrewBrowserClient({
   apiKey,
+  browserNavigator,
+  captureRuntimeContext = true,
   clientKey,
   context,
   maxBatchBytes = DEFAULT_MAX_KEEPALIVE_BODY_BYTES,
@@ -77,9 +80,15 @@ function createLogBrewBrowserClient({
   if (!authKey) {
     throw new SdkError("configuration_error", "createLogBrewBrowserClient requires clientKey or apiKey");
   }
+  if (typeof captureRuntimeContext !== "boolean") {
+    throw new SdkError("configuration_error", "captureRuntimeContext must be a boolean");
+  }
+  const clientContext = captureRuntimeContext
+    ? addBrowserRuntimeContext(context, browserNavigator)
+    : context;
   return LogBrewClient.create({
     apiKey: authKey,
-    context,
+    context: clientContext,
     maxBatchBytes,
     maxBatchEvents,
     maxQueueBytes,
@@ -144,7 +153,10 @@ function installLogBrewBrowser(options = {}) {
     throw new SdkError("configuration_error", "installLogBrewBrowser requires a browser window");
   }
 
-  const client = options.client ?? createLogBrewBrowserClient(options);
+  const client = options.client ?? createLogBrewBrowserClient({
+    ...options,
+    browserNavigator: options.browserNavigator ?? browserWindow.navigator
+  });
   const transport = createBrowserTransport(options, browserWindow);
   const traceContext = resolveBrowserTraceContext(options);
   let installed = true;

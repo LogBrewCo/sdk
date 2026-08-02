@@ -62,6 +62,8 @@ grep -q '^package/persistence.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/resource-timing.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/resource-timing.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/runtime-context.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/runtime-context.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/web-vitals.js$' "$tmp_dir/browser-tarball.txt"
@@ -119,6 +121,29 @@ grep -q 'Browser Error Suppression' "$tmp_dir/browser-readme.md"
 grep -q 'errorSuppressionRules' "$tmp_dir/browser-readme.md"
 grep -q 'shouldCaptureError' "$tmp_dir/browser-readme.md"
 grep -q 'onIssueSuppressed' "$tmp_dir/browser-readme.md"
+grep -q 'captureRuntimeContext' "$tmp_dir/browser-readme.md"
+grep -q 'getHighEntropyValues' "$tmp_dir/browser-readme.md"
+
+node --input-type=module - \
+  "$repo_root/fixtures/valid-batch.json" \
+  "$tmp_dir/browser-valid-batch.json" <<'EOF'
+import { readFileSync, writeFileSync } from "node:fs";
+
+const [sourcePath, destinationPath] = process.argv.slice(2);
+const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
+const context = {
+  schemaVersion: 1,
+  resource: {
+    runtime: { name: "Google Chrome", version: "126" },
+    operatingSystem: { name: "macOS" },
+    device: { family: "desktop" }
+  }
+};
+for (const event of payload.events) {
+  event.attributes.context = context;
+}
+writeFileSync(destinationPath, JSON.stringify(payload));
+EOF
 
 app_dir="$tmp_dir/browser-smoke-app"
 mkdir -p "$app_dir"
@@ -196,6 +221,18 @@ const browserWindow = new Window({
   url: "https://app.example.test/dashboard?email=dev@example.test#section"
 });
 browserWindow.document.title = "LogBrew Browser Smoke";
+Object.defineProperty(browserWindow.navigator, "userAgentData", {
+  configurable: true,
+  value: {
+    brands: [
+      { brand: "Not_A Brand", version: "99" },
+      { brand: "Chromium", version: "126" },
+      { brand: "Google Chrome", version: "126" }
+    ],
+    mobile: false,
+    platform: "macOS"
+  }
+});
 
 let tick = 0;
 const transport = RecordingTransport.alwaysAccept();
@@ -233,6 +270,17 @@ if (pagePayload.events[0].attributes.metadata.documentTitle !== undefined) {
 }
 if (pagePayload.events[0].attributes.metadata.userAgent !== undefined) {
   throw new Error("user agent should be opt-in");
+}
+const expectedBrowserRuntimeContext = {
+  schemaVersion: 1,
+  resource: {
+    runtime: { name: "Google Chrome", version: "126" },
+    operatingSystem: { name: "macOS" },
+    device: { family: "desktop" }
+  }
+};
+if (JSON.stringify(pagePayload.events[0].attributes.context) !== JSON.stringify(expectedBrowserRuntimeContext)) {
+  throw new Error(`expected low-entropy browser runtime context: ${transport.sentBodies[0]}`);
 }
 if (pagePayload.events[0].attributes.traceId !== traceContext.traceId || pagePayload.events[0].attributes.spanId !== traceContext.spanId) {
   throw new Error(`expected shared page trace context: ${transport.sentBodies[0]}`);
@@ -1302,6 +1350,7 @@ if (navigationTraceparent !== "00-11111111111111111111111111111111-2222222222222
 }
 
 const fullClient = createLogBrewBrowserClient({
+  browserNavigator: browserWindow.navigator,
   clientKey: "LOGBREW_BROWSER_KEY",
   sdkName: "browser-smoke-app",
   sdkVersion: "0.1.0",
@@ -1309,12 +1358,26 @@ const fullClient = createLogBrewBrowserClient({
 });
 addFullBatch(fullClient);
 const preview = fullClient.previewJson();
+const optOutClient = createLogBrewBrowserClient({
+  browserNavigator: browserWindow.navigator,
+  captureRuntimeContext: false,
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+optOutClient.log("evt_browser_context_opt_out", "2026-06-02T10:00:03Z", {
+  level: "info",
+  message: "browser context opt out"
+});
+if (JSON.parse(optOutClient.previewJson()).events[0].attributes.context !== undefined) {
+  throw new Error("captureRuntimeContext false did not remove automatic browser context");
+}
+await optOutClient.shutdown(RecordingTransport.alwaysAccept());
 const fullResponse = await fullClient.shutdown(new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]));
 console.log(preview);
 console.error(JSON.stringify({
   ok: true,
   beaconEnvelope: beaconPayload.envelope.events[0].id,
   browserDeliveries: transport.sentBodies.length,
+  browserRuntime: pagePayload.events[0].attributes.context.resource.runtime.name,
   documentTimingSpan: documentTimingSpans[0].attributes.name,
   events: JSON.parse(preview).events.length,
   fetchSpan: browserFetchSpan.attributes.name,
@@ -1736,10 +1799,11 @@ EOF
 
 node smoke.mjs > "$tmp_dir/browser-smoke.stdout.json" 2> "$tmp_dir/browser-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/browser-valid-batch.json" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"beaconEnvelope":"evt_beacon_log_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"browserDeliveries":8' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"browserRuntime":"Google Chrome"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"documentTimingSpan":"browser.document /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"fullAttempts":2' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"hiddenDeferred":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
@@ -1822,6 +1886,14 @@ import {
 } from "@logbrew/browser";
 
 const client = createLogBrewBrowserClient({
+  browserNavigator: {
+    userAgentData: {
+      brands: [{ brand: "Chromium", version: "126" }],
+      mobile: false,
+      platform: "Linux"
+    }
+  },
+  captureRuntimeContext: true,
   clientKey: "LOGBREW_BROWSER_KEY",
   sdkName: "typed-browser-smoke",
   sdkVersion: "0.1.0"
@@ -2181,6 +2253,13 @@ if (typeof browser.createBeaconTransport !== "function") {
   throw new Error("missing CommonJS beacon transport helper");
 }
 const client = browser.createLogBrewBrowserClient({
+  browserNavigator: {
+    userAgentData: {
+      brands: [{ brand: "Chromium", version: "126" }],
+      mobile: false,
+      platform: "Linux"
+    }
+  },
   clientKey: "LOGBREW_BROWSER_KEY",
   sdkName: "cjs-browser-smoke",
   sdkVersion: "0.1.0"
@@ -2190,6 +2269,10 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", {
   level: "info",
   logger: "browser"
 });
+const cjsContext = JSON.parse(client.previewJson()).events[0].attributes.context;
+if (cjsContext.resource.runtime.name !== "Chromium" || cjsContext.resource.operatingSystem.name !== "Linux" || cjsContext.resource.device.family !== "desktop") {
+  throw new Error(`unexpected CommonJS browser runtime context: ${JSON.stringify(cjsContext)}`);
+}
 client.flush(RecordingTransport.alwaysAccept()).then((response) => {
   if (response.statusCode !== 202) {
     throw new Error(`unexpected CJS status: ${response.statusCode}`);

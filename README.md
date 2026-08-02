@@ -238,6 +238,11 @@ LogBrew SDKs favor conservative defaults:
 - The Node delivery client adds only Node version, OS type/release, and
   architecture as automatic shared context. It supports an explicit opt-out
   and does not infer host, user, service, application, or cloud identity.
+- The browser client adds only low-entropy browser brand/significant version,
+  platform, and mobile/desktop family when User-Agent Client Hints expose them;
+  otherwise it reports the generic browser runtime. It never reads the legacy
+  user-agent string or requests high-entropy hints, and supports an explicit
+  opt-out.
 - Automatic Pino metadata excludes credentials, cookies, bodies, payloads, query text, raw URLs, propagation headers, local file paths, and stack text by default.
 - No document title or user agent in browser metadata unless explicitly enabled.
 - No global logger, console, fetch, or framework behavior changes unless the integration explicitly documents that opt-in behavior.
