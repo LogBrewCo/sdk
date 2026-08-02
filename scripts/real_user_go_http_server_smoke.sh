@@ -362,16 +362,51 @@ func verifyInstalledEvents(t *testing.T, events []installedEvent) {
 			}
 		case "issue":
 			issueCount++
-			assertKeys(t, event.Attributes, "level", "metadata", "title")
 			metadata, ok := event.Attributes["metadata"].(map[string]any)
 			if !ok {
 				t.Fatalf("issue metadata missing or invalid: %#v", event.Attributes)
 			}
 			switch event.Attributes["title"] {
 			case "HTTP server panic":
+				assertKeys(t, event.Attributes, "exception", "level", "metadata", "stackFrames", "title")
 				assertKeys(t, metadata, "method", "panic", "panicType", "routeTemplate", "sampled", "spanId", "statusCode", "traceId")
+				exception, ok := event.Attributes["exception"].(map[string]any)
+				if !ok {
+					t.Fatalf("panic exception missing or invalid: %#v", event.Attributes)
+				}
+				assertKeys(t, exception, "mechanism", "type")
+				mechanism, ok := exception["mechanism"].(map[string]any)
+				if !ok {
+					t.Fatalf("panic mechanism missing or invalid: %#v", exception)
+				}
+				assertKeys(t, mechanism, "handled", "type")
+				if exception["type"] != "string" || mechanism["type"] != "net_http.middleware" || mechanism["handled"] != false {
+					t.Fatalf("panic diagnostics mismatch: %#v", exception)
+				}
+				frames, ok := event.Attributes["stackFrames"].([]any)
+				if !ok || len(frames) == 0 || len(frames) > 32 {
+					t.Fatalf("panic frames missing or unbounded: %#v", event.Attributes)
+				}
+				foundHandlerFrame := false
+				for _, value := range frames {
+					frame, frameOK := value.(map[string]any)
+					if !frameOK {
+						t.Fatalf("panic frame invalid: %#v", value)
+					}
+					filename, filenameOK := frame["filename"].(string)
+					if !filenameOK || strings.ContainsAny(filename, `/\\?#`) {
+						t.Fatalf("panic frame leaked a path: %#v", frame)
+					}
+					if filename == "http_server_test.go" {
+						foundHandlerFrame = true
+					}
+				}
+				if !foundHandlerFrame {
+					t.Fatalf("panic frames omitted installed app handler: %#v", frames)
+				}
 				panicIssue = event.Attributes
 			case "HTTP server error response":
+				assertKeys(t, event.Attributes, "level", "metadata", "title")
 				assertKeys(t, metadata, "method", "routeTemplate", "sampled", "spanId", "statusCode", "traceId")
 				optInIssue = event.Attributes
 			default:

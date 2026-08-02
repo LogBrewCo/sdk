@@ -154,13 +154,22 @@ func (h *httpTraceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestWithTrace := r.WithContext(ContextWithLogBrewTrace(requestContext, trace))
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			h.captureRequestTelemetrySafely(requestWithTrace, trace, start, recorder.StatusForPanic(), httpServerPanicMetadata(recovered), true)
+			panicType := httpServerPanicType(recovered)
+			h.captureRequestTelemetrySafely(
+				requestWithTrace,
+				trace,
+				start,
+				recorder.StatusForPanic(),
+				map[string]any{"panic": true, "panicType": panicType},
+				panicType,
+				CaptureIssueStackFrames(),
+			)
 			panic(recovered)
 		}
 	}()
 	h.next.ServeHTTP(wrappedWriter, requestWithTrace)
 
-	h.captureRequestTelemetrySafely(requestWithTrace, trace, start, recorder.Status(), nil, false)
+	h.captureRequestTelemetrySafely(requestWithTrace, trace, start, recorder.Status(), nil, "", nil)
 }
 
 func (h *httpTraceHandler) initializeRequestTelemetry(r *http.Request) (
@@ -186,14 +195,15 @@ func (h *httpTraceHandler) captureRequestTelemetrySafely(
 	start time.Time,
 	statusCode int,
 	extraMetadata map[string]any,
-	panicked bool,
+	panicType string,
+	panicFrames []IssueStackFrame,
 ) {
 	defer func() {
 		if recover() != nil {
 			h.report(&SdkError{Code: "capture_error", Message: "HTTP request telemetry skipped"})
 		}
 	}()
-	h.captureRequestTelemetry(request, trace, start, statusCode, extraMetadata, panicked)
+	h.captureRequestTelemetry(request, trace, start, statusCode, extraMetadata, panicType, panicFrames)
 }
 
 func (h *httpTraceHandler) captureRequestTelemetry(
@@ -202,8 +212,10 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 	start time.Time,
 	statusCode int,
 	extraMetadata map[string]any,
-	panicked bool,
+	panicType string,
+	panicFrames []IssueStackFrame,
 ) {
+	panicked := panicType != ""
 	finished := h.now()
 	durationMs := float64(finished.Sub(start).Microseconds()) / 1000
 	if durationMs < 0 {
@@ -243,11 +255,22 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 		if panicked {
 			title = "HTTP server panic"
 		}
-		issue := IssueAttributesWithTrace(request.Context(), IssueAttributes{
+		issueAttributes := IssueAttributes{
 			Title:    title,
 			Level:    "error",
 			Metadata: metadata,
-		})
+		}
+		if panicked {
+			issueAttributes.Exception = &IssueException{
+				Type: panicType,
+				Mechanism: &IssueExceptionMechanism{
+					Type:    "net_http.middleware",
+					Handled: false,
+				},
+			}
+			issueAttributes.StackFrames = panicFrames
+		}
+		issue := IssueAttributesWithTrace(request.Context(), issueAttributes)
 		if err := h.config.Client.Issue(h.eventID("issue"), timestamp, issue); err != nil {
 			h.report(err)
 		}
@@ -266,17 +289,15 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 	}
 }
 
-func httpServerPanicMetadata(recovered any) map[string]any {
-	metadata := map[string]any{"panic": true}
+func httpServerPanicType(recovered any) string {
 	switch recovered.(type) {
 	case error:
-		metadata["panicType"] = "error"
+		return "error"
 	case string:
-		metadata["panicType"] = "string"
+		return "string"
 	default:
-		metadata["panicType"] = "other"
+		return "other"
 	}
-	return metadata
 }
 
 func panicMetadata(recovered any) map[string]any {

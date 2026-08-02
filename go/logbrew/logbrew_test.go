@@ -248,6 +248,187 @@ func TestSeverityAliasesNormalizeBeforePreview(t *testing.T) {
 	}
 }
 
+func TestIssueDiagnosticsAreValidatedDetachedAndNormalized(t *testing.T) {
+	client := sampleClient(t)
+	attributes := IssueAttributes{
+		Title:   "Checkout failed",
+		Level:   "error",
+		Message: "A safe application-owned summary",
+		Exception: &IssueException{
+			Type: "CheckoutError",
+			Mechanism: &IssueExceptionMechanism{
+				Type:    "go.recover",
+				Handled: true,
+			},
+		},
+		StackFrames: []IssueStackFrame{{
+			Filename: `C:\workspace\checkout.go`,
+			Line:     42,
+			Column:   1,
+			Function: "submitOrder",
+			Module:   "example.com/store/checkout",
+			InApp:    boolPtr(true),
+			DebugID:  "A5B8F2C1-7D3E-4A10-9C42-112233445566",
+		}},
+		Breadcrumbs: []IssueBreadcrumb{{
+			Timestamp: "2026-08-02T08:15:30.123Z",
+			Type:      "http",
+			Category:  "checkout.request",
+			Level:     "warn",
+			Message:   "Inventory request completed",
+			Data: map[string]any{
+				"attempt":     2,
+				"cache_hit":   false,
+				"status_code": 503,
+			},
+		}},
+		BreadcrumbsTruncated: true,
+	}
+	if err := client.Issue("evt_issue_diagnostics", "2026-08-02T08:15:31Z", attributes); err != nil {
+		t.Fatal(err)
+	}
+
+	attributes.Exception.Type = "MutatedError"
+	attributes.Exception.Mechanism.Type = "mutated"
+	attributes.StackFrames[0].Filename = "mutated.go"
+	attributes.StackFrames[0].InApp = boolPtr(false)
+	attributes.Breadcrumbs[0].Data["attempt"] = 99
+
+	var payload struct {
+		Events []struct {
+			Attributes map[string]any `json:"attributes"`
+		} `json:"events"`
+	}
+	preview, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(preview), &payload); err != nil {
+		t.Fatal(err)
+	}
+	queued := payload.Events[0].Attributes
+	exception := queued["exception"].(map[string]any)
+	mechanism := exception["mechanism"].(map[string]any)
+	frames := queued["stackFrames"].([]any)
+	frame := frames[0].(map[string]any)
+	breadcrumbs := queued["breadcrumbs"].([]any)
+	breadcrumb := breadcrumbs[0].(map[string]any)
+	data := breadcrumb["data"].(map[string]any)
+	if exception["type"] != "CheckoutError" || mechanism["type"] != "go.recover" || mechanism["handled"] != true {
+		t.Fatalf("unexpected exception diagnostics: %#v", exception)
+	}
+	if frame["filename"] != "checkout.go" || frame["function"] != "submitOrder" ||
+		frame["module"] != "example.com/store/checkout" || frame["inApp"] != true ||
+		frame["debugId"] != "a5b8f2c1-7d3e-4a10-9c42-112233445566" {
+		t.Fatalf("unexpected stack frame: %#v", frame)
+	}
+	if breadcrumb["level"] != "warning" || data["attempt"] != float64(2) || queued["breadcrumbsTruncated"] != true {
+		t.Fatalf("unexpected breadcrumb diagnostics: %#v", queued)
+	}
+}
+
+func TestIssueDiagnosticsRejectInvalidBoundsAndValues(t *testing.T) {
+	validFrame := IssueStackFrame{Filename: "checkout.go", Line: 1, Column: 1}
+	validBreadcrumb := IssueBreadcrumb{Timestamp: "2026-08-02T08:15:30Z", Category: "checkout"}
+	tests := []struct {
+		name       string
+		attributes IssueAttributes
+		want       string
+	}{
+		{
+			name: "exception location text",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Exception: &IssueException{
+				Type: "Error?location",
+			}},
+			want: "issue exception type is invalid",
+		},
+		{
+			name: "mechanism machine name",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Exception: &IssueException{
+				Type:      "Error",
+				Mechanism: &IssueExceptionMechanism{Type: "bad mechanism", Handled: false},
+			}},
+			want: "issue exception mechanism type must be a stable machine name",
+		},
+		{
+			name:       "too many frames",
+			attributes: IssueAttributes{Title: "failure", Level: "error", StackFrames: make([]IssueStackFrame, 33)},
+			want:       "issue stackFrames must contain 1-32 frames",
+		},
+		{
+			name:       "invalid coordinate",
+			attributes: IssueAttributes{Title: "failure", Level: "error", StackFrames: []IssueStackFrame{{Filename: "checkout.go", Line: 0, Column: 1}}},
+			want:       "issue stack frame line must be a positive integer",
+		},
+		{
+			name:       "too many breadcrumbs",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Breadcrumbs: make([]IssueBreadcrumb, 65)},
+			want:       "issue breadcrumbs must contain 1-64 entries",
+		},
+		{
+			name:       "breadcrumb timezone",
+			attributes: IssueAttributes{Title: "failure", Level: "error", StackFrames: []IssueStackFrame{validFrame}, Breadcrumbs: []IssueBreadcrumb{{Timestamp: "2026-08-02T08:15:30", Category: "checkout"}}},
+			want:       "issue breadcrumb timestamp must be RFC 3339 with an explicit timezone",
+		},
+		{
+			name:       "breadcrumb comma fraction",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Breadcrumbs: []IssueBreadcrumb{{Timestamp: "2026-08-02T08:15:30,123Z", Category: "checkout"}}},
+			want:       "issue breadcrumb timestamp must be RFC 3339 with an explicit timezone",
+		},
+		{
+			name: "breadcrumb non-finite data",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Breadcrumbs: []IssueBreadcrumb{{
+				Timestamp: validBreadcrumb.Timestamp,
+				Category:  validBreadcrumb.Category,
+				Data:      map[string]any{"ratio": math.NaN()},
+			}}},
+			want: "issue breadcrumb data value for ratio must be a finite primitive",
+		},
+		{
+			name: "breadcrumb nested data",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Breadcrumbs: []IssueBreadcrumb{{
+				Timestamp: validBreadcrumb.Timestamp,
+				Category:  validBreadcrumb.Category,
+				Data:      map[string]any{"request": map[string]any{"drop": true}},
+			}}},
+			want: "issue breadcrumb data value for request must be a finite primitive",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := sampleClient(t)
+			err := client.Issue("evt_invalid_diagnostics", "2026-08-02T08:15:31Z", test.attributes)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("unexpected validation result: %v", err)
+			}
+		})
+	}
+}
+
+func TestCaptureIssueStackFramesUsesSanitizedStructuredFrames(t *testing.T) {
+	frames := captureIssueStackFramesForTest()
+	if len(frames) == 0 || len(frames) > 32 {
+		t.Fatalf("unexpected captured frame count: %d", len(frames))
+	}
+	foundTestFrame := false
+	for _, frame := range frames {
+		if frame.Filename == "logbrew_test.go" {
+			foundTestFrame = true
+		}
+		if strings.ContainsAny(frame.Filename, `/\\?#`) || frame.Line < 1 || frame.Column < 1 {
+			t.Fatalf("captured frame is not privacy-safe: %#v", frame)
+		}
+	}
+	if !foundTestFrame {
+		t.Fatalf("captured stack omitted the caller frame: %#v", frames)
+	}
+}
+
+func captureIssueStackFramesForTest() []IssueStackFrame {
+	return CaptureIssueStackFrames()
+}
+
 func TestNegativeSpanDurationFailsValidation(t *testing.T) {
 	client := sampleClient(t)
 	duration := -1.0

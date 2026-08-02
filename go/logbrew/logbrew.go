@@ -423,10 +423,14 @@ type EnvironmentAttributes struct {
 
 // IssueAttributes describes the public payload fields for an issue event.
 type IssueAttributes struct {
-	Title    string         `json:"title"`
-	Level    string         `json:"level"`
-	Message  string         `json:"message,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Title                string            `json:"title"`
+	Level                string            `json:"level"`
+	Message              string            `json:"message,omitempty"`
+	Exception            *IssueException   `json:"exception,omitempty"`
+	StackFrames          []IssueStackFrame `json:"stackFrames,omitempty"`
+	Breadcrumbs          []IssueBreadcrumb `json:"breadcrumbs,omitempty"`
+	BreadcrumbsTruncated bool              `json:"breadcrumbsTruncated,omitempty"`
+	Metadata             map[string]any    `json:"metadata,omitempty"`
 }
 
 // LogAttributes describes the public payload fields for a log event.
@@ -960,6 +964,30 @@ func validateIssue(attributes IssueAttributes) (map[string]any, error) {
 	result := map[string]any{"title": attributes.Title, "level": level}
 	if attributes.Message != "" {
 		result["message"] = attributes.Message
+	}
+	if attributes.Exception != nil {
+		exception, err := cloneIssueException(attributes.Exception)
+		if err != nil {
+			return nil, err
+		}
+		result["exception"] = exception
+	}
+	if attributes.StackFrames != nil {
+		frames, err := cloneIssueStackFrames(attributes.StackFrames)
+		if err != nil {
+			return nil, err
+		}
+		result["stackFrames"] = frames
+	}
+	if attributes.Breadcrumbs != nil {
+		breadcrumbs, err := cloneIssueBreadcrumbs(attributes.Breadcrumbs)
+		if err != nil {
+			return nil, err
+		}
+		result["breadcrumbs"] = breadcrumbs
+	}
+	if attributes.BreadcrumbsTruncated {
+		result["breadcrumbsTruncated"] = true
 	}
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata

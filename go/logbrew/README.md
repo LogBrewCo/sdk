@@ -208,6 +208,58 @@ clearly fake placeholder like `LOGBREW_API_KEY` only in local examples. Call
 `PreviewJSON` when you want a stable local JSON preview before sending anything.
 For production delivery and authenticated readback, use the hosted flow above.
 
+## Structured Issue Diagnostics
+
+`IssueAttributes` accepts a typed exception identity, mechanism/handled state,
+up to 32 structured frames, and up to 64 application-owned breadcrumbs. This
+keeps issue details useful without embedding a raw Go stack string or an error
+value:
+
+```go
+inApp := true
+must(client.Issue("evt_checkout_failure", "2026-08-02T08:15:31Z", logbrew.IssueAttributes{
+  Title:   "Checkout failed",
+  Level:   "error",
+  Message: "Inventory did not accept the reservation",
+  Exception: &logbrew.IssueException{
+    Type: "InventoryError",
+    Mechanism: &logbrew.IssueExceptionMechanism{
+      Type:    "checkout.reserve",
+      Handled: true,
+    },
+  },
+  StackFrames: []logbrew.IssueStackFrame{{
+    Filename: "checkout.go",
+    Line:     84,
+    Column:   1,
+    Function: "reserveInventory",
+    Module:   "example.com/store/checkout",
+    InApp:    &inApp,
+  }},
+  Breadcrumbs: []logbrew.IssueBreadcrumb{{
+    Timestamp: "2026-08-02T08:15:30Z",
+    Type:      "http",
+    Category:  "inventory.request",
+    Level:     "warning",
+    Message:   "Inventory request completed",
+    Data:      map[string]any{"status_code": 503, "attempt": 2},
+  }},
+}))
+```
+
+Breadcrumbs are explicit and request-local; the core client does not keep a
+process-global breadcrumb ring that could mix concurrent users or requests.
+Attach oldest-to-newest history and set `BreadcrumbsTruncated` when older
+entries were intentionally omitted. Data is limited to eight flat finite
+primitive fields, and caller-owned slices/maps are detached before queueing.
+
+`CaptureIssueStackFrames()` snapshots the current goroutine in newest-first
+order with basename-only filenames and bounded function/module identities. Call
+it at the failure boundary (including inside a recovery defer) when the current
+call stack is meaningful. It never captures source lines, locals, panic/error
+values, or raw stack text. Explicit frames receive the same validation and
+absolute filenames are reduced to basenames before queueing.
+
 ## High-Load Behavior
 
 `NewClient` keeps the in-memory event queue bounded to 1,000 events by default. Set `Config.MaxQueueSize` when your service needs a larger or smaller local buffer. When the queue is full, LogBrew drops new events instead of blocking app logging or discarding already-buffered release/environment/request context. Use `DroppedEvents()` for a local counter and `OnEventDropped` for an advisory callback:
@@ -465,15 +517,17 @@ router.Use(gin.Recovery(), middleware)
 The middleware records matched Gin route templates, continues one valid W3C
 `traceparent`, and makes the LogBrew trace available through the request
 `context.Context`. It uses a fixed `<unmatched>` label instead of a concrete
-404 path. Panics produce a generic type-only issue and are re-panicked so Gin's
+404 path. Panics produce a generic type-only exception with mechanism/handled
+state and bounded structured call frames, then are re-panicked so Gin's
 existing recovery retains response ownership. Metrics and generic ordinary
 5xx issues are opt-in. The adapter never captures bodies, concrete URLs, query
 strings, hosts, IPs, user identity, cookies, authorization values, arbitrary
-headers, raw propagation, error messages, panic values, or stacks, and it never
-owns transport or flush behavior. See the [Gin module guide](gin/README.md) for
-the complete setup and privacy contract.
+headers, raw propagation, error messages, panic values, raw stack text, source
+lines, locals, or absolute frame paths, and it never owns transport or flush
+behavior. See the [Gin module guide](gin/README.md) for the complete setup and
+privacy contract.
 
-`NewHTTPHandler` wraps an app-owned `net/http` handler, accepts exactly one valid W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. It uses the matched `http.ServeMux` pattern or an explicit `RouteTemplate`; when neither is available it records `/` instead of the raw request path. The outermost LogBrew wrapper owns nested instrumentation so the same request is emitted once. If the handler panics, LogBrew records one failed request span and one generic correlated issue with type-only panic metadata, then re-panics with the original value. Ordinary 5xx responses remain span-only unless `NewHTTPHandlerWithOptions` receives `WithHTTPServerErrorIssues()`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
+`NewHTTPHandler` wraps an app-owned `net/http` handler, accepts exactly one valid W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. It uses the matched `http.ServeMux` pattern or an explicit `RouteTemplate`; when neither is available it records `/` instead of the raw request path. The outermost LogBrew wrapper owns nested instrumentation so the same request is emitted once. If the handler panics, LogBrew records one failed request span and one generic correlated issue with type-only exception identity, `net_http.middleware` mechanism, unhandled state, and bounded sanitized call frames, then re-panics with the original value. Ordinary 5xx responses remain span-only unless `NewHTTPHandlerWithOptions` receives `WithHTTPServerErrorIssues()`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
 
 ```go
 slogHandler, err := logbrew.NewSlogHandler(logbrew.SlogHandlerConfig{
@@ -500,7 +554,7 @@ if err != nil {
 http.Handle("/checkout/", handler)
 ```
 
-The HTTP and slog helpers are dependency-free and explicit. The HTTP wrapper preserves cancellation/deadlines, `http.Flusher`, `http.Hijacker`, `http.Pusher`, `io.ReaderFrom`, and `http.ResponseController` unwrapping when the app writer supports them. It does not patch globals, add workers, buffer bodies, capture request or response bodies, capture arbitrary headers, capture panic messages or stacks, or use raw URLs, query strings, fragments, cookies, authentication values, IPs, user identity, hosts, or local paths. Custom or unknown HTTP methods are recorded as `OTHER`. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
+The HTTP and slog helpers are dependency-free and explicit. The HTTP wrapper preserves cancellation/deadlines, `http.Flusher`, `http.Hijacker`, `http.Pusher`, `io.ReaderFrom`, and `http.ResponseController` unwrapping when the app writer supports them. It does not patch globals, add workers, buffer bodies, capture request or response bodies, capture arbitrary headers, capture panic messages or raw stack text, or use raw URLs, query strings, fragments, cookies, authentication values, IPs, user identity, hosts, or local paths. Structured panic frames contain basename, coordinates, and bounded code identity only; they exclude source, locals, values, and absolute paths. Custom or unknown HTTP methods are recorded as `OTHER`. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
 
 ## Outbound `net/http` Client Spans
 

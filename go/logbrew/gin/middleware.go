@@ -135,10 +135,10 @@ func (m *middleware) handle(c *gin.Context) {
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			m.captureSafely(c, trace, started, panicStatusCode(c), recovered)
+			m.captureSafely(c, trace, started, panicStatusCode(c), recovered, logbrew.CaptureIssueStackFrames())
 			panic(recovered)
 		}
-		m.captureSafely(c, trace, started, normalizeStatusCode(c.Writer.Status()), nil)
+		m.captureSafely(c, trace, started, normalizeStatusCode(c.Writer.Status()), nil, nil)
 	}()
 
 	c.Next()
@@ -244,13 +244,14 @@ func (m *middleware) captureSafely(
 	started time.Time,
 	statusCode int,
 	recovered any,
+	panicFrames []logbrew.IssueStackFrame,
 ) {
 	defer func() {
 		if recover() != nil {
 			m.report(&logbrew.SdkError{Code: "capture_error", Message: "Gin request telemetry capture failed"})
 		}
 	}()
-	m.capture(c, trace, started, statusCode, recovered)
+	m.capture(c, trace, started, statusCode, recovered, panicFrames)
 }
 
 func (m *middleware) capture(
@@ -259,6 +260,7 @@ func (m *middleware) capture(
 	started time.Time,
 	statusCode int,
 	recovered any,
+	panicFrames []logbrew.IssueStackFrame,
 ) {
 	finished := m.now()
 	durationMs := float64(finished.Sub(started).Microseconds()) / 1000
@@ -306,11 +308,22 @@ func (m *middleware) capture(
 		if recovered != nil {
 			title = "Gin request panicked"
 		}
-		issue := logbrew.IssueAttributesWithTrace(c.Request.Context(), logbrew.IssueAttributes{
+		issueAttributes := logbrew.IssueAttributes{
 			Title:    title,
 			Level:    "error",
 			Metadata: metadata,
-		})
+		}
+		if recovered != nil {
+			issueAttributes.Exception = &logbrew.IssueException{
+				Type: panicType(recovered),
+				Mechanism: &logbrew.IssueExceptionMechanism{
+					Type:    "gin.recovery",
+					Handled: false,
+				},
+			}
+			issueAttributes.StackFrames = panicFrames
+		}
+		issue := logbrew.IssueAttributesWithTrace(c.Request.Context(), issueAttributes)
 		if err := m.client.Issue(m.eventID("issue"), timestamp, issue); err != nil {
 			m.report(err)
 		}

@@ -242,6 +242,35 @@ func TestHTTPHandlerCapturesCorrelatedPanicIssueAndRepanics(t *testing.T) {
 		issueMetadata["parentSpanId"] != httpServerTestParentSpanID {
 		t.Fatalf("panic telemetry is not correlated: %#v %#v", span, issue)
 	}
+	exception, ok := issue["exception"].(map[string]any)
+	if !ok || exception["type"] != "error" {
+		t.Fatalf("panic issue missing type-only exception identity: %#v", issue)
+	}
+	mechanism, ok := exception["mechanism"].(map[string]any)
+	if !ok || mechanism["type"] != "net_http.middleware" || mechanism["handled"] != false {
+		t.Fatalf("panic issue missing escape mechanism: %#v", exception)
+	}
+	frames, ok := issue["stackFrames"].([]any)
+	if !ok || len(frames) == 0 || len(frames) > 32 {
+		t.Fatalf("panic issue missing bounded structured frames: %#v", issue)
+	}
+	foundHandlerFrame := false
+	for _, value := range frames {
+		frame, frameOK := value.(map[string]any)
+		if !frameOK {
+			t.Fatalf("panic issue has invalid frame: %#v", value)
+		}
+		filename, _ := frame["filename"].(string)
+		if filename == "http_trace_server_test.go" {
+			foundHandlerFrame = true
+		}
+		if strings.ContainsAny(filename, `/\\?#`) {
+			t.Fatalf("panic frame leaked a path: %#v", frame)
+		}
+	}
+	if !foundHandlerFrame {
+		t.Fatalf("panic frames omitted the application handler: %#v", frames)
+	}
 	assertHTTPServerPayloadPrivate(t, payload, "opaque panic value", "opaque-id", "marker=value")
 }
 
@@ -352,6 +381,9 @@ func TestHTTPHandlerOrdinary5xxIssueRequiresExplicitOption(t *testing.T) {
 			if test.captureIssue && events[1].Attributes["title"] != "HTTP server error response" {
 				t.Fatalf("unexpected 5xx issue: %#v", events[1])
 			}
+			if test.captureIssue && (events[1].Attributes["exception"] != nil || events[1].Attributes["stackFrames"] != nil) {
+				t.Fatalf("ordinary 5xx issue should not invent panic diagnostics: %#v", events[1])
+			}
 			assertHTTPServerPayloadPrivate(t, payload, "opaque upstream response", "opaque-resource")
 		})
 	}
@@ -412,7 +444,7 @@ func TestHTTPHandlerSnapshotsConfigurationAndNeverUsesRawPathFallback(t *testing
 	metadata["component"] = "mutated-opaque-component"
 	metadata["marker"] = "mutated-opaque-marker"
 
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("OPAQUE-METHOD", "/users/opaque-user?marker=opaque-query", nil))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("OPAQUE-METHOD", "/members/opaque-member?marker=opaque-query", nil))
 	events, payload := previewHTTPServerEvents(t, client)
 	span := events[0].Attributes
 	spanMetadata := span["metadata"].(map[string]any)
@@ -423,7 +455,7 @@ func TestHTTPHandlerSnapshotsConfigurationAndNeverUsesRawPathFallback(t *testing
 		t.Fatalf("unexpected privacy-bounded span: %#v", span)
 	}
 	assertHTTPServerPayloadPrivate(t, payload,
-		"OPAQUE-METHOD", "opaque-user", "opaque-query", "opaque configured body",
+		"OPAQUE-METHOD", "opaque-member", "opaque-query", "opaque configured body",
 		"mutated-opaque-component", "mutated-opaque-marker")
 }
 
