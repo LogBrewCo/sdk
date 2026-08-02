@@ -1128,6 +1128,9 @@ if product_action.get("metadata") != {
     "routeTemplate": "/checkout/:step",
     "sessionId": "sess_123",
     "traceId": context.trace_id,
+    "analyticsSchemaVersion": 1,
+    "analyticsKind": "interaction",
+    "analyticsSurface": "/checkout/:step",
 }:
     raise SystemExit(f"unexpected product action metadata: {product_action!r}")
 
