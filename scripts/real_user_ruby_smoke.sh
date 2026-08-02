@@ -34,10 +34,12 @@ test -f "$unpacked_dir/lib/logbrew/traceparent.rb"
 test -f "$unpacked_dir/lib/logbrew/trace.rb"
 test -f "$unpacked_dir/lib/logbrew/span_events.rb"
 test -f "$unpacked_dir/lib/logbrew/operation_tracing.rb"
+test -f "$unpacked_dir/lib/logbrew/issue_diagnostics.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
 test -f "$unpacked_dir/examples/first_useful_telemetry.rb"
+test -f "$unpacked_dir/examples/issue_diagnostics.rb"
 test -f "$unpacked_dir/examples/http_trace_correlation.rb"
 test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
@@ -59,6 +61,8 @@ grep -q 'HTTP Request Trace Correlation' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RackMiddleware' "$unpacked_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
 grep -q 'LogBrew::OperationTracing' "$unpacked_dir/README.md"
+grep -q 'Typed Issue Diagnostics' "$unpacked_dir/README.md"
+grep -q 'LogBrew::IssueDiagnostics.from_exception' "$unpacked_dir/README.md"
 grep -q 'Dependency Operation Spans' "$unpacked_dir/README.md"
 grep -q 'exceptionEscaped' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
@@ -71,6 +75,7 @@ grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/unpacked-exam
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/unpacked-examples-help.txt"
+grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/unpacked-examples-help.txt"
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-readme-example) > "$tmp_dir/unpacked-readme.stdout.json" 2> "$tmp_dir/unpacked-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
@@ -78,6 +83,8 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"ok":true' "$tmp_dir/unpacked-readme.stderr.json"
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-first-useful-telemetry) > "$tmp_dir/unpacked-first-useful.stdout.json" 2> "$tmp_dir/unpacked-first-useful.stderr.json"
 python3 "$repo_root/scripts/check_ruby_first_useful_payload.py" "$tmp_dir/unpacked-first-useful.stdout.json" "$tmp_dir/unpacked-first-useful.stderr.json" >/dev/null
+(cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-issue-diagnostics) > "$tmp_dir/unpacked-issue-diagnostics.stdout.json" 2> "$tmp_dir/unpacked-issue-diagnostics.stderr.json"
+python3 "$repo_root/scripts/check_ruby_issue_diagnostics_payload.py" "$tmp_dir/unpacked-issue-diagnostics.stdout.json" "$tmp_dir/unpacked-issue-diagnostics.stderr.json" >/dev/null
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-http-trace-correlation) > "$tmp_dir/unpacked-http-trace.stdout.json" 2> "$tmp_dir/unpacked-http-trace.stderr.json"
 python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/unpacked-http-trace.stdout.json" "$tmp_dir/unpacked-http-trace.stderr.json" >/dev/null
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run) > "$tmp_dir/unpacked-smoke.stdout.json" 2> "$tmp_dir/unpacked-smoke.stderr.json"
@@ -108,6 +115,8 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBr
 grep -qx 'true' "$tmp_dir/installed-operation-tracing.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::SupportTicketDraft.respond_to?(:create))' > "$tmp_dir/installed-support-ticket.out"
 grep -qx 'true' "$tmp_dir/installed-support-ticket.out"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::IssueDiagnostics.respond_to?(:from_exception)); puts(LogBrew::IssueDiagnostics.respond_to?(:breadcrumb))' > "$tmp_dir/installed-issue-diagnostics.out"
+test "$(grep -c '^true$' "$tmp_dir/installed-issue-diagnostics.out")" -eq 2
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
 test -f "$gem_dir/README.md"
 test -f "$gem_dir/lib/logbrew/product_timeline.rb"
@@ -116,9 +125,11 @@ test -f "$gem_dir/lib/logbrew/trace.rb"
 test -f "$gem_dir/lib/logbrew/span_events.rb"
 test -f "$gem_dir/lib/logbrew/operation_tracing.rb"
 test -f "$gem_dir/lib/logbrew/support_ticket.rb"
+test -f "$gem_dir/lib/logbrew/issue_diagnostics.rb"
 test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
 test -f "$gem_dir/examples/first_useful_telemetry.rb"
+test -f "$gem_dir/examples/issue_diagnostics.rb"
 test -f "$gem_dir/examples/http_trace_correlation.rb"
 test -f "$gem_dir/examples/Makefile"
 grep -q 'First Useful Service Telemetry' "$gem_dir/README.md"
@@ -136,6 +147,8 @@ grep -q 'Rack And Rails Middleware' "$gem_dir/README.md"
 grep -q 'LogBrew::OperationTracing' "$gem_dir/README.md"
 grep -q 'Support Ticket Draft Diagnostics' "$gem_dir/README.md"
 grep -q 'LogBrew::SupportTicketDraft.create' "$gem_dir/README.md"
+grep -q 'Typed Issue Diagnostics' "$gem_dir/README.md"
+grep -q 'LogBrew::IssueDiagnostics.from_exception' "$gem_dir/README.md"
 grep -q 'support-ticket routes' "$gem_dir/README.md"
 grep -q 'Dependency Operation Spans' "$gem_dir/README.md"
 grep -q 'exceptionEscaped' "$gem_dir/README.md"
@@ -149,6 +162,8 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/first_useful_telemetry.rb" > "$tmp_dir/installed-first-useful.stdout.json" 2> "$tmp_dir/installed-first-useful.stderr.json"
 python3 "$repo_root/scripts/check_ruby_first_useful_payload.py" "$tmp_dir/installed-first-useful.stdout.json" "$tmp_dir/installed-first-useful.stderr.json" >/dev/null
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/issue_diagnostics.rb" > "$tmp_dir/installed-issue-diagnostics.stdout.json" 2> "$tmp_dir/installed-issue-diagnostics.stderr.json"
+python3 "$repo_root/scripts/check_ruby_issue_diagnostics_payload.py" "$tmp_dir/installed-issue-diagnostics.stdout.json" "$tmp_dir/installed-issue-diagnostics.stderr.json" >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/http_trace_correlation.rb" > "$tmp_dir/installed-http-trace.stdout.json" 2> "$tmp_dir/installed-http-trace.stderr.json"
 python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/installed-http-trace.stdout.json" "$tmp_dir/installed-http-trace.stderr.json" >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/real_user_smoke.rb" > "$tmp_dir/installed-smoke.stdout.json" 2> "$tmp_dir/installed-smoke.stderr.json"
@@ -249,7 +264,7 @@ draft = LogBrew::SupportTicketDraft.create(
   diagnostics: {
     apiKey: "lbw_ingest_hidden",
     endpoint: "https://api.example/ingest?debug=true#frag",
-    localPath: "/Users/example/app/.env",
+    localPath: "/home/example/app/.env",
     error: RuntimeError.new("hidden token"),
     values: Hash[(0...25).map { |index| ["item#{index}", index] }]
   }
@@ -263,7 +278,7 @@ raise "path leaked" unless diagnostics.fetch("localPath") == "[redacted-path]"
 raise "exception leaked" unless diagnostics.fetch("error").fetch("type") == "RuntimeError" && !diagnostics.fetch("error").key?("message")
 raise "diagnostic map not bounded" unless diagnostics.fetch("values").length == 20 && !diagnostics.fetch("values").key?("item24")
 payload = JSON.generate(draft)
-raise "unsafe support payload leaked" if payload.include?("hidden") || payload.include?("api.example") || payload.include?("/Users/example")
+raise "unsafe support payload leaked" if payload.include?("hidden") || payload.include?("api.example") || payload.include?("/home/example")
 puts "installed support ticket draft ok"
 RUBY
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$tmp_dir/installed-support-ticket.rb" > "$tmp_dir/installed-support-ticket-smoke.out"
@@ -273,6 +288,7 @@ grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/installed-exa
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/installed-examples-help.txt"
+grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/installed-examples-help.txt"
 
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" gem uninstall logbrew-sdk --all --executables --ignore-dependencies --force >/dev/null

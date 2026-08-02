@@ -140,6 +140,9 @@ begin
       body = JSON.generate("tool" => parameters.fetch(:id))
       [200, { "content-type" => "application/json", "content-length" => body.bytesize.to_s }, [body]]
     }
+    get "/failures/:id", to: lambda { |_environment|
+      raise RuntimeError, "opaque escaped error detail"
+    }
   end
 
   runtime = LogBrew::Rails.runtime
@@ -158,6 +161,13 @@ begin
   abort "application response changed" unless response.status == 200
   abort "application body changed" unless JSON.parse(response.body).fetch("tool") == "opaque-record-id"
 
+  failed_response = Rack::MockRequest.new(application).get(
+    "/failures/opaque-failure-id?session_hint=opaque-failure-query",
+    "HTTP_TRACEPARENT" => incoming,
+    "HTTP_AUTHORIZATION" => "Bearer opaque-failure-auth"
+  )
+  abort "failed application response changed" unless failed_response.status == 500
+
   Rails.error.report(
     RuntimeError.new("opaque handled error detail"),
     handled: true,
@@ -173,8 +183,8 @@ begin
   spans = preview_events.select { |event| event.fetch("type") == "span" }
   issues = preview_events.select { |event| event.fetch("type") == "issue" }
   abort "environment event count changed" unless environment_events.length == 1
-  abort "request span count changed" unless spans.length == 1
-  abort "handled issue count changed" unless issues.length == 1
+  abort "request span count changed" unless spans.length == 2
+  abort "issue count changed" unless issues.length == 2
 
   span = spans.fetch(0).fetch("attributes")
   abort "route template span changed: #{span.fetch("name").inspect}" unless span.fetch("name") == "GET /tools/:id(.:format)"
@@ -185,15 +195,43 @@ begin
   abort "service metadata changed" unless span_metadata.fetch("service") == "installed-rails-smoke"
   abort "environment metadata changed" unless span_metadata.fetch("environment") == "test"
 
-  issue = issues.fetch(0).fetch("attributes")
-  abort "handled issue title changed" unless issue.fetch("title") == "RuntimeError"
-  abort "handled issue message became enabled" if issue.key?("message")
-  abort "handled marker changed" unless issue.fetch("metadata").fetch("rails.handled") == true
+  handled_issue = issues.find do |event|
+    event.fetch("attributes").dig("exception", "mechanism", "type") == "rails.error_reporter"
+  end&.fetch("attributes")
+  abort "handled Rails issue missing" if handled_issue.nil?
+  abort "handled issue title changed" unless handled_issue.fetch("title") == "RuntimeError"
+  abort "handled issue message became enabled" if handled_issue.key?("message")
+  abort "handled marker changed" unless handled_issue.fetch("metadata").fetch("rails.handled") == true
+  abort "handled typed mechanism changed" unless handled_issue.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rails.error_reporter", "handled" => true }
+  }
+
+  escaped_issue = issues.find do |event|
+    event.fetch("attributes").dig("exception", "mechanism", "type") == "rails.middleware"
+  end&.fetch("attributes")
+  abort "escaped Rails issue missing" if escaped_issue.nil?
+  abort "escaped issue message became enabled" if escaped_issue.key?("message")
+  abort "escaped typed mechanism changed" unless escaped_issue.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rails.middleware", "handled" => false }
+  }
+  escaped_frames = escaped_issue.fetch("stackFrames")
+  abort "escaped Rails frames changed" unless escaped_frames.length.between?(1, 32)
+  abort "escaped Rails frame path changed" unless escaped_frames.fetch(0).fetch("filename") == "consumer.rb"
+  failed_span = spans.find { |event| event.fetch("attributes").fetch("status") == "error" }.fetch("attributes")
+  escaped_metadata = escaped_issue.fetch("metadata")
+  abort "escaped Rails trace correlation changed" unless escaped_metadata.fetch("traceId") == failed_span.fetch("traceId")
+  abort "escaped Rails span correlation changed" unless escaped_metadata.fetch("spanId") == failed_span.fetch("spanId")
+  abort "escaped Rails grouping changed" unless escaped_metadata.fetch("issueGroupingKey").match?(
+    /\Arails-exception-[0-9a-f]{64}\z/
+  )
 
   serialized = JSON.generate(preview_events)
   %w[
     opaque-record-id opaque-query opaque-auth installed-rails-key
-    opaque\ handled\ error\ detail opaque-user-id
+    opaque\ handled\ error\ detail opaque\ escaped\ error\ detail opaque-user-id
+    opaque-failure-id opaque-failure-query opaque-failure-auth
   ].each do |forbidden|
     abort "Rails telemetry privacy changed" if serialized.include?(forbidden.tr("\\", " "))
   end
@@ -205,10 +243,10 @@ begin
   abort "intake route changed" unless route == "/v1/events"
   abort "authorization changed" unless headers.fetch("authorization") == "Bearer installed-rails-key"
   delivered = JSON.parse(body).fetch("events")
-  abort "delivered event count changed" unless delivered.length == 3
+  abort "delivered event count changed" unless delivered.length == 5
   abort "pending events remain" unless client.pending_events.zero?
 
-  puts "installed Rails consumer ok requests=1 spans=1 issues=1 environments=1"
+  puts "installed Rails consumer ok requests=2 spans=2 issues=2 environments=1"
 ensure
   intake.close
 end
@@ -219,7 +257,7 @@ LOGBREW_RAILS_SMOKE_VERSION="$rails_version" \
 RUBYOPT=-W0 \
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
   "$ruby_bin" "$consumer_path" > "$tmp_dir/consumer.out"
-grep -qx 'installed Rails consumer ok requests=1 spans=1 issues=1 environments=1' "$tmp_dir/consumer.out"
+grep -qx 'installed Rails consumer ok requests=2 spans=2 issues=2 environments=1' "$tmp_dir/consumer.out"
 
-printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=1 spans=1 issues=1 environments=1\n' \
+printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=2 spans=2 issues=2 environments=1\n' \
   "$package_version" "$rails_version" "$gem_digest"

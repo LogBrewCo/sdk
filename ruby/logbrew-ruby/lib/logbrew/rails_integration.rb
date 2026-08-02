@@ -398,6 +398,14 @@ module LogBrew
     class RailsRackMiddleware < LogBrew::RackMiddleware
       private
 
+      def exception_mechanism_type
+        "rails.middleware"
+      end
+
+      def exception_grouping_prefix
+        "rails-exception"
+      end
+
       def request_name(env)
         "#{request_method(env)} #{route_template(env)}"
       end
