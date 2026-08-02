@@ -9,6 +9,7 @@ import {
 import { AsyncLocalStorage } from "node:async_hooks";
 import { errorMonitor } from "node:events";
 import { createAutomaticEventId } from "./automatic-event-id.js";
+import runtimeContext from "./runtime-context.cjs";
 import {
   createLogBrewQueueBatchSpanOptions as createQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders as createQueueTraceHeaders,
@@ -62,11 +63,13 @@ const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
 const activeTraceContext = new AsyncLocalStorage();
 const axiosInstrumentationHandles = new WeakMap();
 const httpClientInstrumentationHandles = new WeakMap();
+const { addNodeRuntimeContext } = runtimeContext;
 
 export function createLogBrewNodeClient({
   serverApiKey,
   apiKey,
   automaticDelivery,
+  captureRuntimeContext = true,
   context,
   deliveryIntervalMs,
   deliveryQueueThreshold,
@@ -92,6 +95,9 @@ export function createLogBrewNodeClient({
       "createLogBrewNodeClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
+  if (typeof captureRuntimeContext !== "boolean") {
+    throw new SdkError("configuration_error", "captureRuntimeContext must be a boolean");
+  }
   if (persistentQueue !== undefined && persistentQueuePath !== undefined) {
     throw new SdkError("configuration_error", "persistentQueue and persistentQueuePath are mutually exclusive");
   }
@@ -115,11 +121,12 @@ export function createLogBrewNodeClient({
       sdkName
     });
   const ownedTransport = transport ?? createNodeFetchTransport({ endpoint, fetchImpl, headers });
+  const clientContext = captureRuntimeContext ? addNodeRuntimeContext(context) : context;
   try {
     return LogBrewClient.create({
       apiKey: authKey,
       automaticDelivery,
-      context,
+      context: clientContext,
       deliveryIntervalMs,
       deliveryQueueThreshold,
       eventStore,

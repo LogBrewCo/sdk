@@ -15,6 +15,42 @@ npm install @logbrew/sdk @logbrew/node
 pnpm add @logbrew/sdk @logbrew/node
 ```
 
+## Default Runtime Context
+
+`createLogBrewNodeClient()` adds a bounded shared context to every signal by
+default. It includes the Node.js runtime name/version, the operating-system
+type/release reported by Node, and the runtime architecture. These fields help
+people and coding agents distinguish runtime- or platform-specific failures
+without extra setup.
+
+Caller context remains authoritative. Explicit runtime and operating-system
+sections replace their defaults, while explicit device fields extend and
+override the default architecture:
+
+```js
+const client = createLogBrewNodeClient({
+  context: {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "checkout-api", version: "1.4.0" },
+      device: { model: "container" },
+      application: { name: "checkout", version: "1.4.0" }
+    },
+    tags: { plan: "team" }
+  }
+});
+```
+
+Set `captureRuntimeContext: false` to disable only these automatic defaults.
+Any explicit `context` still passes through unchanged and remains subject to
+the shared SDK validation contract.
+
+Automatic runtime context reads only the three Node-provided values listed
+above. It does not inspect other process or system state, and it does not infer
+service, application, deployment, or framework identity from `sdkName`. Add
+those fields explicitly when they are stable and privacy-safe for your
+application.
+
 ## HTTP Server
 
 ```js
