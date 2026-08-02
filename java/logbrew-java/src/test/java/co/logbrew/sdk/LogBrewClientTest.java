@@ -278,6 +278,9 @@ public final class LogBrewClientTest {
         metadata.put("cartTier", "gold");
         metadata.put("attempt", Integer.valueOf(2));
         metadata.put("routeTemplate", "/raw?debug=sample");
+        metadata.put("analyticsSchemaVersion", Integer.valueOf(99));
+        metadata.put("analyticsKind", "page_view");
+        metadata.put("analyticsSurface", "/spoofed");
 
         client.action(
             "evt_product_timeline",
@@ -307,6 +310,9 @@ public final class LogBrewClientTest {
         assertContains(payload, "\"step\": \"submit\"");
         assertContains(payload, "\"cartTier\": \"gold\"");
         assertContains(payload, "\"attempt\": 2");
+        assertContains(payload, "\"analyticsSchemaVersion\": 1");
+        assertContains(payload, "\"analyticsKind\": \"interaction\"");
+        assertContains(payload, "\"analyticsSurface\": \"/checkout/:step\"");
         assertNotContains(payload, "cart=sample");
         assertNotContains(payload, "\"cartTier\": \"platinum\"");
         assertNotContains(payload, "/raw?debug=sample");

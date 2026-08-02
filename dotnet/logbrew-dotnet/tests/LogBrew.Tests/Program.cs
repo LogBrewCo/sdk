@@ -332,7 +332,10 @@ var productTimelineMetadata = new Dictionary<string, object?>
 {
     ["cartTier"] = "gold",
     ["attempt"] = 2,
-    ["routeTemplate"] = "/raw?debug=sample"
+    ["routeTemplate"] = "/raw?debug=sample",
+    ["analyticsSchemaVersion"] = 99,
+    ["analyticsKind"] = "page_view",
+    ["analyticsSurface"] = "/spoofed"
 };
 var productTimelineClient = SampleClient();
 productTimelineClient.Action(
@@ -361,6 +364,9 @@ AssertTrue(productTimelinePreview.Contains("\"funnel\": \"checkout\"", StringCom
 AssertTrue(productTimelinePreview.Contains("\"step\": \"submit\"", StringComparison.Ordinal), "expected product step");
 AssertTrue(productTimelinePreview.Contains("\"cartTier\": \"gold\"", StringComparison.Ordinal), "expected product metadata copy");
 AssertTrue(productTimelinePreview.Contains("\"attempt\": 2", StringComparison.Ordinal), "expected product primitive metadata");
+AssertTrue(productTimelinePreview.Contains("\"analyticsSchemaVersion\": 1", StringComparison.Ordinal), "expected product analytics schema version");
+AssertTrue(productTimelinePreview.Contains("\"analyticsKind\": \"interaction\"", StringComparison.Ordinal), "expected product analytics kind");
+AssertTrue(productTimelinePreview.Contains("\"analyticsSurface\": \"/checkout/:step\"", StringComparison.Ordinal), "expected product analytics surface");
 AssertTrue(!productTimelinePreview.Contains("cart=sample", StringComparison.Ordinal), "expected product query text to be omitted");
 AssertTrue(!productTimelinePreview.Contains("debug=sample", StringComparison.Ordinal), "expected product metadata route override");
 AssertTrue(!productTimelinePreview.Contains("platinum", StringComparison.Ordinal), "expected product metadata to be copied");

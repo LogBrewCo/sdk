@@ -429,7 +429,13 @@ class LogBrewSdkTests(unittest.TestCase):
                 "screen": "checkout",
                 "funnel": "checkout",
                 "step": "submit",
-                "metadata": {"service": "checkout", "payload": {"card": "private"}},
+                "metadata": {
+                    "service": "checkout",
+                    "payload": {"card": "private"},
+                    "analyticsSchemaVersion": 99,
+                    "analyticsKind": "page_view",
+                    "analyticsSurface": "/spoofed",
+                },
             },
             metadata={"release": "2026.06.02"},
         )
@@ -449,6 +455,9 @@ class LogBrewSdkTests(unittest.TestCase):
                     "screen": "checkout",
                     "funnel": "checkout",
                     "step": "submit",
+                    "analyticsSchemaVersion": 1,
+                    "analyticsKind": "interaction",
+                    "analyticsSurface": "/checkout/:step",
                 },
             },
         )

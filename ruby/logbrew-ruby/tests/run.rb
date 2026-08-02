@@ -128,7 +128,14 @@ assert(metric_payload.include?('"queue": "checkout"'), "expected metric metadata
 tests += 1
 
 client = sample_client
-product_metadata = { "plan" => "pro", "source" => "caller", "attempt" => 2 }
+product_metadata = {
+  "plan" => "pro",
+  "source" => "caller",
+  "attempt" => 2,
+  "analyticsSchemaVersion" => 99,
+  "analyticsKind" => "page_view",
+  "analyticsSurface" => "/spoofed"
+}
 product_action = LogBrew::ProductTimeline.product_action(
   name: "checkout.submit",
   status: "running",
@@ -156,6 +163,9 @@ assert(product_timeline_metadata.fetch("funnel") == "purchase", "expected produc
 assert(product_timeline_metadata.fetch("step") == "submit", "expected product step")
 assert(product_timeline_metadata.fetch("plan") == "pro", "expected product metadata copy")
 assert(product_timeline_metadata.fetch("attempt") == 2, "expected product numeric metadata")
+assert(product_timeline_metadata.fetch("analyticsSchemaVersion") == 1, "expected analytics schema version")
+assert(product_timeline_metadata.fetch("analyticsKind") == "interaction", "expected analytics kind")
+assert(product_timeline_metadata.fetch("analyticsSurface") == "/checkout", "expected analytics surface")
 tests += 1
 
 client = sample_client
@@ -718,7 +728,7 @@ support_draft = LogBrew::SupportTicketDraft.create(
     endpoint: "https://api.example/ingest?debug=true#frag",
     errorMessage: "api key leaked in camel case message",
     exception_message: "password leaked in snake case message",
-    localPath: "/Users/example/app/.env",
+    localPath: "/home/example/app/.env",
     error: RuntimeError.new("contains hidden token"),
     headers: {
       authorization: "Bearer hidden",
@@ -764,7 +774,7 @@ assert(events.length == 2, "expected support event diagnostics")
 assert(events[1].fetch("token") == "[redacted]", "expected support nested token redaction")
 assert(!support_diagnostics.key?("callback"), "expected support unsupported diagnostic omission")
 support_json = JSON.generate(support_draft)
-%w[hidden api.example /Users/example traceparent].each do |unsafe|
+%w[hidden api.example /home/example traceparent].each do |unsafe|
   assert(!support_json.include?(unsafe), "support draft leaked #{unsafe}: #{support_json}")
 end
 tests += 1

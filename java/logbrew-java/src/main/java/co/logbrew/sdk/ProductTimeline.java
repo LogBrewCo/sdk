@@ -13,6 +13,9 @@ import java.util.Map;
  * or collect visual session replay.</p>
  */
 public final class ProductTimeline {
+    private static final int PRODUCT_ANALYTICS_SCHEMA_VERSION = 1;
+    private static final int MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
+
     private ProductTimeline() {
     }
 
@@ -119,12 +122,24 @@ public final class ProductTimeline {
             Validation.requireNonEmpty("product action name", name);
             Validation.requireAllowedValue("product action status", status, LogBrewClient.ACTION_STATUSES);
             Map<String, Object> timeline = timelineMetadata("product.action", metadata);
-            putIfPresent(timeline, "routeTemplate", sanitizeRouteTemplate(routeTemplate));
+            String sanitizedRoute = sanitizeRouteTemplate(routeTemplate);
+            String sanitizedScreen = stringOrNull(screen);
+            putIfPresent(timeline, "routeTemplate", sanitizedRoute);
             putIfPresent(timeline, "sessionId", stringOrNull(sessionId));
             putIfPresent(timeline, "traceId", stringOrNull(traceId));
-            putIfPresent(timeline, "screen", stringOrNull(screen));
+            putIfPresent(timeline, "screen", sanitizedScreen);
             putIfPresent(timeline, "funnel", stringOrNull(funnel));
             putIfPresent(timeline, "step", stringOrNull(step));
+            timeline.put("analyticsSchemaVersion", Integer.valueOf(PRODUCT_ANALYTICS_SCHEMA_VERSION));
+            timeline.put("analyticsKind", "interaction");
+            String analyticsSurface = boundedProductAnalyticsSurface(
+                sanitizedRoute == null || sanitizedRoute.trim().isEmpty() ? sanitizedScreen : sanitizedRoute
+            );
+            if (analyticsSurface == null) {
+                timeline.remove("analyticsSurface");
+            } else {
+                timeline.put("analyticsSurface", analyticsSurface);
+            }
 
             ActionAttributes attributes = ActionAttributes.create(name, status).metadata(timeline);
             attributes.toMap();
@@ -351,5 +366,24 @@ public final class ProductTimeline {
 
     private static String stringOrNull(String value) {
         return value == null || value.trim().isEmpty() ? null : value;
+    }
+
+    private static String boundedProductAnalyticsSurface(String surface) {
+        if (surface == null) {
+            return null;
+        }
+        String normalized = surface.trim();
+        if (normalized.isEmpty()
+            || normalized.codePointCount(0, normalized.length()) > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH) {
+            return null;
+        }
+        for (int index = 0; index < normalized.length();) {
+            int codePoint = normalized.codePointAt(index);
+            if (codePoint <= 31 || (codePoint >= 127 && codePoint <= 159)) {
+                return null;
+            }
+            index += Character.charCount(codePoint);
+        }
+        return normalized;
     }
 }

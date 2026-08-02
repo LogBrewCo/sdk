@@ -14,6 +14,8 @@ final class ProductTimeline
 {
     /** @var list<string> */
     private const ACTION_STATUSES = ['queued', 'running', 'success', 'failure'];
+    private const PRODUCT_ANALYTICS_SCHEMA_VERSION = 1;
+    private const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 
     private function __construct()
     {
@@ -38,12 +40,22 @@ final class ProductTimeline
     ): array {
         $normalizedStatus = self::normalizeStatus($status);
         $actionMetadata = self::createMetadata('product_timeline', $metadata);
-        self::putIfNotNull($actionMetadata, 'routeTemplate', self::sanitizeOptionalRouteTemplate('product routeTemplate', $routeTemplate));
+        $sanitizedRoute = self::sanitizeOptionalRouteTemplate('product routeTemplate', $routeTemplate);
+        $sanitizedScreen = self::label('screen', $screen);
+        self::putIfNotNull($actionMetadata, 'routeTemplate', $sanitizedRoute);
         self::putIfNotNull($actionMetadata, 'sessionId', self::label('sessionId', $sessionId));
         self::putIfNotNull($actionMetadata, 'traceId', self::label('traceId', $traceId));
-        self::putIfNotNull($actionMetadata, 'screen', self::label('screen', $screen));
+        self::putIfNotNull($actionMetadata, 'screen', $sanitizedScreen);
         self::putIfNotNull($actionMetadata, 'funnel', self::label('funnel', $funnel));
         self::putIfNotNull($actionMetadata, 'step', self::label('step', $step));
+        $actionMetadata['analyticsSchemaVersion'] = self::PRODUCT_ANALYTICS_SCHEMA_VERSION;
+        $actionMetadata['analyticsKind'] = 'interaction';
+        $surface = self::boundedProductAnalyticsSurface($sanitizedRoute ?? $sanitizedScreen);
+        if ($surface === null) {
+            unset($actionMetadata['analyticsSurface']);
+        } else {
+            $actionMetadata['analyticsSurface'] = $surface;
+        }
 
         return [
             'name' => self::requiredLabel('product action name', $name),
@@ -223,5 +235,22 @@ final class ProductTimeline
         }
 
         return min($first, $second);
+    }
+
+    private static function boundedProductAnalyticsSurface(?string $surface): ?string
+    {
+        if ($surface === null) {
+            return null;
+        }
+        $normalized = trim($surface);
+        if ($normalized === '' || preg_match('/\p{Cc}/u', $normalized) !== 0) {
+            return null;
+        }
+        $characterCount = preg_match_all('/./us', $normalized);
+        if ($characterCount === false || $characterCount > self::MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH) {
+            return null;
+        }
+
+        return $normalized;
     }
 }

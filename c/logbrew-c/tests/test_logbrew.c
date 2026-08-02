@@ -137,7 +137,10 @@ static void product_timeline_helpers_capture_safe_metadata(void) {
   char *json = NULL;
   LogBrewMetadataEntry metadata[] = {
     LOGBREW_METADATA_NUMBER_VALUE("cartValue", 42.5),
-    LOGBREW_METADATA_BOOL_VALUE("retry", false)
+    LOGBREW_METADATA_BOOL_VALUE("retry", false),
+    LOGBREW_METADATA_NUMBER_VALUE("analyticsSchemaVersion", 99.0),
+    LOGBREW_METADATA_STRING_VALUE("analyticsKind", "page_view"),
+    LOGBREW_METADATA_STRING_VALUE("analyticsSurface", "/spoofed")
   };
   LogBrewProductTimelineContext context = {
     "session_123",
@@ -177,6 +180,10 @@ static void product_timeline_helpers_capture_safe_metadata(void) {
   EXPECT_TRUE(strstr(json, "\"durationMs\":184.5") != NULL);
   EXPECT_TRUE(strstr(json, "\"cartValue\":42.5") != NULL);
   EXPECT_TRUE(strstr(json, "\"retry\":false") != NULL);
+  EXPECT_TRUE(strstr(json, "\"analyticsSchemaVersion\":1") != NULL);
+  EXPECT_TRUE(strstr(json, "\"analyticsKind\":\"interaction\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"analyticsSurface\":\"/checkout\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"analyticsSchemaVersion\":99") == NULL);
   EXPECT_TRUE(strstr(json, "sku=") == NULL);
   EXPECT_TRUE(strstr(json, "#pay") == NULL);
   logbrew_free_string(json);

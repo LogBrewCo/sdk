@@ -5,6 +5,9 @@ use crate::http_fields::{
 use crate::{ACTION_STATUSES, ActionEvent, SdkError, require_allowed_value, require_non_empty};
 use serde_json::{Map, Value};
 
+const PRODUCT_ANALYTICS_SCHEMA_VERSION: u64 = 1;
+const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH: usize = 256;
+
 #[derive(Clone, Debug)]
 /// App-owned timeline builders for product actions and network milestones.
 pub struct ProductTimeline;
@@ -105,11 +108,12 @@ impl ProductActionTimeline {
         require_allowed_value("action status", &self.status, ACTION_STATUSES)?;
 
         let mut metadata = telemetry_metadata("product_timeline", self.metadata)?;
-        insert_optional(
-            &mut metadata,
-            "routeTemplate",
-            optional_route_template("product route_template", self.route_template)?,
-        );
+        let route_template =
+            optional_route_template("product route_template", self.route_template)?;
+        let screen = optional_label("screen", self.screen)?;
+        let analytics_surface =
+            bounded_product_analytics_surface(route_template.as_deref().or(screen.as_deref()));
+        insert_optional(&mut metadata, "routeTemplate", route_template);
         insert_optional(
             &mut metadata,
             "sessionId",
@@ -120,20 +124,40 @@ impl ProductActionTimeline {
             "traceId",
             optional_label("trace_id", self.trace_id)?,
         );
-        insert_optional(
-            &mut metadata,
-            "screen",
-            optional_label("screen", self.screen)?,
-        );
+        insert_optional(&mut metadata, "screen", screen);
         insert_optional(
             &mut metadata,
             "funnel",
             optional_label("funnel", self.funnel)?,
         );
         insert_optional(&mut metadata, "step", optional_label("step", self.step)?);
+        metadata.insert(
+            "analyticsSchemaVersion".to_string(),
+            Value::from(PRODUCT_ANALYTICS_SCHEMA_VERSION),
+        );
+        metadata.insert(
+            "analyticsKind".to_string(),
+            Value::String("interaction".to_string()),
+        );
+        if let Some(surface) = analytics_surface {
+            metadata.insert("analyticsSurface".to_string(), Value::String(surface));
+        } else {
+            metadata.remove("analyticsSurface");
+        }
 
         Ok(ActionEvent::new(self.name, self.status).with_metadata(metadata))
     }
+}
+
+fn bounded_product_analytics_surface(surface: Option<&str>) -> Option<String> {
+    let normalized = surface?.trim();
+    if normalized.is_empty()
+        || normalized.chars().count() > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH
+        || normalized.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(normalized.to_string())
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -490,6 +490,9 @@ $productMetadata = [
     'cartTier' => 'gold',
     'attempt' => 2,
     'routeTemplate' => '/raw?debug=sample',
+    'analyticsSchemaVersion' => 99,
+    'analyticsKind' => 'page_view',
+    'analyticsSurface' => '/spoofed',
 ];
 $client = sampleClient();
 $client->action('evt_product_timeline', '2026-06-02T10:00:05Z', ProductTimeline::productAction(
@@ -516,6 +519,9 @@ foreach ([
     '"step": "submit"',
     '"cartTier": "gold"',
     '"attempt": 2',
+    '"analyticsSchemaVersion": 1',
+    '"analyticsKind": "interaction"',
+    '"analyticsSurface": "\/checkout\/:step"',
 ] as $needle) {
     assertTrue(str_contains($productPreview, $needle), "missing product timeline payload: {$needle}");
 }

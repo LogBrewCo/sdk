@@ -291,7 +291,10 @@ static void LBWExerciseTimelineHelpers(void) {
     @"screen": @"Checkout",
     @"traceId": @"trace_abc",
     @"funnel": @"checkout",
-    @"step": @"payment"
+    @"step": @"payment",
+    @"analyticsSchemaVersion": @99,
+    @"analyticsKind": @"page_view",
+    @"analyticsSurface": @"/spoofed"
   };
   LBWAssert([client captureProductActionWithID:@"evt_product_action_001"
                                      timestamp:@"2026-06-02T10:00:07Z"
@@ -325,6 +328,9 @@ static void LBWExerciseTimelineHelpers(void) {
   LBWAssert([actionMetadata[@"source"] isEqualToString:@"objc.action"], @"action source failed");
   LBWAssert([actionMetadata[@"sessionId"] isEqualToString:@"session_123"], @"action session failed");
   LBWAssert([actionMetadata[@"component"] isEqualToString:@"pay-button"], @"action metadata failed");
+  LBWAssert([actionMetadata[@"analyticsSchemaVersion"] isEqual:@1], @"analytics schema version failed");
+  LBWAssert([actionMetadata[@"analyticsKind"] isEqualToString:@"interaction"], @"analytics kind failed");
+  LBWAssert([actionMetadata[@"analyticsSurface"] isEqualToString:@"Checkout"], @"analytics surface failed");
   LBWAssert([networkAttributes[@"name"] isEqualToString:@"POST /api/checkout"], @"network name failed");
   LBWAssert([networkAttributes[@"status"] isEqualToString:@"failure"], @"network status failed");
   LBWAssert([networkMetadata[@"source"] isEqualToString:@"objc.network"], @"network source failed");

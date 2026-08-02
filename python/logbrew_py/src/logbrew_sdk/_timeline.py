@@ -20,6 +20,8 @@ from logbrew_sdk import (
 )
 
 HTTP_METHOD_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]*$")
+PRODUCT_ANALYTICS_SCHEMA_VERSION = 1
+MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256
 
 
 def create_product_action_attributes(
@@ -30,11 +32,13 @@ def create_product_action_attributes(
     """Build privacy-safe action attributes for app-owned product milestones."""
 
     details = product_action_details(action)
+    route_template = sanitize_route_template(details.get("routeTemplate"))
+    screen = string_or_none(details.get("screen"))
     timeline_metadata = {
-        "routeTemplate": sanitize_route_template(details.get("routeTemplate")),
+        "routeTemplate": route_template,
         "sessionId": string_or_none(details.get("sessionId")),
         "traceId": string_or_none(details.get("traceId")),
-        "screen": string_or_none(details.get("screen")),
+        "screen": screen,
         "funnel": string_or_none(details.get("funnel")),
         "step": string_or_none(details.get("step")),
     }
@@ -44,9 +48,10 @@ def create_product_action_attributes(
         "metadata": compact_metadata(
             {
                 "source": "product.action",
-                **dict(compact_metadata(metadata) or {}),
-                **dict(compact_metadata(details.get("metadata")) or {}),
+                **without_reserved_product_analytics(metadata),
+                **without_reserved_product_analytics(details.get("metadata")),
                 **drop_none_values(timeline_metadata),
+                **product_analytics_metadata(route_template or screen),
             }
         )
         or {},
@@ -185,6 +190,39 @@ def non_negative_number_or_none(label: str, value: Any) -> float | None:
 
 def string_or_none(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def product_analytics_metadata(surface: str | None) -> Metadata:
+    metadata: Metadata = {
+        "analyticsSchemaVersion": PRODUCT_ANALYTICS_SCHEMA_VERSION,
+        "analyticsKind": "interaction",
+    }
+    normalized_surface = bounded_product_analytics_surface(surface)
+    if normalized_surface is not None:
+        metadata["analyticsSurface"] = normalized_surface
+    return metadata
+
+
+def without_reserved_product_analytics(metadata: Mapping[str, Any] | None) -> Metadata:
+    reserved = {"analyticsSchemaVersion", "analyticsKind", "analyticsSurface"}
+    return {
+        key: value
+        for key, value in dict(compact_metadata(metadata) or {}).items()
+        if key not in reserved
+    }
+
+
+def bounded_product_analytics_surface(surface: str | None) -> str | None:
+    if surface is None:
+        return None
+    normalized = surface.strip()
+    if (
+        not normalized
+        or len(normalized) > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH
+        or any(ord(character) <= 31 or 127 <= ord(character) <= 159 for character in normalized)
+    ):
+        return None
+    return normalized
 
 
 def drop_none_values(metadata: Mapping[str, MetadataValue | None]) -> Metadata:

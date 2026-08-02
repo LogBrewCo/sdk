@@ -3,6 +3,9 @@
 module LogBrew
   # Builders for app-owned product and network timeline action events.
   class ProductTimeline
+    PRODUCT_ANALYTICS_SCHEMA_VERSION = 1
+    MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256
+
     private_class_method :new
 
     def self.product_action(
@@ -17,12 +20,18 @@ module LogBrew
       metadata: nil
     )
       action_metadata = timeline_metadata("product_timeline", metadata)
-      put_if_present(action_metadata, "routeTemplate", sanitize_optional_route_template("product route_template", route_template))
+      sanitized_route = sanitize_optional_route_template("product route_template", route_template)
+      sanitized_screen = optional_label("screen", screen)
+      put_if_present(action_metadata, "routeTemplate", sanitized_route)
       put_if_present(action_metadata, "sessionId", optional_label("session_id", session_id))
       put_if_present(action_metadata, "traceId", optional_label("trace_id", trace_id))
-      put_if_present(action_metadata, "screen", optional_label("screen", screen))
+      put_if_present(action_metadata, "screen", sanitized_screen)
       put_if_present(action_metadata, "funnel", optional_label("funnel", funnel))
       put_if_present(action_metadata, "step", optional_label("step", step))
+      action_metadata["analyticsSchemaVersion"] = PRODUCT_ANALYTICS_SCHEMA_VERSION
+      action_metadata["analyticsKind"] = "interaction"
+      surface = bounded_product_analytics_surface(sanitized_route || sanitized_screen)
+      surface.nil? ? action_metadata.delete("analyticsSurface") : action_metadata["analyticsSurface"] = surface
 
       {
         "name" => required_label("product action name", name),
@@ -146,8 +155,20 @@ module LogBrew
       [first, second].min
     end
 
+    def self.bounded_product_analytics_surface(surface)
+      return nil if surface.nil?
+
+      normalized = surface.to_s.strip
+      characters = normalized.each_codepoint.take(MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH + 1)
+      return nil if normalized.empty? || characters.length > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH
+      return nil if characters.any? { |codepoint| codepoint <= 31 || (codepoint >= 127 && codepoint <= 159) }
+
+      normalized
+    end
+
     private_class_method :timeline_metadata, :required_label, :optional_label, :normalize_status,
                          :sanitize_optional_route_template, :sanitize_route_template, :normalize_method,
-                         :validate_status_code, :validate_duration_ms, :put_if_present, :first_present_index
+                         :validate_status_code, :validate_duration_ms, :put_if_present, :first_present_index,
+                         :bounded_product_analytics_surface
   end
 end

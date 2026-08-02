@@ -5,7 +5,12 @@ import (
 	"math"
 	"net/url"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
+
+const productAnalyticsSchemaVersion = 1
+const maxProductAnalyticsSurfaceLength = 256
 
 // ProductActionInput describes an app-owned product step that should be
 // captured as an agent-readable action event.
@@ -48,14 +53,22 @@ func CreateProductActionAttributes(input ProductActionInput) (ActionAttributes, 
 	if err := requireAllowedValue("product action status", status, actionStatus); err != nil {
 		return ActionAttributes{}, err
 	}
+	routeTemplate := sanitizeRouteTemplate(input.RouteTemplate)
 	resultMetadata := timelineMetadata("product.action", input.Metadata, map[string]any{
-		"routeTemplate": sanitizeRouteTemplate(input.RouteTemplate),
+		"routeTemplate": routeTemplate,
 		"sessionId":     stringOrNil(input.SessionID),
 		"traceId":       stringOrNil(input.TraceID),
 		"screen":        stringOrNil(input.Screen),
 		"funnel":        stringOrNil(input.Funnel),
 		"step":          stringOrNil(input.Step),
 	})
+	resultMetadata["analyticsSchemaVersion"] = productAnalyticsSchemaVersion
+	resultMetadata["analyticsKind"] = "interaction"
+	if surface := boundedProductAnalyticsSurface(firstNonBlank(routeTemplate, input.Screen)); surface != "" {
+		resultMetadata["analyticsSurface"] = surface
+	} else {
+		delete(resultMetadata, "analyticsSurface")
+	}
 	return ActionAttributes{Name: input.Name, Status: status, Metadata: resultMetadata}, nil
 }
 
@@ -206,4 +219,24 @@ func stringOrNil(value string) any {
 		return nil
 	}
 	return value
+}
+
+func firstNonBlank(primary string, fallback string) string {
+	if strings.TrimSpace(primary) != "" {
+		return primary
+	}
+	return fallback
+}
+
+func boundedProductAnalyticsSurface(surface string) string {
+	normalized := strings.TrimSpace(surface)
+	if normalized == "" || utf8.RuneCountInString(normalized) > maxProductAnalyticsSurfaceLength {
+		return ""
+	}
+	for _, character := range normalized {
+		if unicode.IsControl(character) {
+			return ""
+		}
+	}
+	return normalized
 }

@@ -211,7 +211,7 @@ Use metric helpers when your application already has a bounded measurement:
 
 ## Product Analytics Capture
 
-Product analytics reuses explicit action events and existing page-view telemetry. Supported JavaScript, browser, and React Native helpers attach a reserved versioned classification for page views, screen views, and interactions without installing automatic click capture or collecting user-entered values. Use explicit opaque subject and session IDs in the shared telemetry context when user- or session-level analysis is required.
+Product analytics reuses explicit action events and existing page-view telemetry. Product-action helpers across the supported SDK families attach a reserved versioned `interaction` classification; browser page-view helpers attach `page_view`, and React Native plus Kotlin/Android screen helpers attach `screen_view`. These annotations do not install automatic click capture or collect user-entered values. Use explicit opaque subject and session IDs in the shared telemetry context when user- or session-level analysis is required.
 
 See the [product analytics capture contract](docs/product-analytics-contract.md) for the exact fields, privacy rules, and compatibility behavior.
 

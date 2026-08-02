@@ -11,7 +11,12 @@ struct ProductTimelineTests {
             timestamp: "2026-06-02T10:00:07Z",
             name: "checkout.pay_tapped",
             context: timelineContext(),
-            metadata: ["component": "pay-button"],
+            metadata: [
+                "component": "pay-button",
+                "analyticsSchemaVersion": 99,
+                "analyticsKind": "page_view",
+                "analyticsSurface": "/spoofed",
+            ],
         )
 
         let payload = try parsePayload(client.previewJSON())
@@ -29,6 +34,9 @@ struct ProductTimelineTests {
         #expect(metadata["step"] as? String == "payment")
         #expect(metadata["platform"] as? String == "ios")
         #expect(metadata["component"] as? String == "pay-button")
+        #expect(metadata["analyticsSchemaVersion"] as? Int == 1)
+        #expect(metadata["analyticsKind"] as? String == "interaction")
+        #expect(metadata["analyticsSurface"] as? String == "Checkout")
     }
 
     @Test("Swift network timeline helper sanitizes route metadata")

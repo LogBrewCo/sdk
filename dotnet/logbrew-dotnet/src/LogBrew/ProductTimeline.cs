@@ -90,6 +90,7 @@ namespace LogBrew
             TimelineMetadata.AddIfNotNull(actionMetadata, "screen", screen);
             TimelineMetadata.AddIfNotNull(actionMetadata, "funnel", funnel);
             TimelineMetadata.AddIfNotNull(actionMetadata, "step", step);
+            TimelineMetadata.AddProductAnalytics(actionMetadata, routeTemplate ?? screen);
             return ActionAttributes.Create(name, status).WithMetadata(actionMetadata);
         }
     }
@@ -178,6 +179,9 @@ namespace LogBrew
 
     internal static class TimelineMetadata
     {
+        private const int ProductAnalyticsSchemaVersion = 1;
+        private const int MaxProductAnalyticsSurfaceLength = 256;
+
         internal static Dictionary<string, object?> CopyMetadata(IDictionary<string, object?>? source)
         {
             var copied = Validation.CopyMetadata(source);
@@ -214,6 +218,21 @@ namespace LogBrew
             if (value != null)
             {
                 metadata[key] = value;
+            }
+        }
+
+        internal static void AddProductAnalytics(Dictionary<string, object?> metadata, string? surface)
+        {
+            metadata["analyticsSchemaVersion"] = ProductAnalyticsSchemaVersion;
+            metadata["analyticsKind"] = "interaction";
+            var normalizedSurface = BoundedProductAnalyticsSurface(surface);
+            if (normalizedSurface == null)
+            {
+                metadata.Remove("analyticsSurface");
+            }
+            else
+            {
+                metadata["analyticsSurface"] = normalizedSurface;
             }
         }
 
@@ -319,6 +338,43 @@ namespace LogBrew
                 || (character >= '0' && character <= '9')
                 || character == '-'
                 || character == '_';
+        }
+
+        private static string? BoundedProductAnalyticsSurface(string? surface)
+        {
+            if (surface == null)
+            {
+                return null;
+            }
+
+            var normalized = surface.Trim();
+            if (normalized.Length == 0)
+            {
+                return null;
+            }
+
+            var characterCount = 0;
+            for (var index = 0; index < normalized.Length; index++)
+            {
+                var character = normalized[index];
+                if (char.IsControl(character))
+                {
+                    return null;
+                }
+                if (char.IsHighSurrogate(character)
+                    && index + 1 < normalized.Length
+                    && char.IsLowSurrogate(normalized[index + 1]))
+                {
+                    index++;
+                }
+                characterCount++;
+                if (characterCount > MaxProductAnalyticsSurfaceLength)
+                {
+                    return null;
+                }
+            }
+
+            return normalized;
         }
 
         private static SdkException InvalidMethod()
