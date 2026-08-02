@@ -1,6 +1,8 @@
 import sdk from "./index.cjs";
 
 export const {
+  PRODUCT_ANALYTICS_KINDS,
+  PRODUCT_ANALYTICS_SCHEMA_VERSION,
   createBaggage,
   createIssueAttributesFromError,
   createNetworkMilestoneAttributes,

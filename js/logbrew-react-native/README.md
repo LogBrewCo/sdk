@@ -548,6 +548,8 @@ export function App({ client }) {
 }
 ```
 
+Screen views carry the versioned `screen_view` analytics classification, and explicit product actions carry `interaction`. The SDK uses the app-owned screen name as a bounded surface and does not inspect view hierarchies, selectors, or input values. Caller metadata cannot replace the reserved classification. See the repository [product analytics capture contract](../../docs/product-analytics-contract.md).
+
 The package ships a `react-native` entry that imports `AppState` and `Platform` for Metro, while the default Node entry accepts those dependencies explicitly. That keeps mobile setup explicit instead of pretending a Node process is a native runtime.
 
 ## Trace Propagation

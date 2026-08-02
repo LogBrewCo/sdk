@@ -164,6 +164,55 @@ test("React Native client uses core automatic delivery instead of app-owned flus
   });
 });
 
+test("React Native screen views and product actions use versioned analytics annotations", async () => {
+  await withInstalledPackage(async ({
+    captureReactNativeAction,
+    captureScreenView,
+    createLogBrewReactNativeClient
+  }) => {
+    const client = createLogBrewReactNativeClient({
+      automaticDelivery: false,
+      clientKey: "LOGBREW_CLIENT_KEY",
+      sdkName: "react-native-analytics-test",
+      sdkVersion: "0.1.0"
+    });
+
+    captureScreenView(client, "Checkout", {
+      id: "evt_screen_checkout",
+      metadata: {
+        analyticsKind: "interaction",
+        analyticsSchemaVersion: 99,
+        analyticsSurface: "private-selector"
+      },
+      timestamp: "2026-07-30T12:00:01Z"
+    });
+    captureReactNativeAction(client, {
+      id: "evt_action_checkout_submit",
+      metadata: {
+        analyticsKind: "page_view",
+        analyticsSchemaVersion: 99,
+        analyticsSurface: "private-selector"
+      },
+      name: "checkout.submit",
+      screen: "Checkout",
+      timestamp: "2026-07-30T12:00:02Z"
+    });
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.deepEqual(
+      events.map((event) => ({
+        kind: event.attributes.metadata.analyticsKind,
+        schemaVersion: event.attributes.metadata.analyticsSchemaVersion,
+        surface: event.attributes.metadata.analyticsSurface
+      })),
+      [
+        { kind: "screen_view", schemaVersion: 1, surface: "Checkout" },
+        { kind: "interaction", schemaVersion: 1, surface: "Checkout" }
+      ]
+    );
+  });
+});
+
 test("app-state listener can flush configured delivery before the app backgrounds", async () => {
   await withInstalledPackage(async ({
     createAppStateListener,

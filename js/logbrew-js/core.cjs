@@ -18,6 +18,9 @@ const SEVERITY_ALIASES = new Map([
 const SEVERITY_VALUES = new Set(SEVERITY_ALIASES.keys());
 const SPAN_STATUSES = new Set(["ok", "error"]);
 const ACTION_STATUSES = new Set(["queued", "running", "success", "failure"]);
+const PRODUCT_ANALYTICS_SCHEMA_VERSION = 1;
+const PRODUCT_ANALYTICS_KINDS = Object.freeze(["page_view", "screen_view", "interaction"]);
+const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 const METRIC_KINDS = new Set(["counter", "gauge", "histogram"]);
 const NON_NEGATIVE_METRIC_KINDS = new Set(["counter", "histogram"]);
 const METRIC_TEMPORALITIES_BY_KIND = new Map([
@@ -1520,6 +1523,7 @@ function logbrewLevelFromConsoleMethod(method) {
 
 function createProductActionAttributes(action, options = {}) {
   const details = productActionDetails(action);
+  const routeTemplate = sanitizeRouteTemplate(details.routeTemplate);
   return {
     name: details.name,
     status: details.status,
@@ -1527,12 +1531,13 @@ function createProductActionAttributes(action, options = {}) {
       source: "product.action",
       ...compactMetadata(options.metadata),
       ...compactMetadata(details.metadata),
-      routeTemplate: sanitizeRouteTemplate(details.routeTemplate),
+      routeTemplate,
       sessionId: stringOrUndefined(details.sessionId),
       traceId: stringOrUndefined(details.traceId),
       screen: stringOrUndefined(details.screen),
       funnel: stringOrUndefined(details.funnel),
-      step: stringOrUndefined(details.step)
+      step: stringOrUndefined(details.step),
+      ...productAnalyticsMetadata("interaction", routeTemplate || details.screen)
     })
   };
 }
@@ -2287,6 +2292,34 @@ function sanitizeRouteTemplate(routeTemplate) {
   }
 }
 
+function productAnalyticsMetadata(kind, surface) {
+  const normalizedSurface = boundedProductAnalyticsSurface(surface);
+  return {
+    analyticsSchemaVersion: PRODUCT_ANALYTICS_SCHEMA_VERSION,
+    analyticsKind: kind,
+    analyticsSurface: normalizedSurface
+  };
+}
+
+function boundedProductAnalyticsSurface(surface) {
+  if (typeof surface !== "string") {
+    return undefined;
+  }
+  const normalized = surface.trim();
+  const characters = Array.from(normalized);
+  if (
+    normalized === ""
+    || characters.length > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+    })
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
 function normalizeHttpMethod(method) {
   const value = method === undefined ? "GET" : method;
   if (typeof value !== "string" || value.trim() === "") {
@@ -2388,6 +2421,8 @@ function formatConsoleArgument(value, includeErrorStack) {
 }
 
 module.exports = {
+  PRODUCT_ANALYTICS_KINDS,
+  PRODUCT_ANALYTICS_SCHEMA_VERSION,
   createBaggage,
   createIssueAttributesFromError,
   createNetworkMilestoneAttributes,

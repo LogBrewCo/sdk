@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 import {
+  PRODUCT_ANALYTICS_KINDS,
+  PRODUCT_ANALYTICS_SCHEMA_VERSION,
   createIssueAttributesFromError,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
@@ -1792,7 +1794,10 @@ test("timeline helpers create safe action attributes", () => {
       traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
       screen: "Checkout",
       funnel: "checkout",
-      step: "submit"
+      step: "submit",
+      analyticsSchemaVersion: 1,
+      analyticsKind: "interaction",
+      analyticsSurface: "/checkout/:step"
     }
   });
   assert.deepEqual(network, {
@@ -1810,6 +1815,30 @@ test("timeline helpers create safe action attributes", () => {
       traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
     }
   });
+});
+
+test("product analytics annotations cannot be replaced by caller metadata", () => {
+  const action = createProductActionAttributes({
+    name: "checkout.submit",
+    screen: "Checkout",
+    metadata: {
+      analyticsSchemaVersion: 99,
+      analyticsKind: "page_view",
+      analyticsSurface: "private-selector"
+    }
+  });
+
+  assert.equal(action.metadata.analyticsSchemaVersion, 1);
+  assert.equal(action.metadata.analyticsKind, "interaction");
+  assert.equal(action.metadata.analyticsSurface, "Checkout");
+
+  const unsurfaced = createProductActionAttributes({
+    name: "checkout.confirmed",
+    metadata: { analyticsSurface: "private-selector" }
+  });
+  assert.equal(unsurfaced.metadata.analyticsSurface, undefined);
+  assert.equal(PRODUCT_ANALYTICS_SCHEMA_VERSION, 1);
+  assert.deepEqual(PRODUCT_ANALYTICS_KINDS, ["page_view", "screen_view", "interaction"]);
 });
 
 test("timeline helpers reject unsafe milestone values", () => {
@@ -2464,6 +2493,8 @@ test("CommonJS entry exposes the public API", () => {
 
   assert.equal(typeof sdk.RecordingTransport.alwaysAccept, "function");
   assert.equal(typeof sdk.createProductActionAttributes, "function");
+  assert.equal(sdk.PRODUCT_ANALYTICS_SCHEMA_VERSION, 1);
+  assert.deepEqual(sdk.PRODUCT_ANALYTICS_KINDS, ["page_view", "screen_view", "interaction"]);
   assert.equal(typeof sdk.createNetworkMilestoneAttributes, "function");
   assert.equal(typeof sdk.createSupportTicketDraft, "function");
   assert.equal(typeof sdk.installLogBrewConsoleCapture, "function");

@@ -469,6 +469,15 @@ export type ActionAttributes = {
   context?: TelemetryContext;
 };
 
+/** Stable product-analytics event categories carried in reserved action metadata. */
+export type ProductAnalyticsKind = "page_view" | "screen_view" | "interaction";
+
+/** Current version of the reserved product-analytics metadata vocabulary. */
+export declare const PRODUCT_ANALYTICS_SCHEMA_VERSION: 1;
+
+/** Product-analytics categories understood by this SDK version. */
+export declare const PRODUCT_ANALYTICS_KINDS: readonly ProductAnalyticsKind[];
+
 /** App-owned product step input for agent-readable action timelines. */
 export type ProductActionInput = string | {
   name: string;

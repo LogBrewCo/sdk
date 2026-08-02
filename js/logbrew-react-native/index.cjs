@@ -4,6 +4,7 @@ const {
   createTraceparent,
   LogBrewClient,
   parseTraceparent,
+  PRODUCT_ANALYTICS_SCHEMA_VERSION,
   SdkError,
   TransportError
 } = require("@logbrew/sdk");
@@ -17,6 +18,7 @@ const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const MAX_ACTION_NAME_LENGTH = 64;
+const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 const SCREEN_ACTION_PREFIX = "screen:";
 const BACKGROUND_APP_STATES = new Set(["background", "inactive"]);
 const LogBrewNativeContext = React.createContext(null);
@@ -306,7 +308,8 @@ function captureScreenView(client, screenName, {
       ...getReactNativeContext({ platform, appState }),
       screen: screenName,
       ...metadata,
-      ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
+      ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace()),
+      ...productAnalyticsMetadata("screen_view", screenName)
     }
   });
 }
@@ -361,7 +364,8 @@ function createReactNativeActionEvent({
         sessionId,
         traceId,
         ...metadata,
-        ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
+        ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace()),
+        ...productAnalyticsMetadata("interaction", screen)
       })
     }
   };
@@ -1043,6 +1047,33 @@ function screenActionName(screenName) {
     .slice(0, maxScreenSegmentLength)
     .replace(/_+$/g, "") || "event";
   return `${SCREEN_ACTION_PREFIX}${screenSegment}`;
+}
+
+function productAnalyticsMetadata(kind, surface) {
+  return {
+    analyticsSchemaVersion: PRODUCT_ANALYTICS_SCHEMA_VERSION,
+    analyticsKind: kind,
+    analyticsSurface: boundedProductAnalyticsSurface(surface)
+  };
+}
+
+function boundedProductAnalyticsSurface(surface) {
+  if (typeof surface !== "string") {
+    return undefined;
+  }
+  const normalized = surface.trim();
+  const characters = Array.from(normalized);
+  if (
+    normalized === ""
+    || characters.length > MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+    })
+  ) {
+    return undefined;
+  }
+  return normalized;
 }
 
 function statusFromStatusCode(statusCode) {

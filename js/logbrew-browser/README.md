@@ -31,7 +31,7 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 });
 ```
 
-`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`. Its built-in fetch transport owns one coalesced lifecycle delivery for `pagehide` and hidden visibility, using only an authenticated, bounded `keepalive` request. Duplicate signals do not start another exit request, and `uninstall()` removes both listeners idempotently.
+`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`. The page-view span carries the versioned `page_view` analytics classification and a path-only surface; this classifies the span already being captured and does not add a second event. Its built-in fetch transport owns one coalesced lifecycle delivery for `pagehide` and hidden visibility, using only an authenticated, bounded `keepalive` request. Duplicate signals do not start another exit request, and `uninstall()` removes both listeners idempotently.
 
 Route changes in single-page apps are explicit. Use `installLogBrewBrowserNavigationInstrumentation()` when your app wants LogBrew to observe `history.pushState`, `history.replaceState`, and `popstate`, create a fresh route trace context, and capture a page-view span for each path change. It is not installed by default.
 
@@ -39,7 +39,7 @@ Route changes in single-page apps are explicit. Use `installLogBrewBrowserNaviga
 
 For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
-By default, browser metadata keeps the current path without query string or hash. It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
+By default, browser metadata keeps the current path without query string or hash. It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass a low-cardinality `metadata.routeTemplate` when a concrete path contains identifiers and should group under a stable analytics surface. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
 
 Set `flushOnOnline: false`, `flushOnPageHide: false`, or `flushOnVisibilityHidden: false` if your app wants to own lifecycle or connectivity delivery itself.
 
@@ -126,7 +126,7 @@ await captureBrowserNetwork({
 }, logbrew);
 ```
 
-Action and network metadata is sanitized to primitive values. Keep it low-cardinality and avoid raw selectors, full URLs, query strings, headers, request or response bodies, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy. `captureBrowserNetwork()` records route templates, methods, status codes, durations, trace IDs, session IDs, and your own primitive metadata; it does not patch `fetch` or inspect network payloads automatically.
+Action and network metadata is sanitized to primitive values. Browser product actions carry the versioned `interaction` analytics classification; network milestones do not. Keep metadata low-cardinality and avoid raw selectors, full URLs, query strings, headers, request or response bodies, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy. `captureBrowserNetwork()` records route templates, methods, status codes, durations, trace IDs, session IDs, and your own primitive metadata; it does not patch `fetch` or inspect network payloads automatically. See the repository [product analytics capture contract](../../docs/product-analytics-contract.md) for the reserved fields and compatibility rules.
 
 ## Resource Timing Spans
 
