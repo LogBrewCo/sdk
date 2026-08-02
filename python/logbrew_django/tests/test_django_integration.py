@@ -239,6 +239,15 @@ class DjangoIntegrationTests(unittest.TestCase):
         span = payload["events"][1]["attributes"]
         self.assertEqual(issue["title"], "GET /boom/ failed")
         self.assertEqual(issue["message"], "broken handler")
+        self.assertEqual(
+            issue["exception"],
+            {
+                "type": "RuntimeError",
+                "mechanism": {"type": "django.middleware", "handled": False},
+            },
+        )
+        self.assertEqual(issue["stackFrames"][0]["filename"], "test_django_integration.py")
+        self.assertEqual(issue["stackFrames"][0]["function"], "boom")
         self.assertEqual(issue["metadata"]["exception_type"], "RuntimeError")
         self.assertEqual(span["status"], "error")
         self.assertEqual(span["metadata"]["status_code"], 500)

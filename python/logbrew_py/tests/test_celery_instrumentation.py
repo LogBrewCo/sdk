@@ -366,6 +366,13 @@ class CeleryAppInstrumentationTests(unittest.TestCase):
             self.assertEqual(issue["title"], "Celery task checkout.fail_receipt failed")
             self.assertEqual(issue["level"], "error")
             self.assertEqual(issue["message"], "PrivateTaskError")
+            self.assertEqual(
+                issue["exception"],
+                {
+                    "type": "PrivateTaskError",
+                    "mechanism": {"type": "celery.task", "handled": False},
+                },
+            )
             self.assertEqual(issue["metadata"]["framework"], "celery")
             self.assertEqual(issue["metadata"]["source"], "queue")
             self.assertEqual(issue["metadata"]["taskName"], "checkout.fail_receipt")

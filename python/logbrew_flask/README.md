@@ -123,7 +123,7 @@ Run `python -m logbrew_flask.examples dependency-spans` to see a request span wi
 
 ## Privacy Defaults
 
-LogBrew does not capture request bodies, response bodies, cookies, arbitrary headers, query strings, raw `traceparent` values, baggage, or tracestate. Exception issues include the exception type and message but not stack frames.
+LogBrew does not capture request bodies, response bodies, cookies, arbitrary headers, query strings, raw `traceparent` values, baggage, or tracestate. Exception issues include first-class exception type, `flask.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Exception messages keep the integration's existing `str(error)` behavior, so applications should avoid sensitive values in exception text.
 
 ## Delivery Failures
 

@@ -210,6 +210,15 @@ class FlaskIntegrationTests(unittest.TestCase):
         issue = payload["events"][0]["attributes"]
         span = payload["events"][1]["attributes"]
         self.assertEqual(issue["title"], "GET /orders/<int:order_id>/boom failed")
+        self.assertEqual(
+            issue["exception"],
+            {
+                "type": "RuntimeError",
+                "mechanism": {"type": "flask.middleware", "handled": False},
+            },
+        )
+        self.assertEqual(issue["stackFrames"][0]["filename"], "test_flask_integration.py")
+        self.assertEqual(issue["stackFrames"][0]["function"], "dynamic_order_boom")
         self.assertEqual(issue["metadata"]["exception_type"], "RuntimeError")
         self.assertEqual(span["name"], "GET /orders/<int:order_id>/boom")
         self.assertEqual(span["status"], "error")

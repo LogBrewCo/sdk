@@ -20,6 +20,7 @@ from logbrew_sdk import (
     SdkError,
     SpanAttributes,
     TransportError,
+    create_issue_attributes_from_exception,
     create_logbrew_trace_context,
     get_active_logbrew_trace,
     parse_traceparent,
@@ -280,19 +281,21 @@ def capture_exception(
 
     issue_event_id = event_id or f"evt_django_issue_{uuid.uuid4().hex}"
     trace_context = trace or request_logbrew_trace(request) or get_active_logbrew_trace()
+    captured_at = timestamp or utc_timestamp()
     client.issue(
         issue_event_id,
-        timestamp or utc_timestamp(),
-        {
-            "title": f"{request_name(request)} failed",
-            "level": "error",
-            "message": str(exc) or exc.__class__.__name__,
-            "metadata": {
+        captured_at,
+        create_issue_attributes_from_exception(
+            exc,
+            title=f"{request_name(request)} failed",
+            mechanism="django.middleware",
+            handled=False,
+            metadata={
                 **request_metadata(request, status_code=500),
                 "exception_type": exc.__class__.__name__,
                 **trace_metadata(trace_context),
             },
-        },
+        ),
     )
     return issue_event_id
 

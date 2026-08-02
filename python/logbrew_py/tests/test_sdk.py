@@ -6,19 +6,25 @@ import ssl
 import unittest
 from email.message import Message
 from importlib.metadata import PackageNotFoundError
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from logbrew_sdk import (
     HttpTransport,
+    IssueAttributes,
+    IssueBreadcrumb,
+    IssueBreadcrumbDataValue,
+    IssueException,
+    IssueStackFrame,
     LogBrewClient,
     LogBrewLoggingHandler,
     LogBrewTraceContext,
     RecordingTransport,
     SdkError,
     TransportError,
+    create_issue_attributes_from_exception,
     create_logbrew_trace_context,
     create_network_milestone_attributes,
     create_product_action_attributes,
@@ -247,6 +253,183 @@ class LogBrewSdkTests(unittest.TestCase):
             [event["attributes"]["level"] for event in payload["events"]],
             ["critical", "info", "warning"],
         )
+
+    def test_issue_diagnostics_are_bounded_validated_and_detached(self) -> None:
+        client = sample_client()
+        exception: IssueException = {
+            "type": "CheckoutError",
+            "mechanism": {"type": "python.exception", "handled": False},
+        }
+        stack_frames: list[IssueStackFrame] = [
+            {
+                "filename": "C:\\workspace\\app\\checkout.py?debug=true#frame",
+                "line": 42,
+                "column": 7,
+                "function": "submit_checkout",
+                "module": "checkout.handlers",
+                "inApp": True,
+            }
+        ]
+        breadcrumb_data: dict[str, IssueBreadcrumbDataValue] = {"attempt": 2, "cached": False}
+        breadcrumbs: list[IssueBreadcrumb] = [
+            {
+                "timestamp": "2026-07-17T11:59:00Z",
+                "type": "navigation",
+                "category": "checkout.step",
+                "level": "warn",
+                "message": "Payment step opened",
+                "data": breadcrumb_data,
+            }
+        ]
+
+        client.issue(
+            "evt_issue_diagnostics",
+            "2026-07-17T12:00:00Z",
+            {
+                "title": "Checkout failed",
+                "level": "error",
+                "exception": exception,
+                "stackFrames": stack_frames,
+                "breadcrumbs": breadcrumbs,
+                "breadcrumbsTruncated": True,
+            },
+        )
+        exception["type"] = "CallerMutation"
+        stack_frames[0]["filename"] = "caller-mutation.py"
+        breadcrumbs[0]["message"] = "caller mutation"
+        breadcrumb_data["attempt"] = 99
+
+        attributes = json.loads(client.preview_json())["events"][0]["attributes"]
+        self.assertEqual(
+            attributes["exception"],
+            {
+                "type": "CheckoutError",
+                "mechanism": {"type": "python.exception", "handled": False},
+            },
+        )
+        self.assertEqual(
+            attributes["stackFrames"],
+            [
+                {
+                    "filename": "checkout.py",
+                    "line": 42,
+                    "column": 7,
+                    "function": "submit_checkout",
+                    "module": "checkout.handlers",
+                    "inApp": True,
+                }
+            ],
+        )
+        self.assertEqual(
+            attributes["breadcrumbs"],
+            [
+                {
+                    "timestamp": "2026-07-17T11:59:00Z",
+                    "type": "navigation",
+                    "category": "checkout.step",
+                    "level": "warning",
+                    "message": "Payment step opened",
+                    "data": {"attempt": 2, "cached": False},
+                }
+            ],
+        )
+        self.assertIs(attributes["breadcrumbsTruncated"], True)
+
+    def test_issue_diagnostics_reject_unsafe_shapes(self) -> None:
+        invalid_diagnostics: list[dict[str, Any]] = [
+            {"exception": {"type": "CheckoutError", "mechanism": {"type": "python.exception"}}},
+            {"exception": {"type": "Checkout?Error"}},
+            {"exception": {"type": "CheckoutError", "private": "unsupported"}},
+            {"stackFrames": []},
+            {"stackFrames": [{"filename": "checkout.py", "line": 0, "column": 1}]},
+            {
+                "stackFrames": [
+                    {"filename": "checkout.py", "line": 1, "column": 1}
+                    for _ in range(33)
+                ]
+            },
+            {"breadcrumbs": []},
+            {
+                "breadcrumbs": [
+                    {"timestamp": "2026-07-17T12:00:00Z", "category": "checkout"}
+                    for _ in range(65)
+                ]
+            },
+            {"breadcrumbs": [{"timestamp": "not-a-date", "category": "checkout"}]},
+            {
+                "breadcrumbs": [
+                    {
+                        "timestamp": "2026-07-17T12:00:00Z",
+                        "category": "checkout",
+                        "data": {"nested": {}},
+                    }
+                ]
+            },
+            {
+                "breadcrumbs": [
+                    {
+                        "timestamp": "2026-07-17T12:00:00Z",
+                        "category": "checkout",
+                        "data": {"duration": float("nan")},
+                    }
+                ]
+            },
+            {"breadcrumbsTruncated": "yes"},
+        ]
+
+        for diagnostics in invalid_diagnostics:
+            with self.subTest(diagnostics=diagnostics):
+                client = sample_client()
+                with self.assertRaisesRegex(SdkError, "issue"):
+                    client.issue(
+                        "evt_invalid_diagnostics",
+                        "2026-07-17T12:00:00Z",
+                        cast(
+                            IssueAttributes,
+                            {
+                                "title": "Invalid diagnostics",
+                                "level": "error",
+                                **diagnostics,
+                            },
+                        ),
+                    )
+
+    def test_create_issue_attributes_from_exception_sanitizes_traceback(self) -> None:
+        def fail_checkout() -> None:
+            raise LookupError("payment method is unavailable")
+
+        try:
+            fail_checkout()
+        except LookupError as error:
+            attributes = create_issue_attributes_from_exception(
+                error,
+                title="Checkout failed",
+                mechanism="python.framework",
+                handled=False,
+                metadata={"framework": "example"},
+            )
+
+        self.assertEqual(attributes["title"], "Checkout failed")
+        self.assertEqual(attributes["message"], "payment method is unavailable")
+        self.assertEqual(
+            attributes["exception"],
+            {
+                "type": "LookupError",
+                "mechanism": {"type": "python.framework", "handled": False},
+            },
+        )
+        self.assertEqual(attributes["stackFrames"][0]["filename"], "test_sdk.py")
+        self.assertEqual(attributes["stackFrames"][0]["function"], "fail_checkout")
+        self.assertEqual(attributes["stackFrames"][0]["module"], __name__)
+        self.assertNotIn("workspace", json.dumps(attributes))
+
+        UnsafeError = type("Unsafe/Error", (Exception,), {})
+        unsafe_attributes = create_issue_attributes_from_exception(
+            UnsafeError("safe message"),
+            include_stack_frames=False,
+        )
+        self.assertEqual(unsafe_attributes["exception"]["type"], "Exception")
+        self.assertNotIn("Unsafe/Error", json.dumps(unsafe_attributes))
 
     def test_negative_span_duration_fails_validation(self) -> None:
         client = sample_client()

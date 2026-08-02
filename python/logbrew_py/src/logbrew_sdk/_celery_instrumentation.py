@@ -19,6 +19,7 @@ from logbrew_sdk._celery_client import (
     _safe_task_label,
     logbrew_trace_context_from_celery_headers,
 )
+from logbrew_sdk._issue_diagnostics import safe_issue_exception_type
 from logbrew_sdk._queue_client import _queue_span_request, _QueueSpanRequest
 from logbrew_sdk._trace_context import (
     LogBrewTraceContext,
@@ -336,7 +337,7 @@ class LogBrewCeleryInstrumentation:
         try:
             state = self._active_state(sender)
             if state is not None and isinstance(exception, BaseException):
-                state.error_type = type(exception).__name__
+                state.error_type = safe_issue_exception_type(exception)
                 state.capture_failure_issue = not _is_declared_task_exception(sender, exception)
         except Exception as error:
             _notify_capture_error(self._on_capture_error, error)
@@ -398,6 +399,10 @@ class LogBrewCeleryInstrumentation:
                 "title": f"Celery task {task_name} failed",
                 "level": "error",
                 "message": error_type,
+                "exception": {
+                    "type": error_type,
+                    "mechanism": {"type": "celery.task", "handled": False},
+                },
                 "metadata": issue_metadata,
             },
         )

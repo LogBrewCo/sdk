@@ -16,7 +16,7 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from threading import Lock, RLock, get_ident
-from typing import Annotated, Any, Literal, Protocol, TypeAlias, TypedDict
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, TypedDict, cast
 
 if sys.version_info >= (3, 11):
     from typing import NotRequired
@@ -43,6 +43,11 @@ from logbrew_sdk._automatic_delivery import (
 )
 from logbrew_sdk._errors import SdkError
 from logbrew_sdk._event_queue import EventQueue, MemoryEventQueue, QueuedEvent
+from logbrew_sdk._issue_diagnostics import (
+    issue_stack_frames_from_exception,
+    safe_issue_exception_type,
+    validate_issue_diagnostics,
+)
 from logbrew_sdk._persistent_event_queue import PersistentEventQueue
 from logbrew_sdk._span_events import (
     SpanAttributes,
@@ -90,11 +95,57 @@ class EnvironmentAttributes(TypedDict, total=False):
     metadata: Metadata
 
 
+class IssueStackFrame(TypedDict):
+    """Privacy-bounded code identity for one issue traceback frame."""
+
+    filename: str
+    line: int
+    column: int
+    function: NotRequired[str]
+    module: NotRequired[str]
+    inApp: NotRequired[bool]
+    debugId: NotRequired[str]
+
+
+class IssueExceptionMechanism(TypedDict):
+    """Runtime path that captured an exception and whether it escaped."""
+
+    type: str
+    handled: bool
+
+
+class IssueException(TypedDict):
+    """Structured exception identity attached to an issue."""
+
+    type: str
+    mechanism: NotRequired[IssueExceptionMechanism]
+
+
+IssueBreadcrumbLevel: TypeAlias = Literal["debug", "info", "warning", "error", "critical"]
+IssueBreadcrumbLevelInput: TypeAlias = IssueBreadcrumbLevel | Literal["trace", "log", "warn", "fatal"]
+IssueBreadcrumbDataValue: TypeAlias = str | int | float | bool | None
+
+
+class IssueBreadcrumb(TypedDict):
+    """One bounded, oldest-to-newest step that happened before an issue."""
+
+    timestamp: str
+    category: str
+    type: NotRequired[str]
+    level: NotRequired[IssueBreadcrumbLevelInput]
+    message: NotRequired[str]
+    data: NotRequired[dict[str, IssueBreadcrumbDataValue]]
+
+
 class IssueAttributes(TypedDict, total=False):
     """Public issue event attributes."""
     title: str
     level: str
     message: str
+    exception: IssueException
+    stackFrames: list[IssueStackFrame]
+    breadcrumbs: list[IssueBreadcrumb]
+    breadcrumbsTruncated: bool
     metadata: Metadata
 
 
@@ -1328,9 +1379,55 @@ def validate_issue(attributes: IssueAttributes) -> dict[str, Any]:
             "title": attributes["title"],
             "level": level,
             **({"message": attributes["message"]} if "message" in attributes else {}),
+            **validate_issue_diagnostics(attributes),
         },
         attributes.get("metadata"),
     )
+
+
+def create_issue_attributes_from_exception(
+    error: BaseException,
+    *,
+    title: str | None = None,
+    level: str = "error",
+    message: str | None = None,
+    mechanism: str = "python.exception",
+    handled: bool = True,
+    metadata: Mapping[str, Any] | None = None,
+    breadcrumbs: list[IssueBreadcrumb] | None = None,
+    breadcrumbs_truncated: bool = False,
+    include_stack_frames: bool = True,
+) -> IssueAttributes:
+    """Build an issue with structured identity and a privacy-bounded traceback projection."""
+
+    if not isinstance(error, BaseException):
+        raise SdkError("validation_error", "issue error must be an exception")
+    if not isinstance(include_stack_frames, bool):
+        raise SdkError("validation_error", "include_stack_frames must be a boolean")
+
+    exception_type = safe_issue_exception_type(error)
+    if message is None:
+        try:
+            error_message = str(error) or exception_type
+        except Exception:
+            error_message = exception_type
+    else:
+        error_message = message
+    stack_frames = issue_stack_frames_from_exception(error) if include_stack_frames else []
+    attributes: IssueAttributes = {
+        "title": title if title is not None else exception_type,
+        "level": level,
+        "message": error_message,
+        "exception": {
+            "type": exception_type,
+            "mechanism": {"type": mechanism, "handled": handled},
+        },
+        **({"stackFrames": cast(list[IssueStackFrame], stack_frames)} if stack_frames else {}),
+        **({"breadcrumbs": breadcrumbs} if breadcrumbs is not None else {}),
+        **({"breadcrumbsTruncated": True} if breadcrumbs_truncated else {}),
+        **({"metadata": dict(metadata)} if metadata is not None else {}),
+    }
+    return cast(IssueAttributes, validate_issue(attributes))
 
 
 def validate_log(attributes: LogAttributes) -> dict[str, Any]:
@@ -1500,6 +1597,13 @@ __all__ = [
     "EnvironmentAttributes",
     "HttpTransport",
     "IssueAttributes",
+    "IssueBreadcrumb",
+    "IssueBreadcrumbDataValue",
+    "IssueBreadcrumbLevel",
+    "IssueBreadcrumbLevelInput",
+    "IssueException",
+    "IssueExceptionMechanism",
+    "IssueStackFrame",
     "LogAttributes",
     "LogBrewAiohttpClientSessionInstrumentation",
     "LogBrewCeleryInstrumentation",
@@ -1545,6 +1649,7 @@ __all__ = [
     "celery_worker_persistent_queue_directory",
     "connect_dbapi_connection_with_logbrew_spans",
     "create_celery_trace_headers",
+    "create_issue_attributes_from_exception",
     "create_logbrew_open_telemetry_span_exporter",
     "create_logbrew_open_telemetry_span_processor",
     "create_logbrew_trace_context",
