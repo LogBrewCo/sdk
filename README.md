@@ -78,7 +78,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | StackExchange.Redis | [`LogBrew.StackExchangeRedis`](dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis) | Optional Redis command spans without key/value capture |
 | PHP | [`logbrew/sdk`](php/logbrew-php) | Core PHP client, typed exception/stack/breadcrumb diagnostics, HTTP delivery, PSR-3/Monolog, native Symfony exception capture, and a config-cache-safe Laravel channel |
 | Ruby / Rails | [`logbrew-sdk`](ruby/logbrew-ruby) | Typed exception/stack/breadcrumb diagnostics, automatic Rails request/error capture and delivery, stdlib `Logger`, and manual Rack helpers |
-| Rust | [`logbrew`](rust/logbrew) | Core Rust client and optional blocking HTTP delivery |
+| Rust | [`logbrew`](rust/logbrew) | Core client, typed error/panic/frame/breadcrumb diagnostics, and optional Tower/Axum error correlation and HTTP delivery |
 | Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product for iOS, macOS, tvOS, watchOS, Apple-style logger ergonomics, URLSession delivery; opt-in `LogBrewCrash` product for bounded native fatal-crash replay; Objective-C vendoring for mixed or Objective-C-only apps |
 | Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client, Android-style helper APIs, HTTP delivery |
 | Kotlin OkHttp | [`kotlin/logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp interceptor source package; Maven Central publication is pending, so use the core Kotlin package or local source until the artifact is published |

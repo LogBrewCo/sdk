@@ -101,12 +101,14 @@ grep -F -q "$crate_name/README.md" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/Cargo.toml" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/http_fields.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/http_server.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/src/issue_diagnostics.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/product_timeline.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/traceparent.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/readme_example.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/real_user_smoke.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/first_useful_telemetry.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/http_server_request.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/issue_diagnostics.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/axum_request_middleware.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/actix_request_middleware.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/rocket_request_fairing.rs" "$tmp_dir/crate-contents.txt"
@@ -128,6 +130,11 @@ grep -q 'ProductTimeline' "$crate_readme"
 grep -q 'Product And Network Timelines' "$crate_readme"
 grep -q 'First Useful Service Telemetry' "$crate_readme"
 grep -q 'HTTP Server Request Telemetry' "$crate_readme"
+grep -q 'Typed Issue Diagnostics' "$crate_readme"
+grep -q 'IssueBreadcrumbBuffer' "$crate_readme"
+grep -q 'issue_stack_frame' "$crate_readme"
+grep -q 'from_panic_info' "$crate_readme"
+grep -q 'with_error_issues' "$crate_readme"
 grep -q 'Axum Middleware Example' "$crate_readme"
 grep -q 'Actix Middleware Example' "$crate_readme"
 grep -q 'Rocket Fairing Example' "$crate_readme"
@@ -146,7 +153,7 @@ crate_manifest="$tmp_dir/crate-Cargo.toml"
 tar -xOf "$crate_path" "$crate_name/Cargo.toml" > "$crate_manifest"
 crate_examples_makefile="$tmp_dir/crate-examples-Makefile"
 tar -xOf "$crate_path" "$crate_name/examples/Makefile" > "$crate_examples_makefile"
-grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge run-opentelemetry-exporter$' "$crate_examples_makefile"
+grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-issue-diagnostics run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge run-opentelemetry-exporter$' "$crate_examples_makefile"
 grep -q '^help:$' "$crate_examples_makefile"
 grep -q '^run: run-real-user-smoke$' "$crate_examples_makefile"
 grep -q '^run-readme-example:$' "$crate_examples_makefile"
@@ -157,6 +164,8 @@ grep -q '^run-first-useful-telemetry:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example first_useful_telemetry --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-http-server-request:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example http_server_request --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
+grep -q '^run-issue-diagnostics:$' "$crate_examples_makefile"
+grep -q '^	@cargo run --quiet --example issue_diagnostics --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-axum-request-middleware:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --features tower --example axum_request_middleware --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-actix-request-middleware:$' "$crate_examples_makefile"
@@ -172,6 +181,7 @@ grep -q 'run (real-user-smoke) -> make run' "$crate_examples_makefile"
 grep -q 'run-real-user-smoke -> make run-real-user-smoke' "$crate_examples_makefile"
 grep -q 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$crate_examples_makefile"
 grep -q 'run-http-server-request -> make run-http-server-request' "$crate_examples_makefile"
+grep -q 'run-issue-diagnostics -> make run-issue-diagnostics' "$crate_examples_makefile"
 grep -q 'run-axum-request-middleware -> make run-axum-request-middleware' "$crate_examples_makefile"
 grep -q 'run-actix-request-middleware -> make run-actix-request-middleware' "$crate_examples_makefile"
 grep -q 'run-rocket-request-fairing -> make run-rocket-request-fairing' "$crate_examples_makefile"
@@ -190,6 +200,8 @@ if package.get("version") != os.environ["LOGBREW_RUST_CRATE_VERSION"]:
     raise SystemExit(f"unexpected packaged crate version: {package.get('version')!r}")
 if package.get("license") != "MIT":
     raise SystemExit(f"unexpected packaged crate license: {package.get('license')!r}")
+if package.get("description") != "Public LogBrew Rust SDK for event batches, typed issue diagnostics, and delivery.":
+    raise SystemExit(f"unexpected packaged crate description: {package.get('description')!r}")
 if package.get("repository") != "https://github.com/LogBrewCo/sdk":
     raise SystemExit(f"unexpected packaged crate repository: {package.get('repository')!r}")
 if package.get("readme") != "README.md":
@@ -237,12 +249,14 @@ crate_dir="$crate_src_root/$crate_name"
 test -f "$crate_dir/Cargo.toml"
 test -f "$crate_dir/src/http_fields.rs"
 test -f "$crate_dir/src/http_server.rs"
+test -f "$crate_dir/src/issue_diagnostics.rs"
 test -f "$crate_dir/src/product_timeline.rs"
 test -f "$crate_dir/src/traceparent.rs"
 test -f "$crate_dir/examples/readme_example.rs"
 test -f "$crate_dir/examples/real_user_smoke.rs"
 test -f "$crate_dir/examples/first_useful_telemetry.rs"
 test -f "$crate_dir/examples/http_server_request.rs"
+test -f "$crate_dir/examples/issue_diagnostics.rs"
 test -f "$crate_dir/examples/axum_request_middleware.rs"
 test -f "$crate_dir/examples/actix_request_middleware.rs"
 test -f "$crate_dir/examples/rocket_request_fairing.rs"
@@ -279,12 +293,13 @@ grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' "$tmp_dir/packaged-ex
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-http-server-request -> make run-http-server-request' <(sed -n '5p' "$tmp_dir/packaged-example-make-help.txt")
-grep -qx 'run-axum-request-middleware -> make run-axum-request-middleware' <(sed -n '6p' "$tmp_dir/packaged-example-make-help.txt")
-grep -qx 'run-actix-request-middleware -> make run-actix-request-middleware' <(sed -n '7p' "$tmp_dir/packaged-example-make-help.txt")
-grep -qx 'run-rocket-request-fairing -> make run-rocket-request-fairing' <(sed -n '8p' "$tmp_dir/packaged-example-make-help.txt")
-grep -qx 'run-tracing-bridge -> make run-tracing-bridge' <(sed -n '9p' "$tmp_dir/packaged-example-make-help.txt")
-grep -qx 'run-opentelemetry-exporter -> make run-opentelemetry-exporter' <(sed -n '10p' "$tmp_dir/packaged-example-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "10"
+grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' <(sed -n '6p' "$tmp_dir/packaged-example-make-help.txt")
+grep -qx 'run-axum-request-middleware -> make run-axum-request-middleware' <(sed -n '7p' "$tmp_dir/packaged-example-make-help.txt")
+grep -qx 'run-actix-request-middleware -> make run-actix-request-middleware' <(sed -n '8p' "$tmp_dir/packaged-example-make-help.txt")
+grep -qx 'run-rocket-request-fairing -> make run-rocket-request-fairing' <(sed -n '9p' "$tmp_dir/packaged-example-make-help.txt")
+grep -qx 'run-tracing-bridge -> make run-tracing-bridge' <(sed -n '10p' "$tmp_dir/packaged-example-make-help.txt")
+grep -qx 'run-opentelemetry-exporter -> make run-opentelemetry-exporter' <(sed -n '11p' "$tmp_dir/packaged-example-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "11"
 (cd "$crate_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"
@@ -327,6 +342,16 @@ cargo run --quiet --manifest-path Cargo.toml --example http_server_request > "$t
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/packaged-http-server.stdout.json" "$tmp_dir/packaged-http-server.stderr.json" >/dev/null
 (cd "$crate_dir/examples" && make run-http-server-request) > "$tmp_dir/packaged-http-server-make.stdout.json" 2> "$tmp_dir/packaged-http-server-make.stderr.json"
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/packaged-http-server-make.stdout.json" "$tmp_dir/packaged-http-server-make.stderr.json" >/dev/null
+cargo run --quiet --manifest-path Cargo.toml --example issue_diagnostics > "$tmp_dir/packaged-issue-diagnostics.stdout.json" 2> "$tmp_dir/packaged-issue-diagnostics.stderr.json"
+PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" "$tmp_dir/packaged-issue-diagnostics.stdout.json" >/dev/null
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-issue-diagnostics.stdout.json" >/dev/null
+grep -q '"issues":2' "$tmp_dir/packaged-issue-diagnostics.stderr.json"
+grep -q '"ok":true' "$tmp_dir/packaged-issue-diagnostics.stderr.json"
+(cd "$crate_dir/examples" && make run-issue-diagnostics) > "$tmp_dir/packaged-issue-diagnostics-make.stdout.json" 2> "$tmp_dir/packaged-issue-diagnostics-make.stderr.json"
+PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" "$tmp_dir/packaged-issue-diagnostics-make.stdout.json" >/dev/null
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-issue-diagnostics-make.stdout.json" >/dev/null
+grep -q '"issues":2' "$tmp_dir/packaged-issue-diagnostics-make.stderr.json"
+grep -q '"ok":true' "$tmp_dir/packaged-issue-diagnostics-make.stderr.json"
 cd "$tmp_dir"
 cargo new --quiet lifecycle-app
 cd lifecycle-app
@@ -428,6 +453,7 @@ smoke-readme = "run --quiet --locked --bin readme_example"
 smoke-timeline = "run --quiet --locked --bin timeline"
 smoke-first-useful = "run --quiet --locked --bin first_useful_telemetry"
 smoke-http-server = "run --quiet --locked --bin http_server_request"
+smoke-issue-diagnostics = "run --quiet --locked --bin issue_diagnostics"
 EOF
 grep -q '^smoke-check = "check --quiet --locked"$' .cargo/config.toml
 grep -q '^smoke-build = "build --quiet --locked"$' .cargo/config.toml
@@ -438,6 +464,7 @@ grep -q '^smoke-readme = "run --quiet --locked --bin readme_example"$' .cargo/co
 grep -q '^smoke-timeline = "run --quiet --locked --bin timeline"$' .cargo/config.toml
 grep -q '^smoke-first-useful = "run --quiet --locked --bin first_useful_telemetry"$' .cargo/config.toml
 grep -q '^smoke-http-server = "run --quiet --locked --bin http_server_request"$' .cargo/config.toml
+grep -q '^smoke-issue-diagnostics = "run --quiet --locked --bin issue_diagnostics"$' .cargo/config.toml
 
 cat > src/main.rs <<'EOF'
 use logbrew::{
@@ -628,6 +655,7 @@ EOF
 
 cp "$crate_dir/examples/first_useful_telemetry.rs" src/bin/first_useful_telemetry.rs
 cp "$crate_dir/examples/http_server_request.rs" src/bin/http_server_request.rs
+cp "$crate_dir/examples/issue_diagnostics.rs" src/bin/issue_diagnostics.rs
 
 mkdir -p tests
 cat > tests/installed_user.rs <<'EOF'
@@ -811,7 +839,22 @@ grep -q 'Add an optional region to the environment payload\.' target/doc/logbrew
 test -f target/doc/logbrew/struct.IssueEvent.html
 grep -q 'Public issue-event builder for stable LogBrew issue payload fields\.' target/doc/logbrew/struct.IssueEvent.html
 grep -q 'Create an issue event with its required title and level fields\.' target/doc/logbrew/struct.IssueEvent.html
+grep -q 'Create an error-level issue from a handled concrete Rust error\.' target/doc/logbrew/struct.IssueEvent.html
+grep -q 'Create a critical issue from a panic payload without formatting its text\.' target/doc/logbrew/struct.IssueEvent.html
+grep -q 'Build a privacy-safe panic issue from an app-owned panic hook\.' target/doc/logbrew/struct.IssueEvent.html
 grep -q 'Add an optional message to the issue payload\.' target/doc/logbrew/struct.IssueEvent.html
+test -f target/doc/logbrew/struct.IssueException.html
+grep -q 'Structured exception identity attached to an issue\.' target/doc/logbrew/struct.IssueException.html
+test -f target/doc/logbrew/struct.IssueExceptionMechanism.html
+grep -q 'Runtime path that captured an issue exception and whether it escaped\.' target/doc/logbrew/struct.IssueExceptionMechanism.html
+test -f target/doc/logbrew/struct.IssueStackFrame.html
+grep -q 'Privacy-bounded code identity for one issue stack frame\.' target/doc/logbrew/struct.IssueStackFrame.html
+test -f target/doc/logbrew/struct.IssueBreadcrumb.html
+grep -q 'One bounded oldest-to-newest step that happened before an issue\.' target/doc/logbrew/struct.IssueBreadcrumb.html
+test -f target/doc/logbrew/struct.IssueBreadcrumbBuffer.html
+grep -q 'Bounded caller-owned breadcrumb history for future issue snapshots\.' target/doc/logbrew/struct.IssueBreadcrumbBuffer.html
+test -f target/doc/logbrew/macro.issue_stack_frame.html
+grep -q 'Build a privacy-bounded frame for the current Rust source location\.' target/doc/logbrew/macro.issue_stack_frame.html
 test -f target/doc/logbrew/struct.LogEvent.html
 grep -q 'Public log-event builder for stable LogBrew log payload fields\.' target/doc/logbrew/struct.LogEvent.html
 grep -q 'Create a log event with its required message and level fields\.' target/doc/logbrew/struct.LogEvent.html
@@ -915,6 +958,11 @@ cargo smoke-first-useful > first-useful.stdout.json 2> first-useful.stderr.json
 python3 "$repo_root/scripts/check_rust_first_useful_payload.py" first-useful.stdout.json first-useful.stderr.json >/dev/null
 cargo smoke-http-server > http-server.stdout.json 2> http-server.stderr.json
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" http-server.stdout.json http-server.stderr.json >/dev/null
+cargo smoke-issue-diagnostics > issue-diagnostics.stdout.json 2> issue-diagnostics.stderr.json
+PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" issue-diagnostics.stdout.json >/dev/null
+python3 "$repo_root/scripts/validate_fixtures.py" issue-diagnostics.stdout.json >/dev/null
+grep -q '"issues":2' issue-diagnostics.stderr.json
+grep -q '"ok":true' issue-diagnostics.stderr.json
 
 cat > src/bin/unauth.rs <<'EOF'
 use logbrew::{LogBrewClient, RecordingTransport, ReleaseEvent, SdkError};

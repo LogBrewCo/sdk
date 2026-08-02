@@ -17,6 +17,7 @@ pub struct HttpRequestTelemetry {
     trace_flags: String,
     incoming_traceparent: Option<String>,
     status_code: Option<u16>,
+    error_type: Option<String>,
     duration_ms: Option<f64>,
     metadata: Option<Metadata>,
     span_name: Option<String>,
@@ -39,6 +40,7 @@ impl HttpRequestTelemetry {
             trace_flags: DEFAULT_TRACE_FLAGS.to_string(),
             incoming_traceparent: None,
             status_code: None,
+            error_type: None,
             duration_ms: None,
             metadata: None,
             span_name: None,
@@ -61,6 +63,12 @@ impl HttpRequestTelemetry {
     /// Attach the final HTTP status code.
     pub fn with_status_code(mut self, status_code: u16) -> Self {
         self.status_code = Some(status_code);
+        self
+    }
+
+    /// Mark the request span as failed with a bounded exception type only.
+    pub fn with_error_type(mut self, error_type: impl Into<String>) -> Self {
+        self.error_type = Some(error_type.into());
         self
     }
 
@@ -94,6 +102,11 @@ impl HttpRequestTelemetry {
         let method = normalize_method("http request method", &self.method)?;
         validate_status_code("http request status_code", self.status_code)?;
         validate_duration_ms("http request duration_ms", self.duration_ms)?;
+        let error_type = self
+            .error_type
+            .as_deref()
+            .map(crate::issue_diagnostics::require_exception_type)
+            .transpose()?;
 
         let parsed_context = self
             .incoming_traceparent
@@ -117,8 +130,14 @@ impl HttpRequestTelemetry {
             }
             None => format!("{method} {route}"),
         };
-        let status = request_span_status(self.status_code);
-        let metadata = request_metadata(&route, &method, self.status_code, self.metadata)?;
+        let status = request_span_status(self.status_code, error_type.as_deref());
+        let metadata = request_metadata(
+            &route,
+            &method,
+            self.status_code,
+            error_type.as_deref(),
+            self.metadata,
+        )?;
 
         let span = match parsed_context.as_ref() {
             Some(context) => {
@@ -176,6 +195,7 @@ fn request_metadata(
     route: &str,
     method: &str,
     status_code: Option<u16>,
+    error_type: Option<&str>,
     metadata: Option<Metadata>,
 ) -> Result<Metadata, SdkError> {
     let mut metadata = telemetry_metadata("rust_http_server", metadata)?;
@@ -191,11 +211,17 @@ fn request_metadata(
             Value::String(status_code_class(status_code)),
         );
     }
+    if let Some(error_type) = error_type {
+        metadata.insert(
+            "exception.type".to_string(),
+            Value::String(error_type.to_string()),
+        );
+    }
     Ok(metadata)
 }
 
-fn request_span_status(status_code: Option<u16>) -> &'static str {
-    if status_code.is_some_and(|code| code >= 500) {
+fn request_span_status(status_code: Option<u16>, error_type: Option<&str>) -> &'static str {
+    if error_type.is_some() || status_code.is_some_and(|code| code >= 500) {
         "error"
     } else {
         "ok"

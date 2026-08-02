@@ -10,6 +10,8 @@ use logbrew::{
 use serde_json::Value;
 use std::{
     convert::Infallible,
+    error::Error,
+    fmt,
     sync::{Arc, Mutex},
 };
 use tower::{Layer, ServiceExt, service_fn};
@@ -21,6 +23,17 @@ fn sample_client() -> LogBrewClient {
         .build()
         .expect("client should build")
 }
+
+#[derive(Debug, PartialEq, Eq)]
+struct CheckoutFailure;
+
+impl fmt::Display for CheckoutFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("private tower service error text")
+    }
+}
+
+impl Error for CheckoutFailure {}
 
 #[tokio::test]
 async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
@@ -172,4 +185,96 @@ async fn tower_request_telemetry_layer_queues_span_and_metric() {
     assert!(!text.contains("cart_123"));
     assert!(!text.contains("headers"));
     assert!(!text.contains("payload"));
+}
+
+#[tokio::test]
+async fn tower_request_error_capture_queues_correlated_issue_and_preserves_error() {
+    let client = Arc::new(Mutex::new(sample_client()));
+    let layer = TowerRequestTelemetryLayer::new(
+        Arc::clone(&client),
+        |request: &Request<Body>| {
+            request
+                .extensions()
+                .get::<String>()
+                .cloned()
+                .unwrap_or_else(|| request.uri().path().to_string())
+        },
+        || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
+        || "2026-06-02T10:00:02Z".to_string(),
+    )
+    .with_error_issues()
+    .with_error_issue_event_id_prefix("evt_tower_request_issue");
+
+    let service = service_fn(|_request: Request<Body>| async {
+        Err::<Response<Body>, CheckoutFailure>(CheckoutFailure)
+    });
+    let mut request = Request::builder()
+        .method("post")
+        .uri("/checkout/cart_123?coupon=not-for-telemetry")
+        .header(
+            "traceparent",
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+        .body(Body::empty())
+        .unwrap();
+    request
+        .extensions_mut()
+        .insert("/checkout/{cart_id}".to_string());
+
+    let error = layer.layer(service).oneshot(request).await.unwrap_err();
+    assert_eq!(error, CheckoutFailure);
+
+    let client = client.lock().unwrap();
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let events = payload["events"].as_array().unwrap();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0]["type"], "span");
+    assert_eq!(events[1]["type"], "metric");
+    assert_eq!(events[2]["type"], "issue");
+    assert_eq!(events[2]["id"], "evt_tower_request_issue_b7ad6b7169203331");
+
+    let span = &events[0]["attributes"];
+    assert_eq!(span["status"], "error");
+    assert_eq!(span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(span["parentSpanId"], "00f067aa0ba902b7");
+    assert_eq!(span["spanId"], "b7ad6b7169203331");
+    assert!(
+        span["metadata"]["exception.type"]
+            .as_str()
+            .unwrap()
+            .ends_with("CheckoutFailure")
+    );
+
+    let issue = &events[2]["attributes"];
+    let exception_type = issue["exception"]["type"].as_str().unwrap();
+    assert!(exception_type.ends_with("CheckoutFailure"));
+    assert_eq!(issue["title"], exception_type);
+    assert_eq!(issue["exception"]["mechanism"]["type"], "tower.service");
+    assert_eq!(issue["exception"]["mechanism"]["handled"], false);
+    assert_eq!(issue["metadata"]["traceId"], span["traceId"]);
+    assert_eq!(issue["metadata"]["spanId"], span["spanId"]);
+    assert_eq!(issue["metadata"]["routeTemplate"], "/checkout/{cart_id}");
+    assert_eq!(issue["metadata"]["method"], "POST");
+    assert_eq!(
+        issue["metadata"]["issueGroupingSource"],
+        "error_type_and_route"
+    );
+    assert_eq!(issue["metadata"]["issueEvidenceCompleteness"], "partial");
+    assert_eq!(issue["metadata"]["issueMissingEvidence"], "stackFrames");
+    assert_eq!(
+        issue["metadata"]["issueRedactedEvidence"],
+        "exception.message,stack.text,request.values"
+    );
+    assert_eq!(issue["breadcrumbs"].as_array().unwrap().len(), 1);
+    assert_eq!(issue["breadcrumbs"][0]["category"], "http.request");
+    assert_eq!(
+        issue["breadcrumbs"][0]["data"]["routeTemplate"],
+        "/checkout/{cart_id}"
+    );
+
+    let text = payload.to_string();
+    assert!(!text.contains("private tower service error text"));
+    assert!(!text.contains("cart_123"));
+    assert!(!text.contains("coupon=not-for-telemetry"));
+    assert!(!text.contains("traceparent"));
 }

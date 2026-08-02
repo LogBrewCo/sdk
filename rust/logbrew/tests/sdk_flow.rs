@@ -870,6 +870,58 @@ fn http_request_telemetry_falls_back_when_traceparent_is_missing_or_malformed() 
 }
 
 #[test]
+fn http_request_error_type_marks_span_and_metric_without_error_text() {
+    let events = HttpRequestTelemetry::new(
+        "/checkout/:cart_id",
+        "POST",
+        "11111111111111111111111111111111",
+        "2222222222222222",
+    )
+    .with_error_type("checkout::StorageFailure")
+    .with_duration_ms(12.5)
+    .build()
+    .unwrap();
+
+    let mut client = sample_client();
+    client
+        .span("evt_http_error_span", "2026-06-02T10:00:06Z", events.span)
+        .unwrap();
+    client
+        .metric(
+            "evt_http_error_metric",
+            "2026-06-02T10:00:06Z",
+            events.metric.unwrap(),
+        )
+        .unwrap();
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    assert_eq!(payload["events"][0]["attributes"]["status"], "error");
+    assert_eq!(
+        payload["events"][0]["attributes"]["metadata"]["exception.type"],
+        "checkout::StorageFailure"
+    );
+    assert_eq!(
+        payload["events"][1]["attributes"]["metadata"]["exception.type"],
+        "checkout::StorageFailure"
+    );
+    assert!(!payload.to_string().contains("message"));
+
+    let invalid = HttpRequestTelemetry::new(
+        "/checkout/:cart_id",
+        "POST",
+        "11111111111111111111111111111111",
+        "2222222222222222",
+    )
+    .with_error_type("StorageFailure?record=private")
+    .build()
+    .unwrap_err();
+    assert_eq!(invalid.code, "validation_error");
+    assert_eq!(
+        invalid.message,
+        "issue exception type is invalid or exceeds 256 characters"
+    );
+}
+
+#[test]
 fn unauthenticated_response_surfaces_clean_error() {
     let mut client = sample_client();
     enqueue_all(&mut client);

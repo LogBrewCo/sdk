@@ -52,6 +52,7 @@ tar -xf "$crate_path" -C "$crate_src_root"
 crate_dir="$crate_src_root/$crate_name"
 test -f "$crate_dir/examples/axum_request_middleware.rs"
 grep -q 'TowerHttpClientSpanLayer' "$crate_dir/README.md"
+grep -q 'with_error_issues' "$crate_dir/README.md"
 
 cd "$tmp_dir"
 cargo new --quiet axum-app
@@ -136,6 +137,105 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 EOF
 
+cat > src/bin/tower_request_error.rs <<'EOF'
+use axum::{
+    body::Body,
+    http::{Request, Response},
+};
+use logbrew::{LogBrewClient, TowerRequestIds, TowerRequestTelemetryLayer};
+use serde_json::Value;
+use std::{
+    error::Error,
+    fmt,
+    sync::{Arc, Mutex},
+};
+use tower::{Layer, ServiceExt, service_fn};
+
+#[derive(Debug, PartialEq, Eq)]
+struct CheckoutFailure;
+
+impl fmt::Display for CheckoutFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("private installed Tower error text")
+    }
+}
+
+impl Error for CheckoutFailure {}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let client = Arc::new(Mutex::new(
+        LogBrewClient::builder("tower-request-error-smoke", "0.1.0")
+            .api_key("LOGBREW_API_KEY")
+            .build()?,
+    ));
+    let layer = TowerRequestTelemetryLayer::new(
+        Arc::clone(&client),
+        |request: &Request<Body>| {
+            request
+                .extensions()
+                .get::<String>()
+                .cloned()
+                .unwrap_or_else(|| "/unmatched".to_string())
+        },
+        || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
+        || "2026-06-02T10:00:02Z".to_string(),
+    )
+    .with_error_issues();
+    let service = service_fn(|_request: Request<Body>| async {
+        Err::<Response<Body>, CheckoutFailure>(CheckoutFailure)
+    });
+    let mut request = Request::builder()
+        .method("post")
+        .uri("/checkout/cart_123?coupon=not-for-telemetry")
+        .header(
+            "traceparent",
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+        .body(Body::empty())?;
+    request
+        .extensions_mut()
+        .insert("/checkout/{cart_id}".to_string());
+
+    let result = layer.layer(service).oneshot(request).await;
+    assert_eq!(result.err(), Some(CheckoutFailure));
+
+    let payload: Value = serde_json::from_str(&client.lock().unwrap().preview_json()?)?;
+    let events = payload["events"].as_array().unwrap();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0]["type"], "span");
+    assert_eq!(events[1]["type"], "metric");
+    assert_eq!(events[2]["type"], "issue");
+
+    let span = &events[0]["attributes"];
+    let metric = &events[1]["attributes"];
+    let issue = &events[2]["attributes"];
+    assert_eq!(span["status"], "error");
+    assert_eq!(span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(span["spanId"], "b7ad6b7169203331");
+    assert_eq!(metric["name"], "http.server.duration");
+    assert_eq!(issue["metadata"]["traceId"], span["traceId"]);
+    assert_eq!(issue["metadata"]["spanId"], span["spanId"]);
+    assert_eq!(issue["exception"]["mechanism"]["type"], "tower.service");
+    assert_eq!(issue["exception"]["mechanism"]["handled"], false);
+    assert_eq!(issue["metadata"]["routeTemplate"], "/checkout/{cart_id}");
+    assert_eq!(issue["metadata"]["issueMissingEvidence"], "stackFrames");
+    assert_eq!(issue["breadcrumbs"][0]["category"], "http.request");
+    assert!(issue["exception"]["type"]
+        .as_str()
+        .unwrap()
+        .ends_with("CheckoutFailure"));
+
+    let text = payload.to_string().to_ascii_lowercase();
+    assert!(!text.contains("private installed tower error text"));
+    assert!(!text.contains("cart_123"));
+    assert!(!text.contains("coupon=not-for-telemetry"));
+    assert!(!text.contains("traceparent"));
+    println!("{{\"ok\":true,\"towerRequestErrorIssues\":1,\"requestSpans\":1,\"durationMetrics\":1}}");
+    Ok(())
+}
+EOF
+
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^name = "axum"$' Cargo.lock
 grep -q '^name = "tokio"$' Cargo.lock
@@ -171,8 +271,17 @@ grep -F -q "extracted-crate/$crate_name" axum-cargo-tree.txt
 grep -q 'axum v0\.8\.' axum-cargo-tree.txt
 grep -q 'tokio v1\.' axum-cargo-tree.txt
 grep -q 'tower v0\.5\.' axum-cargo-tree.txt
+cargo doc --quiet --locked --no-deps --package logbrew
+test -f target/doc/logbrew/struct.TowerRequestTelemetryLayer.html
+grep -q 'Opt in to one typed issue when the wrapped Tower service returns an error\.' target/doc/logbrew/struct.TowerRequestTelemetryLayer.html
+grep -q 'Override the error-issue event ID prefix appended with the request span ID\.' target/doc/logbrew/struct.TowerRequestTelemetryLayer.html
 cargo run --quiet --locked --bin axum-app > axum.stdout.json 2> axum.stderr.json
 python3 "$repo_root/scripts/check_rust_axum_payload.py" axum.stdout.json axum.stderr.json >/dev/null
 cargo run --quiet --locked --bin tower_http_client_span > tower-http-client-span.stdout.json
 grep -q '"ok":true' tower-http-client-span.stdout.json
 grep -q '"towerHttpClientSpans":1' tower-http-client-span.stdout.json
+cargo run --quiet --locked --bin tower_request_error > tower-request-error.stdout.json
+grep -q '"ok":true' tower-request-error.stdout.json
+grep -q '"towerRequestErrorIssues":1' tower-request-error.stdout.json
+grep -q '"requestSpans":1' tower-request-error.stdout.json
+grep -q '"durationMetrics":1' tower-request-error.stdout.json

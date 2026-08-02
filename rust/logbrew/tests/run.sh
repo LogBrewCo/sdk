@@ -42,6 +42,19 @@ split_output() {
   printf '%s\n__LOGBREW_STDERR_SPLIT__\n%s' "$stdout_part" "$stderr_part"
 }
 
+validate_issue_diagnostics_output() {
+  local stdout_part="$1"
+  local stderr_part="$2"
+  local payload_file
+  payload_file="$(mktemp)"
+  printf '%s\n' "$stdout_part" >"$payload_file"
+  PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" "$payload_file" >/dev/null
+  PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/validate_fixtures.py" "$payload_file" >/dev/null
+  rm -f "$payload_file"
+  assert_contains "$stderr_part" '"ok":true' 'expected success status in Rust issue diagnostics stderr'
+  assert_contains "$stderr_part" '"issues":2' 'expected issue count in Rust issue diagnostics stderr'
+}
+
 readme_combined="$(run_command "$package_root" cargo run --quiet --example readme_example)"
 readme_split="$(split_output "$readme_combined")"
 readme_stdout="${readme_split%%$'\n'__LOGBREW_STDERR_SPLIT__$'\n'*}"
@@ -70,8 +83,14 @@ assert_contains "$real_user_stdout" '"type": "action"' 'expected action event in
 assert_contains "$real_user_stderr" '"ok":true' 'expected success status in Rust real-user smoke stderr'
 assert_contains "$real_user_stderr" '"events":6' 'expected event count in Rust real-user smoke stderr'
 
+issue_diagnostics_combined="$(run_command "$package_root" cargo run --quiet --example issue_diagnostics)"
+issue_diagnostics_split="$(split_output "$issue_diagnostics_combined")"
+issue_diagnostics_stdout="${issue_diagnostics_split%%$'\n'__LOGBREW_STDERR_SPLIT__$'\n'*}"
+issue_diagnostics_stderr="${issue_diagnostics_split#*$'\n'__LOGBREW_STDERR_SPLIT__$'\n'}"
+validate_issue_diagnostics_output "$issue_diagnostics_stdout" "$issue_diagnostics_stderr"
+
 make_help_output="$(cd "$package_root/examples" && make)"
-expected_help_output=$'run-readme-example -> make run-readme-example\nrun (real-user-smoke) -> make run\nrun-real-user-smoke -> make run-real-user-smoke\nrun-first-useful-telemetry -> make run-first-useful-telemetry\nrun-http-server-request -> make run-http-server-request\nrun-axum-request-middleware -> make run-axum-request-middleware\nrun-actix-request-middleware -> make run-actix-request-middleware\nrun-rocket-request-fairing -> make run-rocket-request-fairing\nrun-tracing-bridge -> make run-tracing-bridge\nrun-opentelemetry-exporter -> make run-opentelemetry-exporter'
+expected_help_output=$'run-readme-example -> make run-readme-example\nrun (real-user-smoke) -> make run\nrun-real-user-smoke -> make run-real-user-smoke\nrun-first-useful-telemetry -> make run-first-useful-telemetry\nrun-http-server-request -> make run-http-server-request\nrun-issue-diagnostics -> make run-issue-diagnostics\nrun-axum-request-middleware -> make run-axum-request-middleware\nrun-actix-request-middleware -> make run-actix-request-middleware\nrun-rocket-request-fairing -> make run-rocket-request-fairing\nrun-tracing-bridge -> make run-tracing-bridge\nrun-opentelemetry-exporter -> make run-opentelemetry-exporter'
 if [[ "$make_help_output" != "$expected_help_output" ]]; then
   printf 'unexpected Rust examples make output\n' >&2
   exit 1
@@ -118,6 +137,12 @@ assert_contains "$make_real_user_stdout" '"type": "span"' 'expected span event i
 assert_contains "$make_real_user_stdout" '"type": "action"' 'expected action event in Rust make run-real-user-smoke output'
 assert_contains "$make_real_user_stderr" '"ok":true' 'expected success status in Rust make run-real-user-smoke stderr'
 assert_contains "$make_real_user_stderr" '"events":6' 'expected event count in Rust make run-real-user-smoke stderr'
+
+make_issue_diagnostics_combined="$(run_command "$package_root/examples" make run-issue-diagnostics)"
+make_issue_diagnostics_split="$(split_output "$make_issue_diagnostics_combined")"
+make_issue_diagnostics_stdout="${make_issue_diagnostics_split%%$'\n'__LOGBREW_STDERR_SPLIT__$'\n'*}"
+make_issue_diagnostics_stderr="${make_issue_diagnostics_split#*$'\n'__LOGBREW_STDERR_SPLIT__$'\n'}"
+validate_issue_diagnostics_output "$make_issue_diagnostics_stdout" "$make_issue_diagnostics_stderr"
 
 bash "$repo_root/scripts/real_user_rust_automatic_delivery_smoke.sh"
 
