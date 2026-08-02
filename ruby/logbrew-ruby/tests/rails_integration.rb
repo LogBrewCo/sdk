@@ -186,9 +186,34 @@ assert(raised.equal?(application_error), "expected Rails application error ident
 error_events = JSON.parse(error_runtime.client.preview_json).fetch("events")
 issue = error_events.find { |event| event.fetch("type") == "issue" }
 assert(!issue.nil?, "expected unhandled Rails issue")
-assert(issue.fetch("attributes").fetch("title") == "RuntimeError", "expected type-only issue title")
-assert(!issue.fetch("attributes").key?("message"), "expected exception message to be omitted by default")
+issue_attributes = issue.fetch("attributes")
+assert(issue_attributes.fetch("title") == "RuntimeError", "expected type-only issue title")
+assert(!issue_attributes.key?("message"), "expected exception message to be omitted by default")
+assert(
+  issue_attributes.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rails.middleware", "handled" => false }
+  },
+  "expected first-class unhandled Rails exception mechanism"
+)
+issue_frames = issue_attributes.fetch("stackFrames")
+assert(issue_frames.length.between?(1, 32), "expected bounded Rails exception frames")
+assert(issue_frames.fetch(0).fetch("filename") == "rails_integration.rb", "expected newest-first Rails throw frame")
+assert(!issue_frames.fetch(0).fetch("filename").include?(File::SEPARATOR), "expected basename-only Rails frames")
+issue_metadata = issue_attributes.fetch("metadata")
+assert(issue_metadata.fetch("errorName") == "RuntimeError", "expected backend-native Rails exception type")
+assert(issue_metadata.fetch("handled") == false, "expected Rails exception to be unhandled")
+assert(issue_metadata.fetch("mechanism") == "rails.middleware", "expected Rails middleware mechanism")
+assert(
+  issue_metadata.fetch("issueGroupingKey").match?(/\Arails-exception-[0-9a-f]{64}\z/),
+  "expected stable Rails issue grouping key"
+)
+assert(issue_metadata.fetch("errorFrameFile") == "rails_integration.rb", "expected Rails frame basename metadata")
+failed_span = error_events.find { |event| event.fetch("type") == "span" }.fetch("attributes")
+assert(issue_metadata.fetch("traceId") == failed_span.fetch("traceId"), "expected Rails issue/span trace correlation")
+assert(issue_metadata.fetch("spanId") == failed_span.fetch("spanId"), "expected Rails issue/span span correlation")
 assert(!JSON.generate(error_events).include?("opaque application error detail"), "expected private exception detail to stay local")
+assert(!JSON.generate(error_events).include?(File.expand_path("..", __dir__)), "expected absolute Rails source paths to stay local")
 tests += 1
 
 reporter = LogBrew::Rails::ErrorReporter.new(error_runtime)
@@ -204,8 +229,18 @@ reporter.report(RuntimeError.new("duplicate unhandled detail"), handled: false, 
 assert(error_runtime.client.pending_events == before_unhandled, "expected unhandled reporter event to avoid middleware duplicate")
 reporter_events = JSON.parse(error_runtime.client.preview_json).fetch("events")
 handled_issue = reporter_events.reverse.find { |event| event.fetch("type") == "issue" }
-handled_metadata = handled_issue.fetch("attributes").fetch("metadata")
+handled_attributes = handled_issue.fetch("attributes")
+handled_metadata = handled_attributes.fetch("metadata")
+assert(
+  handled_attributes.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rails.error_reporter", "handled" => true }
+  },
+  "expected first-class handled Rails reporter mechanism"
+)
 assert(handled_metadata.fetch("rails.handled") == true, "expected handled Rails issue metadata")
+assert(handled_metadata.fetch("handled") == true, "expected handled Rails mechanism state")
+assert(handled_metadata.fetch("mechanism") == "rails.error_reporter", "expected Rails error-reporter mechanism")
 assert(!JSON.generate(reporter_events).include?("opaque handled error detail"), "expected handled error message to stay local")
 assert(!JSON.generate(reporter_events).include?("opaque-user-id"), "expected user context to stay local")
 tests += 1

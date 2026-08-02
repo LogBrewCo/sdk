@@ -596,13 +596,34 @@ issue_attributes = rack_events[0].fetch("attributes")
 assert(issue_attributes.fetch("title") == "RuntimeError", "expected Rack issue title")
 assert(issue_attributes.fetch("level") == "error", "expected Rack issue level")
 assert(issue_attributes.fetch("message") == "checkout failed", "expected Rack issue message")
+assert(
+  issue_attributes.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rack.middleware", "handled" => false }
+  },
+  "expected first-class Rack exception mechanism"
+)
+rack_frames = issue_attributes.fetch("stackFrames")
+assert(rack_frames.length.between?(1, 32), "expected bounded Rack exception frames")
+assert(rack_frames.fetch(0).fetch("filename") == "run.rb", "expected newest-first basename-only Rack frame")
+assert(rack_frames.fetch(0).fetch("line").positive?, "expected positive Rack throw-frame line")
 issue_metadata = issue_attributes.fetch("metadata")
 assert(issue_metadata.fetch("exceptionType") == "RuntimeError", "expected Rack exception type")
+assert(issue_metadata.fetch("errorName") == "RuntimeError", "expected backend-native Rack exception type")
+assert(issue_metadata.fetch("handled") == false, "expected escaped Rack exception state")
+assert(issue_metadata.fetch("mechanism") == "rack.middleware", "expected Rack middleware mechanism")
+assert(
+  issue_metadata.fetch("issueGroupingKey").match?(/\Arack-exception-[0-9a-f]{64}\z/),
+  "expected stable Rack issue grouping key"
+)
+assert(issue_metadata.fetch("errorFrameFile") == "run.rb", "expected Rack error frame basename")
 assert(issue_metadata.fetch("exceptionMessage") == "checkout failed", "expected Rack exception message")
 assert(!issue_metadata.key?("exceptionBacktrace"), "expected Rack exception backtrace to be opt-in")
 error_span = rack_events[1].fetch("attributes")
 assert(error_span.fetch("status") == "error", "expected Rack error span")
 assert(error_span.fetch("metadata").fetch("http.status_code") == 500, "expected Rack error status metadata")
+assert(issue_metadata.fetch("traceId") == error_span.fetch("traceId"), "expected Rack issue/span trace correlation")
+assert(issue_metadata.fetch("spanId") == error_span.fetch("spanId"), "expected Rack issue/span span correlation")
 tests += 1
 
 client = sample_client
@@ -662,6 +683,13 @@ issue_attributes = rails_issue.fetch("attributes")
 assert(issue_attributes.fetch("title") == "RuntimeError", "expected Rails issue title")
 assert(issue_attributes.fetch("level") == "warning", "expected Rails issue level")
 assert(issue_attributes.fetch("message") == "handled checkout failure", "expected Rails issue message")
+assert(
+  issue_attributes.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rails.error_reporter", "handled" => true }
+  },
+  "expected first-class handled Rails exception mechanism"
+)
 issue_metadata = issue_attributes.fetch("metadata")
 assert(issue_metadata.fetch("service") == "web", "expected Rails base metadata")
 assert(!issue_metadata.key?("ignored"), "expected Rails subscriber to skip non-primitive base metadata")
@@ -673,6 +701,13 @@ assert(issue_metadata.fetch("context.route") == "checkout#create", "expected Rai
 assert(issue_metadata.fetch("context.user_id") == 123, "expected Rails context user id")
 assert(!issue_metadata.key?("context.ignored"), "expected Rails subscriber to skip non-primitive context")
 assert(issue_metadata.fetch("exceptionType") == "RuntimeError", "expected Rails exception type")
+assert(issue_metadata.fetch("errorName") == "RuntimeError", "expected backend-native Rails exception type")
+assert(issue_metadata.fetch("handled") == true, "expected handled Rails exception state")
+assert(issue_metadata.fetch("mechanism") == "rails.error_reporter", "expected Rails error-reporter mechanism")
+assert(
+  issue_metadata.fetch("issueGroupingKey").match?(/\Arails-exception-[0-9a-f]{64}\z/),
+  "expected stable Rails issue grouping key"
+)
 assert(issue_metadata.fetch("exceptionMessage") == "handled checkout failure", "expected Rails exception message")
 assert(!issue_metadata.key?("exceptionBacktrace"), "expected Rails exception backtrace to be opt-in")
 tests += 1

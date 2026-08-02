@@ -40,11 +40,14 @@ disabled and the application behaves normally. Set `LOGBREW_ENABLED=false` to
 disable it explicitly. If the Gemfile uses `require: false`, load
 `logbrew/rails` yourself after Rails.
 
-The automatic integration records route-template request spans and type-only
-issues. It does not record concrete request paths, query strings, request or
-response bodies, arbitrary headers, authorization values, cookies, user IDs,
-exception messages, or exception backtraces. Exception messages and backtraces
-are separate opt-ins:
+The automatic integration records route-template request spans and typed
+exception issues. Escaped request failures include exception identity,
+`rails.middleware` with `handled: false`, and up to 32 newest-first sanitized
+frames. Handled Rails reports use `rails.error_reporter` with `handled: true`.
+It does not record concrete request paths, query strings, request or response
+bodies, arbitrary headers, authorization values, cookies, user IDs, exception
+messages, raw backtrace text, source snippets, locals, arguments, or absolute
+paths. Exception messages and raw backtrace text are separate opt-ins:
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
@@ -58,7 +61,7 @@ are separate opt-ins:
 | `LOGBREW_FLUSH_INTERVAL_MS` | `5000` | Automatic delivery interval from 10 to 3600000 ms |
 | `LOGBREW_FLUSH_THRESHOLD` | `100` | Queue size from 1 to 1000 that requests an earlier flush |
 | `LOGBREW_CAPTURE_EXCEPTION_MESSAGES` | `false` | Opt in to exception message capture |
-| `LOGBREW_INCLUDE_EXCEPTION_BACKTRACE` | `false` | Opt in to exception backtrace capture |
+| `LOGBREW_INCLUDE_EXCEPTION_BACKTRACE` | `false` | Opt in to raw exception backtrace text; sanitized structured frames are always captured |
 
 `LOGBREW_API_KEY` and `LOGBREW_INGEST_KEY` are not Rails aliases. If either is
 set without the canonical server key, startup reports the exact
@@ -344,6 +347,60 @@ Both adapters are literal pass-throughs when `LogBrew::Trace.current` is absent.
 
 Outbound HTTP spans allow only method, normalized host, status code, duration, adapter source, sampled state, and exception type. They never record scheme, port, path, query, fragment, full URL, request or response headers, bodies or sizes, exception messages or stacks, authentication material, cookies, baggage, tracestate, resolved addresses, or arbitrary request options.
 
+## Typed Issue Diagnostics
+
+Use `LogBrew::IssueDiagnostics` when an application wants issue evidence that a
+human or coding agent can understand without parsing a flattened metadata map:
+
+```ruby
+breadcrumbs = [
+  LogBrew::IssueDiagnostics.breadcrumb(
+    timestamp: "2026-08-02T10:14:58.125Z",
+    category: "checkout.navigation",
+    type: "navigation",
+    message: "User reached payment review",
+    data: { step: "payment" }
+  ),
+  LogBrew::IssueDiagnostics.breadcrumb(
+    timestamp: "2026-08-02T10:14:59Z",
+    category: "checkout.request",
+    level: "warn",
+    data: { method: "POST", statusCode: 503 }
+  )
+]
+
+begin
+  checkout.call
+rescue RuntimeError => error
+  client.issue(
+    "evt_checkout_failure",
+    Time.now.utc.iso8601,
+    LogBrew::IssueDiagnostics.from_exception(
+      error,
+      message: "Checkout could not be completed.",
+      mechanism_type: "ruby.exception",
+      handled: true,
+      metadata: { routeTemplate: "/checkout/:cart_id" },
+      breadcrumbs: breadcrumbs
+    )
+  )
+end
+```
+
+The typed payload exposes exception type, mechanism and handled state, up to 32
+newest-first stack frames, and up to 64 oldest-to-newest breadcrumbs. Generated
+frames contain only basename, positive coordinates, and bounded function
+identity. Explicit frames can also carry module, `inApp`, and debug ID. A
+breadcrumb accepts a stable category/type, normalized level, bounded message,
+and at most eight flat finite primitive data values. Set
+`breadcrumbs_truncated: true` when the supplied list omits earlier history.
+
+`from_exception` deliberately omits exception text unless `message:` is
+provided. Automatic and manual structured frame projection never captures raw
+backtrace strings, source code, locals, arguments, or absolute paths. The raw
+Rails/Rack backtrace option is separate and remains off by default. Run
+`make -C examples run-issue-diagnostics` for a complete inspectable payload.
+
 ## Metrics
 
 Use `metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:
@@ -576,7 +633,10 @@ Event files contain the same validated event JSON your application submitted, in
 
 ## Example Source
 
-The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, using the standard logger wrapper, attaching Rack middleware, and subscribing to Rails errors in your own Ruby app.
+The `examples` directory contains copyable snippets for creating a client,
+building typed issue diagnostics, sending through `HttpTransport`, using the
+standard logger wrapper, attaching Rack middleware, and subscribing to Rails
+errors in your own Ruby app.
 
 ## Standard Logger
 
@@ -641,13 +701,14 @@ app = LogBrew::RackMiddleware.new(
 ```
 
 The manual middleware records successful responses as span events, records
-unhandled app exceptions as issue plus error-span events, and re-raises app
-exceptions so Rack keeps normal response handling. Its compatibility defaults
-retain path, request-ID, and exception-message capture. Set
-`include_exception_message: false` for type-only issues. Exception backtrace
-text is omitted unless `include_exception_backtrace: true` is set. Events queue
-by default; pass `transport:` plus `flush_on_response: true` when each response
-should flush.
+unhandled app exceptions as typed issue plus error-span events, and re-raises
+the exact app exception so Rack keeps normal response handling. Escaped issues
+use `rack.middleware`, `handled: false`, and bounded structured frames. Its
+compatibility defaults retain path, request-ID, and exception-message capture.
+Set `include_exception_message: false` for type-only issues. Raw backtrace text
+is omitted unless `include_exception_backtrace: true` is set; sanitized
+structured frames remain available either way. Events queue by default; pass
+`transport:` plus `flush_on_response: true` when each response should flush.
 
 ## Rails Error Subscriber
 
@@ -676,9 +737,11 @@ Rails.error.subscribe(
 ```
 
 The manual subscriber implements
-`report(error, handled:, severity:, context:, source:, **options)`. Its
-compatibility default includes primitive context values and exception messages;
-set `include_exception_message: false` for type-only issues. Backtrace text is
+`report(error, handled:, severity:, context:, source:, **options)`. Exception
+reports include typed identity, `rails.error_reporter`, the supplied handled
+state, and bounded structured frames. Its compatibility default includes
+primitive context values and exception messages; set
+`include_exception_message: false` for type-only issues. Raw backtrace text is
 omitted unless `include_exception_backtrace: true` is set. If you also use the
 manual Rack middleware, keep this subscriber focused on handled reports so
 unhandled request exceptions are not captured twice.
@@ -694,6 +757,7 @@ unhandled request exceptions are not captured twice.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `LogBrew::ProductTimeline` builds explicit, application-owned product action and network milestone timeline events with primitive metadata and query/hash-free routes.
 - `LogBrew::SupportTicketDraft.create` builds explicit, local-only support-ticket create payload drafts with redacted diagnostics and no backend route calls.
+- `LogBrew::IssueDiagnostics` builds typed exception identity, mechanism/handled state, basename-only structured frames, and bounded ordered breadcrumbs without raw exception internals.
 - `LogBrew::HttpTransport` sends queued batches through Ruby's standard `Net::HTTP` with configurable endpoint, headers, timeout, and app-owned HTTP client support.
 - `LogBrew::RackMiddleware` captures Rack request spans and unhandled app exceptions without requiring Rails or Rack at runtime.
 - `LogBrew::RailsErrorSubscriber` captures handled/manual Rails error reports without requiring Rails at runtime.

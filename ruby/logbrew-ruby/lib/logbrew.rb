@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "json"
 require "logger"
 require "net/http"
@@ -433,12 +434,13 @@ module LogBrew
     end
 
     def capture_exception_issue(env, error)
-      attributes = {
-        title: error.class.name,
-        level: "error",
+      attributes = IssueDiagnostics.from_exception(
+        error,
+        message: @include_exception_message ? error.message : nil,
+        mechanism_type: exception_mechanism_type,
+        handled: false,
         metadata: exception_metadata(env, error)
-      }
-      attributes[:message] = error.message if @include_exception_message
+      )
       @client.issue(next_event_id("issue"), logbrew_timestamp, attributes)
     end
 
@@ -497,10 +499,37 @@ module LogBrew
 
     def exception_metadata(env, error)
       request_metadata(env, 500).tap do |metadata|
-        metadata["exceptionType"] = error.class.name
+        exception_type = IssueDiagnostics.safe_exception_type(error)
+        frames = IssueDiagnostics.stack_frames_from_exception(error)
+        first_frame = frames.first
+        metadata["exceptionType"] = exception_type
+        metadata["errorName"] = exception_type
+        metadata["handled"] = false
+        metadata["mechanism"] = exception_mechanism_type
+        metadata["issueGroupingKey"] = exception_grouping_key(env, exception_type, first_frame)
+        metadata["issueGroupingSource"] = "exception_type_route_file"
+        unless first_frame.nil?
+          metadata["errorFrameFile"] = first_frame.fetch("filename")
+          metadata["errorFrameLine"] = first_frame.fetch("line")
+        end
         metadata["exceptionMessage"] = error.message if @include_exception_message
         metadata["exceptionBacktrace"] = error.backtrace.join("\n") if @include_exception_backtrace && error.backtrace
       end
+    end
+
+    def exception_mechanism_type
+      "rack.middleware"
+    end
+
+    def exception_grouping_prefix
+      "rack-exception"
+    end
+
+    def exception_grouping_key(env, exception_type, first_frame)
+      route = request_path(env)
+      frame_file = first_frame.nil? ? "" : first_frame.fetch("filename")
+      material = [exception_type, route, frame_file].join("\n")
+      "#{exception_grouping_prefix}-#{Digest::SHA256.hexdigest(material)}"
     end
 
     def rack_status(response)
@@ -603,12 +632,25 @@ module LogBrew
 
     def report(error, handled: true, severity: :error, context: nil, source: nil, **_options)
       capture_safely do
-        attributes = {
-          title: error_title(error),
-          level: issue_level(severity),
-          metadata: rails_metadata(error, handled, severity, context, source)
-        }
-        attributes[:message] = error_message(error) if @include_exception_message
+        attributes = if error.is_a?(Exception)
+                       IssueDiagnostics.from_exception(
+                         error,
+                         title: error_title(error),
+                         level: issue_level(severity),
+                         message: @include_exception_message ? error_message(error) : nil,
+                         mechanism_type: "rails.error_reporter",
+                         handled: handled,
+                         metadata: rails_metadata(error, handled, severity, context, source)
+                       )
+                     else
+                       {
+                         title: error_title(error),
+                         level: issue_level(severity),
+                         metadata: rails_metadata(error, handled, severity, context, source)
+                       }.tap do |fallback|
+                         fallback[:message] = error_message(error) if @include_exception_message
+                       end
+                     end
         @client.issue(next_event_id, logbrew_timestamp, attributes)
         flush_if_configured
       end
@@ -668,9 +710,28 @@ module LogBrew
     end
 
     def add_exception_metadata(metadata, exception)
-      metadata["exceptionType"] = exception.class.name
+      exception_type = IssueDiagnostics.safe_exception_type(exception)
+      frames = IssueDiagnostics.stack_frames_from_exception(exception)
+      first_frame = frames.first
+      metadata["exceptionType"] = exception_type
+      metadata["errorName"] = exception_type
+      metadata["handled"] = metadata.fetch("rails.handled")
+      metadata["mechanism"] = "rails.error_reporter"
+      metadata["issueGroupingKey"] = rails_error_grouping_key(exception_type, metadata, first_frame)
+      metadata["issueGroupingSource"] = "exception_type_source_file"
+      unless first_frame.nil?
+        metadata["errorFrameFile"] = first_frame.fetch("filename")
+        metadata["errorFrameLine"] = first_frame.fetch("line")
+      end
       metadata["exceptionMessage"] = exception.message if @include_exception_message
       metadata["exceptionBacktrace"] = exception.backtrace.join("\n") if @include_exception_backtrace && exception.backtrace
+    end
+
+    def rails_error_grouping_key(exception_type, metadata, first_frame)
+      source = metadata.fetch("rails.source", "rails")
+      frame_file = first_frame.nil? ? "" : first_frame.fetch("filename")
+      material = [exception_type, source, frame_file].join("\n")
+      "rails-exception-#{Digest::SHA256.hexdigest(material)}"
     end
 
     def copy_metadata(metadata)
@@ -1217,20 +1278,7 @@ module LogBrew
     end
 
     def validate_issue(attributes)
-      title = Validation.read(attributes, "title")
-      level = Validation.read(attributes, "level")
-      Validation.require_non_empty("issue title", title)
-      level = normalize_severity("issue level", level)
-      with_metadata(
-        {
-          "title" => title,
-          "level" => level
-        }.tap do |payload|
-          message = Validation.read(attributes, "message")
-          payload["message"] = message unless message.nil?
-        end,
-        attributes
-      )
+      IssueDiagnostics.validate_issue_attributes(attributes)
     end
 
     def validate_log(attributes)
@@ -1332,6 +1380,6 @@ module LogBrew
   require_relative "logbrew/automatic_delivery"
 end
 
-%w[product_timeline traceparent trace span_events operation_tracing http_client_tracing support_ticket worker_lifecycle].each do |path|
+%w[issue_diagnostics product_timeline traceparent trace span_events operation_tracing http_client_tracing support_ticket worker_lifecycle].each do |path|
   require_relative "logbrew/#{path}"
 end

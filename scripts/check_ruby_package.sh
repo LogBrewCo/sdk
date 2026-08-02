@@ -20,9 +20,10 @@ find "$package_dir" -name '*.rb' -not -path '*/.bundle/*' -print0 | while IFS= r
 done
 
 (cd "$package_dir" && ruby tests/run.rb)
+(cd "$package_dir" && ruby tests/issue_diagnostics.rb)
 (cd "$package_dir" && ruby tests/rails_integration.rb)
 test -f "$package_dir/tests/http_client_tracing_support.rb"
-rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/rails.rb" "$package_dir/lib/logbrew/rails_integration.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
+rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/issue_diagnostics.rb" "$package_dir/lib/logbrew/rails.rb" "$package_dir/lib/logbrew/rails_integration.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$tmp_dir/rdoc/LogBrew/Client.html"
 test -f "$tmp_dir/rdoc/LogBrew/Logger.html"
 test -f "$tmp_dir/rdoc/LogBrew/RackMiddleware.html"
@@ -40,6 +41,7 @@ test -f "$tmp_dir/rdoc/LogBrew/WorkerLifecycle.html"
 test -f "$tmp_dir/rdoc/LogBrew/WorkerDeliveryFailure.html"
 test -f "$tmp_dir/rdoc/LogBrew/DeliveryHealth.html"
 test -f "$tmp_dir/rdoc/LogBrew/HttpClientTracing.html"
+test -f "$tmp_dir/rdoc/LogBrew/IssueDiagnostics.html"
 test -f "$tmp_dir/rdoc/LogBrew/NetHttpTracingClient.html"
 test -f "$tmp_dir/rdoc/LogBrew/Sidekiq/Instrumentation.html"
 
@@ -65,12 +67,14 @@ test -f "$unpacked_dir/lib/logbrew/support_ticket.rb"
 test -f "$unpacked_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$unpacked_dir/lib/logbrew/automatic_delivery.rb"
 test -f "$unpacked_dir/lib/logbrew/http_client_tracing.rb"
+test -f "$unpacked_dir/lib/logbrew/issue_diagnostics.rb"
 test -f "$unpacked_dir/lib/logbrew/faraday_tracing.rb"
 test -f "$unpacked_dir/lib/logbrew/sidekiq.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
 test -f "$unpacked_dir/examples/http_trace_correlation.rb"
+test -f "$unpacked_dir/examples/issue_diagnostics.rb"
 test -f "$unpacked_dir/examples/persistent_worker_delivery.rb"
 test -f "$unpacked_dir/examples/automatic_delivery.rb"
 test -f "$unpacked_dir/examples/sidekiq_tracing.rb"
@@ -117,6 +121,8 @@ grep -q 'LogBrew::DeliveryHealth' "$unpacked_dir/README.md"
 grep -q 'recover_automatic_delivery' "$unpacked_dir/README.md"
 grep -q 'Outbound HTTP Tracing' "$unpacked_dir/README.md"
 grep -q 'LogBrew::HttpClientTracing.wrap_net_http' "$unpacked_dir/README.md"
+grep -q 'Typed Issue Diagnostics' "$unpacked_dir/README.md"
+grep -q 'LogBrew::IssueDiagnostics.from_exception' "$unpacked_dir/README.md"
 grep -q 'LogBrew::FaradayTracingMiddleware' "$unpacked_dir/README.md"
 grep -q 'Sidekiq Tracing' "$unpacked_dir/README.md"
 grep -q 'LogBrew::Sidekiq::Instrumentation.create' "$unpacked_dir/README.md"
@@ -144,6 +150,9 @@ grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/real-
 ruby -I "$package_dir/lib" "$package_dir/examples/http_trace_correlation.rb" > "$tmp_dir/http-trace.stdout.json" 2> "$tmp_dir/http-trace.stderr.json"
 python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json" >/dev/null
 
+ruby -I "$package_dir/lib" "$package_dir/examples/issue_diagnostics.rb" > "$tmp_dir/issue-diagnostics.stdout.json" 2> "$tmp_dir/issue-diagnostics.stderr.json"
+python3 "$repo_root/scripts/check_ruby_issue_diagnostics_payload.py" "$tmp_dir/issue-diagnostics.stdout.json" "$tmp_dir/issue-diagnostics.stderr.json" >/dev/null
+
 LOGBREW_PERSISTENT_QUEUE_PATH="$tmp_dir/persistent-example-queue" \
   ruby -I "$package_dir/lib" "$package_dir/examples/persistent_worker_delivery.rb" > "$tmp_dir/persistent-example.json"
 grep -q '"ok":true' "$tmp_dir/persistent-example.json"
@@ -163,6 +172,7 @@ grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' "$tmp_dir/examples-help.txt"
 grep -qx 'run-automatic-delivery -> make run-automatic-delivery' "$tmp_dir/examples-help.txt"
@@ -173,7 +183,7 @@ grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:
 printf '%s\n' "$sidekiq_smoke_output"
 
 rails_smoke_output="$(bash "$repo_root/scripts/real_user_ruby_rails_smoke.sh")"
-grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=1 spans=1 issues=1 environments=1$' <<< "$rails_smoke_output"
+grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=2 spans=2 issues=2 environments=1$' <<< "$rails_smoke_output"
 printf '%s\n' "$rails_smoke_output"
 
 echo "ruby package checks passed"
