@@ -33,7 +33,8 @@ class TelemetryContextSurfaceTests(unittest.TestCase):
                     self.assertRegex(
                         source,
                         re.compile(
-                            r"LogBrewClient\.create\(\{[\s\S]{0,700}?\bcontext,",
+                            r"LogBrewClient\.create\(\{[\s\S]{0,700}?"
+                            r"\bcontext(?:\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*)?,",
                         ),
                     )
 
