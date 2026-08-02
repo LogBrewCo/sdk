@@ -223,7 +223,9 @@ function createEvent(mechanism) {
   delete error.stack;
   const event = createReactNativeErrorEvent(error, {
     id: nextEventId(),
-    includeStack: false
+    handled: false,
+    includeStack: false,
+    mechanism
   });
   return {
     ...event,

@@ -282,13 +282,59 @@ export type IssueStackFrame = {
   debugId?: string;
 };
 
+/** Runtime path that captured an exception and whether it escaped that path. */
+export type IssueExceptionMechanism = {
+  /** Stable low-cardinality capture mechanism, such as `react.error_boundary`. */
+  type: string;
+  /** False when the exception escaped the capture boundary. */
+  handled: boolean;
+};
+
+/** Structured exception identity attached to an issue. */
+export type IssueException = {
+  /** Bounded runtime exception class or error type. */
+  type: string;
+  /** Capture mechanism when the SDK can determine it. */
+  mechanism?: IssueExceptionMechanism;
+};
+
+export type IssueBreadcrumbLevel = "debug" | "info" | "warning" | "error" | "critical";
+export type IssueBreadcrumbLevelInput = IssueBreadcrumbLevel | "trace" | "log" | "warn" | "fatal";
+export type IssueBreadcrumbDataValue = string | number | boolean | null;
+
+/** One privacy-bounded step that happened before an issue. */
+export type IssueBreadcrumb = {
+  /** RFC 3339 timestamp with an explicit timezone. */
+  timestamp: string;
+  /** Optional stable breadcrumb kind, such as `navigation` or `http`. */
+  type?: string;
+  /** Required low-cardinality source category. */
+  category: string;
+  level?: IssueBreadcrumbLevel;
+  /** Optional bounded display-safe description. */
+  message?: string;
+  /** At most eight flat primitive fields. Never include authentication material or raw request data. */
+  data?: Record<string, IssueBreadcrumbDataValue>;
+};
+
+/** Input accepted by `addBreadcrumb`; the client supplies the current timestamp when omitted. */
+export type IssueBreadcrumbInput = Omit<IssueBreadcrumb, "timestamp" | "level"> & {
+  timestamp?: string;
+  level?: IssueBreadcrumbLevelInput;
+};
+
 /** Public issue event attributes. */
 export type IssueAttributes = {
   title: string;
   level: SeverityInput;
   message?: string;
+  exception?: IssueException;
   /** Ordered privacy-bounded generated frames, capped at 32. */
   stackFrames?: IssueStackFrame[];
+  /** Oldest-to-newest issue history, capped at the most recent 64 entries. */
+  breadcrumbs?: IssueBreadcrumb[];
+  /** True when older or invalid history was omitted before capture. */
+  breadcrumbsTruncated?: boolean;
   metadata?: Metadata;
   context?: TelemetryContext;
 };
@@ -299,6 +345,10 @@ export type JavaScriptErrorIssueOptions = {
   level?: SeverityInput;
   message?: string;
   metadata?: Metadata;
+  /** Stable low-cardinality capture mechanism. Defaults to `javascript.error`. */
+  mechanism?: string;
+  /** Whether the error was handled by the capture boundary. Defaults to true. */
+  handled?: boolean;
   /** Metadata source label. Defaults to `javascript.error`. */
   source?: string;
   /** Active trace copied into primitive correlation metadata. */
@@ -756,6 +806,10 @@ export declare class LogBrewClient {
   previewJson(): string;
   /** Purge queued events from memory and persistence while no delivery operation is active. */
   purgePendingEvents(): number;
+  /** Add one explicit privacy-bounded breadcrumb to the client's 64-entry issue history. */
+  addBreadcrumb(breadcrumb: IssueBreadcrumbInput, timestamp?: string): void;
+  /** Clear the current issue breadcrumb history and return the number removed. */
+  clearBreadcrumbs(): number;
   release(id: string, timestamp: string, attributes: ReleaseAttributes): void;
   environment(id: string, timestamp: string, attributes: EnvironmentAttributes): void;
   issue(id: string, timestamp: string, attributes: IssueAttributes): void;

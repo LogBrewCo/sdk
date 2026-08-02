@@ -308,6 +308,13 @@ function fatalStackFrames(error, stackFrame) {
 
 function fatalEventAttributes(record, eventMessage) {
   return Object.freeze({
+    exception: Object.freeze({
+      type: record.errorName,
+      mechanism: Object.freeze({
+        type: "react_native_error_utils",
+        handled: false
+      })
+    }),
     level: "fatal",
     message: eventMessage,
     metadata: Object.freeze({

@@ -76,7 +76,9 @@ export type CaptureReactErrorOptions = {
   idFactory?: (context: ReactErrorIdFactoryContext) => string;
   includeComponentStack?: boolean;
   includeStack?: boolean;
+  handled?: boolean;
   level?: IssueAttributes["level"];
+  mechanism?: string;
   metadata?: Metadata;
   now?: () => string;
   timestamp?: string;
@@ -210,6 +212,8 @@ export type LogBrewActions = {
   previewJson(): string;
   pendingEvents(): number;
   droppedEvents(): number;
+  addBreadcrumb: LogBrewClient["addBreadcrumb"];
+  clearBreadcrumbs: LogBrewClient["clearBreadcrumbs"];
   captureReactError(error: unknown, options?: CaptureReactErrorOptions): ReactErrorEvent;
 };
 

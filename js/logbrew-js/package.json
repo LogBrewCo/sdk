@@ -43,6 +43,7 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "issue-diagnostics.cjs",
     "issue-stack.cjs",
     "log-context.cjs",
     "opentelemetry.cjs",

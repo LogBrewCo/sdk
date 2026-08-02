@@ -1435,6 +1435,13 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
     title: "TypeError",
     level: "error",
     message: "Checkout exploded",
+    exception: {
+      type: "TypeError",
+      mechanism: {
+        type: "javascript.error",
+        handled: true
+      }
+    },
     stackFrames: [
       {
         filename: "https://cdn.example/assets/app.js",
@@ -1484,6 +1491,92 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
   assert.deepEqual(queued.stackFrames, attributes.stackFrames);
 });
 
+test("issue diagnostics retain a bounded breadcrumb trail without caller mutation", () => {
+  const client = sampleClient();
+  const mutable = {
+    category: "navigation",
+    message: "Opened /checkout/:step",
+    data: { route: "/checkout/:step", attempt: 1 }
+  };
+  client.addBreadcrumb(mutable, "2026-07-17T11:59:00.000Z");
+  mutable.message = "caller mutation";
+  mutable.data.route = "/original/example/123";
+
+  for (let index = 1; index <= 64; index += 1) {
+    client.addBreadcrumb({
+      category: `checkout.step.${index}`,
+      level: index === 64 ? "warn" : "debug",
+      data: { attempt: index, complete: index === 64 }
+    }, `2026-07-17T11:59:${String(index % 60).padStart(2, "0")}.000Z`);
+  }
+
+  client.issue("evt_breadcrumbs", "2026-07-17T12:00:00.000Z", {
+    title: "Checkout failed",
+    level: "error",
+    exception: {
+      type: "CheckoutError",
+      mechanism: { type: "react.error_boundary", handled: true }
+    }
+  });
+
+  const attributes = JSON.parse(client.previewJson()).events[0].attributes;
+  assert.equal(attributes.breadcrumbs.length, 64);
+  assert.equal(attributes.breadcrumbs[0].category, "checkout.step.1");
+  assert.equal(attributes.breadcrumbs[0].level, "debug");
+  assert.deepEqual(attributes.breadcrumbs[63], {
+    timestamp: "2026-07-17T11:59:04.000Z",
+    category: "checkout.step.64",
+    level: "warning",
+    data: { attempt: 64, complete: true }
+  });
+  assert.equal(attributes.breadcrumbsTruncated, true);
+  assert.doesNotMatch(JSON.stringify(attributes), /caller mutation|original\/example/u);
+
+  assert.equal(client.clearBreadcrumbs(), 64);
+  client.issue("evt_after_clear", "2026-07-17T12:00:01.000Z", {
+    title: "After clear",
+    level: "error"
+  });
+  const cleared = JSON.parse(client.previewJson()).events[1].attributes;
+  assert.equal(cleared.breadcrumbs, undefined);
+  assert.equal(cleared.breadcrumbsTruncated, undefined);
+});
+
+test("issue diagnostics reject unsafe shapes and preserve explicit breadcrumb snapshots", () => {
+  const invalidIssues = [
+    { exception: { type: "CheckoutError", mechanism: { type: "react.error_boundary" } } },
+    { exception: { type: "x".repeat(257) } },
+    { breadcrumbs: [] },
+    { breadcrumbs: [{ timestamp: "2026-07-17T12:00:00Z", category: "navigation", data: { nested: {} } }] },
+    { breadcrumbsTruncated: "yes" }
+  ];
+  for (const diagnostics of invalidIssues) {
+    const client = sampleClient();
+    assert.throws(
+      () => client.issue("evt_invalid_diagnostics", "2026-07-17T12:00:00Z", {
+        title: "Invalid diagnostics",
+        level: "error",
+        ...diagnostics
+      }),
+      (error) => error instanceof SdkError && error.code === "validation_error"
+    );
+  }
+
+  const client = sampleClient();
+  client.addBreadcrumb({ category: "buffered" }, "2026-07-17T11:58:00Z");
+  client.issue("evt_explicit_snapshot", "2026-07-17T12:00:00Z", {
+    title: "Explicit snapshot",
+    level: "error",
+    breadcrumbs: [{
+      timestamp: "2026-07-17T11:59:00Z",
+      category: "explicit",
+      message: "Safe explicit context"
+    }]
+  });
+  const attributes = JSON.parse(client.previewJson()).events[0].attributes;
+  assert.deepEqual(attributes.breadcrumbs.map(({ category }) => category), ["explicit"]);
+});
+
 test("createIssueAttributesFromError bounds and sanitizes structured stack frames", () => {
   const error = new Error("Bounded stack");
   error.stack = [
@@ -1511,6 +1604,22 @@ test("createIssueAttributesFromError bounds and sanitizes structured stack frame
   });
   assert.equal(attributes.metadata.errorFrameFile, "frame-0.js");
   assert.doesNotMatch(JSON.stringify(attributes), /C:\\workspace|debug=value|fragment|frame-32/u);
+});
+
+test("createIssueAttributesFromError keeps legacy source labels separate from mechanism identity", () => {
+  const error = new Error("Checkout failed");
+  error.name = "Checkout?error";
+  const attributes = createIssueAttributesFromError(error, {
+    source: "application error boundary"
+  });
+
+  assert.equal(attributes.metadata.source, "application error boundary");
+  assert.equal(attributes.metadata.errorName, "Checkout?error");
+  assert.equal(attributes.exception.type, "Error");
+  assert.deepEqual(attributes.exception.mechanism, {
+    type: "javascript.error",
+    handled: true
+  });
 });
 
 test("createIssueAttributesFromError omits non-UUID release artifact Debug IDs", () => {

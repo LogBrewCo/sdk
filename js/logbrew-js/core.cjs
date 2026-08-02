@@ -1,4 +1,5 @@
 const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
+const { buildIssueDiagnosticsHelpers } = require("./issue-diagnostics.cjs");
 const { buildIssueStackHelpers } = require("./issue-stack.cjs");
 const { buildLogContextHelpers } = require("./log-context.cjs");
 const { buildOpenTelemetryHelpers } = require("./opentelemetry.cjs");
@@ -128,6 +129,13 @@ const {
 } = buildLogContextHelpers({ SdkError });
 
 const { javascriptStackFrames, validateIssueStackFrames } = buildIssueStackHelpers({ SdkError });
+const {
+  MAX_ISSUE_BREADCRUMBS,
+  cloneIssueDiagnostics,
+  createIssueException,
+  validateIssueBreadcrumb,
+  validateIssueDiagnostics
+} = buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp });
 const {
   cloneTelemetryContext,
   mergeTelemetryContexts,
@@ -365,6 +373,8 @@ class LogBrewClient {
     this.lastAcceptedAtUnixMs = 0;
     this.lastDroppedAtUnixMs = 0;
     this.failedBatch = undefined;
+    this.issueBreadcrumbs = [];
+    this.issueBreadcrumbsTruncated = false;
     this.#scheduleAutomaticDelivery();
   }
 
@@ -468,6 +478,28 @@ class LogBrewClient {
     return purgedEvents;
   }
 
+  addBreadcrumb(breadcrumb, timestamp = new Date().toISOString()) {
+    if (this.closed) {
+      throw new SdkError("shutdown_error", "client is already shut down");
+    }
+    if (this.closing) {
+      throw new SdkError("shutdown_error", "client is shutting down");
+    }
+    const validated = validateIssueBreadcrumb(breadcrumb, timestamp);
+    if (this.issueBreadcrumbs.length === MAX_ISSUE_BREADCRUMBS) {
+      this.issueBreadcrumbs.shift();
+      this.issueBreadcrumbsTruncated = true;
+    }
+    this.issueBreadcrumbs.push(validated);
+  }
+
+  clearBreadcrumbs() {
+    const cleared = this.issueBreadcrumbs.length;
+    this.issueBreadcrumbs.splice(0, cleared);
+    this.issueBreadcrumbsTruncated = false;
+    return cleared;
+  }
+
   release(id, timestamp, attributes) {
     this.#pushEvent("release", id, timestamp, validateRelease(attributes));
   }
@@ -477,7 +509,18 @@ class LogBrewClient {
   }
 
   issue(id, timestamp, attributes) {
-    this.#pushEvent("issue", id, timestamp, validateIssue(attributes));
+    const withBreadcrumbs = attributes.breadcrumbs !== undefined || this.issueBreadcrumbs.length === 0
+      ? attributes
+      : {
+          ...attributes,
+          breadcrumbs: this.issueBreadcrumbs,
+          ...(
+            attributes.breadcrumbsTruncated === true || this.issueBreadcrumbsTruncated
+              ? { breadcrumbsTruncated: true }
+              : {}
+          )
+        };
+    this.#pushEvent("issue", id, timestamp, validateIssue(withBreadcrumbs));
   }
 
   log(id, timestamp, attributes) {
@@ -1348,6 +1391,11 @@ function createIssueAttributesFromError(error, options = {}) {
     title: stringOrUndefined(options.title) ?? details.name,
     level: normalizeSeverity("issue level", options.level ?? "error"),
     ...(stringOrUndefined(options.message) ? { message: options.message } : details.message ? { message: details.message } : {}),
+    exception: createIssueException(
+      boundedIssueExceptionType(details.name),
+      stringOrUndefined(options.mechanism) ?? "javascript.error",
+      options.handled === undefined ? true : options.handled
+    ),
     ...(stackFrames.length > 0 ? { stackFrames } : {}),
     metadata: compactMetadata(metadata)
   };
@@ -1371,6 +1419,23 @@ function errorDetails(error) {
     return { name: "Error", message: error };
   }
   return { name: "Error" };
+}
+
+function boundedIssueExceptionType(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  const characters = Array.from(normalized);
+  if (
+    normalized === ""
+    || characters.length > 256
+    || /[?#]/u.test(normalized)
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+    })
+  ) {
+    return "Error";
+  }
+  return normalized;
 }
 
 function issueGroupingMetadata(source, details, frame, fingerprint) {
@@ -2022,7 +2087,7 @@ function cloneSpanLinks(links) {
 }
 
 function cloneEvent(event) {
-  const attributes = { ...event.attributes };
+  const attributes = { ...event.attributes, ...cloneIssueDiagnostics(event.attributes) };
   if (event.attributes.metadata !== undefined) {
     attributes.metadata = { ...event.attributes.metadata };
   }
@@ -2066,7 +2131,8 @@ function validateIssue(attributes) {
     title: attributes.title,
     level,
     ...(attributes.message !== undefined ? { message: attributes.message } : {}),
-    ...(stackFrames !== undefined ? { stackFrames } : {})
+    ...(stackFrames !== undefined ? { stackFrames } : {}),
+    ...validateIssueDiagnostics(attributes)
   }, attributes.metadata, attributes.context);
 }
 

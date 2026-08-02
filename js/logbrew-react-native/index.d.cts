@@ -289,10 +289,12 @@ export type CaptureReactNativeErrorOptions = ReactNativeContextOptions & {
   debugIdMap?: Record<string, string>;
   environment?: string;
   fingerprint?: string;
+  handled?: boolean;
   id?: string;
   idFactory?: (context: ReactNativeErrorIdFactoryContext) => string;
   includeStack?: boolean;
   level?: IssueAttributes["level"];
+  mechanism?: string;
   now?: () => string;
   release?: string;
   runtime?: string;

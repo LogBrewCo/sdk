@@ -233,6 +233,7 @@ class ValidateFixturesTests(unittest.TestCase):
             ({"module": "   "}, "module is invalid"),
             ({"inApp": "yes"}, "inApp must be a boolean"),
             ({"inApp": None}, "inApp must be a boolean"),
+            ({"debugId": "not-a-uuid"}, "debugId must be a UUID"),
         )
         for extra, expected in cases:
             with self.subTest(extra=extra):
@@ -254,6 +255,92 @@ class ValidateFixturesTests(unittest.TestCase):
             ValidationError,
             "event 2 issue stackFrames must contain 1-32 entries",
         ):
+            validate_payload(payload)
+
+    def test_issue_diagnostics_accept_bounded_exception_and_breadcrumbs(self) -> None:
+        payload = self.load_valid_payload()
+        attributes = self.issue_attributes(payload)
+        attributes["exception"] = {
+            "type": "CheckoutError",
+            "mechanism": {"type": "react.error_boundary", "handled": True},
+        }
+        attributes["breadcrumbs"] = [
+            {
+                "timestamp": "2026-06-02T09:59:58.123Z",
+                "type": "navigation",
+                "category": "navigation",
+                "level": "info",
+                "message": "Opened /checkout/:step",
+                "data": {
+                    "route": "/checkout/:step",
+                    "cached": False,
+                    "attempt": 2,
+                },
+            }
+        ]
+        attributes["breadcrumbsTruncated"] = True
+
+        validate_payload(payload)
+
+    def test_issue_diagnostics_reject_invalid_or_unbounded_values(self) -> None:
+        cases = (
+            ({"exception": {"type": "CheckoutError", "mechanism": {"type": "react.error_boundary"}}}, "handled"),
+            ({"exception": {"type": "x" * 257}}, "exception type is invalid"),
+            ({"breadcrumbs": []}, "must contain 1-64 entries"),
+            (
+                {
+                    "breadcrumbs": [
+                        {
+                            "timestamp": "2026-06-02T09:59:58Z",
+                            "category": "navigation",
+                            "data": {"nested": {"private": True}},
+                        }
+                    ]
+                },
+                "data value for nested must be a string, number, boolean, or null",
+            ),
+            (
+                {
+                    "breadcrumbs": [
+                        {
+                            "timestamp": "2026-06-02T09:59:58Z",
+                            "category": "navigation",
+                            "data": {f"field_{index}": index for index in range(9)},
+                        }
+                    ]
+                },
+                "data must contain at most 8 fields",
+            ),
+            (
+                {
+                    "breadcrumbs": [
+                        {
+                            "timestamp": "2026-06-02T09:59:58",
+                            "category": "navigation",
+                        }
+                    ]
+                },
+                "timestamp must include a timezone offset",
+            ),
+            ({"breadcrumbsTruncated": "yes"}, "breadcrumbsTruncated must be a boolean"),
+        )
+
+        for diagnostics, expected in cases:
+            with self.subTest(diagnostics=diagnostics):
+                payload = self.load_valid_payload()
+                self.issue_attributes(payload).update(diagnostics)
+                with self.assertRaisesRegex(ValidationError, expected):
+                    validate_payload(payload)
+
+        payload = self.load_valid_payload()
+        self.issue_attributes(payload)["breadcrumbs"] = [
+            {
+                "timestamp": "2026-06-02T09:59:58Z",
+                "category": f"step.{index}",
+            }
+            for index in range(65)
+        ]
+        with self.assertRaisesRegex(ValidationError, "must contain 1-64 entries"):
             validate_payload(payload)
 
     def test_span_events_pass_with_primitive_metadata(self) -> None:
@@ -473,6 +560,45 @@ class ValidateFixturesTests(unittest.TestCase):
                 "items": {"$ref": "#/$defs/issueStackFrame"},
             },
         )
+
+    def test_schema_describes_bounded_issue_diagnostics(self) -> None:
+        schema = self.load_schema()
+        definitions = schema["$defs"]
+        issue_properties = definitions["issueEvent"]["allOf"][1]["properties"]["attributes"][
+            "properties"
+        ]
+
+        self.assertEqual(issue_properties["exception"], {"$ref": "#/$defs/issueException"})
+        self.assertEqual(
+            issue_properties["breadcrumbs"],
+            {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 64,
+                "items": {"$ref": "#/$defs/issueBreadcrumb"},
+            },
+        )
+        self.assertEqual(issue_properties["breadcrumbsTruncated"], {"type": "boolean"})
+
+        exception = definitions["issueException"]
+        self.assertFalse(exception["additionalProperties"])
+        self.assertEqual(exception["required"], ["type"])
+        self.assertEqual(
+            exception["properties"]["mechanism"],
+            {"$ref": "#/$defs/issueExceptionMechanism"},
+        )
+        mechanism = definitions["issueExceptionMechanism"]
+        self.assertFalse(mechanism["additionalProperties"])
+        self.assertEqual(set(mechanism["required"]), {"type", "handled"})
+
+        breadcrumb = definitions["issueBreadcrumb"]
+        self.assertFalse(breadcrumb["additionalProperties"])
+        self.assertEqual(set(breadcrumb["required"]), {"timestamp", "category"})
+        self.assertEqual(
+            breadcrumb["properties"]["data"],
+            {"$ref": "#/$defs/issueBreadcrumbData"},
+        )
+        self.assertEqual(definitions["issueBreadcrumbData"]["maxProperties"], 8)
 
     def test_schema_issue_stack_frame_bounds_match_validator(self) -> None:
         schema = self.load_schema()

@@ -84,7 +84,7 @@ For browser React apps, prefer a browser-scoped public key through `clientKey`. 
 
 ## Product Actions And Network Milestones
 
-Use `useLogBrewAction()` for product steps your React app already understands, such as route changes, clicks, form submits, retry decisions, and funnel steps. Use `useLogBrewNetwork()` for important API milestones that should be correlated with the same session or trace. Both helpers enqueue LogBrew `action` events, which gives LogBrew and AI agents a structured timeline across many app sessions without requiring visual replay.
+Use `useLogBrewAction()` for product steps your React app already understands, such as route changes, clicks, form submits, retry decisions, and funnel steps. Use `useLogBrewNetwork()` for important API milestones that should be correlated with the same session or trace. Both helpers enqueue LogBrew `action` events and add a bounded breadcrumb for later issues. React Router navigation helpers do the same with sanitized route templates. This gives LogBrew and AI agents a structured timeline across many app sessions without requiring visual replay.
 
 Keep metadata low-cardinality and privacy-safe. Prefer route templates such as `/checkout` or `/api/orders/:id`; avoid raw selectors, full URLs, query strings, user-entered text, headers, request bodies, response bodies, screenshots, and replay payloads unless your application owns an explicit opt-in and redaction policy. `useLogBrewNetwork()` strips query strings and hashes from `routeTemplate`, records method/status/duration/session/trace metadata, and does not patch `fetch` automatically.
 
@@ -196,7 +196,7 @@ export function AppRoutes() {
 
 ## Error Boundary
 
-Wrap risky subtrees with `LogBrewErrorBoundary` when you want React render errors to become LogBrew issues and also render a scoped fallback UI. The boundary records React's component stack by default, but JavaScript stack text stays opt-in through `includeStack: true`.
+Wrap risky subtrees with `LogBrewErrorBoundary` when you want React render errors to become LogBrew issues and also render a scoped fallback UI. The boundary records a typed exception with `react.error_boundary` and `handled: true`, includes prior bounded breadcrumbs, and records React's component stack by default. Raw JavaScript stack text stays opt-in through `includeStack: true`.
 
 ```js
 import React from "react";

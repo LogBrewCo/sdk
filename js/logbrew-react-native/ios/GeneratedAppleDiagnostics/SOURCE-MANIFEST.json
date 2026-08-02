@@ -15,7 +15,7 @@
     "swift/logbrew-swift/Sources/LogBrew/LogBrewTrace.swift": "f67edf4ca464e6a6eb1c7a22cd4997928cd27b6c2d07535855a18a053d8de924",
     "swift/logbrew-swift/Sources/LogBrew/Metadata.swift": "c8276f35809d6ffc471b46397c5b85e7d57b3f346e5ddb0afa2027eeba7a480f",
     "swift/logbrew-swift/Sources/LogBrew/NativeStackFrame.swift": "ecbd418969ec4a31503d9916a8bf27f22e6863356c6fabe457c1e61027a8d805",
-    "swift/logbrew-swift/Sources/LogBrew/ProductTimeline.swift": "84b5aa8b8ada9a7e9fe3b8be0866b1a94983ba87ce23a47a01fa31cb6a4020d7",
+    "swift/logbrew-swift/Sources/LogBrew/ProductTimeline.swift": "b95990760cc77ba0242562767d2bdacbb417d84d418e06116ef4c123ae142725",
     "swift/logbrew-swift/Sources/LogBrew/PublicTypes.swift": "e385823c785e3bb4b762dcc7bc41406e90014e44dc8c65fe5797de1b11b36531",
     "swift/logbrew-swift/Sources/LogBrew/Transport.swift": "73eec81aaebec4bc922b2a372429c88fcd3e85606a7862cd08e1795eb2a8e6cd",
     "swift/logbrew-swift/Sources/LogBrew/URLSessionTrace.swift": "d0076c72671716c41bd7498d0509e453b8182c418156e169196fee9f26fc66b1",

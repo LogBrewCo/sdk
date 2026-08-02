@@ -312,6 +312,10 @@ export function captureScreenView(client, screenName, {
       ...productAnalyticsMetadata("screen_view", screenName)
     }
   });
+  recordIssueBreadcrumb(client, {
+    timestamp,
+    attributes: { name: screenActionName(screenName), status }
+  }, "navigation", "navigation");
 }
 
 export function captureAppStateChange(client, state, {
@@ -334,6 +338,10 @@ export function captureAppStateChange(client, state, {
       ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
     }
   });
+  recordIssueBreadcrumb(client, {
+    timestamp,
+    attributes: { name: "app_state_change", status: "success" }
+  }, "app.state", "state");
 }
 
 export function createReactNativeActionEvent({
@@ -375,6 +383,7 @@ export function captureReactNativeAction(client, input = {}) {
   requireClient(client);
   const event = createReactNativeActionEvent(input);
   client.action(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(client, event, "ui.action", "user");
   return event;
 }
 
@@ -427,6 +436,7 @@ export function captureReactNativeNetwork(client, input = {}) {
   requireClient(client);
   const event = createReactNativeNetworkEvent(input);
   client.action(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(client, event, "http", "http");
   return event;
 }
 
@@ -465,6 +475,7 @@ export function captureReactNativeNavigationSpan(client, input = {}) {
   requireClient(client);
   const event = createReactNativeNavigationSpanEvent(input);
   client.span(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(client, event, "navigation", "navigation");
   return event;
 }
 
@@ -574,10 +585,12 @@ export function createReactNativeErrorEvent(error, {
   debugIdMap,
   environment,
   fingerprint,
+  handled = true,
   id,
   idFactory = defaultErrorEventId,
   includeStack = false,
   level = "error",
+  mechanism = "react-native.error",
   metadata = {},
   now = () => new Date().toISOString(),
   platform,
@@ -595,8 +608,10 @@ export function createReactNativeErrorEvent(error, {
     debugIdMap: debugIdMap === undefined ? runtimeReactNativeDebugIdMap() : debugIdMap,
     environment,
     fingerprint,
+    handled,
     includeErrorStack: includeStack,
     level,
+    mechanism,
     metadata: {
       ...getReactNativeContext({ platform, appState }),
       errorValueType: details.valueType,
@@ -845,6 +860,40 @@ function defaultResourceSpanEventId({ method, routeTemplate, screen }) {
 
 function defaultFetch() {
   return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
+}
+
+function recordIssueBreadcrumb(client, event, category, type) {
+  if (typeof client?.addBreadcrumb !== "function") {
+    return;
+  }
+  const status = typeof event?.attributes?.status === "string"
+    ? event.attributes.status
+    : undefined;
+  const message = boundedBreadcrumbMessage(event?.attributes?.name);
+  client.addBreadcrumb({
+    category,
+    type,
+    level: status === "failure" || status === "error" ? "error" : "info",
+    ...(message === undefined ? {} : { message }),
+    ...(status === undefined ? {} : { data: { status } })
+  }, event.timestamp);
+}
+
+function boundedBreadcrumbMessage(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const characters = Array.from(value);
+  if (
+    characters.length > 512
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+    })
+  ) {
+    return undefined;
+  }
+  return value;
 }
 
 function defaultRandomValues(length) {

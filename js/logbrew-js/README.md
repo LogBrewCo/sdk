@@ -134,7 +134,21 @@ try {
 }
 ```
 
-The helper records the error name/message and up to 32 ordered generated `stackFrames`, with query strings, hashes, and local absolute prefixes removed. Each frame carries filename, positive line/column, a conservatively parsed function name when the runtime provides one, and an optional matched Debug ID. Applications that create frames directly may also provide bounded `function`, `module`, and `inApp` identity. Existing first-frame metadata remains available for compatible grouping and tooling. The helper also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Nested `Error.cause` chains and `AggregateError.errors` are summarized as bounded cause counts, types, and sources without copying nested messages or stacks. Raw stack text is included only with `includeErrorStack: true`.
+The helper records the error name/message, a typed exception with capture mechanism and handled state, and up to 32 ordered generated `stackFrames`, with query strings, hashes, and local absolute prefixes removed. Each frame carries filename, positive line/column, a conservatively parsed function name when the runtime provides one, and an optional matched Debug ID. Applications that create frames directly may also provide bounded `function`, `module`, and `inApp` identity. Existing first-frame metadata remains available for compatible grouping and tooling. The helper also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Nested `Error.cause` chains and `AggregateError.errors` are summarized as bounded cause counts, types, and sources without copying nested messages or stacks. Raw stack text is included only with `includeErrorStack: true`.
+
+Use `addBreadcrumb()` for explicit navigation, state, action, or network steps that should appear on later issues. The client keeps only the most recent 64 entries and marks an issue with `breadcrumbsTruncated: true` after older entries are evicted. `clearBreadcrumbs()` removes the current history.
+
+```js
+client.addBreadcrumb({
+  category: "checkout",
+  type: "user",
+  level: "info",
+  message: "Submitted checkout",
+  data: { attempt: 2 }
+});
+```
+
+Breadcrumb timestamps default to the current time. Each entry accepts only fixed keys, a bounded message, and at most eight flat primitive data fields. Nested objects, arrays, invalid timestamps, control characters, and oversized values are rejected. Do not include authentication material, user-entered text, raw identifiers, full URLs, query strings, headers, or request/response bodies. The SDK does not capture console output, DOM text, or network payloads to build breadcrumbs.
 
 ## Shared Telemetry Context
 
