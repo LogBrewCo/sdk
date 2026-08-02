@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public Rust SDK for creating LogBrew event batches, validating them locally, and flushing them through a transport.
+Public Rust SDK for creating LogBrew event batches, typed issue diagnostics, local validation, and explicit transport delivery.
 
 ## Install
 
@@ -18,7 +18,7 @@ cargo add logbrew --features tracing-opentelemetry
 cargo add logbrew --features opentelemetry-exporter
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `AutomaticDeliveryConfig`, `DeliveryHealthSnapshot`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `flush_owned`, `shutdown`, `shutdown_owned`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`. With the `opentelemetry-exporter` feature enabled, docs include `LogBrewOpenTelemetrySpanExporter` for apps that already use the OpenTelemetry SDK and want finished spans queued into an app-owned LogBrew client.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `AutomaticDeliveryConfig`, `DeliveryHealthSnapshot`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, typed issue helpers such as `IssueException`, `IssueStackFrame`, `IssueBreadcrumb`, and `IssueBreadcrumbBuffer`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `flush_owned`, `shutdown`, `shutdown_owned`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and opt-in typed service-error issues, plus `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`. With the `opentelemetry-exporter` feature enabled, docs include `LogBrewOpenTelemetrySpanExporter` for apps that already use the OpenTelemetry SDK and want finished spans queued into an app-owned LogBrew client.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -83,6 +83,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `preview_json` when you want a stable local JSON preview before sending anything.
+
+## Typed Issue Diagnostics
+
+Use `IssueEvent::from_error_with_mechanism` when an application catches a concrete Rust error and wants machine-readable exception identity without copying its `Display` or `Debug` text. Add caller-known code locations and request- or task-local history explicitly:
+
+```rust
+use logbrew::{
+    IssueBreadcrumb, IssueBreadcrumbBuffer, IssueEvent, LogBrewClient, Metadata,
+    MetadataValue,
+};
+
+let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    .api_key("LOGBREW_API_KEY")
+    .build()?;
+let mut breadcrumbs = IssueBreadcrumbBuffer::new();
+let mut data = Metadata::new();
+data.insert(
+    "routeTemplate".to_string(),
+    MetadataValue::String("/checkout/{cart_id}".to_string()),
+);
+breadcrumbs.push(
+    IssueBreadcrumb::new("2026-06-02T10:00:01Z", "http.request")
+        .with_type("http")
+        .with_level("error")
+        .with_data(data),
+);
+
+let error = std::io::Error::other("error text is not emitted by the typed projection");
+let issue = breadcrumbs.apply_to(
+    IssueEvent::from_error_with_mechanism(&error, "rust.application", true)
+        .with_stack_frame(
+            logbrew::issue_stack_frame!()
+                .with_function("checkout::submit")
+                .with_in_app(true),
+        ),
+);
+client.issue("evt_issue_checkout", "2026-06-02T10:00:02Z", issue)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Pass a concrete error reference when exact type identity matters; a `dyn Error` trait object can expose only the trait-object type. Generated diagnostics never format the error or panic payload and never capture raw stack text, source lines, locals, arguments, or absolute paths. A frame retains only a basename, positive coordinates, and explicitly supplied bounded code identity. Frame lists are newest-first and capped at 32. Breadcrumbs are oldest-to-newest and capped at 64; each accepts at most eight flat finite primitive data fields. `IssueBreadcrumbBuffer` is caller-owned, retains the newest 64 entries, and marks the issue when older entries were evicted.
+
+`IssueEvent::from_panic_payload` creates a privacy-safe panic projection without installing a hook. If the application already owns `std::panic::set_hook`, call `IssueEvent::from_panic_info` inside that hook to retain Rust's exact panic location. The helper does not install, replace, flush, or otherwise take ownership of the process-global panic hook.
+
+Run the complete deterministic example locally:
+
+```bash
+cargo run --example issue_diagnostics
+```
 
 ## Bounded Delivery
 
@@ -431,10 +480,13 @@ fn logbrew_layer(
         || "2026-06-02T10:00:00Z".to_string(),
     )
     .with_metadata(metadata)
+    .with_error_issues()
 }
 ```
 
-Attach the layer with `Router::route(...).route_layer(logbrew_layer(client.clone()))`, keep the LogBrew client in your own state management, generate unique trace/span IDs per request, and flush on your normal lifecycle boundary. The layer reads only the W3C `traceparent` propagation header and framework-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
+Attach the layer with `Router::route(...).route_layer(logbrew_layer(client.clone()))`, keep the LogBrew client in your own state management, generate unique trace/span IDs per request, and flush on your normal lifecycle boundary. When a service returns an error, the layer queues an error span and duration metric subject to the client's normal validation and queue limits. `with_error_issues()` additionally queues one typed issue with the same trace/span IDs, `tower.service` mechanism, `handled: false`, and a sanitized route-template breadcrumb, then returns the original service error unchanged. The automatic issue declares that stack frames are missing because middleware cannot recover the original throw site; attach a caller frame through the explicit issue API when application code owns that location. Leave issue capture off when another integration already owns the same failure.
+
+The layer reads only the W3C `traceparent` propagation header and framework-owned route/status metadata. It does not format the service error or capture arbitrary headers, raw request URIs, query strings, payloads, account session values, or user-specific identifiers.
 
 For outbound Tower client services, the same `tower` feature also exposes `TowerHttpClientSpanLayer`. The layer injects exactly one W3C `traceparent` into the app-owned request, queues one sanitized `rust_http_client` span after the service resolves, preserves the original response/error, and does not capture request bodies, arbitrary headers, raw URLs, query strings, fragments, baggage, or tracestate.
 

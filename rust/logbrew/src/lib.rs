@@ -11,6 +11,7 @@ mod delivery;
 mod http_client;
 mod http_fields;
 mod http_server;
+mod issue_diagnostics;
 mod metadata_safety;
 mod metric;
 #[cfg(feature = "opentelemetry-exporter")]
@@ -28,6 +29,10 @@ pub use http_client::HttpRequestCaptureError;
 pub use http_client::ReqwestCaptureError;
 pub use http_client::{HttpClientSpan, HttpClientSpanEvents};
 pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
+pub use issue_diagnostics::{
+    IssueBreadcrumb, IssueBreadcrumbBuffer, IssueException, IssueExceptionMechanism,
+    IssueStackFrame,
+};
 pub use metric::MetricEvent;
 #[cfg(feature = "opentelemetry-exporter")]
 pub use opentelemetry_exporter::{
@@ -63,6 +68,18 @@ pub(crate) const ACTION_STATUSES: &[&str] = &["queued", "running", "success", "f
 
 /// Public metadata map type accepted by LogBrew event builders.
 pub type Metadata = Map<String, Value>;
+
+/// Build a privacy-bounded frame for the current Rust source location.
+///
+/// The generated frame keeps only the source basename, positive line and
+/// column coordinates, and the compile-time Rust module path. Add a function
+/// name and `inApp` classification explicitly when those are useful.
+#[macro_export]
+macro_rules! issue_stack_frame {
+    () => {
+        $crate::IssueStackFrame::new(file!(), line!(), column!()).with_module(module_path!())
+    };
+}
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 /// Public SDK identity emitted with every LogBrew event batch.
@@ -485,6 +502,10 @@ pub struct IssueEvent {
     title: String,
     level: String,
     message: Option<String>,
+    exception: Option<IssueException>,
+    stack_frames: Option<Vec<IssueStackFrame>>,
+    breadcrumbs: Option<Vec<IssueBreadcrumb>>,
+    breadcrumbs_truncated: bool,
     metadata: Option<Map<String, Value>>,
 }
 
@@ -495,13 +516,150 @@ impl IssueEvent {
             title: title.into(),
             level: level.into(),
             message: None,
+            exception: None,
+            stack_frames: None,
+            breadcrumbs: None,
+            breadcrumbs_truncated: false,
             metadata: None,
+        }
+    }
+
+    /// Create an error-level issue from a handled concrete Rust error.
+    ///
+    /// The projection includes only the concrete Rust type, mechanism, and
+    /// handled state. It does not format the error, so `Display` and `Debug`
+    /// text are not captured. Pass a concrete error reference rather than a
+    /// trait object when exact type identity is important.
+    pub fn from_error<E>(error: &E) -> Self
+    where
+        E: std::error::Error + ?Sized,
+    {
+        Self::from_error_with_mechanism(error, "rust.error", true)
+    }
+
+    /// Create an error-level issue with an explicit capture mechanism and handled state.
+    pub fn from_error_with_mechanism<E>(
+        _error: &E,
+        mechanism_type: impl Into<String>,
+        handled: bool,
+    ) -> Self
+    where
+        E: std::error::Error + ?Sized,
+    {
+        let exception_type = issue_diagnostics::error_type_name::<E>();
+        Self::new(exception_type.clone(), "error").with_exception(
+            IssueException::new(exception_type)
+                .with_mechanism(IssueExceptionMechanism::new(mechanism_type, handled)),
+        )
+    }
+
+    /// Create a critical issue from a panic payload without formatting its text.
+    pub fn from_panic_payload(payload: &(dyn std::any::Any + Send)) -> Self {
+        Self::from_panic_payload_with_mechanism(payload, "rust.panic", false)
+    }
+
+    /// Create a panic issue with an explicit capture mechanism and handled state.
+    pub fn from_panic_payload_with_mechanism(
+        payload: &(dyn std::any::Any + Send),
+        mechanism_type: impl Into<String>,
+        handled: bool,
+    ) -> Self {
+        let panic_type = issue_diagnostics::panic_payload_type(payload);
+        let mut metadata = Metadata::new();
+        metadata.insert("panic".to_string(), Value::Bool(true));
+        metadata.insert(
+            "panicType".to_string(),
+            Value::String(panic_type.to_string()),
+        );
+        metadata.insert(
+            "issueGroupingKey".to_string(),
+            Value::String(format!("rust.panic:{panic_type}")),
+        );
+        metadata.insert(
+            "issueGroupingSource".to_string(),
+            Value::String("panic_payload_type".to_string()),
+        );
+        metadata.insert(
+            "issueEvidenceCompleteness".to_string(),
+            Value::String("partial".to_string()),
+        );
+        metadata.insert(
+            "issueMissingEvidence".to_string(),
+            Value::String("additionalStackFrames".to_string()),
+        );
+        metadata.insert(
+            "issueRedactedEvidence".to_string(),
+            Value::String("panic.message,stack.text,locals".to_string()),
+        );
+
+        Self::new("panic", "critical")
+            .with_exception(
+                IssueException::new("panic")
+                    .with_mechanism(IssueExceptionMechanism::new(mechanism_type, handled)),
+            )
+            .with_metadata(metadata)
+    }
+
+    /// Build a privacy-safe panic issue from an app-owned panic hook.
+    ///
+    /// This helper uses the exact panic location when Rust provides one and
+    /// never formats the panic payload. It does not install, replace, flush, or
+    /// otherwise own the process-global panic hook.
+    pub fn from_panic_info(info: &std::panic::PanicHookInfo<'_>) -> Self {
+        let issue = Self::from_panic_payload(info.payload());
+        match info.location() {
+            Some(location) => issue.with_stack_frame(IssueStackFrame::from_location(location)),
+            None => issue,
         }
     }
 
     /// Add an optional message to the issue payload.
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
+        self
+    }
+
+    /// Attach optional structured exception identity.
+    pub fn with_exception(mut self, exception: IssueException) -> Self {
+        self.exception = Some(exception);
+        self
+    }
+
+    /// Append one optional privacy-bounded newest-first stack frame.
+    pub fn with_stack_frame(mut self, frame: IssueStackFrame) -> Self {
+        self.stack_frames.get_or_insert_with(Vec::new).push(frame);
+        self
+    }
+
+    /// Attach 1-32 optional privacy-bounded newest-first stack frames.
+    pub fn with_stack_frames<I>(mut self, frames: I) -> Self
+    where
+        I: IntoIterator<Item = IssueStackFrame>,
+    {
+        self.stack_frames = Some(frames.into_iter().collect());
+        self
+    }
+
+    /// Append one optional privacy-bounded oldest-to-newest breadcrumb.
+    pub fn with_breadcrumb(mut self, breadcrumb: IssueBreadcrumb) -> Self {
+        self.breadcrumbs
+            .get_or_insert_with(Vec::new)
+            .push(breadcrumb);
+        self
+    }
+
+    /// Attach 1-64 optional privacy-bounded oldest-to-newest breadcrumbs.
+    pub fn with_breadcrumbs<I>(mut self, breadcrumbs: I) -> Self
+    where
+        I: IntoIterator<Item = IssueBreadcrumb>,
+    {
+        self.breadcrumbs = Some(breadcrumbs.into_iter().collect());
+        self
+    }
+
+    /// Mark that older breadcrumbs were evicted before this snapshot.
+    pub fn with_breadcrumbs_truncated(mut self, truncated: bool) -> Self {
+        self.breadcrumbs_truncated = truncated;
         self
     }
 
@@ -518,6 +676,49 @@ impl IssueEvent {
         map.insert("title".to_string(), Value::String(self.title));
         map.insert("level".to_string(), Value::String(level.to_string()));
         insert_string(&mut map, "message", self.message);
+        if let Some(exception) = &self.exception {
+            map.insert(
+                "exception".to_string(),
+                Value::Object(exception.attributes()?),
+            );
+        }
+        if let Some(stack_frames) = &self.stack_frames {
+            if stack_frames.is_empty() || stack_frames.len() > issue_diagnostics::MAX_STACK_FRAMES {
+                return Err(SdkError::new(
+                    "validation_error",
+                    "issue stackFrames must contain 1-32 frames",
+                ));
+            }
+            map.insert(
+                "stackFrames".to_string(),
+                Value::Array(
+                    stack_frames
+                        .iter()
+                        .map(|frame| frame.attributes().map(Value::Object))
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+            );
+        }
+        if let Some(breadcrumbs) = &self.breadcrumbs {
+            if breadcrumbs.is_empty() || breadcrumbs.len() > issue_diagnostics::MAX_BREADCRUMBS {
+                return Err(SdkError::new(
+                    "validation_error",
+                    "issue breadcrumbs must contain 1-64 entries",
+                ));
+            }
+            map.insert(
+                "breadcrumbs".to_string(),
+                Value::Array(
+                    breadcrumbs
+                        .iter()
+                        .map(|breadcrumb| breadcrumb.attributes().map(Value::Object))
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+            );
+        }
+        if self.breadcrumbs_truncated {
+            map.insert("breadcrumbsTruncated".to_string(), Value::Bool(true));
+        }
         metadata_entry(&mut map, self.metadata);
         Ok(map)
     }

@@ -1,8 +1,11 @@
+use crate::http_fields::{normalize_method, sanitize_route_template};
 use crate::{
-    HttpClientSpan, HttpRequestTelemetry, Metadata, SdkError, SharedLogBrewClient, Traceparent,
+    HttpClientSpan, HttpRequestTelemetry, IssueBreadcrumb, IssueEvent, IssueException,
+    IssueExceptionMechanism, Metadata, SdkError, SharedLogBrewClient, Traceparent,
     require_non_empty,
 };
 use http_types::{HeaderValue, Request, Response};
+use serde_json::Value;
 use std::{
     future::Future,
     pin::Pin,
@@ -50,6 +53,8 @@ pub struct TowerRequestTelemetryLayer<R, I, T> {
     metadata: Metadata,
     span_event_id_prefix: String,
     metric_event_id_prefix: String,
+    capture_error_issues: bool,
+    error_issue_event_id_prefix: String,
 }
 
 impl<R, I, T> TowerRequestTelemetryLayer<R, I, T> {
@@ -68,6 +73,8 @@ impl<R, I, T> TowerRequestTelemetryLayer<R, I, T> {
             metadata: Metadata::new(),
             span_event_id_prefix: "evt_http_request_span".to_string(),
             metric_event_id_prefix: "evt_http_request_duration".to_string(),
+            capture_error_issues: false,
+            error_issue_event_id_prefix: "evt_tower_request_issue".to_string(),
         }
     }
 
@@ -85,6 +92,22 @@ impl<R, I, T> TowerRequestTelemetryLayer<R, I, T> {
     ) -> Self {
         self.span_event_id_prefix = span_event_id_prefix.into();
         self.metric_event_id_prefix = metric_event_id_prefix.into();
+        self
+    }
+
+    /// Opt in to one typed issue when the wrapped Tower service returns an error.
+    ///
+    /// The issue contains the concrete Rust error type, `tower.service`
+    /// mechanism, handled state, one request breadcrumb, and exact request-span
+    /// correlation. It does not format the error or capture request values.
+    pub fn with_error_issues(mut self) -> Self {
+        self.capture_error_issues = true;
+        self
+    }
+
+    /// Override the error-issue event ID prefix appended with the request span ID.
+    pub fn with_error_issue_event_id_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.error_issue_event_id_prefix = prefix.into();
         self
     }
 }
@@ -107,6 +130,8 @@ where
             metadata: self.metadata.clone(),
             span_event_id_prefix: self.span_event_id_prefix.clone(),
             metric_event_id_prefix: self.metric_event_id_prefix.clone(),
+            capture_error_issues: self.capture_error_issues,
+            error_issue_event_id_prefix: self.error_issue_event_id_prefix.clone(),
         }
     }
 }
@@ -122,6 +147,8 @@ pub struct TowerRequestTelemetryService<S, R, I, T> {
     metadata: Metadata,
     span_event_id_prefix: String,
     metric_event_id_prefix: String,
+    capture_error_issues: bool,
+    error_issue_event_id_prefix: String,
 }
 
 /// Optional Tower `Layer` that injects W3C propagation and queues outbound HTTP spans.
@@ -234,36 +261,66 @@ where
         let client = Arc::clone(&self.client);
         let span_event_id_prefix = self.span_event_id_prefix.clone();
         let metric_event_id_prefix = self.metric_event_id_prefix.clone();
+        let capture_error_issues = self.capture_error_issues;
+        let error_issue_event_id_prefix = self.error_issue_event_id_prefix.clone();
         let future = self.inner.call(request);
 
         Box::pin(async move {
-            let mut response = future.await?;
+            let mut result = future.await;
             let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
-            let telemetry = request_telemetry(
-                route_template,
-                method,
+            let status_code = result
+                .as_ref()
+                .ok()
+                .map(|response| response.status().as_u16());
+            let error_type = result
+                .as_ref()
+                .err()
+                .map(|_| crate::issue_diagnostics::error_type_name::<S::Error>());
+            let telemetry = request_telemetry(TowerRequestTelemetryInput {
+                route_template: route_template.clone(),
+                method: method.clone(),
                 request_ids,
                 incoming_traceparent,
-                response.status().as_u16(),
+                status_code,
                 duration_ms,
+                error_type: error_type.clone(),
                 metadata,
-            );
+            });
             let Ok(events) = telemetry.and_then(|telemetry| telemetry.build()) else {
-                return Ok(response);
+                return result;
             };
 
-            if let Ok(value) = HeaderValue::from_str(&events.outgoing_traceparent) {
+            if let Ok(response) = result.as_mut()
+                && let Ok(value) = HeaderValue::from_str(&events.outgoing_traceparent)
+            {
                 response.headers_mut().insert("traceparent", value);
             }
             if let Ok(mut client) = client.lock() {
                 let span_event_id = event_id(&span_event_id_prefix, &events.span_id);
                 let metric_event_id = event_id(&metric_event_id_prefix, &events.span_id);
+                let issue = error_type.as_deref().and_then(|error_type| {
+                    capture_error_issues.then(|| {
+                        tower_error_issue(
+                            error_type,
+                            &timestamp,
+                            &route_template,
+                            &method,
+                            &events.trace_id,
+                            &events.span_id,
+                        )
+                    })
+                });
+                let span_id = events.span_id.clone();
                 let _ = client.span(span_event_id, timestamp.clone(), events.span);
                 if let Some(metric) = events.metric {
-                    let _ = client.metric(metric_event_id, timestamp, metric);
+                    let _ = client.metric(metric_event_id, timestamp.clone(), metric);
+                }
+                if let Some(Ok(issue)) = issue {
+                    let issue_event_id = event_id(&error_issue_event_id_prefix, &span_id);
+                    let _ = client.issue(issue_event_id, timestamp, issue);
                 }
             }
-            Ok(response)
+            result
         })
     }
 }
@@ -356,15 +413,28 @@ where
     }
 }
 
-fn request_telemetry(
+struct TowerRequestTelemetryInput {
     route_template: String,
     method: String,
     request_ids: TowerRequestIds,
     incoming_traceparent: Option<String>,
-    status_code: u16,
+    status_code: Option<u16>,
     duration_ms: f64,
+    error_type: Option<String>,
     metadata: Metadata,
-) -> Result<HttpRequestTelemetry, SdkError> {
+}
+
+fn request_telemetry(input: TowerRequestTelemetryInput) -> Result<HttpRequestTelemetry, SdkError> {
+    let TowerRequestTelemetryInput {
+        route_template,
+        method,
+        request_ids,
+        incoming_traceparent,
+        status_code,
+        duration_ms,
+        error_type,
+        metadata,
+    } = input;
     require_non_empty("tower request trace_id", &request_ids.trace_id)?;
     require_non_empty("tower request span_id", &request_ids.span_id)?;
     let mut telemetry = HttpRequestTelemetry::new(
@@ -373,13 +443,92 @@ fn request_telemetry(
         request_ids.trace_id,
         request_ids.span_id,
     )
-    .with_status_code(status_code)
     .with_duration_ms(duration_ms)
     .with_metadata(metadata);
+    if let Some(status_code) = status_code {
+        telemetry = telemetry.with_status_code(status_code);
+    }
+    if let Some(error_type) = error_type {
+        telemetry = telemetry.with_error_type(error_type);
+    }
     if let Some(traceparent) = incoming_traceparent {
         telemetry = telemetry.with_incoming_traceparent(traceparent);
     }
     Ok(telemetry)
+}
+
+fn tower_error_issue(
+    error_type: &str,
+    timestamp: &str,
+    route_template: &str,
+    method: &str,
+    trace_id: &str,
+    span_id: &str,
+) -> Result<IssueEvent, SdkError> {
+    let error_type = crate::issue_diagnostics::require_exception_type(error_type)?;
+    let route_template =
+        sanitize_route_template("tower request route_template", route_template.to_string())?;
+    let method = normalize_method("tower request method", method)?;
+    let grouping_key = format!("rust.tower.service:{error_type}:{method} {route_template}")
+        .chars()
+        .take(1024)
+        .collect::<String>();
+
+    let mut breadcrumb_data = Metadata::new();
+    breadcrumb_data.insert(
+        "routeTemplate".to_string(),
+        Value::String(route_template.clone()),
+    );
+    breadcrumb_data.insert("method".to_string(), Value::String(method.clone()));
+    let breadcrumb = IssueBreadcrumb::new(timestamp, "http.request")
+        .with_type("http")
+        .with_level("error")
+        .with_data(breadcrumb_data);
+
+    let mut metadata = Metadata::new();
+    metadata.insert(
+        "source".to_string(),
+        Value::String("rust_tower".to_string()),
+    );
+    metadata.insert(
+        "exceptionType".to_string(),
+        Value::String(error_type.clone()),
+    );
+    metadata.insert("errorName".to_string(), Value::String(error_type.clone()));
+    metadata.insert(
+        "mechanism".to_string(),
+        Value::String("tower.service".to_string()),
+    );
+    metadata.insert("handled".to_string(), Value::Bool(false));
+    metadata.insert("traceId".to_string(), Value::String(trace_id.to_string()));
+    metadata.insert("spanId".to_string(), Value::String(span_id.to_string()));
+    metadata.insert("routeTemplate".to_string(), Value::String(route_template));
+    metadata.insert("method".to_string(), Value::String(method));
+    metadata.insert("issueGroupingKey".to_string(), Value::String(grouping_key));
+    metadata.insert(
+        "issueGroupingSource".to_string(),
+        Value::String("error_type_and_route".to_string()),
+    );
+    metadata.insert(
+        "issueEvidenceCompleteness".to_string(),
+        Value::String("partial".to_string()),
+    );
+    metadata.insert(
+        "issueMissingEvidence".to_string(),
+        Value::String("stackFrames".to_string()),
+    );
+    metadata.insert(
+        "issueRedactedEvidence".to_string(),
+        Value::String("exception.message,stack.text,request.values".to_string()),
+    );
+
+    Ok(IssueEvent::new(error_type.clone(), "error")
+        .with_exception(
+            IssueException::new(error_type)
+                .with_mechanism(IssueExceptionMechanism::new("tower.service", false)),
+        )
+        .with_breadcrumb(breadcrumb)
+        .with_metadata(metadata))
 }
 
 struct TowerHttpClientSpanInput {

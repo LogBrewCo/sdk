@@ -42,7 +42,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
         || "2026-06-02T10:00:00Z".to_string(),
     )
-    .with_metadata(metadata);
+    .with_metadata(metadata)
+    .with_error_issues();
 
     let app = Router::new()
         .route("/checkout/{cart_id}", post(checkout))

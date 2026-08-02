@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge run-opentelemetry-exporter
+.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-issue-diagnostics run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge run-opentelemetry-exporter
 
 help:
 	@printf '%s\n' \
@@ -7,6 +7,7 @@ help:
 		'run-real-user-smoke -> make run-real-user-smoke' \
 		'run-first-useful-telemetry -> make run-first-useful-telemetry' \
 		'run-http-server-request -> make run-http-server-request' \
+		'run-issue-diagnostics -> make run-issue-diagnostics' \
 		'run-axum-request-middleware -> make run-axum-request-middleware' \
 		'run-actix-request-middleware -> make run-actix-request-middleware' \
 		'run-rocket-request-fairing -> make run-rocket-request-fairing' \
@@ -26,6 +27,9 @@ run-first-useful-telemetry:
 
 run-http-server-request:
 	@cargo run --quiet --example http_server_request --manifest-path ../Cargo.toml
+
+run-issue-diagnostics:
+	@cargo run --quiet --example issue_diagnostics --manifest-path ../Cargo.toml
 
 run-axum-request-middleware:
 	@cargo run --quiet --features tower --example axum_request_middleware --manifest-path ../Cargo.toml
