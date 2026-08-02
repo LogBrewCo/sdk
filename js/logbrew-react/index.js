@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  createIssueAttributesFromError,
   createTraceparent,
   LogBrewClient,
   parseTraceparent,
@@ -140,6 +141,12 @@ export function useLogBrewActions() {
     previewJson: client.previewJson.bind(client),
     pendingEvents: client.pendingEvents.bind(client),
     droppedEvents: client.droppedEvents.bind(client),
+    addBreadcrumb: typeof client.addBreadcrumb === "function"
+      ? client.addBreadcrumb.bind(client)
+      : () => {},
+    clearBreadcrumbs: typeof client.clearBreadcrumbs === "function"
+      ? client.clearBreadcrumbs.bind(client)
+      : () => 0,
     captureReactError: (error, options = {}) => captureReactError(client, error, options)
   };
 }
@@ -177,6 +184,7 @@ export function captureReactAction(client, input = {}) {
   }
   const event = createReactActionEvent(input);
   client.action(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(client, event, "ui.action", "user");
   return event;
 }
 
@@ -229,6 +237,7 @@ export function captureReactNetwork(client, input = {}) {
   }
   const event = createReactNetworkEvent(input);
   client.action(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(client, event, "http", "http");
   return event;
 }
 
@@ -290,6 +299,7 @@ export function captureReactRouterNavigation(client, input = {}) {
   }
   const event = createReactRouterNavigationSpanEvent(input);
   client.span(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(client, event, "navigation", "navigation");
   return event;
 }
 
@@ -365,29 +375,33 @@ export function createReactErrorEvent(error, {
   idFactory = defaultErrorEventId,
   includeComponentStack = true,
   includeStack = false,
+  handled = true,
   level = "error",
+  mechanism = "react.error_boundary",
   metadata = {},
   now = () => new Date().toISOString(),
   timestamp
 } = {}) {
   const details = errorDetails(error, includeStack);
   const eventMetadata = compactMetadata({
-    errorName: details.name,
     errorValueType: details.valueType,
-    source: "react.error",
     ...(includeComponentStack ? { componentStack } : {}),
-    ...(includeStack ? { errorStack: details.stack } : {}),
     ...metadata
+  });
+  const attributes = createIssueAttributesFromError(error, {
+    handled,
+    includeErrorStack: includeStack,
+    level,
+    mechanism,
+    message: details.message,
+    metadata: eventMetadata,
+    source: "react.error",
+    title: `React error: ${details.message}`
   });
   return {
     id: id ?? idFactory({ error, message: details.message }),
     timestamp: timestamp ?? now(),
-    attributes: {
-      title: `React error: ${details.message}`,
-      level,
-      message: details.message,
-      metadata: eventMetadata
-    }
+    attributes
   };
 }
 
@@ -423,7 +437,9 @@ export class LogBrewErrorBoundary extends React.Component {
         idFactory: this.props.idFactory,
         includeComponentStack: this.props.includeComponentStack,
         includeStack: this.props.includeStack,
+        handled: this.props.handled,
         level: this.props.level,
+        mechanism: this.props.mechanism,
         metadata: this.props.metadata,
         now: this.props.now,
         timestamp: this.props.timestamp
@@ -463,6 +479,40 @@ export class LogBrewErrorBoundary extends React.Component {
 
 function defaultFetch() {
   return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
+}
+
+function recordIssueBreadcrumb(client, event, category, type) {
+  if (typeof client?.addBreadcrumb !== "function") {
+    return;
+  }
+  const status = typeof event?.attributes?.status === "string"
+    ? event.attributes.status
+    : undefined;
+  const message = boundedBreadcrumbMessage(event?.attributes?.name);
+  client.addBreadcrumb({
+    category,
+    type,
+    level: status === "failure" || status === "error" ? "error" : "info",
+    ...(message === undefined ? {} : { message }),
+    ...(status === undefined ? {} : { data: { status } })
+  }, event.timestamp);
+}
+
+function boundedBreadcrumbMessage(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const characters = Array.from(value);
+  if (
+    characters.length > 512
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+    })
+  ) {
+    return undefined;
+  }
+  return value;
 }
 
 function defaultRandomValues(length) {

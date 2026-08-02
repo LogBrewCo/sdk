@@ -335,6 +335,7 @@ export async function capturePageView(context, options = {}) {
     : createPageViewEvent(context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(context.client, event, "navigation", "navigation");
   return flushAfterCapture(context, options);
 }
 
@@ -377,6 +378,7 @@ export async function captureBrowserAction(action, context, options = {}) {
     : createBrowserActionEvent(action, context.browserWindow, eventOptions);
 
   context.client.action(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(context.client, event, "ui.action", "user");
   return flushAfterCapture(context, options);
 }
 
@@ -387,6 +389,7 @@ export async function captureBrowserNetwork(request, context, options = {}) {
     : createBrowserNetworkEvent(request, context.browserWindow, eventOptions);
 
   context.client.action(event.id, event.timestamp, event.attributes);
+  recordIssueBreadcrumb(context.client, event, "http", "http");
   return flushAfterCapture(context, options);
 }
 
@@ -595,6 +598,8 @@ export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), 
     runtime,
     service,
     source: "browser.error",
+    handled: false,
+    mechanism: "browser.error",
     title: `Browser error: ${details.message}`,
     traceContext: browserTraceContext
   });
@@ -650,6 +655,8 @@ export function createUnhandledRejectionEvent(rejection, browserWindow = default
     runtime,
     service,
     source: "browser.unhandledrejection",
+    handled: false,
+    mechanism: "browser.unhandledrejection",
     title: `Unhandled promise rejection: ${reason.message}`,
     traceContext: browserTraceContext
   });
@@ -965,6 +972,40 @@ function compactMetadata(metadata) {
   return compacted;
 }
 
+function recordIssueBreadcrumb(client, event, category, type) {
+  if (typeof client?.addBreadcrumb !== "function") {
+    return;
+  }
+  const status = typeof event?.attributes?.status === "string"
+    ? event.attributes.status
+    : undefined;
+  const message = boundedBreadcrumbMessage(event?.attributes?.name);
+  client.addBreadcrumb({
+    category,
+    type,
+    level: status === "failure" || status === "error" ? "error" : "info",
+    ...(message === undefined ? {} : { message }),
+    ...(status === undefined ? {} : { data: { status } })
+  }, event.timestamp);
+}
+
+function boundedBreadcrumbMessage(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const characters = Array.from(value);
+  if (
+    characters.length > 512
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+    })
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 function defaultSanitizeMetadata(metadata) {
   return safeMetadata(metadata);
 }
@@ -974,6 +1015,8 @@ function browserIssueAttributes(candidate, message, {
   environment,
   fingerprint,
   includeErrorStack,
+  handled,
+  mechanism,
   metadata,
   platform,
   release,
@@ -987,10 +1030,12 @@ function browserIssueAttributes(candidate, message, {
     debugIdMap,
     environment,
     fingerprint,
+    handled,
     includeErrorStack,
     level: "error",
     message,
     metadata,
+    mechanism,
     platform,
     release,
     runtime,

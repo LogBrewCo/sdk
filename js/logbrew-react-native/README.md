@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package keeps event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`. It adds mobile helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, Promise rejection tracking, provider and hook usage, W3C trace correlation and propagation, lifecycle spans, resource spans, reversible instrumentation, and opt-in Apple native crash and app-hang diagnostics.
+This package keeps event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`. It adds mobile helpers for screen views, app-state changes, product actions, API milestones, bounded issue breadcrumbs, typed handled and unhandled JavaScript errors, Promise rejection tracking, provider and hook usage, W3C trace correlation and propagation, lifecycle spans, resource spans, reversible instrumentation, and opt-in Apple native crash and app-hang diagnostics.
 
 ## Install
 
@@ -227,7 +227,7 @@ withLogBrewTrace(trace, () => {
 
 ## Error Capture
 
-Use `captureReactNativeError()` in app-owned error boundaries, route handlers, async catch blocks, or global handlers. It records handled JavaScript errors as LogBrew issue events with React Native context and omits stack text by default:
+Use `captureReactNativeError()` in app-owned error boundaries, route handlers, async catch blocks, or global handlers. It records a typed exception with `react-native.error`, `handled: true`, prior screen/app-state/action/network breadcrumbs, and React Native context. Global errors and Promise rejections use their own mechanism with `handled: false`. Raw stack text stays omitted by default:
 
 ```js
 import { captureReactNativeError } from "@logbrew/react-native";

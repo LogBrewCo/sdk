@@ -31,7 +31,7 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 });
 ```
 
-`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`. The page-view span carries the versioned `page_view` analytics classification and a path-only surface; this classifies the span already being captured and does not add a second event. Its built-in fetch transport owns one coalesced lifecycle delivery for `pagehide` and hidden visibility, using only an authenticated, bounded `keepalive` request. Duplicate signals do not start another exit request, and `uninstall()` removes both listeners idempotently.
+`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`. The page-view span carries the versioned `page_view` analytics classification and a path-only surface; this classifies the span already being captured and does not add a second event. Page views plus explicit browser actions and network milestones also add privacy-bounded breadcrumbs to later issues. Its built-in fetch transport owns one coalesced lifecycle delivery for `pagehide` and hidden visibility, using only an authenticated, bounded `keepalive` request. Duplicate signals do not start another exit request, and `uninstall()` removes both listeners idempotently.
 
 Route changes in single-page apps are explicit. Use `installLogBrewBrowserNavigationInstrumentation()` when your app wants LogBrew to observe `history.pushState`, `history.replaceState`, and `popstate`, create a fresh route trace context, and capture a page-view span for each path change. It is not installed by default.
 
@@ -62,7 +62,7 @@ const logbrew = installLogBrewBrowser({
 });
 ```
 
-Browser error metadata records the error type/message, path-only first frame, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. It keeps raw stack text and nested cause messages out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files and browser grouping keys are normalized to paths, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
+Browser issues record a typed exception, an explicit unhandled capture mechanism, prior bounded breadcrumbs, the error type/message, path-only frames, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. Raw stack text and nested cause messages stay out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files, grouping keys, and automatic breadcrumbs use sanitized event fields, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
 
 ## Browser Error Suppression
 

@@ -244,6 +244,13 @@ test("replays one pending fatal with its stored identity and acknowledges after 
     assert.equal(client.issues.length, 1);
     assert.deepEqual(client.issues[0], {
       attributes: {
+        exception: {
+          type: "TypeError",
+          mechanism: {
+            type: "react_native_error_utils",
+            handled: false
+          }
+        },
         level: "fatal",
         message: "React Native global JavaScript report",
         metadata: {

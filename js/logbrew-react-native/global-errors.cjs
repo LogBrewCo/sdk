@@ -196,7 +196,9 @@ function createAutomaticErrorEvent(error) {
   }
   const event = createReactNativeErrorEvent(sanitizedError, {
     id: nextEventId(),
-    includeStack: false
+    handled: false,
+    includeStack: false,
+    mechanism: "react_native_error_utils"
   });
   return {
     ...event,

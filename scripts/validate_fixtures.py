@@ -39,7 +39,15 @@ NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 OPTIONAL_ATTRIBUTES = {
     "release": {"commit", "notes", "metadata", "context"},
     "environment": {"region", "metadata", "context"},
-    "issue": {"message", "metadata", "stackFrames", "context"},
+    "issue": {
+        "message",
+        "metadata",
+        "stackFrames",
+        "exception",
+        "breadcrumbs",
+        "breadcrumbsTruncated",
+        "context",
+    },
     "log": {"logger", "metadata", "context"},
     "span": {"parentSpanId", "durationMs", "metadata", "events", "links", "context"},
     "action": {"metadata", "context"},
@@ -75,6 +83,8 @@ RESOURCE_FIELDS = {
     "application": ({"name", "version", "build"}, set()),
 }
 CONTEXT_TAG_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+ISSUE_DIAGNOSTIC_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
+ISSUE_BREADCRUMB_DATA_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 
 
 class ValidationError(Exception):
@@ -372,6 +382,99 @@ def _validate_issue_stack_frames(index: int, attributes: dict[str, Any]) -> None
             raise ValidationError(f"{label} debugId must be a UUID")
 
 
+def _valid_diagnostic_text(value: Any, max_length: int, *, reject_location: bool = False) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and len(value) <= max_length
+        and not any(ord(character) <= 31 or 127 <= ord(character) <= 159 for character in value)
+        and (not reject_location or ("?" not in value and "#" not in value))
+    )
+
+
+def _validate_issue_exception(index: int, attributes: dict[str, Any]) -> None:
+    exception = attributes.get("exception")
+    if exception is None:
+        return
+    label = f"event {index} issue exception"
+    if not isinstance(exception, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(exception, {"type", "mechanism"}, label)
+    if not _valid_diagnostic_text(exception.get("type"), 256, reject_location=True):
+        raise ValidationError(f"{label} type is invalid")
+    mechanism = exception.get("mechanism")
+    if mechanism is None:
+        return
+    if not isinstance(mechanism, dict):
+        raise ValidationError(f"{label} mechanism must be an object")
+    _reject_unknown_keys(mechanism, {"type", "handled"}, f"{label} mechanism")
+    mechanism_type = mechanism.get("type")
+    if not isinstance(mechanism_type, str) or not ISSUE_DIAGNOSTIC_NAME_PATTERN.fullmatch(mechanism_type):
+        raise ValidationError(f"{label} mechanism type is invalid")
+    if not isinstance(mechanism.get("handled"), bool):
+        raise ValidationError(f"{label} mechanism handled must be a boolean")
+
+
+def _validate_issue_breadcrumb_data(label: str, data: Any) -> None:
+    if not isinstance(data, dict):
+        raise ValidationError(f"{label} data must be an object")
+    if len(data) > 8:
+        raise ValidationError(f"{label} data must contain at most 8 fields")
+    for key, value in data.items():
+        if not isinstance(key, str) or not ISSUE_BREADCRUMB_DATA_KEY_PATTERN.fullmatch(key):
+            raise ValidationError(f"{label} data key is invalid")
+        if isinstance(value, str):
+            if not _valid_diagnostic_text(value, 256):
+                raise ValidationError(f"{label} data value for {key} is invalid")
+        elif isinstance(value, bool) or value is None:
+            continue
+        elif isinstance(value, (int, float)):
+            if not math.isfinite(value):
+                raise ValidationError(f"{label} data value for {key} must be finite")
+        else:
+            raise ValidationError(
+                f"{label} data value for {key} must be a string, number, boolean, or null"
+            )
+
+
+def _validate_issue_breadcrumbs(index: int, attributes: dict[str, Any]) -> None:
+    breadcrumbs = attributes.get("breadcrumbs")
+    if breadcrumbs is not None:
+        if not isinstance(breadcrumbs, list) or not 1 <= len(breadcrumbs) <= 64:
+            raise ValidationError(f"event {index} issue breadcrumbs must contain 1-64 entries")
+        for breadcrumb_index, breadcrumb in enumerate(breadcrumbs):
+            label = f"event {index} issue breadcrumb {breadcrumb_index}"
+            if not isinstance(breadcrumb, dict):
+                raise ValidationError(f"{label} must be an object")
+            _reject_unknown_keys(
+                breadcrumb,
+                {"timestamp", "type", "category", "level", "message", "data"},
+                label,
+            )
+            timestamp = breadcrumb.get("timestamp")
+            if not isinstance(timestamp, str):
+                raise ValidationError(f"{label} timestamp must be a string")
+            _parse_timestamp(timestamp)
+            for field in ("type", "category"):
+                value = breadcrumb.get(field)
+                if field == "type" and value is None:
+                    continue
+                if not isinstance(value, str) or not ISSUE_DIAGNOSTIC_NAME_PATTERN.fullmatch(value):
+                    raise ValidationError(f"{label} {field} is invalid")
+            level = breadcrumb.get("level")
+            if level is not None and level not in {"debug", "info", "warning", "error", "critical"}:
+                raise ValidationError(f"{label} level is invalid")
+            if "message" in breadcrumb and not _valid_diagnostic_text(breadcrumb["message"], 512):
+                raise ValidationError(f"{label} message is invalid")
+            if "data" in breadcrumb:
+                _validate_issue_breadcrumb_data(label, breadcrumb["data"])
+    if (
+        "breadcrumbsTruncated" in attributes
+        and not isinstance(attributes["breadcrumbsTruncated"], bool)
+    ):
+        raise ValidationError(f"event {index} issue breadcrumbsTruncated must be a boolean")
+
+
 def _validate_optional_attributes(index: int, event_type: str, attributes: dict[str, Any]) -> None:
     for (expected_type, key), require_non_empty in OPTIONAL_STRING_ATTRIBUTES.items():
         if expected_type != event_type or key not in attributes:
@@ -466,6 +569,8 @@ def validate_payload(payload: dict[str, Any]) -> None:
 
         if event_type == "issue":
             _validate_issue_stack_frames(index, attributes)
+            _validate_issue_exception(index, attributes)
+            _validate_issue_breadcrumbs(index, attributes)
 
         if event_type == "metric":
             _validate_metric_attributes(index, attributes)

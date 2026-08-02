@@ -123,6 +123,15 @@ test("installed browser capture uses one explicit W3C trace context across page 
     assert.equal(network.attributes.metadata.routeTemplate, "/api/checkout");
     assert.equal(issue.attributes.metadata.traceId, TRACE_ID);
     assert.equal(issue.attributes.metadata.spanId, SPAN_ID);
+    assert.deepEqual(
+      issue.attributes.breadcrumbs.map(({ category, type, level }) => ({ category, type, level })),
+      [
+        { category: "navigation", type: "navigation", level: "info" },
+        { category: "ui.action", type: "user", level: "info" },
+        { category: "http", type: "http", level: "error" }
+      ]
+    );
+    assert.doesNotMatch(JSON.stringify(issue.attributes.breadcrumbs), /dev@example\.test/u);
     for (const event of payload.events) {
       assert.equal(event.attributes.metadata?.traceparent, undefined);
     }
@@ -200,6 +209,10 @@ test("installed browser errors attach release artifact Debug ID metadata without
 
     assert.equal(issue.attributes.title, "Browser error: Checkout exploded");
     assert.equal(issue.attributes.message, "Checkout exploded");
+    assert.deepEqual(issue.attributes.exception, {
+      type: "TypeError",
+      mechanism: { type: "browser.error", handled: false }
+    });
     assert.equal(issue.attributes.metadata.source, "browser.error");
     assert.equal(issue.attributes.metadata.path, "/checkout");
     assert.equal(issue.attributes.metadata.errorName, "TypeError");
