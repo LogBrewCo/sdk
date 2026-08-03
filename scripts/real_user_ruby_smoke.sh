@@ -35,6 +35,10 @@ test -f "$unpacked_dir/lib/logbrew/trace.rb"
 test -f "$unpacked_dir/lib/logbrew/span_events.rb"
 test -f "$unpacked_dir/lib/logbrew/operation_tracing.rb"
 test -f "$unpacked_dir/lib/logbrew/issue_diagnostics.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry_context.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry_context_value.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry_resource.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
@@ -63,6 +67,10 @@ grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
 grep -q 'LogBrew::OperationTracing' "$unpacked_dir/README.md"
 grep -q 'Typed Issue Diagnostics' "$unpacked_dir/README.md"
 grep -q 'LogBrew::IssueDiagnostics.from_exception' "$unpacked_dir/README.md"
+grep -q 'Shared Telemetry Context' "$unpacked_dir/README.md"
+grep -q 'LogBrew::TelemetryContext' "$unpacked_dir/README.md"
+grep -q 'LogBrew::Telemetry.with_context' "$unpacked_dir/README.md"
+grep -q 'capture_runtime_context: false' "$unpacked_dir/README.md"
 grep -q 'Dependency Operation Spans' "$unpacked_dir/README.md"
 grep -q 'exceptionEscaped' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
@@ -117,6 +125,8 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBr
 grep -qx 'true' "$tmp_dir/installed-support-ticket.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::IssueDiagnostics.respond_to?(:from_exception)); puts(LogBrew::IssueDiagnostics.respond_to?(:breadcrumb))' > "$tmp_dir/installed-issue-diagnostics.out"
 test "$(grep -c '^true$' "$tmp_dir/installed-issue-diagnostics.out")" -eq 2
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::TelemetryContext.respond_to?(:create)); puts(LogBrew::TelemetryResource.respond_to?(:create)); puts(LogBrew::Telemetry.respond_to?(:with_context))' > "$tmp_dir/installed-telemetry-context.out"
+test "$(grep -c '^true$' "$tmp_dir/installed-telemetry-context.out")" -eq 3
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
 test -f "$gem_dir/README.md"
 test -f "$gem_dir/lib/logbrew/product_timeline.rb"
@@ -126,6 +136,10 @@ test -f "$gem_dir/lib/logbrew/span_events.rb"
 test -f "$gem_dir/lib/logbrew/operation_tracing.rb"
 test -f "$gem_dir/lib/logbrew/support_ticket.rb"
 test -f "$gem_dir/lib/logbrew/issue_diagnostics.rb"
+test -f "$gem_dir/lib/logbrew/telemetry.rb"
+test -f "$gem_dir/lib/logbrew/telemetry_context.rb"
+test -f "$gem_dir/lib/logbrew/telemetry_context_value.rb"
+test -f "$gem_dir/lib/logbrew/telemetry_resource.rb"
 test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
 test -f "$gem_dir/examples/first_useful_telemetry.rb"
@@ -149,6 +163,10 @@ grep -q 'Support Ticket Draft Diagnostics' "$gem_dir/README.md"
 grep -q 'LogBrew::SupportTicketDraft.create' "$gem_dir/README.md"
 grep -q 'Typed Issue Diagnostics' "$gem_dir/README.md"
 grep -q 'LogBrew::IssueDiagnostics.from_exception' "$gem_dir/README.md"
+grep -q 'Shared Telemetry Context' "$gem_dir/README.md"
+grep -q 'LogBrew::TelemetryContext' "$gem_dir/README.md"
+grep -q 'LogBrew::Telemetry.with_context' "$gem_dir/README.md"
+grep -q 'capture_runtime_context: false' "$gem_dir/README.md"
 grep -q 'support-ticket routes' "$gem_dir/README.md"
 grep -q 'Dependency Operation Spans' "$gem_dir/README.md"
 grep -q 'exceptionEscaped' "$gem_dir/README.md"
@@ -325,7 +343,7 @@ def enqueue_all(client)
 end
 
 def client(max_retries: 2)
-  LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "smoke-app", sdk_version: ENV.fetch("LOGBREW_RUBY_PACKAGE_VERSION"), max_retries: max_retries)
+  LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "smoke-app", sdk_version: ENV.fetch("LOGBREW_RUBY_PACKAGE_VERSION"), max_retries: max_retries, capture_runtime_context: false)
 end
 
 def expect(code)

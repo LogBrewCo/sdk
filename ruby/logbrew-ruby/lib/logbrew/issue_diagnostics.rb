@@ -53,7 +53,8 @@ module LogBrew
       metadata: nil,
       breadcrumbs: nil,
       breadcrumbs_truncated: false,
-      include_stack_frames: true
+      include_stack_frames: true,
+      context: nil
     )
       unless error.is_a?(Exception)
         raise validation("issue error must be an exception")
@@ -77,7 +78,14 @@ module LogBrew
       attributes["breadcrumbs"] = breadcrumbs unless breadcrumbs.nil?
       attributes["breadcrumbsTruncated"] = true if breadcrumbs_truncated
       attributes["metadata"] = metadata unless metadata.nil?
-      validate_issue_attributes(attributes)
+      validated = validate_issue_attributes(attributes)
+      unless context.nil?
+        unless context.is_a?(TelemetryContext)
+          raise validation("issue context must be a LogBrew::TelemetryContext")
+        end
+        validated["context"] = context
+      end
+      validated
     end
 
     # Build a typed exception identity and optional observation mechanism.

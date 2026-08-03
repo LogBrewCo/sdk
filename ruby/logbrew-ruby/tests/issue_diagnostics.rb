@@ -84,7 +84,8 @@ issue_assert(!serialized.include?(File.expand_path("..", __dir__)), "default exc
 client = LogBrew::Client.create(
   api_key: "LOGBREW_API_KEY",
   sdk_name: "logbrew-ruby",
-  sdk_version: "0.1.0"
+  sdk_version: "0.1.0",
+  capture_runtime_context: false
 )
 client.issue("evt_ruby_diagnostics", "2026-08-02T12:00:02Z", attributes)
 queued_attributes = JSON.parse(client.preview_json).fetch("events").fetch(0).fetch("attributes")

@@ -41,6 +41,12 @@ def _require(condition: bool, message: str) -> None:
         raise SystemExit(message)
 
 
+def _context(event: dict[str, Any]) -> dict[str, Any]:
+    context = event.get("attributes", {}).get("context")
+    _require(isinstance(context, dict), f"ruby first-useful event is missing typed context: {event.get('id')}")
+    return context
+
+
 def check_payload(payload_path: Path, stderr_path: Path) -> None:
     payload_text = payload_path.read_text()
     for unsafe in FORBIDDEN_PAYLOAD_TEXT:
@@ -55,12 +61,48 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
     )
 
     by_id = {event["id"]: event for event in events}
+    for event in events:
+        context = _context(event)
+        _require(context.get("schemaVersion") == 1, "ruby first-useful context schema version is not 1")
+        resource = context.get("resource", {})
+        _require(
+            resource.get("service") == {"name": "checkout-service", "version": "1.2.3"},
+            f"unexpected ruby service context: {resource.get('service')!r}",
+        )
+        _require(
+            resource.get("deployment") == {
+                "environment": "production",
+                "release": "checkout@1.2.3",
+            },
+            f"unexpected ruby deployment context: {resource.get('deployment')!r}",
+        )
+        _require(resource.get("framework", {}).get("name") == "rack", "ruby framework context is missing")
+        _require(resource.get("runtime", {}).get("name") in {"ruby", "jruby", "truffleruby"}, "ruby runtime name is missing")
+        _require(bool(resource.get("runtime", {}).get("version")), "ruby runtime version is missing")
+        _require(bool(resource.get("operatingSystem", {}).get("name")), "ruby operating-system context is missing")
+        _require(bool(resource.get("device", {}).get("architecture")), "ruby architecture context is missing")
+        _require(context.get("tags", {}).get("region") == "global", "ruby service context tag is missing")
+
+    request_event_ids = {
+        "evt_log_checkout_started",
+        "evt_action_checkout_submit",
+        "evt_action_payment_api",
+        "evt_metric_http_server_duration",
+        "evt_span_checkout_request",
+    }
+    for event_id in request_event_ids:
+        context = _context(by_id[event_id])
+        _require(context.get("trace", {}).get("traceId") == EXPECTED_TRACE_ID, f"{event_id} is missing typed trace context")
+        _require(context.get("trace", {}).get("spanId") == EXPECTED_CHILD_SPAN_ID, f"{event_id} is missing typed span context")
+        _require(context.get("trace", {}).get("parentSpanId") == EXPECTED_PARENT_SPAN_ID, f"{event_id} is missing typed parent span")
+        _require(context.get("session", {}).get("id") == EXPECTED_SESSION_ID, f"{event_id} is missing typed session context")
+        _require(context.get("subject", {}).get("id") == "subject_checkout_123", f"{event_id} is missing opaque subject context")
+        _require(context.get("subject", {}).get("kind") == "user", f"{event_id} has unexpected subject kind")
+        _require(context.get("tags", {}).get("journey") == "checkout", f"{event_id} is missing journey tag")
+        _require(context.get("tags", {}).get("surface") == "payment", f"{event_id} is missing surface tag")
+
     log = by_id["evt_log_checkout_started"]["attributes"]
-    _require(log["metadata"].get("traceId") == EXPECTED_TRACE_ID, "ruby first-useful log is missing trace correlation")
-    _require(
-        log["metadata"].get("sessionId") == EXPECTED_SESSION_ID,
-        "ruby first-useful log is missing session correlation",
-    )
+    _require(log["metadata"].get("routeTemplate") == "/checkout/:cart_id", "ruby first-useful log is missing route template")
 
     product_metadata = by_id["evt_action_checkout_submit"]["attributes"]["metadata"]
     _require(
@@ -95,10 +137,6 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         metric["metadata"].get("routeTemplate") == "/checkout/:cart_id",
         "ruby first-useful metric must use route-template metadata",
     )
-    _require(
-        metric["metadata"].get("traceId") == EXPECTED_TRACE_ID,
-        "ruby first-useful metric is missing trace correlation",
-    )
 
     span = by_id["evt_span_checkout_request"]["attributes"]
     _require(span.get("traceId") == EXPECTED_TRACE_ID, "ruby first-useful span is missing trace id")
@@ -108,10 +146,6 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
     )
     _require(span.get("spanId") == EXPECTED_CHILD_SPAN_ID, "ruby first-useful span is missing fresh child span id")
     _require(span["metadata"].get("sampled") is True, "ruby first-useful span should expose sampled trace context")
-    _require(
-        span["metadata"].get("sessionId") == EXPECTED_SESSION_ID,
-        "ruby first-useful span is missing session correlation",
-    )
 
     stderr = _load_payload(stderr_path)
     _require(

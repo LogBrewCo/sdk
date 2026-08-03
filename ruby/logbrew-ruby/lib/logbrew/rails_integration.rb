@@ -353,8 +353,21 @@ module LogBrew
           sdk_version: LogBrew::VERSION,
           transport: transport,
           flush_interval: configuration.flush_interval,
-          flush_threshold: configuration.flush_threshold
+          flush_threshold: configuration.flush_threshold,
+          context: client_context(configuration)
         )
+      end
+
+      def client_context(configuration)
+        resource = LogBrew::TelemetryResource.create
+          .with_service(name: configuration.service_name)
+          .with_deployment(
+            environment: configuration.app_environment,
+            release: configuration.release
+          )
+          .with_framework(name: "rails", version: configuration.rails_version)
+          .build
+        LogBrew::TelemetryContext.create.with_resource(resource).build
       end
 
       def record_process_context(created)

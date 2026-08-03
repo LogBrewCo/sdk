@@ -21,9 +21,10 @@ done
 
 (cd "$package_dir" && ruby tests/run.rb)
 (cd "$package_dir" && ruby tests/issue_diagnostics.rb)
+(cd "$package_dir" && ruby tests/telemetry_context.rb)
 (cd "$package_dir" && ruby tests/rails_integration.rb)
 test -f "$package_dir/tests/http_client_tracing_support.rb"
-rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/issue_diagnostics.rb" "$package_dir/lib/logbrew/rails.rb" "$package_dir/lib/logbrew/rails_integration.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
+rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/issue_diagnostics.rb" "$package_dir/lib/logbrew/rails.rb" "$package_dir/lib/logbrew/rails_integration.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/telemetry.rb" "$package_dir/lib/logbrew/telemetry_context.rb" "$package_dir/lib/logbrew/telemetry_resource.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$tmp_dir/rdoc/LogBrew/Client.html"
 test -f "$tmp_dir/rdoc/LogBrew/Logger.html"
 test -f "$tmp_dir/rdoc/LogBrew/RackMiddleware.html"
@@ -42,6 +43,9 @@ test -f "$tmp_dir/rdoc/LogBrew/WorkerDeliveryFailure.html"
 test -f "$tmp_dir/rdoc/LogBrew/DeliveryHealth.html"
 test -f "$tmp_dir/rdoc/LogBrew/HttpClientTracing.html"
 test -f "$tmp_dir/rdoc/LogBrew/IssueDiagnostics.html"
+test -f "$tmp_dir/rdoc/LogBrew/Telemetry.html"
+test -f "$tmp_dir/rdoc/LogBrew/TelemetryContext.html"
+test -f "$tmp_dir/rdoc/LogBrew/TelemetryResource.html"
 test -f "$tmp_dir/rdoc/LogBrew/NetHttpTracingClient.html"
 test -f "$tmp_dir/rdoc/LogBrew/Sidekiq/Instrumentation.html"
 
@@ -68,6 +72,10 @@ test -f "$unpacked_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$unpacked_dir/lib/logbrew/automatic_delivery.rb"
 test -f "$unpacked_dir/lib/logbrew/http_client_tracing.rb"
 test -f "$unpacked_dir/lib/logbrew/issue_diagnostics.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry_context.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry_context_value.rb"
+test -f "$unpacked_dir/lib/logbrew/telemetry_resource.rb"
 test -f "$unpacked_dir/lib/logbrew/faraday_tracing.rb"
 test -f "$unpacked_dir/lib/logbrew/sidekiq.rb"
 test -f "$unpacked_dir/README.md"
@@ -123,6 +131,10 @@ grep -q 'Outbound HTTP Tracing' "$unpacked_dir/README.md"
 grep -q 'LogBrew::HttpClientTracing.wrap_net_http' "$unpacked_dir/README.md"
 grep -q 'Typed Issue Diagnostics' "$unpacked_dir/README.md"
 grep -q 'LogBrew::IssueDiagnostics.from_exception' "$unpacked_dir/README.md"
+grep -q 'Shared Telemetry Context' "$unpacked_dir/README.md"
+grep -q 'LogBrew::TelemetryContext' "$unpacked_dir/README.md"
+grep -q 'LogBrew::Telemetry.with_context' "$unpacked_dir/README.md"
+grep -q 'capture_runtime_context: false' "$unpacked_dir/README.md"
 grep -q 'LogBrew::FaradayTracingMiddleware' "$unpacked_dir/README.md"
 grep -q 'Sidekiq Tracing' "$unpacked_dir/README.md"
 grep -q 'LogBrew::Sidekiq::Instrumentation.create' "$unpacked_dir/README.md"
@@ -132,6 +144,9 @@ ruby -I "$unpacked_dir/lib" -e '
   require "logbrew-sdk"
   abort "package require shim did not load core" unless LogBrew::VERSION == ARGV.fetch(0)
   abort "package require shim loaded Rails unexpectedly" if defined?(::LogBrew::RailsRailtie)
+  abort "package is missing telemetry context" unless LogBrew::TelemetryContext.respond_to?(:create)
+  abort "package is missing telemetry resource" unless LogBrew::TelemetryResource.respond_to?(:create)
+  abort "package is missing telemetry scope" unless LogBrew::Telemetry.respond_to?(:with_context)
 ' "$package_version"
 
 ruby -I "$package_dir/lib" "$package_dir/examples/readme_example.rb" > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"

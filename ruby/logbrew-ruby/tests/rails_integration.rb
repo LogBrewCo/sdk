@@ -151,9 +151,32 @@ request_span = events.reverse.find { |event| event.fetch("type") == "span" }
 assert(!request_span.nil?, "expected one Rails request span")
 attributes = request_span.fetch("attributes")
 metadata = attributes.fetch("metadata")
+typed_context = attributes.fetch("context")
+typed_resource = typed_context.fetch("resource")
 assert(attributes.fetch("name") == "GET /tools/:id(.:format)", "expected Rails route-template span name")
 assert(attributes.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "expected incoming trace continuation")
 assert(attributes.fetch("parentSpanId") == "00f067aa0ba902b7", "expected incoming parent span")
+assert(typed_resource.fetch("service") == { "name" => "circulate-web" }, "expected typed Rails service context")
+assert(
+  typed_resource.fetch("deployment") == {
+    "environment" => "staging",
+    "release" => "circulate@2026.08.01"
+  },
+  "expected typed Rails deployment context"
+)
+assert(
+  typed_resource.fetch("framework") == { "name" => "rails", "version" => "8.1.3.1" },
+  "expected typed Rails framework context"
+)
+assert(!typed_resource.dig("runtime", "name").to_s.empty?, "expected typed Ruby runtime context")
+assert(
+  typed_context.dig("trace", "traceId") == attributes.fetch("traceId"),
+  "expected typed Rails request trace correlation"
+)
+assert(
+  typed_context.dig("trace", "spanId") == attributes.fetch("spanId"),
+  "expected typed Rails request span correlation"
+)
 assert(metadata.fetch("http.route") == "/tools/:id(.:format)", "expected route template metadata")
 assert(metadata.fetch("rails.controller") == "tools", "expected bounded controller metadata")
 assert(metadata.fetch("rails.action") == "show", "expected bounded action metadata")
