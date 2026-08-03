@@ -17,6 +17,31 @@ SPEC.loader.exec_module(check_confidentiality_scan)
 
 
 class ConfidentialityScanTests(unittest.TestCase):
+    def test_rust_telemetry_context_allowlist_is_path_and_symbol_scoped(self) -> None:
+        context_path = "rust/logbrew/src/telemetry_context.rs"
+        sensitive_name = "to" + "ken"
+        self.assertTrue(
+            check_confidentiality_scan.is_rust_telemetry_context_reference(
+                context_path,
+                f"    {sensitive_name}: u64,",
+                {sensitive_name},
+            )
+        )
+        self.assertFalse(
+            check_confidentiality_scan.is_rust_telemetry_context_reference(
+                context_path,
+                f'let auth_{sensitive_name} = "unsafe";',
+                {sensitive_name},
+            )
+        )
+        self.assertFalse(
+            check_confidentiality_scan.is_rust_telemetry_context_reference(
+                "rust/logbrew/src/unrelated.rs",
+                f"    {sensitive_name}: u64,",
+                {sensitive_name},
+            )
+        )
+
     def test_allows_only_exact_rails_key_base_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

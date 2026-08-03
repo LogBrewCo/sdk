@@ -1,6 +1,6 @@
 use logbrew::{
-    EnvironmentEvent, LogBrewClient, LogBrewTracingLayer, Metadata, MetadataValue,
-    RecordingTransport, ReleaseEvent,
+    EnvironmentEvent, LogBrewClient, LogBrewTracingLayer, RecordingTransport, ReleaseEvent,
+    TelemetryContext, TelemetryDeployment, TelemetryNamedVersion, TelemetryResource,
 };
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::prelude::*;
@@ -9,6 +9,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Arc::new(Mutex::new(
         LogBrewClient::builder("checkout-service", "1.2.3")
             .api_key("LOGBREW_API_KEY")
+            .context(
+                TelemetryContext::new().with_resource(
+                    TelemetryResource::new()
+                        .with_service(
+                            TelemetryNamedVersion::new("checkout-service").with_version("1.2.3"),
+                        )
+                        .with_deployment(TelemetryDeployment::new().with_environment("production")),
+                ),
+            )
             .build()?,
     ));
 
@@ -16,15 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut client = client
             .lock()
             .expect("LogBrew client lock should be healthy");
-        let mut release_metadata = Metadata::new();
-        release_metadata.insert(
-            "service".to_string(),
-            MetadataValue::String("checkout-service".to_string()),
-        );
         client.release(
             "evt_release_checkout",
             "2026-06-02T10:00:00Z",
-            ReleaseEvent::new("1.2.3").with_metadata(release_metadata),
+            ReleaseEvent::new("1.2.3"),
         )?;
         client.environment(
             "evt_environment_checkout",

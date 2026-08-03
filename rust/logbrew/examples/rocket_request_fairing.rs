@@ -1,4 +1,7 @@
-use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue, RecordingTransport};
+use logbrew::{
+    HttpRequestTelemetry, LogBrewClient, RecordingTransport, TelemetryContext,
+    TelemetryNamedVersion, TelemetryResource,
+};
 use rocket::{
     Config, Data, Request, Response,
     config::LogLevel,
@@ -88,16 +91,6 @@ fn logbrew_request_telemetry() -> AdHoc {
                     .route()
                     .map(|route| route.uri.to_string())
                     .unwrap_or_else(|| "/unknown".to_string());
-                let mut metadata = Metadata::new();
-                metadata.insert(
-                    "framework".to_string(),
-                    MetadataValue::String("rocket".to_string()),
-                );
-                metadata.insert(
-                    "service".to_string(),
-                    MetadataValue::String("checkout-service".to_string()),
-                );
-
                 let mut telemetry = HttpRequestTelemetry::new(
                     route_template,
                     request.method().to_string(),
@@ -106,7 +99,16 @@ fn logbrew_request_telemetry() -> AdHoc {
                 )
                 .with_status_code(response.status().code)
                 .with_duration_ms(started.elapsed().as_secs_f64() * 1000.0)
-                .with_metadata(metadata);
+                .with_context(
+                    TelemetryContext::new().with_resource(
+                        TelemetryResource::new()
+                            .with_service(
+                                TelemetryNamedVersion::new("checkout-service")
+                                    .with_version("1.2.3"),
+                            )
+                            .with_framework(TelemetryNamedVersion::new("rocket")),
+                    ),
+                );
                 if let Some(traceparent) = request.headers().get_one("traceparent") {
                     telemetry = telemetry.with_incoming_traceparent(traceparent);
                 }

@@ -56,11 +56,40 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
 
     by_id = {event["id"]: event for event in events}
     log = by_id["evt_log_checkout_started"]["attributes"]
-    _require(log["metadata"].get("traceId") == EXPECTED_TRACE_ID, "rust first-useful log is missing trace correlation")
-    _require(
-        log["metadata"].get("sessionId") == EXPECTED_SESSION_ID,
-        "rust first-useful log is missing session correlation",
-    )
+    request_ids = [
+        "evt_log_checkout_started",
+        "evt_action_checkout_submit",
+        "evt_action_payment_api",
+        "evt_metric_http_server_duration",
+        "evt_span_checkout_request",
+    ]
+    for event in events:
+        context = event["attributes"].get("context")
+        _require(isinstance(context, dict), f"rust event {event['id']} is missing typed context")
+        _require(context.get("schemaVersion") == 1, f"rust event {event['id']} has wrong context version")
+        resource = context.get("resource", {})
+        _require(
+            resource.get("service", {}).get("name") == "checkout-service"
+            and resource.get("service", {}).get("version") == "1.2.3",
+            f"rust event {event['id']} is missing typed service identity",
+        )
+        _require(
+            resource.get("deployment", {}).get("environment") == "production",
+            f"rust event {event['id']} is missing typed deployment identity",
+        )
+    for event_id in request_ids:
+        context = by_id[event_id]["attributes"]["context"]
+        trace = context.get("trace", {})
+        _require(trace.get("traceId") == EXPECTED_TRACE_ID, f"rust event {event_id} is missing trace correlation")
+        _require(trace.get("spanId") == EXPECTED_CHILD_SPAN_ID, f"rust event {event_id} is missing span correlation")
+        _require(trace.get("parentSpanId") == EXPECTED_PARENT_SPAN_ID, f"rust event {event_id} is missing parent correlation")
+        _require(trace.get("sampled") is True, f"rust event {event_id} is missing sampled state")
+        _require(
+            context.get("session", {}).get("id") == EXPECTED_SESSION_ID,
+            f"rust event {event_id} is missing typed session correlation",
+        )
+    _require("traceId" not in log["metadata"], "rust first-useful log duplicated typed trace metadata")
+    _require("sessionId" not in log["metadata"], "rust first-useful log duplicated typed session metadata")
 
     product_metadata = by_id["evt_action_checkout_submit"]["attributes"]["metadata"]
     _require(
@@ -95,10 +124,7 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         metric["metadata"].get("routeTemplate") == "/checkout/:cart_id",
         "rust first-useful metric must use route-template metadata",
     )
-    _require(
-        metric["metadata"].get("traceId") == EXPECTED_TRACE_ID,
-        "rust first-useful metric is missing trace correlation",
-    )
+    _require("traceId" not in metric["metadata"], "rust first-useful metric duplicated typed trace metadata")
 
     span = by_id["evt_span_checkout_request"]["attributes"]
     _require(span.get("traceId") == EXPECTED_TRACE_ID, "rust first-useful span is missing trace id")
@@ -107,11 +133,12 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         "rust first-useful span is missing upstream parent span id",
     )
     _require(span.get("spanId") == EXPECTED_CHILD_SPAN_ID, "rust first-useful span is missing fresh child span id")
-    _require(span["metadata"].get("sampled") is True, "rust first-useful span should expose sampled trace context")
-    _require(
-        span["metadata"].get("sessionId") == EXPECTED_SESSION_ID,
-        "rust first-useful span is missing session correlation",
-    )
+    _require("sampled" not in span["metadata"], "rust first-useful span duplicated typed sampled state")
+    _require("sessionId" not in span["metadata"], "rust first-useful span duplicated typed session metadata")
+
+    lowered = payload_text.lower()
+    for forbidden_key in ["hostname", "host.name", "process.id", "process.command", "user.name", "home", "cwd", "ip.address"]:
+        _require(forbidden_key not in lowered, f"rust first-useful runtime context leaked forbidden field: {forbidden_key}")
 
     stderr = _load_payload(stderr_path)
     _require(

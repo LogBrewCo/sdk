@@ -84,6 +84,18 @@ fn opentelemetry_exporter_queues_privacy_bounded_spans_from_standard_processor()
     assert!(span["traceId"].as_str().unwrap().len() == 32);
     assert!(span["spanId"].as_str().unwrap().len() == 16);
     assert!(span["durationMs"].as_f64().unwrap() >= 0.0);
+    assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
+    assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
+    assert_eq!(span["context"]["trace"]["sampled"], true);
+    assert_eq!(
+        span["context"]["resource"]["service"]["name"],
+        "checkout-api"
+    );
+    assert_eq!(span["context"]["resource"]["service"]["version"], "1.2.3");
+    assert_eq!(
+        span["context"]["resource"]["deployment"]["environment"],
+        "production"
+    );
 
     let metadata = &span["metadata"];
     assert_eq!(metadata["source"], "opentelemetry.span_exporter");

@@ -1,4 +1,7 @@
-use crate::{SdkError, metadata_entry, require_allowed_value, require_non_empty};
+use crate::{
+    SdkError, TelemetryContext, context_entry, metadata_entry, require_allowed_value,
+    require_non_empty,
+};
 use serde_json::{Map, Value};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -10,6 +13,7 @@ pub struct MetricEvent {
     unit: String,
     temporality: String,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl MetricEvent {
@@ -28,12 +32,19 @@ impl MetricEvent {
             unit: unit.into(),
             temporality: temporality.into(),
             metadata: None,
+            context: None,
         }
     }
 
     /// Attach primitive, low-cardinality metadata to the metric payload.
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    /// Attach an explicit shared telemetry context override.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
         self
     }
 
@@ -63,6 +74,7 @@ impl MetricEvent {
         map.insert("unit".to_string(), Value::String(self.unit));
         map.insert("temporality".to_string(), Value::String(self.temporality));
         metadata_entry(&mut map, self.metadata);
+        context_entry(&mut map, self.context)?;
         Ok(map)
     }
 }

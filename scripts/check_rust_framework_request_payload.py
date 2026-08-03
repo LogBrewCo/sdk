@@ -40,8 +40,8 @@ def validate_payload(
 
     metadata = span["metadata"]
     require(metadata["source"] == "rust_http_server", "bad metadata source")
-    require(metadata["framework"] == framework, "missing framework metadata")
-    require(metadata["service"] == "checkout-service", "missing service metadata")
+    require("framework" not in metadata, "framework identity should not be duplicated in metadata")
+    require("service" not in metadata, "service identity should not be duplicated in metadata")
     require(metadata["routeTemplate"] == route_template, "route was not templated")
     require(metadata["method"] == "POST", "method was not normalized")
     require(metadata["statusCode"] == 202, "bad status code")
@@ -53,6 +53,19 @@ def validate_payload(
     require(metric["unit"] == "ms", "bad metric unit")
     require(metric["temporality"] == "delta", "bad metric temporality")
     require(metric["metadata"] == metadata, "metric/span metadata should match")
+    context = span.get("context")
+    require(isinstance(context, dict), "span is missing typed context")
+    require(metric.get("context") == context, "metric/span typed context should match")
+    require(context.get("schemaVersion") == 1, "bad context schema version")
+    resource = context.get("resource", {})
+    require(resource.get("framework", {}).get("name") == framework, "missing typed framework identity")
+    require(resource.get("service", {}).get("name") == "checkout-service", "missing typed service identity")
+    require(resource.get("service", {}).get("version") == "1.2.3", "missing typed service version")
+    trace = context.get("trace", {})
+    require(trace.get("traceId") == span["traceId"], "typed trace id does not match span")
+    require(trace.get("spanId") == span["spanId"], "typed span id does not match span")
+    require(trace.get("parentSpanId") == span["parentSpanId"], "typed parent span id does not match span")
+    require(trace.get("sampled") is True, "typed trace sampled state is missing")
 
     text = Path(stdout_json).read_text().lower()
     for forbidden in ["coupon=sample", "cart_123", "authorization", "headers", "payload"]:

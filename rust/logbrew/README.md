@@ -18,7 +18,7 @@ cargo add logbrew --features tracing-opentelemetry
 cargo add logbrew --features opentelemetry-exporter
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `AutomaticDeliveryConfig`, `DeliveryHealthSnapshot`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, typed issue helpers such as `IssueException`, `IssueStackFrame`, `IssueBreadcrumb`, and `IssueBreadcrumbBuffer`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `flush_owned`, `shutdown`, `shutdown_owned`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and opt-in typed service-error issues, plus `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`. With the `opentelemetry-exporter` feature enabled, docs include `LogBrewOpenTelemetrySpanExporter` for apps that already use the OpenTelemetry SDK and want finished spans queued into an app-owned LogBrew client.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, shared context types such as `TelemetryContext` and `TelemetryResource`, sync and async context scopes, `ClientBuilder`, `AutomaticDeliveryConfig`, `DeliveryHealthSnapshot`, `SdkError`, transports, public event builders such as `MetricEvent`, typed issue helpers such as `IssueException`, `IssueStackFrame`, `IssueBreadcrumb`, and `IssueBreadcrumbBuffer`, timeline builders, HTTP/dependency/W3C helpers, and delivery lifecycle methods. Feature-gated docs cover the explicit HTTP clients, Tower/Axum request and error correlation, `tracing` logs/spans, `tracing-opentelemetry` context copying, and the OpenTelemetry span exporter.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -83,6 +83,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `preview_json` when you want a stable local JSON preview before sending anything.
+
+## Shared Telemetry Context
+
+Every release, environment, issue, log, span, action, and metric can carry the same schema-v1 context. Put stable service/deployment/application identity on the client, then add request- or job-local trace, opaque session, opaque subject, and low-cardinality tags in a scope:
+
+```rust
+use logbrew::{
+    LogBrewClient, LogEvent, TelemetryApplication, TelemetryContext, TelemetryDeployment,
+    TelemetryNamedVersion, TelemetryResource, TelemetrySessionContext,
+    TelemetrySubjectContext, TelemetryTraceContext, with_telemetry_context,
+};
+
+let service = TelemetryContext::new().with_resource(
+    TelemetryResource::new()
+        .with_service(TelemetryNamedVersion::new("checkout-api").with_version("1.2.3"))
+        .with_deployment(
+            TelemetryDeployment::new()
+                .with_environment("production")
+                .with_release("checkout@1.2.3"),
+        )
+        .with_application(
+            TelemetryApplication::new()
+                .with_name("checkout")
+                .with_version("1.2.3"),
+        ),
+);
+let mut client = LogBrewClient::builder("checkout-api", "1.2.3")
+    .api_key("LOGBREW_API_KEY")
+    .context(service)
+    .build()?;
+
+let request = TelemetryContext::new()
+    .with_trace(
+        TelemetryTraceContext::new("4bf92f3577b34da6a3ce929d0e0e4736")
+            .with_span_id("b7ad6b7169203331")
+            .with_parent_span_id("00f067aa0ba902b7")
+            .with_sampled(true),
+    )
+    .with_session(TelemetrySessionContext::new("opaque-session-id"))
+    .with_subject(TelemetrySubjectContext::user("opaque-subject-id"))
+    .with_tag("customer.tier", "pro");
+
+with_telemetry_context(request, || {
+    client.log(
+        "evt_checkout_log",
+        "2026-06-02T10:00:00Z",
+        LogEvent::new("checkout failed", "error"),
+    )
+})??;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The client adds conservative `rust` runtime, target OS family, and architecture context by default. Call `.capture_runtime_context(false)` for an explicit opt-out. It never probes or emits hostnames, process IDs, commands or arguments, environment variables, local account or path data, network/cloud identity, CPU details, or memory details.
+
+Merge precedence is runtime defaults, client context, current scoped context, signal-derived trace identity, then an event's explicit `.with_context(...)` override. Resource sections and tags merge by field; trace, session, and subject sections replace earlier values. Tags serialize in stable key order and are capped at 32. Context strings, IDs, keys, W3C IDs, empty sections, and schema version are validated before queue admission.
+
+`activate_telemetry_context` returns a same-thread RAII guard with idempotent `close`; nested scopes restore exactly even during panic unwinding. `with_telemetry_context_async` wraps any future and activates context only while each poll runs, so executor thread migration and concurrent tasks do not leak context. Use the async wrapper around a request or job future instead of holding the synchronous guard across `.await`.
+
+Session and subject IDs must be application-owned opaque identifiers. Do not put email addresses, names, authentication material, raw device identifiers, IP addresses, or other direct PII in them. Tags are for bounded dimensions, not messages, URLs, payloads, stack text, or arbitrary customer data. `validate_telemetry_context` and `merge_telemetry_contexts` let applications preflight values without queueing an event.
 
 ## Typed Issue Diagnostics
 
@@ -194,110 +253,57 @@ Automatic health adds only fixed lifecycle facts to `DeliveryHealthSnapshot`: wh
 
 ## First Useful Service Telemetry
 
-For a Rust service, start with release, environment, a canonical-severity log, a product action, a network milestone, a request-duration metric, and one W3C-linked request span:
+For a Rust service, emit release and environment identity once per deployment. Within each request or job, combine a canonical-severity log, meaningful product/network actions, an aggregate-ready metric, and the exact causal span. The shared scope makes those different signals one investigation timeline without repeating trace or session IDs in flat metadata:
 
 ```rust
 use logbrew::{
-    EnvironmentEvent, LogBrewClient, LogEvent, Metadata, MetadataValue, MetricEvent,
-    ProductTimeline, ReleaseEvent, Traceparent, TraceparentSpanInput,
+    LogBrewClient, LogEvent, MetricEvent, TelemetryContext, TelemetrySessionContext,
+    TelemetryTraceContext, with_telemetry_context,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-    let trace = Traceparent::parse(incoming)?;
-    let child_span_id = "b7ad6b7169203331";
-    let route_template = "/checkout/:cart_id";
-    let session_id = "sess_checkout_123";
+let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    .api_key("LOGBREW_API_KEY")
+    .build()?;
+let request = TelemetryContext::new()
+    .with_trace(
+        TelemetryTraceContext::new("4bf92f3577b34da6a3ce929d0e0e4736")
+            .with_span_id("b7ad6b7169203331")
+            .with_parent_span_id("00f067aa0ba902b7")
+            .with_sampled(true),
+    )
+    .with_session(TelemetrySessionContext::new("opaque-session-id"));
 
-    let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
-        .api_key("LOGBREW_API_KEY")
-        .build()?;
-
-    client.release(
-        "evt_release_checkout",
-        "2026-06-02T10:00:00Z",
-        ReleaseEvent::new("1.2.3"),
-    )?;
-    client.environment(
-        "evt_environment_checkout",
-        "2026-06-02T10:00:01Z",
-        EnvironmentEvent::new("production"),
-    )?;
-
-    let mut log_metadata = Metadata::new();
-    log_metadata.insert("traceId".to_string(), MetadataValue::String(trace.trace_id.clone()));
-    log_metadata.insert("sessionId".to_string(), MetadataValue::String(session_id.to_string()));
-    log_metadata.insert("routeTemplate".to_string(), MetadataValue::String(route_template.to_string()));
+with_telemetry_context(request, || -> Result<(), logbrew::SdkError> {
     client.log(
         "evt_log_checkout_started",
         "2026-06-02T10:00:02Z",
-        LogEvent::new("checkout request started", "info")
-            .with_logger("checkout")
-            .with_metadata(log_metadata),
+        LogEvent::new("checkout request started", "info").with_logger("checkout"),
     )?;
-
-    client.action(
-        "evt_action_checkout_submit",
-        "2026-06-02T10:00:03Z",
-        ProductTimeline::product_action("checkout.submit")
-            .with_route_template(route_template)
-            .with_session_id(session_id)
-            .with_trace_id(&trace.trace_id)
-            .with_screen("Checkout")
-            .build()?,
-    )?;
-    client.action(
-        "evt_action_payment_api",
-        "2026-06-02T10:00:04Z",
-        ProductTimeline::network_milestone("/payments/:payment_id")
-            .with_method("POST")
-            .with_status_code(202)
-            .with_duration_ms(183.4)
-            .with_session_id(session_id)
-            .with_trace_id(&trace.trace_id)
-            .build()?,
-    )?;
-
-    let mut metric_metadata = Metadata::new();
-    metric_metadata.insert("method".to_string(), MetadataValue::String("POST".to_string()));
-    metric_metadata.insert("routeTemplate".to_string(), MetadataValue::String(route_template.to_string()));
-    metric_metadata.insert("statusCode".to_string(), MetadataValue::from(202));
-    metric_metadata.insert("traceId".to_string(), MetadataValue::String(trace.trace_id.clone()));
     client.metric(
         "evt_metric_http_server_duration",
         "2026-06-02T10:00:05Z",
-        MetricEvent::new("http.server.duration", "histogram", 183.4, "ms", "delta")
-            .with_metadata(metric_metadata),
+        MetricEvent::new("http.server.duration", "histogram", 183.4, "ms", "delta"),
     )?;
-
-    client.span(
-        "evt_span_checkout_request",
-        "2026-06-02T10:00:06Z",
-        Traceparent::span_attributes_from_context(
-            &trace,
-            TraceparentSpanInput::new("POST /checkout/:cart_id", child_span_id, "ok")
-                .with_duration_ms(183.4),
-        )?,
-    )?;
-
-    println!("{}", client.preview_json()?);
     Ok(())
-}
+})??;
 ```
 
-This stays app-owned and privacy-safe: use route templates such as `/checkout/:cart_id`, primitive metadata, release, environment, and canonical severities (`info`, `warning`, `error`, `critical`). Do not put account-specific values, request or response payloads, arbitrary headers, query strings, hashes, full URLs, or sensitive user data into telemetry.
+Metrics answer questions across many events—rate, latency distribution, saturation, and change after a release—while a span explains one execution and logs/actions explain what happened inside it. Do not use a metric as a substitute for the trace or attach high-cardinality request, user, or session values as metric tags.
+
+The runnable [`first_useful_telemetry.rs`](examples/first_useful_telemetry.rs) example emits release, environment, log, product action, network milestone, request-duration metric, and request span as one schema-valid envelope. It uses route templates, primitive bounded metadata, and canonical severities (`info`, `warning`, `error`, `critical`), and excludes account-specific values, payloads, arbitrary headers, query strings, fragments, full URLs, direct PII, and sensitive values.
 
 ## HTTP Server Request Telemetry
 
 For Axum, Tower, Actix, Rocket, or a custom Rust server, keep request capture in your app-owned middleware and pass stable route metadata into `HttpRequestTelemetry`. The helper builds a request span plus an optional `http.server.duration` metric without installing framework middleware, patching HTTP clients, or capturing payloads/headers.
 
 ```rust
-use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
+use logbrew::{
+    HttpRequestTelemetry, LogBrewClient, TelemetryContext, TelemetryNamedVersion,
+    TelemetryResource,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-    let mut metadata = Metadata::new();
-    metadata.insert("framework".to_string(), MetadataValue::String("axum".to_string()));
 
     let request = HttpRequestTelemetry::new(
         "https://api.example.invalid/checkout/:cart_id?coupon=sample#review",
@@ -308,7 +314,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_incoming_traceparent(incoming)
     .with_status_code(202)
     .with_duration_ms(183.4)
-    .with_metadata(metadata)
+    .with_context(TelemetryContext::new().with_resource(
+        TelemetryResource::new()
+            .with_service(
+                TelemetryNamedVersion::new("checkout-service").with_version("1.2.3"),
+            )
+            .with_framework(TelemetryNamedVersion::new("axum")),
+    ))
     .build()?;
 
     let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
@@ -325,7 +337,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`HttpRequestTelemetry` strips query strings and hash fragments from route templates, normalizes HTTP methods, adds primitive metadata such as `routeTemplate`, `method`, `statusCode`, and `statusCodeClass`, treats valid incoming W3C `traceparent` values as parent context, and falls back to the explicit app trace ID when propagation is missing or malformed. It does not create backend setup state, inspect account sessions, capture arbitrary headers, or read request/response bodies.
+`HttpRequestTelemetry` strips query strings and hash fragments from route templates, normalizes HTTP methods, adds primitive metadata such as `routeTemplate`, `method`, `statusCode`, and `statusCodeClass`, treats valid incoming W3C `traceparent` values as parent context, and falls back to the explicit app trace ID when propagation is missing or malformed. Its span and optional metric receive the same typed service/framework and effective trace/span/parent/sampled context, so either signal can lead an investigator to the exact request. It does not create backend setup state, inspect account sessions, capture arbitrary headers, or read request/response bodies.
 
 ## Outbound HTTP Client Spans
 
@@ -453,7 +465,8 @@ use axum::{
     http::Request,
 };
 use logbrew::{
-    LogBrewClient, Metadata, MetadataValue, TowerRequestIds, TowerRequestTelemetryLayer,
+    LogBrewClient, TelemetryContext, TelemetryNamedVersion, TelemetryResource,
+    TowerRequestIds, TowerRequestTelemetryLayer,
 };
 use std::sync::{Arc, Mutex};
 
@@ -464,9 +477,6 @@ fn logbrew_layer(
     impl Fn() -> TowerRequestIds + Clone,
     impl Fn() -> String + Clone,
 > {
-    let mut metadata = Metadata::new();
-    metadata.insert("framework".to_string(), MetadataValue::String("axum".to_string()));
-
     TowerRequestTelemetryLayer::new(
         client,
         |request: &Request<Body>| {
@@ -479,7 +489,13 @@ fn logbrew_layer(
         || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
         || "2026-06-02T10:00:00Z".to_string(),
     )
-    .with_metadata(metadata)
+    .with_context(TelemetryContext::new().with_resource(
+        TelemetryResource::new()
+            .with_service(
+                TelemetryNamedVersion::new("checkout-service").with_version("1.2.3"),
+            )
+            .with_framework(TelemetryNamedVersion::new("axum")),
+    ))
     .with_error_issues()
 }
 ```
@@ -537,7 +553,10 @@ use actix_web::{
     middleware::Next,
     web,
 };
-use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
+use logbrew::{
+    HttpRequestTelemetry, LogBrewClient, TelemetryContext, TelemetryNamedVersion,
+    TelemetryResource,
+};
 use std::{sync::{Arc, Mutex}, time::Instant};
 
 #[derive(Clone)]
@@ -565,8 +584,6 @@ async fn logbrew_request_telemetry(
         .request()
         .match_pattern()
         .unwrap_or_else(|| "/unknown".to_string());
-    let mut metadata = Metadata::new();
-    metadata.insert("framework".to_string(), MetadataValue::String("actix-web".to_string()));
     let mut telemetry = HttpRequestTelemetry::new(
         route_template,
         method,
@@ -575,7 +592,13 @@ async fn logbrew_request_telemetry(
     )
     .with_status_code(response.status().as_u16())
     .with_duration_ms(started.elapsed().as_secs_f64() * 1000.0)
-    .with_metadata(metadata);
+    .with_context(TelemetryContext::new().with_resource(
+        TelemetryResource::new()
+            .with_service(
+                TelemetryNamedVersion::new("checkout-service").with_version("1.2.3"),
+            )
+            .with_framework(TelemetryNamedVersion::new("actix-web")),
+    ));
     if let Some(traceparent) = incoming {
         telemetry = telemetry.with_incoming_traceparent(traceparent);
     }
@@ -616,7 +639,10 @@ until that upstream pair is updated; it is not a LogBrew runtime dependency.
 The packaged `examples/rocket_request_fairing.rs` file is a runnable mini-app; the core pattern is:
 
 ```rust
-use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
+use logbrew::{
+    HttpRequestTelemetry, LogBrewClient, TelemetryContext, TelemetryNamedVersion,
+    TelemetryResource,
+};
 use rocket::{Data, Request, Response, fairing::AdHoc, http::Header};
 use std::{sync::{Arc, Mutex}, time::Instant};
 
@@ -647,11 +673,6 @@ fn logbrew_request_telemetry() -> AdHoc {
                     .route()
                     .map(|route| route.uri.to_string())
                     .unwrap_or_else(|| "/unknown".to_string());
-                let mut metadata = Metadata::new();
-                metadata.insert(
-                    "framework".to_string(),
-                    MetadataValue::String("rocket".to_string()),
-                );
                 let mut telemetry = HttpRequestTelemetry::new(
                     route_template,
                     request.method().to_string(),
@@ -660,7 +681,14 @@ fn logbrew_request_telemetry() -> AdHoc {
                 )
                 .with_status_code(response.status().code)
                 .with_duration_ms(started.elapsed().as_secs_f64() * 1000.0)
-                .with_metadata(metadata);
+                .with_context(TelemetryContext::new().with_resource(
+                    TelemetryResource::new()
+                        .with_service(
+                            TelemetryNamedVersion::new("checkout-service")
+                                .with_version("1.2.3"),
+                        )
+                        .with_framework(TelemetryNamedVersion::new("rocket")),
+                ));
                 if let Some(traceparent) = request.headers().get_one("traceparent") {
                     telemetry = telemetry.with_incoming_traceparent(traceparent);
                 }
@@ -701,7 +729,10 @@ cargo add tracing tracing-subscriber
 ```
 
 ```rust
-use logbrew::{LogBrewClient, LogBrewTracingLayer};
+use logbrew::{
+    LogBrewClient, LogBrewTracingLayer, TelemetryContext, TelemetryDeployment,
+    TelemetryNamedVersion, TelemetryResource,
+};
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::prelude::*;
 
@@ -709,6 +740,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Arc::new(Mutex::new(
         LogBrewClient::builder("checkout-service", "1.2.3")
             .api_key("LOGBREW_API_KEY")
+            .context(TelemetryContext::new().with_resource(
+                TelemetryResource::new()
+                    .with_service(
+                        TelemetryNamedVersion::new("checkout-service")
+                            .with_version("1.2.3"),
+                    )
+                    .with_deployment(
+                        TelemetryDeployment::new().with_environment("production"),
+                    ),
+            ))
             .build()?,
     ));
     let layer = LogBrewTracingLayer::new(client.clone(), || {
@@ -743,7 +784,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. It records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. With `with_span_events()`, the layer continues a valid `traceparent` or `trace_parent` field on a root span, generates W3C-shaped child span IDs, adds trace correlation to logs emitted inside a span, records parent/child span links, copies the sampled flag, marks the current span as `error` when an error-level event is emitted inside it, and adds privacy-bounded event summaries such as `tracingSpanEventCount`, `tracingSpanErrorEventCount`, `tracingLastErrorLevel`, and `tracingLastErrorTarget` to the closed span. Malformed trace context is ignored non-fatally and the raw propagation field is not emitted as metadata. Span event summaries intentionally do not copy error messages, stacks, payloads, headers, or arbitrary event fields. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
+`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. Every converted log and span carries typed `tracing` framework identity plus configured service/deployment context. Work inside a span also carries exact typed trace, span, parent, and sampled identity, while the existing primitive correlation fields remain for wire compatibility. The layer records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. With `with_span_events()`, the layer continues a valid `traceparent` or `trace_parent` field on a root span, generates W3C-shaped child span IDs, records parent/child links, marks the current span as `error` when an error-level event is emitted inside it, and adds privacy-bounded event summaries such as `tracingSpanEventCount`, `tracingSpanErrorEventCount`, `tracingLastErrorLevel`, and `tracingLastErrorTarget` to the closed span. Malformed trace context is ignored non-fatally and the raw propagation field is not emitted as metadata. Span event summaries intentionally do not copy error messages, stacks, payloads, headers, or arbitrary event fields. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
 
 If your service already installs `tracing-opentelemetry`, enable `logbrew`'s `tracing-opentelemetry` feature and call `opentelemetry_span_context_from_current_tracing_span()` inside an entered span. The helper returns `None` when no valid OTel span is active; otherwise pass the copied context to `Traceparent::span_attributes_from_opentelemetry_context(...)` or `Traceparent::create_headers_from_opentelemetry_context(...)`. This is an opt-in copy bridge, not a LogBrew OpenTelemetry exporter or processor, and it does not read tracestate, baggage, span attributes, event arrays, links, payloads, headers, or raw URLs.
 
@@ -811,7 +852,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The exporter copies trace ID, span ID, parent span ID, span kind, duration, instrumentation scope, and only primitive attributes explicitly allowlisted with `with_allowed_attribute_keys(...)`. Route-template strings are sanitized to remove query strings and hash fragments. It intentionally drops baggage, tracestate, arrays, payloads, arbitrary headers, full URLs, authorization values, exception messages, stack traces, SQL statements, and future unknown OTel value variants. Use this when you want LogBrew to receive spans from an existing OTel pipeline; use the `tracing-opentelemetry` context-copy helper when you only need IDs for child spans or outbound propagation.
+The exporter copies trace ID, span ID, parent span ID, sampled state, span kind, duration, instrumentation scope, and only primitive attributes explicitly allowlisted with `with_allowed_attribute_keys(...)`. It also maps configured or resource-provided OTel service name/version and deployment environment into the shared typed resource context, and writes the same exact trace/span/parent/sampled identity into typed trace context. Route-template strings are sanitized to remove query strings and hash fragments. It intentionally drops baggage, tracestate, arrays, payloads, arbitrary headers, full URLs, authorization values, exception messages, stack traces, SQL statements, and future unknown OTel value variants. Use this when you want LogBrew to receive spans from an existing OTel pipeline; use the `tracing-opentelemetry` context-copy helper when you only need IDs for child spans or outbound propagation.
 
 ## W3C Trace Context
 
@@ -888,7 +929,9 @@ For dependency work where a panic would otherwise hide the failed span, use the 
 
 ## Metrics
 
-Use `MetricEvent` for explicit app-owned measurements such as counters, gauges, and histograms. Metrics are not captured automatically; keep metadata primitive and low-cardinality, and avoid raw URLs, query strings, user IDs, request or response payloads, headers, and free-form text.
+Use `MetricEvent` for explicit app-owned measurements such as counters, gauges, and histograms. A metric is the aggregatable view of behavior over time: use it to compare request volume, error rate, latency distributions, queue depth, or business throughput across releases and environments. Use logs and actions for discrete facts and spans for one execution path; metrics should answer trends and thresholds across many executions.
+
+Metrics are not captured automatically. Put stable service/deployment identity on the client and only bounded dimensions such as route template, operation, region, or status class in metadata/tags. Avoid raw URLs, query strings, event IDs, trace IDs, session IDs, user IDs, request or response payloads, headers, and free-form text as metric dimensions. A metric may still inherit scoped trace/session context for investigation linkage, but backends should aggregate only the explicitly selected low-cardinality dimensions.
 
 ```rust
 use logbrew::{LogBrewClient, MetricEvent};
@@ -916,20 +959,27 @@ Metric kinds are `counter`, `gauge`, and `histogram`. Gauge metrics use `instant
 Use `ProductTimeline` when your app already knows the product step or API milestone that matters and you want an agent-readable timeline without recording a visual session replay:
 
 ```rust
-use logbrew::{LogBrewClient, ProductTimeline};
+use logbrew::{
+    LogBrewClient, ProductTimeline, TelemetryContext, TelemetrySessionContext,
+    TelemetryTraceContext,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
         .api_key("LOGBREW_API_KEY")
         .build()?;
+    let timeline_context = TelemetryContext::new()
+        .with_trace(TelemetryTraceContext::new(
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+        ))
+        .with_session(TelemetrySessionContext::new("opaque-session-id"));
 
     client.action(
         "evt_checkout_submit",
         "2026-06-02T10:00:07Z",
         ProductTimeline::product_action("checkout.submit")
             .with_route_template("/checkout/:cart_id")
-            .with_session_id("session_123")
-            .with_trace_id("trace_123")
+            .with_context(timeline_context.clone())
             .with_screen("Checkout")
             .with_funnel("purchase")
             .with_step("submit")
@@ -943,8 +993,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_method("POST")
             .with_status_code(503)
             .with_duration_ms(42.5)
-            .with_session_id("session_123")
-            .with_trace_id("trace_123")
+            .with_context(timeline_context)
             .build()?,
     )?;
 
@@ -953,7 +1002,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The builders return normal `ActionEvent` values, so they work with the existing queue, preview, flush, and retry behavior. They accept only primitive metadata, copy it defensively, strip query strings and hashes from route templates, reduce full HTTP URLs to paths, normalize HTTP methods, and infer failed network milestones from `4xx`/`5xx` status codes. They do not patch HTTP clients, capture request or response payloads, capture arbitrary headers, auto-capture clicks, or claim visual replay.
+The builders return normal `ActionEvent` values, so they work with the existing queue, preview, flush, and retry behavior. Explicit `.with_context(...)` is the preferred typed correlation path. The older `.with_session_id(...)` and `.with_trace_id(...)` helpers remain compatible; valid W3C trace IDs and session IDs are promoted into typed context while their legacy primitive metadata stays available. The builders accept only primitive metadata, copy it defensively, strip query strings and hashes from route templates, reduce full HTTP URLs to paths, normalize HTTP methods, and infer failed network milestones from `4xx`/`5xx` status codes. They do not patch HTTP clients, capture request or response payloads, capture arbitrary headers, auto-capture clicks, or claim visual replay.
 
 ## HTTP Delivery
 

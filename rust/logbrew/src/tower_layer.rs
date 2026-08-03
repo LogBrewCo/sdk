@@ -1,8 +1,9 @@
 use crate::http_fields::{normalize_method, sanitize_route_template};
 use crate::{
     HttpClientSpan, HttpRequestTelemetry, IssueBreadcrumb, IssueEvent, IssueException,
-    IssueExceptionMechanism, Metadata, SdkError, SharedLogBrewClient, Traceparent,
-    require_non_empty,
+    IssueExceptionMechanism, Metadata, SdkError, SharedLogBrewClient, TelemetryContext,
+    TelemetryNamedVersion, TelemetryResource, TelemetryTraceContext, Traceparent,
+    merge_telemetry_contexts, require_non_empty,
 };
 use http_types::{HeaderValue, Request, Response};
 use serde_json::Value;
@@ -55,6 +56,7 @@ pub struct TowerRequestTelemetryLayer<R, I, T> {
     metric_event_id_prefix: String,
     capture_error_issues: bool,
     error_issue_event_id_prefix: String,
+    context: Option<TelemetryContext>,
 }
 
 impl<R, I, T> TowerRequestTelemetryLayer<R, I, T> {
@@ -75,6 +77,7 @@ impl<R, I, T> TowerRequestTelemetryLayer<R, I, T> {
             metric_event_id_prefix: "evt_http_request_duration".to_string(),
             capture_error_issues: false,
             error_issue_event_id_prefix: "evt_tower_request_issue".to_string(),
+            context: None,
         }
     }
 
@@ -110,6 +113,12 @@ impl<R, I, T> TowerRequestTelemetryLayer<R, I, T> {
         self.error_issue_event_id_prefix = prefix.into();
         self
     }
+
+    /// Attach shared service, deployment, application, session, subject, or tag context.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
 }
 
 impl<S, R, I, T> Layer<S> for TowerRequestTelemetryLayer<R, I, T>
@@ -132,6 +141,7 @@ where
             metric_event_id_prefix: self.metric_event_id_prefix.clone(),
             capture_error_issues: self.capture_error_issues,
             error_issue_event_id_prefix: self.error_issue_event_id_prefix.clone(),
+            context: self.context.clone(),
         }
     }
 }
@@ -149,6 +159,7 @@ pub struct TowerRequestTelemetryService<S, R, I, T> {
     metric_event_id_prefix: String,
     capture_error_issues: bool,
     error_issue_event_id_prefix: String,
+    context: Option<TelemetryContext>,
 }
 
 /// Optional Tower `Layer` that injects W3C propagation and queues outbound HTTP spans.
@@ -160,6 +171,7 @@ pub struct TowerHttpClientSpanLayer<R, I, T> {
     timestamp: T,
     metadata: Metadata,
     span_event_id_prefix: String,
+    context: Option<TelemetryContext>,
 }
 
 impl<R, I, T> TowerHttpClientSpanLayer<R, I, T> {
@@ -177,6 +189,7 @@ impl<R, I, T> TowerHttpClientSpanLayer<R, I, T> {
             timestamp,
             metadata: Metadata::new(),
             span_event_id_prefix: "evt_http_client_span".to_string(),
+            context: None,
         }
     }
 
@@ -189,6 +202,12 @@ impl<R, I, T> TowerHttpClientSpanLayer<R, I, T> {
     /// Override the event ID prefix. The child span ID is appended per request.
     pub fn with_event_id_prefix(mut self, span_event_id_prefix: impl Into<String>) -> Self {
         self.span_event_id_prefix = span_event_id_prefix.into();
+        self
+    }
+
+    /// Attach shared service, deployment, application, session, subject, or tag context.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
         self
     }
 }
@@ -210,6 +229,7 @@ where
             timestamp: self.timestamp.clone(),
             metadata: self.metadata.clone(),
             span_event_id_prefix: self.span_event_id_prefix.clone(),
+            context: self.context.clone(),
         }
     }
 }
@@ -224,6 +244,7 @@ pub struct TowerHttpClientSpanService<S, R, I, T> {
     timestamp: T,
     metadata: Metadata,
     span_event_id_prefix: String,
+    context: Option<TelemetryContext>,
 }
 
 impl<S, ReqBody, ResBody, R, I, T> Service<Request<ReqBody>>
@@ -263,6 +284,7 @@ where
         let metric_event_id_prefix = self.metric_event_id_prefix.clone();
         let capture_error_issues = self.capture_error_issues;
         let error_issue_event_id_prefix = self.error_issue_event_id_prefix.clone();
+        let context = self.context.clone();
         let future = self.inner.call(request);
 
         Box::pin(async move {
@@ -285,6 +307,7 @@ where
                 duration_ms,
                 error_type: error_type.clone(),
                 metadata,
+                context: context.clone(),
             });
             let Ok(events) = telemetry.and_then(|telemetry| telemetry.build()) else {
                 return result;
@@ -300,14 +323,17 @@ where
                 let metric_event_id = event_id(&metric_event_id_prefix, &events.span_id);
                 let issue = error_type.as_deref().and_then(|error_type| {
                     capture_error_issues.then(|| {
-                        tower_error_issue(
+                        tower_error_issue(TowerErrorIssueInput {
                             error_type,
-                            &timestamp,
-                            &route_template,
-                            &method,
-                            &events.trace_id,
-                            &events.span_id,
-                        )
+                            timestamp: &timestamp,
+                            route_template: &route_template,
+                            method: &method,
+                            trace_id: &events.trace_id,
+                            span_id: &events.span_id,
+                            parent_span_id: events.parent_span_id.as_deref(),
+                            sampled: events.sampled,
+                            context: context.as_ref(),
+                        })
                     })
                 });
                 let span_id = events.span_id.clone();
@@ -359,6 +385,7 @@ where
         let metadata = self.metadata.clone();
         let client = Arc::clone(&self.client);
         let span_event_id_prefix = self.span_event_id_prefix.clone();
+        let context = self.context.clone();
 
         let prepared = tower_http_client_span(TowerHttpClientSpanInput {
             route_template: route_template.clone(),
@@ -369,6 +396,7 @@ where
             duration_ms: None,
             error_type: None,
             metadata: metadata.clone(),
+            context: context.clone(),
         });
         if let Ok(events) = prepared.as_ref()
             && let Ok(value) = HeaderValue::from_str(&events.outgoing_traceparent)
@@ -401,6 +429,7 @@ where
                 duration_ms: Some(duration_ms),
                 error_type,
                 metadata,
+                context,
             }) else {
                 return result;
             };
@@ -422,6 +451,7 @@ struct TowerRequestTelemetryInput {
     duration_ms: f64,
     error_type: Option<String>,
     metadata: Metadata,
+    context: Option<TelemetryContext>,
 }
 
 fn request_telemetry(input: TowerRequestTelemetryInput) -> Result<HttpRequestTelemetry, SdkError> {
@@ -434,6 +464,7 @@ fn request_telemetry(input: TowerRequestTelemetryInput) -> Result<HttpRequestTel
         duration_ms,
         error_type,
         metadata,
+        context,
     } = input;
     require_non_empty("tower request trace_id", &request_ids.trace_id)?;
     require_non_empty("tower request span_id", &request_ids.span_id)?;
@@ -444,7 +475,8 @@ fn request_telemetry(input: TowerRequestTelemetryInput) -> Result<HttpRequestTel
         request_ids.span_id,
     )
     .with_duration_ms(duration_ms)
-    .with_metadata(metadata);
+    .with_metadata(metadata)
+    .with_context(tower_base_context(context.as_ref())?);
     if let Some(status_code) = status_code {
         telemetry = telemetry.with_status_code(status_code);
     }
@@ -457,14 +489,30 @@ fn request_telemetry(input: TowerRequestTelemetryInput) -> Result<HttpRequestTel
     Ok(telemetry)
 }
 
-fn tower_error_issue(
-    error_type: &str,
-    timestamp: &str,
-    route_template: &str,
-    method: &str,
-    trace_id: &str,
-    span_id: &str,
-) -> Result<IssueEvent, SdkError> {
+struct TowerErrorIssueInput<'a> {
+    error_type: &'a str,
+    timestamp: &'a str,
+    route_template: &'a str,
+    method: &'a str,
+    trace_id: &'a str,
+    span_id: &'a str,
+    parent_span_id: Option<&'a str>,
+    sampled: bool,
+    context: Option<&'a TelemetryContext>,
+}
+
+fn tower_error_issue(input: TowerErrorIssueInput<'_>) -> Result<IssueEvent, SdkError> {
+    let TowerErrorIssueInput {
+        error_type,
+        timestamp,
+        route_template,
+        method,
+        trace_id,
+        span_id,
+        parent_span_id,
+        sampled,
+        context,
+    } = input;
     let error_type = crate::issue_diagnostics::require_exception_type(error_type)?;
     let route_template =
         sanitize_route_template("tower request route_template", route_template.to_string())?;
@@ -522,13 +570,27 @@ fn tower_error_issue(
         Value::String("exception.message,stack.text,request.values".to_string()),
     );
 
+    let base_context = tower_base_context(None)?;
+    let mut trace = TelemetryTraceContext::new(trace_id)
+        .with_span_id(span_id)
+        .with_sampled(sampled);
+    if let Some(parent_span_id) = parent_span_id {
+        trace = trace.with_parent_span_id(parent_span_id);
+    }
+    let trace_context = TelemetryContext::new().with_trace(trace);
+    let derived_context = merge_telemetry_contexts(Some(&base_context), Some(&trace_context))?
+        .expect("Tower issue context is always populated");
+    let context = merge_telemetry_contexts(Some(&derived_context), context)?
+        .expect("Tower issue context is always populated");
+
     Ok(IssueEvent::new(error_type.clone(), "error")
         .with_exception(
             IssueException::new(error_type)
                 .with_mechanism(IssueExceptionMechanism::new("tower.service", false)),
         )
         .with_breadcrumb(breadcrumb)
-        .with_metadata(metadata))
+        .with_metadata(metadata)
+        .with_context(context))
 }
 
 struct TowerHttpClientSpanInput {
@@ -540,6 +602,7 @@ struct TowerHttpClientSpanInput {
     duration_ms: Option<f64>,
     error_type: Option<String>,
     metadata: Metadata,
+    context: Option<TelemetryContext>,
 }
 
 fn tower_http_client_span(
@@ -554,6 +617,7 @@ fn tower_http_client_span(
         duration_ms,
         error_type,
         metadata,
+        context,
     } = input;
     require_non_empty("tower client trace_id", &request_ids.trace_id)?;
     require_non_empty("tower client span_id", &request_ids.span_id)?;
@@ -573,8 +637,9 @@ fn tower_http_client_span(
         .map(|context| context.trace_flags.as_str())
         .unwrap_or("01");
 
-    let mut span =
-        HttpClientSpan::new(route_template, method, request_ids.span_id).with_metadata(metadata);
+    let mut span = HttpClientSpan::new(route_template, method, request_ids.span_id)
+        .with_metadata(metadata)
+        .with_context(tower_base_context(context.as_ref())?);
     if let Some(status_code) = status_code {
         span = span.with_status_code(status_code);
     }
@@ -585,6 +650,18 @@ fn tower_http_client_span(
         span = span.with_error_type(error_type);
     }
     span.build_from_trace_parts(trace_id, parent_span_id, trace_flags)
+}
+
+fn tower_base_context(context: Option<&TelemetryContext>) -> Result<TelemetryContext, SdkError> {
+    let framework = TelemetryContext::new().with_resource(
+        TelemetryResource::new().with_framework(TelemetryNamedVersion::new("tower")),
+    );
+    merge_telemetry_contexts(Some(&framework), context)?.ok_or_else(|| {
+        SdkError::new(
+            "validation_error",
+            "Tower telemetry context could not be created",
+        )
+    })
 }
 
 fn event_id(prefix: &str, span_id: &str) -> String {

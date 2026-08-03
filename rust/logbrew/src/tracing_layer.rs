@@ -1,8 +1,9 @@
 #[cfg(feature = "tracing-opentelemetry")]
 use crate::OpenTelemetrySpanContext;
 use crate::{
-    LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent, Traceparent,
-    TraceparentContext, http_fields::sanitize_route_template,
+    LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent,
+    TelemetryContext, TelemetryNamedVersion, TelemetryResource, TelemetryTraceContext, Traceparent,
+    TraceparentContext, http_fields::sanitize_route_template, merge_telemetry_contexts,
 };
 use std::fmt;
 use std::sync::{
@@ -29,6 +30,7 @@ pub struct LogBrewTracingLayer<T> {
     next_span_id: Arc<AtomicU64>,
     logger_name: Option<String>,
     capture_spans: bool,
+    context: Option<TelemetryContext>,
 }
 
 impl<T> LogBrewTracingLayer<T> {
@@ -44,6 +46,7 @@ impl<T> LogBrewTracingLayer<T> {
             next_span_id: Arc::new(AtomicU64::new(1)),
             logger_name: None,
             capture_spans: false,
+            context: None,
         }
     }
 
@@ -78,6 +81,12 @@ impl<T> LogBrewTracingLayer<T> {
     /// Opt in to converting closed `tracing` spans into LogBrew span events.
     pub fn with_span_events(mut self) -> Self {
         self.capture_spans = true;
+        self
+    }
+
+    /// Attach shared service, deployment, application, session, subject, or tag context.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
         self
     }
 }
@@ -208,13 +217,20 @@ where
             .message
             .unwrap_or_else(|| "tracing event".to_string());
         let mut log_metadata = visitor.metadata;
-        if let Some(state) = current_event_span_correlation(event, &ctx) {
-            log_metadata.insert("traceId".to_string(), MetadataValue::String(state.trace_id));
-            log_metadata.insert("spanId".to_string(), MetadataValue::String(state.span_id));
-            if let Some(parent_span_id) = state.parent_span_id {
+        let correlation = current_event_span_correlation(event, &ctx);
+        if let Some(state) = correlation.as_ref() {
+            log_metadata.insert(
+                "traceId".to_string(),
+                MetadataValue::String(state.trace_id.clone()),
+            );
+            log_metadata.insert(
+                "spanId".to_string(),
+                MetadataValue::String(state.span_id.clone()),
+            );
+            if let Some(parent_span_id) = &state.parent_span_id {
                 log_metadata.insert(
                     "parentSpanId".to_string(),
-                    MetadataValue::String(parent_span_id),
+                    MetadataValue::String(parent_span_id.clone()),
                 );
             }
             if let Some(sampled) = state.sampled {
@@ -238,8 +254,12 @@ where
             .unwrap_or_else(|| metadata.target())
             .trim()
             .to_string();
-        let mut log =
-            LogEvent::new(message, severity_for(metadata.level())).with_metadata(log_metadata);
+        let Ok(context) = tracing_event_context(correlation.as_ref(), self.context.as_ref()) else {
+            return;
+        };
+        let mut log = LogEvent::new(message, severity_for(metadata.level()))
+            .with_metadata(log_metadata)
+            .with_context(context);
         if !logger.is_empty() {
             log = log.with_logger(logger);
         }
@@ -266,6 +286,10 @@ where
         let Some(state) = span.extensions_mut().remove::<TracingSpanState>() else {
             return;
         };
+        let reference = SpanReference::from(&state);
+        let Ok(context) = tracing_event_context(Some(&reference), self.context.as_ref()) else {
+            return;
+        };
 
         let span_metadata = span_metadata_with_event_summary(&state);
         let mut event = SpanEvent::new(
@@ -275,7 +299,8 @@ where
             if state.error { "error" } else { "ok" },
         )
         .with_duration_ms(state.started_at.elapsed().as_secs_f64() * 1000.0)
-        .with_metadata(span_metadata);
+        .with_metadata(span_metadata)
+        .with_context(context);
         if let Some(parent_span_id) = state.parent_span_id {
             event = event.with_parent_span_id(parent_span_id);
         }
@@ -320,6 +345,33 @@ fn trace_id_for(sequence: u64) -> String {
 
 fn span_id_for(sequence: u64) -> String {
     format!("{sequence:016x}")
+}
+
+fn tracing_event_context(
+    span: Option<&SpanReference>,
+    configured: Option<&TelemetryContext>,
+) -> Result<TelemetryContext, crate::SdkError> {
+    let framework = TelemetryContext::new().with_resource(
+        TelemetryResource::new().with_framework(TelemetryNamedVersion::new("tracing")),
+    );
+    let trace = span.map(|span| {
+        let mut trace = TelemetryTraceContext::new(&span.trace_id).with_span_id(&span.span_id);
+        if let Some(parent_span_id) = &span.parent_span_id {
+            trace = trace.with_parent_span_id(parent_span_id);
+        }
+        if let Some(sampled) = span.sampled {
+            trace = trace.with_sampled(sampled);
+        }
+        TelemetryContext::new().with_trace(trace)
+    });
+    let context = merge_telemetry_contexts(Some(&framework), trace.as_ref())?
+        .expect("tracing framework context is always populated");
+    merge_telemetry_contexts(Some(&context), configured)?.ok_or_else(|| {
+        crate::SdkError::new(
+            "validation_error",
+            "tracing telemetry context could not be created",
+        )
+    })
 }
 
 #[derive(Debug)]

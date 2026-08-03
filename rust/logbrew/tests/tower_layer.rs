@@ -5,7 +5,8 @@ use axum::{
     http::{Request, Response, StatusCode},
 };
 use logbrew::{
-    LogBrewClient, TowerHttpClientSpanLayer, TowerRequestIds, TowerRequestTelemetryLayer,
+    LogBrewClient, TelemetryContext, TelemetryNamedVersion, TelemetryResource,
+    TowerHttpClientSpanLayer, TowerRequestIds, TowerRequestTelemetryLayer,
 };
 use serde_json::Value;
 use std::{
@@ -55,6 +56,9 @@ async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
         || "2026-06-02T10:00:11Z".to_string(),
     )
     .with_metadata(metadata)
+    .with_context(TelemetryContext::new().with_resource(
+        TelemetryResource::new().with_service(TelemetryNamedVersion::new("payments-client")),
+    ))
     .with_event_id_prefix("evt_tower_http_client_span");
 
     let service = service_fn(|request: Request<Body>| async move {
@@ -98,6 +102,14 @@ async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
     assert_eq!(span["metadata"]["statusCode"], 502);
     assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
     assert_eq!(span["metadata"]["framework"], "tower");
+    assert_eq!(span["context"]["resource"]["framework"]["name"], "tower");
+    assert_eq!(
+        span["context"]["resource"]["service"]["name"],
+        "payments-client"
+    );
+    assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
+    assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
+    assert_eq!(span["context"]["trace"]["sampled"], true);
     let text = payload.to_string().to_ascii_lowercase();
     assert!(!text.contains("coupon=sample"));
     assert!(!text.contains("payments/123"));
@@ -127,7 +139,10 @@ async fn tower_request_telemetry_layer_queues_span_and_metric() {
         || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
         || "2026-06-02T10:00:00Z".to_string(),
     )
-    .with_metadata(metadata);
+    .with_metadata(metadata)
+    .with_context(TelemetryContext::new().with_resource(
+        TelemetryResource::new().with_service(TelemetryNamedVersion::new("checkout-service")),
+    ));
 
     let service = service_fn(|_request: Request<Body>| async {
         Ok::<_, Infallible>(
@@ -180,6 +195,18 @@ async fn tower_request_telemetry_layer_queues_span_and_metric() {
     assert_eq!(span["metadata"]["framework"], "tower");
     assert_eq!(metric["name"], "http.server.duration");
     assert_eq!(metric["metadata"], span["metadata"]);
+    assert_eq!(span["context"], metric["context"]);
+    assert_eq!(span["context"]["resource"]["framework"]["name"], "tower");
+    assert_eq!(
+        span["context"]["resource"]["service"]["name"],
+        "checkout-service"
+    );
+    assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
+    assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
+    assert_eq!(
+        span["context"]["trace"]["parentSpanId"],
+        span["parentSpanId"]
+    );
     let text = payload.to_string().to_ascii_lowercase();
     assert!(!text.contains("coupon=sample"));
     assert!(!text.contains("cart_123"));
@@ -202,6 +229,9 @@ async fn tower_request_error_capture_queues_correlated_issue_and_preserves_error
         || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
         || "2026-06-02T10:00:02Z".to_string(),
     )
+    .with_context(TelemetryContext::new().with_resource(
+        TelemetryResource::new().with_service(TelemetryNamedVersion::new("checkout-service")),
+    ))
     .with_error_issues()
     .with_error_issue_event_id_prefix("evt_tower_request_issue");
 
@@ -253,6 +283,18 @@ async fn tower_request_error_capture_queues_correlated_issue_and_preserves_error
     assert_eq!(issue["exception"]["mechanism"]["handled"], false);
     assert_eq!(issue["metadata"]["traceId"], span["traceId"]);
     assert_eq!(issue["metadata"]["spanId"], span["spanId"]);
+    assert_eq!(issue["context"]["trace"]["traceId"], span["traceId"]);
+    assert_eq!(issue["context"]["trace"]["spanId"], span["spanId"]);
+    assert_eq!(
+        issue["context"]["trace"]["parentSpanId"],
+        span["parentSpanId"]
+    );
+    assert_eq!(issue["context"]["trace"]["sampled"], true);
+    assert_eq!(issue["context"]["resource"]["framework"]["name"], "tower");
+    assert_eq!(
+        issue["context"]["resource"]["service"]["name"],
+        "checkout-service"
+    );
     assert_eq!(issue["metadata"]["routeTemplate"], "/checkout/{cart_id}");
     assert_eq!(issue["metadata"]["method"], "POST");
     assert_eq!(

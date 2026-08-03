@@ -56,6 +56,14 @@ def main() -> int:
         "missing upstream parent span correlation",
     )
     require("unsafeDebug" not in metadata, "non-primitive debug field should not be captured")
+    context = log.get("context", {})
+    require(context.get("schemaVersion") == 1, "tracing log is missing typed context")
+    require(context.get("resource", {}).get("service", {}).get("name") == "checkout-service", "tracing log is missing typed service")
+    require(context.get("resource", {}).get("framework", {}).get("name") == "tracing", "tracing log is missing typed framework")
+    require(context.get("trace", {}).get("traceId") == UPSTREAM_TRACE_ID, "tracing log typed trace id is wrong")
+    require(context.get("trace", {}).get("spanId") == "0000000000000001", "tracing log typed span id is wrong")
+    require(context.get("trace", {}).get("parentSpanId") == UPSTREAM_PARENT_SPAN_ID, "tracing log typed parent is wrong")
+    require(context.get("trace", {}).get("sampled") is True, "tracing log typed sampled state is missing")
 
     error_log = events[3]["attributes"]
     require(error_log["message"] == "cart validation failed", "unexpected tracing error message")
@@ -77,6 +85,9 @@ def main() -> int:
     require(child_span["metadata"]["tracingSpanErrorEventCount"] == 1, "missing child span error count")
     require(child_span["metadata"]["tracingLastErrorLevel"] == "ERROR", "missing child last error level")
     require(child_span["metadata"]["tracingLastErrorTarget"] == "checkout", "missing child last error target")
+    require(child_span.get("context", {}).get("trace", {}).get("traceId") == child_span["traceId"], "child span typed trace id is wrong")
+    require(child_span.get("context", {}).get("trace", {}).get("spanId") == child_span["spanId"], "child span typed span id is wrong")
+    require(child_span.get("context", {}).get("resource", {}).get("framework", {}).get("name") == "tracing", "child span is missing typed tracing framework")
     require(
         "cart validation failed" not in json.dumps(child_span["metadata"]),
         "span metadata should not duplicate error messages",

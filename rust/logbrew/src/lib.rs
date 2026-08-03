@@ -18,6 +18,7 @@ mod metric;
 mod opentelemetry_exporter;
 mod operation_tracing;
 mod product_timeline;
+mod telemetry_context;
 #[cfg(feature = "tower")]
 mod tower_layer;
 mod traceparent;
@@ -41,6 +42,14 @@ pub use opentelemetry_exporter::{
 pub use operation_tracing::{DependencyOperationKind, DependencyOperationSpan};
 pub use product_timeline::{NetworkMilestoneTimeline, ProductActionTimeline, ProductTimeline};
 pub use serde_json::Value as MetadataValue;
+pub use telemetry_context::{
+    TELEMETRY_CONTEXT_SCHEMA_VERSION, TelemetryApplication, TelemetryContext,
+    TelemetryContextFuture, TelemetryContextGuard, TelemetryDeployment, TelemetryDevice,
+    TelemetryNamedVersion, TelemetryOperatingSystem, TelemetryResource, TelemetrySessionContext,
+    TelemetrySubjectContext, TelemetrySubjectKind, TelemetryTraceContext,
+    activate_telemetry_context, current_telemetry_context, merge_telemetry_contexts,
+    validate_telemetry_context, with_telemetry_context, with_telemetry_context_async,
+};
 #[cfg(any(
     feature = "tower",
     feature = "tracing",
@@ -398,6 +407,19 @@ fn metadata_entry(map: &mut Map<String, Value>, metadata: Option<Map<String, Val
     }
 }
 
+pub(crate) fn context_entry(
+    map: &mut Map<String, Value>,
+    context: Option<TelemetryContext>,
+) -> Result<(), SdkError> {
+    if let Some(context) = context {
+        map.insert(
+            "context".to_string(),
+            telemetry_context::context_to_value(&context)?,
+        );
+    }
+    Ok(())
+}
+
 fn insert_string(map: &mut Map<String, Value>, key: &str, value: Option<String>) {
     if let Some(value) = value {
         map.insert(key.to_string(), Value::String(value));
@@ -411,6 +433,7 @@ pub struct ReleaseEvent {
     commit: Option<String>,
     notes: Option<String>,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl ReleaseEvent {
@@ -421,6 +444,7 @@ impl ReleaseEvent {
             commit: None,
             notes: None,
             metadata: None,
+            context: None,
         }
     }
 
@@ -442,6 +466,12 @@ impl ReleaseEvent {
         self
     }
 
+    /// Attach an explicit shared telemetry context override.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("release version", &self.version)?;
         if let Some(commit) = &self.commit {
@@ -452,6 +482,7 @@ impl ReleaseEvent {
         insert_string(&mut map, "commit", self.commit);
         insert_string(&mut map, "notes", self.notes);
         metadata_entry(&mut map, self.metadata);
+        context_entry(&mut map, self.context)?;
         Ok(map)
     }
 }
@@ -462,6 +493,7 @@ pub struct EnvironmentEvent {
     name: String,
     region: Option<String>,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl EnvironmentEvent {
@@ -471,6 +503,7 @@ impl EnvironmentEvent {
             name: name.into(),
             region: None,
             metadata: None,
+            context: None,
         }
     }
 
@@ -486,12 +519,19 @@ impl EnvironmentEvent {
         self
     }
 
+    /// Attach an explicit shared telemetry context override.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("environment name", &self.name)?;
         let mut map = Map::new();
         map.insert("name".to_string(), Value::String(self.name));
         insert_string(&mut map, "region", self.region);
         metadata_entry(&mut map, self.metadata);
+        context_entry(&mut map, self.context)?;
         Ok(map)
     }
 }
@@ -507,6 +547,7 @@ pub struct IssueEvent {
     breadcrumbs: Option<Vec<IssueBreadcrumb>>,
     breadcrumbs_truncated: bool,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl IssueEvent {
@@ -521,6 +562,7 @@ impl IssueEvent {
             breadcrumbs: None,
             breadcrumbs_truncated: false,
             metadata: None,
+            context: None,
         }
     }
 
@@ -669,6 +711,12 @@ impl IssueEvent {
         self
     }
 
+    /// Attach an explicit shared telemetry context override.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("issue title", &self.title)?;
         let level = normalize_severity("issue level", &self.level)?;
@@ -720,6 +768,7 @@ impl IssueEvent {
             map.insert("breadcrumbsTruncated".to_string(), Value::Bool(true));
         }
         metadata_entry(&mut map, self.metadata);
+        context_entry(&mut map, self.context)?;
         Ok(map)
     }
 }
@@ -731,6 +780,7 @@ pub struct LogEvent {
     level: String,
     logger: Option<String>,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl LogEvent {
@@ -741,6 +791,7 @@ impl LogEvent {
             level: level.into(),
             logger: None,
             metadata: None,
+            context: None,
         }
     }
 
@@ -756,6 +807,12 @@ impl LogEvent {
         self
     }
 
+    /// Attach an explicit shared telemetry context override.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("log message", &self.message)?;
         let level = normalize_severity("log level", &self.level)?;
@@ -764,6 +821,7 @@ impl LogEvent {
         map.insert("level".to_string(), Value::String(level.to_string()));
         insert_string(&mut map, "logger", self.logger);
         metadata_entry(&mut map, self.metadata);
+        context_entry(&mut map, self.context)?;
         Ok(map)
     }
 }
@@ -778,6 +836,7 @@ pub struct SpanEvent {
     status: String,
     duration_ms: Option<f64>,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl SpanEvent {
@@ -796,6 +855,7 @@ impl SpanEvent {
             status: status.into(),
             duration_ms: None,
             metadata: None,
+            context: None,
         }
     }
 
@@ -814,6 +874,12 @@ impl SpanEvent {
     /// Attach optional metadata to the span payload.
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    /// Attach an explicit shared telemetry context override.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
         self
     }
 
@@ -843,6 +909,7 @@ impl SpanEvent {
             map.insert("durationMs".to_string(), Value::from(duration_ms));
         }
         metadata_entry(&mut map, self.metadata);
+        context_entry(&mut map, self.context)?;
         Ok(map)
     }
 }
@@ -853,6 +920,7 @@ pub struct ActionEvent {
     name: String,
     status: String,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl ActionEvent {
@@ -862,12 +930,19 @@ impl ActionEvent {
             name: name.into(),
             status: status.into(),
             metadata: None,
+            context: None,
         }
     }
 
     /// Attach optional metadata to the action payload.
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    /// Attach an explicit shared telemetry context override.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
         self
     }
 
@@ -878,6 +953,7 @@ impl ActionEvent {
         map.insert("name".to_string(), Value::String(self.name));
         map.insert("status".to_string(), Value::String(self.status));
         metadata_entry(&mut map, self.metadata);
+        context_entry(&mut map, self.context)?;
         Ok(map)
     }
 }

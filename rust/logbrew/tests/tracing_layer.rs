@@ -1,6 +1,8 @@
 #![cfg(feature = "tracing")]
 
-use logbrew::{LogBrewClient, LogBrewTracingLayer};
+use logbrew::{
+    LogBrewClient, LogBrewTracingLayer, TelemetryContext, TelemetryNamedVersion, TelemetryResource,
+};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::prelude::*;
@@ -18,7 +20,13 @@ fn tracing_layer_queues_allowed_log_fields() {
     let client = Arc::new(Mutex::new(sample_client()));
     let layer =
         LogBrewTracingLayer::new(Arc::clone(&client), || "2026-06-02T10:00:00Z".to_string())
-            .with_allowed_fields(["routeTemplate", "statusCode", "sampled", "unsafeDebug"]);
+            .with_allowed_fields(["routeTemplate", "statusCode", "sampled", "unsafeDebug"])
+            .with_context(
+                TelemetryContext::new().with_resource(
+                    TelemetryResource::new()
+                        .with_service(TelemetryNamedVersion::new("checkout-service")),
+                ),
+            );
     let subscriber = tracing_subscriber::registry().with(layer);
 
     tracing::subscriber::with_default(subscriber, || {
@@ -52,6 +60,9 @@ fn tracing_layer_queues_allowed_log_fields() {
     assert_eq!(metadata["sampled"], true);
     assert_eq!(metadata["tracingTarget"], "checkout");
     assert_eq!(metadata["tracingLevel"], "INFO");
+    let context = &events[0]["attributes"]["context"];
+    assert_eq!(context["resource"]["framework"]["name"], "tracing");
+    assert_eq!(context["resource"]["service"]["name"], "checkout-service");
     assert!(metadata.get("unsafeDebug").is_none());
     assert!(metadata.get("authorization").is_none());
     assert!(metadata.get("requestBody").is_none());
@@ -129,12 +140,35 @@ fn tracing_layer_can_queue_privacy_bounded_spans() {
         "00000000000000000000000000000001"
     );
     assert_eq!(info_log_metadata["spanId"], "0000000000000001");
+    let info_log_context = &events[0]["attributes"]["context"];
+    assert_eq!(info_log_context["resource"]["framework"]["name"], "tracing");
+    assert_eq!(
+        info_log_context["trace"]["traceId"],
+        "00000000000000000000000000000001"
+    );
+    assert_eq!(info_log_context["trace"]["spanId"], "0000000000000001");
 
     let child_span = &events[2]["attributes"];
     assert_eq!(child_span["name"], "checkout.validate");
     assert_eq!(child_span["traceId"], "00000000000000000000000000000001");
     assert_eq!(child_span["spanId"], "0000000000000002");
     assert_eq!(child_span["parentSpanId"], "0000000000000001");
+    assert_eq!(
+        child_span["context"]["trace"]["traceId"],
+        child_span["traceId"]
+    );
+    assert_eq!(
+        child_span["context"]["trace"]["spanId"],
+        child_span["spanId"]
+    );
+    assert_eq!(
+        child_span["context"]["trace"]["parentSpanId"],
+        child_span["parentSpanId"]
+    );
+    assert_eq!(
+        child_span["context"]["resource"]["framework"]["name"],
+        "tracing"
+    );
     assert_eq!(child_span["status"], "error");
     assert!(child_span["durationMs"].as_f64().unwrap() >= 0.0);
     assert_eq!(child_span["metadata"]["tracingSpanEventCount"], 1);
@@ -219,6 +253,16 @@ fn tracing_layer_continues_incoming_traceparent_on_root_span() {
     assert_eq!(root_log_metadata["spanId"], "0000000000000001");
     assert_eq!(root_log_metadata["parentSpanId"], "00f067aa0ba902b7");
     assert_eq!(root_log_metadata["sampled"], true);
+    let root_log_context = &events[0]["attributes"]["context"];
+    assert_eq!(
+        root_log_context["trace"]["traceId"],
+        root_log_metadata["traceId"]
+    );
+    assert_eq!(
+        root_log_context["trace"]["spanId"],
+        root_log_metadata["spanId"]
+    );
+    assert_eq!(root_log_context["trace"]["sampled"], true);
 
     let child_log_metadata = &events[1]["attributes"]["metadata"];
     assert_eq!(
