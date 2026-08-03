@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, TypeAlias, TypedDict
 
+from logbrew_sdk._telemetry_context import TelemetryContext
+
 MetadataValue: TypeAlias = str | int | float | bool | None
 Metadata: TypeAlias = dict[str, MetadataValue]
 SpanEventErrorFactory: TypeAlias = Callable[[str, str], Exception]
@@ -42,6 +44,7 @@ class SpanAttributes(TypedDict, total=False):
     status: str
     durationMs: float
     metadata: Metadata
+    context: TelemetryContext
     events: list[SpanEventSummary]
     links: list[SpanLinkSummary]
 

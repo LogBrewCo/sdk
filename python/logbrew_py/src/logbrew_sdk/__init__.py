@@ -49,6 +49,7 @@ from logbrew_sdk._issue_diagnostics import (
     validate_issue_diagnostics,
 )
 from logbrew_sdk._persistent_event_queue import PersistentEventQueue
+from logbrew_sdk._runtime_context import add_python_runtime_context
 from logbrew_sdk._span_events import (
     SpanAttributes,
     SpanEventSummary,
@@ -62,6 +63,20 @@ from logbrew_sdk._support_ticket import (
     SupportTicketDraft,
     SupportTicketSource,
     build_create_support_ticket_draft,
+)
+from logbrew_sdk._telemetry_context import (
+    TelemetryApplication,
+    TelemetryContext,
+    TelemetryDeployment,
+    TelemetryDevice,
+    TelemetryNamedVersion,
+    TelemetryOperatingSystem,
+    TelemetryResource,
+    TelemetrySessionContext,
+    TelemetrySubjectContext,
+    TelemetryTraceContext,
+    merge_telemetry_contexts,
+    validate_telemetry_context,
 )
 from logbrew_sdk._trace_context import (
     LogBrewTraceContext,
@@ -86,6 +101,7 @@ class ReleaseAttributes(TypedDict, total=False):
     commit: str
     notes: str
     metadata: Metadata
+    context: TelemetryContext
 
 
 class EnvironmentAttributes(TypedDict, total=False):
@@ -93,6 +109,7 @@ class EnvironmentAttributes(TypedDict, total=False):
     name: str
     region: str
     metadata: Metadata
+    context: TelemetryContext
 
 
 class IssueStackFrame(TypedDict):
@@ -147,6 +164,7 @@ class IssueAttributes(TypedDict, total=False):
     breadcrumbs: list[IssueBreadcrumb]
     breadcrumbsTruncated: bool
     metadata: Metadata
+    context: TelemetryContext
 
 
 class LogAttributes(TypedDict, total=False):
@@ -155,6 +173,7 @@ class LogAttributes(TypedDict, total=False):
     level: str
     logger: str
     metadata: Metadata
+    context: TelemetryContext
 
 
 class ActionAttributes(TypedDict, total=False):
@@ -162,6 +181,7 @@ class ActionAttributes(TypedDict, total=False):
     name: str
     status: str
     metadata: Metadata
+    context: TelemetryContext
 
 
 class MetricAttributes(TypedDict, total=False):
@@ -172,6 +192,7 @@ class MetricAttributes(TypedDict, total=False):
     unit: str
     temporality: Literal["delta", "cumulative", "instant"]
     metadata: Metadata
+    context: TelemetryContext
 
 
 class ScriptedTransportResponse(TypedDict):
@@ -389,6 +410,8 @@ class LogBrewClient:
         api_key: str,
         sdk_name: str,
         sdk_version: str,
+        context: TelemetryContext | None = None,
+        capture_runtime_context: bool = True,
         transport: Transport | None = None,
         automatic_delivery: bool | None = None,
         delivery_interval_seconds: float = DEFAULT_DELIVERY_INTERVAL_SECONDS,
@@ -408,6 +431,8 @@ class LogBrewClient:
         return cls(
             api_key=api_key,
             sdk={"name": sdk_name, "language": "python", "version": sdk_version},
+            context=context,
+            capture_runtime_context=capture_runtime_context,
             transport=transport,
             automatic_delivery=automatic_delivery,
             delivery_interval_seconds=delivery_interval_seconds,
@@ -426,6 +451,8 @@ class LogBrewClient:
         *,
         api_key: str,
         sdk: dict[str, str],
+        context: TelemetryContext | None = None,
+        capture_runtime_context: bool = True,
         transport: Transport | None = None,
         automatic_delivery: bool | None = None,
         delivery_interval_seconds: float = DEFAULT_DELIVERY_INTERVAL_SECONDS,
@@ -438,6 +465,8 @@ class LogBrewClient:
         persistent_queue_directory: str | os.PathLike[str] | None = None,
         persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
     ) -> None:
+        if not isinstance(capture_runtime_context, bool):
+            raise SdkError("configuration_error", "capture_runtime_context must be a boolean")
         _require_positive_integer("max_queue_size", max_queue_size)
         _require_positive_integer("max_queue_bytes", max_queue_bytes)
         _require_positive_integer("max_batch_events", max_batch_events)
@@ -462,6 +491,11 @@ class LogBrewClient:
         self.api_key = api_key
         self.sdk = sdk
         self._sdk_json = _compact_json(sdk)
+        self._context = (
+            add_python_runtime_context(context)
+            if capture_runtime_context
+            else validate_telemetry_context(context, label="client telemetry context")
+        )
         self.max_retries = max_retries
         self.max_queue_size = max_queue_size
         self.max_queue_bytes = max_queue_bytes
@@ -698,6 +732,10 @@ class LogBrewClient:
         self._assert_owner()
         require_non_empty("event id", event_id)
         require_timestamp(timestamp)
+        event_context = attributes.pop("context", None)
+        merged_context = merge_telemetry_contexts(self._context, event_context)
+        if merged_context is not None:
+            attributes["context"] = merged_context
         event = {
             "type": event_type,
             "id": event_id,
@@ -1345,43 +1383,53 @@ def with_metadata(attributes: dict[str, Any], metadata: Any) -> dict[str, Any]:
     return {**attributes, "metadata": safe_metadata}
 
 
+def with_common_attributes(
+    normalized: dict[str, Any],
+    source: Mapping[str, Any],
+) -> dict[str, Any]:
+    attributes = with_metadata(normalized, source.get("metadata"))
+    if "context" in source:
+        attributes["context"] = source["context"]
+    return attributes
+
+
 def validate_release(attributes: ReleaseAttributes) -> dict[str, Any]:
     require_non_empty("release version", attributes.get("version"))
     commit = attributes.get("commit")
     if commit is not None:
         require_non_empty("release commit", commit)
-    return with_metadata(
+    return with_common_attributes(
         {
             "version": attributes["version"],
             **({"commit": commit} if commit is not None else {}),
             **({"notes": attributes["notes"]} if "notes" in attributes else {}),
         },
-        attributes.get("metadata"),
+        attributes,
     )
 
 
 def validate_environment(attributes: EnvironmentAttributes) -> dict[str, Any]:
     require_non_empty("environment name", attributes.get("name"))
-    return with_metadata(
+    return with_common_attributes(
         {
             "name": attributes["name"],
             **({"region": attributes["region"]} if "region" in attributes else {}),
         },
-        attributes.get("metadata"),
+        attributes,
     )
 
 
 def validate_issue(attributes: IssueAttributes) -> dict[str, Any]:
     require_non_empty("issue title", attributes.get("title"))
     level = normalize_severity("issue level", attributes.get("level"))
-    return with_metadata(
+    return with_common_attributes(
         {
             "title": attributes["title"],
             "level": level,
             **({"message": attributes["message"]} if "message" in attributes else {}),
             **validate_issue_diagnostics(attributes),
         },
-        attributes.get("metadata"),
+        attributes,
     )
 
 
@@ -1394,6 +1442,7 @@ def create_issue_attributes_from_exception(
     mechanism: str = "python.exception",
     handled: bool = True,
     metadata: Mapping[str, Any] | None = None,
+    context: TelemetryContext | None = None,
     breadcrumbs: list[IssueBreadcrumb] | None = None,
     breadcrumbs_truncated: bool = False,
     include_stack_frames: bool = True,
@@ -1426,6 +1475,7 @@ def create_issue_attributes_from_exception(
         **({"breadcrumbs": breadcrumbs} if breadcrumbs is not None else {}),
         **({"breadcrumbsTruncated": True} if breadcrumbs_truncated else {}),
         **({"metadata": dict(metadata)} if metadata is not None else {}),
+        **({"context": context} if context is not None else {}),
     }
     return cast(IssueAttributes, validate_issue(attributes))
 
@@ -1433,13 +1483,13 @@ def create_issue_attributes_from_exception(
 def validate_log(attributes: LogAttributes) -> dict[str, Any]:
     require_non_empty("log message", attributes.get("message"))
     level = normalize_severity("log level", attributes.get("level"))
-    return with_metadata(
+    return with_common_attributes(
         {
             "message": attributes["message"],
             "level": level,
             **({"logger": attributes["logger"]} if "logger" in attributes else {}),
         },
-        attributes.get("metadata"),
+        attributes,
     )
 
 
@@ -1456,7 +1506,7 @@ def validate_span(attributes: SpanAttributes) -> dict[str, Any]:
         isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)) or duration_ms < 0
     ):
         raise SdkError("validation_error", "span durationMs must be non-negative")
-    return with_metadata(
+    return with_common_attributes(
         {
             "name": attributes["name"],
             "traceId": attributes["traceId"],
@@ -1491,19 +1541,19 @@ def validate_span(attributes: SpanAttributes) -> dict[str, Any]:
                 else {}
             ),
         },
-        attributes.get("metadata"),
+        attributes,
     )
 
 
 def validate_action(attributes: ActionAttributes) -> dict[str, Any]:
     require_non_empty("action name", attributes.get("name"))
     require_allowed_value("action status", attributes.get("status"), ACTION_STATUSES)
-    return with_metadata(
+    return with_common_attributes(
         {
             "name": attributes["name"],
             "status": attributes["status"],
         },
-        attributes.get("metadata"),
+        attributes,
     )
 
 
@@ -1521,7 +1571,7 @@ def validate_metric(attributes: MetricAttributes) -> dict[str, Any]:
     )
     if kind in NON_NEGATIVE_METRIC_KINDS and value < 0:
         raise SdkError("validation_error", f"metric {kind} value must be non-negative")
-    return with_metadata(
+    return with_common_attributes(
         {
             "name": attributes["name"],
             "kind": kind,
@@ -1529,7 +1579,7 @@ def validate_metric(attributes: MetricAttributes) -> dict[str, Any]:
             "unit": attributes["unit"],
             "temporality": attributes["temporality"],
         },
-        attributes.get("metadata"),
+        attributes,
     )
 
 
@@ -1635,6 +1685,16 @@ __all__ = [
     "SupportTicketCategory",
     "SupportTicketDraft",
     "SupportTicketSource",
+    "TelemetryApplication",
+    "TelemetryContext",
+    "TelemetryDeployment",
+    "TelemetryDevice",
+    "TelemetryNamedVersion",
+    "TelemetryOperatingSystem",
+    "TelemetryResource",
+    "TelemetrySessionContext",
+    "TelemetrySubjectContext",
+    "TelemetryTraceContext",
     "TraceparentContext",
     "Transport",
     "TransportError",

@@ -88,6 +88,7 @@ def sample_client() -> LogBrewClient:
         sdk_name="logbrew-python",
         sdk_version="0.1.0",
         max_retries=2,
+        capture_runtime_context=False,
     )
 
 
