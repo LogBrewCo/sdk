@@ -56,8 +56,33 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
 
     by_id = {event["id"]: event for event in events}
     log = by_id["evt_log_checkout_started"]["attributes"]
-    _require(log["metadata"].get("traceId") == EXPECTED_TRACE_ID, "first-useful log is missing trace correlation")
-    _require(log["metadata"].get("sessionId") == EXPECTED_SESSION_ID, "first-useful log is missing session correlation")
+    log_context = log["context"]
+    _require(log_context.get("schemaVersion") == 1, "first-useful log is missing schema-v1 context")
+    _require(
+        log_context["resource"]["service"] == {"name": "checkout-service", "version": "1.2.3"},
+        f"unexpected first-useful service context: {log_context['resource']['service']!r}",
+    )
+    _require(
+        log_context["resource"]["deployment"]
+        == {"environment": "production", "release": "checkout@1.2.3"},
+        f"unexpected first-useful deployment context: {log_context['resource']['deployment']!r}",
+    )
+    _require(
+        log_context["trace"].get("traceId") == EXPECTED_TRACE_ID,
+        "first-useful log is missing typed trace correlation",
+    )
+    _require(
+        log_context["session"].get("id") == EXPECTED_SESSION_ID,
+        "first-useful log is missing typed session correlation",
+    )
+    _require(
+        log_context["subject"] == {"id": "visitor_checkout_123", "kind": "anonymous"},
+        f"unexpected first-useful subject context: {log_context['subject']!r}",
+    )
+    _require(
+        log_context["tags"] == {"journey": "checkout", "region": "global"},
+        f"unexpected first-useful tags: {log_context['tags']!r}",
+    )
 
     product_metadata = by_id["evt_action_checkout_submit"]["attributes"]["metadata"]
     _require(
@@ -93,8 +118,8 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         "first-useful metric must use route-template metadata",
     )
     _require(
-        metric["metadata"].get("traceId") == EXPECTED_TRACE_ID,
-        "first-useful metric is missing trace correlation",
+        metric["context"]["trace"].get("traceId") == EXPECTED_TRACE_ID,
+        "first-useful metric is missing typed trace correlation",
     )
 
     span = by_id["evt_span_checkout_request"]["attributes"]
@@ -104,11 +129,28 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         "first-useful span is missing upstream parent span id",
     )
     _require(span.get("spanId") == EXPECTED_CHILD_SPAN_ID, "first-useful span is missing fresh child span id")
-    _require(span["metadata"].get("sampled") is True, "first-useful span should expose sampled trace context")
     _require(
-        span["metadata"].get("sessionId") == EXPECTED_SESSION_ID,
-        "first-useful span is missing session correlation",
+        span["context"]["trace"].get("sampled") is True,
+        "first-useful span should expose sampled typed trace context",
     )
+    _require(
+        span["context"]["session"].get("id") == EXPECTED_SESSION_ID,
+        "first-useful span is missing typed session correlation",
+    )
+
+    for event_id in (
+        "evt_log_checkout_started",
+        "evt_action_checkout_submit",
+        "evt_action_payment_api",
+        "evt_metric_http_server_duration",
+        "evt_span_checkout_request",
+    ):
+        context = by_id[event_id]["attributes"]["context"]
+        _require(
+            context["trace"].get("traceId") == EXPECTED_TRACE_ID
+            and context["session"].get("id") == EXPECTED_SESSION_ID,
+            f"first-useful event {event_id!r} is not correlated through typed context",
+        )
 
     stderr = _load_payload(stderr_path)
     _require(

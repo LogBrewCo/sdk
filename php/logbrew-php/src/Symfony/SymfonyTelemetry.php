@@ -13,13 +13,18 @@ use LogBrew\IssueDiagnostics;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewHttpRequestTelemetry;
 use LogBrew\LogBrewMonologHandler;
+use LogBrew\LogBrewTelemetry;
+use LogBrew\LogBrewTelemetryScope;
 use LogBrew\LogBrewTrace;
 use LogBrew\SdkError;
+use LogBrew\TelemetryContext;
+use LogBrew\TelemetryResource;
 use LogBrew\Transport;
 use LogBrew\TransportResponse;
 use Monolog\Handler\HandlerInterface;
 use Monolog\Handler\NoopHandler;
 use Monolog\Level;
+use Symfony\Component\HttpFoundation\Request;
 use Throwable;
 
 /**
@@ -40,6 +45,7 @@ use Throwable;
  * @phpstan-type TimestampProvider callable(): DateTimeInterface
  * @phpstan-type EventIdProvider callable(string, int): string
  * @phpstan-type ErrorHandler callable(Throwable): void
+ * @phpstan-type ContextProvider callable(Request): (TelemetryContext|null)
  * @phpstan-type MonologLevelName 'debug'|'info'|'notice'|'warning'|'error'|'critical'|'alert'|'emergency'
  */
 final class SymfonyTelemetry
@@ -66,12 +72,16 @@ final class SymfonyTelemetry
     /** @var Closure|null */
     private readonly ?Closure $onError;
 
+    /** @var Closure|null */
+    private readonly ?Closure $contextProvider;
+
     private int $nextEventNumber = 0;
 
     /**
      * @param TimestampProvider|null $timestampProvider
      * @param EventIdProvider|null $eventIdProvider
      * @param ErrorHandler|null $onError
+     * @param ContextProvider|null $contextProvider
      * @param MonologLevelName|Level $level
      */
     public function __construct(
@@ -92,7 +102,8 @@ final class SymfonyTelemetry
         private readonly bool $includeExceptionMessage = false,
         private readonly bool $includeExceptionTrace = false,
         ?string $sdkVersion = null,
-        ?callable $onError = null
+        ?callable $onError = null,
+        ?callable $contextProvider = null
     ) {
         LogBrewClient::requireNonEmpty('Symfony service', $this->service);
         LogBrewClient::requireNonEmpty('Symfony release', $this->release);
@@ -111,6 +122,7 @@ final class SymfonyTelemetry
         $this->timestampProvider = $timestampProvider === null ? null : Closure::fromCallable($timestampProvider);
         $this->eventIdProvider = $eventIdProvider === null ? null : Closure::fromCallable($eventIdProvider);
         $this->onError = $onError === null ? null : Closure::fromCallable($onError);
+        $this->contextProvider = $contextProvider === null ? null : Closure::fromCallable($contextProvider);
 
         if (!$this->active()) {
             $this->client = null;
@@ -118,11 +130,18 @@ final class SymfonyTelemetry
             return;
         }
 
+        $frameworkVersion = self::installedPackageVersion('symfony/framework-bundle');
+        $resource = TelemetryResource::create()
+            ->withService($this->service)
+            ->withDeployment($this->environment, $this->release)
+            ->withFramework('symfony', $frameworkVersion)
+            ->build();
         $this->client = LogBrewClient::create(
             apiKey: $this->apiKey,
             sdkName: self::SDK_NAME,
             sdkVersion: $this->sdkVersion,
-            maxRetries: $this->maxRetries
+            maxRetries: $this->maxRetries,
+            context: TelemetryContext::create()->withResource($resource)->build()
         );
         $this->transport = $transport ?? new HttpTransport(endpoint: $this->endpoint, timeout: $this->timeout);
     }
@@ -198,7 +217,8 @@ final class SymfonyTelemetry
     public function beginRequest(
         string $method,
         string $routeTemplate,
-        ?string $incomingTraceparent = null
+        ?string $incomingTraceparent = null,
+        ?Request $symfonyRequest = null
     ): ?SymfonyRequestState {
         if ($this->client === null || (!$this->captureRequests && !$this->captureExceptions)) {
             return null;
@@ -212,7 +232,13 @@ final class SymfonyTelemetry
                 $incomingTraceparent
             );
 
-            return new SymfonyRequestState($request, $request->activate());
+            $contextScope = $this->activateProvidedContext($symfonyRequest);
+            try {
+                return new SymfonyRequestState($request, $request->activate(), $contextScope);
+            } catch (Throwable $error) {
+                $contextScope?->close();
+                throw $error;
+            }
         } catch (Throwable $error) {
             $this->reportError($error);
             return null;
@@ -282,7 +308,11 @@ final class SymfonyTelemetry
         }
 
         $state->finished = true;
-        $state->scope->close();
+        try {
+            $state->scope->close();
+        } finally {
+            $state->contextScope?->close();
+        }
     }
 
     private function captureException(SymfonyRequestState $state, int $statusCode): void
@@ -382,6 +412,37 @@ final class SymfonyTelemetry
         }
     }
 
+    private function activateProvidedContext(?Request $request): ?LogBrewTelemetryScope
+    {
+        if ($this->contextProvider === null) {
+            return null;
+        }
+        if ($request === null) {
+            $this->reportError(new SdkError(
+                'configuration_error',
+                'Symfony context provider requires the current Request'
+            ));
+            return null;
+        }
+
+        try {
+            $context = ($this->contextProvider)($request);
+            if ($context === null) {
+                return null;
+            }
+            if (!$context instanceof TelemetryContext) {
+                throw new SdkError(
+                    'validation_error',
+                    'Symfony context provider must return TelemetryContext or null'
+                );
+            }
+            return LogBrewTelemetry::activateContext($context);
+        } catch (Throwable $error) {
+            $this->reportError($error);
+            return null;
+        }
+    }
+
     private static function environmentApiKey(): string
     {
         foreach ([
@@ -404,6 +465,16 @@ final class SymfonyTelemetry
         }
 
         return InstalledVersions::getPrettyVersion('logbrew/sdk') ?? 'unversioned';
+    }
+
+    private static function installedPackageVersion(string $package): ?string
+    {
+        if (!class_exists(InstalledVersions::class) || !InstalledVersions::isInstalled($package)) {
+            return null;
+        }
+
+        $version = InstalledVersions::getPrettyVersion($package);
+        return is_string($version) && trim($version) !== '' ? $version : null;
     }
 
     private static function boundedString(string $value, int $maxBytes): string

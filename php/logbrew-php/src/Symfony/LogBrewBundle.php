@@ -30,7 +30,8 @@ use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
  *   capture_requests: bool,
  *   capture_exceptions: bool,
  *   include_exception_message: bool,
- *   include_exception_trace: bool
+ *   include_exception_trace: bool,
+ *   context_provider: string|null
  * }
  */
 final class LogBrewBundle extends AbstractBundle
@@ -61,6 +62,7 @@ final class LogBrewBundle extends AbstractBundle
                 ->booleanNode('capture_exceptions')->defaultTrue()->end()
                 ->booleanNode('include_exception_message')->defaultFalse()->end()
                 ->booleanNode('include_exception_trace')->defaultFalse()->end()
+                ->scalarNode('context_provider')->defaultNull()->cannotBeEmpty()->end()
             ->end();
     }
 
@@ -95,6 +97,9 @@ final class LogBrewBundle extends AbstractBundle
             ? $config['environment']
             : $kernelEnvironment;
 
+        $contextProvider = is_string($config['context_provider'])
+            ? new Reference($config['context_provider'])
+            : null;
         $telemetry = new Definition(SymfonyTelemetry::class, [
             $config['enabled'],
             $config['api_key'],
@@ -112,6 +117,9 @@ final class LogBrewBundle extends AbstractBundle
             $config['capture_exceptions'],
             $config['include_exception_message'],
             $config['include_exception_trace'],
+            null,
+            null,
+            $contextProvider,
         ]);
         $telemetry->setPublic(false);
         $container->setDefinition('logbrew.symfony.telemetry', $telemetry);

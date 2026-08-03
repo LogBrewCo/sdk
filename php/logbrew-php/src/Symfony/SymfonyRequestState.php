@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace LogBrew\Symfony;
 
 use LogBrew\LogBrewHttpRequestTelemetry;
+use LogBrew\LogBrewTelemetryScope;
 use LogBrew\LogBrewTraceScope;
 use Throwable;
 
@@ -17,7 +18,8 @@ final class SymfonyRequestState
 
     public function __construct(
         public readonly LogBrewHttpRequestTelemetry $request,
-        public readonly LogBrewTraceScope $scope
+        public readonly LogBrewTraceScope $scope,
+        public readonly ?LogBrewTelemetryScope $contextScope = null
     ) {
     }
 }

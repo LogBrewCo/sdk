@@ -106,7 +106,8 @@ final class SymfonyRequestSubscriber implements EventSubscriberInterface
             $state = $this->telemetry->beginRequest(
                 $request->getMethod(),
                 'symfony.route.' . self::routeName($request),
-                $request->headers->get('traceparent')
+                $request->headers->get('traceparent'),
+                $request
             );
         } catch (Throwable) {
             return null;

@@ -77,6 +77,16 @@ if (!class_exists(LogBrew\EncryptedFileEventStore::class)) {
     fwrite(STDERR, "installed encrypted event store is unavailable\n");
     exit(1);
 }
+foreach ([
+    LogBrew\TelemetryContext::class,
+    LogBrew\TelemetryResource::class,
+    LogBrew\LogBrewTelemetry::class,
+] as $contextClass) {
+    if (!class_exists($contextClass)) {
+        fwrite(STDERR, "installed shared telemetry context API is unavailable\n");
+        exit(1);
+    }
+}
 $create = new ReflectionMethod(LogBrew\LogBrewClient::class, 'create');
 $parameterNames = array_map(
     static fn (ReflectionParameter $parameter): string => $parameter->getName(),
@@ -86,8 +96,41 @@ if (!in_array('eventStore', $parameterNames, true)) {
     fwrite(STDERR, "installed client eventStore option is unavailable\n");
     exit(1);
 }
+foreach (['context', 'captureRuntimeContext'] as $contextParameter) {
+    if (!in_array($contextParameter, $parameterNames, true)) {
+        fwrite(STDERR, "installed client shared context option is unavailable\n");
+        exit(1);
+    }
+}
 if (!method_exists(LogBrew\LogBrewClient::class, 'purgePersistedEvents')) {
     fwrite(STDERR, "installed purge API is unavailable\n");
+    exit(1);
+}
+
+$context = LogBrew\TelemetryContext::create()
+    ->withResource(LogBrew\TelemetryResource::create()->withService('installed-php-service')->build())
+    ->withSession('installed_session')
+    ->withTag('journey', 'installed-smoke')
+    ->build();
+$client = LogBrew\LogBrewClient::create(
+    'LOGBREW_API_KEY',
+    'installed-php-context',
+    '0.1.0',
+    context: $context,
+    captureRuntimeContext: false
+);
+$client->log('installed_context', '2026-08-03T10:00:00Z', [
+    'message' => 'installed shared context',
+    'level' => 'info',
+]);
+$preview = json_decode($client->previewJson(), true, 512, JSON_THROW_ON_ERROR);
+if (
+    ($preview['events'][0]['attributes']['context']['resource']['service']['name'] ?? null)
+        !== 'installed-php-service'
+    || ($preview['events'][0]['attributes']['context']['session']['id'] ?? null)
+        !== 'installed_session'
+) {
+    fwrite(STDERR, "installed shared telemetry context did not serialize\n");
     exit(1);
 }
 PHP

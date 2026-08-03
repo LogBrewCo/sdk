@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use LogBrew\LogBrewTrace;
+use LogBrew\LogBrewTelemetry;
 use LogBrew\RecordingTransport;
+use LogBrew\TelemetryContext;
 use LogBrew\Symfony\LogBrewBundle;
 use LogBrew\Symfony\SymfonyRequestSubscriber;
 use LogBrew\Symfony\SymfonyStatusCommand;
@@ -13,6 +15,7 @@ use Monolog\Handler\NoopHandler;
 use Monolog\Logger;
 use Symfony\Bundle\MonologBundle\DependencyInjection\MonologExtension;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -28,6 +31,17 @@ final class SymfonyTestKernel implements HttpKernelInterface
     public function handle(Request $request, int $type = self::MAIN_REQUEST, bool $catch = true): Response
     {
         return new Response('', 200);
+    }
+}
+
+final class SymfonyTestContextProvider
+{
+    public function __invoke(Request $request): ?TelemetryContext
+    {
+        if ($request->attributes->getBoolean('with_test_context')) {
+            return TelemetryContext::create()->withSession('fixture_session')->build();
+        }
+        return null;
     }
 }
 
@@ -128,6 +142,43 @@ function symfonyMetadata(array $event): array
     return $copied;
 }
 
+/**
+ * @param array<string, mixed> $event
+ * @return array<string, mixed>
+ */
+function symfonyContext(array $event): array
+{
+    $context = symfonyAttributes($event)['context'] ?? null;
+    if (!is_array($context)) {
+        throw new RuntimeException('expected Symfony shared context');
+    }
+
+    $copied = [];
+    foreach ($context as $key => $value) {
+        if (!is_string($key)) {
+            throw new RuntimeException('expected Symfony context string keys');
+        }
+        $copied[$key] = $value;
+    }
+    return $copied;
+}
+
+/**
+ * @param array<string, mixed> $value
+ * @param non-empty-list<int|string> $path
+ */
+function symfonyContextAt(array $value, array $path): mixed
+{
+    $current = $value;
+    foreach ($path as $key) {
+        if (!is_array($current) || !array_key_exists($key, $current)) {
+            throw new RuntimeException('missing Symfony context path: ' . implode('.', $path));
+        }
+        $current = $current[$key];
+    }
+    return $current;
+}
+
 /** @return array<string, mixed> */
 function symfonyJsonObject(string $json): array
 {
@@ -185,6 +236,12 @@ assertTrue($logEvent['type'] === 'log', 'expected Symfony Monolog event');
 $logMetadata = symfonyMetadata($logEvent);
 assertTrue($logMetadata['framework'] === 'symfony', 'expected Symfony framework metadata');
 assertTrue($logMetadata['service'] === 'symfony-demo', 'expected Symfony service metadata');
+$logContext = symfonyContext($logEvent);
+assertTrue(symfonyContextAt($logContext, ['resource', 'service', 'name']) === 'symfony-demo', 'expected typed Symfony service context');
+assertTrue(symfonyContextAt($logContext, ['resource', 'deployment', 'release']) === '1.2.3', 'expected typed Symfony release context');
+assertTrue(symfonyContextAt($logContext, ['resource', 'deployment', 'environment']) === 'test', 'expected typed Symfony environment context');
+assertTrue(symfonyContextAt($logContext, ['resource', 'framework', 'name']) === 'symfony', 'expected typed Symfony framework context');
+assertTrue(symfonyContextAt($logContext, ['resource', 'runtime', 'name']) === 'php', 'expected Symfony PHP runtime context');
 $logSdk = $logPayload['sdk'] ?? null;
 if (!is_array($logSdk)) {
     throw new RuntimeException('expected Symfony SDK identity');
@@ -217,6 +274,7 @@ assertTrue($statusPayload['statusCode'] === 202, 'expected Symfony delivery resp
 assertTrue(count($testTransport->sentBodies) === 1, 'expected one Symfony delivery-probe request');
 
 $requestTransport = RecordingTransport::alwaysAccept();
+$providerSawRequest = false;
 $requestTelemetry = new SymfonyTelemetry(
     enabled: true,
     apiKey: 'LOGBREW_SERVER_API_KEY',
@@ -225,7 +283,15 @@ $requestTelemetry = new SymfonyTelemetry(
     environment: 'test',
     transport: $requestTransport,
     timestampProvider: static fn (): DateTimeImmutable => new DateTimeImmutable('2026-08-01T14:00:00+00:00'),
-    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_{$kind}_{$sequence}"
+    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_{$kind}_{$sequence}",
+    contextProvider: static function (Request $request) use (&$providerSawRequest): TelemetryContext {
+        $providerSawRequest = $request->attributes->get('_route') === 'blog_index';
+        return TelemetryContext::create()
+            ->withSession('session_symfony')
+            ->withSubject('subject_symfony', 'user')
+            ->withTag('journey', 'content')
+            ->build();
+    }
 );
 $subscriber = new SymfonyRequestSubscriber($requestTelemetry);
 $kernel = new SymfonyTestKernel();
@@ -234,18 +300,58 @@ $request->attributes->set('_route', 'blog_index');
 $request->headers->set('traceparent', '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01');
 $subscriber->onKernelRequest(new RequestEvent($kernel, $request, HttpKernelInterface::MAIN_REQUEST));
 assertTrue(LogBrewTrace::current()?->traceId === '4bf92f3577b34da6a3ce929d0e0e4736', 'expected Symfony trace continuation');
+assertTrue($providerSawRequest, 'expected explicit Symfony context provider to receive the request');
+assertTrue(LogBrewTelemetry::currentContext() !== null, 'expected Symfony request context activation');
 $subscriber->onKernelResponse(new ResponseEvent($kernel, $request, HttpKernelInterface::MAIN_REQUEST, new Response('', 200)));
 assertTrue(LogBrewTrace::current() === null, 'expected Symfony request trace scope reset');
+assertTrue(LogBrewTelemetry::currentContext() === null, 'expected Symfony request context scope reset');
 assertTrue(count($requestTransport->sentBodies) === 1, 'expected one Symfony request delivery');
 $requestPayload = symfonyPayload($requestTransport);
 assertTrue(count(symfonyEvents($requestPayload)) === 1, 'expected one successful Symfony request span');
 $span = symfonyEvents($requestPayload)[0];
 assertTrue($span['type'] === 'span', 'expected Symfony request span');
 assertTrue((symfonyAttributes($span)['name'] ?? null) === 'GET symfony.route.blog_index', 'expected stable Symfony route name');
+$spanContext = symfonyContext($span);
+assertTrue(symfonyContextAt($spanContext, ['trace', 'traceId']) === '4bf92f3577b34da6a3ce929d0e0e4736', 'expected typed Symfony trace context');
+assertTrue(symfonyContextAt($spanContext, ['session', 'id']) === 'session_symfony', 'expected provider session on Symfony span');
+assertTrue(symfonyContextAt($spanContext, ['subject', 'id']) === 'subject_symfony', 'expected provider subject on Symfony span');
+assertTrue(symfonyContextAt($spanContext, ['tags', 'journey']) === 'content', 'expected provider tag on Symfony span');
 $encodedRequest = json_encode($requestPayload, JSON_THROW_ON_ERROR);
 assertTrue(!str_contains($encodedRequest, 'concrete-path-marker'), 'expected concrete Symfony path exclusion');
 assertTrue(!str_contains($encodedRequest, 'query-value-marker'), 'expected Symfony query value exclusion');
 assertTrue(!str_contains($encodedRequest, '00-4bf92'), 'expected raw traceparent exclusion');
+
+$providerErrors = [];
+$providerFailureTransport = RecordingTransport::alwaysAccept();
+$providerFailureTelemetry = new SymfonyTelemetry(
+    apiKey: 'LOGBREW_SERVER_API_KEY',
+    transport: $providerFailureTransport,
+    timestampProvider: static fn (): DateTimeImmutable => new DateTimeImmutable('2026-08-01T14:00:00+00:00'),
+    eventIdProvider: static fn (string $kind, int $sequence): string => "symfony_provider_{$kind}_{$sequence}",
+    onError: static function (Throwable $error) use (&$providerErrors): void {
+        $providerErrors[] = $error->getMessage();
+    },
+    contextProvider: static function (Request $request): ?TelemetryContext {
+        throw new RuntimeException('context provider fixture failed');
+    }
+);
+$providerFailureSubscriber = new SymfonyRequestSubscriber($providerFailureTelemetry);
+$providerFailureRequest = Request::create('/safe/provider-failure', 'GET');
+$providerFailureRequest->attributes->set('_route', 'provider_failure');
+$providerFailureSubscriber->onKernelRequest(new RequestEvent(
+    $kernel,
+    $providerFailureRequest,
+    HttpKernelInterface::MAIN_REQUEST
+));
+$providerFailureSubscriber->onKernelResponse(new ResponseEvent(
+    $kernel,
+    $providerFailureRequest,
+    HttpKernelInterface::MAIN_REQUEST,
+    new Response('', 200)
+));
+assertTrue(count($providerErrors) === 1, 'expected isolated Symfony context provider failure');
+assertTrue(count($providerFailureTransport->sentBodies) === 1, 'expected request telemetry after provider failure');
+assertTrue(LogBrewTelemetry::currentContext() === null, 'expected no leaked context after provider failure');
 
 $exceptionTransport = RecordingTransport::alwaysAccept();
 $exceptionTelemetry = new SymfonyTelemetry(
@@ -285,20 +391,23 @@ assertTrue(
     'expected useful Symfony exception title'
 );
 $issueAttributes = symfonyAttributes($exceptionEvents[0]);
-assertTrue($issueAttributes['exception'] === [
+assertTrue(symfonyContextAt($issueAttributes, ['exception']) === [
     'type' => RuntimeException::class,
     'mechanism' => ['type' => 'symfony.kernel_exception', 'handled' => false],
 ], 'expected first-class Symfony exception mechanism');
+$issueStackFrames = symfonyContextAt($issueAttributes, ['stackFrames']);
 assertTrue(
-    is_array($issueAttributes['stackFrames'] ?? null)
-        && count($issueAttributes['stackFrames']) >= 1
-        && count($issueAttributes['stackFrames']) <= 32,
+    is_array($issueStackFrames)
+        && count($issueStackFrames) >= 1
+        && count($issueStackFrames) <= 32,
     'expected bounded first-class Symfony stack frames'
 );
+$issueStackFrameLine = symfonyContextAt($issueAttributes, ['stackFrames', 0, 'line']);
 assertTrue(
-    ($issueAttributes['stackFrames'][0]['filename'] ?? null) === basename(__FILE__)
-        && ($issueAttributes['stackFrames'][0]['line'] ?? 0) > 0
-        && ($issueAttributes['stackFrames'][0]['column'] ?? null) === 1,
+    symfonyContextAt($issueAttributes, ['stackFrames', 0, 'filename']) === basename(__FILE__)
+        && is_int($issueStackFrameLine)
+        && $issueStackFrameLine > 0
+        && symfonyContextAt($issueAttributes, ['stackFrames', 0, 'column']) === 1,
     'expected newest-first basename-only Symfony throw frame'
 );
 $issueMetadata = symfonyMetadata($exceptionEvents[0]);
@@ -403,10 +512,18 @@ if (!is_array($logBrewChannels)) {
     throw new RuntimeException('expected Symfony channel exclusions');
 }
 assertTrue(in_array('!request', $logBrewChannels, true), 'expected Symfony formatted exception-log exclusion');
-$extension->load([[]], $container);
+$container->register('logbrew.test_context_provider', SymfonyTestContextProvider::class);
+$extension->load([['context_provider' => 'logbrew.test_context_provider']], $container);
 assertTrue($container->hasDefinition('logbrew.symfony.telemetry'), 'expected Symfony telemetry service');
 assertTrue($container->hasDefinition('logbrew.symfony.request_subscriber'), 'expected Symfony request subscriber');
 assertTrue($container->hasDefinition('logbrew.symfony.status_command'), 'expected Symfony status command');
+$telemetryArguments = $container->getDefinition('logbrew.symfony.telemetry')->getArguments();
+$contextProviderReference = $telemetryArguments[18] ?? null;
+assertTrue(
+    $contextProviderReference instanceof Reference
+        && (string) $contextProviderReference === 'logbrew.test_context_provider',
+    'expected configured Symfony context provider service reference'
+);
 
 $events = SymfonyRequestSubscriber::getSubscribedEvents();
 assertTrue(isset($events[KernelEvents::REQUEST], $events[KernelEvents::EXCEPTION], $events[KernelEvents::RESPONSE]), 'expected Symfony request lifecycle subscriptions');
