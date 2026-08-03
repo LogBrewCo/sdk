@@ -22,12 +22,14 @@ namespace LogBrew;
  *   version: string,
  *   commit?: string,
  *   notes?: string,
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  * @phpstan-type EnvironmentAttributes array{
  *   name: string,
  *   region?: string,
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  * @phpstan-type IssueAttributes array{
  *   title: string,
@@ -52,13 +54,15 @@ namespace LogBrew;
  *     data?: array<string, MetadataValue>
  *   }>,
  *   breadcrumbsTruncated?: bool,
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  * @phpstan-type LogAttributes array{
  *   message: string,
  *   level: Severity|SeverityAlias,
  *   logger?: string,
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  * @phpstan-type SpanAttributes array{
  *   name: string,
@@ -67,7 +71,8 @@ namespace LogBrew;
  *   parentSpanId?: string,
  *   status: 'ok'|'error',
  *   durationMs?: int|float,
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  * @phpstan-type MetricAttributes array{
  *   name: string,
@@ -75,12 +80,14 @@ namespace LogBrew;
  *   value: int|float,
  *   unit: string,
  *   temporality: 'delta'|'cumulative'|'instant',
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  * @phpstan-type ActionAttributes array{
  *   name: string,
  *   status: 'queued'|'running'|'success'|'failure',
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  */
 final class LogBrewClient
@@ -138,7 +145,8 @@ final class LogBrewClient
         private readonly ?\Closure $onEventDropped,
         private readonly int $maxBatchEvents,
         private readonly int $maxBatchBytes,
-        private readonly ?EncryptedFileEventStore $eventStore
+        private readonly ?EncryptedFileEventStore $eventStore,
+        private readonly ?TelemetryContext $context
     ) {
         try {
             $sdkJson = json_encode($sdk, JSON_THROW_ON_ERROR);
@@ -165,7 +173,9 @@ final class LogBrewClient
         ?callable $onEventDropped = null,
         int $maxBatchEvents = self::DEFAULT_MAX_BATCH_EVENTS,
         int $maxBatchBytes = self::DEFAULT_MAX_BATCH_BYTES,
-        ?EncryptedFileEventStore $eventStore = null
+        ?EncryptedFileEventStore $eventStore = null,
+        ?TelemetryContext $context = null,
+        bool $captureRuntimeContext = true
     ): self {
         self::requireNonEmpty('api_key', $apiKey);
         self::requireNonEmpty('sdk_name', $sdkName);
@@ -186,11 +196,26 @@ final class LogBrewClient
             throw new SdkError('validation_error', 'maxBatchBytes must be greater than zero');
         }
 
-        return new self($apiKey, [
-            'name' => $sdkName,
-            'language' => 'php',
-            'version' => $sdkVersion,
-        ], $maxRetries, $maxQueueSize, $maxQueueBytes, $onEventDropped === null ? null : \Closure::fromCallable($onEventDropped), $maxBatchEvents, $maxBatchBytes, $eventStore);
+        $resolvedContext = $captureRuntimeContext
+            ? TelemetryContext::merge(TelemetryContext::runtimeDefaults(), $context)
+            : $context;
+
+        return new self(
+            $apiKey,
+            [
+                'name' => $sdkName,
+                'language' => 'php',
+                'version' => $sdkVersion,
+            ],
+            $maxRetries,
+            $maxQueueSize,
+            $maxQueueBytes,
+            $onEventDropped === null ? null : \Closure::fromCallable($onEventDropped),
+            $maxBatchEvents,
+            $maxBatchBytes,
+            $eventStore,
+            $resolvedContext
+        );
     }
 
     /**
@@ -250,43 +275,43 @@ final class LogBrewClient
     /** @param ReleaseAttributes $attributes */
     public function release(string $id, string $timestamp, array $attributes): void
     {
-        $this->pushEvent('release', $id, $timestamp, $this->validateRelease($attributes));
+        $this->pushEvent('release', $id, $timestamp, $this->validateRelease($attributes), self::eventContext($attributes));
     }
 
     /** @param EnvironmentAttributes $attributes */
     public function environment(string $id, string $timestamp, array $attributes): void
     {
-        $this->pushEvent('environment', $id, $timestamp, $this->validateEnvironment($attributes));
+        $this->pushEvent('environment', $id, $timestamp, $this->validateEnvironment($attributes), self::eventContext($attributes));
     }
 
     /** @param IssueAttributes $attributes */
     public function issue(string $id, string $timestamp, array $attributes): void
     {
-        $this->pushEvent('issue', $id, $timestamp, $this->validateIssue($attributes));
+        $this->pushEvent('issue', $id, $timestamp, $this->validateIssue($attributes), self::eventContext($attributes));
     }
 
     /** @param LogAttributes $attributes */
     public function log(string $id, string $timestamp, array $attributes): void
     {
-        $this->pushEvent('log', $id, $timestamp, $this->validateLog($attributes));
+        $this->pushEvent('log', $id, $timestamp, $this->validateLog($attributes), self::eventContext($attributes));
     }
 
     /** @param SpanAttributes $attributes */
     public function span(string $id, string $timestamp, array $attributes): void
     {
-        $this->pushEvent('span', $id, $timestamp, $this->validateSpan($attributes));
+        $this->pushEvent('span', $id, $timestamp, $this->validateSpan($attributes), self::eventContext($attributes));
     }
 
     /** @param MetricAttributes $attributes */
     public function metric(string $id, string $timestamp, array $attributes): void
     {
-        $this->pushEvent('metric', $id, $timestamp, $this->validateMetric($attributes));
+        $this->pushEvent('metric', $id, $timestamp, $this->validateMetric($attributes), self::eventContext($attributes));
     }
 
     /** @param ActionAttributes $attributes */
     public function action(string $id, string $timestamp, array $attributes): void
     {
-        $this->pushEvent('action', $id, $timestamp, $this->validateAction($attributes));
+        $this->pushEvent('action', $id, $timestamp, $this->validateAction($attributes), self::eventContext($attributes));
     }
 
     /**
@@ -341,7 +366,13 @@ final class LogBrewClient
     }
 
     /** @param array<string, mixed> $attributes */
-    private function pushEvent(string $type, string $id, string $timestamp, array $attributes): void
+    private function pushEvent(
+        string $type,
+        string $id,
+        string $timestamp,
+        array $attributes,
+        ?TelemetryContext $eventContext
+    ): void
     {
         if ($this->closed) {
             throw new SdkError('shutdown_error', 'client is already shut down');
@@ -351,6 +382,18 @@ final class LogBrewClient
         }
         self::requireNonEmpty('event id', $id);
         self::requireTimestamp($timestamp);
+        $ambientContext = LogBrewTelemetry::currentContext();
+        $activeTrace = LogBrewTrace::current();
+        if ($activeTrace !== null) {
+            $ambientContext = TelemetryContext::withTrace($ambientContext, $activeTrace);
+        }
+        $mergedContext = TelemetryContext::merge(
+            TelemetryContext::merge($this->context, $ambientContext),
+            $eventContext
+        );
+        if ($mergedContext !== null) {
+            $attributes['context'] = $mergedContext->toArray();
+        }
         if (count($this->events) >= $this->maxQueueSize) {
             $this->recordDroppedEvent($id, $type, 'queue_overflow');
             return;
@@ -579,16 +622,7 @@ final class LogBrewClient
         try {
             self::requireNonEmpty('event id', $id);
             self::requireTimestamp($timestamp);
-            $validatedAttributes = match ($type) {
-                'release' => $this->validateRelease($attributes),
-                'environment' => $this->validateEnvironment($attributes),
-                'issue' => $this->validateIssue($attributes),
-                'log' => $this->validateLog($attributes),
-                'span' => $this->validateSpan($attributes),
-                'metric' => $this->validateMetric($attributes),
-                'action' => $this->validateAction($attributes),
-                default => throw new SdkError('validation_error', 'event type is unsupported'),
-            };
+            $validatedAttributes = $this->validatePersistedAttributes($type, $attributes);
         } catch (SdkError) {
             throw new SdkError('persistent_queue_error', 'persistent event storage contains invalid events');
         }
@@ -631,13 +665,54 @@ final class LogBrewClient
         if (array_key_exists('value', $attributes) && !is_int($attributes['value']) && !is_float($attributes['value'])) {
             return false;
         }
-        if (!array_key_exists('metadata', $attributes)) {
-            return true;
-        }
-        if (!is_array($attributes['metadata'])) {
+        if (array_key_exists('metadata', $attributes)
+            && (!is_array($attributes['metadata']) || !self::metadataHasExpectedTypes($attributes['metadata']))) {
             return false;
         }
-        return self::metadataHasExpectedTypes($attributes['metadata']);
+        return !array_key_exists('context', $attributes) || is_array($attributes['context']);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private function validatePersistedAttributes(string $type, array $attributes): array
+    {
+        $context = null;
+        if (array_key_exists('context', $attributes)) {
+            if (!is_array($attributes['context'])) {
+                throw new SdkError('validation_error', 'event context must be an object');
+            }
+            $context = TelemetryContext::fromArray($attributes['context'])->toArray();
+            unset($attributes['context']);
+        }
+
+        $validated = match ($type) {
+            'release' => $this->validateRelease($attributes),
+            'environment' => $this->validateEnvironment($attributes),
+            'issue' => $this->validateIssue($attributes),
+            'log' => $this->validateLog($attributes),
+            'span' => $this->validateSpan($attributes),
+            'metric' => $this->validateMetric($attributes),
+            'action' => $this->validateAction($attributes),
+            default => throw new SdkError('validation_error', 'event type is unsupported'),
+        };
+        if ($context !== null) {
+            $validated['context'] = $context;
+        }
+        return $validated;
+    }
+
+    /** @param array<string, mixed> $attributes */
+    private static function eventContext(array $attributes): ?TelemetryContext
+    {
+        if (!array_key_exists('context', $attributes)) {
+            return null;
+        }
+        if (!$attributes['context'] instanceof TelemetryContext) {
+            throw new SdkError('validation_error', 'event context must be a TelemetryContext');
+        }
+        return $attributes['context'];
     }
 
     private function sendBatch(Transport $transport, string $body): TransportResponse

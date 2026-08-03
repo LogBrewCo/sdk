@@ -45,7 +45,8 @@ use Throwable;
  *   stackFrames?: list<IssueStackFrame>,
  *   breadcrumbs?: list<IssueBreadcrumb>,
  *   breadcrumbsTruncated?: bool,
- *   metadata?: Metadata
+ *   metadata?: Metadata,
+ *   context?: TelemetryContext
  * }
  */
 final class IssueDiagnostics
@@ -100,7 +101,8 @@ final class IssueDiagnostics
         ?array $metadata = null,
         ?array $breadcrumbs = null,
         bool $breadcrumbsTruncated = false,
-        bool $includeStackFrames = true
+        bool $includeStackFrames = true,
+        ?TelemetryContext $context = null
     ): array {
         $exceptionType = self::throwableType($error);
         $attributes = [
@@ -124,7 +126,11 @@ final class IssueDiagnostics
             $attributes['metadata'] = $metadata;
         }
 
-        return self::validateIssueAttributes($attributes);
+        $validated = self::validateIssueAttributes($attributes);
+        if ($context !== null) {
+            $validated['context'] = $context;
+        }
+        return $validated;
     }
 
     /** @return IssueException */
@@ -239,7 +245,7 @@ final class IssueDiagnostics
      * Validate and detach a complete issue attribute payload.
      *
      * @param array<string, mixed> $attributes
-     * @return array<string, mixed>
+     * @return IssueAttributes
      */
     public static function validateIssueAttributes(array $attributes): array
     {
@@ -248,11 +254,13 @@ final class IssueDiagnostics
             self::requireStringAttribute($attributes, 'level', 'issue level')
         );
         $message = self::optionalStringAttribute($attributes, 'message', 'issue message');
-        $validated = array_filter([
+        $validated = [
             'title' => $title,
             'level' => $level,
-            'message' => $message,
-        ], static fn (mixed $value): bool => $value !== null);
+        ];
+        if ($message !== null) {
+            $validated['message'] = $message;
+        }
 
         if (array_key_exists('exception', $attributes)) {
             $validated['exception'] = self::validateException($attributes['exception']);
@@ -502,17 +510,19 @@ final class IssueDiagnostics
         if (!is_array($value)) {
             throw self::validation('issue breadcrumb data must be an object');
         }
-        foreach (array_keys($value) as $key) {
+        $copied = [];
+        foreach ($value as $key => $item) {
             if (!is_string($key)) {
                 throw self::validation('issue breadcrumb data keys must be stable machine names');
             }
+            $copied[$key] = $item;
         }
-        if (count($value) > self::MAX_BREADCRUMB_DATA_FIELDS) {
+        if (count($copied) > self::MAX_BREADCRUMB_DATA_FIELDS) {
             throw self::validation('issue breadcrumb data must contain at most 8 fields');
         }
 
         $validated = [];
-        foreach ($value as $key => $item) {
+        foreach ($copied as $key => $item) {
             self::machineName('issue breadcrumb data key', $key, self::MAX_BREADCRUMB_NAME_LENGTH, false);
             if (is_string($item)) {
                 $validated[$key] = self::boundedText(
@@ -578,6 +588,7 @@ final class IssueDiagnostics
         return $attributes[$field];
     }
 
+    /** @return 'info'|'warning'|'error'|'critical' */
     private static function normalizeSeverity(string $value): string
     {
         if (!in_array($value, self::SEVERITY_VALUES, true)) {
@@ -703,13 +714,15 @@ final class IssueDiagnostics
         if (!is_array($value) || array_is_list($value)) {
             throw self::validation(sprintf('%s must be an object', $label));
         }
-        foreach (array_keys($value) as $key) {
+        $copied = [];
+        foreach ($value as $key => $item) {
             if (!is_string($key)) {
                 throw self::validation(sprintf('%s keys must be strings', $label));
             }
+            $copied[$key] = $item;
         }
 
-        return $value;
+        return $copied;
     }
 
     /**

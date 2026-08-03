@@ -269,7 +269,9 @@ foreach ([
     "make run-issue-diagnostics" => "missing composer archive issue diagnostics example guidance\n",
     "never copies raw trace text, arguments, locals, source text, or absolute source paths" => "missing composer archive issue diagnostics privacy guidance\n",
     "MetricAttributes" => "missing composer archive metric guidance\n",
-    "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing composer archive metric auto-capture guidance\n",
+    "Metrics answer aggregate questions" => "missing composer archive metric purpose guidance\n",
+    "The runtime identity described above is context, not a runtime measurement" => "missing composer archive context-versus-metric guidance\n",
+    "does not automatically collect PHP memory, CPU, FPM, framework, or database metrics yet." => "missing composer archive metric auto-capture guidance\n",
     "ProductTimeline" => "missing composer archive timeline guidance\n",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing composer archive timeline privacy guidance\n",
     "Traceparent" => "missing composer archive traceparent guidance\n",
@@ -570,7 +572,9 @@ foreach ([
     "make run-issue-diagnostics" => "missing installed README issue diagnostics example guidance\n",
     "never copies raw trace text, arguments, locals, source text, or absolute source paths" => "missing installed README issue diagnostics privacy guidance\n",
     "MetricAttributes" => "missing installed README metric guidance\n",
-    "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing installed README metric auto-capture guidance\n",
+    "Metrics answer aggregate questions" => "missing installed README metric purpose guidance\n",
+    "The runtime identity described above is context, not a runtime measurement" => "missing installed README context-versus-metric guidance\n",
+    "does not automatically collect PHP memory, CPU, FPM, framework, or database metrics yet." => "missing installed README metric auto-capture guidance\n",
     "ProductTimeline" => "missing installed README timeline guidance\n",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing installed README timeline privacy guidance\n",
     "Traceparent" => "missing installed README traceparent guidance\n",
@@ -1076,7 +1080,12 @@ require __DIR__ . '/vendor/autoload.php';
 use LogBrew\LogBrewClient;
 use LogBrew\RecordingTransport;
 
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'logbrew-php', '0.1.0');
+$client = LogBrewClient::create(
+    'LOGBREW_API_KEY',
+    'logbrew-php',
+    '0.1.0',
+    captureRuntimeContext: false,
+);
 $client->release('evt_release_001', '2026-06-02T10:00:00Z', [
     'version' => '1.2.3',
     'commit' => 'abc123def456',
@@ -1130,7 +1139,12 @@ require __DIR__ . '/vendor/autoload.php';
 use LogBrew\LogBrewClient;
 use LogBrew\RecordingTransport;
 
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
+$client = LogBrewClient::create(
+    'LOGBREW_API_KEY',
+    'smoke-app',
+    '0.1.0',
+    captureRuntimeContext: false,
+);
 $client->release('evt_release_001', '2026-06-02T10:00:00Z', [
     'version' => '1.2.3',
     'commit' => 'abc123def456',
@@ -2707,7 +2721,12 @@ require __DIR__ . '/vendor/autoload.php';
 use LogBrew\LogBrewClient;
 use LogBrew\RecordingTransport;
 
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
+$client = LogBrewClient::create(
+    'LOGBREW_API_KEY',
+    'smoke-app',
+    '0.1.0',
+    captureRuntimeContext: false,
+);
 $client->release('evt_release_001', '2026-06-02T10:00:00Z', [
     'version' => '1.2.3',
     'commit' => 'abc123def456',

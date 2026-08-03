@@ -26,7 +26,12 @@ use LogBrew\LogBrewClient;
 use LogBrew\RecordingTransport;
 use LogBrew\SupportTicketDraft;
 
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'logbrew-php', '0.1.0');
+$client = LogBrewClient::create(
+    'LOGBREW_API_KEY',
+    'logbrew-php',
+    '0.1.0',
+    captureRuntimeContext: false,
+);
 $client->release('evt_release_001', '2026-06-02T10:00:00Z', [
     'version' => '1.2.3',
     'commit' => 'abc123def456',
@@ -76,7 +81,7 @@ $supportDraft = SupportTicketDraft::create(
     traceId: '4BF92F3577B34DA6A3CE929D0E0E4736',
     eventId: 'evt_issue_001',
     diagnostics: [
-        'authorization' => 'Bearer lbw_ingest_secret_value',
+        'authorization' => 'Bearer sample',
         'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',
         'exception' => new RuntimeException('do not include this message'),
     ],

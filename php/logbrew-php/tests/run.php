@@ -42,6 +42,47 @@ function expectThrows(callable $callback, string $needle): void
     exit(1);
 }
 
+/** @return array<string, mixed> */
+function testStringMap(mixed $value, string $label): array
+{
+    if (!is_array($value)) {
+        throw new RuntimeException("expected {$label} object");
+    }
+    $copied = [];
+    foreach ($value as $key => $item) {
+        if (!is_string($key)) {
+            throw new RuntimeException("expected {$label} string keys");
+        }
+        $copied[$key] = $item;
+    }
+    return $copied;
+}
+
+/** @return list<mixed> */
+function testList(mixed $value, string $label): array
+{
+    if (!is_array($value) || !array_is_list($value)) {
+        throw new RuntimeException("expected {$label} list");
+    }
+    return $value;
+}
+
+/**
+ * @param array<mixed> $value
+ * @param non-empty-list<int|string> $path
+ */
+function testValueAt(array $value, array $path): mixed
+{
+    $current = $value;
+    foreach ($path as $key) {
+        if (!is_array($current) || !array_key_exists($key, $current)) {
+            throw new RuntimeException('missing test value path');
+        }
+        $current = $current[$key];
+    }
+    return $current;
+}
+
 /**
  * @param list<string> $command
  * @return array{stdout: string, stderr: string}
@@ -394,34 +435,48 @@ $issueAttributes = IssueDiagnostics::fromThrowable(
 );
 $diagnosticClient = sampleClient();
 $diagnosticClient->issue('evt_issue_diagnostics', '2026-06-02T10:00:02Z', $issueAttributes);
+$issueException = $issueAttributes['exception'] ?? null;
+$issueFrames = $issueAttributes['stackFrames'] ?? null;
+$issueBreadcrumbs = $issueAttributes['breadcrumbs'] ?? null;
+if (!is_array($issueException) || !is_array($issueFrames) || !is_array($issueBreadcrumbs)) {
+    throw new RuntimeException('expected complete issue diagnostics fixture');
+}
 $issueAttributes['exception']['type'] = 'MutatedException';
 $issueAttributes['stackFrames'][0]['filename'] = 'mutated.php';
 $issueAttributes['breadcrumbs'][0]['data']['attempt'] = 99;
-$diagnosticPayload = json_decode($diagnosticClient->previewJson(), true, 512, JSON_THROW_ON_ERROR);
-$diagnosticAttributes = $diagnosticPayload['events'][0]['attributes'];
+$diagnosticPayload = testStringMap(
+    json_decode($diagnosticClient->previewJson(), true, 512, JSON_THROW_ON_ERROR),
+    'diagnostic payload'
+);
+$diagnosticAttributes = testStringMap(
+    testValueAt($diagnosticPayload, ['events', 0, 'attributes']),
+    'diagnostic attributes'
+);
 assertTrue($diagnosticAttributes['title'] === RuntimeException::class, 'expected safe PHP exception title');
 assertTrue($diagnosticAttributes['level'] === 'error', 'expected PHP exception error level');
 assertTrue(!array_key_exists('message', $diagnosticAttributes), 'expected throwable message to remain opt-in');
-assertTrue($diagnosticAttributes['exception'] === [
+assertTrue(testValueAt($diagnosticAttributes, ['exception']) === [
     'type' => RuntimeException::class,
     'mechanism' => ['type' => 'php.exception', 'handled' => true],
 ], 'expected typed PHP exception mechanism');
+$diagnosticFrames = testList(testValueAt($diagnosticAttributes, ['stackFrames']), 'diagnostic stack frames');
 assertTrue(
-    is_array($diagnosticAttributes['stackFrames'])
-        && count($diagnosticAttributes['stackFrames']) >= 1
-        && count($diagnosticAttributes['stackFrames']) <= 32,
+    count($diagnosticFrames) >= 1 && count($diagnosticFrames) <= 32,
     'expected bounded PHP stack frame projection'
 );
+$diagnosticFrame = testStringMap($diagnosticFrames[0], 'diagnostic stack frame');
 assertTrue(
-    $diagnosticAttributes['stackFrames'][0]['filename'] === basename(__FILE__)
-        && $diagnosticAttributes['stackFrames'][0]['line'] > 0
-        && $diagnosticAttributes['stackFrames'][0]['column'] === 1,
+    $diagnosticFrame['filename'] === basename(__FILE__)
+        && is_int($diagnosticFrame['line'])
+        && $diagnosticFrame['line'] > 0
+        && $diagnosticFrame['column'] === 1,
     'expected newest-first basename-only PHP throw frame'
 );
+$diagnosticBreadcrumbs = testList(testValueAt($diagnosticAttributes, ['breadcrumbs']), 'diagnostic breadcrumbs');
 assertTrue(
-    ($diagnosticAttributes['breadcrumbs'][0]['level'] ?? null) === 'warning'
-        && ($diagnosticAttributes['breadcrumbs'][0]['data']['attempt'] ?? null) === 2
-        && ($diagnosticAttributes['breadcrumbs'][1]['category'] ?? null) === 'checkout.request',
+    testValueAt($diagnosticBreadcrumbs, [0, 'level']) === 'warning'
+        && testValueAt($diagnosticBreadcrumbs, [0, 'data', 'attempt']) === 2
+        && testValueAt($diagnosticBreadcrumbs, [1, 'category']) === 'checkout.request',
     'expected detached oldest-first PHP breadcrumbs'
 );
 assertTrue($diagnosticAttributes['breadcrumbsTruncated'] === true, 'expected PHP breadcrumb truncation signal');
@@ -441,8 +496,8 @@ $explicitFrame = IssueDiagnostics::stackFrame(
 );
 assertTrue(
     $explicitFrame['filename'] === 'CheckoutService.php'
-        && $explicitFrame['debugId'] === '123e4567-e89b-12d3-a456-426614174000'
-        && $explicitFrame['inApp'] === true,
+        && ($explicitFrame['debugId'] ?? null) === '123e4567-e89b-12d3-a456-426614174000'
+        && ($explicitFrame['inApp'] ?? null) === true,
     'expected sanitized explicit PHP stack frame'
 );
 
@@ -451,7 +506,7 @@ $anonymousIssue = new class('anonymous detail') extends RuntimeException {
 $anonymousAttributes = IssueDiagnostics::fromThrowable($anonymousIssue, includeStackFrames: false);
 assertTrue(
     $anonymousAttributes['title'] === 'anonymous_exception'
-        && $anonymousAttributes['exception']['type'] === 'anonymous_exception'
+        && testValueAt($anonymousAttributes, ['exception', 'type']) === 'anonymous_exception'
         && !array_key_exists('stackFrames', $anonymousAttributes),
     'expected privacy-safe anonymous PHP exception identity'
 );
@@ -985,6 +1040,11 @@ foreach ([
     '"service":"pterodactyl-panel"',
     '"release":"1.11.0"',
     '"environment":"testing"',
+    '"context":{"schemaVersion":1',
+    '"service":{"name":"pterodactyl-panel"}',
+    '"deployment":{"environment":"testing","release":"1.11.0"}',
+    '"framework":{"name":"laravel"}',
+    '"runtime":{"name":"php"',
 ] as $needle) {
     assertTrue(str_contains($laravelBody, $needle), "missing Laravel logger payload: {$needle}");
 }
@@ -1097,25 +1157,30 @@ assertTrue(str_contains($makeFirstUseful['stdout'], '"type":"metric"') || str_co
 assertTrue(str_contains($makeFirstUseful['stderr'], '"events":7') || str_contains($makeFirstUseful['stderr'], '"events": 7'), 'expected first-useful make event count');
 
 $issueDiagnosticsExample = runCommand($packageRoot, [PHP_BINARY, 'examples/issue_diagnostics.php']);
-$issueDiagnosticsPayload = json_decode($issueDiagnosticsExample['stdout'], true, 512, JSON_THROW_ON_ERROR);
-$issueDiagnosticsAttributes = $issueDiagnosticsPayload['events'][0]['attributes'] ?? null;
-assertTrue(is_array($issueDiagnosticsAttributes), 'expected issue diagnostics example attributes');
+$issueDiagnosticsPayload = testStringMap(
+    json_decode($issueDiagnosticsExample['stdout'], true, 512, JSON_THROW_ON_ERROR),
+    'issue diagnostics example payload'
+);
+$issueDiagnosticsAttributes = testStringMap(
+    testValueAt($issueDiagnosticsPayload, ['events', 0, 'attributes']),
+    'issue diagnostics example attributes'
+);
 assertTrue(
-    ($issueDiagnosticsAttributes['exception']['mechanism'] ?? null) === [
+    testValueAt($issueDiagnosticsAttributes, ['exception', 'mechanism']) === [
         'type' => 'php.exception',
         'handled' => true,
     ],
     'expected issue diagnostics example mechanism'
 );
 assertTrue(
-    ($issueDiagnosticsAttributes['stackFrames'][0]['filename'] ?? null) === 'issue_diagnostics.php'
-        && ($issueDiagnosticsAttributes['stackFrames'][0]['function'] ?? null) === 'fail'
-        && ($issueDiagnosticsAttributes['stackFrames'][0]['module'] ?? null) === 'CheckoutFailureFixture',
+    testValueAt($issueDiagnosticsAttributes, ['stackFrames', 0, 'filename']) === 'issue_diagnostics.php'
+        && testValueAt($issueDiagnosticsAttributes, ['stackFrames', 0, 'function']) === 'fail'
+        && testValueAt($issueDiagnosticsAttributes, ['stackFrames', 0, 'module']) === 'CheckoutFailureFixture',
     'expected useful issue diagnostics example frame identity'
 );
 assertTrue(
-    ($issueDiagnosticsAttributes['breadcrumbs'][0]['category'] ?? null) === 'checkout.navigation'
-        && ($issueDiagnosticsAttributes['breadcrumbs'][1]['level'] ?? null) === 'warning',
+    testValueAt($issueDiagnosticsAttributes, ['breadcrumbs', 0, 'category']) === 'checkout.navigation'
+        && testValueAt($issueDiagnosticsAttributes, ['breadcrumbs', 1, 'level']) === 'warning',
     'expected oldest-first normalized issue diagnostics breadcrumbs'
 );
 assertTrue(!str_contains($issueDiagnosticsExample['stdout'], 'sensitive provider response fixture'), 'expected issue diagnostics example message exclusion');
@@ -1161,5 +1226,6 @@ require __DIR__ . '/http_client_tracing.php';
 require __DIR__ . '/worker_lifecycle.php';
 require __DIR__ . '/persistent_delivery.php';
 require __DIR__ . '/symfony_integration.php';
+require __DIR__ . '/telemetry_context.php';
 
 fwrite(STDOUT, "php sdk checks passed\n");

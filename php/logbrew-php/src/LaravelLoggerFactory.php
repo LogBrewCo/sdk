@@ -87,11 +87,21 @@ final class LaravelLoggerFactory
         $service = self::stringValue($config, 'service', 'laravel-app');
         $release = self::stringValue($config, 'release', 'unversioned');
         $environment = self::stringValue($config, 'environment', 'production');
+        $context = TelemetryContext::create()
+            ->withResource(
+                TelemetryResource::create()
+                    ->withService($service)
+                    ->withDeployment($environment, $release)
+                    ->withFramework('laravel')
+                    ->build()
+            )
+            ->build();
         $client = LogBrewClient::create(
             apiKey: $apiKey,
             sdkName: $service,
             sdkVersion: $release,
-            maxRetries: self::intValue($config, 'max_retries', 0)
+            maxRetries: self::intValue($config, 'max_retries', 0),
+            context: $context
         );
         $transport = $this->transport ?? new HttpTransport(
             endpoint: self::stringValue($config, 'endpoint', HttpTransport::DEFAULT_ENDPOINT),

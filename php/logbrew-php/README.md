@@ -153,9 +153,73 @@ try {
 }
 ```
 
-Throwable capture deliberately omits the throwable message by default. It also never copies raw trace text, arguments, locals, source text, or absolute source paths; generated filenames are basename-only. Pass a deliberately safe `message` only when it adds user-facing value. Use `IssueDiagnostics::stackFrame(...)` for an explicit frame, and set `breadcrumbsTruncated: true` when the application retained only the newest 64 breadcrumbs. Run the shipped example with `php vendor/logbrew/sdk/examples/issue_diagnostics.php` or `make run-issue-diagnostics` from `vendor/logbrew/sdk/examples`.
+Throwable capture deliberately omits the throwable message by default. It also never copies raw trace text, arguments, locals, source text, or absolute source paths; generated filenames are basename-only. Pass a deliberately safe `message` only when it adds user-facing value. `fromThrowable(..., context: $context)` can attach the same typed request context as nearby signals. Use `IssueDiagnostics::stackFrame(...)` for an explicit frame, and set `breadcrumbsTruncated: true` when the application retained only the newest 64 breadcrumbs. Run the shipped example with `php vendor/logbrew/sdk/examples/issue_diagnostics.php` or `make run-issue-diagnostics` from `vendor/logbrew/sdk/examples`.
+
+## Shared Telemetry Context
+
+Issues, logs, spans, metrics, actions, releases, and environment events all accept the same immutable schema-v1 `TelemetryContext`. Use it to give a human or AI the stable facts needed to move from a symptom to the affected deployment, request trace, session, and product journey without repeating those values in every flat metadata map.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+use LogBrew\LogBrewTelemetry;
+use LogBrew\LogBrewTrace;
+use LogBrew\LogBrewTraceContext;
+use LogBrew\TelemetryContext;
+use LogBrew\TelemetryResource;
+
+$clientContext = TelemetryContext::create()
+    ->withResource(
+        TelemetryResource::create()
+            ->withService('checkout-api', '1.4.0')
+            ->withDeployment('production', 'checkout@1.4.0')
+            ->withFramework('symfony', '7.3.1')
+            ->withApplication('checkout', '1.4.0', '20260803.1')
+            ->build()
+    )
+    ->withTag('region', 'global')
+    ->build();
+
+$client = LogBrewClient::create(
+    'LOGBREW_API_KEY',
+    'checkout-api',
+    '1.4.0',
+    context: $clientContext
+);
+
+$requestContext = TelemetryContext::create()
+    ->withSession('session_checkout_123')
+    ->withSubject('visitor_checkout_123', 'anonymous')
+    ->withTag('journey', 'checkout')
+    ->build();
+$trace = LogBrewTraceContext::fromIncomingTraceparentOrCreateRoot(
+    $_SERVER['HTTP_TRACEPARENT'] ?? null
+);
+$contextScope = LogBrewTelemetry::activateContext($requestContext);
+$traceScope = LogBrewTrace::activate($trace);
+
+try {
+    $client->log('evt_checkout_started', '2026-08-03T10:00:00Z', [
+        'message' => 'checkout started',
+        'level' => 'info',
+        'metadata' => ['routeTemplate' => '/checkout/:cart_id'],
+    ]);
+} finally {
+    $traceScope->close();
+    $contextScope->close();
+}
+```
+
+The final merge order is client context, active `LogBrewTelemetry` context plus `LogBrewTrace::current()`, then the event's optional `context`. Resource sections and tags merge field by field; a later trace, session, or subject replaces the earlier section. Builders validate and detach values before queue admission. Tags are limited to 32 low-cardinality string dimensions, identifiers are opaque and bounded, and subject IDs should never be email addresses, authorization values, or other direct PII.
+
+By default the client adds only safe PHP runtime identity: PHP version, OS family, and process architecture. Pass `captureRuntimeContext: false` when even that identity is inappropriate. The synchronous ambient scopes match the SDK's existing trace scope and must not be shared across overlapping Swoole coroutines or other concurrent request handlers; use an explicit client or event context in those environments.
 
 ## Explicit Metrics
+
+Metrics answer aggregate questions: a counter shows how often something happened, a gauge shows the current level, and a histogram shows the distribution of values such as latency. In the dashboard they become time-series trends, comparisons, regression signals, and alert thresholds. A metric usually tells a user or AI **what changed**, not **why**; attach the same service, deployment, trace, session, and journey context as nearby logs, issues, and spans so an abnormal chart can lead directly to the evidence that explains it.
 
 Use the `MetricAttributes` shaped array when your application already knows the measurement it wants to report:
 
@@ -177,7 +241,7 @@ $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
 ]);
 ```
 
-Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as service, region, queue, or route pattern. This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet.
+Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as queue or route pattern and put shared identity in `TelemetryContext`. The runtime identity described above is context, not a runtime measurement: this SDK does not automatically collect PHP memory, CPU, FPM, framework, or database metrics yet.
 
 ## Product and Network Timelines
 
@@ -218,7 +282,7 @@ $client->action('evt_network_payment', '2026-06-02T10:00:06Z', ProductTimeline::
 
 ## First Useful Service Telemetry
 
-For first useful PHP service telemetry, combine release, environment, log, action, metric, and span events in one request path. `Traceparent` accepts W3C `traceparent` headers, normalizes IDs, rejects forbidden all-zero identifiers, exposes the sampled flag, and creates outbound propagation headers without patching HTTP clients.
+For first useful PHP service telemetry, combine release, environment, log, action, metric, and span events under the same resource, request, and trace context. This keeps each event readable on its own while letting dashboard users and agents traverse the complete causal chain.
 
 ```php
 <?php
@@ -226,54 +290,73 @@ For first useful PHP service telemetry, combine release, environment, log, actio
 require __DIR__ . '/vendor/autoload.php';
 
 use LogBrew\LogBrewClient;
+use LogBrew\LogBrewTelemetry;
+use LogBrew\LogBrewTrace;
+use LogBrew\LogBrewTraceContext;
 use LogBrew\ProductTimeline;
-use LogBrew\Traceparent;
-use LogBrew\TraceparentSpanInput;
+use LogBrew\TelemetryContext;
+use LogBrew\TelemetryResource;
 
 $incomingTraceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
-$traceContext = Traceparent::parse($incomingTraceparent);
-$childSpanId = 'b7ad6b7169203331';
-$outgoingHeaders = Traceparent::createHeaders($traceContext->traceId, $childSpanId, $traceContext->traceFlags);
+$trace = LogBrewTraceContext::fromTraceparent($incomingTraceparent, 'b7ad6b7169203331');
+$outgoingHeaders = $trace->headers();
 
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-service', '1.2.3');
+$baseContext = TelemetryContext::create()
+    ->withResource(
+        TelemetryResource::create()
+            ->withService('checkout-service', '1.2.3')
+            ->withDeployment('production', 'checkout@1.2.3')
+            ->build()
+    )
+    ->build();
+$client = LogBrewClient::create(
+    'LOGBREW_API_KEY',
+    'checkout-service',
+    '1.2.3',
+    context: $baseContext
+);
 $client->release('evt_release_checkout', '2026-06-02T10:00:00Z', ['version' => '1.2.3']);
 $client->environment('evt_environment_checkout', '2026-06-02T10:00:01Z', ['name' => 'production']);
-$client->log('evt_log_checkout_started', '2026-06-02T10:00:02Z', [
-    'message' => 'checkout request started',
-    'level' => 'info',
-    'metadata' => [
-        'traceId' => $traceContext->traceId,
-        'sessionId' => 'sess_checkout_123',
-        'routeTemplate' => '/checkout/:cart_id',
-    ],
-]);
-$client->action('evt_action_payment_api', '2026-06-02T10:00:04Z', ProductTimeline::networkMilestone(
-    routeTemplate: 'https://api.example.com/payments/:payment_id?card=sample',
-    method: 'POST',
-    statusCode: 202,
-    durationMs: 183.4,
-    sessionId: 'sess_checkout_123',
-    traceId: $traceContext->traceId
-));
-$client->metric('evt_metric_http_server_duration', '2026-06-02T10:00:05Z', [
-    'name' => 'http.server.duration',
-    'kind' => 'histogram',
-    'value' => 183.4,
-    'unit' => 'ms',
-    'temporality' => 'delta',
-    'metadata' => [
-        'method' => 'POST',
-        'routeTemplate' => '/checkout/:cart_id',
-        'statusCode' => 202,
-        'traceId' => $traceContext->traceId,
-    ],
-]);
-$client->span('evt_span_checkout_request', '2026-06-02T10:00:06Z', Traceparent::spanAttributesFromTraceparent(
-    $traceContext,
-    TraceparentSpanInput::create('POST /checkout/:cart_id', $childSpanId)
-        ->withDurationMs(183.4)
-        ->withMetadata(['sampled' => $traceContext->sampled, 'sessionId' => 'sess_checkout_123'])
-));
+
+$requestContext = TelemetryContext::create()
+    ->withSession('sess_checkout_123')
+    ->withSubject('visitor_checkout_123', 'anonymous')
+    ->withTag('journey', 'checkout')
+    ->build();
+$contextScope = LogBrewTelemetry::activateContext($requestContext);
+$traceScope = LogBrewTrace::activate($trace);
+try {
+    $client->log('evt_log_checkout_started', '2026-06-02T10:00:02Z', [
+        'message' => 'checkout request started',
+        'level' => 'info',
+        'metadata' => ['routeTemplate' => '/checkout/:cart_id'],
+    ]);
+    $client->action('evt_action_payment_api', '2026-06-02T10:00:04Z', ProductTimeline::networkMilestone(
+        routeTemplate: 'https://api.example.com/payments/:payment_id?card=sample',
+        method: 'POST',
+        statusCode: 202,
+        durationMs: 183.4
+    ));
+    $client->metric('evt_metric_http_server_duration', '2026-06-02T10:00:05Z', [
+        'name' => 'http.server.duration',
+        'kind' => 'histogram',
+        'value' => 183.4,
+        'unit' => 'ms',
+        'temporality' => 'delta',
+        'metadata' => ['routeTemplate' => '/checkout/:cart_id'],
+    ]);
+    $client->span('evt_span_checkout_request', '2026-06-02T10:00:06Z', [
+        'name' => 'POST /checkout/:cart_id',
+        'traceId' => $trace->traceId,
+        'spanId' => $trace->spanId,
+        'parentSpanId' => $trace->parentSpanId,
+        'status' => 'ok',
+        'durationMs' => 183.4,
+    ]);
+} finally {
+    $traceScope->close();
+    $contextScope->close();
+}
 ```
 
 Attach `$outgoingHeaders['traceparent']` to the next service call when your application owns that request. Keep route metadata as stable patterns such as `/checkout/:cart_id`; avoid raw URLs, request bodies, response bodies, and arbitrary headers.
@@ -336,7 +419,7 @@ $request->finishSpanAndMetric(
 $outgoingHeaders = $request->outgoingHeaders();
 ```
 
-`LogBrewHttpRequestTelemetry::start(...)` continues valid incoming W3C `traceparent` values and falls back to a local root trace when propagation is missing or malformed, so bad upstream headers do not interrupt request handling. `LogBrewTrace::current()` returns the active request trace, and `LogBrewTrace::metadataWithCurrentTrace(...)` merges primitive metadata with `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`. Active trace metadata is automatically added to `LogBrewPsrLogger` and `LogBrewMonologHandler` records, and app metadata cannot spoof those correlation fields.
+`LogBrewHttpRequestTelemetry::start(...)` continues valid incoming W3C `traceparent` values and falls back to a local root trace when propagation is missing or malformed, so bad upstream headers do not interrupt request handling. `LogBrewTrace::current()` returns the active request trace. The core client promotes it into first-class typed context on every signal, including direct client calls; `LogBrewPsrLogger` and `LogBrewMonologHandler` also retain compatibility trace metadata, and app metadata cannot spoof those correlation fields.
 
 For a copyable service example, run `php vendor/logbrew/sdk/examples/http_trace_correlation.php` or `make run-http-trace-correlation` from `vendor/logbrew/sdk/examples`.
 
@@ -689,9 +772,41 @@ log_brew:
   capture_exceptions: true
   include_exception_message: false
   include_exception_trace: false
+  context_provider: App\Observability\LogBrewContextProvider
 ```
 
-Automatic request telemetry records only the method, bounded Symfony route name, status, duration, framework/service/release/environment, and normalized trace identifiers. It does not record concrete paths, query strings, request or response bodies, arbitrary headers, or the raw `traceparent` value. Automatic exception issues include a first-class exception type, `symfony.kernel_exception` mechanism with `handled: false`, up to 32 newest-first basename-only frames with safe function/module identity, and a hashed type/route/file grouping key. Arguments, locals, source text, and absolute paths are never captured; exception messages and raw trace text remain off unless explicitly enabled. The handler excludes Symfony's `request`, `event`, `doctrine`, and `deprecation` channels to avoid duplicating framework exception reports or copying Symfony's formatted exception message. Application-authored log messages and primitive context remain under the application's control.
+The optional provider is an invokable autowired service. It is the explicit privacy boundary for request-specific identity; return only opaque application-owned IDs and low-cardinality tags:
+
+```php
+<?php
+
+namespace App\Observability;
+
+use LogBrew\TelemetryContext;
+use Symfony\Component\HttpFoundation\Request;
+
+final class LogBrewContextProvider
+{
+    public function __invoke(Request $request): ?TelemetryContext
+    {
+        $sessionId = $request->attributes->get('telemetry_session_id');
+        $subjectId = $request->attributes->get('telemetry_subject_id');
+        if (!is_string($sessionId) || !is_string($subjectId)) {
+            return null;
+        }
+
+        return TelemetryContext::create()
+            ->withSession($sessionId)
+            ->withSubject($subjectId, 'user')
+            ->withTag('journey', 'checkout')
+            ->build();
+    }
+}
+```
+
+The provider context and continued trace stay active while the main request runs, so application logs, captured issues, request spans, and request metrics share the same correlation. Provider failures are reported through the optional error callback and never change the application response. Do not return email addresses, cookies, authorization data, concrete paths, or arbitrary request attributes.
+
+Automatic request telemetry records only the method, bounded Symfony route name, status, duration, typed PHP/framework/service/release/environment identity, and normalized trace identifiers. It does not record concrete paths, query strings, request or response bodies, arbitrary headers, or the raw `traceparent` value. Automatic exception issues include a first-class exception type, `symfony.kernel_exception` mechanism with `handled: false`, up to 32 newest-first basename-only frames with safe function/module identity, and a hashed type/route/file grouping key. Arguments, locals, source text, and absolute paths are never captured; exception messages and raw trace text remain off unless explicitly enabled. The handler excludes Symfony's `request`, `event`, `doctrine`, and `deprecation` channels to avoid duplicating framework exception reports or copying Symfony's formatted exception message. Application-authored log messages and primitive context remain under the application's control.
 
 ## Laravel Quick Start
 
@@ -721,7 +836,7 @@ LOGBREW_SERVER_API_KEY=
 
 Use a project-scoped server/SDK ingest key, never a user login key. The channel is not resolved when it is absent from the active stack; if the channel is enabled without a key, the factory raises an actionable configuration error.
 
-The Laravel factory accepts warning-and-higher records by default and immediately flushes every accepted record with a 2-second timeout and zero retries. Delivery failures stay inside the handler and do not interrupt application logging; a retained failed record is retried with the next accepted record. Override `level`, `timeout`, or `maxRetries` through named arguments to `configuration(...)` when the application has a different bounded policy. Write directly with `Log::channel('logbrew')->warning(...)` or include `logbrew` beside the existing channel in Laravel's stack.
+The Laravel factory accepts warning-and-higher records by default and immediately flushes every accepted record with a 2-second timeout and zero retries. Every record gets typed PHP/Laravel/service/deployment context. Application middleware can activate an explicit `LogBrewTelemetry` scope to add opaque session, subject, and journey context to logs written during that request. Delivery failures stay inside the handler and do not interrupt application logging; a retained failed record is retried with the next accepted record. Override `level`, `timeout`, or `maxRetries` through named arguments to `configuration(...)` when the application has a different bounded policy. Write directly with `Log::channel('logbrew')->warning(...)` or include `logbrew` beside the existing channel in Laravel's stack.
 
 ## Custom Monolog Integration
 
