@@ -70,6 +70,20 @@ def main() -> int:
         assert meta["parentSpanId"] == expected_parent_span_id
         assert meta["traceFlags"] == "01"
         assert meta["traceSampled"] is True
+        context = attrs.get("context")
+        if not isinstance(context, dict):
+            raise AssertionError(f"{event.get('id')} context must be an object")
+        assert context.get("schemaVersion") == 1
+        assert context.get("trace") == {
+            "traceId": expected_trace_id,
+            "spanId": expected_span_id,
+            "parentSpanId": expected_parent_span_id,
+            "sampled": True,
+        }
+        resource = context.get("resource")
+        if not isinstance(resource, dict):
+            raise AssertionError(f"{event.get('id')} resource context must be an object")
+        assert resource.get("runtime", {}).get("name") == "java"
 
     span_attrs = span["attributes"]
     metric_attrs = metric["attributes"]

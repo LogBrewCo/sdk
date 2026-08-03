@@ -163,7 +163,9 @@ public final class LogBrewServletFilter implements Filter {
                     failure,
                     "jakarta_servlet.filter",
                     false
-                ).metadata(LogBrewTrace.metadataWithTrace(traceContext, metadata))
+                )
+                    .metadata(LogBrewTrace.metadataWithTrace(traceContext, metadata))
+                    .context(traceContext.telemetryContext())
             );
             request.setAttribute(EXCEPTION_CAPTURED_ATTRIBUTE, Boolean.TRUE);
         } catch (RuntimeException error) {

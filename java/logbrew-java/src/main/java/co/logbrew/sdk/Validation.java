@@ -159,6 +159,19 @@ final class Validation {
         }
     }
 
+    static TelemetryContext requireTelemetryContext(TelemetryContext context) {
+        if (context == null) {
+            throw new SdkException("validation_error", "telemetry context must be provided");
+        }
+        return context;
+    }
+
+    static void putOptionalContext(Map<String, Object> target, TelemetryContext context) {
+        if (context != null) {
+            target.put("context", context);
+        }
+    }
+
     static void requireNonNegativeNumber(String label, Double value) {
         if (value != null && (value.doubleValue() < 0.0 || value.isNaN() || value.isInfinite())) {
             throw new SdkException("validation_error", label + " must be non-negative");

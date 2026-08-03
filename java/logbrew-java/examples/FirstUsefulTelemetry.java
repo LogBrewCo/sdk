@@ -1,10 +1,13 @@
 import co.logbrew.sdk.EnvironmentAttributes;
 import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewClientOptions;
 import co.logbrew.sdk.MetricAttributes;
 import co.logbrew.sdk.ProductTimeline;
 import co.logbrew.sdk.RecordingTransport;
 import co.logbrew.sdk.ReleaseAttributes;
+import co.logbrew.sdk.TelemetryContext;
+import co.logbrew.sdk.TelemetryResource;
 import co.logbrew.sdk.Traceparent;
 import co.logbrew.sdk.TransportResponse;
 import java.util.Map;
@@ -26,9 +29,33 @@ public final class FirstUsefulTelemetry {
             CHILD_SPAN_ID,
             context.traceFlags()
         );
-        LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "checkout-java-service", "0.1.0");
+        TelemetryContext clientContext = TelemetryContext.builder()
+            .resource(TelemetryResource.builder()
+                .service("checkout-java-service", "1.4.2")
+                .deployment("production", "checkout-api@1.4.2")
+                .application("checkout-api", "1.4.2", "20260803.1")
+                .build())
+            .tag("region", "global")
+            .build();
+        TelemetryContext requestContext = TelemetryContext.builder()
+            .trace(
+                context.traceId(),
+                CHILD_SPAN_ID,
+                context.parentSpanId(),
+                Boolean.valueOf(context.sampled())
+            )
+            .session(SESSION_ID)
+            .subject("user_42", "user")
+            .tag("operation", "checkout")
+            .build();
+        LogBrewClient client = LogBrewClient.create(
+            "LOGBREW_API_KEY",
+            "checkout-java-service",
+            "0.1.0",
+            LogBrewClientOptions.builder().context(clientContext).build()
+        );
 
-        enqueueFirstUsefulTelemetry(client, context);
+        enqueueFirstUsefulTelemetry(client, context, requestContext);
 
         System.out.println(client.previewJson());
         TransportResponse response = client.shutdown(RecordingTransport.alwaysAccept());
@@ -45,7 +72,8 @@ public final class FirstUsefulTelemetry {
 
     private static void enqueueFirstUsefulTelemetry(
         LogBrewClient client,
-        Traceparent.Context context
+        Traceparent.Context context,
+        TelemetryContext requestContext
     ) {
         client.release(
             "evt_release_checkout_api",
@@ -71,6 +99,7 @@ public final class FirstUsefulTelemetry {
                     "sessionId", SESSION_ID,
                     "traceId", context.traceId()
                 ))
+                .context(requestContext)
         );
         client.action(
             "evt_action_checkout_submit",
@@ -84,6 +113,7 @@ public final class FirstUsefulTelemetry {
                 .step("submit")
                 .metadata(Map.of("cartTier", "gold"))
                 .toActionAttributes()
+                .context(requestContext)
         );
         client.action(
             "evt_action_payment_api",
@@ -96,6 +126,7 @@ public final class FirstUsefulTelemetry {
                 .traceId(context.traceId())
                 .metadata(Map.of("dependency", "payments"))
                 .toActionAttributes()
+                .context(requestContext)
         );
         client.metric(
             "evt_metric_http_server_duration",
@@ -107,6 +138,7 @@ public final class FirstUsefulTelemetry {
                     "statusCode", 202,
                     "traceId", context.traceId()
                 ))
+                .context(requestContext)
         );
         client.span(
             "evt_span_checkout_request",
@@ -120,7 +152,7 @@ public final class FirstUsefulTelemetry {
                         "sampled", context.sampled(),
                         "sessionId", SESSION_ID
                     ))
-            )
+            ).context(requestContext)
         );
     }
 }

@@ -10,6 +10,7 @@ public final class ActionAttributes {
     private final String name;
     private final String status;
     private Map<String, ?> metadata;
+    private TelemetryContext context;
 
     private ActionAttributes(String name, String status) {
         this.name = name;
@@ -31,6 +32,12 @@ public final class ActionAttributes {
         return this;
     }
 
+    /** Sets shared resource and correlation context. */
+    public ActionAttributes context(TelemetryContext context) {
+        this.context = Validation.requireTelemetryContext(context);
+        return this;
+    }
+
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("action name", name);
         Validation.requireAllowedValue("action status", status, LogBrewClient.ACTION_STATUSES);
@@ -38,6 +45,7 @@ public final class ActionAttributes {
         value.put("name", name);
         value.put("status", status);
         Validation.putOptionalMetadata(value, metadata);
+        Validation.putOptionalContext(value, context);
         return value;
     }
 }

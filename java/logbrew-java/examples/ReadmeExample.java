@@ -3,6 +3,7 @@ import co.logbrew.sdk.EnvironmentAttributes;
 import co.logbrew.sdk.IssueAttributes;
 import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewClientOptions;
 import co.logbrew.sdk.RecordingTransport;
 import co.logbrew.sdk.ReleaseAttributes;
 import co.logbrew.sdk.SpanAttributes;
@@ -13,7 +14,12 @@ public final class ReadmeExample {
     }
 
     public static void main(String[] args) {
-        LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "logbrew-java", "0.1.0");
+        LogBrewClient client = LogBrewClient.create(
+            "LOGBREW_API_KEY",
+            "logbrew-java",
+            "0.1.0",
+            LogBrewClientOptions.builder().disableRuntimeContext(true).build()
+        );
         enqueueAll(client);
 
         System.out.println(client.previewJson());

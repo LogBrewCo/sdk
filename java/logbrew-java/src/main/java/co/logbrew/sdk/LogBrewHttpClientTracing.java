@@ -180,7 +180,8 @@ public final class LogBrewHttpClientTracing {
                     spanStatus(statusCode, requestError)
                 )
                 .durationMs(durationMs)
-                .metadata(metadata);
+                .metadata(metadata)
+                .context(prepared.trace.telemetryContext());
             if (prepared.trace.parentSpanId() != null) {
                 attributes.parentSpanId(prepared.trace.parentSpanId());
             }

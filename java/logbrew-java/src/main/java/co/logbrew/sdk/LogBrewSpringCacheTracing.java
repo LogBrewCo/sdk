@@ -506,7 +506,8 @@ public final class LogBrewSpringCacheTracing {
                     errored ? "error" : "ok"
                 )
                 .durationMs(Duration.between(span.startedAt, finishedAt).toNanos() / 1_000_000.0)
-                .metadata(metadata);
+                .metadata(metadata)
+                .context(span.trace.telemetryContext());
             if (span.trace.parentSpanId() != null) {
                 attributes.parentSpanId(span.trace.parentSpanId());
             }

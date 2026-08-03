@@ -376,7 +376,8 @@ public final class LogBrewJdbcTracing {
         SpanAttributes attributes = SpanAttributes
             .create("jdbc:" + operationName, trace.traceId(), trace.spanId(), operationError == null ? "ok" : "error")
             .durationMs(duration.toNanos() / 1_000_000.0)
-            .metadata(metadata);
+            .metadata(metadata)
+            .context(trace.telemetryContext());
         if (trace.parentSpanId() != null) {
             attributes.parentSpanId(trace.parentSpanId());
         }

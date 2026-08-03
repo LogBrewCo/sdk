@@ -52,6 +52,63 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
     )
 
     by_id = {event["id"]: event for event in events}
+    for event in events:
+        context = event["attributes"]["context"]
+        resource = context["resource"]
+        _require(
+            context.get("schemaVersion") == 1,
+            f"{event['id']} is missing shared-context schema version",
+        )
+        _require(
+            resource.get("service")
+            == {"name": "checkout-java-service", "version": "1.4.2"},
+            f"{event['id']} is missing service context",
+        )
+        _require(
+            resource.get("deployment")
+            == {"environment": "production", "release": "checkout-api@1.4.2"},
+            f"{event['id']} is missing deployment context",
+        )
+        _require(
+            resource.get("application")
+            == {"name": "checkout-api", "version": "1.4.2", "build": "20260803.1"}
+            and context.get("tags", {}).get("region") == "global",
+            f"{event['id']} is missing application/tag context",
+        )
+        _require(
+            resource.get("runtime", {}).get("name") == "java"
+            and bool(resource.get("runtime", {}).get("version"))
+            and bool(resource.get("operatingSystem", {}).get("name"))
+            and bool(resource.get("device", {}).get("architecture")),
+            f"{event['id']} is missing bounded Java runtime context",
+        )
+
+    correlated_ids = {
+        "evt_log_checkout_started",
+        "evt_action_checkout_submit",
+        "evt_action_payment_api",
+        "evt_metric_http_server_duration",
+        "evt_span_checkout_request",
+    }
+    for event_id in correlated_ids:
+        shared = by_id[event_id]["attributes"]["context"]
+        _require(
+            shared.get("trace")
+            == {
+                "traceId": EXPECTED_TRACE_ID,
+                "spanId": EXPECTED_CHILD_SPAN_ID,
+                "parentSpanId": EXPECTED_PARENT_SPAN_ID,
+                "sampled": True,
+            },
+            f"{event_id} is missing exact trace/span context",
+        )
+        _require(
+            shared.get("session") == {"id": EXPECTED_SESSION_ID}
+            and shared.get("subject") == {"id": "user_42", "kind": "user"}
+            and shared.get("tags", {}).get("operation") == "checkout",
+            f"{event_id} is missing bounded request context",
+        )
+
     log = by_id["evt_log_checkout_started"]["attributes"]
     _require(
         log["metadata"].get("traceId") == EXPECTED_TRACE_ID,

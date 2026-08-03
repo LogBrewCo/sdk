@@ -122,7 +122,58 @@ cd java/logbrew-java
 make -C examples run-first-useful-telemetry
 ```
 
-The example uses a fake key and `RecordingTransport` so you can inspect the JSON locally before enabling `HttpTransport` in your app. It strips query strings and fragments from route templates, keeps metadata primitive-only, links logs/actions/metrics/spans with the same trace and session IDs, and does not capture request/response payloads, arbitrary headers, or full URLs.
+The example uses a fake key and `RecordingTransport` so you can inspect the JSON locally before enabling `HttpTransport` in your app. It strips query strings and fragments from route templates, keeps metadata primitive-only, and gives logs/actions/metrics/spans the same typed trace, session, and subject context. It does not capture request/response payloads, arbitrary headers, or full URLs.
+
+## Shared Telemetry Context
+
+`LogBrewClientOptions.context(...)` adds one versioned, typed context to every event. An event attribute's `context(...)` merges on top: resource sections and tags merge by field, while an event trace, session, or subject replaces the corresponding client section. Builders validate and detach inputs before queueing, so later caller mutation cannot rewrite accepted evidence.
+
+```java
+import co.logbrew.sdk.LogAttributes;
+import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewClientOptions;
+import co.logbrew.sdk.TelemetryContext;
+import co.logbrew.sdk.TelemetryResource;
+
+TelemetryContext serviceContext = TelemetryContext.builder()
+    .resource(TelemetryResource.builder()
+        .service("checkout-service", "1.2.3")
+        .deployment("production", "checkout@1.2.3")
+        .application("checkout-api", "1.2.3", "20260803.1")
+        .build())
+    .tag("region", "eu")
+    .tag("plan", "team")
+    .build();
+
+LogBrewClient client = LogBrewClient.create(
+    "LOGBREW_INGEST_KEY",
+    "checkout-service",
+    "1.2.3",
+    LogBrewClientOptions.builder().context(serviceContext).build()
+);
+
+TelemetryContext requestContext = TelemetryContext.builder()
+    .trace(
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "00f067aa0ba902b7",
+        null,
+        Boolean.TRUE
+    )
+    .session("session_01")
+    .subject("user_42", "user")
+    .tag("operation", "checkout")
+    .build();
+
+client.log(
+    "evt_checkout",
+    "2026-08-03T08:15:30Z",
+    LogAttributes.create("checkout started", "info").context(requestContext)
+);
+```
+
+By default the core client adds only Java runtime name/version, OS family, and architecture beneath explicit caller context. Set `disableRuntimeContext(true)` to disable those defaults without dropping explicit context. Runtime defaults do not inspect process environment, machine names, network addresses, local account names, startup arguments, working directories, files, cloud metadata, or application configuration.
+
+Session and subject IDs are app-owned opaque correlation values. Do not put names, email addresses, authentication material, network addresses, or other direct personal data in them. Tags are capped at 32 low-cardinality string dimensions. Every context string and ID is bounded, control characters are rejected, W3C IDs are normalized, all-zero IDs are rejected, and empty resource sections fail before queueing.
 
 ## Metrics
 
@@ -252,6 +303,7 @@ maybeTrace.ifPresent(trace -> client.span(
     SpanAttributes.create("otel child operation", trace.traceId(), trace.spanId(), "ok")
         .parentSpanId(trace.parentSpanId())
         .metadata(trace.metadata())
+        .context(trace.telemetryContext())
 ));
 
 Map<String, String> downstreamHeaders = maybeTrace
@@ -309,6 +361,7 @@ try {
         "2026-06-02T10:00:03Z",
         IssueAttributes.create("Checkout returned a server error", "error")
             .metadata(LogBrewTrace.metadataWithCurrentTrace(Map.of("stage", "handler")))
+            .context(request.traceContext().telemetryContext())
     );
 } finally {
     scope.close();
@@ -324,7 +377,7 @@ request.finishSpanAndMetric(
 Map<String, String> outgoingHeaders = request.outgoingHeaders();
 ```
 
-`LogBrewTrace.activate(...)` reinstates the previous active trace when closed. Use `LogBrewTrace.wrapCurrent(...)` when handing work to another thread or executor; plain Java threads do not inherit request trace state automatically. The request helper falls back to a local root trace when incoming propagation is missing or malformed, while `Traceparent.parse(...)` stays strict for explicit validation paths. `LogBrewJulHandler` and `LogBrewLogbackAppender` attach active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata automatically, while preserving app-owned logger handlers and primitive metadata.
+`LogBrewTrace.activate(...)` reinstates the previous active trace when closed. Use `LogBrewTrace.wrapCurrent(...)` when handing work to another thread or executor; plain Java threads do not inherit request trace state automatically. The request helper falls back to a local root trace when incoming propagation is missing or malformed, while `Traceparent.parse(...)` stays strict for explicit validation paths. `LogBrewJulHandler` and `LogBrewLogbackAppender` attach active typed trace context plus compatibility metadata automatically, while preserving app-owned logger handlers and primitive metadata. Framework-created request spans, request metrics, and escaped issues also carry the same typed context.
 
 ## Java HttpClient Spans
 
@@ -1019,6 +1072,7 @@ The `examples` directory contains copyable snippets for creating a client, confi
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
+- `LogBrewClientOptions`, `TelemetryContext`, and `TelemetryResource` add bounded client/event resource, trace, session, subject, and tag context to every signal; safe Java runtime context is enabled by default and can be disabled explicitly.
 - `LogBrewClient` keeps a bounded in-memory queue of 1,000 events and 4 MiB of serialized event JSON by default; use `DeliveryOptions` to tune count, byte, request, retry, and advisory drop bounds. When either queue bound is full, the newest event is dropped, content-free counters increment, and drop-callback failures do not interrupt application logging. The older `create(..., maxRetries, maxQueueSize, drop)` overload remains supported with the new default byte and request bounds.
 - `EncryptedEventStore` adds explicit caller-owned AES-GCM restart persistence on supported POSIX filesystems without changing default memory delivery.
 - `createAutomatic(...)` is an explicit transport-owned mode with one lazy scheduler; manual `create(...)` remains thread-free.

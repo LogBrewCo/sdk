@@ -11,6 +11,7 @@ public final class ReleaseAttributes {
     private String commit;
     private String notes;
     private Map<String, ?> metadata;
+    private TelemetryContext context;
 
     private ReleaseAttributes(String version) {
         this.version = version;
@@ -47,6 +48,12 @@ public final class ReleaseAttributes {
         return this;
     }
 
+    /** Sets shared resource and correlation context. */
+    public ReleaseAttributes context(TelemetryContext context) {
+        this.context = Validation.requireTelemetryContext(context);
+        return this;
+    }
+
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("release version", version);
         if (commit != null) {
@@ -57,6 +64,7 @@ public final class ReleaseAttributes {
         Validation.putOptionalString(value, "commit", commit);
         Validation.putOptionalString(value, "notes", notes);
         Validation.putOptionalMetadata(value, metadata);
+        Validation.putOptionalContext(value, context);
         return value;
     }
 }

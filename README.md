@@ -71,7 +71,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Django | [`logbrew-django`](python/logbrew_django) | Request spans plus typed unhandled-exception diagnostics |
 | Go | [`github.com/LogBrewCo/sdk/go/logbrew`](go/logbrew) | Core client, shared runtime/resource/session/subject context, delivery, tracing, and typed exception/stack/breadcrumb diagnostics |
 | Go / Gin | [`github.com/LogBrewCo/sdk/go/logbrew/gin`](go/logbrew/gin) | Gin request spans, typed panic diagnostics, and optional request metrics |
-| Java | [`co.logbrew:logbrew-sdk`](java/logbrew-java) | Core client, typed issue diagnostics, servlet/Spring exception capture, HTTP delivery, JUL, and Logback support |
+| Java | [`co.logbrew:logbrew-sdk`](java/logbrew-java) | Core client, shared runtime/resource/session/subject context, typed issue diagnostics, servlet/Spring correlation, HTTP delivery, JUL, and Logback support |
 | .NET | [`LogBrew`](dotnet/logbrew-dotnet) | Core .NET client, typed exception/stack/breadcrumb diagnostics, HTTP delivery, and `ILogger` provider |
 | ASP.NET Core | [`LogBrew.AspNetCore`](dotnet/logbrew-dotnet/src/LogBrew.AspNetCore) | Optional request telemetry and typed unhandled-exception capture middleware |
 | Entity Framework Core | [`LogBrew.EntityFrameworkCore`](dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore) | Optional EF Core command span interceptor |

@@ -55,6 +55,20 @@ public final class LogBrewTrace {
         return Collections.unmodifiableMap(values);
     }
 
+    /** Returns shared context with the active trace, when one exists. */
+    public static TelemetryContext contextWithCurrentTrace(TelemetryContext context) {
+        LogBrewTraceContext current = CURRENT.get();
+        return current == null ? context : contextWithTrace(current, context);
+    }
+
+    /** Returns shared context with exact trace and span correlation. */
+    public static TelemetryContext contextWithTrace(
+        LogBrewTraceContext trace,
+        TelemetryContext context
+    ) {
+        return TelemetryContext.withTrace(context, Objects.requireNonNull(trace, "trace"));
+    }
+
     /**
      * Wraps a runnable with the current trace so explicit async handoffs keep correlation.
      */

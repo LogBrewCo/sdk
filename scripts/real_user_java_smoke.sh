@@ -58,6 +58,12 @@ cp -R "$package_dir/examples" "$tmp_dir/source-stage/examples"
 jar --create --file "$java_sources_jar" -C "$tmp_dir/source-stage" .
 jar --list --file "$java_jar" > "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClientOptions.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClientOptions\$Builder.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext\$Builder.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryResource.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryResource\$Builder.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDroppedHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -123,6 +129,9 @@ jar --list --file "$java_sources_jar" > "$tmp_dir/source-jar-contents.txt"
 grep -q '^pom.xml$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewClientOptions.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/TelemetryContext.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/TelemetryResource.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/IssueAttributes.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/IssueBreadcrumb.java$' "$tmp_dir/source-jar-contents.txt"
@@ -173,6 +182,9 @@ grep -q 'HttpTransport' "$package_dir/README.md"
 grep -q 'MetricAttributes' "$package_dir/README.md"
 grep -q 'ProductTimeline' "$package_dir/README.md"
 grep -q 'Traceparent' "$package_dir/README.md"
+grep -q 'Shared Telemetry Context' "$package_dir/README.md"
+grep -q 'LogBrewClientOptions' "$package_dir/README.md"
+grep -q 'TelemetryResource' "$package_dir/README.md"
 grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewHttpClientTracing' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
@@ -291,6 +303,7 @@ import co.logbrew.sdk.IssueExceptionMechanism;
 import co.logbrew.sdk.IssueStackFrame;
 import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewClientOptions;
 import co.logbrew.sdk.LogBrewHttpClientTracing;
 import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.LogBrewLogbackAppender;
@@ -360,7 +373,12 @@ public final class Main {
     }
 
     public static void main(String[] args) throws Exception {
-        LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        LogBrewClient client = LogBrewClient.create(
+            "LOGBREW_API_KEY",
+            "smoke-app",
+            "0.1.0",
+            LogBrewClientOptions.builder().disableRuntimeContext(true).build()
+        );
         enqueueAll(client);
         System.out.println(client.previewJson());
         TransportResponse response = client.flush(RecordingTransport.alwaysAccept());

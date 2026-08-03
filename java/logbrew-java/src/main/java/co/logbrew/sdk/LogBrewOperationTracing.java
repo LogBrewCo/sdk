@@ -264,7 +264,8 @@ public final class LogBrewOperationTracing {
         SpanAttributes attributes = SpanAttributes
             .create(spanName, trace.traceId(), trace.spanId(), operationError == null ? "ok" : "error")
             .durationMs(duration.toNanos() / 1_000_000.0)
-            .metadata(metadata);
+            .metadata(metadata)
+            .context(trace.telemetryContext());
         if (!spanEvents.isEmpty()) {
             attributes.events(spanEvents);
         }

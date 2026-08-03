@@ -41,7 +41,15 @@ public final class LogBrewPersistenceTest {
                 );
                 PersistenceStatus empty = client.recoverPersistedEvents();
                 assertEquals(0, empty.pendingEvents(), "initial persisted events");
-                enqueueLog(client, "evt_java_persist_1", "café");
+                enqueueLog(
+                    client,
+                    "evt_java_persist_1",
+                    "café",
+                    TelemetryContext.builder()
+                        .session("session_restart_1")
+                        .tag("operation", "checkout")
+                        .build()
+                );
                 firstBody = client.previewJson();
                 assertEquals(1, client.persistenceStatus().pendingEvents(), "persisted admission");
             }
@@ -52,6 +60,8 @@ public final class LogBrewPersistenceTest {
                 assertEquals(1, recovered.pendingEvents(), "recovered events");
                 assertEquals(firstBody, client.previewJson(), "stable recovered body");
                 assertContains(client.previewJson(), "evt_java_persist_1");
+                assertContains(client.previewJson(), "session_restart_1");
+                assertContains(client.previewJson(), "\"operation\": \"checkout\"");
             }
         } finally {
             Arrays.fill(key, (byte) 0);
@@ -201,6 +211,19 @@ public final class LogBrewPersistenceTest {
 
     private static void enqueueLog(LogBrewClient client, String id, String message) {
         client.log(id, "2026-06-02T10:00:03Z", LogAttributes.create(message, "info"));
+    }
+
+    private static void enqueueLog(
+        LogBrewClient client,
+        String id,
+        String message,
+        TelemetryContext context
+    ) {
+        client.log(
+            id,
+            "2026-06-02T10:00:03Z",
+            LogAttributes.create(message, "info").context(context)
+        );
     }
 
     private static byte[] key(int seed) {

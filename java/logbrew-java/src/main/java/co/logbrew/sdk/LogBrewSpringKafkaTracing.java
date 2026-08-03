@@ -412,7 +412,8 @@ public final class LogBrewSpringKafkaTracing {
                 error == null ? "ok" : "error"
             )
             .durationMs(durationMs)
-            .metadata(producerMetadata(record, trace, config, error));
+            .metadata(producerMetadata(record, trace, config, error))
+            .context(trace.telemetryContext());
         if (trace.parentSpanId() != null) {
             attributes.parentSpanId(trace.parentSpanId());
         }
@@ -730,7 +731,8 @@ public final class LogBrewSpringKafkaTracing {
             SpanAttributes attributes = SpanAttributes
                 .create(spanName(active.record), active.trace.traceId(), active.trace.spanId(), status)
                 .durationMs(durationMs)
-                .metadata(metadata(active.record, active.trace, active.startedAt, error));
+                .metadata(metadata(active.record, active.trace, active.startedAt, error))
+                .context(active.trace.telemetryContext());
             if (active.trace.parentSpanId() != null) {
                 attributes.parentSpanId(active.trace.parentSpanId());
             }

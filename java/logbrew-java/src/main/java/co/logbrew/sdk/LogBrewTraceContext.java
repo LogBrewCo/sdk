@@ -139,6 +139,11 @@ public final class LogBrewTraceContext {
         return Collections.unmodifiableMap(values);
     }
 
+    /** Returns this exact trace and span identity as shared telemetry context. */
+    public TelemetryContext telemetryContext() {
+        return TelemetryContext.builder().trace(this).build();
+    }
+
     private static String normalizeTraceId(String traceId) {
         Validation.requireNonEmpty("traceId", traceId);
         String normalized = traceId.trim().toLowerCase(Locale.ROOT);

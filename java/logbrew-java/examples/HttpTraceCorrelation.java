@@ -47,6 +47,7 @@ public final class HttpTraceCorrelation {
                 IssueAttributes.create("Checkout returned a server error", "error")
                     .message("handler returned 502")
                     .metadata(LogBrewTrace.metadataWithCurrentTrace(Collections.singletonMap("stage", "handler")))
+                    .context(trace.telemetryContext())
             );
         } finally {
             scope.close();

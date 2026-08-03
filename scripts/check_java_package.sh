@@ -62,6 +62,7 @@ java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.lo
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.EncryptedEventStoreTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewPersistenceTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewTraceTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.TelemetryContextTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.IssueDiagnosticsTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewServletFilterTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringExceptionResolverTest
@@ -88,6 +89,9 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
 
 javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_optional_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClientOptions.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/TelemetryContext.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/TelemetryResource.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/AutomaticDeliveryOptions.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/DeliveryHealth.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/DeliveryOptions.html"
@@ -139,6 +143,9 @@ if [ -d "$package_dir/src/main/resources" ]; then
 fi
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClientOptions.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryResource.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/AutomaticDeliveryController.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/AutomaticDeliveryScheduler.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -243,6 +250,12 @@ fi
 jar --create --file "$tmp_dir/logbrew-sdk-$package_version.jar" -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClientOptions.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClientOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryResource.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryResource\$Builder.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AutomaticDeliveryController.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
@@ -393,6 +406,9 @@ grep -q 'finalizePersistedTransactionAndRecover' "$package_dir/README.md"
 grep -q 'persistence_unsupported' "$package_dir/README.md"
 grep -q 'pendingEventBytes()' "$package_dir/README.md"
 grep -q 'first useful LogBrew payload' "$package_dir/README.md"
+grep -q 'Shared Telemetry Context' "$package_dir/README.md"
+grep -q 'LogBrewClientOptions' "$package_dir/README.md"
+grep -q 'TelemetryResource' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
 
