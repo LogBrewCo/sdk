@@ -331,14 +331,15 @@ func (m *middleware) capture(
 
 	if m.captureRequestMetrics {
 		metricMetadata := mergeMetadata(metadata, trace.Metadata())
-		if err := m.client.Metric(m.eventID("metric"), timestamp, logbrew.MetricAttributes{
+		metric := logbrew.MetricAttributesWithTrace(c.Request.Context(), logbrew.MetricAttributes{
 			Name:        m.metricName,
 			Kind:        "histogram",
 			Value:       durationMs,
 			Unit:        "ms",
 			Temporality: "delta",
 			Metadata:    metricMetadata,
-		}); err != nil {
+		})
+		if err := m.client.Metric(m.eventID("metric"), timestamp, metric); err != nil {
 			m.report(err)
 		}
 	}

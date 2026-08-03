@@ -67,12 +67,13 @@ func (h *logbrewSlogHandler) Handle(ctx context.Context, record slog.Record) err
 	}
 	metadata["source"] = "slog"
 
-	if err := h.config.Client.Log(h.eventID(), h.timestamp(record), LogAttributes{
+	attributes := LogAttributesWithTrace(ctx, LogAttributes{
 		Message:  record.Message,
 		Level:    slogLevel(record.Level),
 		Logger:   h.config.Logger,
 		Metadata: metadata,
-	}); err != nil {
+	})
+	if err := h.config.Client.Log(h.eventID(), h.timestamp(record), attributes); err != nil {
 		h.report(err)
 	}
 

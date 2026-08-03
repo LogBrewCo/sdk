@@ -140,9 +140,10 @@ import (
 
 func main() {
   client, err := logbrew.NewClient(logbrew.Config{
-    APIKey:     "LOGBREW_API_KEY",
-    SDKName:    "logbrew-go",
-    SDKVersion: "0.1.0",
+    APIKey:               "LOGBREW_API_KEY",
+    SDKName:              "logbrew-go",
+    SDKVersion:           "0.1.0",
+    DisableRuntimeContext: true, // Keep this language-neutral parity preview minimal.
   })
   if err != nil {
     panic(err)
@@ -207,6 +208,69 @@ clearly fake placeholder like `LOGBREW_API_KEY` only in local examples. Call
 `Flush` or `Shutdown` to send queued events through a transport, and use
 `PreviewJSON` when you want a stable local JSON preview before sending anything.
 For production delivery and authenticated readback, use the hosted flow above.
+
+## Shared Telemetry Context
+
+`Config.Context` adds one versioned, typed context to every event. Event-level
+`Context` fields merge on top: resource sections and tags merge by field, while
+an event trace, session, or subject replaces the corresponding client section.
+Inputs are validated and detached before queueing, so later caller mutation
+cannot rewrite evidence that was already accepted. Use
+`ValidateTelemetryContext` to preflight one value or `MergeTelemetryContexts`
+to apply the client/event rules without queueing an event.
+
+```go
+client, err := logbrew.NewClient(logbrew.Config{
+  APIKey:     "LOGBREW_API_KEY",
+  SDKName:    "checkout-service",
+  SDKVersion: "1.2.3",
+  Context: &logbrew.TelemetryContext{
+    SchemaVersion: 1,
+    Resource: &logbrew.TelemetryResource{
+      Service:    &logbrew.TelemetryNamedVersion{Name: "checkout-service", Version: "1.2.3"},
+      Deployment: &logbrew.TelemetryDeployment{Environment: "production", Release: "checkout@1.2.3"},
+      Application: &logbrew.TelemetryApplication{
+        Name: "checkout-api", Version: "1.2.3", Build: "20260803.1",
+      },
+    },
+    Tags: map[string]string{"region": "eu", "plan": "team"},
+  },
+})
+must(err)
+
+sampled := true
+requestContext := &logbrew.TelemetryContext{
+  SchemaVersion: 1,
+  Trace: &logbrew.TelemetryTraceContext{
+    TraceID: "4bf92f3577b34da6a3ce929d0e0e4736",
+    SpanID:  "00f067aa0ba902b7",
+    Sampled: &sampled,
+  },
+  Session: &logbrew.TelemetrySessionContext{ID: "session_01"},
+  Subject: &logbrew.TelemetrySubjectContext{ID: "user_42", Kind: "user"},
+  Tags:    map[string]string{"operation": "checkout"},
+}
+must(client.Log("evt_checkout", "2026-08-03T08:15:30Z", logbrew.LogAttributes{
+  Message: "checkout started",
+  Level:   "info",
+  Context: requestContext,
+}))
+```
+
+By default the core client adds only `runtime` (`go` plus `runtime.Version()`),
+the compiled OS family, and the compiled architecture beneath explicit caller
+context. Set `DisableRuntimeContext: true` to disable those defaults without
+dropping explicit context. The runtime probe does not inspect process
+environment, machine names, network addresses, local account names, startup
+arguments, working directories, files, cloud metadata, or application
+configuration.
+
+Session and subject IDs are app-owned opaque correlation values. Do not put
+names, email addresses, authentication material, network addresses, or other
+direct PII in them. Tags are capped at 32 low-cardinality string dimensions.
+Every context string and ID is bounded, control characters are rejected, W3C
+IDs are normalized, all-zero IDs are rejected, and empty resource sections
+fail before queueing.
 
 ## Structured Issue Diagnostics
 
@@ -436,7 +500,7 @@ fmt.Println(outgoing)
 
 `ParseTraceparent` validates W3C shape, rejects forbidden version `ff`, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `SpanAttributesFromTraceparent` returns LogBrew span attributes with `TraceID` from the incoming trace and `ParentSpanID` from the incoming parent span, while copying only primitive metadata values. `CreateTraceparent` emits a normalized outgoing `traceparent` from explicit IDs and defaults empty flags to sampled `01`.
 
-For request-local correlation, use `NewTraceContext` and attach it with `ContextWithLogBrewTrace`. `LogBrewTraceFromContext` returns the active request trace, and `LogAttributesWithTrace` / `IssueAttributesWithTrace` merge primitive trace metadata into app-owned logs and issues:
+For request-local correlation, use `NewTraceContext` and attach it with `ContextWithLogBrewTrace`. `LogBrewTraceFromContext` returns the active request trace. `LogAttributesWithTrace`, `IssueAttributesWithTrace`, `ActionAttributesWithTrace`, and `MetricAttributesWithTrace` attach the exact trace/span as first-class shared context and retain primitive trace metadata for older readers:
 
 ```go
 trace, err := logbrew.NewTraceContext(logbrew.TraceContextInput{

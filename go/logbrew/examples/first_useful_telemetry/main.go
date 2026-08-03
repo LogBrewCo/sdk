@@ -13,6 +13,15 @@ func main() {
 		APIKey:     "LOGBREW_API_KEY",
 		SDKName:    "checkout-service",
 		SDKVersion: "0.1.0",
+		Context: &logbrew.TelemetryContext{
+			SchemaVersion: 1,
+			Resource: &logbrew.TelemetryResource{
+				Service:     &logbrew.TelemetryNamedVersion{Name: "checkout-service", Version: "1.2.3"},
+				Deployment:  &logbrew.TelemetryDeployment{Environment: "production", Release: "checkout@1.2.3"},
+				Application: &logbrew.TelemetryApplication{Name: "checkout-api", Version: "1.2.3"},
+			},
+			Tags: map[string]string{"region": "global"},
+		},
 	})
 	must(err)
 
@@ -24,6 +33,19 @@ func main() {
 	must(err)
 
 	sessionID := "sess_checkout_123"
+	sampled := context.Sampled
+	requestContext := &logbrew.TelemetryContext{
+		SchemaVersion: 1,
+		Trace: &logbrew.TelemetryTraceContext{
+			TraceID:      context.TraceID,
+			SpanID:       childSpanID,
+			ParentSpanID: context.ParentSpanID,
+			Sampled:      &sampled,
+		},
+		Session: &logbrew.TelemetrySessionContext{ID: sessionID},
+		Subject: &logbrew.TelemetrySubjectContext{ID: "user_42", Kind: "user"},
+		Tags:    map[string]string{"operation": "checkout"},
+	}
 	must(client.Release("evt_release_001", "2026-06-02T10:00:00Z", logbrew.ReleaseAttributes{
 		Version: "1.2.3",
 		Commit:  "abc123def456",
@@ -47,6 +69,7 @@ func main() {
 			"sessionId": sessionID,
 			"traceId":   context.TraceID,
 		},
+		Context: requestContext,
 	}))
 
 	action, err := logbrew.CreateProductActionAttributes(logbrew.ProductActionInput{
@@ -63,6 +86,7 @@ func main() {
 		},
 	})
 	must(err)
+	action.Context = requestContext
 	must(client.Action("evt_action_checkout_submit", "2026-06-02T10:00:03Z", action))
 
 	statusCode := 202
@@ -80,6 +104,7 @@ func main() {
 		},
 	})
 	must(err)
+	network.Context = requestContext
 	must(client.Action("evt_action_payment_api", "2026-06-02T10:00:04Z", network))
 
 	must(client.Metric("evt_metric_http_server_duration", "2026-06-02T10:00:05Z", logbrew.MetricAttributes{
@@ -95,6 +120,7 @@ func main() {
 			"statusCode":    statusCode,
 			"traceId":       context.TraceID,
 		},
+		Context: requestContext,
 	}))
 
 	spanDurationMs := 92.4
@@ -112,6 +138,7 @@ func main() {
 		},
 	})
 	must(err)
+	span.Context = requestContext
 	must(client.Span("evt_span_checkout_request", "2026-06-02T10:00:06Z", span))
 
 	payload, err := client.PreviewJSON()

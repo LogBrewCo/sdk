@@ -276,14 +276,15 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 		}
 	}
 	if h.config.CaptureRequestMetric {
-		if err := h.config.Client.Metric(h.eventID("metric"), timestamp, MetricAttributes{
+		metric := MetricAttributesWithTrace(request.Context(), MetricAttributes{
 			Name:        "http.server.duration",
 			Kind:        "histogram",
 			Value:       durationMs,
 			Unit:        "ms",
 			Temporality: "delta",
 			Metadata:    metricMetadata,
-		}); err != nil {
+		})
+		if err := h.config.Client.Metric(h.eventID("metric"), timestamp, metric); err != nil {
 			h.report(err)
 		}
 	}

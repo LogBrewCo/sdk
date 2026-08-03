@@ -82,6 +82,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -332,7 +333,7 @@ func verifyInstalledEvents(t *testing.T, events []installedEvent) {
 			if !ok {
 				t.Fatalf("span route missing or invalid: %#v", metadata)
 			}
-			spanKeys := []string{"durationMs", "metadata", "name", "spanId", "status", "traceId"}
+			spanKeys := []string{"context", "durationMs", "metadata", "name", "spanId", "status", "traceId"}
 			if route == "/orders/{id}" {
 				spanKeys = append(spanKeys, "parentSpanId")
 			}
@@ -342,6 +343,7 @@ func verifyInstalledEvents(t *testing.T, events []installedEvent) {
 				metadataKeys = append(metadataKeys, "panic", "panicType")
 			}
 			assertKeys(t, metadata, metadataKeys...)
+			assertEventContext(t, event.Attributes, metadata)
 			spanID, ok := event.Attributes["spanId"].(string)
 			if !ok || spanID == "" {
 				t.Fatalf("span id missing or invalid: %#v", event.Attributes)
@@ -368,8 +370,9 @@ func verifyInstalledEvents(t *testing.T, events []installedEvent) {
 			}
 			switch event.Attributes["title"] {
 			case "HTTP server panic":
-				assertKeys(t, event.Attributes, "exception", "level", "metadata", "stackFrames", "title")
+				assertKeys(t, event.Attributes, "context", "exception", "level", "metadata", "stackFrames", "title")
 				assertKeys(t, metadata, "method", "panic", "panicType", "routeTemplate", "sampled", "spanId", "statusCode", "traceId")
+				assertEventContext(t, event.Attributes, metadata)
 				exception, ok := event.Attributes["exception"].(map[string]any)
 				if !ok {
 					t.Fatalf("panic exception missing or invalid: %#v", event.Attributes)
@@ -406,8 +409,9 @@ func verifyInstalledEvents(t *testing.T, events []installedEvent) {
 				}
 				panicIssue = event.Attributes
 			case "HTTP server error response":
-				assertKeys(t, event.Attributes, "level", "metadata", "title")
+				assertKeys(t, event.Attributes, "context", "level", "metadata", "title")
 				assertKeys(t, metadata, "method", "routeTemplate", "sampled", "spanId", "statusCode", "traceId")
+				assertEventContext(t, event.Attributes, metadata)
 				optInIssue = event.Attributes
 			default:
 				t.Fatalf("unexpected issue title: %#v", event.Attributes)
@@ -484,6 +488,58 @@ func waitFor(t *testing.T, timeout time.Duration, ready func() bool) {
 			t.Fatal("timed out waiting for installed delivery")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func assertEventContext(t *testing.T, attributes, metadata map[string]any) {
+	t.Helper()
+	context, ok := attributes["context"].(map[string]any)
+	if !ok {
+		t.Fatalf("typed context missing or invalid: %#v", attributes)
+	}
+	assertKeys(t, context, "resource", "schemaVersion", "trace")
+	if context["schemaVersion"] != float64(1) {
+		t.Fatalf("unexpected context schema version: %#v", context)
+	}
+	resource, ok := context["resource"].(map[string]any)
+	if !ok {
+		t.Fatalf("resource context missing or invalid: %#v", context)
+	}
+	assertKeys(t, resource, "device", "operatingSystem", "runtime")
+	runtimeContext, ok := resource["runtime"].(map[string]any)
+	if !ok || runtimeContext["name"] != "go" || runtimeContext["version"] != runtime.Version() {
+		t.Fatalf("runtime context mismatch: %#v", resource)
+	}
+	operatingSystem, ok := resource["operatingSystem"].(map[string]any)
+	if !ok || operatingSystem["name"] != runtime.GOOS {
+		t.Fatalf("operating system context mismatch: %#v", resource)
+	}
+	device, ok := resource["device"].(map[string]any)
+	if !ok || device["architecture"] != runtime.GOARCH {
+		t.Fatalf("device context mismatch: %#v", resource)
+	}
+	trace, ok := context["trace"].(map[string]any)
+	expectedTraceID := attributes["traceId"]
+	if expectedTraceID == nil {
+		expectedTraceID = metadata["traceId"]
+	}
+	expectedSpanID := attributes["spanId"]
+	if expectedSpanID == nil {
+		expectedSpanID = metadata["spanId"]
+	}
+	if !ok || trace["traceId"] != expectedTraceID || trace["spanId"] != expectedSpanID || trace["sampled"] != metadata["sampled"] {
+		t.Fatalf("typed trace context mismatch: context=%#v metadata=%#v", context, metadata)
+	}
+	parentSpanID, exists := attributes["parentSpanId"]
+	if !exists {
+		parentSpanID, exists = metadata["parentSpanId"]
+	}
+	if exists {
+		if trace["parentSpanId"] != parentSpanID {
+			t.Fatalf("typed parent span mismatch: context=%#v metadata=%#v", context, metadata)
+		}
+	} else if _, exists := trace["parentSpanId"]; exists {
+		t.Fatalf("typed context invented parent span: %#v", context)
 	}
 }
 
