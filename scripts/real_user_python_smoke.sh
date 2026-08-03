@@ -45,6 +45,44 @@ run_make() {
     make --no-print-directory -C "$tmp_dir" "$@"
 }
 
+check_base_event_parity() {
+    local input_path="$1"
+    local projection_path="${input_path%.json}.base-parity.json"
+
+    python3 - "$input_path" "$projection_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+input_path = Path(sys.argv[1])
+projection_path = Path(sys.argv[2])
+payload = json.loads(input_path.read_text(encoding="utf-8"))
+events = payload.get("events")
+if not isinstance(events, list) or not events:
+    raise SystemExit("runtime-enriched parity input must include events")
+for event in events:
+    attributes = event.get("attributes")
+    if not isinstance(attributes, dict):
+        raise SystemExit("runtime-enriched parity event must include attributes")
+    context = attributes.get("context")
+    if not isinstance(context, dict) or context.get("schemaVersion") != 1:
+        raise SystemExit(f"missing telemetry context for {event.get('type')}")
+    resource = context.get("resource")
+    runtime = resource.get("runtime") if isinstance(resource, dict) else None
+    if not isinstance(runtime, dict) or not isinstance(runtime.get("name"), str):
+        raise SystemExit(f"missing runtime identity for {event.get('type')}")
+    attributes.pop("context")
+projection_path.write_text(
+    json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
+    python3 "$repo_root/scripts/check_sdk_parity.py" \
+        "$repo_root/fixtures/valid-batch.json" \
+        "$projection_path" \
+        >/dev/null
+}
+
 run_readme_example() {
     local make_target="$1"
     local output_prefix="$2"
@@ -57,7 +95,7 @@ run_readme_example() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -74,7 +112,7 @@ run_packaged_example_module() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -91,7 +129,7 @@ run_packaged_real_user_module() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -108,7 +146,7 @@ run_packaged_examples_entrypoint() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -248,7 +286,7 @@ run_smoke_script() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -266,6 +304,29 @@ run_logging_smoke() {
     grep -q '"exceptionName": "RuntimeError"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"hasPathname": false' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"hasExceptionText": false' "$tmp_dir/$output_prefix.stdout.json"
+}
+
+run_runtime_context_smoke() {
+    local output_prefix="$1"
+
+    python "$tmp_dir/runtime_context_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    python3 - "$tmp_dir/$output_prefix.stdout.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = {
+    "explicitMerge": True,
+    "ok": True,
+    "optOut": True,
+    "privacyBounded": True,
+    "signals": 7,
+    "validation": True,
+}
+if payload != expected:
+    raise SystemExit(f"unexpected runtime context smoke result: {payload!r}")
+PY
 }
 
 run_http_transport_smoke() {
@@ -606,6 +667,7 @@ run_reinstall_from_freeze() {
     run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-freeze-packaged-examples"
     run_smoke_script "smoke-run" "$output_prefix-freeze-smoke"
     run_logging_smoke "$output_prefix-freeze-logging"
+    run_runtime_context_smoke "$output_prefix-freeze-runtime-context"
     run_http_transport_smoke "$output_prefix-freeze-http-transport"
     run_urlopen_span_smoke "$output_prefix-freeze-urlopen-span"
     run_requests_span_smoke "$output_prefix-freeze-requests-span"
@@ -667,6 +729,7 @@ run_reinstall_from_direct_requirement() {
     run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-direct-packaged-examples"
     run_smoke_script "smoke-run" "$output_prefix-direct-smoke"
     run_logging_smoke "$output_prefix-direct-logging"
+    run_runtime_context_smoke "$output_prefix-direct-runtime-context"
     run_http_transport_smoke "$output_prefix-direct-http-transport"
     run_urlopen_span_smoke "$output_prefix-direct-urlopen-span"
     run_requests_span_smoke "$output_prefix-direct-requests-span"
@@ -3181,6 +3244,199 @@ response = client.shutdown(transport)
 print(f'{{"ok": true, "status": {response.status_code}, "attempts": {response.attempts}, "events": 6}}', file=__import__("sys").stderr)
 EOF
 
+cat > "$tmp_dir/runtime_context_smoke.py" <<'EOF'
+import json
+import os
+import platform
+
+from logbrew_sdk import LogBrewClient, SdkError, TelemetryContext, create_issue_attributes_from_exception
+
+TIMESTAMP = "2026-08-03T00:00:00Z"
+
+
+def create_client(**options):
+    return LogBrewClient.create(
+        api_key="LOGBREW_API_KEY",
+        sdk_name="runtime-context-smoke",
+        sdk_version="0.1.0",
+        automatic_delivery=False,
+        **options,
+    )
+
+
+def bounded(value):
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or len(normalized) > 256:
+        return None
+    if any(ord(character) <= 31 or 127 <= ord(character) <= 159 for character in normalized):
+        return None
+    return normalized
+
+
+def expected_runtime_context():
+    runtime = {"name": bounded(platform.python_implementation()) or "python"}
+    runtime_version = bounded(platform.python_version())
+    if runtime_version is not None:
+        runtime["version"] = runtime_version
+
+    resource = {"runtime": runtime}
+    operating_system_name = bounded(platform.system())
+    if operating_system_name is not None:
+        operating_system = {"name": operating_system_name}
+        operating_system_version = bounded(platform.release())
+        if operating_system_version is not None:
+            operating_system["version"] = operating_system_version
+        resource["operatingSystem"] = operating_system
+    architecture = bounded(platform.machine())
+    if architecture is not None:
+        resource["device"] = {"architecture": architecture}
+    return {"schemaVersion": 1, "resource": resource}
+
+
+def capture_log_context(client, context=None):
+    attributes = {"message": "runtime context", "level": "info"}
+    if context is not None:
+        attributes["context"] = context
+    client.log("runtime-log", TIMESTAMP, attributes)
+    return json.loads(client.preview_json())["events"][0]["attributes"].get("context")
+
+
+private_marker_name = "LOGBREW_RUNTIME_CONTEXT_PRIVATE_MARKER"
+private_marker_value = "must-not-enter-telemetry"
+os.environ[private_marker_name] = private_marker_value
+try:
+    default_client = create_client()
+finally:
+    del os.environ[private_marker_name]
+
+default_client.release("runtime-release", TIMESTAMP, {"version": "1.0.0"})
+default_client.environment("runtime-environment", TIMESTAMP, {"name": "test"})
+default_client.issue("runtime-issue", TIMESTAMP, {"title": "Runtime issue", "level": "error"})
+default_client.log("runtime-log", TIMESTAMP, {"message": "runtime log", "level": "info"})
+default_client.span(
+    "runtime-span",
+    TIMESTAMP,
+    {
+        "name": "runtime span",
+        "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "spanId": "00f067aa0ba902b7",
+        "status": "ok",
+    },
+)
+default_client.action("runtime-action", TIMESTAMP, {"name": "runtime action", "status": "success"})
+default_client.metric(
+    "runtime-metric",
+    TIMESTAMP,
+    {
+        "name": "runtime.context",
+        "kind": "gauge",
+        "value": 1,
+        "unit": "1",
+        "temporality": "instant",
+    },
+)
+default_payload = json.loads(default_client.preview_json())
+expected_default = expected_runtime_context()
+if len(default_payload["events"]) != 7:
+    raise SystemExit("expected all seven telemetry signals")
+for event in default_payload["events"]:
+    if event["attributes"].get("context") != expected_default:
+        raise SystemExit(f"unexpected default context for {event['type']}")
+serialized_default = json.dumps(default_payload)
+if private_marker_name in serialized_default or private_marker_value in serialized_default:
+    raise SystemExit("automatic context leaked an environment marker")
+
+client_context: TelemetryContext = {
+    "schemaVersion": 1,
+    "resource": {
+        "service": {"name": "checkout-api", "version": "1.4.0"},
+        "runtime": {"name": "custom-python", "version": "9.9"},
+        "device": {"model": "container"},
+    },
+    "tags": {"plan": "team"},
+}
+event_context: TelemetryContext = {
+    "schemaVersion": 1,
+    "resource": {
+        "device": {"architecture": "logical"},
+        "application": {"name": "checkout-worker", "build": "20260803.1"},
+    },
+    "trace": {"traceId": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+    "tags": {"operation": "checkout", "plan": "enterprise"},
+}
+explicit_client = create_client(context=client_context)
+explicit_context = capture_log_context(explicit_client, event_context)
+if explicit_context["resource"]["runtime"] != {"name": "custom-python", "version": "9.9"}:
+    raise SystemExit("explicit runtime did not override the automatic default")
+if explicit_context["resource"]["service"] != {"name": "checkout-api", "version": "1.4.0"}:
+    raise SystemExit("explicit service context was not retained")
+if explicit_context["resource"]["device"] != {"model": "container", "architecture": "logical"}:
+    raise SystemExit("device context did not merge at field level")
+if explicit_context["tags"] != {"operation": "checkout", "plan": "enterprise"}:
+    raise SystemExit("event tags did not override client tags")
+if explicit_context["trace"]["traceId"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":
+    raise SystemExit("trace context was not normalized")
+
+opt_out_client = create_client(capture_runtime_context=False)
+if capture_log_context(opt_out_client) is not None:
+    raise SystemExit("runtime context opt-out still captured context")
+explicit_opt_out_context: TelemetryContext = {"schemaVersion": 1, "tags": {"plan": "team"}}
+explicit_opt_out_client = create_client(
+    capture_runtime_context=False,
+    context=explicit_opt_out_context,
+)
+if capture_log_context(explicit_opt_out_client) != explicit_opt_out_context:
+    raise SystemExit("runtime context opt-out changed explicit context")
+
+issue_context: TelemetryContext = {
+    "schemaVersion": 1,
+    "resource": {"application": {"name": "checkout-worker"}},
+}
+issue_attributes = create_issue_attributes_from_exception(
+    RuntimeError("inventory unavailable"),
+    context=issue_context,
+    include_stack_frames=False,
+)
+if issue_attributes.get("context") != issue_context:
+    raise SystemExit("exception helper did not preserve context")
+
+validation_checks = 0
+try:
+    create_client(capture_runtime_context="yes")
+except SdkError as error:
+    if error.code != "configuration_error" or "must be a boolean" not in error.message:
+        raise
+    validation_checks += 1
+else:
+    raise SystemExit("expected invalid runtime context option to fail")
+
+try:
+    create_client(capture_runtime_context=False, context={"resource": {"runtime": {"name": "python"}}})
+except SdkError as error:
+    if error.code != "validation_error" or "schemaVersion must be 1" not in error.message:
+        raise
+    validation_checks += 1
+else:
+    raise SystemExit("expected malformed telemetry context to fail")
+
+print(
+    json.dumps(
+        {
+            "ok": True,
+            "signals": len(default_payload["events"]),
+            "explicitMerge": True,
+            "optOut": True,
+            "privacyBounded": True,
+            "validation": validation_checks == 2,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+)
+EOF
+
 cat > "$tmp_dir/Makefile" <<'EOF'
 .PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-first-useful-telemetry smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run
 
@@ -3265,6 +3521,7 @@ check_packaged_examples_help "smoke-packaged-examples-help" "wheel-packaged-exam
 run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-packaged-examples"
 run_smoke_script "smoke-run" "smoke"
 run_logging_smoke "wheel-logging"
+run_runtime_context_smoke "wheel-runtime-context"
 run_http_transport_smoke "wheel-http-transport"
 run_urlopen_span_smoke "wheel-urlopen-span"
 run_requests_span_smoke "wheel-requests-span"
@@ -3306,6 +3563,7 @@ check_packaged_examples_help "smoke-packaged-examples-help" "wheel-reinstall-pac
 run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-reinstall-packaged-examples"
 run_smoke_script "smoke-run" "smoke-reinstall"
 run_logging_smoke "wheel-reinstall-logging"
+run_runtime_context_smoke "wheel-reinstall-runtime-context"
 run_http_transport_smoke "wheel-reinstall-http-transport"
 run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 run_requests_span_smoke "wheel-reinstall-requests-span"
@@ -3358,6 +3616,7 @@ check_packaged_examples_help "smoke-packaged-examples-help" "sdist-packaged-exam
 run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-packaged-examples"
 run_smoke_script "smoke-run" "sdist-smoke"
 run_logging_smoke "sdist-logging"
+run_runtime_context_smoke "sdist-runtime-context"
 run_http_transport_smoke "sdist-http-transport"
 run_urlopen_span_smoke "sdist-urlopen-span"
 run_requests_span_smoke "sdist-requests-span"
@@ -3399,6 +3658,7 @@ check_packaged_examples_help "smoke-packaged-examples-help" "sdist-reinstall-pac
 run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-reinstall-packaged-examples"
 run_smoke_script "smoke-run" "sdist-smoke-reinstall"
 run_logging_smoke "sdist-reinstall-logging"
+run_runtime_context_smoke "sdist-reinstall-runtime-context"
 run_http_transport_smoke "sdist-reinstall-http-transport"
 run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 run_requests_span_smoke "sdist-reinstall-requests-span"
