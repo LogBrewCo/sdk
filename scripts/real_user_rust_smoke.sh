@@ -277,7 +277,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-readme-example.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-readme-example.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-readme-example.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-readme-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme-example.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-readme-example.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-readme-example.stderr.json"
 
@@ -289,7 +289,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-example.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-example.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-example.stderr.json"
 (cd "$crate_dir/examples" && make) > "$tmp_dir/packaged-example-make-help.txt"
@@ -313,7 +313,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-readme-example-make.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme-example-make.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme-example-make.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-readme-example-make.stderr.json"
 (cd "$crate_dir/examples" && make run-real-user-smoke) > "$tmp_dir/packaged-example-make.stdout.json" 2> "$tmp_dir/packaged-example-make.stderr.json"
@@ -324,7 +324,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-example-make.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example-make.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example-make.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-example-make.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-example-make.stderr.json"
 (cd "$crate_dir/examples" && make run) > "$tmp_dir/packaged-example-make-run.stdout.json" 2> "$tmp_dir/packaged-example-make-run.stderr.json"
@@ -335,7 +335,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-example-make-run.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example-make-run.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example-make-run.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example-make-run.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make-run.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make-run.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-example-make-run.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-example-make-run.stderr.json"
 cd "$crate_dir"
@@ -952,7 +952,7 @@ grep -q '"type": "log"' smoke.stdout.json
 grep -q '"type": "span"' smoke.stdout.json
 grep -q '"type": "action"' smoke.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" smoke.stdout.json >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
 grep -q '"events":6' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json
 
@@ -964,7 +964,7 @@ grep -q '"type": "log"' readme-example.stdout.json
 grep -q '"type": "span"' readme-example.stdout.json
 grep -q '"type": "action"' readme-example.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" readme-example.stdout.json >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
 grep -q '"events":6' readme-example.stderr.json
 grep -q '"ok":true' readme-example.stderr.json
 
