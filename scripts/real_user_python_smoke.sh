@@ -45,6 +45,44 @@ run_make() {
     make --no-print-directory -C "$tmp_dir" "$@"
 }
 
+check_base_event_parity() {
+    local input_path="$1"
+    local projection_path="${input_path%.json}.base-parity.json"
+
+    python3 - "$input_path" "$projection_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+input_path = Path(sys.argv[1])
+projection_path = Path(sys.argv[2])
+payload = json.loads(input_path.read_text(encoding="utf-8"))
+events = payload.get("events")
+if not isinstance(events, list) or not events:
+    raise SystemExit("runtime-enriched parity input must include events")
+for event in events:
+    attributes = event.get("attributes")
+    if not isinstance(attributes, dict):
+        raise SystemExit("runtime-enriched parity event must include attributes")
+    context = attributes.get("context")
+    if not isinstance(context, dict) or context.get("schemaVersion") != 1:
+        raise SystemExit(f"missing telemetry context for {event.get('type')}")
+    resource = context.get("resource")
+    runtime = resource.get("runtime") if isinstance(resource, dict) else None
+    if not isinstance(runtime, dict) or not isinstance(runtime.get("name"), str):
+        raise SystemExit(f"missing runtime identity for {event.get('type')}")
+    attributes.pop("context")
+projection_path.write_text(
+    json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
+    python3 "$repo_root/scripts/check_sdk_parity.py" \
+        "$repo_root/fixtures/valid-batch.json" \
+        "$projection_path" \
+        >/dev/null
+}
+
 run_readme_example() {
     local make_target="$1"
     local output_prefix="$2"
@@ -57,7 +95,7 @@ run_readme_example() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -74,7 +112,7 @@ run_packaged_example_module() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -91,7 +129,7 @@ run_packaged_real_user_module() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -108,7 +146,7 @@ run_packaged_examples_entrypoint() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -248,7 +286,7 @@ run_smoke_script() {
     grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
