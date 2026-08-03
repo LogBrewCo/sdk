@@ -208,6 +208,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_python_opentelemetry_privacy_denylist_literal(relative_text, line):
         return True
 
+    if is_rust_telemetry_context_reference(relative_text, line, terms):
+        return True
+
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
@@ -278,6 +281,65 @@ def is_allowed_match(relative: Path, line: str) -> bool:
         return True
 
     return False
+
+
+def is_rust_telemetry_context_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    stripped = line.strip()
+    if relative_text == "README.md":
+        return terms == {"hostnames"} and stripped.startswith(
+            "and does not probe hostnames, process details, environment variables, local"
+        )
+
+    if relative_text == "rust/logbrew/README.md":
+        if terms == {"customer"} and '"customer.tier"' in line:
+            return True
+        if terms == {"hostnames"} and stripped.startswith(
+            "The client adds conservative `rust` runtime"
+        ):
+            return True
+        if terms == {"restore"} and stripped.startswith(
+            "`activate_telemetry_context` returns a same-thread RAII guard"
+        ):
+            return True
+        return terms == {"customer"} and stripped.startswith(
+            "Session and subject IDs must be application-owned opaque identifiers."
+        )
+
+    if relative_text == "rust/logbrew/src/telemetry_context.rs":
+        if terms == {"restore"}:
+            return stripped in {
+                "/// Run one synchronous closure with context and restore the exact previous scope on unwind.",
+                "/// Restore this guard's context contribution. Repeated calls are harmless.",
+            }
+        token_fragments = (
+            "token: u64",
+            "NEXT_CONTEXT_TOKEN",
+            "{ token, context }",
+            "token: Some(token)",
+            "token: Option<u64>",
+            "self.token.take()",
+            "active.token == token",
+        )
+        return terms == {"token"} and any(fragment in line for fragment in token_fragments)
+
+    if relative_text == "rust/logbrew/tests/telemetry_context.rs":
+        if terms == {"customer"}:
+            return '"customer.tier"' in line
+        if terms == {"hostname"}:
+            return stripped == '"hostname",'
+        return terms == {"restore"} and stripped.startswith(
+            "fn synchronous_scopes_restore_on_close_drop_panic_and_threads()"
+        )
+
+    return (
+        relative_text == "scripts/check_rust_first_useful_payload.py"
+        and terms == {"hostname"}
+        and stripped.startswith('for forbidden_key in ["hostname",')
+    )
 
 
 def is_java_aes_key_spec_reference(relative_text: str, line: str) -> bool:

@@ -470,6 +470,7 @@ fn product_timeline_builds_product_action_event() {
     assert_eq!(timeline_metadata["routeTemplate"], "/checkout");
     assert_eq!(timeline_metadata["sessionId"], "session_123");
     assert_eq!(timeline_metadata["traceId"], "trace_123");
+    assert_eq!(attributes["context"]["session"]["id"], "session_123");
     assert_eq!(timeline_metadata["screen"], "Checkout");
     assert_eq!(timeline_metadata["funnel"], "purchase");
     assert_eq!(timeline_metadata["step"], "submit");
@@ -517,6 +518,7 @@ fn product_timeline_builds_network_milestone_event() {
     assert_eq!(timeline_metadata["durationMs"], 42.5);
     assert_eq!(timeline_metadata["sessionId"], "session_123");
     assert_eq!(timeline_metadata["traceId"], "trace_123");
+    assert_eq!(attributes["context"]["session"]["id"], "session_123");
     assert_eq!(timeline_metadata["region"], "iad");
     assert_eq!(timeline_metadata["cached"], false);
 }
@@ -777,6 +779,7 @@ fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
     assert_eq!(events.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
     assert_eq!(events.span_id, "b7ad6b7169203331");
     assert_eq!(events.parent_span_id.as_deref(), Some("00f067aa0ba902b7"));
+    assert!(events.sampled);
     assert_eq!(
         events.outgoing_traceparent,
         "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
@@ -805,6 +808,13 @@ fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
     assert_eq!(span["metadata"]["method"], "POST");
     assert_eq!(span["metadata"]["statusCode"], 503);
     assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
+    assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
+    assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
+    assert_eq!(
+        span["context"]["trace"]["parentSpanId"],
+        span["parentSpanId"]
+    );
+    assert_eq!(span["context"]["trace"]["sampled"], true);
     assert!(client.preview_json().unwrap().find("cart=sample").is_none());
     assert!(client.preview_json().unwrap().find("#debug").is_none());
 
@@ -814,6 +824,7 @@ fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
     assert_eq!(metric["value"], 183.4);
     assert_eq!(metric["unit"], "ms");
     assert_eq!(metric["metadata"]["routeTemplate"], "/checkout/:cart_id");
+    assert_eq!(metric["context"], span["context"]);
 }
 
 #[test]

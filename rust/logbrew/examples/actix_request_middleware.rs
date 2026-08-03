@@ -5,7 +5,10 @@ use actix_web::{
     middleware::{Next, from_fn},
     test, web,
 };
-use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue, RecordingTransport};
+use logbrew::{
+    HttpRequestTelemetry, LogBrewClient, RecordingTransport, TelemetryContext,
+    TelemetryNamedVersion, TelemetryResource,
+};
 use std::{
     sync::{Arc, Mutex},
     time::Instant,
@@ -89,16 +92,6 @@ async fn logbrew_request_telemetry(
     let status_code = response.status().as_u16();
     let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
 
-    let mut metadata = Metadata::new();
-    metadata.insert(
-        "framework".to_string(),
-        MetadataValue::String("actix-web".to_string()),
-    );
-    metadata.insert(
-        "service".to_string(),
-        MetadataValue::String("checkout-service".to_string()),
-    );
-
     let mut telemetry = HttpRequestTelemetry::new(
         route_template,
         method,
@@ -107,7 +100,13 @@ async fn logbrew_request_telemetry(
     )
     .with_status_code(status_code)
     .with_duration_ms(duration_ms)
-    .with_metadata(metadata);
+    .with_context(
+        TelemetryContext::new().with_resource(
+            TelemetryResource::new()
+                .with_service(TelemetryNamedVersion::new("checkout-service").with_version("1.2.3"))
+                .with_framework(TelemetryNamedVersion::new("actix-web")),
+        ),
+    );
     if let Some(traceparent) = incoming_traceparent {
         telemetry = telemetry.with_incoming_traceparent(traceparent);
     }

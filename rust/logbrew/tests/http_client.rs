@@ -71,6 +71,13 @@ fn http_client_span_builds_sanitized_outbound_span_and_traceparent() {
     assert_eq!(span["metadata"]["statusCode"], 503);
     assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
     assert_eq!(span["metadata"]["retryAttempt"], 1);
+    assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
+    assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
+    assert_eq!(
+        span["context"]["trace"]["parentSpanId"],
+        span["parentSpanId"]
+    );
+    assert_eq!(span["context"]["trace"]["sampled"], true);
 
     let preview = client.preview_json().unwrap();
     assert!(!preview.contains("card=sample"));

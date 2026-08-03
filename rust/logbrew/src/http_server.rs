@@ -2,7 +2,10 @@ use crate::http_fields::{
     normalize_method, sanitize_route_template, status_code_class, telemetry_metadata,
     validate_duration_ms, validate_status_code,
 };
-use crate::{Metadata, MetricEvent, SdkError, SpanEvent, Traceparent, TraceparentSpanInput};
+use crate::{
+    Metadata, MetricEvent, SdkError, SpanEvent, TelemetryContext, TelemetryTraceContext,
+    Traceparent, TraceparentSpanInput, merge_telemetry_contexts,
+};
 use serde_json::Value;
 
 const DEFAULT_TRACE_FLAGS: &str = "01";
@@ -22,6 +25,7 @@ pub struct HttpRequestTelemetry {
     metadata: Option<Metadata>,
     span_name: Option<String>,
     metric_name: String,
+    context: Option<TelemetryContext>,
 }
 
 impl HttpRequestTelemetry {
@@ -45,6 +49,7 @@ impl HttpRequestTelemetry {
             metadata: None,
             span_name: None,
             metric_name: "http.server.duration".to_string(),
+            context: None,
         }
     }
 
@@ -96,8 +101,15 @@ impl HttpRequestTelemetry {
         self
     }
 
+    /// Attach shared event context; effective request trace identity is merged into it.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     /// Build the request span plus an optional duration metric.
     pub fn build(self) -> Result<HttpRequestTelemetryEvents, SdkError> {
+        let explicit_context = self.context.clone();
         let route = sanitize_route_template("http request route_template", self.route_template)?;
         let method = normalize_method("http request method", &self.method)?;
         validate_status_code("http request status_code", self.status_code)?;
@@ -139,7 +151,7 @@ impl HttpRequestTelemetry {
             self.metadata,
         )?;
 
-        let span = match parsed_context.as_ref() {
+        let mut span = match parsed_context.as_ref() {
             Some(context) => {
                 let mut input = TraceparentSpanInput::new(span_name, &span_id, status);
                 if let Some(duration_ms) = self.duration_ms {
@@ -158,9 +170,26 @@ impl HttpRequestTelemetry {
                 span.with_metadata(metadata.clone())
             }
         };
+        let mut trace = TelemetryTraceContext::new(trace_id).with_span_id(&span_id);
+        if let Some(parent_span_id) = parsed_context
+            .as_ref()
+            .map(|context| context.parent_span_id.as_str())
+        {
+            trace = trace.with_parent_span_id(parent_span_id);
+        }
+        let sampled = parsed_context
+            .as_ref()
+            .map(|context| context.sampled)
+            .unwrap_or_else(|| trace_flags_sampled(trace_flags));
+        trace = trace.with_sampled(sampled);
+        let trace_context = TelemetryContext::new().with_trace(trace);
+        let context = merge_telemetry_contexts(Some(&trace_context), explicit_context.as_ref())?
+            .expect("request trace context is always populated");
+        span = span.with_context(context.clone());
         let metric = self.duration_ms.map(|duration_ms| {
             MetricEvent::new(self.metric_name, "histogram", duration_ms, "ms", "delta")
                 .with_metadata(metadata)
+                .with_context(context)
         });
 
         Ok(HttpRequestTelemetryEvents {
@@ -169,9 +198,16 @@ impl HttpRequestTelemetry {
             trace_id: trace_id.to_string(),
             span_id,
             parent_span_id: parsed_context.map(|context| context.parent_span_id),
+            sampled,
             outgoing_traceparent,
         })
     }
+}
+
+fn trace_flags_sampled(trace_flags: &str) -> bool {
+    u8::from_str_radix(trace_flags.trim(), 16)
+        .map(|flags| flags & 1 == 1)
+        .unwrap_or(false)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -187,6 +223,8 @@ pub struct HttpRequestTelemetryEvents {
     pub span_id: String,
     /// Parent span ID when a valid incoming traceparent was continued.
     pub parent_span_id: Option<String>,
+    /// Whether the effective W3C trace sampled bit is set.
+    pub sampled: bool,
     /// Outgoing W3C traceparent header value for downstream app-owned clients.
     pub outgoing_traceparent: String,
 }

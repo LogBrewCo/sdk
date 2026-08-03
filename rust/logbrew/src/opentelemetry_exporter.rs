@@ -1,5 +1,6 @@
 use crate::{
-    LogBrewClient, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent,
+    LogBrewClient, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent, TelemetryContext,
+    TelemetryDeployment, TelemetryNamedVersion, TelemetryResource, TelemetryTraceContext,
     http_fields::sanitize_route_template, metadata_safety::sanitized_metadata,
 };
 use opentelemetry::{Key, KeyValue, Value};
@@ -137,6 +138,7 @@ impl LogBrewOpenTelemetrySpanExporter {
         event
             .with_duration_ms(duration_ms(span.start_time, span.end_time))
             .with_metadata(self.metadata_for(&span))
+            .with_context(self.context_for(&span))
     }
 
     fn metadata_for(&self, span: &SpanData) -> Metadata {
@@ -199,6 +201,50 @@ impl LogBrewOpenTelemetrySpanExporter {
             .ok()
             .and_then(|resource| resource.service_name.clone())
     }
+
+    fn context_for(&self, span: &SpanData) -> TelemetryContext {
+        let snapshot = self
+            .resource
+            .lock()
+            .map(|resource| resource.clone())
+            .unwrap_or_default();
+        let service_name = self.config.service_name.clone().or(snapshot.service_name);
+        let service_version = self
+            .config
+            .service_version
+            .clone()
+            .or(snapshot.service_version);
+        let deployment_environment = self
+            .config
+            .deployment_environment
+            .clone()
+            .or(snapshot.deployment_environment);
+
+        let mut resource = TelemetryResource::new();
+        if let Some(service_name) = service_name {
+            let mut service = TelemetryNamedVersion::new(service_name);
+            if let Some(service_version) = service_version {
+                service = service.with_version(service_version);
+            }
+            resource = resource.with_service(service);
+        }
+        if let Some(environment) = deployment_environment {
+            resource =
+                resource.with_deployment(TelemetryDeployment::new().with_environment(environment));
+        }
+        let mut trace = TelemetryTraceContext::new(span.span_context.trace_id().to_string())
+            .with_span_id(span.span_context.span_id().to_string())
+            .with_sampled(span.span_context.is_sampled());
+        let parent_span_id = span.parent_span_id.to_string();
+        if parent_span_id != "0000000000000000" {
+            trace = trace.with_parent_span_id(parent_span_id);
+        }
+        let mut context = TelemetryContext::new().with_trace(trace);
+        if resource.service.is_some() || resource.deployment.is_some() {
+            context = context.with_resource(resource);
+        }
+        context
+    }
 }
 
 impl fmt::Debug for LogBrewOpenTelemetrySpanExporter {
@@ -233,6 +279,8 @@ impl SpanExporter for LogBrewOpenTelemetrySpanExporter {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct ResourceSnapshot {
     service_name: Option<String>,
+    service_version: Option<String>,
+    deployment_environment: Option<String>,
 }
 
 impl From<&Resource> for ResourceSnapshot {
@@ -240,7 +288,22 @@ impl From<&Resource> for ResourceSnapshot {
         let service_name = resource
             .get(&Key::from_static_str("service.name"))
             .and_then(value_to_string);
-        Self { service_name }
+        let service_version = resource
+            .get(&Key::from_static_str("service.version"))
+            .and_then(value_to_string);
+        let deployment_environment = resource
+            .get(&Key::from_static_str("deployment.environment.name"))
+            .and_then(value_to_string)
+            .or_else(|| {
+                resource
+                    .get(&Key::from_static_str("deployment.environment"))
+                    .and_then(value_to_string)
+            });
+        Self {
+            service_name,
+            service_version,
+            deployment_environment,
+        }
     }
 }
 

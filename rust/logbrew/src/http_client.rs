@@ -3,7 +3,10 @@ use crate::http_fields::{
     telemetry_metadata, validate_duration_ms, validate_status_code,
 };
 use crate::metadata_safety::sanitized_metadata;
-use crate::{Metadata, SdkError, SpanEvent, Traceparent, TraceparentContext, TraceparentSpanInput};
+use crate::{
+    Metadata, SdkError, SpanEvent, TelemetryContext, TelemetryTraceContext, Traceparent,
+    TraceparentContext, TraceparentSpanInput, merge_telemetry_contexts,
+};
 use serde_json::Value;
 #[cfg(feature = "hyper")]
 use std::future::Future;
@@ -20,6 +23,7 @@ pub struct HttpClientSpan {
     duration_ms: Option<f64>,
     error_type: Option<String>,
     metadata: Option<Metadata>,
+    context: Option<TelemetryContext>,
 }
 
 impl HttpClientSpan {
@@ -37,6 +41,7 @@ impl HttpClientSpan {
             duration_ms: None,
             error_type: None,
             metadata: None,
+            context: None,
         }
     }
 
@@ -64,6 +69,12 @@ impl HttpClientSpan {
         self
     }
 
+    /// Attach shared event context; effective outbound trace identity is merged into it.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     /// Build the outbound span plus the exact W3C `traceparent` header value to send.
     pub fn from_traceparent_context(
         self,
@@ -82,6 +93,7 @@ impl HttpClientSpan {
         parent_span_id: Option<&str>,
         trace_flags: &str,
     ) -> Result<HttpClientSpanEvents, SdkError> {
+        let explicit_context = self.context.clone();
         let route = sanitize_route_template("http client route_template", self.route_template)?;
         let method = normalize_method("http client method", &self.method)?;
         validate_status_code("http client status_code", self.status_code)?;
@@ -122,8 +134,16 @@ impl HttpClientSpan {
             self.error_type,
             self.metadata,
         )?;
+        let mut trace = TelemetryTraceContext::new(trace_id).with_span_id(&span_id);
+        if let Some(parent_span_id) = parent_span_id {
+            trace = trace.with_parent_span_id(parent_span_id);
+        }
+        trace = trace.with_sampled(trace_flags_sampled(trace_flags));
+        let trace_context = TelemetryContext::new().with_trace(trace);
+        let context = merge_telemetry_contexts(Some(&trace_context), explicit_context.as_ref())?
+            .expect("HTTP client trace context is always populated");
         Ok(HttpClientSpanEvents {
-            span: span.with_metadata(metadata),
+            span: span.with_metadata(metadata).with_context(context),
             trace_id: trace_id.trim().to_ascii_lowercase(),
             span_id,
             parent_span_id: parent_span_id.map(|span_id| span_id.trim().to_ascii_lowercase()),
@@ -257,6 +277,12 @@ impl HttpClientSpan {
 
         result.map_err(HttpRequestCaptureError::Request)
     }
+}
+
+fn trace_flags_sampled(trace_flags: &str) -> bool {
+    u8::from_str_radix(trace_flags.trim(), 16)
+        .map(|flags| flags & 1 == 1)
+        .unwrap_or(false)
 }
 
 #[cfg(feature = "hyper")]

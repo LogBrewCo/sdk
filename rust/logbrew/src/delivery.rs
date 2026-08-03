@@ -1,7 +1,8 @@
 use crate::{
     ActionEvent, EnvironmentEvent, Event, EventBatch, IssueEvent, LogEvent, MetricEvent,
-    ReleaseEvent, SdkError, SdkInfo, SpanEvent, Transport, TransportResponse, require_non_empty,
-    require_timestamp,
+    ReleaseEvent, SdkError, SdkInfo, SpanEvent, TelemetryContext, TelemetryTraceContext, Transport,
+    TransportResponse, current_telemetry_context, require_non_empty, require_timestamp,
+    validate_telemetry_context,
 };
 use serde_json::{Map, Value};
 use std::fmt;
@@ -144,6 +145,8 @@ pub struct ClientBuilder {
     max_queue_bytes: usize,
     max_batch_events: usize,
     max_request_body_bytes: usize,
+    context: Option<TelemetryContext>,
+    capture_runtime_context: bool,
 }
 
 impl fmt::Debug for ClientBuilder {
@@ -157,6 +160,8 @@ impl fmt::Debug for ClientBuilder {
             .field("max_queue_bytes", &self.max_queue_bytes)
             .field("max_batch_events", &self.max_batch_events)
             .field("max_request_body_bytes", &self.max_request_body_bytes)
+            .field("has_context", &self.context.is_some())
+            .field("capture_runtime_context", &self.capture_runtime_context)
             .finish_non_exhaustive()
     }
 }
@@ -195,6 +200,18 @@ impl ClientBuilder {
     /// Set the maximum exact UTF-8 request-body bytes for one delivery batch.
     pub fn max_request_body_bytes(mut self, max_request_body_bytes: usize) -> Self {
         self.max_request_body_bytes = max_request_body_bytes;
+        self
+    }
+
+    /// Attach privacy-bounded base context merged into every captured signal.
+    pub fn context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
+    /// Enable or disable conservative Rust runtime/OS/architecture defaults.
+    pub fn capture_runtime_context(mut self, enabled: bool) -> Self {
+        self.capture_runtime_context = enabled;
         self
     }
 
@@ -258,6 +275,11 @@ impl ClientBuilder {
         let max_event_bytes = self
             .max_queue_bytes
             .min(self.max_request_body_bytes - envelope_bytes);
+        let runtime_context = self
+            .capture_runtime_context
+            .then(TelemetryContext::runtime_defaults);
+        let context =
+            crate::telemetry_context::merge_captured_contexts([runtime_context, self.context])?;
 
         Ok(LogBrewClient {
             inner: Arc::new(ClientInner {
@@ -268,6 +290,7 @@ impl ClientBuilder {
                 max_request_body_bytes: self.max_request_body_bytes,
                 max_event_bytes,
                 request_prefix,
+                context,
                 automatic,
                 client_owners: AtomicUsize::new(1),
                 state: Mutex::new(ClientState::new(
@@ -390,6 +413,8 @@ impl LogBrewClient {
             max_queue_bytes: DEFAULT_MAX_QUEUE_BYTES,
             max_batch_events: DEFAULT_MAX_BATCH_EVENTS,
             max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
+            context: None,
+            capture_runtime_context: true,
         }
     }
 
@@ -550,11 +575,28 @@ impl LogBrewClient {
         event_type: &str,
         id: String,
         timestamp: String,
-        attributes: Map<String, Value>,
+        mut attributes: Map<String, Value>,
     ) -> Result<(), SdkError> {
         self.require_open_for_capture()?;
         require_non_empty("event id", &id)?;
         require_timestamp(&timestamp)?;
+        let event_context = attributes
+            .remove("context")
+            .map(crate::telemetry_context::context_from_value)
+            .transpose()?;
+        let signal_context = span_signal_context(event_type, &attributes);
+        let context = crate::telemetry_context::merge_captured_contexts([
+            self.inner.context.clone(),
+            current_telemetry_context(),
+            signal_context,
+            event_context,
+        ])?;
+        if let Some(context) = context {
+            attributes.insert(
+                "context".to_string(),
+                crate::telemetry_context::context_to_value(&context)?,
+            );
+        }
         let event = Event {
             event_type: event_type.to_string(),
             timestamp,
@@ -626,6 +668,22 @@ impl LogBrewClient {
     }
 }
 
+fn span_signal_context(
+    event_type: &str,
+    attributes: &Map<String, Value>,
+) -> Option<TelemetryContext> {
+    if event_type != "span" {
+        return None;
+    }
+    let trace_id = attributes.get("traceId")?.as_str()?;
+    let span_id = attributes.get("spanId")?.as_str()?;
+    let mut trace = TelemetryTraceContext::new(trace_id).with_span_id(span_id);
+    if let Some(parent_span_id) = attributes.get("parentSpanId").and_then(Value::as_str) {
+        trace = trace.with_parent_span_id(parent_span_id);
+    }
+    validate_telemetry_context(&TelemetryContext::new().with_trace(trace)).ok()
+}
+
 struct ClientInner {
     sdk: SdkInfo,
     api_key: String,
@@ -634,6 +692,7 @@ struct ClientInner {
     max_request_body_bytes: usize,
     max_event_bytes: usize,
     request_prefix: Vec<u8>,
+    context: Option<TelemetryContext>,
     automatic: Option<Arc<AutomaticDelivery>>,
     client_owners: AtomicUsize,
     state: Mutex<ClientState>,

@@ -1,4 +1,4 @@
-use crate::{SdkError, SpanEvent};
+use crate::{SdkError, SpanEvent, TelemetryContext, TelemetryTraceContext};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
@@ -220,7 +220,7 @@ impl Traceparent {
             require_primitive_metadata(metadata)?;
         }
 
-        let mut span = SpanEvent::new(input.name, &context.trace_id, span_id, input.status)
+        let mut span = SpanEvent::new(input.name, &context.trace_id, &span_id, input.status)
             .with_parent_span_id(&context.parent_span_id);
         if let Some(duration_ms) = input.duration_ms {
             span = span.with_duration_ms(duration_ms);
@@ -228,7 +228,13 @@ impl Traceparent {
         if let Some(metadata) = input.metadata {
             span = span.with_metadata(metadata);
         }
-        Ok(span)
+        let context = TelemetryContext::new().with_trace(
+            TelemetryTraceContext::new(&context.trace_id)
+                .with_span_id(&span_id)
+                .with_parent_span_id(&context.parent_span_id)
+                .with_sampled(context.sampled),
+        );
+        Ok(span.with_context(context))
     }
 
     /// Build a LogBrew child span from an OpenTelemetry-compatible current span context.

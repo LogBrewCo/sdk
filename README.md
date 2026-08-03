@@ -78,7 +78,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | StackExchange.Redis | [`LogBrew.StackExchangeRedis`](dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis) | Optional Redis command spans without key/value capture |
 | PHP | [`logbrew/sdk`](php/logbrew-php) | Core PHP client, typed exception/stack/breadcrumb diagnostics, HTTP delivery, PSR-3/Monolog, native Symfony exception capture, and a config-cache-safe Laravel channel |
 | Ruby / Rails | [`logbrew-sdk`](ruby/logbrew-ruby) | Shared runtime/resource/session/subject context, typed exception/stack/breadcrumb diagnostics, automatic Rails request/error capture and delivery, stdlib `Logger`, and manual Rack helpers |
-| Rust | [`logbrew`](rust/logbrew) | Core client, typed error/panic/frame/breadcrumb diagnostics, and optional Tower/Axum error correlation and HTTP delivery |
+| Rust | [`logbrew`](rust/logbrew) | Shared runtime/resource/trace/session/subject context, typed issue diagnostics, HTTP/Tower correlation, `tracing`, OpenTelemetry export, and delivery |
 | Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product for iOS, macOS, tvOS, watchOS, Apple-style logger ergonomics, URLSession delivery; opt-in `LogBrewCrash` product for bounded native fatal-crash replay; Objective-C vendoring for mixed or Objective-C-only apps |
 | Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client, Android-style helper APIs, HTTP delivery |
 | Kotlin OkHttp | [`kotlin/logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp interceptor source package; Maven Central publication is pending, so use the core Kotlin package or local source until the artifact is published |
@@ -222,13 +222,14 @@ Each package README has ecosystem-specific install commands, logger integration 
 
 ## Metrics
 
-Metrics are explicit: the SDKs do not automatically collect runtime, framework, database, or host metrics yet.
+Metrics are explicit: the SDKs do not automatically collect runtime, framework, database, or host metrics yet. Their purpose is to aggregate behavior over time—rates, latency distributions, saturation, and release-to-release change—while logs/actions describe discrete facts and traces explain individual executions.
 
 Use metric helpers when your application already has a bounded measurement:
 
 - `counter` and `histogram` values use `delta` or `cumulative` temporality and must be non-negative.
 - `gauge` values use `instant` temporality and may go up or down.
-- Metadata should be primitive and low-cardinality, such as service, region, route template, queue, or worker name.
+- Metadata should be primitive and low-cardinality, such as region, route template, operation, status class, queue, or worker name. Keep service and deployment identity in typed context.
+- Do not use event, trace, session, user, raw URL, or other high-cardinality values as metric dimensions. Typed context may still link one metric event to an investigation without making those values aggregation keys.
 
 ## Product Analytics Capture
 
@@ -244,7 +245,7 @@ Framework integrations that capture inbound requests omit query strings from aut
 
 ## Agent-Readable Sessions
 
-LogBrew is designed for structured analysis across many app sessions, not only one-at-a-time inspection. Capture important product steps as `action` events, connect frontend and backend work with `traceparent`, and use shared low-cardinality metadata such as `sessionId`, `routeTemplate`, `funnel`, `step`, `feature`, and `region`.
+LogBrew is designed for structured analysis across many app sessions, not only one-at-a-time inspection. Capture important product steps as `action` events, connect frontend and backend work with `traceparent`, keep session/subject identity in the versioned typed context, and use low-cardinality dimensions such as `routeTemplate`, `funnel`, `step`, `feature`, and `region`.
 
 For browser and mobile apps, prefer explicit action helpers for clicks, form submits, route changes, funnel steps, and retry decisions that your app already understands. Avoid raw selectors, full URLs, user-entered text, screenshots, and visual replay data unless your team has a clear privacy policy and opt-in path.
 
@@ -263,6 +264,10 @@ LogBrew SDKs favor conservative defaults:
   and architecture as automatic shared context. It supports an explicit
   opt-out and does not infer user, service, application, session, or cloud
   identity.
+- The Rust client adds only Rust runtime name, target OS family, and
+  architecture as automatic shared context. It supports an explicit opt-out
+  and does not probe hostnames, process details, environment variables, local
+  accounts or paths, network/cloud identity, CPU details, or memory details.
 - The browser client adds only low-entropy browser brand/significant version,
   platform, and mobile/desktop family when User-Agent Client Hints expose them;
   otherwise it reports the generic browser runtime. It never reads the legacy

@@ -103,6 +103,7 @@ grep -F -q "$crate_name/src/http_fields.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/http_server.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/issue_diagnostics.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/product_timeline.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/src/telemetry_context.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/src/traceparent.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/readme_example.rs" "$tmp_dir/crate-contents.txt"
 grep -F -q "$crate_name/examples/real_user_smoke.rs" "$tmp_dir/crate-contents.txt"
@@ -127,6 +128,9 @@ grep -q 'MetricEvent' "$crate_readme"
 grep -q 'client.metric' "$crate_readme"
 grep -q 'low-cardinality' "$crate_readme"
 grep -q 'ProductTimeline' "$crate_readme"
+grep -q 'Shared Telemetry Context' "$crate_readme"
+grep -q 'TelemetryContext' "$crate_readme"
+grep -q 'with_telemetry_context_async' "$crate_readme"
 grep -q 'Product And Network Timelines' "$crate_readme"
 grep -q 'First Useful Service Telemetry' "$crate_readme"
 grep -q 'HTTP Server Request Telemetry' "$crate_readme"
@@ -251,6 +255,7 @@ test -f "$crate_dir/src/http_fields.rs"
 test -f "$crate_dir/src/http_server.rs"
 test -f "$crate_dir/src/issue_diagnostics.rs"
 test -f "$crate_dir/src/product_timeline.rs"
+test -f "$crate_dir/src/telemetry_context.rs"
 test -f "$crate_dir/src/traceparent.rs"
 test -f "$crate_dir/examples/readme_example.rs"
 test -f "$crate_dir/examples/real_user_smoke.rs"
@@ -870,6 +875,18 @@ test -f target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Public metric-event builder for explicit low-cardinality metric measurements\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Create a metric event with name, kind, value, unit, and temporality fields\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Attach primitive, low-cardinality metadata to the metric payload\.' target/doc/logbrew/struct.MetricEvent.html
+test -f target/doc/logbrew/struct.TelemetryContext.html
+grep -q 'Versioned privacy-bounded context available on every LogBrew signal\.' target/doc/logbrew/struct.TelemetryContext.html
+test -f target/doc/logbrew/struct.TelemetryResource.html
+grep -q 'Shared service, deployment, runtime, framework, OS, device, and app identity\.' target/doc/logbrew/struct.TelemetryResource.html
+test -f target/doc/logbrew/struct.TelemetryContextGuard.html
+grep -q 'Same-thread RAII guard returned by' target/doc/logbrew/struct.TelemetryContextGuard.html
+test -f target/doc/logbrew/struct.TelemetryContextFuture.html
+grep -q 'Executor-safe future wrapper returned by' target/doc/logbrew/struct.TelemetryContextFuture.html
+grep -q 'fn.validate_telemetry_context.html' target/doc/logbrew/index.html
+grep -q 'fn.merge_telemetry_contexts.html' target/doc/logbrew/index.html
+grep -q 'fn.with_telemetry_context.html' target/doc/logbrew/index.html
+grep -q 'fn.with_telemetry_context_async.html' target/doc/logbrew/index.html
 grep -q 'type.Metadata.html' target/doc/logbrew/index.html
 grep -q 'MetadataValue' target/doc/logbrew/index.html
 test -f target/doc/logbrew/struct.Traceparent.html
@@ -899,6 +916,7 @@ grep -q 'Attach an incoming W3C traceparent\. Malformed values fall back to the 
 grep -q 'Build the request span plus an optional duration metric\.' target/doc/logbrew/struct.HttpRequestTelemetry.html
 test -f target/doc/logbrew/struct.HttpRequestTelemetryEvents.html
 grep -q 'Request span and optional duration metric built for queueing on <code>LogBrewClient</code>\.' target/doc/logbrew/struct.HttpRequestTelemetryEvents.html
+grep -q 'Whether the effective W3C trace sampled bit is set\.' target/doc/logbrew/struct.HttpRequestTelemetryEvents.html
 grep -q 'Outgoing W3C traceparent header value for downstream app-owned clients\.' target/doc/logbrew/struct.HttpRequestTelemetryEvents.html
 test -f target/doc/logbrew/struct.ProductTimeline.html
 grep -q 'App-owned timeline builders for product actions and network milestones\.' target/doc/logbrew/struct.ProductTimeline.html

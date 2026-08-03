@@ -2,7 +2,11 @@ use crate::http_fields::{
     insert_optional, normalize_method, optional_label, optional_route_template, required_label,
     sanitize_route_template, telemetry_metadata, validate_duration_ms, validate_status_code,
 };
-use crate::{ACTION_STATUSES, ActionEvent, SdkError, require_allowed_value, require_non_empty};
+use crate::{
+    ACTION_STATUSES, ActionEvent, SdkError, TelemetryContext, TelemetrySessionContext,
+    TelemetryTraceContext, merge_telemetry_contexts, require_allowed_value, require_non_empty,
+    validate_telemetry_context,
+};
 use serde_json::{Map, Value};
 
 const PRODUCT_ANALYTICS_SCHEMA_VERSION: u64 = 1;
@@ -36,6 +40,7 @@ pub struct ProductActionTimeline {
     funnel: Option<String>,
     step: Option<String>,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl ProductActionTimeline {
@@ -51,6 +56,7 @@ impl ProductActionTimeline {
             funnel: None,
             step: None,
             metadata: None,
+            context: None,
         }
     }
 
@@ -102,6 +108,12 @@ impl ProductActionTimeline {
         self
     }
 
+    /// Attach explicit shared telemetry context to the action.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     /// Build a normal LogBrew action event for queueing with `client.action`.
     pub fn build(self) -> Result<ActionEvent, SdkError> {
         require_non_empty("product action name", &self.name)?;
@@ -114,16 +126,10 @@ impl ProductActionTimeline {
         let analytics_surface =
             bounded_product_analytics_surface(route_template.as_deref().or(screen.as_deref()));
         insert_optional(&mut metadata, "routeTemplate", route_template);
-        insert_optional(
-            &mut metadata,
-            "sessionId",
-            optional_label("session_id", self.session_id)?,
-        );
-        insert_optional(
-            &mut metadata,
-            "traceId",
-            optional_label("trace_id", self.trace_id)?,
-        );
+        let session_id = optional_label("session_id", self.session_id)?;
+        let trace_id = optional_label("trace_id", self.trace_id)?;
+        insert_optional(&mut metadata, "sessionId", session_id.clone());
+        insert_optional(&mut metadata, "traceId", trace_id.clone());
         insert_optional(&mut metadata, "screen", screen);
         insert_optional(
             &mut metadata,
@@ -145,7 +151,15 @@ impl ProductActionTimeline {
             metadata.remove("analyticsSurface");
         }
 
-        Ok(ActionEvent::new(self.name, self.status).with_metadata(metadata))
+        let mut action = ActionEvent::new(self.name, self.status).with_metadata(metadata);
+        if let Some(context) = timeline_context(
+            self.context.as_ref(),
+            session_id.as_deref(),
+            trace_id.as_deref(),
+        )? {
+            action = action.with_context(context);
+        }
+        Ok(action)
     }
 }
 
@@ -172,6 +186,7 @@ pub struct NetworkMilestoneTimeline {
     session_id: Option<String>,
     trace_id: Option<String>,
     metadata: Option<Map<String, Value>>,
+    context: Option<TelemetryContext>,
 }
 
 impl NetworkMilestoneTimeline {
@@ -187,6 +202,7 @@ impl NetworkMilestoneTimeline {
             session_id: None,
             trace_id: None,
             metadata: None,
+            context: None,
         }
     }
 
@@ -238,6 +254,12 @@ impl NetworkMilestoneTimeline {
         self
     }
 
+    /// Attach explicit shared telemetry context to the network milestone.
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
     /// Build a normal LogBrew action event for queueing with `client.action`.
     pub fn build(self) -> Result<ActionEvent, SdkError> {
         let route =
@@ -267,17 +289,40 @@ impl NetworkMilestoneTimeline {
         if let Some(duration_ms) = self.duration_ms {
             metadata.insert("durationMs".to_string(), Value::from(duration_ms));
         }
-        insert_optional(
-            &mut metadata,
-            "sessionId",
-            optional_label("session_id", self.session_id)?,
-        );
-        insert_optional(
-            &mut metadata,
-            "traceId",
-            optional_label("trace_id", self.trace_id)?,
-        );
+        let session_id = optional_label("session_id", self.session_id)?;
+        let trace_id = optional_label("trace_id", self.trace_id)?;
+        insert_optional(&mut metadata, "sessionId", session_id.clone());
+        insert_optional(&mut metadata, "traceId", trace_id.clone());
 
-        Ok(ActionEvent::new(name, status).with_metadata(metadata))
+        let mut action = ActionEvent::new(name, status).with_metadata(metadata);
+        if let Some(context) = timeline_context(
+            self.context.as_ref(),
+            session_id.as_deref(),
+            trace_id.as_deref(),
+        )? {
+            action = action.with_context(context);
+        }
+        Ok(action)
     }
+}
+
+fn timeline_context(
+    explicit: Option<&TelemetryContext>,
+    session_id: Option<&str>,
+    trace_id: Option<&str>,
+) -> Result<Option<TelemetryContext>, SdkError> {
+    let session = session_id.and_then(|session_id| {
+        validate_telemetry_context(
+            &TelemetryContext::new().with_session(TelemetrySessionContext::new(session_id)),
+        )
+        .ok()
+    });
+    let trace = trace_id.and_then(|trace_id| {
+        validate_telemetry_context(
+            &TelemetryContext::new().with_trace(TelemetryTraceContext::new(trace_id)),
+        )
+        .ok()
+    });
+    let automatic = merge_telemetry_contexts(session.as_ref(), trace.as_ref())?;
+    merge_telemetry_contexts(automatic.as_ref(), explicit)
 }

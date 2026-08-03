@@ -7,8 +7,8 @@ use axum::{
     routing::post,
 };
 use logbrew::{
-    LogBrewClient, Metadata, MetadataValue, RecordingTransport, TowerRequestIds,
-    TowerRequestTelemetryLayer,
+    LogBrewClient, RecordingTransport, TelemetryContext, TelemetryNamedVersion, TelemetryResource,
+    TowerRequestIds, TowerRequestTelemetryLayer,
 };
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
@@ -19,16 +19,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .api_key("LOGBREW_API_KEY")
         .build()?;
     let client = Arc::new(Mutex::new(client));
-
-    let mut metadata = Metadata::new();
-    metadata.insert(
-        "framework".to_string(),
-        MetadataValue::String("axum".to_string()),
-    );
-    metadata.insert(
-        "service".to_string(),
-        MetadataValue::String("checkout-service".to_string()),
-    );
 
     let logbrew_layer = TowerRequestTelemetryLayer::new(
         Arc::clone(&client),
@@ -42,7 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
         || "2026-06-02T10:00:00Z".to_string(),
     )
-    .with_metadata(metadata)
+    .with_context(
+        TelemetryContext::new().with_resource(
+            TelemetryResource::new()
+                .with_service(TelemetryNamedVersion::new("checkout-service").with_version("1.2.3"))
+                .with_framework(TelemetryNamedVersion::new("axum")),
+        ),
+    )
     .with_error_issues();
 
     let app = Router::new()
