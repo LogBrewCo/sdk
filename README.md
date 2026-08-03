@@ -69,7 +69,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | FastAPI | [`logbrew-fastapi`](python/logbrew_fastapi) | Request spans plus typed unhandled-exception diagnostics |
 | Flask | [`logbrew-flask`](python/logbrew_flask) | Request spans plus typed unhandled-exception diagnostics |
 | Django | [`logbrew-django`](python/logbrew_django) | Request spans plus typed unhandled-exception diagnostics |
-| Go | [`github.com/LogBrewCo/sdk/go/logbrew`](go/logbrew) | Core client, delivery, tracing, and typed exception/stack/breadcrumb diagnostics |
+| Go | [`github.com/LogBrewCo/sdk/go/logbrew`](go/logbrew) | Core client, shared runtime/resource/session/subject context, delivery, tracing, and typed exception/stack/breadcrumb diagnostics |
 | Go / Gin | [`github.com/LogBrewCo/sdk/go/logbrew/gin`](go/logbrew/gin) | Gin request spans, typed panic diagnostics, and optional request metrics |
 | Java | [`co.logbrew:logbrew-sdk`](java/logbrew-java) | Core client, typed issue diagnostics, servlet/Spring exception capture, HTTP delivery, JUL, and Logback support |
 | .NET | [`LogBrew`](dotnet/logbrew-dotnet) | Core .NET client, typed exception/stack/breadcrumb diagnostics, HTTP delivery, and `ILogger` provider |

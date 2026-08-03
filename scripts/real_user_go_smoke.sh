@@ -96,6 +96,9 @@ with zipfile.ZipFile(zip_path) as archive:
     issue_diagnostics_source_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/issue_diagnostics.go"
     if issue_diagnostics_source_path not in names:
         raise SystemExit("missing issue_diagnostics.go in proxy module zip")
+    telemetry_context_source_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/telemetry_context.go"
+    if telemetry_context_source_path not in names:
+        raise SystemExit("missing telemetry_context.go in proxy module zip")
     readme_example_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/readme_example/main.go"
     if readme_example_path not in names:
         raise SystemExit("missing examples/readme_example/main.go in proxy module zip")
@@ -140,6 +143,13 @@ for needle in (
     "LogBrewTraceFromContext",
     "LogAttributesWithTrace",
     "IssueAttributesWithTrace",
+    "ActionAttributesWithTrace",
+    "MetricAttributesWithTrace",
+    "Shared Telemetry Context",
+    "TelemetryContext",
+    "ValidateTelemetryContext",
+    "MergeTelemetryContexts",
+    "DisableRuntimeContext",
     "Structured Issue Diagnostics",
     "IssueException",
     "IssueBreadcrumb",
@@ -199,6 +209,7 @@ module_dir="$module_src_root/github.com/LogBrewCo/sdk/go/logbrew@v0.1.0"
 test -f "$module_dir/go.mod"
 test -f "$module_dir/http_client_trace.go"
 test -f "$module_dir/operation_trace.go"
+test -f "$module_dir/telemetry_context.go"
 test -f "$module_dir/examples/Makefile"
 test -f "$module_dir/examples/agent_timeline/main.go"
 test -f "$module_dir/examples/first_useful_telemetry/main.go"
@@ -414,9 +425,10 @@ import (
 
 func main() {
 	client, err := logbrew.NewClient(logbrew.Config{
-		APIKey:     "LOGBREW_API_KEY",
-		SDKName:    "smoke-app",
-		SDKVersion: "0.1.0",
+		APIKey:               "LOGBREW_API_KEY",
+		SDKName:              "smoke-app",
+		SDKVersion:           "0.1.0",
+		DisableRuntimeContext: true,
 	})
 	if err != nil {
 		panic(err)
@@ -490,9 +502,10 @@ import (
 
 func main() {
 	client, err := logbrew.NewClient(logbrew.Config{
-		APIKey:     "LOGBREW_API_KEY",
-		SDKName:    "logbrew-go",
-		SDKVersion: "0.1.0",
+		APIKey:               "LOGBREW_API_KEY",
+		SDKName:              "logbrew-go",
+		SDKVersion:           "0.1.0",
+		DisableRuntimeContext: true,
 	})
 	if err != nil {
 		panic(err)

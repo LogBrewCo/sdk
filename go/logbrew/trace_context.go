@@ -119,6 +119,12 @@ func (trace TraceContext) Metadata() map[string]any {
 	return metadata
 }
 
+// TelemetryContext returns first-class W3C trace and exact span correlation
+// suitable for an issue, log, action, or metric Context field.
+func (trace TraceContext) TelemetryContext() *TelemetryContext {
+	return telemetryContextWithTrace(nil, trace)
+}
+
 // TraceMetadataFromContext returns primitive trace metadata from ctx, when a
 // LogBrew trace context is active.
 func TraceMetadataFromContext(ctx context.Context) map[string]any {
@@ -131,16 +137,38 @@ func TraceMetadataFromContext(ctx context.Context) map[string]any {
 
 // LogAttributesWithTrace merges active trace metadata into log attributes.
 func LogAttributesWithTrace(ctx context.Context, attributes LogAttributes) LogAttributes {
-	if metadata := TraceMetadataFromContext(ctx); metadata != nil {
-		attributes.Metadata = mergeMetadata(attributes.Metadata, metadata)
+	if trace, ok := LogBrewTraceFromContext(ctx); ok {
+		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
+		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
 	}
 	return attributes
 }
 
 // IssueAttributesWithTrace merges active trace metadata into issue attributes.
 func IssueAttributesWithTrace(ctx context.Context, attributes IssueAttributes) IssueAttributes {
-	if metadata := TraceMetadataFromContext(ctx); metadata != nil {
-		attributes.Metadata = mergeMetadata(attributes.Metadata, metadata)
+	if trace, ok := LogBrewTraceFromContext(ctx); ok {
+		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
+		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
+	}
+	return attributes
+}
+
+// ActionAttributesWithTrace adds exact active trace/span context while keeping
+// legacy primitive metadata for compatible readers.
+func ActionAttributesWithTrace(ctx context.Context, attributes ActionAttributes) ActionAttributes {
+	if trace, ok := LogBrewTraceFromContext(ctx); ok {
+		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
+		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
+	}
+	return attributes
+}
+
+// MetricAttributesWithTrace adds exact active trace/span context while keeping
+// legacy primitive metadata for compatible readers.
+func MetricAttributesWithTrace(ctx context.Context, attributes MetricAttributes) MetricAttributes {
+	if trace, ok := LogBrewTraceFromContext(ctx); ok {
+		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
+		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
 	}
 	return attributes
 }
@@ -176,6 +204,7 @@ func SpanAttributesFromTraceContext(input TraceContextSpanInput) (SpanAttributes
 		Status:       input.Status,
 		DurationMs:   input.DurationMs,
 		Metadata:     compactMetadata(input.Metadata),
+		Context:      input.Trace.TelemetryContext(),
 		Links:        input.Links,
 	}, nil
 }

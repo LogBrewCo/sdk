@@ -248,6 +248,12 @@ type Config struct {
 	SDKName string
 	// SDKVersion identifies the calling SDK or application version.
 	SDKVersion string
+	// Context is explicit privacy-bounded resource, correlation, session,
+	// subject, and tag context merged into every event.
+	Context *TelemetryContext
+	// DisableRuntimeContext turns off the default Go version, OS family, and
+	// architecture context without changing explicit Context.
+	DisableRuntimeContext bool
 	// MaxRetries sets the retry budget for retryable transport failures.
 	MaxRetries int
 	// MaxQueueSize bounds the in-memory event queue. Zero defaults to 1000.
@@ -297,6 +303,7 @@ type Client struct {
 	flushMu        sync.Mutex
 	apiKey         string
 	sdk            sdkInfo
+	context        *TelemetryContext
 	maxRetries     int
 	maxQueueSize   int
 	events         []Event
@@ -334,6 +341,17 @@ func newClient(config Config, delivery *AutomaticDeliveryConfig) (*Client, error
 	if err := requireNonEmpty("sdk_version", config.SDKVersion); err != nil {
 		return nil, err
 	}
+	explicitContext, err := validateTelemetryContext(config.Context, "client telemetry context")
+	if err != nil {
+		return nil, err
+	}
+	clientContext := explicitContext
+	if !config.DisableRuntimeContext {
+		clientContext, err = mergeTelemetryContexts(createGoRuntimeContext(), explicitContext)
+		if err != nil {
+			return nil, err
+		}
+	}
 	maxRetries := config.MaxRetries
 	if maxRetries == 0 {
 		maxRetries = 2
@@ -360,6 +378,7 @@ func newClient(config Config, delivery *AutomaticDeliveryConfig) (*Client, error
 			Language: "go",
 			Version:  config.SDKVersion,
 		},
+		context:        clientContext,
 		maxRetries:     maxRetries,
 		maxQueueSize:   maxQueueSize,
 		events:         make([]Event, 0),
@@ -407,18 +426,20 @@ func (c *Client) previewJSONLocked() (string, error) {
 
 // ReleaseAttributes describes the public payload fields for a release event.
 type ReleaseAttributes struct {
-	Version  string         `json:"version"`
-	Commit   string         `json:"commit,omitempty"`
-	Notes    string         `json:"notes,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Version  string            `json:"version"`
+	Commit   string            `json:"commit,omitempty"`
+	Notes    string            `json:"notes,omitempty"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
+	Context  *TelemetryContext `json:"context,omitempty"`
 }
 
 // EnvironmentAttributes describes the public payload fields for an
 // environment event.
 type EnvironmentAttributes struct {
-	Name     string         `json:"name"`
-	Region   string         `json:"region,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Name     string            `json:"name"`
+	Region   string            `json:"region,omitempty"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
+	Context  *TelemetryContext `json:"context,omitempty"`
 }
 
 // IssueAttributes describes the public payload fields for an issue event.
@@ -431,14 +452,16 @@ type IssueAttributes struct {
 	Breadcrumbs          []IssueBreadcrumb `json:"breadcrumbs,omitempty"`
 	BreadcrumbsTruncated bool              `json:"breadcrumbsTruncated,omitempty"`
 	Metadata             map[string]any    `json:"metadata,omitempty"`
+	Context              *TelemetryContext `json:"context,omitempty"`
 }
 
 // LogAttributes describes the public payload fields for a log event.
 type LogAttributes struct {
-	Message  string         `json:"message"`
-	Level    string         `json:"level"`
-	Logger   string         `json:"logger,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Message  string            `json:"message"`
+	Level    string            `json:"level"`
+	Logger   string            `json:"logger,omitempty"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
+	Context  *TelemetryContext `json:"context,omitempty"`
 }
 
 // SpanAttributes describes the public payload fields for a span event.
@@ -451,6 +474,7 @@ type SpanAttributes struct {
 	DurationMs   *float64          `json:"durationMs,omitempty"`
 	Metadata     map[string]any    `json:"metadata,omitempty"`
 	Links        []SpanLinkSummary `json:"links,omitempty"`
+	Context      *TelemetryContext `json:"context,omitempty"`
 }
 
 // SpanLinkSummary is a privacy-bounded link from one span to another W3C trace
@@ -496,20 +520,22 @@ type TraceparentSpanInput struct {
 
 // ActionAttributes describes the public payload fields for an action event.
 type ActionAttributes struct {
-	Name     string         `json:"name"`
-	Status   string         `json:"status"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Name     string            `json:"name"`
+	Status   string            `json:"status"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
+	Context  *TelemetryContext `json:"context,omitempty"`
 }
 
 // MetricAttributes describes the public payload fields for an explicit metric
 // event.
 type MetricAttributes struct {
-	Name        string         `json:"name"`
-	Kind        string         `json:"kind"`
-	Value       float64        `json:"value"`
-	Unit        string         `json:"unit"`
-	Temporality string         `json:"temporality"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+	Name        string            `json:"name"`
+	Kind        string            `json:"kind"`
+	Value       float64           `json:"value"`
+	Unit        string            `json:"unit"`
+	Temporality string            `json:"temporality"`
+	Metadata    map[string]any    `json:"metadata,omitempty"`
+	Context     *TelemetryContext `json:"context,omitempty"`
 }
 
 func (c *Client) Release(id, timestamp string, attributes ReleaseAttributes) error {
@@ -576,6 +602,15 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 	}
 	if err := requireTimestamp(timestamp); err != nil {
 		return err
+	}
+	eventContext, _ := attributes["context"].(*TelemetryContext)
+	delete(attributes, "context")
+	context, err := mergeTelemetryContexts(c.context, eventContext)
+	if err != nil {
+		return err
+	}
+	if context != nil {
+		attributes["context"] = telemetryContextMap(context)
 	}
 	var dropped EventDrop
 	var droppedHandler func(EventDrop)
@@ -936,7 +971,7 @@ func validateRelease(attributes ReleaseAttributes) (map[string]any, error) {
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}
-	return result, nil
+	return addTelemetryContext(result, attributes.Context)
 }
 
 func validateEnvironment(attributes EnvironmentAttributes) (map[string]any, error) {
@@ -950,7 +985,7 @@ func validateEnvironment(attributes EnvironmentAttributes) (map[string]any, erro
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}
-	return result, nil
+	return addTelemetryContext(result, attributes.Context)
 }
 
 func validateIssue(attributes IssueAttributes) (map[string]any, error) {
@@ -992,7 +1027,7 @@ func validateIssue(attributes IssueAttributes) (map[string]any, error) {
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}
-	return result, nil
+	return addTelemetryContext(result, attributes.Context)
 }
 
 func validateLog(attributes LogAttributes) (map[string]any, error) {
@@ -1010,7 +1045,7 @@ func validateLog(attributes LogAttributes) (map[string]any, error) {
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}
-	return result, nil
+	return addTelemetryContext(result, attributes.Context)
 }
 
 func validateSpan(attributes SpanAttributes) (map[string]any, error) {
@@ -1051,7 +1086,7 @@ func validateSpan(attributes SpanAttributes) (map[string]any, error) {
 	} else if links != nil {
 		result["links"] = links
 	}
-	return result, nil
+	return addTelemetryContext(result, attributes.Context)
 }
 
 func validateAction(attributes ActionAttributes) (map[string]any, error) {
@@ -1065,7 +1100,7 @@ func validateAction(attributes ActionAttributes) (map[string]any, error) {
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}
-	return result, nil
+	return addTelemetryContext(result, attributes.Context)
 }
 
 func validateMetric(attributes MetricAttributes) (map[string]any, error) {
@@ -1101,5 +1136,16 @@ func validateMetric(attributes MetricAttributes) (map[string]any, error) {
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}
-	return result, nil
+	return addTelemetryContext(result, attributes.Context)
+}
+
+func addTelemetryContext(attributes map[string]any, context *TelemetryContext) (map[string]any, error) {
+	validated, err := validateTelemetryContext(context, "event telemetry context")
+	if err != nil {
+		return nil, err
+	}
+	if validated != nil {
+		attributes["context"] = validated
+	}
+	return attributes, nil
 }

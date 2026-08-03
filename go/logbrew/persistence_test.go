@@ -53,14 +53,19 @@ func newPersistentTestClient(
 
 func stopPersistentClientWithoutFlush(t *testing.T, client *Client) {
 	t.Helper()
+	stopPersistentAutomaticLoop(t, client)
+	if err := client.persistent.close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stopPersistentAutomaticLoop(t *testing.T, client *Client) {
+	t.Helper()
 	client.mu.Lock()
 	started := client.stopAutomaticLocked()
 	client.mu.Unlock()
 	if started {
 		<-client.automatic.done
-	}
-	if err := client.persistent.close(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -556,6 +561,7 @@ func TestPersistentStoreRejectsHardLinksAndPostForkOwnership(t *testing.T) {
 	}
 
 	client = newPersistentTestClient(t, directory, key, newLifecycleTransport(202))
+	stopPersistentAutomaticLoop(t, client)
 	ownerPID := client.persistent.ownerPID
 	client.persistent.ownerPID = ownerPID + 1
 	err = client.Log("evt_wrong_process", "2026-06-02T10:00:03Z", LogAttributes{Message: "queued", Level: "info"})

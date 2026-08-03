@@ -10,9 +10,10 @@ import (
 
 func main() {
 	client, err := logbrew.NewClient(logbrew.Config{
-		APIKey:     "LOGBREW_API_KEY",
-		SDKName:    "logbrew-go",
-		SDKVersion: "0.1.0",
+		APIKey:                "LOGBREW_API_KEY",
+		SDKName:               "logbrew-go",
+		SDKVersion:            "0.1.0",
+		DisableRuntimeContext: true,
 	})
 	if err != nil {
 		panic(err)
