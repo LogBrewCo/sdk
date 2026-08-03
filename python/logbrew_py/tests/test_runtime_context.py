@@ -205,7 +205,7 @@ class PythonRuntimeContextTests(unittest.TestCase):
                 patch("platform.system", return_value=None),
                 patch("platform.release", side_effect=AssertionError("release should not be read")),
                 patch("platform.machine", return_value="x" * 257),
-                patch("platform.node", side_effect=AssertionError("hostname must not be read")),
+                patch("platform.node", side_effect=AssertionError("node identity must not be read")),
                 patch("platform.platform", side_effect=AssertionError("platform build must not be read")),
             ):
                 client = LogBrewClient.create(
@@ -250,7 +250,7 @@ class PythonRuntimeContextTests(unittest.TestCase):
                 "previousId must differ from id",
             ),
             (
-                {"schemaVersion": 1, "subject": {"id": "user_1", "kind": "customer"}},
+                {"schemaVersion": 1, "subject": {"id": "user_1", "kind": "person"}},
                 "kind must be anonymous or user",
             ),
             ({"schemaVersion": 1, "tags": {"bad key": "value"}}, "tags key is invalid"),
