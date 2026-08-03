@@ -260,16 +260,17 @@ must(client.Log("evt_checkout", "2026-08-03T08:15:30Z", logbrew.LogAttributes{
 By default the core client adds only `runtime` (`go` plus `runtime.Version()`),
 the compiled OS family, and the compiled architecture beneath explicit caller
 context. Set `DisableRuntimeContext: true` to disable those defaults without
-dropping explicit context. The runtime probe does not read environment
-variables, hostnames, IP addresses, usernames, process arguments, working
-directories, files, cloud metadata, or application configuration.
+dropping explicit context. The runtime probe does not inspect process
+environment, machine names, network addresses, local account names, startup
+arguments, working directories, files, cloud metadata, or application
+configuration.
 
 Session and subject IDs are app-owned opaque correlation values. Do not put
-names, email addresses, access tokens, IP addresses, or other direct PII in
-them. Tags are capped at 32 low-cardinality string dimensions. Every context
-string and ID is bounded, control characters are rejected, W3C IDs are
-normalized, all-zero IDs are rejected, and empty resource sections fail before
-queueing.
+names, email addresses, authentication material, network addresses, or other
+direct PII in them. Tags are capped at 32 low-cardinality string dimensions.
+Every context string and ID is bounded, control characters are rejected, W3C
+IDs are normalized, all-zero IDs are rejected, and empty resource sections
+fail before queueing.
 
 ## Structured Issue Diagnostics
 

@@ -28,7 +28,8 @@ type TelemetryOperatingSystem struct {
 }
 
 // TelemetryDevice describes a broad device or runtime host class. Do not put
-// unique device identifiers, hostnames, IP addresses, or user names here.
+// unique device identifiers, machine names, network addresses, or local
+// account names here.
 type TelemetryDevice struct {
 	Family       string `json:"family,omitempty"`
 	Model        string `json:"model,omitempty"`
@@ -64,7 +65,8 @@ type TelemetryTraceContext struct {
 }
 
 // TelemetrySessionContext is an opaque application-owned session identity.
-// It must not contain an email address, access token, or other direct PII.
+// It must not contain an email address, authentication material, or other
+// direct PII.
 type TelemetrySessionContext struct {
 	ID         string `json:"id"`
 	PreviousID string `json:"previousId,omitempty"`
