@@ -265,7 +265,8 @@ namespace LogBrew
                     trace.SpanId,
                     operationError == null ? "ok" : "error")
                 .WithDurationMs(ElapsedMilliseconds(startedAt))
-                .WithMetadata(metadata);
+                .WithMetadata(metadata)
+                .WithContext(trace.ToTelemetryContext());
             if (trace.ParentSpanId != null)
             {
                 attributes.WithParentSpanId(trace.ParentSpanId);

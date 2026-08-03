@@ -292,6 +292,10 @@ def _temporary_witness_validity(path: Path) -> bool | None:
         path_details = path.stat(follow_symlinks=False)
         if not stat.S_ISREG(path_details.st_mode):
             return False
+        if os.name == "nt":
+            # Opening the producer-owned temporary can deny its atomic rename on Windows.
+            # The bounded publication loop validates the committed marker after the move.
+            return path_details.st_size <= len(WITNESS_VALUE)
         with path.open("rb") as stream:
             details = os.fstat(stream.fileno())
             if not stat.S_ISREG(details.st_mode):

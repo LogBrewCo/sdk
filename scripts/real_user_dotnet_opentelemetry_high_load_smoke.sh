@@ -74,6 +74,7 @@ using OpenTelemetry.Trace;
 const string ApiKey = "lbw_ingest_dotnet_otel_high_load_fake";
 const int HighVolumeSpans = 1500;
 const int MaxQueueSize = 1000;
+const int MaxRequestEvents = 100;
 const string SourceName = "LogBrew.Smoke.DotNet.OpenTelemetry.HighLoad";
 
 static void Require(bool condition, string message)
@@ -188,6 +189,7 @@ var unsafeTexts = new[]
 
 var preview = client.PreviewJson();
 Require(CountOccurrences(preview, "\"type\": \"span\"") == MaxQueueSize, "expected accepted OpenTelemetry span count");
+Require(CountOccurrences(preview, "\"context\": {") == MaxQueueSize, "expected typed context on every accepted span");
 foreach (var expected in new[]
 {
     "\"id\": \"dotnet_otel_high_load_span_",
@@ -209,7 +211,10 @@ foreach (var expected in new[]
     "\"otel.exception_types\": \"System.TimeoutException\"",
     "\"exceptionType\": \"System.TimeoutException\"",
     "\"exceptionEscaped\": true",
-    "\"safe\": true"
+    "\"safe\": true",
+    "\"schemaVersion\": 1",
+    "\"trace\": {",
+    "\"runtime\": {"
 })
 {
     Require(preview.Contains(expected, StringComparison.Ordinal), "missing OpenTelemetry high-load payload: " + expected);
@@ -229,13 +234,19 @@ var response = client.Flush(new HttpTransport(new HttpTransportOptions
 }));
 
 Require(response.StatusCode == 202, "expected retry flush status");
-Require(response.Attempts == 2, "expected retry attempts");
-Require(intake.RequestCount == 2, "expected fake intake retry count");
+var expectedRequests = (MaxQueueSize / MaxRequestEvents) + 1;
+Require(response.Attempts == expectedRequests, "expected bounded batches plus one retry");
+Require(intake.RequestCount == expectedRequests, "expected fake intake bounded request count");
 Require(client.PendingEvents() == 0, "expected OpenTelemetry queue after flush");
 Require(client.DroppedEvents() == expectedDrops, "expected OpenTelemetry drop count to survive flush");
 
-var body = intake.LastBody;
-Require(CountOccurrences(body, "\"type\": \"span\"") == MaxQueueSize, "expected flushed OpenTelemetry span count");
+var bodies = intake.Bodies;
+Require(bodies.Count == expectedRequests, "expected every fake intake body");
+Require(bodies[0] == bodies[1], "expected immutable retry body");
+var body = string.Join("\n", bodies);
+Require(
+    CountOccurrences(body, "\"type\": \"span\"") == MaxQueueSize + MaxRequestEvents,
+    "expected flushed spans plus one retried first batch");
 Require(body.Contains("\"name\": \"dotnet-opentelemetry-high-load-smoke\"", StringComparison.Ordinal), "expected sdk name");
 Require(body.Contains("\"source\": \"dotnet.activity\"", StringComparison.Ordinal), "expected Activity source marker");
 Require(body.Contains("\"serviceName\": \"checkout-api\"", StringComparison.Ordinal), "expected service correlation");
@@ -294,18 +305,13 @@ internal sealed class FakeIntake : IDisposable
         get { return requestCount; }
     }
 
-    public string LastBody
+    public IReadOnlyList<string> Bodies
     {
         get
         {
             lock (bodies)
             {
-                if (bodies.Count == 0)
-                {
-                    throw new InvalidOperationException("expected fake intake body");
-                }
-
-                return bodies[bodies.Count - 1];
+                return new List<string>(bodies).AsReadOnly();
             }
         }
     }
@@ -492,7 +498,7 @@ fi
 grep -q '"ok":true' "$tmp_dir/high-load.stdout.json"
 grep -q '"droppedEvents":500' "$tmp_dir/high-load.stdout.json"
 grep -q '"flushedSpans":1000' "$tmp_dir/high-load.stdout.json"
-grep -q '"retryAttempts":2' "$tmp_dir/high-load.stdout.json"
+grep -q '"retryAttempts":11' "$tmp_dir/high-load.stdout.json"
 grep -q '"exporterFailure":"Failure"' "$tmp_dir/high-load.stdout.json"
 if [[ -s "$tmp_dir/high-load.stderr.txt" ]]; then
   cat "$tmp_dir/high-load.stderr.txt" >&2

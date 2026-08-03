@@ -5,6 +5,7 @@ using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using LogBrew;
@@ -97,6 +98,15 @@ internal static class DbCommandTelemetryTests
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected command detail to be omitted: " + blocked);
         }
+
+
+        using var document = JsonDocument.Parse(payload);
+        var trace = document.RootElement.GetProperty("events")[0]
+            .GetProperty("attributes")
+            .GetProperty("context")
+            .GetProperty("trace");
+        Require(trace.GetProperty("traceId").GetString() == root.TraceId, "expected typed command trace id");
+        Require(trace.GetProperty("parentSpanId").GetString() == root.SpanId, "expected typed command parent span id");
     }
 
     private static void ExecuteScalarAndReaderPreserveResults()

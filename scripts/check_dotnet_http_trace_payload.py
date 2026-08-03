@@ -26,6 +26,12 @@ def metadata(event):
     return value
 
 
+def context(event):
+    value = event.get("attributes", {}).get("context")
+    require(isinstance(value, dict), f"context is not an object for {event.get('id')}")
+    return value
+
+
 def main():
     if len(sys.argv) != 3:
         raise SystemExit("usage: check_dotnet_http_trace_payload.py stdout.json stderr.json")
@@ -53,6 +59,31 @@ def main():
     span_event = event_by_id(events, "evt_span_checkout_trace")
     metric_event = event_by_id(events, "evt_metric_checkout_trace")
 
+    for event in events:
+        shared = context(event)
+        resource = shared.get("resource", {})
+        require(shared.get("schemaVersion") == 1, f"{event.get('id')} context version mismatch")
+        require(
+            resource.get("service") == {"name": "checkout-api", "version": "1.4.2"},
+            f"{event.get('id')} service context mismatch",
+        )
+        require(
+            resource.get("deployment")
+            == {"environment": "production", "release": "checkout-api@1.4.2"},
+            f"{event.get('id')} deployment context mismatch",
+        )
+        require(
+            resource.get("framework") == {"name": "aspnetcore", "version": "10.0"},
+            f"{event.get('id')} framework context mismatch",
+        )
+        require(
+            resource.get("runtime", {}).get("name") == "dotnet"
+            and bool(resource.get("runtime", {}).get("version"))
+            and bool(resource.get("operatingSystem", {}).get("name"))
+            and bool(resource.get("device", {}).get("architecture")),
+            f"{event.get('id')} bounded runtime context mismatch",
+        )
+
     span_attrs = span_event["attributes"]
     span_id = span_attrs["spanId"]
     require(summary["outgoingTraceparent"] == f"00-{TRACE_ID}-{span_id}-01", "outgoing traceparent must use the request span")
@@ -61,6 +92,31 @@ def main():
     require(span_attrs["name"] == "POST /checkout/:cart_id", "span route name must be sanitized")
     require(span_attrs["status"] == "error", "5xx request span should be error")
     require(span_attrs["durationMs"] >= 0, "span duration must be non-negative")
+
+    for event, label in (
+        (log_event, "logger"),
+        (issue_event, "issue"),
+        (action_event, "action"),
+        (span_event, "span"),
+        (metric_event, "metric"),
+    ):
+        shared = context(event)
+        require(
+            shared.get("trace") == {
+                "traceId": TRACE_ID,
+                "spanId": span_id,
+                "parentSpanId": PARENT_SPAN_ID,
+                "sampled": True,
+            },
+            f"{label} typed trace context mismatch",
+        )
+        require(
+            shared.get("session") == {"id": "sess_checkout_123"}
+            and shared.get("subject")
+            == {"id": "user_checkout_opaque", "kind": "user"}
+            and shared.get("tags", {}).get("journey") == "checkout",
+            f"{label} request context mismatch",
+        )
 
     for event, label in (
         (log_event, "logger"),
@@ -83,7 +139,8 @@ def main():
     require(metadata(metric_event).get("statusCode") == 503, "metric status metadata missing")
     require(metric_event["attributes"]["name"] == "http.server.duration", "metric name mismatch")
     require(action_event["attributes"]["metadata"]["routeTemplate"] == "/checkout/:cart_id", "action route must be sanitized")
-    require(action_event["attributes"]["metadata"]["traceId"] == TRACE_ID, "action trace id mismatch")
+    require("traceId" not in action_event["attributes"]["metadata"], "action duplicated typed trace metadata")
+    require("sessionId" not in action_event["attributes"]["metadata"], "action duplicated typed session metadata")
 
 
 if __name__ == "__main__":

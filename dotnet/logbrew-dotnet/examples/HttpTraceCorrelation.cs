@@ -12,7 +12,19 @@ public static class Program
 
     public static void Main()
     {
-        var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "0.1.0");
+        var clientContext = TelemetryContext.Create()
+            .WithResource(
+                TelemetryResource.Create()
+                    .WithService("checkout-api", "1.4.2")
+                    .WithDeployment("production", "checkout-api@1.4.2")
+                    .WithFramework("aspnetcore", "10.0")
+                    .Build())
+            .Build();
+        var client = LogBrewClient.Create(
+            "LOGBREW_API_KEY",
+            "checkout-dotnet-service",
+            "0.1.0",
+            new LogBrewClientOptions { Context = clientContext });
         var request = LogBrewHttpRequestTelemetry.Start(
             client,
             "POST",
@@ -37,56 +49,64 @@ public static class Program
             "2026-06-02T10:00:01Z",
             EnvironmentAttributes.Create("production").WithRegion("global"));
 
-        using (request.Activate())
+        var requestContext = TelemetryContext.Create()
+            .WithTrace(request.Trace)
+            .WithSession("sess_checkout_123")
+            .WithSubject("user_checkout_opaque", "user")
+            .WithTag("journey", "checkout")
+            .Build();
+        using (LogBrewTelemetry.ActivateContext(requestContext))
         {
-            var logger = loggerFactory.CreateLogger("CheckoutTrace");
-            Task.Run(() =>
+            using (request.Activate())
             {
-                logger.Log(
-                    LogLevel.Warning,
-                    new EventId(51, "CheckoutSlow"),
-                    new Dictionary<string, object?>
-                    {
-                        ["CartId"] = "cart_123",
-                        ["{OriginalFormat}"] = "checkout slow for {CartId}"
-                    },
-                    null,
-                    static (_, _) => "checkout slow for cart_123");
-            }).GetAwaiter().GetResult();
+                var logger = loggerFactory.CreateLogger("CheckoutTrace");
+                Task.Run(() =>
+                {
+                    logger.Log(
+                        LogLevel.Warning,
+                        new EventId(51, "CheckoutSlow"),
+                        new Dictionary<string, object?>
+                        {
+                            ["CartId"] = "cart_123",
+                            ["{OriginalFormat}"] = "checkout slow for {CartId}"
+                        },
+                        null,
+                        static (_, _) => "checkout slow for cart_123");
+                }).GetAwaiter().GetResult();
 
-            client.Issue(
-                "evt_issue_checkout_trace",
-                "2026-06-02T10:00:04Z",
-                IssueAttributes.Create("Checkout handler failed", "error")
-                    .WithMessage("payment provider failed")
-                    .WithMetadata(LogBrewTrace.MetadataWithCurrentTrace(new Dictionary<string, object?>
-                    {
-                        ["routeTemplate"] = request.RouteTemplate,
-                        ["exceptionType"] = "System.InvalidOperationException",
-                        ["exceptionMessage"] = "payment provider failed",
-                        ["ignored"] = new object()
-                    })));
+                client.Issue(
+                    "evt_issue_checkout_trace",
+                    "2026-06-02T10:00:04Z",
+                    IssueAttributes.Create("Checkout handler failed", "error")
+                        .WithMessage("payment provider failed")
+                        .WithMetadata(LogBrewTrace.MetadataWithCurrentTrace(new Dictionary<string, object?>
+                        {
+                            ["routeTemplate"] = request.RouteTemplate,
+                            ["exceptionType"] = "System.InvalidOperationException",
+                            ["exceptionMessage"] = "payment provider failed",
+                            ["ignored"] = new object()
+                        })));
 
-            client.Action(
-                "evt_action_checkout_trace",
-                "2026-06-02T10:00:05Z",
-                ProductTimeline.ProductAction("checkout.submit")
-                    .WithRouteTemplate("https://shop.example/checkout/:cart_id?coupon=sample#review")
-                    .WithSessionId("sess_checkout_123")
-                    .WithTraceId(request.Trace.TraceId)
-                    .WithScreen("Checkout")
-                    .WithFunnel("checkout")
-                    .WithStep("submit")
-                    .WithMetadata(new Dictionary<string, object?> { ["cartTier"] = "gold" })
-                    .ToActionAttributes());
+                client.Action(
+                    "evt_action_checkout_trace",
+                    "2026-06-02T10:00:05Z",
+                    ProductTimeline.ProductAction("checkout.submit")
+                        .WithRouteTemplate("https://shop.example/checkout/:cart_id?coupon=sample#review")
+                        .WithTraceContext(request.Trace)
+                        .WithScreen("Checkout")
+                        .WithFunnel("checkout")
+                        .WithStep("submit")
+                        .WithMetadata(new Dictionary<string, object?> { ["cartTier"] = "gold" })
+                        .ToActionAttributes());
+            }
+
+            request.FinishSpanAndMetric(
+                "evt_span_checkout_trace",
+                "evt_metric_checkout_trace",
+                "2026-06-02T10:00:06Z",
+                503,
+                new Dictionary<string, object?> { ["cartTier"] = "gold" });
         }
-
-        request.FinishSpanAndMetric(
-            "evt_span_checkout_trace",
-            "evt_metric_checkout_trace",
-            "2026-06-02T10:00:06Z",
-            503,
-            new Dictionary<string, object?> { ["cartTier"] = "gold" });
 
         Console.WriteLine(client.PreviewJson());
         var response = client.Shutdown(RecordingTransport.AlwaysAccept());

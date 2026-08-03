@@ -432,6 +432,8 @@ namespace LogBrew
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public static ReleaseAttributes Create(string version)
         {
             return new ReleaseAttributes(version);
@@ -452,6 +454,14 @@ namespace LogBrew
         public ReleaseAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public ReleaseAttributes WithContext(TelemetryContext context)
+        {
+            ExceptionContract.ThrowIfNull(context, nameof(context));
+            Context = context;
             return this;
         }
 
@@ -484,6 +494,8 @@ namespace LogBrew
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public static EnvironmentAttributes Create(string name)
         {
             return new EnvironmentAttributes(name);
@@ -498,6 +510,14 @@ namespace LogBrew
         public EnvironmentAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public EnvironmentAttributes WithContext(TelemetryContext context)
+        {
+            ExceptionContract.ThrowIfNull(context, nameof(context));
+            Context = context;
             return this;
         }
 
@@ -527,6 +547,8 @@ namespace LogBrew
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public static LogAttributes Create(string message, string level)
         {
             return new LogAttributes(message, level);
@@ -541,6 +563,14 @@ namespace LogBrew
         public LogAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public LogAttributes WithContext(TelemetryContext context)
+        {
+            ExceptionContract.ThrowIfNull(context, nameof(context));
+            Context = context;
             return this;
         }
 
@@ -569,6 +599,8 @@ namespace LogBrew
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public static ActionAttributes Create(string name, string status)
         {
             return new ActionAttributes(name, status);
@@ -577,6 +609,14 @@ namespace LogBrew
         public ActionAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public ActionAttributes WithContext(TelemetryContext context)
+        {
+            ExceptionContract.ThrowIfNull(context, nameof(context));
+            Context = context;
             return this;
         }
 
@@ -595,6 +635,7 @@ namespace LogBrew
         private const int DefaultMaxQueueSize = 1000;
         private const int DefaultMaxQueueBytes = 4 * 1024 * 1024;
         private readonly DeliveryEngine delivery;
+        private readonly TelemetryContext? context;
 
         internal static readonly string[] SeverityValues = { "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical" };
         internal static readonly string[] SpanStatuses = { "ok", "error" };
@@ -607,6 +648,7 @@ namespace LogBrew
             string apiKey,
             string sdkName,
             string sdkVersion,
+            LogBrewClientOptions clientOptions,
             int maxRetries,
             int maxQueueSize,
             int maxQueueBytes,
@@ -615,6 +657,10 @@ namespace LogBrew
             AutomaticDeliverySettings? automaticSettings,
             IDurableDeliverySession? durableSession = null)
         {
+            ExceptionContract.ThrowIfNull(clientOptions, nameof(clientOptions));
+            context = TelemetryContext.Merge(
+                clientOptions.DisableRuntimeContext ? null : TelemetryContext.RuntimeDefaults(),
+                clientOptions.Context);
             var sdk = new OrderedJsonObject()
                 .Add("name", sdkName)
                 .Add("language", "dotnet")
@@ -646,6 +692,33 @@ namespace LogBrew
                 apiKey,
                 sdkName,
                 sdkVersion,
+                new LogBrewClientOptions(),
+                maxRetries,
+                maxQueueSize,
+                maxQueueBytes,
+                onEventDropped,
+                null,
+                null);
+        }
+
+        /// <summary>Creates a client with explicit shared-context options.</summary>
+        public static LogBrewClient Create(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            LogBrewClientOptions clientOptions,
+            int maxRetries = 2,
+            int maxQueueSize = DefaultMaxQueueSize,
+            Action<DroppedEvent>? onEventDropped = null,
+            int maxQueueBytes = DefaultMaxQueueBytes)
+        {
+            ExceptionContract.ThrowIfNull(clientOptions, nameof(clientOptions));
+            ValidateClientOptions(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, maxQueueBytes);
+            return new LogBrewClient(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                clientOptions,
                 maxRetries,
                 maxQueueSize,
                 maxQueueBytes,
@@ -662,6 +735,27 @@ namespace LogBrew
             AutomaticDeliveryOptions? options = null,
             Action<DroppedEvent>? onEventDropped = null)
         {
+            return CreateAutomatic(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                new LogBrewClientOptions(),
+                transport,
+                options,
+                onEventDropped);
+        }
+
+        /// <summary>Creates an automatic client with explicit shared-context options.</summary>
+        public static LogBrewClient CreateAutomatic(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            LogBrewClientOptions clientOptions,
+            ITransport transport,
+            AutomaticDeliveryOptions? options = null,
+            Action<DroppedEvent>? onEventDropped = null)
+        {
+            ExceptionContract.ThrowIfNull(clientOptions, nameof(clientOptions));
             if (transport == null)
             {
                 throw new SdkException("validation_error", "automatic transport must be non-null");
@@ -679,6 +773,7 @@ namespace LogBrew
                 apiKey,
                 sdkName,
                 sdkVersion,
+                clientOptions,
                 settings.MaxRetries,
                 settings.MaxQueueSize,
                 settings.MaxQueueBytes,
@@ -697,6 +792,29 @@ namespace LogBrew
             AutomaticDeliveryOptions? options = null,
             Action<DroppedEvent>? onEventDropped = null)
         {
+            return CreateAutomaticDurable(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                new LogBrewClientOptions(),
+                transport,
+                storage,
+                options,
+                onEventDropped);
+        }
+
+        /// <summary>Creates a durable automatic client with explicit shared-context options.</summary>
+        public static LogBrewClient CreateAutomaticDurable(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            LogBrewClientOptions clientOptions,
+            ITransport transport,
+            DurableDeliveryOptions storage,
+            AutomaticDeliveryOptions? options = null,
+            Action<DroppedEvent>? onEventDropped = null)
+        {
+            ExceptionContract.ThrowIfNull(clientOptions, nameof(clientOptions));
             if (transport == null)
             {
                 throw new SdkException("validation_error", "automatic transport must be non-null");
@@ -726,6 +844,7 @@ namespace LogBrew
                     apiKey,
                     sdkName,
                     sdkVersion,
+                    clientOptions,
                     settings.MaxRetries,
                     settings.MaxQueueSize,
                     settings.MaxQueueBytes,
@@ -764,37 +883,37 @@ namespace LogBrew
 
         public void Release(string id, string timestamp, ReleaseAttributes attributes)
         {
-            PushEvent("release", id, timestamp, attributes.ToJsonObject());
+            PushEvent("release", id, timestamp, attributes.ToJsonObject(), attributes.Context);
         }
 
         public void Environment(string id, string timestamp, EnvironmentAttributes attributes)
         {
-            PushEvent("environment", id, timestamp, attributes.ToJsonObject());
+            PushEvent("environment", id, timestamp, attributes.ToJsonObject(), attributes.Context);
         }
 
         public void Issue(string id, string timestamp, IssueAttributes attributes)
         {
-            PushEvent("issue", id, timestamp, attributes.ToJsonObject());
+            PushEvent("issue", id, timestamp, attributes.ToJsonObject(), attributes.Context);
         }
 
         public void Log(string id, string timestamp, LogAttributes attributes)
         {
-            PushEvent("log", id, timestamp, attributes.ToJsonObject());
+            PushEvent("log", id, timestamp, attributes.ToJsonObject(), attributes.Context);
         }
 
         public void Span(string id, string timestamp, SpanAttributes attributes)
         {
-            PushEvent("span", id, timestamp, attributes.ToJsonObject());
+            PushEvent("span", id, timestamp, attributes.ToJsonObject(), attributes.Context);
         }
 
         public void Metric(string id, string timestamp, MetricAttributes attributes)
         {
-            PushEvent("metric", id, timestamp, attributes.ToJsonObject());
+            PushEvent("metric", id, timestamp, attributes.ToJsonObject(), attributes.Context);
         }
 
         public void Action(string id, string timestamp, ActionAttributes attributes)
         {
-            PushEvent("action", id, timestamp, attributes.ToJsonObject());
+            PushEvent("action", id, timestamp, attributes.ToJsonObject(), attributes.Context);
         }
 
         public TransportResponse Flush(ITransport transport)
@@ -829,10 +948,24 @@ namespace LogBrew
         }
 #endif
 
-        private void PushEvent(string type, string id, string timestamp, OrderedJsonObject attributes)
+        private void PushEvent(
+            string type,
+            string id,
+            string timestamp,
+            OrderedJsonObject attributes,
+            TelemetryContext? eventContext)
         {
             Validation.RequireNonEmpty("event id", id);
             Validation.RequireTimestamp(timestamp);
+            var ambientContext = LogBrewTrace.ContextWithCurrentTrace(LogBrewTelemetry.CurrentContext);
+            var mergedContext = TelemetryContext.Merge(
+                TelemetryContext.Merge(context, ambientContext),
+                eventContext);
+            if (mergedContext != null)
+            {
+                attributes.Add("context", mergedContext.ToJsonObject());
+            }
+
             delivery.Enqueue(new Event(type, timestamp, id, attributes));
         }
 

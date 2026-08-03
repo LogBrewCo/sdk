@@ -749,6 +749,7 @@ AssertTrue(flushOnLogTransport.SentBodies.Count == 1, "expected flush-on-log tra
 tests++;
 
 tests += TraceCorrelationTests.Run();
+tests += TelemetryContextTests.Run();
 tests += OperationTracingTests.Run();
 tests += DbCommandTelemetryTests.Run();
 tests += SupportTicketDraftTests.Run();

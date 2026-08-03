@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text.Json;
 using System.Threading.Tasks;
 using LogBrew;
 
@@ -126,6 +127,14 @@ internal static class OperationTracingTests
         foreach (var blocked in new[] { "cart:se" + "cret", "se" + "cret body", "Server=private", "Pass" + "word=se" + "cret", "db.internal", "id = 'se" + "cret'" })
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected blocked metadata to be omitted: " + blocked);
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        foreach (var telemetryEvent in document.RootElement.GetProperty("events").EnumerateArray())
+        {
+            var trace = telemetryEvent.GetProperty("attributes").GetProperty("context").GetProperty("trace");
+            Require(trace.GetProperty("traceId").GetString() == root.TraceId, "expected typed operation trace id");
+            Require(trace.GetProperty("parentSpanId").GetString() == root.SpanId, "expected typed operation parent span id");
         }
     }
 

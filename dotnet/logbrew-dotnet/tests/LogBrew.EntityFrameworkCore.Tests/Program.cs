@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Globalization;
+using System.Text.Json;
 using LogBrew;
 using LogBrew.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -143,6 +144,14 @@ static void EntityFrameworkCoreInterceptorCapturesPrivacyBoundedCommandSpans()
     })
     {
         Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected EF Core payload to omit unsafe value: " + blocked);
+    }
+
+    using var document = JsonDocument.Parse(payload);
+    foreach (var telemetryEvent in document.RootElement.GetProperty("events").EnumerateArray())
+    {
+        var trace = telemetryEvent.GetProperty("attributes").GetProperty("context").GetProperty("trace");
+        Require(trace.GetProperty("traceId").GetString() == root.TraceId, "expected typed EF Core trace id");
+        Require(trace.GetProperty("parentSpanId").GetString() == root.SpanId, "expected typed EF Core parent span id");
     }
 }
 

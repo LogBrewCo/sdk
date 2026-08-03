@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text.Json;
 using LogBrew;
 
 internal static class ActivitySpanTelemetryTests
@@ -103,6 +104,15 @@ internal static class ActivitySpanTelemetryTests
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe Activity metadata to be omitted: " + blocked);
         }
+
+        using var document = JsonDocument.Parse(payload);
+        var trace = document.RootElement.GetProperty("events")[0]
+            .GetProperty("attributes")
+            .GetProperty("context")
+            .GetProperty("trace");
+        Require(trace.GetProperty("traceId").GetString() == IncomingTraceId, "expected typed Activity trace id");
+        Require(trace.GetProperty("spanId").GetString() == activity.SpanId.ToHexString(), "expected typed Activity span id");
+        Require(trace.GetProperty("parentSpanId").GetString() == IncomingParentSpanId, "expected typed Activity parent span id");
     }
 
     private static void CaptureCopiesActivityEventsAndLinksSafely()

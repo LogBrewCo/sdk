@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text.Json;
 using System.Threading.Tasks;
 using LogBrew;
 using LogBrew.StackExchangeRedis;
@@ -93,6 +94,14 @@ static void TraceCommandCreatesPrivacyBoundedSpan()
     {
         Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected Redis detail to be omitted: " + blocked);
     }
+
+    using var document = JsonDocument.Parse(payload);
+    var trace = document.RootElement.GetProperty("events")[0]
+        .GetProperty("attributes")
+        .GetProperty("context")
+        .GetProperty("trace");
+    Require(trace.GetProperty("traceId").GetString() == root.TraceId, "expected typed Redis trace id");
+    Require(trace.GetProperty("parentSpanId").GetString() == root.SpanId, "expected typed Redis parent span id");
 }
 
 static async Task TraceCommandAsyncPreservesResultAndActiveTrace()

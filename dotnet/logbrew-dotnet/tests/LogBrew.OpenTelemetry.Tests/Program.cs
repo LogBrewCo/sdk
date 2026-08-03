@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text.Json;
 using LogBrew;
 using LogBrew.OpenTelemetry;
 using OpenTelemetry;
@@ -102,6 +103,14 @@ static void OpenTelemetryProcessorCapturesEndedActivity()
     {
         Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected OpenTelemetry detail to be omitted: " + blocked);
     }
+
+    using var document = JsonDocument.Parse(payload);
+    var context = document.RootElement.GetProperty("events")[0].GetProperty("attributes").GetProperty("context");
+    Require(context.GetProperty("trace").GetProperty("sampled").GetBoolean(), "expected typed OpenTelemetry trace");
+    var resource = context.GetProperty("resource");
+    Require(resource.GetProperty("service").GetProperty("name").GetString() == "checkout-api", "expected typed OpenTelemetry service");
+    Require(resource.GetProperty("service").GetProperty("version").GetString() == "2.3.4", "expected typed OpenTelemetry service version");
+    Require(resource.GetProperty("deployment").GetProperty("environment").GetString() == "staging", "expected typed OpenTelemetry deployment");
 }
 
 static void OpenTelemetryExporterWorksWithSimpleActivityExportProcessor()

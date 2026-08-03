@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using LogBrew;
@@ -59,6 +60,11 @@ static async Task AspNetCoreMiddlewareCapturesRequestSpanMetricAndActiveTrace()
         options => options
             .WithEventIdPrefix("dotnet_aspnetcore")
             .WithTimestampProvider(() => "2026-06-02T10:00:36Z")
+            .WithContextProvider(_ => TelemetryContext.Create()
+                .WithSession("aspnetcore_session")
+                .WithSubject("aspnetcore_subject", "anonymous")
+                .WithTag("journey", "checkout")
+                .Build())
             .WithMetadataProvider(context => new Dictionary<string, object?>
             {
                 ["framework"] = "aspnetcore",
@@ -117,6 +123,17 @@ static async Task AspNetCoreMiddlewareCapturesRequestSpanMetricAndActiveTrace()
     {
         Require(!preview.Contains(blocked, StringComparison.Ordinal), "expected middleware payload to omit unsafe value: " + blocked);
     }
+
+    using var document = JsonDocument.Parse(preview);
+    foreach (var telemetryEvent in document.RootElement.GetProperty("events").EnumerateArray())
+    {
+        var trace = telemetryEvent.GetProperty("attributes").GetProperty("context").GetProperty("trace");
+        Require(trace.GetProperty("traceId").GetString() == "4bf92f3577b34da6a3ce929d0e0e4736", "expected typed ASP.NET Core trace id");
+        Require(trace.GetProperty("parentSpanId").GetString() == "00f067aa0ba902b7", "expected typed ASP.NET Core parent span id");
+        var sharedContext = telemetryEvent.GetProperty("attributes").GetProperty("context");
+        Require(sharedContext.GetProperty("session").GetProperty("id").GetString() == "aspnetcore_session", "expected request session on every ASP.NET Core event");
+        Require(sharedContext.GetProperty("subject").GetProperty("id").GetString() == "aspnetcore_subject", "expected request subject on every ASP.NET Core event");
+    }
 }
 
 static async Task AspNetCoreMiddlewarePreservesOriginalExceptionAndCapturesIssue()
@@ -154,18 +171,29 @@ static async Task AspNetCoreMiddlewarePreservesOriginalExceptionAndCapturesIssue
     Require(preview.Contains("\"status\": \"error\"", StringComparison.Ordinal), "expected error span status");
     Require(!preview.Contains("exceptionStackTrace", StringComparison.Ordinal), "middleware must not capture stack traces by default");
     Require(!preview.Contains("payment provider failed", StringComparison.Ordinal), "middleware must not copy the raw exception message");
+    using var document = JsonDocument.Parse(preview);
+    var events = document.RootElement.GetProperty("events").EnumerateArray().ToArray();
+    var issueTrace = events.Single(telemetryEvent => telemetryEvent.GetProperty("type").GetString() == "issue")
+        .GetProperty("attributes").GetProperty("context").GetProperty("trace");
+    var spanTrace = events.Single(telemetryEvent => telemetryEvent.GetProperty("type").GetString() == "span")
+        .GetProperty("attributes").GetProperty("context").GetProperty("trace");
+    Require(issueTrace.GetProperty("traceId").GetString() == spanTrace.GetProperty("traceId").GetString(), "expected issue and span typed trace correlation");
+    Require(issueTrace.GetProperty("spanId").GetString() == spanTrace.GetProperty("spanId").GetString(), "expected issue and span typed span correlation");
 }
 
 static async Task AspNetCoreMiddlewareRouteSelectorStripsAbsoluteUrls()
 {
     var client = LogBrewClient.Create("LOGBREW_API_KEY", "aspnetcore-selector-tests", "0.1.0");
+    var contextErrors = 0;
     var app = CreateApplicationBuilder();
     app.UseLogBrewRequestTelemetry(
         client,
         options => options
             .WithEventIdPrefix("dotnet_aspnetcore_selector")
             .WithTimestampProvider(() => "2026-06-02T10:00:39Z")
-            .WithRouteTemplateSelector(_ => "https://api.example.test/custom/{cartId}?coupon=dropme#frag"));
+            .WithRouteTemplateSelector(_ => "https://api.example.test/custom/{cartId}?coupon=dropme#frag")
+            .WithContextProvider(_ => throw new InvalidOperationException("context unavailable"))
+            .OnError(_ => contextErrors++));
     app.Run(context =>
     {
         context.Response.StatusCode = StatusCodes.Status204NoContent;
@@ -175,6 +203,7 @@ static async Task AspNetCoreMiddlewareRouteSelectorStripsAbsoluteUrls()
     await app.Build().Invoke(CreateHttpContext()).ConfigureAwait(false);
 
     var preview = client.PreviewJson();
+    Require(contextErrors == 1, "expected request context provider failure to be reported once");
     Require(preview.Contains("\"name\": \"POST /custom/{cartId}\"", StringComparison.Ordinal), "expected absolute selector to become route path");
     Require(preview.Contains("\"routeTemplate\": \"/custom/{cartId}\"", StringComparison.Ordinal), "expected route template to omit origin/query/fragment");
     foreach (var blocked in new[] { "api.example.test", "coupon=dropme", "#frag" })

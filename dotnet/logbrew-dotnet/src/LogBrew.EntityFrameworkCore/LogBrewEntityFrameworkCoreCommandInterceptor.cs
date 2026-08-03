@@ -331,7 +331,8 @@ namespace LogBrew.EntityFrameworkCore
                     state.Trace.SpanId,
                     error == null ? "ok" : "error")
                 .WithDurationMs(eventData.Duration.TotalMilliseconds)
-                .WithMetadata(metadata);
+                .WithMetadata(metadata)
+                .WithContext(state.Trace.ToTelemetryContext());
 
             if (state.Trace.ParentSpanId != null)
             {

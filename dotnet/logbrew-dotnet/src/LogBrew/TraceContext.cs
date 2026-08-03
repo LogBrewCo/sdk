@@ -140,6 +140,12 @@ namespace LogBrew
             return metadata;
         }
 
+        /// <summary>Returns first-class typed correlation for any LogBrew event.</summary>
+        public TelemetryContext ToTelemetryContext()
+        {
+            return TelemetryContext.Create().WithTrace(this).Build();
+        }
+
         internal static LogBrewTraceContext FromIncomingTraceparentOrCreateRoot(string? traceparent)
         {
             return TryFromTraceparent(traceparent, out var context) && context != null ? context : CreateRoot();
@@ -261,6 +267,18 @@ namespace LogBrew
         public static IDictionary<string, object?> MetadataWithCurrentTrace(IDictionary<string, object?>? metadata)
         {
             return MetadataWithTrace(Current, metadata);
+        }
+
+        /// <summary>Merges the active trace into optional shared event context.</summary>
+        public static TelemetryContext? ContextWithCurrentTrace(TelemetryContext? context)
+        {
+            return ContextWithTrace(Current, context);
+        }
+
+        /// <summary>Merges one trace into optional shared event context.</summary>
+        public static TelemetryContext? ContextWithTrace(LogBrewTraceContext? trace, TelemetryContext? context)
+        {
+            return trace == null ? context : TelemetryContext.WithTrace(context, trace);
         }
 
         public static IDictionary<string, object?> MetadataWithTrace(LogBrewTraceContext? context, IDictionary<string, object?>? metadata)
@@ -422,7 +440,8 @@ namespace LogBrew
                 var durationMs = ElapsedMilliseconds();
                 var span = SpanAttributes.Create(Method + " " + RouteTemplate, Trace.TraceId, Trace.SpanId, StatusFromHttpStatus(statusCode))
                     .WithDurationMs(durationMs)
-                    .WithMetadata(LogBrewTrace.MetadataWithTrace(Trace, RequestMetadata(statusCode, metadata)));
+                    .WithMetadata(LogBrewTrace.MetadataWithTrace(Trace, RequestMetadata(statusCode, metadata)))
+                    .WithContext(Trace.ToTelemetryContext());
                 if (Trace.ParentSpanId != null)
                 {
                     span.WithParentSpanId(Trace.ParentSpanId);
@@ -435,7 +454,8 @@ namespace LogBrew
                         metricEventId,
                         timestamp,
                         MetricAttributes.Create("http.server.duration", "histogram", durationMs, "ms", "delta")
-                            .WithMetadata(LogBrewTrace.MetadataWithTrace(Trace, RequestMetadata(statusCode, metadata))));
+                            .WithMetadata(LogBrewTrace.MetadataWithTrace(Trace, RequestMetadata(statusCode, metadata)))
+                            .WithContext(Trace.ToTelemetryContext()));
                 }
 
                 finished = true;

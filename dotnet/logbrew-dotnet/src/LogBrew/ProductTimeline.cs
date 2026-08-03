@@ -26,6 +26,7 @@ namespace LogBrew
         private string? screen;
         private string? funnel;
         private string? step;
+        private TelemetryContext? context;
         private Dictionary<string, object?> metadata = new Dictionary<string, object?>();
 
         internal ProductActionBuilder(string name)
@@ -81,6 +82,22 @@ namespace LogBrew
             return this;
         }
 
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public ProductActionBuilder WithContext(TelemetryContext value)
+        {
+            ExceptionContract.ThrowIfNull(value, nameof(value));
+            context = value;
+            return this;
+        }
+
+        /// <summary>Merges exact W3C trace correlation into the action context.</summary>
+        public ProductActionBuilder WithTraceContext(LogBrewTraceContext value)
+        {
+            ExceptionContract.ThrowIfNull(value, nameof(value));
+            context = TelemetryContext.WithTrace(context, value);
+            return this;
+        }
+
         public ActionAttributes ToActionAttributes()
         {
             var actionMetadata = TimelineMetadata.CreateMetadata("product_timeline", metadata);
@@ -91,7 +108,9 @@ namespace LogBrew
             TimelineMetadata.AddIfNotNull(actionMetadata, "funnel", funnel);
             TimelineMetadata.AddIfNotNull(actionMetadata, "step", step);
             TimelineMetadata.AddProductAnalytics(actionMetadata, routeTemplate ?? screen);
-            return ActionAttributes.Create(name, status).WithMetadata(actionMetadata);
+            var attributes = ActionAttributes.Create(name, status).WithMetadata(actionMetadata);
+            var eventContext = LogBrewTrace.ContextWithCurrentTrace(context);
+            return eventContext == null ? attributes : attributes.WithContext(eventContext);
         }
     }
 
@@ -105,6 +124,7 @@ namespace LogBrew
         private double? durationMs;
         private string? sessionId;
         private string? traceId;
+        private TelemetryContext? context;
         private Dictionary<string, object?> metadata = new Dictionary<string, object?>();
 
         internal NetworkMilestoneBuilder(string routeTemplate)
@@ -160,6 +180,22 @@ namespace LogBrew
             return this;
         }
 
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public NetworkMilestoneBuilder WithContext(TelemetryContext value)
+        {
+            ExceptionContract.ThrowIfNull(value, nameof(value));
+            context = value;
+            return this;
+        }
+
+        /// <summary>Merges exact W3C trace correlation into the milestone context.</summary>
+        public NetworkMilestoneBuilder WithTraceContext(LogBrewTraceContext value)
+        {
+            ExceptionContract.ThrowIfNull(value, nameof(value));
+            context = TelemetryContext.WithTrace(context, value);
+            return this;
+        }
+
         public ActionAttributes ToActionAttributes()
         {
             TimelineMetadata.ValidateStatusCode(statusCode);
@@ -173,7 +209,9 @@ namespace LogBrew
             TimelineMetadata.AddIfNotNull(actionMetadata, "durationMs", durationMs);
             TimelineMetadata.AddIfNotNull(actionMetadata, "sessionId", sessionId);
             TimelineMetadata.AddIfNotNull(actionMetadata, "traceId", traceId);
-            return ActionAttributes.Create(actionName, normalizedStatus).WithMetadata(actionMetadata);
+            var attributes = ActionAttributes.Create(actionName, normalizedStatus).WithMetadata(actionMetadata);
+            var eventContext = LogBrewTrace.ContextWithCurrentTrace(context);
+            return eventContext == null ? attributes : attributes.WithContext(eventContext);
         }
     }
 

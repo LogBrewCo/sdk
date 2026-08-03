@@ -154,7 +154,8 @@ namespace LogBrew
             var linkSummaries = ActivityLinkSummaries(capturedActivity, metadata);
             var attributes = SpanAttributes.Create(activityName, context.TraceId, context.SpanId, StatusFromActivity(capturedActivity, metadata))
                 .WithDurationMs(Math.Max(0, capturedActivity.Duration.TotalMilliseconds))
-                .WithMetadata(metadata);
+                .WithMetadata(metadata)
+                .WithContext(ActivityTelemetryContext(context, safeOptions));
             if (context.ParentSpanId != null)
             {
                 attributes.WithParentSpanId(context.ParentSpanId);
@@ -208,6 +209,34 @@ namespace LogBrew
             AddString(metadata, "serviceVersion", options.ServiceVersion);
             AddString(metadata, "deploymentEnvironment", options.DeploymentEnvironment);
             return metadata;
+        }
+
+        private static TelemetryContext ActivityTelemetryContext(
+            CapturedActivityContext context,
+            LogBrewActivitySpanOptions options)
+        {
+            var builder = TelemetryContext.Create()
+                .WithTrace(context.TraceId, context.SpanId, context.ParentSpanId, context.Sampled);
+            var resourceBuilder = TelemetryResource.Create();
+            var hasResource = false;
+            if (options.ServiceName != null)
+            {
+                resourceBuilder.WithService(options.ServiceName, options.ServiceVersion);
+                hasResource = true;
+            }
+
+            if (options.DeploymentEnvironment != null)
+            {
+                resourceBuilder.WithDeployment(environment: options.DeploymentEnvironment);
+                hasResource = true;
+            }
+
+            if (hasResource)
+            {
+                builder.WithResource(resourceBuilder.Build());
+            }
+
+            return builder.Build();
         }
 
         private static List<SpanEventSummary> ActivityEventSummaries(Activity activity, Dictionary<string, object?> spanMetadata)
