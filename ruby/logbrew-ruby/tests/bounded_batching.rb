@@ -17,6 +17,7 @@ rescue LogBrew::SdkError => error
 end
 
 def bounded_batching_client(**options)
+  options = { capture_runtime_context: false }.merge(options)
   LogBrew::Client.create(
     api_key: "LOGBREW_API_KEY",
     sdk_name: "logbrew-ruby",

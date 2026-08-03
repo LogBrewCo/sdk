@@ -12,7 +12,8 @@ require_relative "readme_example"
 client = LogBrew::Client.create(
   api_key: "LOGBREW_API_KEY",
   sdk_name: "logbrew-ruby",
-  sdk_version: "0.1.0"
+  sdk_version: "0.1.0",
+  capture_runtime_context: false
 )
 enqueue_all(client)
 
@@ -22,7 +23,8 @@ response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 retry_client = LogBrew::Client.create(
   api_key: "LOGBREW_API_KEY",
   sdk_name: "logbrew-ruby",
-  sdk_version: "0.1.0"
+  sdk_version: "0.1.0",
+  capture_runtime_context: false
 )
 enqueue_all(retry_client)
 retry_response = retry_client.flush(

@@ -42,6 +42,11 @@ module LogBrew
     end
   end
 
+  require_relative "logbrew/telemetry_context_value"
+  require_relative "logbrew/telemetry_resource"
+  require_relative "logbrew/telemetry_context"
+  require_relative "logbrew/telemetry"
+
   require_relative "logbrew/event_batcher"
   require_relative "logbrew/persistent_event_store"
   require_relative "logbrew/bounded_event_queue"
@@ -851,12 +856,26 @@ module LogBrew
       on_event_dropped: nil,
       max_batch_size: EventBatcher::DEFAULT_MAX_SIZE,
       max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES,
-      persistent_queue_path: nil
+      persistent_queue_path: nil,
+      context: nil,
+      capture_runtime_context: true
     )
       Validation.require_non_empty("api_key", api_key)
       Validation.require_non_empty("sdk_name", sdk_name)
       Validation.require_non_empty("sdk_version", sdk_version)
       raise SdkError.new("validation_error", "max_retries must be non-negative") if max_retries.negative?
+      unless context.nil? || context.is_a?(TelemetryContext)
+        raise SdkError.new("validation_error", "client context must be a LogBrew::TelemetryContext")
+      end
+      unless capture_runtime_context == true || capture_runtime_context == false
+        raise SdkError.new("validation_error", "capture_runtime_context must be a boolean")
+      end
+
+      resolved_context = if capture_runtime_context
+                           TelemetryContext.merge(TelemetryContext.runtime_defaults, context)
+                         else
+                           TelemetryContext.merge(nil, context)
+                         end
 
       new(
         api_key: api_key,
@@ -871,7 +890,8 @@ module LogBrew
         on_event_dropped: on_event_dropped,
         max_batch_size: max_batch_size,
         max_batch_bytes: max_batch_bytes,
-        persistent_queue_path: persistent_queue_path
+        persistent_queue_path: persistent_queue_path,
+        context: resolved_context
       )
     end
 
@@ -921,10 +941,12 @@ module LogBrew
       on_event_dropped: nil,
       max_batch_size: EventBatcher::DEFAULT_MAX_SIZE,
       max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES,
-      persistent_queue_path: nil
+      persistent_queue_path: nil,
+      context: nil
     )
       @api_key = api_key
       @sdk = sdk
+      @context = context
       @max_retries = max_retries
       @event_batcher = EventBatcher.new(sdk: sdk, max_size: max_batch_size, max_bytes: max_batch_bytes)
       event_store = nil
@@ -1015,31 +1037,31 @@ module LogBrew
     end
 
     def release(id, timestamp, attributes)
-      push_event("release", id, timestamp, validate_release(attributes))
+      push_event("release", id, timestamp, validate_release(attributes), event_context(attributes))
     end
 
     def environment(id, timestamp, attributes)
-      push_event("environment", id, timestamp, validate_environment(attributes))
+      push_event("environment", id, timestamp, validate_environment(attributes), event_context(attributes))
     end
 
     def issue(id, timestamp, attributes)
-      push_event("issue", id, timestamp, validate_issue(attributes))
+      push_event("issue", id, timestamp, validate_issue(attributes), event_context(attributes))
     end
 
     def log(id, timestamp, attributes)
-      push_event("log", id, timestamp, validate_log(attributes))
+      push_event("log", id, timestamp, validate_log(attributes), event_context(attributes))
     end
 
     def span(id, timestamp, attributes)
-      push_event("span", id, timestamp, validate_span(attributes))
+      push_event("span", id, timestamp, validate_span(attributes), event_context(attributes))
     end
 
     def metric(id, timestamp, attributes)
-      push_event("metric", id, timestamp, validate_metric(attributes))
+      push_event("metric", id, timestamp, validate_metric(attributes), event_context(attributes))
     end
 
     def action(id, timestamp, attributes)
-      push_event("action", id, timestamp, validate_action(attributes))
+      push_event("action", id, timestamp, validate_action(attributes), event_context(attributes))
     end
 
     def flush(transport = nil)
@@ -1096,10 +1118,18 @@ module LogBrew
 
     private
 
-    def push_event(type, id, timestamp, attributes)
+    def push_event(type, id, timestamp, attributes, event_context)
       @automatic_delivery&.assert_process_ownership!
       Validation.require_non_empty("event id", id)
       Validation.require_timestamp(timestamp)
+      ambient_context = Telemetry.current_context
+      active_trace = defined?(LogBrew::Trace) ? LogBrew::Trace.current : nil
+      ambient_context = TelemetryContext.with_trace(ambient_context, active_trace) unless active_trace.nil?
+      merged_context = TelemetryContext.merge(
+        TelemetryContext.merge(@context, ambient_context),
+        event_context
+      )
+      attributes["context"] = merged_context.to_h unless merged_context.nil?
       event = {
         "type" => type,
         "timestamp" => timestamp,
@@ -1368,6 +1398,23 @@ module LogBrew
       Validation.require_non_empty("action name", name)
       Validation.require_allowed_value("action status", status, ACTION_STATUSES)
       with_metadata({ "name" => name, "status" => status }, attributes)
+    end
+
+    def event_context(attributes)
+      return nil unless attributes.is_a?(Hash)
+
+      string_key = attributes.key?("context")
+      symbol_key = attributes.key?(:context)
+      if string_key && symbol_key
+        raise SdkError.new("validation_error", "event context must use one context field")
+      end
+      return nil unless string_key || symbol_key
+
+      value = string_key ? attributes["context"] : attributes[:context]
+      unless value.is_a?(TelemetryContext)
+        raise SdkError.new("validation_error", "event context must be a LogBrew::TelemetryContext")
+      end
+      value
     end
 
     def with_metadata(payload, attributes)

@@ -55,7 +55,8 @@ if __FILE__ == $PROGRAM_NAME
   client = LogBrew::Client.create(
     api_key: "LOGBREW_API_KEY",
     sdk_name: "logbrew-ruby",
-    sdk_version: "0.1.0"
+    sdk_version: "0.1.0",
+    capture_runtime_context: false
   )
   enqueue_all(client)
 

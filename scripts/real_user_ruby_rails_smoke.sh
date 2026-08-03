@@ -190,6 +190,14 @@ begin
   abort "route template span changed: #{span.fetch("name").inspect}" unless span.fetch("name") == "GET /tools/:id(.:format)"
   abort "incoming trace changed" unless span.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736"
   abort "incoming parent changed" unless span.fetch("parentSpanId") == "00f067aa0ba902b7"
+  span_context = span.fetch("context")
+  span_resource = span_context.fetch("resource")
+  abort "typed service context changed" unless span_resource.fetch("service") == { "name" => "installed-rails-smoke" }
+  abort "typed deployment context changed" unless span_resource.fetch("deployment") == { "environment" => "test" }
+  abort "typed framework context changed" unless span_resource.fetch("framework") == { "name" => "rails", "version" => expected_rails }
+  abort "typed runtime context missing" if span_resource.dig("runtime", "name").to_s.empty?
+  abort "typed request trace changed" unless span_context.dig("trace", "traceId") == span.fetch("traceId")
+  abort "typed request span changed" unless span_context.dig("trace", "spanId") == span.fetch("spanId")
   span_metadata = span.fetch("metadata")
   abort "route metadata changed" unless span_metadata.fetch("http.route") == "/tools/:id(.:format)"
   abort "service metadata changed" unless span_metadata.fetch("service") == "installed-rails-smoke"

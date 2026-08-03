@@ -140,6 +140,76 @@ response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 warn response.status_code
 ```
 
+## Shared Telemetry Context
+
+Use one versioned context when a human or coding agent must correlate releases,
+issues, logs, spans, metrics, and product actions without reverse-engineering a
+flat metadata map:
+
+```ruby
+resource = LogBrew::TelemetryResource.create
+  .with_service(name: "checkout-api", version: "1.4.0")
+  .with_deployment(environment: "production", release: "checkout@1.4.0")
+  .with_framework(name: "rails", version: "8.1.3")
+  .with_application(name: "checkout", version: "1.4.0", build: "140")
+  .build
+client_context = LogBrew::TelemetryContext.create
+  .with_resource(resource)
+  .with_tag("region", "eu")
+  .build
+
+client = LogBrew::Client.create(
+  api_key: ENV.fetch("LOGBREW_SERVER_API_KEY"),
+  sdk_name: "checkout-api",
+  sdk_version: "1.4.0",
+  context: client_context
+)
+
+request_context = LogBrew::TelemetryContext.create
+  .with_session(id: "session_checkout_123")
+  .with_subject(id: "subject_checkout_123", kind: "user")
+  .with_tags("journey" => "checkout", "surface" => "payment")
+  .build
+
+LogBrew::Telemetry.with_context(request_context) do
+  client.log(
+    "evt_checkout_started",
+    Time.now.utc.iso8601,
+    message: "checkout started",
+    level: "info"
+  )
+end
+```
+
+Client context is merged into all seven signal types. Resource sections and
+tags merge field by field; event context replaces trace, session, or subject
+sections and wins on conflicting resource fields or tags. Pass a built
+`TelemetryContext` as an event's `context:` value for an explicit override.
+`LogBrew::Telemetry.with_context` provides a fiber/thread-local request or job
+scope and returns to the exact prior scope even when application work raises.
+When `LogBrew::Trace.current` is active, its W3C trace and span IDs are added to
+the typed context on every signal. Explicit event context remains the final
+override.
+
+The client adds only Ruby engine/version, operating-system family/release, and
+architecture beneath explicit context by default. Set
+`capture_runtime_context: false` to disable those defaults without removing
+explicit context. The automatic Rails adapter also promotes its already
+validated service, environment, release, and Rails version configuration into
+the corresponding resource sections. Automatic context never reads host names,
+process IDs, commands or arguments, environment variables, local account names,
+working directories, files, network addresses, cloud metadata, memory, or CPU
+values.
+
+Context is detached and validated before queue admission. Strings, IDs, trace
+identifiers, resource sections, and tags follow the shared event schema; tags
+are sorted and capped at 32. Session and subject IDs are application-owned,
+opaque correlation values. Never put names, email addresses, authentication
+material, network addresses, or other direct personal data in them. Use
+`TelemetryContext.from_hash(...)` or `TelemetryResource.from_hash(...)` only
+when adapting an already schema-shaped object; the builders are clearer for
+new code.
+
 ## Serialized Worker Lifecycle
 
 Use `LogBrew::WorkerLifecycle` when a prefork or long-running worker processes
@@ -192,7 +262,9 @@ when that lifecycle fits the application better.
 
 ## First Useful Service Telemetry
 
-For a service request, combine release, environment, log, product action, network milestone, metric, and span events around one shared W3C trace:
+For a service request, combine release, environment, log, product action,
+network milestone, metric, and span events around one typed request context and
+one shared W3C trace:
 
 ```ruby
 incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
@@ -200,51 +272,66 @@ trace = LogBrew::Traceparent.parse(incoming)
 child_span_id = "b7ad6b7169203331"
 route_template = "/checkout/:cart_id"
 session_id = "sess_checkout_123"
+request_context = LogBrew::TelemetryContext.create
+  .with_session(id: session_id)
+  .with_subject(id: "subject_checkout_123", kind: "user")
+  .with_tag("journey", "checkout")
+  .build
+active_trace = LogBrew::Trace.create(
+  trace_id: trace.trace_id,
+  span_id: child_span_id,
+  parent_span_id: trace.parent_span_id,
+  trace_flags: trace.trace_flags
+)
 
-client.log(
-  "evt_log_checkout_started",
-  "2026-06-02T10:00:02Z",
-  message: "checkout request started",
-  level: "info",
-  logger: "checkout",
-  metadata: { traceId: trace.trace_id, sessionId: session_id, routeTemplate: route_template }
-)
-client.action(
-  "evt_action_checkout_submit",
-  "2026-06-02T10:00:03Z",
-  LogBrew::ProductTimeline.product_action(
-    name: "checkout.submit",
-    route_template: "/checkout/:cart_id",
-    session_id: session_id,
-    trace_id: trace.trace_id,
-    screen: "Checkout",
-    funnel: "checkout",
-    step: "submit"
-  )
-)
-client.metric(
-  "evt_metric_http_server_duration",
-  "2026-06-02T10:00:05Z",
-  name: "http.server.duration",
-  kind: "histogram",
-  value: 183.4,
-  unit: "ms",
-  temporality: "delta",
-  metadata: { method: "POST", routeTemplate: route_template, statusCode: 202, traceId: trace.trace_id }
-)
-client.span(
-  "evt_span_checkout_request",
-  "2026-06-02T10:00:06Z",
-  LogBrew::Traceparent.span_attributes_from_traceparent(
-    trace,
-    LogBrew::TraceparentSpanInput.new(
-      name: "POST /checkout/:cart_id",
-      span_id: child_span_id,
-      duration_ms: 183.4,
-      metadata: { sampled: trace.sampled, routeTemplate: route_template, sessionId: session_id }
+LogBrew::Telemetry.with_context(request_context) do
+  LogBrew::Trace.with_context(active_trace) do
+    client.log(
+      "evt_log_checkout_started",
+      "2026-06-02T10:00:02Z",
+      message: "checkout request started",
+      level: "info",
+      logger: "checkout",
+      metadata: { routeTemplate: route_template }
     )
-  )
-)
+    client.action(
+      "evt_action_checkout_submit",
+      "2026-06-02T10:00:03Z",
+      LogBrew::ProductTimeline.product_action(
+        name: "checkout.submit",
+        route_template: route_template,
+        session_id: session_id,
+        trace_id: trace.trace_id,
+        screen: "Checkout",
+        funnel: "checkout",
+        step: "submit"
+      )
+    )
+    client.metric(
+      "evt_metric_http_server_duration",
+      "2026-06-02T10:00:05Z",
+      name: "http.server.duration",
+      kind: "histogram",
+      value: 183.4,
+      unit: "ms",
+      temporality: "delta",
+      metadata: { method: "POST", routeTemplate: route_template, statusCode: 202 }
+    )
+    client.span(
+      "evt_span_checkout_request",
+      "2026-06-02T10:00:06Z",
+      LogBrew::Traceparent.span_attributes_from_traceparent(
+        trace,
+        LogBrew::TraceparentSpanInput.new(
+          name: "POST /checkout/:cart_id",
+          span_id: child_span_id,
+          duration_ms: 183.4,
+          metadata: { sampled: trace.sampled, routeTemplate: route_template }
+        )
+      )
+    )
+  end
+end
 
 outgoing_headers = LogBrew::Traceparent.create_headers(
   trace_id: trace.trace_id,
@@ -253,7 +340,11 @@ outgoing_headers = LogBrew::Traceparent.create_headers(
 )
 ```
 
-The packaged `examples/first_useful_telemetry.rb` file shows the full flow, including release, environment, and network milestone events. Route templates stay query-free, metadata is primitive-only, and the SDK does not capture request bodies or arbitrary transport metadata.
+The packaged `examples/first_useful_telemetry.rb` file shows the full flow,
+including client resource/deployment context, release, environment, opaque
+subject/session correlation, and a network milestone. Route templates stay
+query-free, metadata is primitive-only, and the SDK does not capture request
+bodies or arbitrary transport metadata.
 
 ## W3C Trace Context
 
@@ -380,6 +471,7 @@ rescue RuntimeError => error
       message: "Checkout could not be completed.",
       mechanism_type: "ruby.exception",
       handled: true,
+      context: request_context,
       metadata: { routeTemplate: "/checkout/:cart_id" },
       breadcrumbs: breadcrumbs
     )
@@ -396,9 +488,11 @@ and at most eight flat finite primitive data values. Set
 `breadcrumbs_truncated: true` when the supplied list omits earlier history.
 
 `from_exception` deliberately omits exception text unless `message:` is
-provided. Automatic and manual structured frame projection never captures raw
-backtrace strings, source code, locals, arguments, or absolute paths. The raw
-Rails/Rack backtrace option is separate and remains off by default. Run
+provided. Pass `context:` to correlate the issue with the same typed resource,
+trace, session, opaque subject, and tags as its surrounding signals. Automatic
+and manual structured frame projection never captures raw backtrace strings,
+source code, locals, arguments, or absolute paths. The raw Rails/Rack backtrace
+option is separate and remains off by default. Run
 `make -C examples run-issue-diagnostics` for a complete inspectable payload.
 
 ## Metrics
