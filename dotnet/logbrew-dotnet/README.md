@@ -48,6 +48,56 @@ TransportResponse response = client.Shutdown(RecordingTransport.AlwaysAccept());
 Console.Error.WriteLine(response.StatusCode);
 ```
 
+## Shared Telemetry Context
+
+`TelemetryContext` gives issues, logs, spans, actions, metrics, releases, and environments the same versioned resource and correlation vocabulary. Set stable service/deployment identity once with `LogBrewClientOptions`, activate request or job identity with `LogBrewTelemetry.ActivateContext(...)`, and use an attribute's `WithContext(...)` only for an event-specific override.
+
+```csharp
+using LogBrew;
+
+var serviceContext = TelemetryContext.Create()
+    .WithResource(
+        TelemetryResource.Create()
+            .WithService("checkout-api", "1.4.2")
+            .WithDeployment("production", "checkout-api@1.4.2")
+            .WithFramework("aspnetcore", "10.0")
+            .WithApplication("checkout", "1.4.2", "104")
+            .Build())
+    .WithTag("region", "eu")
+    .Build();
+
+var client = LogBrewClient.Create(
+    "LOGBREW_API_KEY",
+    "checkout-dotnet-service",
+    "1.0.0",
+    new LogBrewClientOptions { Context = serviceContext });
+
+var requestContext = TelemetryContext.Create()
+    .WithTrace(
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "b7ad6b7169203331",
+        "00f067aa0ba902b7",
+        sampled: true)
+    .WithSession("session_01")
+    .WithSubject("subject_opaque_42", "user")
+    .WithTag("journey", "checkout")
+    .Build();
+
+using (LogBrewTelemetry.ActivateContext(requestContext))
+{
+    client.Log(
+        "evt_checkout",
+        "2026-08-03T08:15:30Z",
+        LogAttributes.Create("checkout started", "info"));
+}
+```
+
+The final merge order is client context, current async-local context plus `LogBrewTrace.Current`, then event context. Resource sections and tags merge field by field; a later trace, session, or subject replaces the earlier section. Builders validate and detach inputs before queueing, and disposing an ambient scope reinstates the exact earlier context. For span events, the required top-level trace and span IDs remain canonical and integrations also attach the matching typed context so related non-span signals can join the same trace.
+
+By default, the client adds only .NET runtime name/version, OS family, and process architecture beneath explicit context. Set `DisableRuntimeContext = true` in `LogBrewClientOptions` to turn those defaults off without discarding caller context. Runtime defaults do not inspect environment variables, machine names, user names, network addresses, startup arguments, working directories, files, cloud metadata, or application configuration.
+
+Context uses `schemaVersion: 1`. Strings are limited to 256 Unicode scalar values, session and subject IDs to 200, and tags to 32 low-cardinality string dimensions with 64-character ASCII keys. Control characters, malformed Unicode, invalid or all-zero W3C identifiers, and empty resource sections fail before queueing. Use opaque session and subject IDs; never put names, email addresses, IP addresses, authentication material, raw URLs, or free-form user input in context or tags.
+
 ## Typed Issue Diagnostics
 
 Use `IssueAttributes.FromException(...)` for privacy-bounded exception identity,
@@ -167,6 +217,8 @@ Storage failures pause automatic delivery with `DeliveryPauseReason.Storage`. Af
 
 ## Explicit Metrics
 
+Metrics answer "how much?", "how often?", "how long?", and "what is the current level?" across many events. They power dashboard trends, comparisons, regression detection, and alert thresholds; they do not explain a root cause by themselves. Attach the same service, deployment, session, and trace context as nearby logs, issues, and spans so a human or AI can move from an abnormal chart to the evidence that explains it.
+
 Use `MetricAttributes` when your application already knows the measurement it wants to report:
 
 ```csharp
@@ -179,28 +231,38 @@ client.Metric(
     "evt_metric_001",
     "2026-06-02T10:00:06Z",
     MetricAttributes.Create("queue.depth", "gauge", 42, "{items}", "instant")
-        .WithMetadata(new Dictionary<string, object?> { ["queue"] = "default" }));
+        .WithContext(
+            TelemetryContext.Create()
+                .WithTag("queue", "default")
+                .Build()));
 ```
 
-Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as service, region, queue, or route pattern. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
+Use a `counter` for an amount that accumulates, such as completed jobs or failures; use a `gauge` for a point-in-time level, such as queue depth or active connections; and use a `histogram` sample for a distribution, such as request duration or payload size. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable route templates and low-cardinality dimensions—never raw user, session, trace, URL, or request IDs as metric tags. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
 
 ## Product and Network Timelines
 
 Use `ProductTimeline` when your .NET service already knows important product steps or API milestones. The helpers create normal `action` events with primitive metadata that AI assistants can analyze across sessions without visual replay, HTTP client patching, request/response payload capture, or header capture.
 
 ```csharp
-using System.Collections.Generic;
 using LogBrew;
 
 var client = LogBrewClient.Create("LOGBREW_API_KEY", "my-dotnet-app", "1.0.0");
+var timelineContext = TelemetryContext.Create()
+    .WithSession("session_123")
+    .WithSubject("subject_opaque_42", "user")
+    .WithTag("journey", "checkout")
+    .Build();
+var timelineTrace = LogBrewTraceContext.FromTraceparent(
+    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "b7ad6b7169203331");
 
 client.Action(
     "evt_action_checkout_submit",
     "2026-06-02T10:00:05Z",
     ProductTimeline.ProductAction("checkout.submit")
         .WithRouteTemplate("/checkout/:step")
-        .WithSessionId("session_123")
-        .WithTraceId("trace_abc")
+        .WithContext(timelineContext)
+        .WithTraceContext(timelineTrace)
         .WithScreen("Checkout")
         .WithFunnel("checkout")
         .WithStep("submit")
@@ -214,12 +276,12 @@ client.Action(
         .WithMethod("POST")
         .WithStatusCode(202)
         .WithDurationMs(183.4)
-        .WithSessionId("session_123")
-        .WithTraceId("trace_abc")
+        .WithContext(timelineContext)
+        .WithTraceContext(timelineTrace)
         .ToActionAttributes());
 ```
 
-`ProductTimeline` strips query strings and fragments from route templates, keeps metadata primitive-only, and leaves all product action and network milestone capture under app control.
+`ProductTimeline` strips query strings and fragments from route templates, keeps metadata primitive-only, and leaves all product action and network milestone capture under app control. `WithSessionId(...)` and `WithTraceId(...)` remain available for legacy flat metadata, but new integrations should use typed context and exact W3C trace IDs.
 
 ## First Useful Service Telemetry
 
@@ -231,62 +293,75 @@ using LogBrew;
 
 const string incomingTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const string childSpanId = "b7ad6b7169203331";
-var context = Traceparent.Parse(incomingTraceparent);
-var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+var traceparent = Traceparent.Parse(incomingTraceparent);
+var serviceContext = TelemetryContext.Create()
+    .WithResource(
+        TelemetryResource.Create()
+            .WithService("checkout-api", "1.4.2")
+            .WithDeployment("production", "checkout-api@1.4.2")
+            .Build())
+    .Build();
+var client = LogBrewClient.Create(
+    "LOGBREW_API_KEY",
+    "checkout-dotnet-service",
+    "1.0.0",
+    new LogBrewClientOptions { Context = serviceContext });
 
-client.Log(
-    "evt_log_checkout_started",
-    "2026-06-02T10:00:02Z",
-    LogAttributes.Create("checkout request started", "info")
-        .WithLogger("checkout.http")
-        .WithMetadata(new Dictionary<string, object?>
-        {
-            ["routeTemplate"] = "/checkout/:cart_id",
-            ["sessionId"] = "sess_checkout_123",
-            ["traceId"] = context.TraceId
-        }));
+client.Release("evt_release_checkout", "2026-06-02T10:00:00Z", ReleaseAttributes.Create("checkout-api@1.4.2"));
+client.Environment("evt_environment_checkout", "2026-06-02T10:00:01Z", EnvironmentAttributes.Create("production"));
 
-client.Action(
-    "evt_action_payment_api",
-    "2026-06-02T10:00:04Z",
-    ProductTimeline.NetworkMilestone("https://payments.example/payments/:payment_id?card=sample")
-        .WithMethod("POST")
-        .WithStatusCode(202)
-        .WithDurationMs(183.4)
-        .WithSessionId("sess_checkout_123")
-        .WithTraceId(context.TraceId)
-        .ToActionAttributes());
+var requestContext = TelemetryContext.Create()
+    .WithTrace(traceparent.TraceId, childSpanId, traceparent.ParentSpanId, traceparent.Sampled)
+    .WithSession("sess_checkout_123")
+    .WithSubject("subject_checkout_opaque", "user")
+    .WithTag("journey", "checkout")
+    .Build();
 
-client.Metric(
-    "evt_metric_http_server_duration",
-    "2026-06-02T10:00:05Z",
-    MetricAttributes.Create("http.server.duration", "histogram", 183.4, "ms", "delta")
-        .WithMetadata(new Dictionary<string, object?>
-        {
-            ["method"] = "POST",
-            ["routeTemplate"] = "/checkout/:cart_id",
-            ["statusCode"] = 202,
-            ["traceId"] = context.TraceId
-        }));
-
-client.Span(
-    "evt_span_checkout_request",
-    "2026-06-02T10:00:06Z",
-    Traceparent.SpanAttributesFromTraceparent(
-        incomingTraceparent,
-        TraceparentSpanInput.Create("POST /checkout/:cart_id", childSpanId, "ok")
-            .WithDurationMs(183.4)
+using (LogBrewTelemetry.ActivateContext(requestContext))
+{
+    client.Log(
+        "evt_log_checkout_started",
+        "2026-06-02T10:00:02Z",
+        LogAttributes.Create("checkout request started", "info")
+            .WithLogger("checkout.http")
             .WithMetadata(new Dictionary<string, object?>
             {
-                ["routeTemplate"] = "/checkout/:cart_id",
-                ["sampled"] = context.Sampled,
-                ["sessionId"] = "sess_checkout_123"
-            })));
+                ["routeTemplate"] = "/checkout/:cart_id"
+            }));
 
-var outgoingHeaders = Traceparent.CreateHeaders(context.TraceId, childSpanId, context.TraceFlags);
+    client.Action(
+        "evt_action_payment_api",
+        "2026-06-02T10:00:04Z",
+        ProductTimeline.NetworkMilestone("https://payments.example/payments/:payment_id?card=sample")
+            .WithMethod("POST")
+            .WithStatusCode(202)
+            .WithDurationMs(183.4)
+            .ToActionAttributes());
+
+    client.Metric(
+        "evt_metric_http_server_duration",
+        "2026-06-02T10:00:05Z",
+        MetricAttributes.Create("http.server.duration", "histogram", 183.4, "ms", "delta")
+            .WithMetadata(new Dictionary<string, object?>
+            {
+                ["method"] = "POST",
+                ["routeTemplate"] = "/checkout/:cart_id",
+                ["statusCode"] = 202
+            }));
+
+    client.Span(
+        "evt_span_checkout_request",
+        "2026-06-02T10:00:06Z",
+        Traceparent.SpanAttributesFromTraceparent(
+            incomingTraceparent,
+            TraceparentSpanInput.Create("POST /checkout/:cart_id", childSpanId, "ok")
+                .WithDurationMs(183.4)));
+}
+
+var outgoingHeaders = Traceparent.CreateHeaders(traceparent.TraceId, childSpanId, traceparent.TraceFlags);
 ```
 
-`Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes IDs, exposes the sampled flag, creates outbound `traceparent` headers, and builds child span attributes with primitive metadata only. The packaged `examples/FirstUsefulTelemetry.cs` file shows the complete release, environment, log, product action, network milestone, metric, and span flow.
+`Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes IDs, exposes the sampled flag, creates outbound `traceparent` headers, and builds child span attributes with primitive metadata only. The ambient context lets each request signal carry the same typed trace, session, subject, and journey identity without duplicating those values in flat metadata. The packaged `examples/FirstUsefulTelemetry.cs` file shows the complete release, environment, log, product action, network milestone, metric, and span flow.
 
 ## Request Trace Correlation
 
@@ -305,49 +380,57 @@ var request = LogBrewHttpRequestTelemetry.Start(
     "POST",
     "https://shop.example/checkout/:cart_id?coupon=sample#review",
     incomingTraceparent);
+var requestContext = TelemetryContext.Create()
+    .WithTrace(request.Trace)
+    .WithSession("sess_checkout_123")
+    .WithSubject("subject_checkout_opaque", "user")
+    .WithTag("journey", "checkout")
+    .Build();
 
 using ILoggerFactory factory = LoggerFactory.Create(builder =>
 {
     builder.AddLogBrew(client, new LogBrewLoggerOptions { EventIdPrefix = "checkout_trace" });
 });
 
-using (request.Activate())
+using (LogBrewTelemetry.ActivateContext(requestContext))
 {
-    LogBrewTraceContext? activeTrace = LogBrewTrace.Current;
-    ILogger logger = factory.CreateLogger("CheckoutTrace");
-    logger.LogWarning("checkout slow for {CartId}", "cart_123");
+    using (request.Activate())
+    {
+        ILogger logger = factory.CreateLogger("CheckoutTrace");
+        logger.LogWarning("checkout slow for {CartId}", "cart_123");
 
-    try
-    {
-        SubmitCheckout();
+        try
+        {
+            SubmitCheckout();
+        }
+        catch (InvalidOperationException error)
+        {
+            client.Issue(
+                "evt_issue_checkout_trace",
+                "2026-06-02T10:00:04Z",
+                IssueAttributes.FromException(
+                        error,
+                        "Checkout handler failed",
+                        "dotnet.request_handler",
+                        true)
+                    .WithMetadata(new Dictionary<string, object?>
+                    {
+                        ["routeTemplate"] = request.RouteTemplate
+                    }));
+        }
     }
-    catch (InvalidOperationException error)
-    {
-        client.Issue(
-            "evt_issue_checkout_trace",
-            "2026-06-02T10:00:04Z",
-            IssueAttributes.FromException(
-                    error,
-                    "Checkout handler failed",
-                    "dotnet.request_handler",
-                    true)
-                .WithMetadata(LogBrewTrace.MetadataWithCurrentTrace(new Dictionary<string, object?>
-                {
-                    ["routeTemplate"] = request.RouteTemplate
-                })));
-    }
+
+    request.FinishSpanAndMetric(
+        "evt_span_checkout_trace",
+        "evt_metric_checkout_trace",
+        "2026-06-02T10:00:06Z",
+        503);
 }
-
-request.FinishSpanAndMetric(
-    "evt_span_checkout_trace",
-    "evt_metric_checkout_trace",
-    "2026-06-02T10:00:06Z",
-    503);
 
 IReadOnlyDictionary<string, string> outgoingHeaders = request.OutgoingHeaders;
 ```
 
-`LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` uses .NET `AsyncLocal` so standard async work keeps the active trace context. The `ILogger` provider automatically adds `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a trace is active. `MetadataWithCurrentTrace()` is useful for app-owned errors or product events that should join the same request. `FromException(...)` adds typed diagnostics without copying the raw exception message or stack text. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
+`LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` and `LogBrewTelemetry.ActivateContext(...)` use .NET `AsyncLocal`, so normal async work keeps both the active trace and the approved session/subject/tags. Request spans, metrics, issues, logs, actions, dependency integrations, and `ILogger` records receive matching typed trace context; the logger also retains compatible flat trace metadata. `MetadataWithCurrentTrace()` remains available for older app-owned metadata flows. `FromException(...)` adds typed diagnostics without copying the raw exception message or stack text. ASP.NET Core apps can supply approved opaque request identity through `WithContextProvider(...)`. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
 
 If your service already creates `System.Diagnostics.Activity` spans through OpenTelemetry or framework instrumentation, create a LogBrew child context from the current Activity instead of reparsing headers:
 

@@ -415,7 +415,8 @@ namespace LogBrew.HttpClient
                 var status = requestError == null && (response == null || (int)response.StatusCode < 500) ? "ok" : "error";
                 var attributes = SpanAttributes.Create("HTTP " + method, Trace.TraceId, Trace.SpanId, status)
                     .WithDurationMs(ElapsedMilliseconds(startedAt))
-                    .WithMetadata(metadata);
+                    .WithMetadata(metadata)
+                    .WithContext(Trace.ToTelemetryContext());
                 if (Trace.ParentSpanId != null)
                 {
                     attributes.WithParentSpanId(Trace.ParentSpanId);

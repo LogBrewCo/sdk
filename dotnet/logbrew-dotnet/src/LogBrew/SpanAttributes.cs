@@ -32,6 +32,8 @@ namespace LogBrew
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public IReadOnlyList<SpanEventSummary>? Events
         {
             get { return events?.AsReadOnly(); }
@@ -62,6 +64,14 @@ namespace LogBrew
         public SpanAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public SpanAttributes WithContext(TelemetryContext context)
+        {
+            ExceptionContract.ThrowIfNull(context, nameof(context));
+            Context = context;
             return this;
         }
 

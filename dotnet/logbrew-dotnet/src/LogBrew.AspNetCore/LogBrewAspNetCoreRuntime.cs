@@ -69,6 +69,17 @@ namespace LogBrew
                         options.ApiKey!,
                         SdkName,
                         SdkVersion,
+                        new LogBrewClientOptions
+                        {
+                            Context = TelemetryContext.Create()
+                                .WithResource(
+                                    TelemetryResource.Create()
+                                        .WithService(options.ServiceName, options.Release)
+                                        .WithDeployment(options.ApplicationEnvironment, options.Release)
+                                        .WithFramework("aspnetcore", options.FrameworkVersion)
+                                        .Build())
+                                .Build()
+                        },
                         options.Transport!,
                         options.Delivery);
                 }

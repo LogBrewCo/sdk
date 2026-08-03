@@ -33,6 +33,8 @@ namespace LogBrew
 
         internal Func<HttpContext, IDictionary<string, object?>?>? MetadataProvider { get; private set; }
 
+        internal Func<HttpContext, TelemetryContext?>? ContextProvider { get; private set; }
+
         internal Func<string> TimestampProvider { get; private set; } = DefaultTimestamp;
 
         internal Action<Exception>? ErrorHandler { get; private set; }
@@ -87,6 +89,16 @@ namespace LogBrew
         public LogBrewAspNetCoreOptions WithMetadataProvider(Func<HttpContext, IDictionary<string, object?>?> value)
         {
             MetadataProvider = value ?? throw new ArgumentNullException(nameof(value));
+            return this;
+        }
+
+        /// <summary>
+        /// Sets an explicit request-context provider. LogBrew does not inspect claims, cookies,
+        /// headers, or client addresses automatically.
+        /// </summary>
+        public LogBrewAspNetCoreOptions WithContextProvider(Func<HttpContext, TelemetryContext?> value)
+        {
+            ContextProvider = value ?? throw new ArgumentNullException(nameof(value));
             return this;
         }
 
@@ -275,17 +287,21 @@ namespace LogBrew
                 serverOptions.WithMetadata(metadata);
             }
 
-            await LogBrewServerRequestTelemetry.CaptureAsync(
-                client,
-                context.Request.Method,
-                routeTemplate,
-                incomingTraceparent,
-                async _ =>
-                {
-                    await next(context).ConfigureAwait(false);
-                    return NormalizeStatusCode(context.Response.StatusCode);
-                },
-                serverOptions).ConfigureAwait(false);
+            var telemetryContext = BuildContext(context);
+            using (telemetryContext == null ? null : LogBrewTelemetry.ActivateContext(telemetryContext))
+            {
+                await LogBrewServerRequestTelemetry.CaptureAsync(
+                    client,
+                    context.Request.Method,
+                    routeTemplate,
+                    incomingTraceparent,
+                    async _ =>
+                    {
+                        await next(context).ConfigureAwait(false);
+                        return NormalizeStatusCode(context.Response.StatusCode);
+                    },
+                    serverOptions).ConfigureAwait(false);
+            }
         }
 
         private bool ShouldCapture(HttpContext context)
@@ -366,6 +382,24 @@ namespace LogBrew
             }
 
             return result;
+        }
+
+        private TelemetryContext? BuildContext(HttpContext context)
+        {
+            if (options.ContextProvider == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return options.ContextProvider(context);
+            }
+            catch (Exception error)
+            {
+                ReportError(error);
+                return null;
+            }
         }
 
         private void ReportError(Exception error)

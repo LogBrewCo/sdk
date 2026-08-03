@@ -5,7 +5,12 @@ public static class Program
 {
     public static void Main()
     {
-        var client = LogBrewClient.Create("LOGBREW_API_KEY", "logbrew-dotnet", "0.1.0");
+        // Keep this cross-SDK parity fixture exact; production clients normally retain safe runtime defaults.
+        var client = LogBrewClient.Create(
+            "LOGBREW_API_KEY",
+            "logbrew-dotnet",
+            "0.1.0",
+            new LogBrewClientOptions { DisableRuntimeContext = true });
         EnqueueAll(client);
 
         Console.WriteLine(client.PreviewJson());

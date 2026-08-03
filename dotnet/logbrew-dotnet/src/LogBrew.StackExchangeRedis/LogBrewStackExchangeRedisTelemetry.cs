@@ -268,7 +268,8 @@ namespace LogBrew.StackExchangeRedis
                     trace.SpanId,
                     commandError == null ? "ok" : "error")
                 .WithDurationMs(ElapsedMilliseconds(startedAt))
-                .WithMetadata(metadata);
+                .WithMetadata(metadata)
+                .WithContext(trace.ToTelemetryContext());
 
             if (trace.ParentSpanId != null)
             {

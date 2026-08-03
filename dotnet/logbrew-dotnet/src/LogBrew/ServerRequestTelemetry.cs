@@ -195,7 +195,8 @@ namespace LogBrew
                         "ASP.NET Core request failed",
                         "aspnetcore.middleware",
                         false)
-                    .WithMetadata(metadata));
+                    .WithMetadata(metadata)
+                    .WithContext(request.Trace.ToTelemetryContext()));
         }
 
         private static IDictionary<string, object?> RequestMetadata(

@@ -81,9 +81,13 @@ internal static partial class DurableDeliveryContractTests
         if (arguments[0] == "--durable-child-write")
         {
             var client = CreateDurableClient(arguments[1]);
-            client.Log("evt_restart_1", "2026-06-02T10:00:03Z", LogAttributes.Create("first", "info"));
-            client.Log("evt_restart_2", "2026-06-02T10:00:04Z", LogAttributes.Create("second", "info"));
-            client.Span("evt_restart_span", "2026-06-02T10:00:05Z", SpanWithArrays());
+            var context = TelemetryContext.Create()
+                .WithSession("durable_session")
+                .WithTag("recovery", "restart")
+                .Build();
+            client.Log("evt_restart_1", "2026-06-02T10:00:03Z", LogAttributes.Create("first", "info").WithContext(context));
+            client.Log("evt_restart_2", "2026-06-02T10:00:04Z", LogAttributes.Create("second", "info").WithContext(context));
+            client.Span("evt_restart_span", "2026-06-02T10:00:05Z", SpanWithArrays().WithContext(context));
             Environment.Exit(0);
         }
 
@@ -466,6 +470,7 @@ internal static partial class DurableDeliveryContractTests
         AssertTrue(body.IndexOf("evt_restart_1", StringComparison.Ordinal) < body.IndexOf("evt_restart_2", StringComparison.Ordinal), "restart recovery order changed");
         AssertTrue(body.IndexOf("evt_restart_2", StringComparison.Ordinal) < body.IndexOf("evt_restart_span", StringComparison.Ordinal), "restart span order changed");
         AssertTrue(body.Contains("span-event", StringComparison.Ordinal) && body.Contains("traceId", StringComparison.Ordinal), "restart span arrays changed");
+        AssertTrue(body.Contains("durable_session", StringComparison.Ordinal) && body.Contains("\"recovery\": \"restart\"", StringComparison.Ordinal), "restart shared context changed");
         AssertTrue(client.PendingEvents() == 0, "accepted restart prefix remained queued");
         AssertTrue(client.Shutdown().StatusCode == 204, "restarted client shutdown failed");
     }

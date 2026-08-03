@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.Json;
 using System.Threading.Tasks;
 using LogBrew;
 using Microsoft.Extensions.Logging;
@@ -195,7 +196,8 @@ internal static class TraceCorrelationTests
                         ["exceptionMessage"] = "payment provider failed",
                         ["safe"] = true,
                         ["ignored"] = new object()
-                    })));
+                    }))
+                    .WithContext(request.Trace.ToTelemetryContext()));
         }
 
         request.FinishSpanAndMetric(
@@ -231,6 +233,14 @@ internal static class TraceCorrelationTests
         Require(!payload.Contains("debug=sample", StringComparison.Ordinal), "expected query string to be omitted");
         Require(!payload.Contains("traceparent", StringComparison.OrdinalIgnoreCase), "expected raw traceparent to be omitted");
         Require(!payload.Contains("ignored", StringComparison.Ordinal), "expected non-primitive metadata to be skipped");
+        using var document = JsonDocument.Parse(payload);
+        foreach (var telemetryEvent in document.RootElement.GetProperty("events").EnumerateArray())
+        {
+            var trace = telemetryEvent.GetProperty("attributes").GetProperty("context").GetProperty("trace");
+            Require(trace.GetProperty("traceId").GetString() == request.Trace.TraceId, "expected typed trace on every related event");
+            Require(trace.GetProperty("spanId").GetString() == request.Trace.SpanId, "expected typed span on every related event");
+            Require(trace.GetProperty("parentSpanId").GetString() == request.Trace.ParentSpanId, "expected typed parent span on every related event");
+        }
     }
 
     private static void RequestHelperAcceptsExplicitTraceContext()

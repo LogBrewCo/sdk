@@ -132,12 +132,19 @@ namespace LogBrew
             {
                 try
                 {
+                    var attributes = LogAttributes.Create(message, LogBrewLoggingMetadata.ToLogBrewLevel(logLevel))
+                        .WithLogger(categoryName)
+                        .WithMetadata(metadata);
+                    var context = LogBrewTrace.ContextWithCurrentTrace(null);
+                    if (context != null)
+                    {
+                        attributes.WithContext(context);
+                    }
+
                     client.Log(
                         options.EventIdPrefix + "_" + eventNumber.ToString(CultureInfo.InvariantCulture),
                         timestamp,
-                        LogAttributes.Create(message, LogBrewLoggingMetadata.ToLogBrewLevel(logLevel))
-                            .WithLogger(categoryName)
-                            .WithMetadata(metadata));
+                        attributes);
 
                     if (options.FlushOnLog && options.Transport != null)
                     {

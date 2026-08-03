@@ -25,6 +25,8 @@ namespace LogBrew
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public static MetricAttributes Create(string name, string kind, double value, string unit, string temporality)
         {
             return new MetricAttributes(name, kind, value, unit, temporality);
@@ -33,6 +35,14 @@ namespace LogBrew
         public MetricAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public MetricAttributes WithContext(TelemetryContext context)
+        {
+            ExceptionContract.ThrowIfNull(context, nameof(context));
+            Context = context;
             return this;
         }
 

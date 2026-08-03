@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using LogBrew;
@@ -93,7 +94,15 @@ static async Task SelectedNamedAndTypedClientsAreScopedAndDeduplicated()
     Require(selectedTraceparents.Count == 1, "selected named client must inject once after duplicate registration");
     Require(typedTraceparents.Count == 1, "selected typed client must inject once");
     Require(plainHeaders.Count == 0, "unselected client must stay untouched");
-    Require(Count(telemetry.PreviewJson(), "\"type\": \"span\"") == 2, "selected clients must capture exactly two spans");
+    var preview = telemetry.PreviewJson();
+    Require(Count(preview, "\"type\": \"span\"") == 2, "selected clients must capture exactly two spans");
+    using var document = JsonDocument.Parse(preview);
+    foreach (var telemetryEvent in document.RootElement.GetProperty("events").EnumerateArray())
+    {
+        var trace = telemetryEvent.GetProperty("attributes").GetProperty("context").GetProperty("trace");
+        Require(trace.GetProperty("traceId").GetString() == root.TraceId, "expected typed HttpClient trace id");
+        Require(trace.GetProperty("parentSpanId").GetString() == root.SpanId, "expected typed HttpClient parent span id");
+    }
 }
 
 static async Task NoParentIsLiteralPassThrough()

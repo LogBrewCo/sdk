@@ -102,7 +102,15 @@ for needle in (
     "IssueExceptionInfo",
     "IssueDiagnostics.cs",
     "raw stack text",
+    "## Shared Telemetry Context",
+    "TelemetryContext",
+    "TelemetryResource",
+    "LogBrewClientOptions",
+    "DisableRuntimeContext",
+    "LogBrewTelemetry.ActivateContext",
+    "schemaVersion: 1",
     "MetricAttributes",
+    'Metrics answer "how much?"',
     "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
     "ProductTimeline",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture",
@@ -125,6 +133,7 @@ for needle in (
     "LogBrewHttpClientHandler",
     "WithRouteTemplateSelector",
     "WithRequestFilter",
+    "WithContextProvider",
     "HttpClientOutboundTelemetry.cs",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
@@ -203,6 +212,7 @@ for needle in (
     "SimpleActivityExportProcessor",
     "does not create an OpenTelemetry provider",
     "OTLP forwarding path",
+    "matching `TelemetryContext` trace identity",
     "OpenTelemetrySpanProcessorTelemetry.cs",
 ):
     if needle not in readme:
@@ -240,6 +250,8 @@ for needle in (
     "UseLogBrewDependencyActivitySourceTelemetry",
     "WithRequestFilter",
     "WithRouteTemplateSelector",
+    "WithContextProvider",
+    "opaque approved session ID",
     "does not read request or response bodies",
     "mechanism `aspnetcore.middleware`",
     "omits exception messages, raw stack text",
@@ -617,7 +629,12 @@ static void Require(bool condition, string message)
 
 static LogBrewClient NewClient(int maxRetries = 2)
 {
-    return LogBrewClient.Create("LOGBREW_API_KEY", "smoke-app", "0.1.0", maxRetries);
+    return LogBrewClient.Create(
+        "LOGBREW_API_KEY",
+        "smoke-app",
+        "0.1.0",
+        new LogBrewClientOptions { DisableRuntimeContext = true },
+        maxRetries);
 }
 
 static void EnqueueAll(LogBrewClient client)

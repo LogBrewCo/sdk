@@ -163,7 +163,11 @@ namespace LogBrew
             var spanId = NormalizeRequired("spanId", input.SpanId);
             RequireSpanId("spanId", spanId);
             var attributes = SpanAttributes.Create(input.Name, context.TraceId, spanId, input.Status)
-                .WithParentSpanId(context.ParentSpanId);
+                .WithParentSpanId(context.ParentSpanId)
+                .WithContext(
+                    TelemetryContext.Create()
+                        .WithTrace(context.TraceId, spanId, context.ParentSpanId, context.Sampled)
+                        .Build());
             if (input.DurationMs.HasValue)
             {
                 attributes.WithDurationMs(input.DurationMs.Value);

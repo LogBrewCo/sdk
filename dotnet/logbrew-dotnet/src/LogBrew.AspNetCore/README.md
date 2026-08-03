@@ -61,10 +61,16 @@ builder.AddLogBrew(options => options
     .ConfigureLogging(logging => logging.MinimumLevel = LogLevel.Warning)
     .ConfigureRequestTelemetry(request => request
         .WithRequestFilter(context => context.Request.Path != "/health")
-        .WithRouteTemplateSelector(context => context.GetEndpoint()?.DisplayName)));
+        .WithRouteTemplateSelector(context => context.GetEndpoint()?.DisplayName)
+        .WithContextProvider(context =>
+            context.Items.TryGetValue("LogBrewSessionId", out var value) && value is string sessionId
+                ? TelemetryContext.Create().WithSession(sessionId).Build()
+                : null)));
 ```
 
-Dependency telemetry is opt-in. When enabled, the host owns a `LogBrewActivitySourceListener` for `System.Net.Http`, Entity Framework Core, SqlClient, and StackExchange.Redis sources. Use `ConfigureDependencyTelemetry(...)` to narrow or extend those named sources. `WithTransport(...)` accepts an app-owned transport; network endpoints must use HTTPS, except loopback HTTP for local development.
+`WithContextProvider(...)` is the explicit bridge for app-approved request identity. The middleware activates the returned `TelemetryContext` for the asynchronous request flow, so the request span, duration metric, escaping-exception issue, application logs/actions, and dependency spans can share one session, subject, tag, and trace vocabulary. The example assumes earlier application middleware stored an opaque approved session ID; LogBrew does not inspect claims, cookies, headers, connection addresses, or route values to invent one. Provider failures are reported through `OnError(...)` and never change the app-owned response.
+
+Dependency telemetry is opt-in. When enabled, the host owns a `LogBrewActivitySourceListener` for `System.Net.Http`, Entity Framework Core, SqlClient, and StackExchange.Redis sources. Use `ConfigureDependencyTelemetry(...)` to narrow or extend those named sources. `WithTransport(...)` accepts an app-owned transport; network endpoints must use HTTPS, except loopback HTTP for local development. The automatic client also supplies typed service, deployment, ASP.NET Core framework, .NET runtime, OS-family, and architecture resource context without collecting host identity.
 
 ## Create a Project and Confirm Hosted Delivery
 
@@ -117,7 +123,7 @@ var runtime = app.Services.GetRequiredService<LogBrewAspNetCoreRuntime>();
 LogBrewAspNetCoreHealthSnapshot health = runtime.Health();
 ```
 
-The request middleware captures one route-template span, one optional `http.server.duration` metric, and one optional exception issue. Escaping exceptions carry typed .NET exception identity, mechanism `aspnetcore.middleware`, handled `false`, and at most 32 newest-first structured frames before the exact original exception is rethrown. Automatic issue capture omits exception messages, raw stack text, locals, source snippets, and absolute paths. It keeps `LogBrewTrace.Current` active while downstream handlers run so application-owned logs and telemetry can join the trace. It does not read request or response bodies, capture arbitrary headers, serialize raw `traceparent`, include query strings, or include raw route values; requests without a selected endpoint use the stable `/unmatched` route. The automatic logging provider excludes ASP.NET ambient scopes—which can contain raw paths and connection identifiers—while retaining explicit structured log fields and LogBrew trace correlation. Set `WithCaptureExceptionIssue(false)` only when another owner already captures the same failure.
+The request middleware captures one route-template span, one optional `http.server.duration` metric, and one optional exception issue. Escaping exceptions carry typed .NET exception identity, mechanism `aspnetcore.middleware`, handled `false`, and at most 32 newest-first structured frames before the exact original exception is rethrown. Automatic issue capture omits exception messages, raw stack text, locals, source snippets, and absolute paths. It keeps `LogBrewTrace.Current` and any `WithContextProvider(...)` value active while downstream handlers run so application-owned logs and telemetry can join the same trace and request context. It does not read request or response bodies, capture arbitrary headers, serialize raw `traceparent`, include query strings, or include raw route values; requests without a selected endpoint use the stable `/unmatched` route. The automatic logging provider excludes ASP.NET ambient scopes—which can contain raw paths and connection identifiers—while retaining explicit structured log fields and LogBrew trace correlation. Set `WithCaptureExceptionIssue(false)` only when another owner already captures the same failure.
 
 ## Existing Manual APIs
 

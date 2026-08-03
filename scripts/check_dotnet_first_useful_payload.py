@@ -50,14 +50,77 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
     )
 
     by_id = {event["id"]: event for event in events}
+    for event in events:
+        context = event["attributes"]["context"]
+        resource = context["resource"]
+        _require(
+            context.get("schemaVersion") == 1,
+            f"{event['id']} is missing shared-context schema version",
+        )
+        _require(
+            resource.get("service")
+            == {"name": "checkout-api", "version": "1.4.2"},
+            f"{event['id']} is missing service context",
+        )
+        _require(
+            resource.get("deployment")
+            == {"environment": "production", "release": "checkout-api@1.4.2"},
+            f"{event['id']} is missing deployment context",
+        )
+        _require(
+            resource.get("framework")
+            == {"name": "aspnetcore", "version": "10.0"},
+            f"{event['id']} is missing framework context",
+        )
+        _require(
+            resource.get("application")
+            == {"name": "checkout", "version": "1.4.2", "build": "104"}
+            and context.get("tags", {}).get("region") == "us-east-1",
+            f"{event['id']} is missing application/tag context",
+        )
+        _require(
+            resource.get("runtime", {}).get("name") == "dotnet"
+            and bool(resource.get("runtime", {}).get("version"))
+            and bool(resource.get("operatingSystem", {}).get("name"))
+            and bool(resource.get("device", {}).get("architecture")),
+            f"{event['id']} is missing bounded .NET runtime context",
+        )
+
+    correlated_ids = {
+        "evt_log_checkout_started",
+        "evt_action_checkout_submit",
+        "evt_action_payment_api",
+        "evt_metric_http_server_duration",
+        "evt_span_checkout_request",
+    }
+    for event_id in correlated_ids:
+        shared = by_id[event_id]["attributes"]["context"]
+        _require(
+            shared.get("trace")
+            == {
+                "traceId": EXPECTED_TRACE_ID,
+                "spanId": EXPECTED_CHILD_SPAN_ID,
+                "parentSpanId": EXPECTED_PARENT_SPAN_ID,
+                "sampled": True,
+            },
+            f"{event_id} is missing exact trace/span context",
+        )
+        _require(
+            shared.get("session") == {"id": EXPECTED_SESSION_ID}
+            and shared.get("subject")
+            == {"id": "user_checkout_opaque", "kind": "user"}
+            and shared.get("tags", {}).get("journey") == "checkout",
+            f"{event_id} is missing bounded request context",
+        )
+
     log = by_id["evt_log_checkout_started"]["attributes"]
     _require(
-        log["metadata"].get("traceId") == EXPECTED_TRACE_ID,
-        "first-useful log is missing trace correlation",
+        log["metadata"].get("routeTemplate") == "/checkout/:cart_id",
+        "first-useful log is missing route-template metadata",
     )
     _require(
-        log["metadata"].get("sessionId") == EXPECTED_SESSION_ID,
-        "first-useful log is missing session correlation",
+        "traceId" not in log["metadata"] and "sessionId" not in log["metadata"],
+        "first-useful log duplicated typed correlation into flat metadata",
     )
 
     product_metadata = by_id["evt_action_checkout_submit"]["attributes"]["metadata"]
@@ -68,6 +131,10 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
     _require(
         product_metadata.get("routeTemplate") == "/checkout/:cart_id",
         f"unexpected product route template: {product_metadata.get('routeTemplate')!r}",
+    )
+    _require(
+        "traceId" not in product_metadata and "sessionId" not in product_metadata,
+        "first-useful product action duplicated typed correlation into flat metadata",
     )
 
     network_metadata = by_id["evt_action_payment_api"]["attributes"]["metadata"]
@@ -83,6 +150,10 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         network_metadata.get("method") == "POST" and network_metadata.get("statusCode") == 202,
         f"unexpected network method/status metadata: {network_metadata!r}",
     )
+    _require(
+        "traceId" not in network_metadata and "sessionId" not in network_metadata,
+        "first-useful network action duplicated typed correlation into flat metadata",
+    )
 
     metric = by_id["evt_metric_http_server_duration"]["attributes"]
     _require(
@@ -93,10 +164,7 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         metric["metadata"].get("routeTemplate") == "/checkout/:cart_id",
         "first-useful metric must use route-template metadata",
     )
-    _require(
-        metric["metadata"].get("traceId") == EXPECTED_TRACE_ID,
-        "first-useful metric is missing trace correlation",
-    )
+    _require("traceId" not in metric["metadata"], "first-useful metric duplicated typed trace metadata")
 
     span = by_id["evt_span_checkout_request"]["attributes"]
     _require(span.get("traceId") == EXPECTED_TRACE_ID, "first-useful span is missing trace id")

@@ -25,6 +25,8 @@ namespace LogBrew
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public IssueExceptionInfo? Exception { get; private set; }
 
         public IReadOnlyList<IssueStackFrame>? StackFrames
@@ -88,6 +90,14 @@ namespace LogBrew
         public IssueAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Sets shared resource and correlation context.</summary>
+        public IssueAttributes WithContext(TelemetryContext context)
+        {
+            ExceptionContract.ThrowIfNull(context, nameof(context));
+            Context = context;
             return this;
         }
 

@@ -17,7 +17,21 @@ public static class Program
             context.TraceId,
             ChildSpanId,
             context.TraceFlags);
-        var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "0.1.0");
+        var clientContext = TelemetryContext.Create()
+            .WithResource(
+                TelemetryResource.Create()
+                    .WithService("checkout-api", "1.4.2")
+                    .WithDeployment("production", "checkout-api@1.4.2")
+                    .WithFramework("aspnetcore", "10.0")
+                    .WithApplication("checkout", "1.4.2", "104")
+                    .Build())
+            .WithTag("region", "us-east-1")
+            .Build();
+        var client = LogBrewClient.Create(
+            "LOGBREW_API_KEY",
+            "checkout-dotnet-service",
+            "0.1.0",
+            new LogBrewClientOptions { Context = clientContext });
 
         EnqueueFirstUsefulTelemetry(client, context);
 
@@ -35,6 +49,12 @@ public static class Program
 
     private static void EnqueueFirstUsefulTelemetry(LogBrewClient client, TraceparentContext context)
     {
+        var requestContext = TelemetryContext.Create()
+            .WithTrace(context.TraceId, ChildSpanId, context.ParentSpanId, context.Sampled)
+            .WithSession(SessionId)
+            .WithSubject("user_checkout_opaque", "user")
+            .WithTag("journey", "checkout")
+            .Build();
         client.Release(
             "evt_release_checkout_api",
             "2026-06-02T10:00:00Z",
@@ -52,19 +72,17 @@ public static class Program
             "2026-06-02T10:00:02Z",
             LogAttributes.Create("checkout request started", "info")
                 .WithLogger("checkout.http")
+                .WithContext(requestContext)
                 .WithMetadata(new Dictionary<string, object?>
                 {
-                    ["routeTemplate"] = RouteTemplate,
-                    ["sessionId"] = SessionId,
-                    ["traceId"] = context.TraceId
+                    ["routeTemplate"] = RouteTemplate
                 }));
         client.Action(
             "evt_action_checkout_submit",
             "2026-06-02T10:00:03Z",
             ProductTimeline.ProductAction("checkout.submit")
                 .WithRouteTemplate("https://shop.example/checkout/:cart_id?coupon=sample#review")
-                .WithSessionId(SessionId)
-                .WithTraceId(context.TraceId)
+                .WithContext(requestContext)
                 .WithScreen("Checkout")
                 .WithFunnel("checkout")
                 .WithStep("submit")
@@ -77,33 +95,32 @@ public static class Program
                 .WithMethod("post")
                 .WithStatusCode(202)
                 .WithDurationMs(183.4)
-                .WithSessionId(SessionId)
-                .WithTraceId(context.TraceId)
+                .WithContext(requestContext)
                 .WithMetadata(new Dictionary<string, object?> { ["dependency"] = "payments" })
                 .ToActionAttributes());
         client.Metric(
             "evt_metric_http_server_duration",
             "2026-06-02T10:00:05Z",
             MetricAttributes.Create("http.server.duration", "histogram", 183.4, "ms", "delta")
+                .WithContext(requestContext)
                 .WithMetadata(new Dictionary<string, object?>
                 {
                     ["method"] = "POST",
                     ["routeTemplate"] = RouteTemplate,
-                    ["statusCode"] = 202,
-                    ["traceId"] = context.TraceId
+                    ["statusCode"] = 202
                 }));
         client.Span(
             "evt_span_checkout_request",
             "2026-06-02T10:00:06Z",
             Traceparent.SpanAttributesFromTraceparent(
-                IncomingTraceparent,
-                TraceparentSpanInput.Create("POST " + RouteTemplate, ChildSpanId, "ok")
-                    .WithDurationMs(183.4)
-                    .WithMetadata(new Dictionary<string, object?>
-                    {
-                        ["routeTemplate"] = RouteTemplate,
-                        ["sampled"] = context.Sampled,
-                        ["sessionId"] = SessionId
-                    })));
+                    IncomingTraceparent,
+                    TraceparentSpanInput.Create("POST " + RouteTemplate, ChildSpanId, "ok")
+                        .WithDurationMs(183.4)
+                        .WithMetadata(new Dictionary<string, object?>
+                        {
+                            ["routeTemplate"] = RouteTemplate,
+                            ["sampled"] = context.Sampled
+                        }))
+                .WithContext(requestContext));
     }
 }

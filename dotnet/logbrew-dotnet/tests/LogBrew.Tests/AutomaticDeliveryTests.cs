@@ -251,6 +251,7 @@ internal static class AutomaticDeliveryTests
             ApiKey,
             "manual-byte-bounds",
             "0.1.0",
+            new LogBrewClientOptions { DisableRuntimeContext = true },
             maxQueueSize: 1000,
             onEventDropped: byteDrops.Add,
             maxQueueBytes: 1024);
