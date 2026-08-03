@@ -10,6 +10,7 @@ public final class EnvironmentAttributes {
     private final String name;
     private String region;
     private Map<String, ?> metadata;
+    private TelemetryContext context;
 
     private EnvironmentAttributes(String name) {
         this.name = name;
@@ -38,12 +39,19 @@ public final class EnvironmentAttributes {
         return this;
     }
 
+    /** Sets shared resource and correlation context. */
+    public EnvironmentAttributes context(TelemetryContext context) {
+        this.context = Validation.requireTelemetryContext(context);
+        return this;
+    }
+
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("environment name", name);
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("name", name);
         Validation.putOptionalString(value, "region", region);
         Validation.putOptionalMetadata(value, metadata);
+        Validation.putOptionalContext(value, context);
         return value;
     }
 }

@@ -95,7 +95,10 @@ final class LogBrewSpringHttpSpan {
             trace.traceId(),
             trace.spanId(),
             successful ? "ok" : "error"
-        ).durationMs(durationMs).metadata(metadata);
+        )
+            .durationMs(durationMs)
+            .metadata(metadata)
+            .context(trace.telemetryContext());
         if (trace.parentSpanId() != null) {
             attributes.parentSpanId(trace.parentSpanId());
         }

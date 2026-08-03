@@ -103,7 +103,12 @@ public final class LogBrewJulHandler extends Handler {
         if (record.getLoggerName() != null && !record.getLoggerName().trim().isEmpty()) {
             attributes.logger(record.getLoggerName());
         }
-        return attributes.metadata(metadataFromRecord(record, includeThrownStackTrace, metadata));
+        attributes.metadata(metadataFromRecord(record, includeThrownStackTrace, metadata));
+        TelemetryContext context = LogBrewTrace.contextWithCurrentTrace(null);
+        if (context != null) {
+            attributes.context(context);
+        }
+        return attributes;
     }
 
     /**

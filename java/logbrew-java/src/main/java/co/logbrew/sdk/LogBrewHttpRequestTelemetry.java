@@ -161,7 +161,8 @@ public final class LogBrewHttpRequestTelemetry {
         SpanAttributes attributes = SpanAttributes
             .create(method + " " + routeTemplate, traceContext.traceId(), traceContext.spanId(), spanStatus(statusCode))
             .durationMs(durationMs)
-            .metadata(requestMetadata(statusCode));
+            .metadata(requestMetadata(statusCode))
+            .context(traceContext.telemetryContext());
         if (traceContext.parentSpanId() != null) {
             attributes.parentSpanId(traceContext.parentSpanId());
         }
@@ -172,7 +173,8 @@ public final class LogBrewHttpRequestTelemetry {
         validateStatusCode(statusCode);
         return MetricAttributes
             .create("http.server.duration", "histogram", durationMs, "ms", "delta")
-            .metadata(requestMetadata(statusCode));
+            .metadata(requestMetadata(statusCode))
+            .context(traceContext.telemetryContext());
     }
 
     private Map<String, Object> requestMetadata(int statusCode) {

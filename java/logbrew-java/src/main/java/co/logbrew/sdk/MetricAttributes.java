@@ -13,6 +13,7 @@ public final class MetricAttributes {
     private final String unit;
     private final String temporality;
     private Map<String, ?> metadata;
+    private TelemetryContext context;
 
     private MetricAttributes(String name, String kind, double value, String unit, String temporality) {
         this.name = name;
@@ -38,6 +39,12 @@ public final class MetricAttributes {
         return this;
     }
 
+    /** Sets shared resource and correlation context. */
+    public MetricAttributes context(TelemetryContext context) {
+        this.context = Validation.requireTelemetryContext(context);
+        return this;
+    }
+
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("metric name", name);
         Validation.requireAllowedValue("metric kind", kind, LogBrewClient.METRIC_KINDS);
@@ -55,6 +62,7 @@ public final class MetricAttributes {
         mapped.put("unit", unit);
         mapped.put("temporality", temporality);
         Validation.putOptionalMetadata(mapped, metadata);
+        Validation.putOptionalContext(mapped, context);
         return mapped;
     }
 

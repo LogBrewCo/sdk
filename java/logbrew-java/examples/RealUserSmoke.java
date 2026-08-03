@@ -1,4 +1,5 @@
 import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewClientOptions;
 import co.logbrew.sdk.RecordingTransport;
 import co.logbrew.sdk.SdkException;
 import co.logbrew.sdk.SupportTicketDraft;
@@ -11,13 +12,13 @@ public final class RealUserSmoke {
     }
 
     public static void main(String[] args) {
-        LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "logbrew-java", "0.1.0");
+        LogBrewClient client = parityClient();
         ReadmeExample.enqueueAll(client);
 
         System.out.println(client.previewJson());
         TransportResponse response = client.shutdown(RecordingTransport.alwaysAccept());
 
-        LogBrewClient retryClient = LogBrewClient.create("LOGBREW_API_KEY", "logbrew-java", "0.1.0");
+        LogBrewClient retryClient = parityClient();
         ReadmeExample.enqueueAll(retryClient);
         TransportResponse retryResponse = retryClient.flush(RecordingTransport.scripted(
             TransportException.network("temporary outage"),
@@ -63,6 +64,15 @@ public final class RealUserSmoke {
                 + ",\"supportDraftRedacted\":"
                 + supportDraftRedacted
                 + ",\"events\":6}"
+        );
+    }
+
+    private static LogBrewClient parityClient() {
+        return LogBrewClient.create(
+            "LOGBREW_API_KEY",
+            "logbrew-java",
+            "0.1.0",
+            LogBrewClientOptions.builder().disableRuntimeContext(true).build()
         );
     }
 }

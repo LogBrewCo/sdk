@@ -75,15 +75,20 @@ public final class LogBrewSpringExceptionResolver implements HandlerExceptionRes
             metadata.put("method", method);
             metadata.put("routeTemplate", route);
             metadata.put("statusCode", Integer.valueOf(500));
+            IssueAttributes attributes = IssueAttributes.fromThrowable(
+                method + " " + route + " failed",
+                error,
+                "spring.mvc.exception_resolver",
+                false
+            ).metadata(LogBrewTrace.metadataWithCurrentTrace(metadata));
+            TelemetryContext context = LogBrewTrace.contextWithCurrentTrace(null);
+            if (context != null) {
+                attributes.context(context);
+            }
             client.issue(
                 eventIdPrefix + "_issue_" + nextEventNumber.incrementAndGet(),
                 Instant.now().toString(),
-                IssueAttributes.fromThrowable(
-                    method + " " + route + " failed",
-                    error,
-                    "spring.mvc.exception_resolver",
-                    false
-                ).metadata(LogBrewTrace.metadataWithCurrentTrace(metadata))
+                attributes
             );
             request.setAttribute(LogBrewServletFilter.EXCEPTION_CAPTURED_ATTRIBUTE, Boolean.TRUE);
         } catch (RuntimeException failure) {

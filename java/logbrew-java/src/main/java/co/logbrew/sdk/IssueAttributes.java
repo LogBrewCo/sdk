@@ -13,6 +13,7 @@ public final class IssueAttributes {
     private final String level;
     private String message;
     private Map<String, ?> metadata;
+    private TelemetryContext context;
     private IssueException exception;
     private List<IssueStackFrame> stackFrames;
     private List<IssueBreadcrumb> breadcrumbs;
@@ -81,6 +82,12 @@ public final class IssueAttributes {
      */
     public IssueAttributes metadata(Map<String, ?> metadata) {
         this.metadata = Validation.copyMetadata(metadata);
+        return this;
+    }
+
+    /** Sets shared resource and correlation context. */
+    public IssueAttributes context(TelemetryContext context) {
+        this.context = Validation.requireTelemetryContext(context);
         return this;
     }
 
@@ -205,6 +212,7 @@ public final class IssueAttributes {
             value.put("breadcrumbsTruncated", Boolean.TRUE);
         }
         Validation.putOptionalMetadata(value, metadata);
+        Validation.putOptionalContext(value, context);
         return value;
     }
 

@@ -123,7 +123,12 @@ public final class LogBrewLogbackAppender extends AppenderBase<ILoggingEvent> {
         if (loggerName != null && !loggerName.trim().isEmpty()) {
             attributes.logger(loggerName);
         }
-        return attributes.metadata(metadataFromEvent(event, includeThrowableStackTrace, metadata));
+        attributes.metadata(metadataFromEvent(event, includeThrowableStackTrace, metadata));
+        TelemetryContext context = LogBrewTrace.contextWithCurrentTrace(null);
+        if (context != null) {
+            attributes.context(context);
+        }
+        return attributes;
     }
 
     /**

@@ -232,7 +232,15 @@ public final class Traceparent {
         requireSpanId("spanId", spanId);
         SpanAttributes attributes = SpanAttributes
             .create(input.name, context.traceId(), spanId, input.status)
-            .parentSpanId(context.parentSpanId());
+            .parentSpanId(context.parentSpanId())
+            .context(TelemetryContext.builder()
+                .trace(
+                    context.traceId(),
+                    spanId,
+                    context.parentSpanId(),
+                    Boolean.valueOf(context.sampled())
+                )
+                .build());
         if (input.durationMs != null) {
             attributes.durationMs(input.durationMs.doubleValue());
         }

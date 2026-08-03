@@ -11,6 +11,7 @@ public final class LogAttributes {
     private final String level;
     private String logger;
     private Map<String, ?> metadata;
+    private TelemetryContext context;
 
     private LogAttributes(String message, String level) {
         this.message = message;
@@ -40,6 +41,12 @@ public final class LogAttributes {
         return this;
     }
 
+    /** Sets shared resource and correlation context. */
+    public LogAttributes context(TelemetryContext context) {
+        this.context = Validation.requireTelemetryContext(context);
+        return this;
+    }
+
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("log message", message);
         String normalizedLevel = Validation.normalizeSeverity("log level", level);
@@ -48,6 +55,7 @@ public final class LogAttributes {
         value.put("level", normalizedLevel);
         Validation.putOptionalString(value, "logger", logger);
         Validation.putOptionalMetadata(value, metadata);
+        Validation.putOptionalContext(value, context);
         return value;
     }
 }

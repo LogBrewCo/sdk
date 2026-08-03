@@ -16,6 +16,7 @@ public final class SpanAttributes {
     private String parentSpanId;
     private Double durationMs;
     private Map<String, ?> metadata;
+    private TelemetryContext context;
     private List<SpanEventSummary> events;
     private List<SpanLinkSummary> links;
 
@@ -54,6 +55,12 @@ public final class SpanAttributes {
      */
     public SpanAttributes metadata(Map<String, ?> metadata) {
         this.metadata = Validation.copyMetadata(metadata);
+        return this;
+    }
+
+    /** Sets shared resource and correlation context. */
+    public SpanAttributes context(TelemetryContext context) {
+        this.context = Validation.requireTelemetryContext(context);
         return this;
     }
 
@@ -144,6 +151,7 @@ public final class SpanAttributes {
             value.put("durationMs", durationMs);
         }
         Validation.putOptionalMetadata(value, metadata);
+        Validation.putOptionalContext(value, context);
         if (events != null && !events.isEmpty()) {
             List<Map<String, Object>> mappedEvents = new ArrayList<>();
             for (SpanEventSummary event : events) {

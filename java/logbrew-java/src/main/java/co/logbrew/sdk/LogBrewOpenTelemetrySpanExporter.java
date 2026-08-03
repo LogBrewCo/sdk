@@ -79,9 +79,19 @@ public final class LogBrewOpenTelemetrySpanExporter implements SpanExporter {
             .create(span.getName(), context.getTraceId(), context.getSpanId(), spanStatus(span))
             .metadata(metadata);
         SpanContext parent = span.getParentSpanContext();
+        String parentSpanId = null;
         if (parent != null && parent.isValid()) {
-            attributes.parentSpanId(parent.getSpanId());
+            parentSpanId = parent.getSpanId();
+            attributes.parentSpanId(parentSpanId);
         }
+        attributes.context(TelemetryContext.builder()
+            .trace(
+                context.getTraceId(),
+                context.getSpanId(),
+                parentSpanId,
+                Boolean.valueOf(context.getTraceFlags().isSampled())
+            )
+            .build());
         long durationNanos = span.getEndEpochNanos() - span.getStartEpochNanos();
         if (durationNanos >= 0L) {
             attributes.durationMs(durationNanos / 1_000_000.0);

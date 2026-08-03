@@ -25,6 +25,7 @@ public final class LogBrewClient {
 
     private final String apiKey;
     private final Map<String, Object> sdk;
+    private final TelemetryContext context;
     private final DeliveryOptions deliveryOptions;
     private final Deque<QueuedEvent> events;
     private final Object stateLock;
@@ -48,9 +49,15 @@ public final class LogBrewClient {
         AutomaticDeliveryOptions automaticDeliveryOptions,
         AutomaticDeliveryScheduler.Factory schedulerFactory,
         AutomaticDeliveryScheduler.Jitter jitter,
-        BooleanSupplier processOwnership
+        BooleanSupplier processOwnership,
+        TelemetryContext clientContext,
+        boolean disableRuntimeContext
     ) {
         this.apiKey = apiKey;
+        this.context = TelemetryContext.merge(
+            disableRuntimeContext ? null : TelemetryContext.runtimeDefaults(),
+            clientContext
+        );
         this.deliveryOptions = deliveryOptions;
         this.events = new ArrayDeque<>();
         this.stateLock = new Object();
@@ -167,7 +174,35 @@ public final class LogBrewClient {
             null,
             null,
             null,
-            null
+            null,
+            null,
+            false
+        );
+    }
+
+    /** Creates a client with explicit shared-context and delivery options. */
+    public static LogBrewClient create(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        LogBrewClientOptions options
+    ) {
+        Validation.requireNonEmpty("api_key", apiKey);
+        Validation.requireNonEmpty("sdk_name", sdkName);
+        Validation.requireNonEmpty("sdk_version", sdkVersion);
+        LogBrewClientOptions validated = Objects.requireNonNull(options, "options");
+        return new LogBrewClient(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            validated.deliveryOptions(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            validated.context(),
+            validated.disableRuntimeContext()
         );
     }
 
@@ -213,7 +248,55 @@ public final class LogBrewClient {
             Objects.requireNonNull(automaticDeliveryOptions, "automaticDeliveryOptions"),
             null,
             null,
-            null
+            null,
+            null,
+            false
+        );
+    }
+
+    /** Creates an automatic client with explicit shared-context and delivery options. */
+    public static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport,
+        LogBrewClientOptions options
+    ) {
+        return createAutomatic(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            transport,
+            options,
+            AutomaticDeliveryOptions.builder().build()
+        );
+    }
+
+    /** Creates an automatic client with explicit shared-context, delivery, and scheduling options. */
+    public static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport,
+        LogBrewClientOptions options,
+        AutomaticDeliveryOptions automaticDeliveryOptions
+    ) {
+        Validation.requireNonEmpty("api_key", apiKey);
+        Validation.requireNonEmpty("sdk_name", sdkName);
+        Validation.requireNonEmpty("sdk_version", sdkVersion);
+        LogBrewClientOptions validated = Objects.requireNonNull(options, "options");
+        return new LogBrewClient(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            validated.deliveryOptions(),
+            Objects.requireNonNull(transport, "transport"),
+            Objects.requireNonNull(automaticDeliveryOptions, "automaticDeliveryOptions"),
+            null,
+            null,
+            null,
+            validated.context(),
+            validated.disableRuntimeContext()
         );
     }
 
@@ -240,7 +323,9 @@ public final class LogBrewClient {
             Objects.requireNonNull(automaticDeliveryOptions, "automaticDeliveryOptions"),
             Objects.requireNonNull(schedulerFactory, "schedulerFactory"),
             Objects.requireNonNull(jitter, "jitter"),
-            Objects.requireNonNull(processOwnership, "processOwnership")
+            Objects.requireNonNull(processOwnership, "processOwnership"),
+            null,
+            false
         );
     }
 
@@ -494,6 +579,15 @@ public final class LogBrewClient {
     private void pushEvent(String type, String id, String timestamp, Map<String, Object> attributes) {
         Validation.requireNonEmpty("event id", id);
         Validation.requireTimestamp(timestamp);
+        Object rawEventContext = attributes.remove("context");
+        if (rawEventContext != null && !(rawEventContext instanceof TelemetryContext)) {
+            throw new SdkException("validation_error", "event context must be a TelemetryContext");
+        }
+        TelemetryContext eventContext = (TelemetryContext) rawEventContext;
+        TelemetryContext mergedContext = TelemetryContext.merge(context, eventContext);
+        if (mergedContext != null) {
+            attributes.put("context", mergedContext.asMap());
+        }
         Event event = new Event(type, timestamp, id, attributes);
         Map<String, Object> eventValue = Collections.unmodifiableMap(event.toMap());
         String eventJson = Json.write(eventValue);
