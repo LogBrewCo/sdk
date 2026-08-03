@@ -928,6 +928,29 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
                         expected,
                     )
 
+    def test_windows_temporary_witness_uses_metadata_without_opening_file(self) -> None:
+        self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            temporary = root / verifier.WITNESS_TEMPORARY_NAME
+            temporary.write_bytes(b"obs")
+            original_open = Path.open
+
+            def reject_temporary_open(path: Path, *args, **kwargs):
+                if path == temporary:
+                    raise AssertionError(
+                        "supervisor opened a producer-owned publication file",
+                    )
+                return original_open(path, *args, **kwargs)
+
+            with (
+                mock.patch.object(verifier.os, "name", "nt"),
+                mock.patch.object(Path, "open", new=reject_temporary_open),
+            ):
+                self.assertTrue(verifier._is_valid_temporary_witness(temporary))
+
     def test_atomic_temporary_publication_requires_committed_progress(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
         verifier = load_verifier()
