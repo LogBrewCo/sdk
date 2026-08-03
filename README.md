@@ -64,7 +64,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | React | [`@logbrew/react`](js/logbrew-react) | Provider, hook, error boundary, handled error helpers |
 | React Native | [`@logbrew/react-native`](js/logbrew-react-native) | Hosted fetch delivery, app-private offline/restart queueing, mobile context, handled errors, and app-owned Promise rejection reports |
 | Next.js | [`@logbrew/next`](js/logbrew-next) | App Router request-error instrumentation, Route Handler capture, and release artifacts |
-| Python | [`logbrew-sdk`](python/logbrew_py) | Core client, delivery, logging, and typed exception/stack/breadcrumb diagnostics |
+| Python | [`logbrew-sdk`](python/logbrew_py) | Core client, delivery, logging, shared telemetry context, and typed exception/stack/breadcrumb diagnostics |
 | Python / Celery | [`logbrew-sdk[celery]`](python/logbrew_py#automatic-celery-spans) | App-scoped producer/worker spans and typed privacy-bounded unexpected-failure issues |
 | FastAPI | [`logbrew-fastapi`](python/logbrew_fastapi) | Request spans plus typed unhandled-exception diagnostics |
 | Flask | [`logbrew-flask`](python/logbrew_flask) | Request spans plus typed unhandled-exception diagnostics |
@@ -135,7 +135,21 @@ python3 -m pip install logbrew-sdk
 ```python
 from logbrew_sdk import LogBrewClient, RecordingTransport
 
-client = LogBrewClient.create("LOGBREW_API_KEY", "checkout-worker", "1.0.0")
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.0.0",
+    context={
+        "schemaVersion": 1,
+        "resource": {
+            "service": {"name": "checkout-worker"},
+            "deployment": {
+                "environment": "production",
+                "release": "checkout@1.0.0",
+            },
+        },
+    },
+)
 client.log("evt_log_001", "2026-06-02T10:00:03Z", {
     "message": "worker started",
     "level": "info",
@@ -143,6 +157,13 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", {
 })
 client.flush(RecordingTransport.always_accept())
 ```
+
+The Python core and framework clients merge this bounded context into every
+event. The core client also adds conservative Python runtime, operating-system,
+and architecture context by default, with an explicit opt-out. Session and
+subject identifiers remain explicit, app-owned, and opaque. See the
+[`logbrew-sdk` shared telemetry context guide](python/logbrew_py#shared-telemetry-context)
+for the complete shape and privacy rules.
 
 Python DB-API spans are explicit and app-owned. Trace the connect callable your
 app already controls, then keep using normal cursor methods:
@@ -238,6 +259,10 @@ LogBrew SDKs favor conservative defaults:
 - The Node delivery client adds only Node version, OS type/release, and
   architecture as automatic shared context. It supports an explicit opt-out
   and does not infer host, user, service, application, or cloud identity.
+- The Python client adds only Python implementation/version, OS name/release,
+  and architecture as automatic shared context. It supports an explicit
+  opt-out and does not infer user, service, application, session, or cloud
+  identity.
 - The browser client adds only low-entropy browser brand/significant version,
   platform, and mobile/desktop family when User-Agent Client Hints expose them;
   otherwise it reports the generic browser runtime. It never reads the legacy

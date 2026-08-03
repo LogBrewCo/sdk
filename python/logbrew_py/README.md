@@ -14,7 +14,7 @@ python3 -m pip install logbrew-sdk
 
 `logbrew-sdk` requires Python 3.10 or newer.
 
-The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, and `TraceparentContext`, and copyable examples for wiring LogBrew into your Python service. Keep the real key in your app configuration and use `preview_json()` when you want to inspect queued JSON before sending.
+The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, `TelemetryContext`, and `TraceparentContext`, and copyable examples for wiring LogBrew into your Python service. Keep the real key in your app configuration and use `preview_json()` when you want to inspect queued JSON before sending.
 
 ## Example
 
@@ -88,6 +88,75 @@ print(
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `preview_json()` when you want a stable local JSON preview before sending anything.
+
+## Shared Telemetry Context
+
+Give issues, logs, spans, actions, metrics, releases, and environments the same bounded identity and correlation data with the versioned `context` option. Python framework clients reuse the core client, so framework-generated and app-created events share one resource, deployment, session, subject, trace, and tag vocabulary.
+
+```python
+from logbrew_sdk import LogBrewClient, TelemetryContext
+
+shared_context: TelemetryContext = {
+    "schemaVersion": 1,
+    "resource": {
+        "service": {"name": "checkout-worker", "version": "1.4.0"},
+        "deployment": {
+            "environment": "production",
+            "release": "worker@1.4.0",
+        },
+        "framework": {"name": "celery", "version": "5.6"},
+    },
+    "session": {"id": "session_01"},
+    "subject": {"id": "subject_01", "kind": "anonymous"},
+    "tags": {"plan": "team", "region": "eu"},
+}
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.4.0",
+    context=shared_context,
+)
+
+client.action(
+    "evt_checkout_started",
+    "2026-08-03T12:00:00Z",
+    {
+        "name": "checkout.started",
+        "status": "success",
+        "context": {
+            "schemaVersion": 1,
+            "trace": {
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "spanId": "b7ad6b7169203331",
+                "sampled": True,
+            },
+            "tags": {"funnel": "checkout"},
+        },
+    },
+)
+```
+
+Client context is copied at creation and merged into every event. Event context can replace the current trace, session, or subject and can add or override individual resource fields and tags. Inputs are validated before queueing: unknown fields, all-zero trace identifiers, empty sections, oversized values, and more than 32 tags are rejected. The package exports `TelemetryContext` and its nested `Telemetry*` types for typed configuration.
+
+By default, the core client adds only the Python implementation/version, operating-system name/release, and architecture beneath explicit caller context. It does not infer a user, service, application, session, location, or cloud identity, and it does not read application environment values. Set `capture_runtime_context=False` to disable these probes while preserving any explicit `context`:
+
+```python
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.4.0",
+    context={
+        "schemaVersion": 1,
+        "resource": {"service": {"name": "checkout-worker"}},
+    },
+    capture_runtime_context=False,
+)
+```
+
+For span events, the span's required top-level `traceId`, `spanId`, and optional `parentSpanId` remain the canonical span identity. Shared `context.trace` correlates issues, logs, actions, metrics, releases, and environments that do not already carry a required span identity.
+
+`subject.id` and `session.id` are app-owned correlation identifiers, not profile fields. Use opaque identifiers and never put names, email addresses, IP addresses, authentication values, free-form user input, or other personal data in context or tags. Capture only fields your application has deliberately approved, rotate anonymous identifiers according to your privacy policy, and keep tags low-cardinality.
 
 ## Issue Diagnostics
 
