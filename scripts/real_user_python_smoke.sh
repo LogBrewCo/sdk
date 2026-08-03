@@ -310,12 +310,23 @@ run_runtime_context_smoke() {
     local output_prefix="$1"
 
     python "$tmp_dir/runtime_context_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"signals": 7' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"explicitMerge": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"optOut": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"privacyBounded": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"validation": true' "$tmp_dir/$output_prefix.stdout.json"
+    python3 - "$tmp_dir/$output_prefix.stdout.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = {
+    "explicitMerge": True,
+    "ok": True,
+    "optOut": True,
+    "privacyBounded": True,
+    "signals": 7,
+    "validation": True,
+}
+if payload != expected:
+    raise SystemExit(f"unexpected runtime context smoke result: {payload!r}")
+PY
 }
 
 run_http_transport_smoke() {
