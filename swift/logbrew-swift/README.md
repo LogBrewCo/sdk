@@ -78,6 +78,85 @@ print("status=\(response.statusCode) attempts=\(response.attempts)")
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush(transport:)` or `shutdown(transport:)` to send queued events through a transport, and use `previewJSON()` when you want a stable local JSON preview before sending anything.
 
+## Rich Investigation Context
+
+The client automatically adds conservative Swift runtime, Apple operating-system version, application bundle, and CPU architecture context to every release, environment, issue, log, span, action, and metric. It does not automatically collect a device identifier, hardware model, host name, account name, locale, IP address, user identity, or session identity. Disable even this conservative context with `includeAutomaticContext: false` when an app needs a fully explicit capture policy.
+
+Add stable app-owned context once on the client, then refine it for a task or one event:
+
+```swift
+let client = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "checkout-ios",
+    sdkVersion: "0.1.0",
+    context: TelemetryContext(
+        resource: TelemetryResource(
+            service: TelemetryNamedVersion(name: "checkout-app", version: "2.4.0"),
+            deployment: TelemetryDeployment(environment: "production", release: "checkout@2.4.0")
+        ),
+        tags: ["plan": "team"]
+    )
+)
+
+try await LogBrewTelemetry.withContext(
+    TelemetryContext(
+        session: TelemetrySessionContext(id: "opaque-session-01"),
+        subject: TelemetrySubjectContext(id: "opaque-subject-01", kind: .user),
+        tags: ["journey": "checkout"]
+    )
+) {
+    try client.log(
+        "evt_checkout_started",
+        timestamp: "2026-08-06T10:00:00Z",
+        attributes: LogAttributes(
+            message: "Checkout started",
+            level: .info,
+            context: TelemetryContext(tags: ["step": "confirm"])
+        )
+    )
+}
+```
+
+Context merge order is automatic, client, task-local, active trace, then event; later layers win while resource fields and tags merge. On spans, valid first-class `traceId`, `spanId`, and `parentSpanId` values always replace `context.trace` so one event cannot contradict itself; legacy non-W3C span IDs remain supported without emitting a conflicting typed trace object. Context is schema-versioned, copied into the queued event, and bounded to 256-character values, 200-character opaque IDs, and 32 low-cardinality tags. Trace IDs use W3C hex shapes. Session and subject IDs must be app-owned opaque identifiers; never use names, email addresses, IP addresses, authentication material, or raw user input. `LogBrewTelemetry` uses Swift task-local storage, so nested synchronous and asynchronous scopes unwind without global mutable identity.
+
+## Issue Diagnostics and Breadcrumbs
+
+Use `IssueAttributes.fromError(...)` for a handled Swift error. It records the dynamic error type, a stable mechanism and handled state, and a safe call-site frame using `#fileID`, `#line`, `#column`, and `#function`. It deliberately does not format the error, copy its description, capture raw stack text, read locals or arguments, or send an absolute source path. Pass an explicit `message` only when the application has approved that value for display.
+
+```swift
+enum CheckoutError: Error {
+    case authorizationDeclined
+}
+
+try client.addBreadcrumb(
+    IssueBreadcrumb(
+        timestamp: "2026-08-06T09:59:59Z",
+        category: "checkout.submit",
+        type: "navigation",
+        level: .info,
+        message: "Payment step submitted",
+        data: ["attempt": 2]
+    )
+)
+
+do {
+    try await submitCheckout()
+} catch {
+    try client.issue(
+        "evt_checkout_error",
+        timestamp: "2026-08-06T10:00:00Z",
+        attributes: IssueAttributes.fromError(
+            error,
+            title: "Payment authorization failed",
+            mechanism: "swift.task",
+            handled: true
+        )
+    )
+}
+```
+
+The client retains the newest 64 validated breadcrumbs, attaches a detached oldest-to-newest snapshot to each later issue, and sets `breadcrumbsTruncated` when older history was evicted. `clearBreadcrumbs()` affects only future issues. Breadcrumbs accept stable machine categories, an optional bounded message, and at most eight flat finite primitive data fields. Explicit issue frames are capped at 32 and keep only bounded filename, positive coordinates, optional function/module ownership, and an optional Debug ID. Absolute file prefixes and query or fragment data are removed before queue admission.
+
 ## Automatic Delivery (Opt-In)
 
 Manual capture and delivery remain the default. When the client should own delivery, start one explicit scheduler with an app-owned transport before capturing events:
@@ -149,7 +228,7 @@ try client.metric(
 )
 ```
 
-Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Gauges use `instant` temporality and may be negative. Keep metric metadata low-cardinality and primitive, such as service, route template, queue name, plan, or region. Avoid user ids, raw URLs, query strings, stack traces, and unbounded labels.
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Gauges use `instant` temporality and may be negative. Keep metric metadata low-cardinality and primitive, such as route template or queue name. Put shared service, deployment, runtime, session, subject, trace, and tag evidence in `TelemetryContext` so the metric can be compared with related issues, logs, actions, and spans. Avoid raw URLs, query strings, stack traces, authentication data, and unbounded labels.
 
 The Swift SDK does not automatically collect app runtime, URLSession, SwiftUI, or database metrics. Add explicit measurements where they are meaningful for your product, or keep those signals in framework-owned integrations when you add them.
 
@@ -190,7 +269,7 @@ try client.captureNetworkMilestone(
 )
 ```
 
-Network helpers normalize the method, strip query strings and fragments from route templates, default HTTP `4xx` and `5xx` milestones to `failure`, and store primitive metadata such as `sessionId`, `screen`, `traceId`, `funnel`, and `step`. They do not patch `URLSession`, record visual replay, collect headers, or capture request or response bodies. Keep user-entered text, raw URLs, query strings, headers, and payloads out of timeline metadata.
+Product timeline helpers preserve primitive metadata such as `sessionId`, `screen`, `traceId`, `funnel`, and `step`, and also promote `sessionId` into typed telemetry session context so actions can correlate with issues, logs, traces, and metrics without relying on one flattened key. Network helpers normalize the method, strip query strings and fragments from route templates, and default HTTP `4xx` and `5xx` milestones to `failure`. They do not patch `URLSession`, record visual replay, collect headers, or capture request or response bodies. Keep user-entered text, raw URLs, query strings, headers, and payloads out of timeline metadata.
 
 ## Trace Correlation
 
@@ -303,7 +382,38 @@ if let otelParent = try LogBrewTrace.openTelemetrySpanContext(from: appOwnedOpen
 }
 ```
 
-`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` automatically adds active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata. Use `LogBrewURLSessionTracer` when you want a small app-owned wrapper around `URLSession.data(for:)`: it injects one `traceparent`, measures monotonic duration, captures success or failure spans, reports span-capture failures through `onCaptureError`, and rethrows the original request error. If your app collects `URLSessionTaskMetrics` through its own delegate, pass `try LogBrewURLSessionTimings(taskMetrics: metrics)` or app-supplied `LogBrewURLSessionTimings(...)` to include bounded phase timings such as name lookup, connect, TLS, send, wait, receive, and body byte counts.
+`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` writes the active `traceId`, `spanId`, `parentSpanId`, and sampled decision into typed `TelemetryContext` and keeps primitive correlation metadata for compatibility on issues, logs, actions, and metrics. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata. Use `LogBrewURLSessionTracer` when you want a small app-owned wrapper around `URLSession.data(for:)`: it injects one `traceparent`, measures monotonic duration, captures success or failure spans, reports span-capture failures through `onCaptureError`, and rethrows the original request error. If your app collects `URLSessionTaskMetrics` through its own delegate, pass `try LogBrewURLSessionTimings(taskMetrics: metrics)` or app-supplied `LogBrewURLSessionTimings(...)` to include bounded phase timings such as name lookup, connect, TLS, send, wait, receive, and body byte counts.
+
+Add up to eight typed span milestones and eight W3C span links when a trace needs more than one duration row:
+
+```swift
+let span = SpanAttributes(
+    name: "checkout.submit",
+    traceId: trace.traceId,
+    spanId: trace.spanId,
+    parentSpanId: trace.parentSpanId,
+    status: .error,
+    durationMs: 420,
+    events: [
+        SpanEventSummary(
+            name: "payment.retry",
+            timestamp: "2026-08-06T10:00:00.200Z",
+            metadata: ["attempt": 2]
+        ),
+        SpanEventSummary(name: "payment.rejected", metadata: ["retryable": false])
+    ],
+    links: [
+        SpanLinkSummary(
+            traceId: "11111111111111111111111111111111",
+            spanId: "2222222222222222",
+            sampled: true,
+            metadata: ["relationship": "follows_from"]
+        )
+    ]
+)
+```
+
+Milestones preserve bounded names, optional RFC 3339 timestamps, and flat primitive metadata. Links preserve only non-zero W3C trace/span IDs, an optional sampling decision, and flat primitive metadata. Invalid or oversized evidence fails before queue admission instead of silently creating a contradictory trace.
 
 Use `LogBrewLifecycleTracker` from your own SwiftUI, UIKit, AppKit, or SceneDelegate lifecycle hooks when you want app state transitions such as `active -> background` to appear as child spans on the active trace. The tracker dedupes repeated states, computes previous-state duration from app-owned timestamps, records primitive metadata only, and overwrites spoofed trace metadata with the active child span context. Use the lower-level `captureLifecycleSpan(...)` helper only when your app already owns previous/current state and duration values.
 
@@ -341,7 +451,7 @@ Enable durable delivery on the client before replay when a failed request must s
 
 Capture is process-wide and intentionally single-owner because fatal signal and Mach exception handlers cannot be safely stacked. Installation is idempotent for the owning object, but ownership cannot be transferred or the KSCrash handler uninstalled until process restart, and an inherited post-fork object fails closed. `stopReplay()` prevents further replay through that adapter and retains pending reports; it does not claim to remove the process-lifetime engine handler. Use a dedicated directory whose parent already exists. LogBrew normalizes it, rejects a symlink or non-directory target, pins its inode for the integration lifetime, and tightens it to owner-only access before engine installation. The engine keeps at most five raw reports by default; replay discards a raw report larger than 4 MiB by default. KSCrash's raw app-local report can still contain stack, binary, system, and application details even though memory introspection, queue names, user context, and console capture are disabled. Treat that directory as app-controlled sensitive data and apply your own cloud-synchronization, data-protection, consent, and retention policy.
 
-Only fixed title, critical severity, replay marker, allowlisted crash mechanism, and privacy-bounded native frame identities and offsets are added to the LogBrew issue. Raw reports, exception reasons, messages, stack memory, thread names, console logs, paths, process data, user data, headers, authentication data, and device identity are not uploaded by this integration. This capture feature does not upload debug objects itself. Use the released `logbrew debug-artifacts upload` and `logbrew debug-artifacts lookup` commands with the exact project, release, environment, service, Mach-O UUID, and architecture to enable hosted native symbolication.
+Only fixed title, severity, replay marker, typed `AppleNativeCrash` or `AppleNativeHang` exception identity, allowlisted mechanism and handled state, and privacy-bounded native frame identities and offsets are added to the LogBrew issue. Raw reports, exception reasons, messages, stack memory, thread names, console logs, paths, process data, user data, headers, authentication data, and device identity are not uploaded by this integration. This capture feature does not upload debug objects itself. Use the released `logbrew debug-artifacts upload` and `logbrew debug-artifacts lookup` commands with the exact project, release, environment, service, Mach-O UUID, and architecture to enable hosted native symbolication.
 
 To bind native frames to an uploaded Apple debug object, configure the exact
 project, release, environment, and active project service name used by the

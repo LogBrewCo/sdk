@@ -15,8 +15,9 @@ def _comparison_events(
     actual_events: Any,
     *,
     allow_additive_context: bool,
+    allow_additive_investigation_evidence: bool,
 ) -> Any:
-    if not allow_additive_context:
+    if not allow_additive_context and not allow_additive_investigation_evidence:
         return actual_events
 
     comparable_events = copy.deepcopy(actual_events)
@@ -30,12 +31,46 @@ def _comparison_events(
         actual_attributes = actual_event.get("attributes")
         if not isinstance(actual_attributes, dict):
             continue
-        if isinstance(expected_attributes, dict) and "context" in expected_attributes:
+        if not isinstance(expected_attributes, dict):
             continue
-        if isinstance(actual_attributes.get("context"), dict):
+        if (
+            allow_additive_context
+            and "context" not in expected_attributes
+            and isinstance(actual_attributes.get("context"), dict)
+        ):
             del actual_attributes["context"]
+        if allow_additive_investigation_evidence:
+            _remove_additive_investigation_evidence(
+                expected_event.get("type"),
+                expected_attributes,
+                actual_attributes,
+            )
 
     return comparable_events
+
+
+def _remove_additive_investigation_evidence(
+    event_type: Any,
+    expected_attributes: dict[str, Any],
+    actual_attributes: dict[str, Any],
+) -> None:
+    allowed_fields: dict[str, dict[str, type[Any]]] = {
+        "issue": {
+            "exception": dict,
+            "stackFrames": list,
+            "breadcrumbs": list,
+            "breadcrumbsTruncated": bool,
+        },
+        "span": {
+            "events": list,
+            "links": list,
+        },
+    }
+    for field, expected_type in allowed_fields.get(event_type, {}).items():
+        if field in expected_attributes:
+            continue
+        if isinstance(actual_attributes.get(field), expected_type):
+            del actual_attributes[field]
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -48,6 +83,14 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help=(
             "permit a schema-validated attributes.context object when the "
             "expected event has no context"
+        ),
+    )
+    parser.add_argument(
+        "--allow-additive-investigation-evidence",
+        action="store_true",
+        help=(
+            "permit schema-validated optional issue diagnostics and span evidence "
+            "when the expected event omits those fields"
         ),
     )
     parser.add_argument("expected_fixture", type=Path)
@@ -68,6 +111,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_events,
             actual_events,
             allow_additive_context=args.allow_additive_context,
+            allow_additive_investigation_evidence=args.allow_additive_investigation_evidence,
         )
         if comparable_events != expected_events:
             print(f"parity failed for {payload_path}", file=sys.stderr)

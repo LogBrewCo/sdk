@@ -1,0 +1,77 @@
+import Foundation
+
+/// One bounded milestone that happened during a span.
+public struct SpanEventSummary: Codable, Equatable, Sendable {
+    public let name: String
+    public let timestamp: String?
+    public let metadata: Metadata?
+
+    public init(name: String, timestamp: String? = nil, metadata: Metadata? = nil) {
+        self.name = name
+        self.timestamp = timestamp
+        self.metadata = metadata
+    }
+}
+
+/// One bounded relationship from this span to another trace or span.
+public struct SpanLinkSummary: Codable, Equatable, Sendable {
+    public let traceId: String
+    public let spanId: String
+    public let sampled: Bool?
+    public let metadata: Metadata?
+
+    public init(
+        traceId: String,
+        spanId: String,
+        sampled: Bool? = nil,
+        metadata: Metadata? = nil,
+    ) {
+        self.traceId = traceId
+        self.spanId = spanId
+        self.sampled = sampled
+        self.metadata = metadata
+    }
+}
+
+func validateSpanEvents(_ values: [SpanEventSummary]?) throws -> [SpanEventSummary]? {
+    guard let values else {
+        return nil
+    }
+    guard values.count <= 8 else {
+        throw traceEvidenceError("span events must contain at most 8 entries")
+    }
+    return try values.map { value in
+        try requireNonEmpty("span event name", value.name)
+        if let timestamp = value.timestamp {
+            try requireTimestamp(timestamp)
+        }
+        try validateMetadata(value.metadata, label: "span event metadata")
+        return value
+    }
+}
+
+func validateSpanLinks(_ values: [SpanLinkSummary]?) throws -> [SpanLinkSummary]? {
+    guard let values else {
+        return nil
+    }
+    guard values.count <= 8 else {
+        throw traceEvidenceError("span links must contain at most 8 entries")
+    }
+    return try values.map { value in
+        let trace = try validateTelemetryTraceContext(
+            TelemetryTraceContext(traceId: value.traceId, spanId: value.spanId, sampled: value.sampled),
+            label: "span link",
+        )
+        try validateMetadata(value.metadata, label: "span link metadata")
+        return SpanLinkSummary(
+            traceId: trace.traceId,
+            spanId: trace.spanId ?? value.spanId,
+            sampled: trace.sampled,
+            metadata: value.metadata,
+        )
+    }
+}
+
+private func traceEvidenceError(_ message: String) -> SdkError {
+    SdkError(code: "validation_error", message: message)
+}

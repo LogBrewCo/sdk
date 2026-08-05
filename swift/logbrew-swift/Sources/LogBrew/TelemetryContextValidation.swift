@@ -1,0 +1,335 @@
+import Foundation
+
+func mergeTelemetryContexts(
+    _ base: TelemetryContext?,
+    _ override: TelemetryContext?,
+) throws -> TelemetryContext? {
+    let base = try base.map { try validateTelemetryContext($0, label: "base telemetry context") }
+    let override = try override.map { try validateTelemetryContext($0, label: "event telemetry context") }
+    guard let base else {
+        return override
+    }
+    guard let override else {
+        return base
+    }
+
+    let context = TelemetryContext(
+        resource: mergeResources(base.resource, override.resource),
+        trace: override.trace ?? base.trace,
+        session: override.session ?? base.session,
+        subject: override.subject ?? base.subject,
+        tags: mergeTags(base.tags, override.tags),
+    )
+    return try validateTelemetryContext(context, label: "merged telemetry context")
+}
+
+func validateTelemetryContext(
+    _ value: TelemetryContext,
+    label: String = "telemetry context",
+) throws -> TelemetryContext {
+    guard value.schemaVersion == 1 else {
+        throw contextValidationError("\(label) schemaVersion must be 1")
+    }
+    let resource = try value.resource.map { try validateResource($0, label: "\(label) resource") }
+    let trace = try value.trace.map { try validateTelemetryTraceContext($0, label: "\(label) trace") }
+    let session = try value.session.map { try validateSession($0, label: "\(label) session") }
+    let subject = try value.subject.map { try validateSubject($0, label: "\(label) subject") }
+    let tags = try value.tags.map { try validateTags($0, label: "\(label) tags") }
+    guard resource != nil || trace != nil || session != nil || subject != nil || tags != nil else {
+        throw contextValidationError("\(label) must include resource, trace, session, subject, or tags")
+    }
+    return TelemetryContext(resource: resource, trace: trace, session: session, subject: subject, tags: tags)
+}
+
+func telemetryTraceContext(_ context: LogBrewTraceContext) -> TelemetryTraceContext {
+    TelemetryTraceContext(
+        traceId: context.traceId,
+        spanId: context.spanId,
+        parentSpanId: context.parentSpanId,
+        sampled: context.sampled,
+    )
+}
+
+func telemetryTraceContext(
+    traceId: String,
+    spanId: String,
+    parentSpanId: String?,
+    sampled: Bool?,
+) -> TelemetryTraceContext? {
+    let candidate = TelemetryTraceContext(
+        traceId: traceId,
+        spanId: spanId,
+        parentSpanId: parentSpanId,
+        sampled: sampled,
+    )
+    return try? validateTelemetryTraceContext(candidate, label: "span telemetry context trace")
+}
+
+func validateTelemetryTraceContext(
+    _ value: TelemetryTraceContext,
+    label: String,
+) throws -> TelemetryTraceContext {
+    try TelemetryTraceContext(
+        traceId: contextHexId(value.traceId, length: 32, label: "\(label) traceId"),
+        spanId: value.spanId.map { try contextHexId($0, length: 16, label: "\(label) spanId") },
+        parentSpanId: value.parentSpanId.map {
+            try contextHexId($0, length: 16, label: "\(label) parentSpanId")
+        },
+        sampled: value.sampled,
+    )
+}
+
+func validMachineKey(_ value: String, maximum: Int, separators: Set<Character>) -> Bool {
+    guard !value.isEmpty, value.count <= maximum, value.first?.isASCII == true,
+          value.first?.isLetter == true
+    else {
+        return false
+    }
+    return value.allSatisfy { character in
+        character.isASCII && (character.isLetter || character.isNumber || separators.contains(character))
+    }
+}
+
+func containsForbiddenControl(_ value: String) -> Bool {
+    value.unicodeScalars.contains { scalar in
+        scalar.value <= 0x1F || (0x7F ... 0x9F).contains(scalar.value)
+    }
+}
+
+func requireTelemetryContext(_ value: TelemetryContext?) throws -> TelemetryContext {
+    guard let value else {
+        throw contextValidationError("merged telemetry context must not be empty")
+    }
+    return value
+}
+
+private func validateResource(_ value: TelemetryResource, label: String) throws -> TelemetryResource {
+    let service = try value.service.map { try validateNamedVersion($0, label: "\(label) service") }
+    let deployment = try value.deployment.map { try validateDeployment($0, label: "\(label) deployment") }
+    let runtime = try value.runtime.map { try validateNamedVersion($0, label: "\(label) runtime") }
+    let framework = try value.framework.map { try validateNamedVersion($0, label: "\(label) framework") }
+    let operatingSystem = try value.operatingSystem.map {
+        try validateOperatingSystem($0, label: "\(label) operatingSystem")
+    }
+    let device = try value.device.map { try validateDevice($0, label: "\(label) device") }
+    let application = try value.application.map { try validateApplication($0, label: "\(label) application") }
+    guard service != nil || deployment != nil || runtime != nil || framework != nil || operatingSystem != nil
+        || device != nil || application != nil
+    else {
+        throw contextValidationError("\(label) must not be empty")
+    }
+    return TelemetryResource(
+        service: service,
+        deployment: deployment,
+        runtime: runtime,
+        framework: framework,
+        operatingSystem: operatingSystem,
+        device: device,
+        application: application,
+    )
+}
+
+private func validateNamedVersion(_ value: TelemetryNamedVersion, label: String) throws -> TelemetryNamedVersion {
+    try TelemetryNamedVersion(
+        name: contextString(value.name, label: "\(label) name"),
+        version: value.version.map { try contextString($0, label: "\(label) version") },
+    )
+}
+
+private func validateDeployment(_ value: TelemetryDeployment, label: String) throws -> TelemetryDeployment {
+    let environment = try value.environment.map { try contextString($0, label: "\(label) environment") }
+    let release = try value.release.map { try contextString($0, label: "\(label) release") }
+    guard environment != nil || release != nil else {
+        throw contextValidationError("\(label) must not be empty")
+    }
+    return TelemetryDeployment(environment: environment, release: release)
+}
+
+private func validateOperatingSystem(
+    _ value: TelemetryOperatingSystem,
+    label: String,
+) throws -> TelemetryOperatingSystem {
+    try TelemetryOperatingSystem(
+        name: contextString(value.name, label: "\(label) name"),
+        version: value.version.map { try contextString($0, label: "\(label) version") },
+        build: value.build.map { try contextString($0, label: "\(label) build") },
+    )
+}
+
+private func validateDevice(_ value: TelemetryDevice, label: String) throws -> TelemetryDevice {
+    let family = try value.family.map { try contextString($0, label: "\(label) family") }
+    let model = try value.model.map { try contextString($0, label: "\(label) model") }
+    let architecture = try value.architecture.map { try contextString($0, label: "\(label) architecture") }
+    guard family != nil || model != nil || architecture != nil else {
+        throw contextValidationError("\(label) must not be empty")
+    }
+    return TelemetryDevice(family: family, model: model, architecture: architecture)
+}
+
+private func validateApplication(_ value: TelemetryApplication, label: String) throws -> TelemetryApplication {
+    let name = try value.name.map { try contextString($0, label: "\(label) name") }
+    let version = try value.version.map { try contextString($0, label: "\(label) version") }
+    let build = try value.build.map { try contextString($0, label: "\(label) build") }
+    guard name != nil || version != nil || build != nil else {
+        throw contextValidationError("\(label) must not be empty")
+    }
+    return TelemetryApplication(name: name, version: version, build: build)
+}
+
+private func validateSession(_ value: TelemetrySessionContext, label: String) throws -> TelemetrySessionContext {
+    let id = try contextString(value.id, label: "\(label) id", maximum: 200)
+    let previousId = try value.previousId.map {
+        try contextString($0, label: "\(label) previousId", maximum: 200)
+    }
+    guard previousId != id else {
+        throw contextValidationError("\(label) previousId must differ from id")
+    }
+    return TelemetrySessionContext(id: id, previousId: previousId)
+}
+
+private func validateSubject(_ value: TelemetrySubjectContext, label: String) throws -> TelemetrySubjectContext {
+    try TelemetrySubjectContext(
+        id: contextString(value.id, label: "\(label) id", maximum: 200),
+        kind: value.kind,
+    )
+}
+
+private func validateTags(_ value: [String: String], label: String) throws -> [String: String] {
+    guard (1 ... 32).contains(value.count) else {
+        throw contextValidationError("\(label) must contain 1-32 entries")
+    }
+    var output: [String: String] = [:]
+    for (key, rawValue) in value {
+        guard validMachineKey(key, maximum: 64, separators: ["_", ".", "-"]) else {
+            throw contextValidationError("\(label) key is invalid")
+        }
+        output[key] = try contextString(rawValue, label: "\(label) value for \(key)")
+    }
+    return output
+}
+
+private func mergeResources(_ base: TelemetryResource?, _ override: TelemetryResource?) -> TelemetryResource? {
+    guard base != nil || override != nil else {
+        return nil
+    }
+    return TelemetryResource(
+        service: mergeNamedVersion(base?.service, override?.service),
+        deployment: mergeDeployment(base?.deployment, override?.deployment),
+        runtime: mergeNamedVersion(base?.runtime, override?.runtime),
+        framework: mergeNamedVersion(base?.framework, override?.framework),
+        operatingSystem: mergeOperatingSystem(base?.operatingSystem, override?.operatingSystem),
+        device: mergeDevice(base?.device, override?.device),
+        application: mergeApplication(base?.application, override?.application),
+    )
+}
+
+private func mergeNamedVersion(
+    _ base: TelemetryNamedVersion?,
+    _ override: TelemetryNamedVersion?,
+) -> TelemetryNamedVersion? {
+    guard let base else {
+        return override
+    }
+    guard let override else {
+        return base
+    }
+    return TelemetryNamedVersion(name: override.name, version: override.version ?? base.version)
+}
+
+private func mergeDeployment(_ base: TelemetryDeployment?, _ override: TelemetryDeployment?) -> TelemetryDeployment? {
+    guard let base else {
+        return override
+    }
+    guard let override else {
+        return base
+    }
+    return TelemetryDeployment(
+        environment: override.environment ?? base.environment,
+        release: override.release ?? base.release,
+    )
+}
+
+private func mergeOperatingSystem(
+    _ base: TelemetryOperatingSystem?,
+    _ override: TelemetryOperatingSystem?,
+) -> TelemetryOperatingSystem? {
+    guard let base else {
+        return override
+    }
+    guard let override else {
+        return base
+    }
+    return TelemetryOperatingSystem(
+        name: override.name,
+        version: override.version ?? base.version,
+        build: override.build ?? base.build,
+    )
+}
+
+private func mergeDevice(_ base: TelemetryDevice?, _ override: TelemetryDevice?) -> TelemetryDevice? {
+    guard let base else {
+        return override
+    }
+    guard let override else {
+        return base
+    }
+    return TelemetryDevice(
+        family: override.family ?? base.family,
+        model: override.model ?? base.model,
+        architecture: override.architecture ?? base.architecture,
+    )
+}
+
+private func mergeApplication(
+    _ base: TelemetryApplication?,
+    _ override: TelemetryApplication?,
+) -> TelemetryApplication? {
+    guard let base else {
+        return override
+    }
+    guard let override else {
+        return base
+    }
+    return TelemetryApplication(
+        name: override.name ?? base.name,
+        version: override.version ?? base.version,
+        build: override.build ?? base.build,
+    )
+}
+
+private func mergeTags(_ base: [String: String]?, _ override: [String: String]?) -> [String: String]? {
+    guard base != nil || override != nil else {
+        return nil
+    }
+    var output = base ?? [:]
+    for (key, value) in override ?? [:] {
+        output[key] = value
+    }
+    return output
+}
+
+private func contextString(_ value: String, label: String, maximum: Int = 256) throws -> String {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty, normalized.count <= maximum, !containsForbiddenControl(normalized) else {
+        throw contextValidationError("\(label) is invalid")
+    }
+    return normalized
+}
+
+private func contextHexId(_ value: String, length: Int, label: String) throws -> String {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard normalized.count == length, normalized.allSatisfy(isASCIIHex),
+          normalized.contains(where: { $0 != "0" })
+    else {
+        throw contextValidationError("\(label) must be a non-zero \(length)-character hex value")
+    }
+    return normalized
+}
+
+private func isASCIIHex(_ value: Character) -> Bool {
+    value.isASCII && (value.isNumber || ("a" ... "f").contains(value))
+}
+
+private func contextValidationError(_ message: String) -> SdkError {
+    SdkError(code: "validation_error", message: message)
+}

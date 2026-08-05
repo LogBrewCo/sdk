@@ -23,6 +23,8 @@ struct ProductTimelineTests {
         let events = try #require(payload["events"] as? [[String: Any]])
         let attributes = try #require(events[0]["attributes"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
+        let telemetryContext = try #require(attributes["context"] as? [String: Any])
+        let session = try #require(telemetryContext["session"] as? [String: Any])
 
         #expect(attributes["name"] as? String == "checkout.pay_tapped")
         #expect(attributes["status"] as? String == "success")
@@ -37,6 +39,7 @@ struct ProductTimelineTests {
         #expect(metadata["analyticsSchemaVersion"] as? Int == 1)
         #expect(metadata["analyticsKind"] as? String == "interaction")
         #expect(metadata["analyticsSurface"] as? String == "Checkout")
+        #expect(session["id"] as? String == "session_123")
     }
 
     @Test("Swift network timeline helper sanitizes route metadata")
@@ -58,6 +61,8 @@ struct ProductTimelineTests {
         let events = try #require(payload["events"] as? [[String: Any]])
         let networkAttributes = try #require(events[0]["attributes"] as? [String: Any])
         let networkMetadata = try #require(networkAttributes["metadata"] as? [String: Any])
+        let telemetryContext = try #require(networkAttributes["context"] as? [String: Any])
+        let session = try #require(telemetryContext["session"] as? [String: Any])
         let preview = try client.previewJSON()
 
         #expect(networkAttributes["name"] as? String == "POST /api/checkout")
@@ -68,6 +73,7 @@ struct ProductTimelineTests {
         #expect(networkMetadata["statusCode"] as? Int == 503)
         #expect(networkMetadata["durationMs"] as? Double == 184.5)
         #expect(networkMetadata["retryable"] as? Bool == true)
+        #expect(session["id"] as? String == "session_123")
         #expect(!preview.contains("itemId"))
         #expect(!preview.contains("#pay"))
     }
@@ -122,7 +128,7 @@ struct ProductTimelineTests {
 
     private func timelineContext() -> ProductTimelineContext {
         ProductTimelineContext(
-            sessionId: "session_123",
+            sessionId: " session_123 ",
             screen: "Checkout",
             traceId: "trace_abc",
             funnel: "checkout",

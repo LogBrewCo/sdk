@@ -1,0 +1,70 @@
+import Foundation
+
+func automaticTelemetryContext() -> TelemetryContext {
+    let operatingSystem = ProcessInfo.processInfo.operatingSystemVersion
+    let version = "\(operatingSystem.majorVersion).\(operatingSystem.minorVersion).\(operatingSystem.patchVersion)"
+    let application = automaticApplicationContext()
+    let architecture = automaticArchitecture()
+    return TelemetryContext(
+        resource: TelemetryResource(
+            runtime: TelemetryNamedVersion(name: "swift"),
+            operatingSystem: TelemetryOperatingSystem(name: automaticOperatingSystemName(), version: version),
+            device: architecture.map { TelemetryDevice(architecture: $0) },
+            application: application,
+        ),
+    )
+}
+
+private func automaticOperatingSystemName() -> String {
+    #if os(iOS)
+        "iOS"
+    #elseif os(macOS)
+        "macOS"
+    #elseif os(tvOS)
+        "tvOS"
+    #elseif os(watchOS)
+        "watchOS"
+    #elseif os(visionOS)
+        "visionOS"
+    #else
+        "unknown"
+    #endif
+}
+
+private func automaticArchitecture() -> String? {
+    #if arch(arm64)
+        "arm64"
+    #elseif arch(x86_64)
+        "x86_64"
+    #elseif arch(arm)
+        "arm"
+    #elseif arch(i386)
+        "i386"
+    #else
+        nil
+    #endif
+}
+
+private func automaticApplicationContext() -> TelemetryApplication? {
+    let bundle = Bundle.main
+    let name = automaticBundleValue(bundle, keys: ["CFBundleDisplayName", "CFBundleName"])
+    let version = automaticBundleValue(bundle, keys: ["CFBundleShortVersionString"])
+    let build = automaticBundleValue(bundle, keys: ["CFBundleVersion"])
+    guard name != nil || version != nil || build != nil else {
+        return nil
+    }
+    return TelemetryApplication(name: name, version: version, build: build)
+}
+
+private func automaticBundleValue(_ bundle: Bundle, keys: [String]) -> String? {
+    for key in keys {
+        guard let candidate = bundle.object(forInfoDictionaryKey: key) as? String else {
+            continue
+        }
+        let normalized = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalized.isEmpty, normalized.count <= 256, !containsForbiddenControl(normalized) {
+            return normalized
+        }
+    }
+    return nil
+}

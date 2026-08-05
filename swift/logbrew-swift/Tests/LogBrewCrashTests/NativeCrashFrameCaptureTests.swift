@@ -37,7 +37,7 @@ struct NativeCrashFrameCaptureTests {
         let attributes = try issueAttributes(for: report)
         let frames = try #require(attributes["nativeStackFrames"] as? [[String: Any]])
 
-        #expect(Set(attributes.keys) == ["level", "metadata", "nativeStackFrames", "title"])
+        #expect(Set(attributes.keys) == ["exception", "level", "metadata", "nativeStackFrames", "title"])
         #expect(frames as NSArray == expectedNativeStackFrames() as NSArray)
         #expect(frames.allSatisfy { Set($0.keys) == ["architecture", "imageUuid", "instructionOffset"] })
 

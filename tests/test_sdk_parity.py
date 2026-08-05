@@ -42,6 +42,30 @@ class SdkParityTests(unittest.TestCase):
             ]
         }
 
+    @staticmethod
+    def _investigation_payload() -> dict[str, Any]:
+        return {
+            "events": [
+                {
+                    "type": "issue",
+                    "timestamp": "2026-08-03T10:00:00Z",
+                    "id": "evt_issue_001",
+                    "attributes": {"title": "Checkout failed", "level": "error"},
+                },
+                {
+                    "type": "span",
+                    "timestamp": "2026-08-03T10:00:01Z",
+                    "id": "evt_span_001",
+                    "attributes": {
+                        "name": "checkout",
+                        "traceId": "trace_001",
+                        "spanId": "span_001",
+                        "status": "error",
+                    },
+                },
+            ]
+        }
+
     def test_exact_payload_passes(self) -> None:
         payload = self._payload()
 
@@ -115,6 +139,65 @@ class SdkParityTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("parity failed", result.stderr)
+
+    def test_additive_investigation_evidence_requires_explicit_mode(self) -> None:
+        expected = self._investigation_payload()
+        actual = self._investigation_payload()
+        actual["events"][0]["attributes"]["exception"] = {"type": "CheckoutError"}
+
+        result = self._run(expected, actual)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("parity failed", result.stderr)
+
+    def test_explicit_mode_allows_only_typed_additive_investigation_evidence(self) -> None:
+        expected = self._investigation_payload()
+        actual = self._investigation_payload()
+        actual["events"][0]["attributes"].update(
+            {
+                "exception": {"type": "CheckoutError"},
+                "stackFrames": [{"filename": "Checkout.swift", "line": 42, "column": 17}],
+                "breadcrumbs": [{"timestamp": "2026-08-03T10:00:00Z", "category": "checkout"}],
+                "breadcrumbsTruncated": False,
+            }
+        )
+        actual["events"][1]["attributes"].update(
+            {
+                "events": [{"name": "payment.retry"}],
+                "links": [{"traceId": "1" * 32, "spanId": "2" * 16}],
+            }
+        )
+
+        result = self._run(
+            expected,
+            actual,
+            "--allow-additive-investigation-evidence",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_investigation_mode_rejects_malformed_or_expected_evidence(self) -> None:
+        expected = self._investigation_payload()
+        actual = self._investigation_payload()
+        actual["events"][0]["attributes"]["exception"] = "invalid"
+
+        malformed = self._run(
+            expected,
+            actual,
+            "--allow-additive-investigation-evidence",
+        )
+
+        self.assertEqual(malformed.returncode, 1)
+        expected["events"][0]["attributes"]["exception"] = {"type": "ExpectedError"}
+        actual["events"][0]["attributes"]["exception"] = {"type": "ActualError"}
+
+        changed = self._run(
+            expected,
+            actual,
+            "--allow-additive-investigation-evidence",
+        )
+
+        self.assertEqual(changed.returncode, 1)
 
 
 if __name__ == "__main__":
