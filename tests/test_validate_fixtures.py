@@ -545,6 +545,37 @@ class ValidateFixturesTests(unittest.TestCase):
         )
         self.assertEqual(schema_temporalities, validator_temporalities)
 
+    def test_schema_describes_bounded_span_links(self) -> None:
+        schema = self.load_schema()
+        definitions = schema["$defs"]
+        span_properties = definitions["spanEvent"]["allOf"][1]["properties"]["attributes"][
+            "properties"
+        ]
+
+        self.assertEqual(
+            span_properties["links"],
+            {
+                "type": "array",
+                "maxItems": 8,
+                "items": {"$ref": "#/$defs/spanLinkSummary"},
+            },
+        )
+        link = definitions["spanLinkSummary"]
+        self.assertFalse(link["additionalProperties"])
+        self.assertEqual(set(link["required"]), {"traceId", "spanId"})
+        self.assertEqual(link["properties"]["sampled"], {"type": "boolean"})
+        self.assertEqual(link["properties"]["metadata"], {"$ref": "#/$defs/metadata"})
+        self.assertEqual(link["properties"]["traceId"]["pattern"], "^[0-9a-fA-F]{32}$")
+        self.assertEqual(
+            link["properties"]["traceId"]["not"],
+            {"const": "00000000000000000000000000000000"},
+        )
+        self.assertEqual(link["properties"]["spanId"]["pattern"], "^[0-9a-fA-F]{16}$")
+        self.assertEqual(
+            link["properties"]["spanId"]["not"],
+            {"const": "0000000000000000"},
+        )
+
     def test_schema_describes_issue_stack_frames(self) -> None:
         schema = self.load_schema()
         issue_properties = schema["$defs"]["issueEvent"]["allOf"][1]["properties"]["attributes"][

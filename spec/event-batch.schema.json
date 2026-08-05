@@ -191,6 +191,25 @@
         "metadata": { "$ref": "#/$defs/metadata" }
       }
     },
+    "spanLinkSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traceId", "spanId"],
+      "properties": {
+        "traceId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{32}$",
+          "not": { "const": "00000000000000000000000000000000" }
+        },
+        "spanId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{16}$",
+          "not": { "const": "0000000000000000" }
+        },
+        "sampled": { "type": "boolean" },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
     "issueStackFrame": {
       "type": "object",
       "additionalProperties": false,
@@ -463,6 +482,11 @@
                   "type": "array",
                   "maxItems": 8,
                   "items": { "$ref": "#/$defs/spanEventSummary" }
+                },
+                "links": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "items": { "$ref": "#/$defs/spanLinkSummary" }
                 },
                 "metadata": { "$ref": "#/$defs/metadata" },
                 "context": { "$ref": "#/$defs/telemetryContext" }
