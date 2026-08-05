@@ -29,7 +29,7 @@ struct NativeCrashFrameCaptureAmbiguityTests {
         let attributes = try issueAttributes(for: report)
 
         #expect(attributes["nativeStackFrames"] == nil)
-        #expect(Set(attributes.keys) == ["level", "metadata", "title"])
+        #expect(Set(attributes.keys) == ["exception", "level", "metadata", "title"])
         #expect(attributes["title"] as? String == "Native application crash")
         #expect(attributes["level"] as? String == "critical")
         #expect(attributes["metadata"] as? [String: Any] as NSDictionary? == [

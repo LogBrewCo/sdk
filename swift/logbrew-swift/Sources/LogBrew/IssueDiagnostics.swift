@@ -1,0 +1,383 @@
+import Foundation
+
+/// Runtime path that captured an exception and whether it escaped that path.
+public struct IssueExceptionMechanism: Codable, Equatable, Sendable {
+    public let type: String
+    public let handled: Bool
+
+    public init(type: String, handled: Bool) {
+        self.type = type
+        self.handled = handled
+    }
+}
+
+/// Structured exception identity attached to an issue without copying its private description.
+public struct IssueException: Codable, Equatable, Sendable {
+    public let type: String
+    public let mechanism: IssueExceptionMechanism?
+
+    public init(type: String, mechanism: IssueExceptionMechanism? = nil) {
+        self.type = type
+        self.mechanism = mechanism
+    }
+}
+
+/// Privacy-bounded source identity for one issue stack frame.
+public struct IssueStackFrame: Codable, Equatable, Sendable {
+    public let filename: String
+    public let line: Int
+    public let column: Int
+    public let function: String?
+    public let module: String?
+    public let inApp: Bool?
+    public let debugId: String?
+
+    public init(
+        filename: String,
+        line: Int,
+        column: Int,
+        function: String? = nil,
+        module: String? = nil,
+        inApp: Bool? = nil,
+        debugId: String? = nil,
+    ) {
+        self.filename = filename
+        self.line = line
+        self.column = column
+        self.function = function
+        self.module = module
+        self.inApp = inApp
+        self.debugId = debugId
+    }
+}
+
+public enum IssueBreadcrumbLevel: String, Codable, Equatable, Sendable {
+    case debug
+    case info
+    case warning
+    case error
+    case critical
+}
+
+/// One oldest-to-newest, privacy-bounded step that happened before an issue.
+public struct IssueBreadcrumb: Codable, Equatable, Sendable {
+    public let timestamp: String
+    public let type: String?
+    public let category: String
+    public let level: IssueBreadcrumbLevel?
+    public let message: String?
+    public let data: Metadata?
+
+    public init(
+        timestamp: String,
+        category: String,
+        type: String? = nil,
+        level: IssueBreadcrumbLevel? = nil,
+        message: String? = nil,
+        data: Metadata? = nil,
+    ) {
+        self.timestamp = timestamp
+        self.type = type
+        self.category = category
+        self.level = level
+        self.message = message
+        self.data = data
+    }
+}
+
+public extension IssueAttributes {
+    /// Create a handled-error issue with safe type identity and a call-site frame.
+    ///
+    /// The error description, raw stack text, locals, arguments, and absolute source paths are
+    /// deliberately omitted. Pass `message` only when the application has approved it for display.
+    static func fromError(
+        _ error: any Error,
+        title: String? = nil,
+        level: IssueLevel = .error,
+        message: String? = nil,
+        mechanism: String = "swift.error",
+        handled: Bool = true,
+        breadcrumbs: [IssueBreadcrumb]? = nil,
+        breadcrumbsTruncated: Bool? = nil,
+        metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
+        column: Int = #column,
+        function: String = #function,
+    ) -> IssueAttributes {
+        let exceptionType = safeSwiftErrorType(error)
+        let fileModule = fileID.split(separator: "/", maxSplits: 1).first.map(String.init)
+        return IssueAttributes(
+            title: title ?? exceptionType,
+            level: level,
+            message: message,
+            exception: IssueException(
+                type: exceptionType,
+                mechanism: IssueExceptionMechanism(type: mechanism, handled: handled),
+            ),
+            stackFrames: [
+                IssueStackFrame(
+                    filename: fileID,
+                    line: line,
+                    column: column,
+                    function: function,
+                    module: fileModule,
+                    inApp: true,
+                ),
+            ],
+            breadcrumbs: breadcrumbs,
+            breadcrumbsTruncated: breadcrumbsTruncated,
+            metadata: metadata,
+            context: context,
+        )
+    }
+}
+
+final class IssueBreadcrumbStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var breadcrumbs: [IssueBreadcrumb] = []
+    private var truncated = false
+
+    func add(_ breadcrumb: IssueBreadcrumb) throws {
+        let breadcrumb = try validateIssueBreadcrumb(breadcrumb)
+        lock.lock()
+        if breadcrumbs.count == maximumIssueBreadcrumbs {
+            breadcrumbs.removeFirst()
+            truncated = true
+        }
+        breadcrumbs.append(breadcrumb)
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        breadcrumbs.removeAll(keepingCapacity: true)
+        truncated = false
+        lock.unlock()
+    }
+
+    func snapshot() -> (breadcrumbs: [IssueBreadcrumb], truncated: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (breadcrumbs, truncated)
+    }
+}
+
+let maximumIssueBreadcrumbs = 64
+
+func normalizeIssueAttributes(_ value: IssueAttributes) throws -> IssueAttributes {
+    let exception = try value.exception.map(validateIssueException)
+    let stackFrames = try normalizeIssueStackFrames(value.stackFrames)
+    let breadcrumbs = try normalizeIssueBreadcrumbs(value.breadcrumbs)
+    let breadcrumbsWereCapped = (value.breadcrumbs?.count ?? 0) > maximumIssueBreadcrumbs
+    let context = try value.context.map { try validateTelemetryContext($0) }
+    try validateMetadata(value.metadata, label: "issue metadata")
+    return IssueAttributes(
+        title: value.title,
+        level: value.level,
+        message: value.message,
+        exception: exception,
+        stackFrames: stackFrames,
+        breadcrumbs: breadcrumbs,
+        breadcrumbsTruncated: breadcrumbsWereCapped ? true : value.breadcrumbsTruncated,
+        metadata: value.metadata,
+        context: context,
+        nativeStackFrames: value.nativeStackFrames,
+    )
+}
+
+func issueAttributes(
+    _ value: IssueAttributes,
+    adding snapshot: (breadcrumbs: [IssueBreadcrumb], truncated: Bool),
+) -> IssueAttributes {
+    guard !snapshot.breadcrumbs.isEmpty else {
+        return value
+    }
+    let explicit = value.breadcrumbs ?? []
+    let combined = snapshot.breadcrumbs + explicit
+    let capped = Array(combined.suffix(maximumIssueBreadcrumbs))
+    return IssueAttributes(
+        title: value.title,
+        level: value.level,
+        message: value.message,
+        exception: value.exception,
+        stackFrames: value.stackFrames,
+        breadcrumbs: capped,
+        breadcrumbsTruncated: value.breadcrumbsTruncated == true
+            || snapshot.truncated
+            || combined.count > maximumIssueBreadcrumbs,
+        metadata: value.metadata,
+        context: value.context,
+        nativeStackFrames: value.nativeStackFrames,
+    )
+}
+
+func validateIssueException(_ value: IssueException) throws -> IssueException {
+    let exceptionType = try issueText(
+        value.type,
+        label: "issue exception type",
+        maximum: 256,
+        disallowLocationDelimiters: true,
+    )
+    let mechanism = try value.mechanism.map { mechanism in
+        guard validMachineKey(mechanism.type, maximum: 64, separators: ["_", ".", ":", "-"]) else {
+            throw issueValidationError("issue exception mechanism type is invalid")
+        }
+        return IssueExceptionMechanism(type: mechanism.type, handled: mechanism.handled)
+    }
+    return IssueException(type: exceptionType, mechanism: mechanism)
+}
+
+func validateIssueBreadcrumb(_ value: IssueBreadcrumb) throws -> IssueBreadcrumb {
+    try requireTimestamp(value.timestamp)
+    guard validMachineKey(value.category, maximum: 64, separators: ["_", ".", ":", "-"]) else {
+        throw issueValidationError("issue breadcrumb category is invalid")
+    }
+    let type = try value.type.map { rawValue in
+        guard validMachineKey(rawValue, maximum: 64, separators: ["_", ".", ":", "-"]) else {
+            throw issueValidationError("issue breadcrumb type is invalid")
+        }
+        return rawValue
+    }
+    let message = try value.message.map {
+        try issueText($0, label: "issue breadcrumb message", maximum: 512)
+    }
+    try validateBreadcrumbData(value.data)
+    return IssueBreadcrumb(
+        timestamp: value.timestamp,
+        category: value.category,
+        type: type,
+        level: value.level,
+        message: message,
+        data: value.data,
+    )
+}
+
+private func normalizeIssueStackFrames(_ values: [IssueStackFrame]?) throws -> [IssueStackFrame]? {
+    guard let values else {
+        return nil
+    }
+    guard !values.isEmpty else {
+        throw issueValidationError("issue stackFrames must not be empty")
+    }
+    return try values.prefix(32).map(validateIssueStackFrame)
+}
+
+private func validateIssueStackFrame(_ value: IssueStackFrame) throws -> IssueStackFrame {
+    let filename = try sanitizedIssueFilename(value.filename)
+    guard (1 ... Int(Int32.max)).contains(value.line), (1 ... Int(Int32.max)).contains(value.column) else {
+        throw issueValidationError("issue stack frame line and column must be positive 32-bit integers")
+    }
+    let function = try value.function.map {
+        try issueText($0, label: "issue stack frame function", maximum: 256)
+    }
+    let module = try value.module.map {
+        try issueText(
+            $0,
+            label: "issue stack frame module",
+            maximum: 512,
+            disallowLocationDelimiters: true,
+        )
+    }
+    let debugId = try value.debugId.map { rawValue -> String in
+        guard let uuid = UUID(uuidString: rawValue) else {
+            throw issueValidationError("issue stack frame debugId must be a UUID")
+        }
+        return uuid.uuidString.lowercased()
+    }
+    return IssueStackFrame(
+        filename: filename,
+        line: value.line,
+        column: value.column,
+        function: function,
+        module: module,
+        inApp: value.inApp,
+        debugId: debugId,
+    )
+}
+
+private func normalizeIssueBreadcrumbs(_ values: [IssueBreadcrumb]?) throws -> [IssueBreadcrumb]? {
+    guard let values else {
+        return nil
+    }
+    guard !values.isEmpty else {
+        throw issueValidationError("issue breadcrumbs must not be empty")
+    }
+    return try values.suffix(maximumIssueBreadcrumbs).map(validateIssueBreadcrumb)
+}
+
+private func validateBreadcrumbData(_ data: Metadata?) throws {
+    guard let data else {
+        return
+    }
+    guard data.count <= 8 else {
+        throw issueValidationError("issue breadcrumb data must contain at most 8 entries")
+    }
+    for (key, value) in data {
+        guard validMachineKey(key, maximum: 64, separators: ["_", ".", "-"]) else {
+            throw issueValidationError("issue breadcrumb data key is invalid")
+        }
+        switch value {
+        case let .string(value):
+            _ = try issueText(value, label: "issue breadcrumb data value for \(key)", maximum: 256)
+        case let .double(value):
+            guard value.isFinite else {
+                throw issueValidationError("issue breadcrumb data numeric values must be finite")
+            }
+        case .int, .bool, .null:
+            break
+        }
+    }
+}
+
+private func sanitizedIssueFilename(_ value: String) throws -> String {
+    var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "\\", with: "/")
+    if let delimiter = normalized.firstIndex(where: { $0 == "?" || $0 == "#" }) {
+        normalized = String(normalized[..<delimiter])
+    }
+    let isAbsoluteFilePath = normalized.hasPrefix("/")
+        || normalized.lowercased().hasPrefix("file://")
+        || (normalized.count >= 3
+            && normalized[normalized.index(after: normalized.startIndex)] == ":"
+            && normalized[normalized.index(normalized.startIndex, offsetBy: 2)] == "/")
+    if isAbsoluteFilePath, let last = normalized.split(separator: "/").last {
+        normalized = String(last)
+    }
+    return try issueText(
+        normalized,
+        label: "issue stack frame filename",
+        maximum: 2048,
+        disallowLocationDelimiters: true,
+    )
+}
+
+private func issueText(
+    _ value: String,
+    label: String,
+    maximum: Int,
+    disallowLocationDelimiters: Bool = false,
+) throws -> String {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty, normalized.count <= maximum, !containsForbiddenControl(normalized),
+          !disallowLocationDelimiters || (!normalized.contains("?") && !normalized.contains("#"))
+    else {
+        throw issueValidationError("\(label) is invalid")
+    }
+    return normalized
+}
+
+private func safeSwiftErrorType(_ error: any Error) -> String {
+    let reflected = String(reflecting: Swift.type(of: error))
+    let normalized = reflected.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty, !containsForbiddenControl(normalized) else {
+        return "Swift.Error"
+    }
+    let filtered = normalized.filter { $0 != "?" && $0 != "#" }
+    return String(filtered.prefix(256))
+}
+
+private func issueValidationError(_ message: String) -> SdkError {
+    SdkError(code: "validation_error", message: message)
+}

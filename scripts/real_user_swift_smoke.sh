@@ -31,6 +31,7 @@ grep -q '/README.md$' "$tmp_dir/archive-contents.txt"
 grep -q '/.swiftformat$' "$tmp_dir/archive-contents.txt"
 grep -q '/.swiftlint.yml$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/EventEncoding.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/AutomaticTelemetryContext.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DurableDeliveryStore.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DurableDeliveryStoreRecovery.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DeliveryEngine.swift$' "$tmp_dir/archive-contents.txt"
@@ -39,12 +40,16 @@ grep -q '/Sources/LogBrew/DeliveryEngineAutomatic.swift$' "$tmp_dir/archive-cont
 grep -q '/Sources/LogBrew/DeliveryEngineQueue.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DeliveryLifecycle.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LifecycleTrace.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/IssueDiagnostics.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewClient.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewLogger.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewTrace.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Metadata.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/ProductTimeline.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/PublicTypes.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/TelemetryContext.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/TelemetryContextValidation.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/TraceEvidence.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Transport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/URLSessionTrace.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/URLSessionTracer.swift$' "$tmp_dir/archive-contents.txt"
@@ -62,6 +67,10 @@ grep -q '/Tests/LogBrewTests/DurableDeliveryRecoveryTests.swift$' "$tmp_dir/arch
 grep -q '/Tests/LogBrewTests/LifecycleTraceTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/OpenTelemetryTraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/ProductTimelineTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/IssueDiagnosticsTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/RichTelemetryTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/RichTelemetryTestSupport.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/SpanEvidenceTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/TraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/URLSessionTraceTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/examples/Makefile$' "$tmp_dir/archive-contents.txt"
@@ -101,18 +110,24 @@ grep -q 'AppOwnedOpenTelemetrySpanContext' "$tmp_dir/archive-trace-example.swift
 grep -q 'openTelemetrySpanContext(' "$tmp_dir/archive-trace-example.swift"
 grep -q 'from: AppOwnedOpenTelemetrySpanContext' "$tmp_dir/archive-trace-example.swift"
 grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-trace-example.swift"
+unzip -p "$archive_path" '*/README.md' > "$tmp_dir/archive-readme.md"
+grep -q 'Rich Investigation Context' "$tmp_dir/archive-readme.md"
+grep -q 'Issue Diagnostics and Breadcrumbs' "$tmp_dir/archive-readme.md"
+grep -q 'IssueAttributes.fromError' "$tmp_dir/archive-readme.md"
+grep -q 'SpanEventSummary' "$tmp_dir/archive-readme.md"
+grep -q 'SpanLinkSummary' "$tmp_dir/archive-readme.md"
 
 echo "swift real-user smoke: packaged README example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/readme-run-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 grep -q '"events":6' "$tmp_dir/readme.stderr.json"
 
 echo "swift real-user smoke: packaged real-user example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/smoke-run-build" RealUserSmoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/smoke.stderr.json"
@@ -184,10 +199,24 @@ cat > "$consumer_dir/Sources/SmokeApp/main.swift" <<'EOF'
 import Foundation
 import LogBrew
 
+private enum ConsumerCheckoutError: Error {
+    case authorizationDeclined(restrictedValue: String)
+}
+
 let client = try LogBrewClient.create(
     apiKey: "LOGBREW_API_KEY",
     sdkName: "swift-consumer",
-    sdkVersion: "0.1.0"
+    sdkVersion: "0.1.0",
+    context: TelemetryContext(
+        resource: TelemetryResource(
+            service: TelemetryNamedVersion(name: "checkout-app", version: "2.4.0"),
+            deployment: TelemetryDeployment(environment: "production", release: "checkout@2.4.0")
+        ),
+        session: TelemetrySessionContext(id: "session_consumer"),
+        subject: TelemetrySubjectContext(id: "subject_consumer", kind: .user),
+        tags: ["plan": "team"]
+    ),
+    includeAutomaticContext: false
 )
 try client.release(
     "evt_release_001",
@@ -199,10 +228,29 @@ try client.environment(
     timestamp: "2026-06-02T10:00:01Z",
     attributes: EnvironmentAttributes(name: "production", region: "global")
 )
+try client.addBreadcrumb(
+    IssueBreadcrumb(
+        timestamp: "2026-06-02T10:00:01Z",
+        category: "checkout.submit",
+        type: "navigation",
+        level: .info,
+        message: "Checkout submitted",
+        data: ["attempt": 2]
+    )
+)
 try client.issue(
     "evt_issue_001",
     timestamp: "2026-06-02T10:00:02Z",
-    attributes: IssueAttributes(title: "Checkout timeout", level: .error, message: "Request timed out after retry budget")
+    attributes: IssueAttributes.fromError(
+        ConsumerCheckoutError.authorizationDeclined(restrictedValue: "must-not-escape"),
+        title: "Checkout timeout",
+        message: "Request timed out after retry budget",
+        mechanism: "swift.task",
+        fileID: "Checkout/PaymentService.swift",
+        line: 42,
+        column: 17,
+        function: "authorize()"
+    )
 )
 try client.log(
     "evt_log_001",
@@ -212,7 +260,28 @@ try client.log(
 try client.span(
     "evt_span_001",
     timestamp: "2026-06-02T10:00:04Z",
-    attributes: SpanAttributes(name: "GET /health", traceId: "trace_001", spanId: "span_001", status: .ok, durationMs: 12.5)
+    attributes: SpanAttributes(
+        name: "GET /health",
+        traceId: "trace_001",
+        spanId: "span_001",
+        status: .ok,
+        durationMs: 12.5,
+        events: [
+            SpanEventSummary(
+                name: "cache.lookup",
+                timestamp: "2026-06-02T10:00:04Z",
+                metadata: ["hit": true]
+            )
+        ],
+        links: [
+            SpanLinkSummary(
+                traceId: "11111111111111111111111111111111",
+                spanId: "2222222222222222",
+                sampled: true,
+                metadata: ["relationship": "follows_from"]
+            )
+        ]
+    )
 )
 try client.action(
     "evt_action_001",
@@ -221,6 +290,15 @@ try client.action(
 )
 
 let preview = try client.previewJSON()
+precondition(preview.contains(#""service" : {"#))
+precondition(preview.contains(#""name" : "checkout-app""#))
+precondition(preview.contains(#""exception" : {"#))
+precondition(preview.contains(#""handled" : true"#))
+precondition(preview.contains(#""breadcrumbs" : ["#))
+precondition(preview.contains(#""stackFrames" : ["#))
+precondition(preview.contains(#""events" : ["#))
+precondition(preview.contains(#""links" : ["#))
+precondition(!preview.contains("must-not-escape"))
 let response = try client.shutdown(transport: RecordingTransport.alwaysAccept())
 
 let loggerClient = try LogBrewClient.create(
@@ -707,7 +785,7 @@ if ! wait "$intake_pid"; then
 fi
 intake_pid=""
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/consumer.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/consumer.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/consumer.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/consumer.stderr.json"
 grep -q '"attempts":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"events":6' "$tmp_dir/consumer.stderr.json"

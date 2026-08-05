@@ -28,6 +28,8 @@ extension NativeCrashDeliveryTests {
         try record.enqueue(in: client)
         let event = try firstEvent(in: client)
         let attributes = try #require(event["attributes"] as? [String: Any])
+        let exception = try #require(attributes["exception"] as? [String: Any])
+        let exceptionMechanism = try #require(exception["mechanism"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
         let frames = try #require(attributes["nativeStackFrames"] as? [[String: Any]])
 
@@ -39,6 +41,9 @@ extension NativeCrashDeliveryTests {
             "environment": "production",
             "service": "ios-app",
         ])
+        #expect(exception["type"] as? String == "AppleNativeCrash")
+        #expect(exceptionMechanism["type"] as? String == "signal")
+        #expect(exceptionMechanism["handled"] as? Bool == false)
         #expect(frames.map { $0["architecture"] as? String } == ["arm64", "arm64e", "x86_64"])
         #expect(frames.allSatisfy { Set($0.keys) == ["architecture", "imageUuid", "instructionOffset"] })
     }
@@ -61,12 +66,17 @@ extension NativeCrashDeliveryTests {
         try record.enqueue(in: client)
         let event = try firstEvent(in: client)
         let attributes = try #require(event["attributes"] as? [String: Any])
+        let exception = try #require(attributes["exception"] as? [String: Any])
+        let exceptionMechanism = try #require(exception["mechanism"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
 
         #expect(metadata as NSDictionary == [
             "crash.mechanism": "signal",
             "crash.replayed": true,
         ])
+        #expect(exception["type"] as? String == "AppleNativeCrash")
+        #expect(exceptionMechanism["type"] as? String == "signal")
+        #expect(exceptionMechanism["handled"] as? Bool == false)
     }
 
     @Test("malformed persisted artifact identity fails closed")
@@ -124,11 +134,16 @@ extension NativeCrashDeliveryTests {
         try record.enqueue(in: client)
         let event = try firstEvent(in: client)
         let attributes = try #require(event["attributes"] as? [String: Any])
+        let exception = try #require(attributes["exception"] as? [String: Any])
+        let exceptionMechanism = try #require(exception["mechanism"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
 
         #expect(attributes["title"] as? String == "Native application hang")
         #expect(attributes["level"] as? String == "error")
         #expect(attributes["message"] == nil)
+        #expect(exception["type"] as? String == "AppleNativeHang")
+        #expect(exceptionMechanism["type"] as? String == "deadlock")
+        #expect(exceptionMechanism["handled"] as? Bool == true)
         #expect(metadata["crash.mechanism"] as? String == "deadlock")
         #expect(metadata["crash.replayed"] as? Bool == true)
         #expect(metadata["crash.handled"] as? Bool == true)
@@ -143,6 +158,59 @@ extension NativeCrashDeliveryTests {
         for forbidden in ["symbolName", "imageName", "thread", "reason", "console", "/private/"] {
             #expect(!payload.contains(forbidden))
         }
+    }
+
+    @Test("typed crash diagnostics preserve retry identity for legacy queued events")
+    func legacyQueuedCrashEventRemainsIdempotent() throws {
+        let eventID = "11111111-2222-3333-4444-555555555555"
+        let timestamp = "2026-07-25T12:00:00Z"
+        let frame = NativeStackFrame(
+            imageUuid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            architecture: .arm64,
+            instructionOffset: "0000000000000010",
+        )
+        let identity = try NativeArtifactIdentity(
+            projectId: "550e8400-e29b-41d4-a716-446655440000",
+            release: "com.example.app@1.2.3+45",
+            environment: "production",
+            service: "ios-app",
+        )
+        let incident = NativeHangIncident(
+            eventID: eventID,
+            timestamp: timestamp,
+            state: .recovered,
+            identity: identity,
+            nativeStackFrames: [frame],
+            durationMs: 4250,
+        )
+        let record = try incident.makeRecord(ownerNonce: UUID())
+        let client = try makeClient(name: "legacy-queued-crash-test")
+        try client.issueDetached(
+            eventID,
+            timestamp: timestamp,
+            attributes: IssueAttributes(
+                title: "Native application hang",
+                level: .error,
+                metadata: [
+                    "crash.mechanism": "deadlock",
+                    "crash.replayed": true,
+                    "crash.handled": true,
+                    "durationMs": 4250,
+                    "projectId": "550e8400-e29b-41d4-a716-446655440000",
+                    "release": "com.example.app@1.2.3+45",
+                    "environment": "production",
+                    "service": "ios-app",
+                ],
+                nativeStackFrames: [frame],
+            ),
+        )
+
+        try record.enqueue(in: client)
+
+        let event = try firstEvent(in: client)
+        let attributes = try #require(event["attributes"] as? [String: Any])
+        #expect(client.pendingEvents() == 1)
+        #expect(attributes["exception"] == nil)
     }
 
     @Test("sanitized replay records enqueue only fixed crash metadata")
@@ -163,6 +231,8 @@ extension NativeCrashDeliveryTests {
         try record.enqueue(in: client)
         let event = try firstEvent(in: client)
         let attributes = try #require(event["attributes"] as? [String: Any])
+        let exception = try #require(attributes["exception"] as? [String: Any])
+        let exceptionMechanism = try #require(exception["mechanism"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
 
         #expect(event["id"] as? String == "8f12b746-0c79-4cc6-a077-98ed62f094b2")
@@ -170,6 +240,9 @@ extension NativeCrashDeliveryTests {
         #expect(attributes["title"] as? String == "Native application crash")
         #expect(attributes["level"] as? String == "critical")
         #expect(attributes["message"] == nil)
+        #expect(exception["type"] as? String == "AppleNativeCrash")
+        #expect(exceptionMechanism["type"] as? String == "signal")
+        #expect(exceptionMechanism["handled"] as? Bool == false)
         #expect(metadata as NSDictionary == [
             "crash.mechanism": "signal",
             "crash.replayed": true,

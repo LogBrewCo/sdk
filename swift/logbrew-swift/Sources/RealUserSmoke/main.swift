@@ -1,10 +1,24 @@
 import Foundation
 import LogBrew
 
+private enum CheckoutSmokeError: Error {
+    case authorizationDeclined(restrictedValue: String)
+}
+
 let client = try LogBrewClient.create(
     apiKey: "LOGBREW_API_KEY",
     sdkName: "logbrew-swift",
     sdkVersion: "0.1.0",
+    context: TelemetryContext(
+        resource: TelemetryResource(
+            service: TelemetryNamedVersion(name: "checkout-app", version: "2.4.0"),
+            deployment: TelemetryDeployment(environment: "production", release: "checkout@2.4.0"),
+        ),
+        session: TelemetrySessionContext(id: "session_smoke"),
+        subject: TelemetrySubjectContext(id: "subject_smoke", kind: .user),
+        tags: ["plan": "team"],
+    ),
+    includeAutomaticContext: false,
 )
 
 try client.release(
@@ -17,13 +31,29 @@ try client.environment(
     timestamp: "2026-06-02T10:00:01Z",
     attributes: EnvironmentAttributes(name: "production", region: "global"),
 )
+try client.addBreadcrumb(
+    IssueBreadcrumb(
+        timestamp: "2026-06-02T10:00:01Z",
+        category: "checkout.submit",
+        type: "navigation",
+        level: .info,
+        message: "Checkout submitted",
+        data: ["attempt": 2],
+    ),
+)
 try client.issue(
     "evt_issue_001",
     timestamp: "2026-06-02T10:00:02Z",
-    attributes: IssueAttributes(
+    attributes: IssueAttributes.fromError(
+        CheckoutSmokeError.authorizationDeclined(restrictedValue: "must-not-escape"),
         title: "Checkout timeout",
         level: .error,
         message: "Request timed out after retry budget",
+        mechanism: "swift.task",
+        fileID: "Checkout/PaymentService.swift",
+        line: 42,
+        column: 17,
+        function: "authorize()",
     ),
 )
 try client.log(
@@ -40,6 +70,21 @@ try client.span(
         spanId: "span_001",
         status: .ok,
         durationMs: 12.5,
+        events: [
+            SpanEventSummary(
+                name: "cache.lookup",
+                timestamp: "2026-06-02T10:00:04Z",
+                metadata: ["hit": true],
+            ),
+        ],
+        links: [
+            SpanLinkSummary(
+                traceId: "11111111111111111111111111111111",
+                spanId: "2222222222222222",
+                sampled: true,
+                metadata: ["relationship": "follows_from"],
+            ),
+        ],
     ),
 )
 try client.action(
@@ -49,6 +94,15 @@ try client.action(
 )
 
 let preview = try client.previewJSON()
+precondition(preview.contains(#""service" : {"#))
+precondition(preview.contains(#""name" : "checkout-app""#))
+precondition(preview.contains(#""exception" : {"#))
+precondition(preview.contains(#""handled" : true"#))
+precondition(preview.contains(#""breadcrumbs" : ["#))
+precondition(preview.contains(#""stackFrames" : ["#))
+precondition(preview.contains(#""events" : ["#))
+precondition(preview.contains(#""links" : ["#))
+precondition(!preview.contains("must-not-escape"))
 let transport = RecordingTransport(
     scriptedResponses: [
         .failure(.network("temporary network failure")),

@@ -2,12 +2,16 @@ import Foundation
 
 public final class LogBrewClient: @unchecked Sendable {
     private let engine: DeliveryEngine
+    private let baseContext: TelemetryContext?
+    private let breadcrumbStore = IssueBreadcrumbStore()
 
     public static func create(
         apiKey: String,
         sdkName: String,
         sdkVersion: String,
         maxRetries: Int = 2,
+        context: TelemetryContext? = nil,
+        includeAutomaticContext: Bool = true,
     ) throws -> LogBrewClient {
         try LogBrewClient(
             config: ClientConfig(
@@ -15,6 +19,8 @@ public final class LogBrewClient: @unchecked Sendable {
                 sdkName: sdkName,
                 sdkVersion: sdkVersion,
                 maxRetries: maxRetries,
+                context: context,
+                includeAutomaticContext: includeAutomaticContext,
             ),
         )
     }
@@ -23,6 +29,10 @@ public final class LogBrewClient: @unchecked Sendable {
         try requireNonEmpty("api_key", config.apiKey)
         try requireNonEmpty("sdk_name", config.sdkName)
         try requireNonEmpty("sdk_version", config.sdkVersion)
+        baseContext = try mergeTelemetryContexts(
+            config.includeAutomaticContext ? automaticTelemetryContext() : nil,
+            config.context,
+        )
         engine = DeliveryEngine(
             apiKey: config.apiKey,
             sdk: SDKInfo(name: config.sdkName, language: "swift", version: config.sdkVersion),
@@ -39,15 +49,21 @@ public final class LogBrewClient: @unchecked Sendable {
     }
 
     public func release(_ id: String, timestamp: String, attributes: ReleaseAttributes) throws {
-        try pushEvent(.release(validateRelease(attributes)), id: id, timestamp: timestamp)
+        let context = try resolvedContext(event: attributes.context)
+        try pushEvent(.release(validateRelease(attributes.withContext(context))), id: id, timestamp: timestamp)
     }
 
     public func environment(_ id: String, timestamp: String, attributes: EnvironmentAttributes) throws {
-        try pushEvent(.environment(validateEnvironment(attributes)), id: id, timestamp: timestamp)
+        let context = try resolvedContext(event: attributes.context)
+        try pushEvent(.environment(validateEnvironment(attributes.withContext(context))), id: id, timestamp: timestamp)
     }
 
     public func issue(_ id: String, timestamp: String, attributes: IssueAttributes) throws {
-        try pushEvent(.issue(validateIssue(attributes.withActiveTrace())), id: id, timestamp: timestamp)
+        let context = try resolvedContext(event: attributes.context)
+        let attributes = issueAttributes(attributes, adding: breadcrumbStore.snapshot())
+            .withContext(context)
+            .withCorrelationMetadata()
+        try pushEvent(.issue(validateIssue(attributes)), id: id, timestamp: timestamp)
     }
 
     @_spi(CrashReplay)
@@ -56,19 +72,58 @@ public final class LogBrewClient: @unchecked Sendable {
     }
 
     public func log(_ id: String, timestamp: String, attributes: LogAttributes) throws {
-        try pushEvent(.log(validateLog(attributes.withActiveTrace())), id: id, timestamp: timestamp)
+        let context = try resolvedContext(event: attributes.context)
+        try pushEvent(
+            .log(validateLog(attributes.withContext(context).withCorrelationMetadata())),
+            id: id,
+            timestamp: timestamp,
+        )
     }
 
     public func span(_ id: String, timestamp: String, attributes: SpanAttributes) throws {
-        try pushEvent(.span(validateSpan(attributes)), id: id, timestamp: timestamp)
+        let inherited = try resolvedContext(event: attributes.context)
+        let sampled = inherited?.trace.flatMap { trace in
+            trace.traceId.caseInsensitiveCompare(attributes.traceId) == .orderedSame ? trace.sampled : nil
+        }
+        let spanTrace = telemetryTraceContext(
+            traceId: attributes.traceId,
+            spanId: attributes.spanId,
+            parentSpanId: attributes.parentSpanId,
+            sampled: sampled,
+        )
+        let context = try mergeTelemetryContexts(
+            contextWithoutTrace(inherited),
+            spanTrace.map { TelemetryContext(trace: $0) },
+        )
+        try pushEvent(.span(validateSpan(attributes.withContext(context))), id: id, timestamp: timestamp)
     }
 
     public func action(_ id: String, timestamp: String, attributes: ActionAttributes) throws {
-        try pushEvent(.action(validateAction(attributes.withActiveTrace())), id: id, timestamp: timestamp)
+        let context = try resolvedContext(event: attributes.context)
+        try pushEvent(
+            .action(validateAction(attributes.withContext(context).withCorrelationMetadata())),
+            id: id,
+            timestamp: timestamp,
+        )
     }
 
     public func metric(_ id: String, timestamp: String, attributes: MetricAttributes) throws {
-        try pushEvent(.metric(validateMetric(attributes.withActiveTrace())), id: id, timestamp: timestamp)
+        let context = try resolvedContext(event: attributes.context)
+        try pushEvent(
+            .metric(validateMetric(attributes.withContext(context).withCorrelationMetadata())),
+            id: id,
+            timestamp: timestamp,
+        )
+    }
+
+    /// Retain one validated breadcrumb for subsequent issues, evicting the oldest after 64 entries.
+    public func addBreadcrumb(_ breadcrumb: IssueBreadcrumb) throws {
+        try breadcrumbStore.add(breadcrumb)
+    }
+
+    /// Clear the client-owned breadcrumb history without changing already queued issues.
+    public func clearBreadcrumbs() {
+        breadcrumbStore.clear()
     }
 
     public func flush(transport: any Transport) throws -> TransportResponse {
@@ -128,46 +183,174 @@ public final class LogBrewClient: @unchecked Sendable {
         try requireTimestamp(timestamp)
         try engine.enqueue(Event(type: attributes.eventType, timestamp: timestamp, id: id, attributes: attributes))
     }
+
+    private func resolvedContext(event: TelemetryContext?) throws -> TelemetryContext? {
+        var context = try mergeTelemetryContexts(baseContext, LogBrewTelemetry.current)
+        if let activeTrace = LogBrewTrace.current {
+            context = try mergeTelemetryContexts(
+                context,
+                TelemetryContext(trace: telemetryTraceContext(activeTrace)),
+            )
+        }
+        return try mergeTelemetryContexts(context, event)
+    }
 }
 
 private extension IssueAttributes {
-    func withActiveTrace() -> IssueAttributes {
+    func withContext(_ context: TelemetryContext?) -> IssueAttributes {
         IssueAttributes(
             title: title,
             level: level,
             message: message,
-            metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+            exception: exception,
+            stackFrames: stackFrames,
+            breadcrumbs: breadcrumbs,
+            breadcrumbsTruncated: breadcrumbsTruncated,
+            metadata: metadata,
+            context: context,
+            nativeStackFrames: nativeStackFrames,
+        )
+    }
+
+    func withCorrelationMetadata() -> IssueAttributes {
+        IssueAttributes(
+            title: title,
+            level: level,
+            message: message,
+            exception: exception,
+            stackFrames: stackFrames,
+            breadcrumbs: breadcrumbs,
+            breadcrumbsTruncated: breadcrumbsTruncated,
+            metadata: correlationMetadata(metadata, context: context),
+            context: context,
             nativeStackFrames: nativeStackFrames,
         )
     }
 }
 
 private extension LogAttributes {
-    func withActiveTrace() -> LogAttributes {
+    func withContext(_ context: TelemetryContext?) -> LogAttributes {
         LogAttributes(
             message: message,
             level: level,
             logger: logger,
-            metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+            metadata: metadata,
+            context: context,
+        )
+    }
+
+    func withCorrelationMetadata() -> LogAttributes {
+        LogAttributes(
+            message: message,
+            level: level,
+            logger: logger,
+            metadata: correlationMetadata(metadata, context: context),
+            context: context,
         )
     }
 }
 
 private extension ActionAttributes {
-    func withActiveTrace() -> ActionAttributes {
-        ActionAttributes(name: name, status: status, metadata: LogBrewTrace.metadataWithCurrentTrace(metadata))
+    func withContext(_ context: TelemetryContext?) -> ActionAttributes {
+        ActionAttributes(name: name, status: status, metadata: metadata, context: context)
+    }
+
+    func withCorrelationMetadata() -> ActionAttributes {
+        ActionAttributes(
+            name: name,
+            status: status,
+            metadata: correlationMetadata(metadata, context: context),
+            context: context,
+        )
     }
 }
 
 private extension MetricAttributes {
-    func withActiveTrace() -> MetricAttributes {
+    func withContext(_ context: TelemetryContext?) -> MetricAttributes {
         MetricAttributes(
             name: name,
             kind: kind,
             value: value,
             unit: unit,
             temporality: temporality,
-            metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+            metadata: metadata,
+            context: context,
         )
     }
+
+    func withCorrelationMetadata() -> MetricAttributes {
+        MetricAttributes(
+            name: name,
+            kind: kind,
+            value: value,
+            unit: unit,
+            temporality: temporality,
+            metadata: correlationMetadata(metadata, context: context),
+            context: context,
+        )
+    }
+}
+
+private extension ReleaseAttributes {
+    func withContext(_ context: TelemetryContext?) -> ReleaseAttributes {
+        ReleaseAttributes(version: version, commit: commit, notes: notes, metadata: metadata, context: context)
+    }
+}
+
+private extension EnvironmentAttributes {
+    func withContext(_ context: TelemetryContext?) -> EnvironmentAttributes {
+        EnvironmentAttributes(name: name, region: region, metadata: metadata, context: context)
+    }
+}
+
+private extension SpanAttributes {
+    func withContext(_ context: TelemetryContext?) -> SpanAttributes {
+        SpanAttributes(
+            name: name,
+            traceId: traceId,
+            spanId: spanId,
+            parentSpanId: parentSpanId,
+            status: status,
+            durationMs: durationMs,
+            events: events,
+            links: links,
+            metadata: metadata,
+            context: context,
+        )
+    }
+}
+
+private func correlationMetadata(_ metadata: Metadata?, context: TelemetryContext?) -> Metadata? {
+    guard let trace = context?.trace else {
+        return metadata
+    }
+    var output = metadata ?? [:]
+    output["traceId"] = .string(trace.traceId)
+    if let spanId = trace.spanId {
+        output["spanId"] = .string(spanId)
+    }
+    if let parentSpanId = trace.parentSpanId {
+        output["parentSpanId"] = .string(parentSpanId)
+    }
+    if let sampled = trace.sampled {
+        output["traceSampled"] = .bool(sampled)
+    }
+    if let active = LogBrewTrace.current, active.traceId == trace.traceId, active.spanId == trace.spanId {
+        output["traceFlags"] = .string(active.traceFlags)
+    }
+    return output
+}
+
+private func contextWithoutTrace(_ context: TelemetryContext?) -> TelemetryContext? {
+    guard let context,
+          context.resource != nil || context.session != nil || context.subject != nil || context.tags != nil
+    else {
+        return nil
+    }
+    return TelemetryContext(
+        resource: context.resource,
+        session: context.session,
+        subject: context.subject,
+        tags: context.tags,
+    )
 }
