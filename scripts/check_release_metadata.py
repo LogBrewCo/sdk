@@ -764,9 +764,9 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     readme = (root / "objc/logbrew-objc/README.md").read_text(encoding="utf-8")
     location = "objc/logbrew-objc/include/LogBrew.h"
     require(
-        'LogBrewObjectiveCVersion = @"0.2.0"' in source,
+        'LogBrewObjectiveCVersion = @"0.2.1"' in source,
         failures,
-        "objc/logbrew-objc/src/LogBrew.m: Objective-C source version must be 0.2.0",
+        "objc/logbrew-objc/src/LogBrew.m: Objective-C source version must be 0.2.1",
     )
     for needle in (
         "LogBrewObjectiveCVersion",

@@ -72,3 +72,15 @@ extension MetadataValue: ExpressibleByNilLiteral {
         self = .null
     }
 }
+
+func validateMetadata(_ metadata: Metadata?, label: String) throws {
+    guard let metadata else {
+        return
+    }
+    for (key, value) in metadata {
+        try requireNonEmpty("\(label) key", key)
+        if case let .double(number) = value, !number.isFinite {
+            throw SdkError(code: "validation_error", message: "\(label) numeric values must be finite")
+        }
+    }
+}

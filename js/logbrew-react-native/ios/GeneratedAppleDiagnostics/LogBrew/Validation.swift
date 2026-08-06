@@ -7,12 +7,25 @@ func validateRelease(_ attributes: ReleaseAttributes) throws -> ReleaseAttribute
     if let commit = attributes.commit {
         try requireNonEmpty("release commit", commit)
     }
-    return attributes
+    try validateMetadata(attributes.metadata, label: "release metadata")
+    return try ReleaseAttributes(
+        version: attributes.version,
+        commit: attributes.commit,
+        notes: attributes.notes,
+        metadata: attributes.metadata,
+        context: attributes.context.map { try validateTelemetryContext($0) },
+    )
 }
 
 func validateEnvironment(_ attributes: EnvironmentAttributes) throws -> EnvironmentAttributes {
     try requireNonEmpty("environment name", attributes.name)
-    return attributes
+    try validateMetadata(attributes.metadata, label: "environment metadata")
+    return try EnvironmentAttributes(
+        name: attributes.name,
+        region: attributes.region,
+        metadata: attributes.metadata,
+        context: attributes.context.map { try validateTelemetryContext($0) },
+    )
 }
 
 func validateIssue(_ attributes: IssueAttributes) throws -> IssueAttributes {
@@ -22,7 +35,7 @@ func validateIssue(_ attributes: IssueAttributes) throws -> IssueAttributes {
             throw SdkError(code: "validation_error", message: "issue nativeStackFrames must be canonical")
         }
     }
-    return attributes
+    return try normalizeIssueAttributes(attributes)
 }
 
 private func isValidNativeStackFrame(_ frame: NativeStackFrame) -> Bool {
@@ -33,7 +46,14 @@ private func isValidNativeStackFrame(_ frame: NativeStackFrame) -> Bool {
 
 func validateLog(_ attributes: LogAttributes) throws -> LogAttributes {
     try requireNonEmpty("log message", attributes.message)
-    return attributes
+    try validateMetadata(attributes.metadata, label: "log metadata")
+    return try LogAttributes(
+        message: attributes.message,
+        level: attributes.level,
+        logger: attributes.logger,
+        metadata: attributes.metadata,
+        context: attributes.context.map { try validateTelemetryContext($0) },
+    )
 }
 
 func validateSpan(_ attributes: SpanAttributes) throws -> SpanAttributes {
@@ -46,12 +66,30 @@ func validateSpan(_ attributes: SpanAttributes) throws -> SpanAttributes {
     if let durationMs = attributes.durationMs, durationMs < 0 {
         throw SdkError(code: "validation_error", message: "span durationMs must be non-negative")
     }
-    return attributes
+    try validateMetadata(attributes.metadata, label: "span metadata")
+    return try SpanAttributes(
+        name: attributes.name,
+        traceId: attributes.traceId,
+        spanId: attributes.spanId,
+        parentSpanId: attributes.parentSpanId,
+        status: attributes.status,
+        durationMs: attributes.durationMs,
+        events: validateSpanEvents(attributes.events),
+        links: validateSpanLinks(attributes.links),
+        metadata: attributes.metadata,
+        context: attributes.context.map { try validateTelemetryContext($0) },
+    )
 }
 
 func validateAction(_ attributes: ActionAttributes) throws -> ActionAttributes {
     try requireNonEmpty("action name", attributes.name)
-    return attributes
+    try validateMetadata(attributes.metadata, label: "action metadata")
+    return try ActionAttributes(
+        name: attributes.name,
+        status: attributes.status,
+        metadata: attributes.metadata,
+        context: attributes.context.map { try validateTelemetryContext($0) },
+    )
 }
 
 func validateMetric(_ attributes: MetricAttributes) throws -> MetricAttributes {
@@ -82,7 +120,16 @@ func validateMetric(_ attributes: MetricAttributes) throws -> MetricAttributes {
             )
         }
     }
-    return attributes
+    try validateMetadata(attributes.metadata, label: "metric metadata")
+    return try MetricAttributes(
+        name: attributes.name,
+        kind: attributes.kind,
+        value: attributes.value,
+        unit: attributes.unit,
+        temporality: attributes.temporality,
+        metadata: attributes.metadata,
+        context: attributes.context.map { try validateTelemetryContext($0) },
+    )
 }
 
 func requireNonEmpty(_ label: String, _ value: String) throws {

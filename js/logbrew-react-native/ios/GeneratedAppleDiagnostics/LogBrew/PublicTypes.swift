@@ -105,12 +105,23 @@ public struct ClientConfig: Equatable, Sendable {
     public let sdkName: String
     public let sdkVersion: String
     public let maxRetries: Int
+    public let context: TelemetryContext?
+    public let includeAutomaticContext: Bool
 
-    public init(apiKey: String, sdkName: String, sdkVersion: String, maxRetries: Int = 2) {
+    public init(
+        apiKey: String,
+        sdkName: String,
+        sdkVersion: String,
+        maxRetries: Int = 2,
+        context: TelemetryContext? = nil,
+        includeAutomaticContext: Bool = true,
+    ) {
         self.apiKey = apiKey
         self.sdkName = sdkName
         self.sdkVersion = sdkVersion
         self.maxRetries = maxRetries
+        self.context = context
+        self.includeAutomaticContext = includeAutomaticContext
     }
 }
 
@@ -119,17 +130,20 @@ public struct ReleaseAttributes: Codable, Equatable, Sendable {
     public let commit: String?
     public let notes: String?
     public let metadata: Metadata?
+    public let context: TelemetryContext?
 
     public init(
         version: String,
         commit: String? = nil,
         notes: String? = nil,
         metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
     ) {
         self.version = version
         self.commit = commit
         self.notes = notes
         self.metadata = metadata
+        self.context = context
     }
 }
 
@@ -137,11 +151,18 @@ public struct EnvironmentAttributes: Codable, Equatable, Sendable {
     public let name: String
     public let region: String?
     public let metadata: Metadata?
+    public let context: TelemetryContext?
 
-    public init(name: String, region: String? = nil, metadata: Metadata? = nil) {
+    public init(
+        name: String,
+        region: String? = nil,
+        metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
+    ) {
         self.name = name
         self.region = region
         self.metadata = metadata
+        self.context = context
     }
 }
 
@@ -149,19 +170,34 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
     public let title: String
     public let level: IssueLevel
     public let message: String?
+    public let exception: IssueException?
+    public let stackFrames: [IssueStackFrame]?
+    public let breadcrumbs: [IssueBreadcrumb]?
+    public let breadcrumbsTruncated: Bool?
     public let metadata: Metadata?
+    public let context: TelemetryContext?
     @_spi(CrashReplay) public let nativeStackFrames: [NativeStackFrame]?
 
     public init(
         title: String,
         level: IssueLevel,
         message: String? = nil,
+        exception: IssueException? = nil,
+        stackFrames: [IssueStackFrame]? = nil,
+        breadcrumbs: [IssueBreadcrumb]? = nil,
+        breadcrumbsTruncated: Bool? = nil,
         metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
     ) {
         self.title = title
         self.level = level
         self.message = message
+        self.exception = exception
+        self.stackFrames = stackFrames
+        self.breadcrumbs = breadcrumbs
+        self.breadcrumbsTruncated = breadcrumbsTruncated
         self.metadata = metadata
+        self.context = context
         nativeStackFrames = nil
     }
 
@@ -170,13 +206,23 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         title: String,
         level: IssueLevel,
         message: String? = nil,
+        exception: IssueException? = nil,
+        stackFrames: [IssueStackFrame]? = nil,
+        breadcrumbs: [IssueBreadcrumb]? = nil,
+        breadcrumbsTruncated: Bool? = nil,
         metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
         nativeStackFrames: [NativeStackFrame]?,
     ) {
         self.title = title
         self.level = level
         self.message = message
+        self.exception = exception
+        self.stackFrames = stackFrames
+        self.breadcrumbs = breadcrumbs
+        self.breadcrumbsTruncated = breadcrumbsTruncated
         self.metadata = metadata
+        self.context = context
         self.nativeStackFrames = nativeStackFrames
     }
 }
@@ -186,17 +232,20 @@ public struct LogAttributes: Codable, Equatable, Sendable {
     public let level: LogLevel
     public let logger: String?
     public let metadata: Metadata?
+    public let context: TelemetryContext?
 
     public init(
         message: String,
         level: LogLevel,
         logger: String? = nil,
         metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
     ) {
         self.message = message
         self.level = level
         self.logger = logger
         self.metadata = metadata
+        self.context = context
     }
 }
 
@@ -207,7 +256,10 @@ public struct SpanAttributes: Codable, Equatable, Sendable {
     public let parentSpanId: String?
     public let status: SpanStatus
     public let durationMs: Double?
+    public let events: [SpanEventSummary]?
+    public let links: [SpanLinkSummary]?
     public let metadata: Metadata?
+    public let context: TelemetryContext?
 
     public init(
         name: String,
@@ -216,7 +268,10 @@ public struct SpanAttributes: Codable, Equatable, Sendable {
         parentSpanId: String? = nil,
         status: SpanStatus,
         durationMs: Double? = nil,
+        events: [SpanEventSummary]? = nil,
+        links: [SpanLinkSummary]? = nil,
         metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
     ) {
         self.name = name
         self.traceId = traceId
@@ -224,7 +279,10 @@ public struct SpanAttributes: Codable, Equatable, Sendable {
         self.parentSpanId = parentSpanId
         self.status = status
         self.durationMs = durationMs
+        self.events = events
+        self.links = links
         self.metadata = metadata
+        self.context = context
     }
 }
 
@@ -232,11 +290,18 @@ public struct ActionAttributes: Codable, Equatable, Sendable {
     public let name: String
     public let status: ActionStatus
     public let metadata: Metadata?
+    public let context: TelemetryContext?
 
-    public init(name: String, status: ActionStatus, metadata: Metadata? = nil) {
+    public init(
+        name: String,
+        status: ActionStatus,
+        metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
+    ) {
         self.name = name
         self.status = status
         self.metadata = metadata
+        self.context = context
     }
 }
 
@@ -247,6 +312,7 @@ public struct MetricAttributes: Codable, Equatable, Sendable {
     public let unit: String
     public let temporality: MetricTemporality
     public let metadata: Metadata?
+    public let context: TelemetryContext?
 
     public init(
         name: String,
@@ -255,6 +321,7 @@ public struct MetricAttributes: Codable, Equatable, Sendable {
         unit: String,
         temporality: MetricTemporality,
         metadata: Metadata? = nil,
+        context: TelemetryContext? = nil,
     ) {
         self.name = name
         self.kind = kind
@@ -262,5 +329,6 @@ public struct MetricAttributes: Codable, Equatable, Sendable {
         self.unit = unit
         self.temporality = temporality
         self.metadata = metadata
+        self.context = context
     }
 }

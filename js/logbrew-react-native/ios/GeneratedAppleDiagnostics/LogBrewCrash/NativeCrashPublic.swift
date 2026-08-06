@@ -234,6 +234,13 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         return IssueAttributes(
             title: hangState == nil ? "Native application crash" : "Native application hang",
             level: hangState == .recovered ? .error : .fatal,
+            exception: IssueException(
+                type: hangState == nil ? "AppleNativeCrash" : "AppleNativeHang",
+                mechanism: IssueExceptionMechanism(
+                    type: mechanism.name,
+                    handled: hangState == .recovered,
+                ),
+            ),
             metadata: metadata,
             nativeStackFrames: nativeStackFrames,
         )
@@ -255,6 +262,11 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
               attributes["title"] as? String == issueAttributes.title,
               attributes["level"] as? String == issueAttributes.level.canonicalValue,
               attributes["message"] == nil,
+              exceptionMatches(attributes["exception"]),
+              attributes["stackFrames"] == nil,
+              attributes["breadcrumbs"] == nil,
+              attributes["breadcrumbsTruncated"] == nil,
+              attributes["context"] == nil,
               let metadata = attributes["metadata"] as? [String: Any],
               metadata as NSDictionary == expectedMetadata,
               nativeStackFramesMatch(attributes["nativeStackFrames"])
@@ -282,6 +294,27 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
             metadata["durationMs"] = hangDurationMs
         }
         return metadata as NSDictionary
+    }
+
+    private var expectedException: NSDictionary {
+        [
+            "type": hangState == nil ? "AppleNativeCrash" : "AppleNativeHang",
+            "mechanism": [
+                "type": mechanism.name,
+                "handled": hangState == .recovered,
+            ],
+        ] as NSDictionary
+    }
+
+    private func exceptionMatches(_ value: Any?) -> Bool {
+        guard let value else {
+            // Preserve exact retry identity for an event queued by an older SDK before typed exceptions existed.
+            return true
+        }
+        guard let exception = value as? [String: Any] else {
+            return false
+        }
+        return exception as NSDictionary == expectedException
     }
 
     private func nativeStackFramesMatch(_ value: Any?) -> Bool {

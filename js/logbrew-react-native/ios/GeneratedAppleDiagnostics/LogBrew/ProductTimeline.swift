@@ -58,6 +58,7 @@ public extension LogBrewClient {
                 name: name,
                 status: status,
                 metadata: eventMetadata,
+                context: timelineTelemetryContext(context),
             ),
         )
     }
@@ -98,9 +99,21 @@ public extension LogBrewClient {
                 name: "\(normalizedMethod) \(normalizedRoute)",
                 status: status ?? statusFromStatusCode(checkedStatusCode),
                 metadata: eventMetadata,
+                context: timelineTelemetryContext(context),
             ),
         )
     }
+}
+
+private func timelineTelemetryContext(_ context: ProductTimelineContext) -> TelemetryContext? {
+    guard let sessionId = context.sessionId else {
+        return nil
+    }
+    return TelemetryContext(
+        session: TelemetrySessionContext(
+            id: sessionId.trimmingCharacters(in: .whitespacesAndNewlines),
+        ),
+    )
 }
 
 private func boundedProductAnalyticsSurface(_ surface: String?) -> String? {
@@ -140,8 +153,9 @@ private func copyOptionalString(_ key: String, _ value: String?, into output: in
     guard let value else {
         return
     }
-    try requireNonEmpty(key, value)
-    output[key] = .string(value)
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    try requireNonEmpty(key, normalized)
+    output[key] = .string(normalized)
 }
 
 func copyMetadata(_ metadata: Metadata?, into output: inout Metadata) throws {
