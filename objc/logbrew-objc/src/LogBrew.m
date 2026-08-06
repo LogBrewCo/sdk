@@ -1,11 +1,13 @@
 #import "LogBrew.h"
 
 #import "LogBrewNetworkValidation.h"
+#import "LBWInvestigationEvidence.h"
+#import "LBWTelemetryContext.h"
 #import "LBWDeliveryEngine.h"
 
 #import <math.h>
 
-NSString *const LogBrewObjectiveCVersion = @"0.1.0";
+NSString *const LogBrewObjectiveCVersion = @"0.2.0";
 NSString *const LBWErrorDomain = @"co.logbrew.sdk";
 NSString *const LBWErrorStableCodeKey = @"LBWStableCode";
 NSString *const LBWErrorRetryableKey = @"LBWRetryable";
@@ -33,6 +35,9 @@ NSString *const LBWErrorRetryableKey = @"LBWRetryable";
 @property(nonatomic, copy) NSString *apiKey;
 @property(nonatomic, copy) NSString *sdkName;
 @property(nonatomic, copy) NSString *sdkVersion;
+@property(nonatomic, copy, nullable) NSDictionary<NSString *, id> *baseContext;
+@property(nonatomic) NSMutableArray<NSDictionary<NSString *, id> *> *breadcrumbs;
+@property(nonatomic) BOOL breadcrumbsTruncated;
 @property(nonatomic) LBWDeliveryEngine *deliveryEngine;
 
 @end
@@ -258,6 +263,28 @@ static BOOL LBWCopyMetadata(
   return YES;
 }
 
+static BOOL LBWIsBoolean(id value) {
+  return [value isKindOfClass:[NSNumber class]] &&
+      CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID();
+}
+
+static BOOL LBWCopyContextAttribute(
+    NSMutableDictionary<NSString *, id> *target,
+    NSDictionary<NSString *, id> *attributes,
+    NSString *label,
+    NSError *_Nullable *_Nullable error) {
+  id rawContext = attributes[@"context"];
+  if (rawContext == nil) {
+    return YES;
+  }
+  NSDictionary<NSString *, id> *context = nil;
+  if (!LBWValidateTelemetryContext(rawContext, label, &context, error)) {
+    return NO;
+  }
+  target[@"context"] = context;
+  return YES;
+}
+
 static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   if (statusCode != nil && [statusCode integerValue] >= 400) {
     return @"failure";
@@ -313,6 +340,8 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
     _sdkName = @"logbrew-objc";
     _sdkVersion = LogBrewObjectiveCVersion;
     _maxRetries = 2U;
+    _context = nil;
+    _includeAutomaticContext = YES;
   }
   return self;
 }
@@ -440,6 +469,13 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   _apiKey = [config.apiKey copy];
   _sdkName = [config.sdkName copy];
   _sdkVersion = [config.sdkVersion copy];
+  NSDictionary *automaticContext = config.includeAutomaticContext ? LBWAutomaticTelemetryContext() : nil;
+  _baseContext = LBWMergeTelemetryContexts(automaticContext, config.context, error);
+  if ((automaticContext != nil || config.context != nil) && _baseContext == nil) {
+    return nil;
+  }
+  _breadcrumbs = [NSMutableArray array];
+  _breadcrumbsTruncated = NO;
   _deliveryEngine = [[LBWDeliveryEngine alloc] initWithAPIKey:_apiKey
                                                      sdkName:_sdkName
                                                   sdkVersion:_sdkVersion
@@ -497,6 +533,28 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   return [self.deliveryEngine shutdownOwnedTransportWithError:error];
 }
 
+- (BOOL)addBreadcrumb:(NSDictionary<NSString *, id> *)breadcrumb error:(NSError **)error {
+  NSDictionary<NSString *, id> *clean = nil;
+  if (!LBWValidateIssueBreadcrumb(breadcrumb, &clean, error)) {
+    return NO;
+  }
+  @synchronized(self.breadcrumbs) {
+    if ([self.breadcrumbs count] == 64U) {
+      [self.breadcrumbs removeObjectAtIndex:0U];
+      self.breadcrumbsTruncated = YES;
+    }
+    [self.breadcrumbs addObject:clean];
+  }
+  return YES;
+}
+
+- (void)clearBreadcrumbs {
+  @synchronized(self.breadcrumbs) {
+    [self.breadcrumbs removeAllObjects];
+    self.breadcrumbsTruncated = NO;
+  }
+}
+
 - (BOOL)releaseWithID:(NSString *)eventID
             timestamp:(NSString *)timestamp
            attributes:(NSDictionary<NSString *, id> *)attributes
@@ -521,6 +579,16 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   if (notes != nil) {
     clean[@"notes"] = notes;
   }
+  NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"release metadata", error);
+  if (metadata == nil && attributes[@"metadata"] != nil) {
+    return NO;
+  }
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
+  if (!LBWCopyContextAttribute(clean, attributes, @"release telemetry context", error)) {
+    return NO;
+  }
   return [self pushEventWithType:@"release" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
 
@@ -540,6 +608,16 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   }
   if (region != nil) {
     clean[@"region"] = region;
+  }
+  NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"environment metadata", error);
+  if (metadata == nil && attributes[@"metadata"] != nil) {
+    return NO;
+  }
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
+  if (!LBWCopyContextAttribute(clean, attributes, @"environment telemetry context", error)) {
+    return NO;
   }
   return [self pushEventWithType:@"environment" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -564,13 +642,65 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   if (message != nil) {
     clean[@"message"] = message;
   }
+  if (attributes[@"exception"] != nil) {
+    NSDictionary<NSString *, id> *exception = nil;
+    if (!LBWValidateIssueException(attributes[@"exception"], &exception, error)) {
+      return NO;
+    }
+    clean[@"exception"] = exception;
+  }
+  if (attributes[@"stackFrames"] != nil) {
+    NSArray<NSDictionary<NSString *, id> *> *stackFrames = nil;
+    if (!LBWValidateIssueStackFrames(attributes[@"stackFrames"], &stackFrames, error)) {
+      return NO;
+    }
+    clean[@"stackFrames"] = stackFrames;
+  }
+  NSArray<NSDictionary<NSString *, id> *> *storedBreadcrumbs;
+  BOOL storedTruncated;
+  @synchronized(self.breadcrumbs) {
+    storedBreadcrumbs = [self.breadcrumbs copy];
+    storedTruncated = self.breadcrumbsTruncated;
+  }
+  NSArray<NSDictionary<NSString *, id> *> *explicitBreadcrumbs = nil;
+  BOOL explicitTruncated = NO;
+  if (attributes[@"breadcrumbs"] != nil &&
+      !LBWValidateIssueBreadcrumbs(attributes[@"breadcrumbs"], &explicitBreadcrumbs, &explicitTruncated, error)) {
+    return NO;
+  }
+  BOOL requestedTruncated = NO;
+  if (attributes[@"breadcrumbsTruncated"] != nil) {
+    if (!LBWIsBoolean(attributes[@"breadcrumbsTruncated"])) {
+      LBWSetError(error, LBWMakeError(
+          LBWErrorKindValidation, @"validation_error", @"issue breadcrumbsTruncated must be a boolean", NO));
+      return NO;
+    }
+    requestedTruncated = [attributes[@"breadcrumbsTruncated"] boolValue];
+  }
+  NSMutableArray<NSDictionary<NSString *, id> *> *combinedBreadcrumbs = [NSMutableArray arrayWithArray:storedBreadcrumbs];
+  if (explicitBreadcrumbs != nil) {
+    [combinedBreadcrumbs addObjectsFromArray:explicitBreadcrumbs];
+  }
+  BOOL combinedTruncated = [combinedBreadcrumbs count] > 64U;
+  if (combinedTruncated) {
+    NSRange retainedRange = NSMakeRange([combinedBreadcrumbs count] - 64U, 64U);
+    combinedBreadcrumbs = [[combinedBreadcrumbs subarrayWithRange:retainedRange] mutableCopy];
+  }
+  if ([combinedBreadcrumbs count] > 0U) {
+    clean[@"breadcrumbs"] = [combinedBreadcrumbs copy];
+  }
+  if (storedTruncated || explicitTruncated || combinedTruncated || requestedTruncated) {
+    clean[@"breadcrumbsTruncated"] = @YES;
+  }
   NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"issue metadata", error);
   if (metadata == nil && attributes[@"metadata"] != nil) {
     return NO;
   }
-  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
-  if (traceMetadata != nil) {
-    clean[@"metadata"] = traceMetadata;
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
+  if (!LBWCopyContextAttribute(clean, attributes, @"issue telemetry context", error)) {
+    return NO;
   }
   return [self pushEventWithType:@"issue" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -599,9 +729,11 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   if (metadata == nil && attributes[@"metadata"] != nil) {
     return NO;
   }
-  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
-  if (traceMetadata != nil) {
-    clean[@"metadata"] = traceMetadata;
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
+  if (!LBWCopyContextAttribute(clean, attributes, @"log telemetry context", error)) {
+    return NO;
   }
   return [self pushEventWithType:@"log" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -637,12 +769,29 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   if (durationMs != nil) {
     clean[@"durationMs"] = durationMs;
   }
+  if (attributes[@"events"] != nil) {
+    NSArray<NSDictionary<NSString *, id> *> *events = nil;
+    if (!LBWValidateSpanEvents(attributes[@"events"], &events, error)) {
+      return NO;
+    }
+    clean[@"events"] = events;
+  }
+  if (attributes[@"links"] != nil) {
+    NSArray<NSDictionary<NSString *, id> *> *links = nil;
+    if (!LBWValidateSpanLinks(attributes[@"links"], &links, error)) {
+      return NO;
+    }
+    clean[@"links"] = links;
+  }
   NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"span metadata", error);
   if (metadata == nil && attributes[@"metadata"] != nil) {
     return NO;
   }
   if (metadata != nil) {
     clean[@"metadata"] = metadata;
+  }
+  if (!LBWCopyContextAttribute(clean, attributes, @"span telemetry context", error)) {
+    return NO;
   }
   return [self pushEventWithType:@"span" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -664,9 +813,11 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   if (metadata == nil && attributes[@"metadata"] != nil) {
     return NO;
   }
-  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
-  if (traceMetadata != nil) {
-    clean[@"metadata"] = traceMetadata;
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
+  if (!LBWCopyContextAttribute(clean, attributes, @"action telemetry context", error)) {
+    return NO;
   }
   return [self pushEventWithType:@"action" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -711,9 +862,11 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   if (metadata == nil && attributes[@"metadata"] != nil) {
     return NO;
   }
-  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
-  if (traceMetadata != nil) {
-    clean[@"metadata"] = traceMetadata;
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
+  if (!LBWCopyContextAttribute(clean, attributes, @"metric telemetry context", error)) {
+    return NO;
   }
   return [self pushEventWithType:@"metric" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -801,11 +954,90 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   if (!LBWRequireNonEmpty(@"id", eventID, error) || !LBWRequireTimestamp(timestamp, error)) {
     return NO;
   }
+  NSMutableDictionary<NSString *, id> *resolvedAttributes = [attributes mutableCopy];
+  NSDictionary<NSString *, id> *eventContext = resolvedAttributes[@"context"];
+  [resolvedAttributes removeObjectForKey:@"context"];
+  NSDictionary<NSString *, id> *context = self.baseContext;
+  NSDictionary<NSString *, id> *ambientContext = [LBWTelemetry currentContext];
+  if (ambientContext != nil) {
+    context = LBWMergeTelemetryContexts(context, ambientContext, error);
+    if (context == nil) {
+      return NO;
+    }
+  }
+  LBWTraceContext *activeTrace = [LBWTrace currentContext];
+  if (activeTrace != nil) {
+    context = LBWMergeTelemetryContexts(context, LBWTelemetryContextFromTrace(activeTrace), error);
+    if (context == nil) {
+      return NO;
+    }
+  }
+  if (eventContext != nil) {
+    context = LBWMergeTelemetryContexts(context, eventContext, error);
+    if (context == nil) {
+      return NO;
+    }
+  }
+  if ([type isEqualToString:@"span"]) {
+    NSMutableDictionary<NSString *, id> *trace = [@{
+      @"traceId": resolvedAttributes[@"traceId"],
+      @"spanId": resolvedAttributes[@"spanId"]
+    } mutableCopy];
+    if (resolvedAttributes[@"parentSpanId"] != nil) {
+      trace[@"parentSpanId"] = resolvedAttributes[@"parentSpanId"];
+    }
+    NSDictionary *inheritedTrace = context[@"trace"];
+    if (inheritedTrace != nil &&
+        [inheritedTrace[@"traceId"] caseInsensitiveCompare:resolvedAttributes[@"traceId"]] == NSOrderedSame &&
+        inheritedTrace[@"sampled"] != nil) {
+      trace[@"sampled"] = inheritedTrace[@"sampled"];
+    }
+    NSDictionary<NSString *, id> *validatedSpanContext = nil;
+    NSError *ignoredSpanContextError = nil;
+    BOOL hasTypedSpanContext = LBWValidateTelemetryContext(
+        @{@"schemaVersion": @1, @"trace": trace},
+        @"span telemetry context",
+        &validatedSpanContext,
+        &ignoredSpanContextError);
+    context = LBWTelemetryContextByReplacingTrace(
+        context, hasTypedSpanContext ? validatedSpanContext[@"trace"] : nil);
+  }
+  if (context != nil) {
+    resolvedAttributes[@"context"] = context;
+  }
+  if ([type isEqualToString:@"issue"] || [type isEqualToString:@"log"] ||
+      [type isEqualToString:@"action"] || [type isEqualToString:@"metric"]) {
+    NSDictionary *trace = context[@"trace"];
+    if (trace != nil) {
+      NSMutableDictionary *metadata = resolvedAttributes[@"metadata"] != nil
+          ? [resolvedAttributes[@"metadata"] mutableCopy]
+          : [NSMutableDictionary dictionary];
+      metadata[@"traceId"] = trace[@"traceId"];
+      if (trace[@"spanId"] != nil) {
+        metadata[@"spanId"] = trace[@"spanId"];
+      }
+      if (trace[@"parentSpanId"] != nil) {
+        metadata[@"parentSpanId"] = trace[@"parentSpanId"];
+      }
+      BOOL activeTraceMatches = activeTrace != nil &&
+          [activeTrace.traceID caseInsensitiveCompare:trace[@"traceId"]] == NSOrderedSame &&
+          (trace[@"spanId"] == nil ||
+              [activeTrace.spanID caseInsensitiveCompare:trace[@"spanId"]] == NSOrderedSame) &&
+          (trace[@"sampled"] == nil || [trace[@"sampled"] boolValue] == activeTrace.sampled);
+      if (activeTraceMatches) {
+        metadata[@"traceFlags"] = activeTrace.traceFlags;
+        metadata[@"traceSampled"] = @(activeTrace.sampled);
+      } else if (trace[@"sampled"] != nil) {
+        metadata[@"traceSampled"] = trace[@"sampled"];
+      }
+      resolvedAttributes[@"metadata"] = [metadata copy];
+    }
+  }
   return [self.deliveryEngine enqueueEvent:@{
     @"type": type,
     @"timestamp": timestamp,
     @"id": eventID,
-    @"attributes": attributes
+    @"attributes": [resolvedAttributes copy]
   } error:error];
 }
 

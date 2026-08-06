@@ -25,6 +25,8 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 @property(nonatomic, copy) NSString *sdkName;
 @property(nonatomic, copy) NSString *sdkVersion;
 @property(nonatomic) NSUInteger maxRetries;
+@property(nonatomic, copy, nullable) NSDictionary<NSString *, id> *context;
+@property(nonatomic) BOOL includeAutomaticContext;
 
 + (instancetype)configWithAPIKey:(NSString *)apiKey;
 
@@ -196,6 +198,48 @@ typedef NS_ENUM(NSInteger, LBWDeliveryPauseReason) {
 
 @end
 
+/// A synchronous, thread-local shared telemetry context scope.
+///
+/// Capture and reactivate `LBWTelemetry.currentContext` explicitly when work
+/// crosses a queue or thread boundary.
+@interface LBWTelemetryScope : NSObject
+
+- (void)close;
+
+@end
+
+/// Shared schema-v1 resource, trace, session, opaque subject, and tag context.
+@interface LBWTelemetry : NSObject
+
++ (nullable NSDictionary<NSString *, id> *)currentContext;
++ (nullable LBWTelemetryScope *)activateContext:(NSDictionary<NSString *, id> *)context
+                                          error:(NSError *_Nullable *_Nullable)error;
++ (nullable NSDictionary<NSString *, id> *)contextByMergingBase:
+    (nullable NSDictionary<NSString *, id> *)baseContext
+                                                        override:
+    (nullable NSDictionary<NSString *, id> *)overrideContext
+                                                           error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
+/// Builds privacy-bounded structured issue attributes from an NSError.
+@interface LBWIssueDiagnostics : NSObject
+
++ (nullable NSDictionary<NSString *, id> *)attributesForError:(NSError *)capturedError
+                                                        title:(nullable NSString *)title
+                                                        level:(NSString *)level
+                                                    mechanism:(NSString *)mechanism
+                                                       handled:(BOOL)handled
+                                                          file:(NSString *)file
+                                                          line:(NSUInteger)line
+                                                        column:(NSUInteger)column
+                                                      function:(nullable NSString *)function
+                                                      metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                                                       context:(nullable NSDictionary<NSString *, id> *)context
+                                                         error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 @interface LBWURLSessionSpan : NSObject
 
 @property(nonatomic, copy, readonly) NSURLRequest *request;
@@ -302,6 +346,9 @@ typedef NS_ENUM(NSInteger, LBWDeliveryPauseReason) {
 - (BOOL)purgeDurableDeliveryWithError:(NSError *_Nullable *_Nullable)error;
 - (nullable LBWTransportResponse *)flushOwnedTransportWithError:(NSError *_Nullable *_Nullable)error;
 - (nullable LBWTransportResponse *)shutdownOwnedTransportWithError:(NSError *_Nullable *_Nullable)error;
+- (BOOL)addBreadcrumb:(NSDictionary<NSString *, id> *)breadcrumb
+                 error:(NSError *_Nullable *_Nullable)error;
+- (void)clearBreadcrumbs;
 
 - (BOOL)releaseWithID:(NSString *)eventID
             timestamp:(NSString *)timestamp

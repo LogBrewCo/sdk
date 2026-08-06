@@ -2,7 +2,7 @@ OBJC ?= clang
 OBJCFLAGS ?= -fobjc-arc -Wall -Wextra -Wpedantic -Werror -Iinclude
 LDFLAGS ?= -framework Foundation
 BUILD_DIR ?= build
-CORE_SOURCES := src/LogBrew.m src/LBWDeliveryEngine.m src/LBWDeliveryEngineDurable.m src/LBWDurableDeliveryStore.m src/LogBrewTrace.m src/LogBrewNetworkValidation.m src/LogBrewURLSession.m src/LogBrewLifecycle.m
+CORE_SOURCES := src/LogBrew.m src/LBWTelemetryContext.m src/LBWInvestigationEvidence.m src/LBWDeliveryEngine.m src/LBWDeliveryEngineDurable.m src/LBWDurableDeliveryStore.m src/LogBrewTrace.m src/LogBrewNetworkValidation.m src/LogBrewURLSession.m src/LogBrewLifecycle.m
 
 .PHONY: all test examples clean
 
@@ -23,11 +23,15 @@ $(BUILD_DIR)/test_durable_delivery: $(CORE_SOURCES) tests/test_durable_delivery.
 $(BUILD_DIR)/test_durable_delivery_recovery: $(CORE_SOURCES) tests/test_durable_delivery_recovery.m include/LogBrew.h | $(BUILD_DIR)
 	@$(OBJC) $(OBJCFLAGS) $(CORE_SOURCES) tests/test_durable_delivery_recovery.m $(LDFLAGS) -o "$@"
 
-test: $(BUILD_DIR)/test_logbrew $(BUILD_DIR)/test_automatic_delivery $(BUILD_DIR)/test_durable_delivery $(BUILD_DIR)/test_durable_delivery_recovery
+$(BUILD_DIR)/test_rich_telemetry: $(CORE_SOURCES) tests/test_rich_telemetry.m include/LogBrew.h | $(BUILD_DIR)
+	@$(OBJC) $(OBJCFLAGS) $(CORE_SOURCES) tests/test_rich_telemetry.m $(LDFLAGS) -o "$@"
+
+test: $(BUILD_DIR)/test_logbrew $(BUILD_DIR)/test_automatic_delivery $(BUILD_DIR)/test_durable_delivery $(BUILD_DIR)/test_durable_delivery_recovery $(BUILD_DIR)/test_rich_telemetry
 	@$(BUILD_DIR)/test_logbrew
 	@$(BUILD_DIR)/test_automatic_delivery
 	@$(BUILD_DIR)/test_durable_delivery
 	@$(BUILD_DIR)/test_durable_delivery_recovery
+	@$(BUILD_DIR)/test_rich_telemetry
 
 examples:
 	@$(MAKE) -C examples OBJC="$(OBJC)"

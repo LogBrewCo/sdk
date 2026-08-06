@@ -29,6 +29,8 @@ objcflags=(-fobjc-arc -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
 ldflags=(-framework Foundation)
 core_sources=(
   "$package_dir/src/LogBrew.m"
+  "$package_dir/src/LBWTelemetryContext.m"
+  "$package_dir/src/LBWInvestigationEvidence.m"
   "$package_dir/src/LBWDeliveryEngine.m"
   "$package_dir/src/LBWDeliveryEngineDurable.m"
   "$package_dir/src/LBWDurableDeliveryStore.m"
@@ -55,18 +57,24 @@ mkdir -p "$tmp_dir/build"
   "${ldflags[@]}" -o "$tmp_dir/build/test_durable_delivery_recovery"
 "$tmp_dir/build/test_durable_delivery_recovery"
 
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/tests/test_rich_telemetry.m" \
+  "${ldflags[@]}" -o "$tmp_dir/build/test_rich_telemetry"
+"$tmp_dir/build/test_rich_telemetry"
+
 "$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/examples/readme_example.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
 "$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/examples/real_user_smoke.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
 "$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/examples/trace_correlation.m" \
@@ -80,13 +88,17 @@ grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 
-archive="$tmp_dir/logbrew-objc-0.1.0.tar.gz"
+archive="$tmp_dir/logbrew-objc-0.2.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 tar -tzf "$archive" > "$tmp_dir/archive-contents.txt"
 grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
 grep -qx 'Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'include/LogBrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrew.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWTelemetryContext.h' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWTelemetryContext.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWInvestigationEvidence.h' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWInvestigationEvidence.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LBWDeliveryEngine.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LBWDeliveryEngine.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LBWDeliveryEnginePrivate.h' "$tmp_dir/archive-contents.txt"
@@ -107,6 +119,7 @@ grep -qx 'tests/test_logbrew.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_automatic_delivery.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_durable_delivery.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_durable_delivery_recovery.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'tests/test_rich_telemetry.m' "$tmp_dir/archive-contents.txt"
 
 extracted_dir="$tmp_dir/extracted"
 mkdir -p "$extracted_dir"
@@ -136,6 +149,9 @@ for needle in (
     "LBWOpenTelemetrySpanContext",
     "LBWTraceScope",
     "LBWTrace",
+    "LBWTelemetry",
+    "LBWTelemetryScope",
+    "LBWIssueDiagnostics",
     "LBWURLSessionSpan",
     "LBWURLSessionTimings",
     "timingsWithTaskMetrics",
@@ -147,6 +163,8 @@ for needle in (
     "spanAttributesFromOpenTelemetrySpanObject",
     "spanAttributesFromOpenTelemetrySpanContext",
     "metricWithID",
+    "addBreadcrumb",
+    "clearBreadcrumbs",
     "captureProductActionWithID",
     "captureNetworkMilestoneWithID",
     "LBWAutomaticDeliveryOptions",
@@ -160,7 +178,7 @@ for needle in (
 ):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
-for needle in ("Metrics", "metricWithID", "low-cardinality", "Tracing", "LBWTraceContext"):
+for needle in ("Shared Telemetry Context", "Issue Diagnostics", "Span Evidence", "Metrics", "metricWithID", "low-cardinality", "Tracing", "LBWTraceContext"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 PY

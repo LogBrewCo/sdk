@@ -53,6 +53,122 @@ LBWRecordingTransport *transport = [[LBWRecordingTransport alloc] init];
 [client flushWithTransport:transport error:&error];
 ```
 
+## Shared Telemetry Context
+
+Configure bounded schema-v1 context once so issues, logs, spans, actions, metrics, releases, and environments can be investigated together:
+
+```objective-c
+LBWConfig *config = [LBWConfig configWithAPIKey:@"LOGBREW_API_KEY"];
+config.context = @{
+  @"schemaVersion": @1,
+  @"resource": @{
+    @"service": @{@"name": @"checkout-app", @"version": @"2.4.0"},
+    @"deployment": @{
+      @"environment": @"production",
+      @"release": @"checkout@2.4.0"
+    }
+  },
+  @"tags": @{@"region": @"eu", @"plan": @"team"}
+};
+LBWClient *client = [[LBWClient alloc] initWithConfig:config error:&error];
+
+LBWTelemetryScope *scope = [LBWTelemetry activateContext:@{
+  @"schemaVersion": @1,
+  @"session": @{@"id": @"session_01", @"previousId": @"session_00"},
+  @"subject": @{@"id": @"subject_01", @"kind": @"user"},
+  @"tags": @{@"journey": @"checkout"}
+} error:&error];
+
+[client logWithID:@"evt_log_001"
+        timestamp:@"2026-08-06T10:00:00Z"
+       attributes:@{
+         @"message": @"checkout started",
+         @"level": @"info",
+         @"context": @{
+           @"schemaVersion": @1,
+           @"tags": @{@"step": @"confirm"}
+         }
+       }
+            error:&error];
+[scope close];
+```
+
+Context merges in this order: conservative automatic Apple context, client configuration, the current `LBWTelemetry` scope, the active W3C trace, and the event override. Later values win. Resource subfields and tags merge by field, so an event tag does not erase the configured service or deployment. Invalid versions, unknown fields, empty resources, zero trace identifiers, repeated session identifiers, unsafe tag keys, or more than 32 tags fail before queue admission.
+
+Automatic context is enabled by default. It contains only the Objective-C runtime name, operating-system name/version, architecture, and populated application bundle name/version/build. It does not collect local user identity, machine names, network addresses, unique device identifiers, advertising identifiers, session IDs, subject IDs, or tags. Set `config.includeAutomaticContext = NO` before client creation to disable it.
+
+Session and subject identifiers are explicit, app-owned, opaque values. Use `kind: user` or `kind: anonymous`; do not send names, email addresses, IP addresses, access values, or other profile data. `LBWTelemetry` scopes are synchronous and thread-local. Capture `LBWTelemetry.currentContext` and activate it again when work crosses a dispatch queue or thread; do not assume a scope follows asynchronous work automatically.
+
+## Issue Diagnostics
+
+Keep a bounded oldest-to-newest trail, then build a structured handled-error issue without copying the NSError description or `userInfo`:
+
+```objective-c
+[client addBreadcrumb:@{
+  @"timestamp": @"2026-08-06T10:00:00Z",
+  @"category": @"checkout.submit",
+  @"type": @"navigation",
+  @"level": @"info",
+  @"message": @"Checkout submitted",
+  @"data": @{@"attempt": @2}
+} error:&error];
+
+NSDictionary *issue =
+    [LBWIssueDiagnostics attributesForError:capturedError
+                                      title:@"Payment authorization failed"
+                                      level:@"error"
+                                  mechanism:@"objc.error"
+                                     handled:YES
+                                        file:[NSString stringWithUTF8String:__FILE__]
+                                        line:__LINE__
+                                      column:1U
+                                    function:NSStringFromSelector(_cmd)
+                                    metadata:@{@"provider": @"primary"}
+                                     context:nil
+                                       error:&error];
+[client issueWithID:@"evt_issue_001"
+          timestamp:@"2026-08-06T10:00:01Z"
+         attributes:issue
+              error:&error];
+```
+
+The helper uses a safe NSError domain as the exception type, or falls back to the Objective-C class name. It records mechanism and handled state plus one call-site frame. It never copies `localizedDescription`, `userInfo`, raw stack text, locals, arguments, or an absolute source path. Pass display text only through an explicitly reviewed issue `message`.
+
+Issue payloads accept `exception`, `stackFrames`, `breadcrumbs`, and `breadcrumbsTruncated`. Frames retain filename, positive line/column, function, module, in-app state, and optional debug UUID; absolute filenames are reduced to their basename. The client retains at most 64 breadcrumbs and marks truncation after eviction. Explicit frame arrays retain at most 32 entries, breadcrumb data accepts at most 8 primitive entries, and malformed evidence fails before queue admission. Call `clearBreadcrumbs` after a completed journey or account boundary. Attachments, screenshots, view hierarchy, replay, and source/header-only native crash capture are separate opt-in capabilities and are not inferred by this helper.
+
+## Span Evidence
+
+Add up to eight ordered span milestones and eight validated links when they materially explain the execution:
+
+```objective-c
+[client spanWithID:@"evt_span_001"
+         timestamp:@"2026-08-06T10:00:02Z"
+        attributes:@{
+          @"name": @"checkout.submit",
+          @"traceId": @"4bf92f3577b34da6a3ce929d0e0e4736",
+          @"spanId": @"00f067aa0ba902b7",
+          @"status": @"error",
+          @"events": @[
+            @{
+              @"name": @"payment.retry",
+              @"timestamp": @"2026-08-06T10:00:02.200Z",
+              @"metadata": @{@"attempt": @2}
+            }
+          ],
+          @"links": @[
+            @{
+              @"traceId": @"11111111111111111111111111111111",
+              @"spanId": @"2222222222222222",
+              @"sampled": @YES,
+              @"metadata": @{@"relationship": @"follows_from"}
+            }
+          ]
+        }
+             error:&error];
+```
+
+Event/link metadata is primitive. Link identifiers must be non-zero W3C-sized hexadecimal values. For a W3C-sized span, the first-class `traceId`, `spanId`, and `parentSpanId` are canonical and replace a contradictory typed context trace. Existing non-W3C legacy span identifiers remain accepted for compatibility, but they do not create a misleading typed trace context.
+
 ## Metrics
 
 Use `metricWithID:timestamp:attributes:error:` for explicit product, service, or mobile measurements that your app already owns:

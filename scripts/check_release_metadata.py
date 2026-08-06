@@ -738,6 +738,10 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     require_path(root, "objc/logbrew-objc/README.md", failures)
     header_path = require_path(root, "objc/logbrew-objc/include/LogBrew.h", failures)
     source_path = require_path(root, "objc/logbrew-objc/src/LogBrew.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWTelemetryContext.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWTelemetryContext.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWInvestigationEvidence.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWInvestigationEvidence.m", failures)
     require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.h", failures)
     require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.m", failures)
     require_path(root, "objc/logbrew-objc/src/LBWDeliveryEnginePrivate.h", failures)
@@ -752,11 +756,18 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     require_path(root, "objc/logbrew-objc/tests/test_logbrew.m", failures)
     require_path(root, "objc/logbrew-objc/tests/test_durable_delivery.m", failures)
     require_path(root, "objc/logbrew-objc/tests/test_durable_delivery_recovery.m", failures)
+    require_path(root, "objc/logbrew-objc/tests/test_rich_telemetry.m", failures)
     if not header_path.exists() or not source_path.exists():
         return
     header = header_path.read_text(encoding="utf-8")
+    source = source_path.read_text(encoding="utf-8")
     readme = (root / "objc/logbrew-objc/README.md").read_text(encoding="utf-8")
     location = "objc/logbrew-objc/include/LogBrew.h"
+    require(
+        'LogBrewObjectiveCVersion = @"0.2.0"' in source,
+        failures,
+        "objc/logbrew-objc/src/LogBrew.m: Objective-C source version must be 0.2.0",
+    )
     for needle in (
         "LogBrewObjectiveCVersion",
         "LBWHTTPTransportDefaultEndpoint",
@@ -764,6 +775,11 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "LBWHTTPTransport",
         "LBWRecordingTransport",
         "LBWErrorStableCodeKey",
+        "LBWTelemetry",
+        "LBWTelemetryScope",
+        "LBWIssueDiagnostics",
+        "addBreadcrumb",
+        "clearBreadcrumbs",
         "metricWithID",
         "captureProductActionWithID",
         "captureNetworkMilestoneWithID",
@@ -778,6 +794,9 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     ):
         require(needle in header, failures, f"{location}: missing public Objective-C SDK symbol {needle}")
     for needle in (
+        "Shared Telemetry Context",
+        "Issue Diagnostics",
+        "Span Evidence",
         "Public Objective-C SDK",
         "LOGBREW_API_KEY",
         "Metrics",
