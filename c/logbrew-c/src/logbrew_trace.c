@@ -15,11 +15,26 @@
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #define LOGBREW_THREAD_LOCAL _Thread_local
 #else
-#define LOGBREW_THREAD_LOCAL
+#error "LogBrew trace scopes require compiler thread-local storage support"
 #endif
 
 static LOGBREW_THREAD_LOCAL const LogBrewTraceContext *current_context = NULL;
-static unsigned long long id_counter = 0x9e3779b97f4a7c15ULL;
+static LOGBREW_THREAD_LOCAL unsigned long long id_counter = 0x9e3779b97f4a7c15ULL;
+
+static bool trace_scope_is_in_active_chain(const LogBrewTraceScope *candidate) {
+  const LogBrewTraceContext *cursor = current_context;
+  while (cursor != NULL) {
+    const LogBrewTraceScope *active_scope = (const LogBrewTraceScope *)(const void *)cursor;
+    if (active_scope == candidate) {
+      return true;
+    }
+    if (!active_scope->active || active_scope->owner != active_scope) {
+      return false;
+    }
+    cursor = active_scope->previous;
+  }
+  return false;
+}
 
 static void set_trace_error(LogBrewError *error, const char *code, const char *message) {
   if (error == NULL) {
@@ -78,18 +93,18 @@ static void copy_lower_hex(char *destination, const char *source, size_t offset,
 }
 
 static bool trace_flags_are_sampled(const char *trace_flags) {
-  return (trace_flags[1] == '1' ||
-          trace_flags[1] == '3' ||
-          trace_flags[1] == '5' ||
-          trace_flags[1] == '7' ||
-          trace_flags[1] == '9' ||
-          trace_flags[1] == 'b' ||
-          trace_flags[1] == 'd' ||
-          trace_flags[1] == 'f');
+  char low_nibble = lower_hex_char(trace_flags[1]);
+  return (low_nibble == '1' ||
+          low_nibble == '3' ||
+          low_nibble == '5' ||
+          low_nibble == '7' ||
+          low_nibble == '9' ||
+          low_nibble == 'b' ||
+          low_nibble == 'd' ||
+          low_nibble == 'f');
 }
 
 static LogBrewStatus validate_trace_context(const LogBrewTraceContext *context, LogBrewError *error) {
-  char traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U];
   if (context == NULL) {
     set_trace_error(error, "config_error", "trace context is required");
     return LOGBREW_CONFIG_ERROR;
@@ -98,13 +113,17 @@ static LogBrewStatus validate_trace_context(const LogBrewTraceContext *context, 
     set_trace_error(error, "validation_error", "trace context is incomplete");
     return LOGBREW_VALIDATION_ERROR;
   }
-  (void)snprintf(traceparent, sizeof(traceparent), "00-%s-%s-%s",
-                 context->trace_id, context->span_id, context->trace_flags);
-  if (strlen(traceparent) != LOGBREW_TRACEPARENT_LENGTH ||
-      !hex_part_is_valid(traceparent, 3U, LOGBREW_TRACE_ID_LENGTH) ||
-      !hex_part_is_valid(traceparent, 36U, LOGBREW_SPAN_ID_LENGTH) ||
-      !is_hex_char(traceparent[53]) ||
-      !is_hex_char(traceparent[54])) {
+  if (strlen(context->trace_id) != LOGBREW_TRACE_ID_LENGTH ||
+      strlen(context->span_id) != LOGBREW_SPAN_ID_LENGTH ||
+      strlen(context->trace_flags) != LOGBREW_TRACE_FLAGS_LENGTH ||
+      !hex_part_is_valid(context->trace_id, 0U, LOGBREW_TRACE_ID_LENGTH) ||
+      !hex_part_is_valid(context->span_id, 0U, LOGBREW_SPAN_ID_LENGTH) ||
+      !is_hex_char(context->trace_flags[0]) ||
+      !is_hex_char(context->trace_flags[1]) ||
+      (!trace_blank(context->parent_span_id) &&
+       (strlen(context->parent_span_id) != LOGBREW_SPAN_ID_LENGTH ||
+        !hex_part_is_valid(context->parent_span_id, 0U, LOGBREW_SPAN_ID_LENGTH))) ||
+      context->sampled != trace_flags_are_sampled(context->trace_flags)) {
     set_trace_error(error, "validation_error", "trace context is invalid");
     return LOGBREW_VALIDATION_ERROR;
   }
@@ -142,21 +161,96 @@ static LogBrewStatus normalize_http_method(const char *method, char *out_method,
   return LOGBREW_OK;
 }
 
+static bool trace_scheme_equals(const char *start, const char *end, const char *expected) {
+  size_t index;
+  size_t length = (size_t)(end - start);
+  if (length != strlen(expected)) {
+    return false;
+  }
+  for (index = 0U; index < length; index++) {
+    if (lower_hex_char(start[index]) != expected[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool trace_uri_scheme_prefix(const char *start, const char *colon) {
+  const char *cursor;
+  if (colon <= start || !isalpha((unsigned char)start[0])) {
+    return false;
+  }
+  for (cursor = start + 1; cursor < colon; cursor++) {
+    unsigned char current = (unsigned char)*cursor;
+    if (!isalnum(current) && current != (unsigned char)'+' &&
+        current != (unsigned char)'-' && current != (unsigned char)'.') {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool trace_route_has_forbidden_control(const unsigned char *value, size_t length) {
+  size_t index;
+  for (index = 0U; index < length; index++) {
+    if (value[index] < 0x20U || value[index] == 0x7fU ||
+        (value[index] == 0xc2U && index + 1U < length &&
+         value[index + 1U] >= 0x80U && value[index + 1U] <= 0x9fU)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static LogBrewStatus sanitize_http_route(const char *route_template, char *out_route, size_t out_size, LogBrewError *error) {
   const char *start = route_template;
   const char *scheme;
+  const char *colon;
+  const char *boundary;
   const char *query;
   const char *hash;
   const char *end;
+  size_t raw_length;
   size_t length;
   if (trace_blank(route_template)) {
     set_trace_error(error, "validation_error", "HTTP client route_template must be non-empty");
     return LOGBREW_VALIDATION_ERROR;
   }
+  raw_length = strlen(route_template);
+  if (raw_length > 8192U || isspace((unsigned char)route_template[0]) ||
+      isspace((unsigned char)route_template[raw_length - 1U]) ||
+      trace_route_has_forbidden_control((const unsigned char *)route_template, raw_length)) {
+    set_trace_error(error, "validation_error", "HTTP client route_template is invalid");
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (start[0] == '/' && start[1] == '/') {
+    set_trace_error(error, "validation_error", "HTTP client route_template must not use a protocol-relative host");
+    return LOGBREW_VALIDATION_ERROR;
+  }
   scheme = strstr(route_template, "://");
-  if (scheme != NULL && (strncmp(route_template, "http://", 7U) == 0 || strncmp(route_template, "https://", 8U) == 0)) {
-    const char *path = strchr(scheme + 3U, '/');
-    start = path == NULL ? "/" : path;
+  if (scheme != NULL) {
+    const char *authority;
+    const char *authority_end;
+    if (!(trace_scheme_equals(route_template, scheme, "http") ||
+          trace_scheme_equals(route_template, scheme, "https"))) {
+      set_trace_error(error, "validation_error", "HTTP client route_template uses an unsupported URL scheme");
+      return LOGBREW_VALIDATION_ERROR;
+    }
+    authority = scheme + 3U;
+    authority_end = authority + strcspn(authority, "/?#");
+    if (authority_end == authority) {
+      set_trace_error(error, "validation_error", "HTTP client route_template URL host is invalid");
+      return LOGBREW_VALIDATION_ERROR;
+    }
+    start = *authority_end == '/' ? authority_end : "/";
+  } else {
+    colon = strchr(route_template, ':');
+    boundary = strpbrk(route_template, "/?#");
+    if (colon != NULL && (boundary == NULL || colon < boundary) &&
+        trace_uri_scheme_prefix(route_template, colon)) {
+      set_trace_error(error, "validation_error", "HTTP client route_template uses an unsupported URL scheme");
+      return LOGBREW_VALIDATION_ERROR;
+    }
   }
   query = strchr(start, '?');
   hash = strchr(start, '#');
@@ -340,6 +434,8 @@ LogBrewStatus logbrew_trace_create_headers(
     const LogBrewTraceContext *context,
     char out_traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U],
     LogBrewError *error) {
+  size_t index;
+  LogBrewStatus status;
   if (context == NULL) {
     set_trace_error(error, "config_error", "trace context is required");
     return LOGBREW_CONFIG_ERROR;
@@ -348,50 +444,14 @@ LogBrewStatus logbrew_trace_create_headers(
     set_trace_error(error, "config_error", "out_traceparent is required");
     return LOGBREW_CONFIG_ERROR;
   }
-  if (trace_blank(context->trace_id) || trace_blank(context->span_id) || trace_blank(context->trace_flags)) {
-    set_trace_error(error, "validation_error", "trace context is incomplete");
-    return LOGBREW_VALIDATION_ERROR;
+  status = validate_trace_context(context, error);
+  if (status != LOGBREW_OK) {
+    return status;
   }
   (void)snprintf(out_traceparent, LOGBREW_TRACEPARENT_LENGTH + 1U, "00-%s-%s-%s",
                  context->trace_id, context->span_id, context->trace_flags);
-  return LOGBREW_OK;
-}
-
-LogBrewStatus logbrew_trace_active_metadata_json(char **out_json, LogBrewError *error) {
-  const LogBrewTraceContext *context = current_context;
-  const char *format;
-  int needed;
-  if (out_json == NULL) {
-    set_trace_error(error, "config_error", "out_json is required");
-    return LOGBREW_CONFIG_ERROR;
-  }
-  *out_json = NULL;
-  if (context == NULL || trace_blank(context->trace_id) || trace_blank(context->span_id)) {
-    return LOGBREW_OK;
-  }
-  format = trace_blank(context->parent_span_id)
-      ? "{\"traceId\":\"%s\",\"spanId\":\"%s\",\"sampled\":%s,\"traceFlags\":\"%s\"}"
-      : "{\"traceId\":\"%s\",\"spanId\":\"%s\",\"parentSpanId\":\"%s\",\"sampled\":%s,\"traceFlags\":\"%s\"}";
-  needed = trace_blank(context->parent_span_id)
-      ? snprintf(NULL, 0U, format, context->trace_id, context->span_id, context->sampled ? "true" : "false",
-                 context->trace_flags)
-      : snprintf(NULL, 0U, format, context->trace_id, context->span_id, context->parent_span_id,
-                 context->sampled ? "true" : "false", context->trace_flags);
-  if (needed < 0) {
-    set_trace_error(error, "serialization_error", "trace metadata formatting failed");
-    return LOGBREW_SERIALIZATION_ERROR;
-  }
-  *out_json = (char *)malloc((size_t)needed + 1U);
-  if (*out_json == NULL) {
-    set_trace_error(error, "allocation_error", "out of memory");
-    return LOGBREW_ALLOCATION_ERROR;
-  }
-  if (trace_blank(context->parent_span_id)) {
-    (void)snprintf(*out_json, (size_t)needed + 1U, format, context->trace_id, context->span_id,
-                   context->sampled ? "true" : "false", context->trace_flags);
-  } else {
-    (void)snprintf(*out_json, (size_t)needed + 1U, format, context->trace_id, context->span_id,
-                   context->parent_span_id, context->sampled ? "true" : "false", context->trace_flags);
+  for (index = 0U; index < LOGBREW_TRACEPARENT_LENGTH; index++) {
+    out_traceparent[index] = lower_hex_char(out_traceparent[index]);
   }
   return LOGBREW_OK;
 }
@@ -412,10 +472,35 @@ LogBrewStatus logbrew_trace_scope_enter(
     set_trace_error(error, "config_error", "trace context is required");
     return LOGBREW_CONFIG_ERROR;
   }
+  if (trace_scope_is_in_active_chain(scope)) {
+    set_trace_error(error, "config_error", "trace scope is already active");
+    return LOGBREW_CONFIG_ERROR;
+  }
+  if (validate_trace_context(context, error) != LOGBREW_OK) {
+    return LOGBREW_VALIDATION_ERROR;
+  }
   memset(scope, 0, sizeof(*scope));
   scope->context = *context;
   scope->previous = current_context;
   scope->active = true;
+  scope->owner = scope;
+  {
+    size_t index;
+    for (index = 0U; index < LOGBREW_TRACE_ID_LENGTH; index++) {
+      scope->context.trace_id[index] = lower_hex_char(scope->context.trace_id[index]);
+    }
+    for (index = 0U; index < LOGBREW_SPAN_ID_LENGTH; index++) {
+      scope->context.span_id[index] = lower_hex_char(scope->context.span_id[index]);
+    }
+    if (!trace_blank(scope->context.parent_span_id)) {
+      for (index = 0U; index < LOGBREW_SPAN_ID_LENGTH; index++) {
+        scope->context.parent_span_id[index] = lower_hex_char(scope->context.parent_span_id[index]);
+      }
+    }
+    for (index = 0U; index < LOGBREW_TRACE_FLAGS_LENGTH; index++) {
+      scope->context.trace_flags[index] = lower_hex_char(scope->context.trace_flags[index]);
+    }
+  }
   current_context = &scope->context;
   return LOGBREW_OK;
 }
@@ -424,9 +509,13 @@ void logbrew_trace_scope_exit(LogBrewTraceScope *scope) {
   if (scope == NULL || !scope->active) {
     return;
   }
+  if (current_context != &scope->context || scope->owner != scope) {
+    return;
+  }
   current_context = scope->previous;
   scope->previous = NULL;
   scope->active = false;
+  scope->owner = NULL;
 }
 
 LogBrewMetadata logbrew_trace_metadata(

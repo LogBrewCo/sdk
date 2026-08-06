@@ -20,16 +20,63 @@ if [[ -z "$cc_command" ]]; then
   fi
 fi
 
+cxx_command="${CXX:-}"
+if [[ -z "$cxx_command" ]]; then
+  if command -v clang++ >/dev/null 2>&1; then
+    cxx_command="clang++"
+  else
+    cxx_command="c++"
+  fi
+fi
+
+if ! command -v "$cxx_command" >/dev/null 2>&1; then
+  echo "C++ compiler is required to validate the public C header: $cxx_command" >&2
+  exit 1
+fi
+
 run_examples_make() {
     make --no-print-directory -C "$package_dir/examples"
 }
 
 cflags=(-std=c99 -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
-sdk_sources=("$package_dir/src/logbrew.c" "$package_dir/src/logbrew_metric.c" "$package_dir/src/logbrew_recording_transport.c" "$package_dir/src/logbrew_timeline.c" "$package_dir/src/logbrew_trace.c")
+sdk_sources=("$package_dir/src/logbrew.c" "$package_dir/src/logbrew_json.c" "$package_dir/src/logbrew_context.c" "$package_dir/src/logbrew_evidence.c" "$package_dir/src/logbrew_metric.c" "$package_dir/src/logbrew_recording_transport.c" "$package_dir/src/logbrew_timeline.c" "$package_dir/src/logbrew_trace.c")
 
 mkdir -p "$tmp_dir/build"
+
+header_cpp_source="$tmp_dir/header_cpp.cpp"
+cat > "$header_cpp_source" <<'CPP'
+#include "logbrew.h"
+
+int main() {
+  LogBrewMetadataEntry string_entry = LOGBREW_METADATA_STRING_VALUE("string", "value");
+  LogBrewMetadataEntry number_entry = LOGBREW_METADATA_NUMBER_VALUE("number", 1.0);
+  LogBrewMetadataEntry bool_entry = LOGBREW_METADATA_BOOL_VALUE("bool", true);
+  LogBrewMetadataEntry null_entry = LOGBREW_METADATA_NULL_VALUE("null");
+  LogBrewEventOptions options = LOGBREW_EVENT_OPTIONS_NONE;
+  LogBrewTelemetryScope scope = LOGBREW_TELEMETRY_SCOPE_INIT;
+  const bool initialized = options.metadata.entries == nullptr &&
+                           options.metadata.count == 0U &&
+                           options.context == nullptr &&
+                           scope.snapshot == nullptr &&
+                           scope.previous == nullptr &&
+                           !scope.active;
+  return (string_entry.key && number_entry.key && bool_entry.key && null_entry.key &&
+          initialized)
+             ? 0
+             : 1;
+}
+CPP
+"$cxx_command" -std=c++17 -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include" \
+  -c "$header_cpp_source" -o "$tmp_dir/build/header_cpp.o"
+
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/tests/test_logbrew.c" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
+
+"$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/tests/test_rich_telemetry.c" -o "$tmp_dir/build/test_rich_telemetry"
+"$tmp_dir/build/test_rich_telemetry" > "$tmp_dir/rich.stdout.json" 2> "$tmp_dir/rich.stderr.txt"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/rich.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_c_rich_telemetry_payload.py" "$tmp_dir/rich.stdout.json" >/dev/null
+grep -q 'c rich telemetry tests passed' "$tmp_dir/rich.stderr.txt"
 
 if command -v curl-config >/dev/null 2>&1; then
   curl_cflags=()
@@ -51,13 +98,13 @@ fi
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/readme_example.c" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/real_user_smoke.c" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/trace_correlation.c" -o "$tmp_dir/build/trace_correlation"
@@ -71,13 +118,16 @@ grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 
-archive="$tmp_dir/logbrew-c-0.1.0.tar.gz"
+archive="$tmp_dir/logbrew-c-0.2.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 tar -tzf "$archive" > "$tmp_dir/archive-contents.txt"
 grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
 grep -qx 'Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'include/logbrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_json.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_context.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_evidence.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_http_transport.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_internal.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_metric.c' "$tmp_dir/archive-contents.txt"
@@ -89,6 +139,7 @@ grep -qx 'examples/real_user_smoke.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/trace_correlation.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_logbrew.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'tests/test_rich_telemetry.c' "$tmp_dir/archive-contents.txt"
 
 extracted_dir="$tmp_dir/extracted"
 mkdir -p "$extracted_dir"
@@ -116,6 +167,9 @@ readme_needles = (
     "logbrew_trace_span_attributes_from_opentelemetry_span_context",
     "logbrew_trace_scope_enter",
     "logbrew_http_transport_init",
+    "LogBrewTelemetryContext",
+    "logbrew_client_issue_with_details",
+    "logbrew_client_span_with_evidence",
 )
 header_needles = (
     "LOGBREW_C_VERSION",
@@ -133,6 +187,9 @@ header_needles = (
     "logbrew_trace_current_context",
     "LogBrewHttpTransport",
     "logbrew_http_transport_init",
+    "LogBrewTelemetryContext",
+    "logbrew_client_issue_with_details",
+    "logbrew_client_span_with_evidence",
 )
 for needle in readme_needles:
     if needle not in readme:
@@ -142,4 +199,4 @@ for needle in header_needles:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY
 
-echo "c package checks passed with $($cc_command --version | head -n 1)"
+echo "c package checks passed with $($cc_command --version | head -n 1); C++ header consumer passed with $($cxx_command --version | head -n 1)"

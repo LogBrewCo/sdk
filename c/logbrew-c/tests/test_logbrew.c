@@ -205,6 +205,15 @@ static void product_timeline_helpers_capture_safe_metadata(void) {
   network.route_template = "?sku=123";
   EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_query_only", "2026-06-02T10:00:07Z",
       network, &error) == LOGBREW_VALIDATION_ERROR);
+  network.route_template = "//api.example.com/checkout";
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_protocol_relative", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_VALIDATION_ERROR);
+  network.route_template = "ftp://api.example.com/checkout";
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_unsupported_scheme", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_VALIDATION_ERROR);
+  network.route_template = "mailto:private@example.com";
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_scheme_without_host", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_VALIDATION_ERROR);
   product_action.metadata.entries = NULL;
   product_action.metadata.count = 1U;
   EXPECT_TRUE(logbrew_client_product_action(client, "evt_bad_metadata", "2026-06-02T10:00:06Z",
@@ -300,6 +309,14 @@ static void trace_context_helpers_validate_and_correlate(void) {
   EXPECT_TRUE(strcmp(context.span_id, context.parent_span_id) != 0);
   EXPECT_TRUE(context.sampled);
   EXPECT_TRUE(strcmp(context.trace_flags, "01") == 0);
+  {
+    LogBrewTraceContext inconsistent = context;
+    LogBrewTraceScope invalid_scope;
+    inconsistent.sampled = false;
+    EXPECT_TRUE(logbrew_trace_scope_enter(
+        &invalid_scope, &inconsistent, &error) == LOGBREW_VALIDATION_ERROR);
+    EXPECT_TRUE(logbrew_trace_current_context() == NULL);
+  }
   EXPECT_TRUE(logbrew_trace_create_headers(&context, traceparent, &error) == LOGBREW_OK);
   EXPECT_TRUE(strstr(traceparent, "00-4bf92f3577b34da6a3ce929d0e0e4736-") == traceparent);
   EXPECT_TRUE(strcmp(traceparent + 52, "-01") == 0);
@@ -316,6 +333,13 @@ static void trace_context_helpers_validate_and_correlate(void) {
   EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, context.trace_id) == 0);
   EXPECT_TRUE(logbrew_trace_root_context(&nested, &error) == LOGBREW_OK);
   EXPECT_TRUE(logbrew_trace_scope_enter(&nested_scope, &nested, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, nested.trace_id) == 0);
+  EXPECT_TRUE(logbrew_trace_scope_enter(&nested_scope, &nested, &error) == LOGBREW_CONFIG_ERROR);
+  EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, nested.trace_id) == 0);
+  EXPECT_TRUE(logbrew_trace_scope_enter(&scope, &context, &error) == LOGBREW_CONFIG_ERROR);
+  EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, nested.trace_id) == 0);
+  logbrew_trace_scope_exit(&scope);
+  EXPECT_TRUE(logbrew_trace_current_context() != NULL);
   EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, nested.trace_id) == 0);
   logbrew_trace_scope_exit(&nested_scope);
   EXPECT_TRUE(logbrew_trace_current_context() != NULL);
@@ -467,8 +491,15 @@ static void http_client_span_helpers_create_child_propagation(void) {
   logbrew_free_string(json);
   logbrew_client_free(client);
 
+  EXPECT_TRUE(logbrew_trace_http_client_span_start(
+      &parent, "GET", "HTTPS://payments.example.test?private=/query-path", &outbound, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(outbound.name, "GET /") == 0);
   EXPECT_TRUE(logbrew_trace_http_client_span_start(&parent, "GET /bad", "/health", &outbound, &error) == LOGBREW_VALIDATION_ERROR);
   EXPECT_TRUE(logbrew_trace_http_client_span_start(&parent, "GET", "?debug=true", &outbound, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_http_client_span_start(
+      &parent, "GET", "//payments.example.test/health", &outbound, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_http_client_span_start(
+      &parent, "GET", "ftp://payments.example.test/health", &outbound, &error) == LOGBREW_VALIDATION_ERROR);
   EXPECT_TRUE(logbrew_trace_http_client_span_attributes(
       &outbound, 700, true, false, 1.0, true, &outbound_attributes, &error) == LOGBREW_VALIDATION_ERROR);
   EXPECT_TRUE(logbrew_trace_http_client_span_attributes(

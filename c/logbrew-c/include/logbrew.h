@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define LOGBREW_C_VERSION "0.1.0"
+#define LOGBREW_C_VERSION "0.2.0"
 #define LOGBREW_HTTP_TRANSPORT_DEFAULT_ENDPOINT "https://api.logbrew.co/v1/events"
 
 typedef enum {
@@ -113,7 +113,8 @@ typedef struct {
 typedef enum {
   LOGBREW_METADATA_STRING,
   LOGBREW_METADATA_NUMBER,
-  LOGBREW_METADATA_BOOL
+  LOGBREW_METADATA_BOOL,
+  LOGBREW_METADATA_NULL
 } LogBrewMetadataValueKind;
 
 typedef struct {
@@ -147,6 +148,7 @@ typedef struct {
   LogBrewTraceContext context;
   const LogBrewTraceContext *previous;
   bool active;
+  const void *owner;
 } LogBrewTraceScope;
 
 typedef struct {
@@ -164,14 +166,202 @@ typedef struct {
   LogBrewMetadata metadata;
 } LogBrewMetricAttributes;
 
+#ifdef __cplusplus
+#define LOGBREW_METADATA_STRING_VALUE(key_value, value) \
+  LogBrewMetadataEntry{(key_value), LOGBREW_METADATA_STRING, (value), 0.0, false}
+#define LOGBREW_METADATA_NUMBER_VALUE(key_value, value) \
+  LogBrewMetadataEntry{(key_value), LOGBREW_METADATA_NUMBER, NULL, (value), false}
+#define LOGBREW_METADATA_BOOL_VALUE(key_value, value) \
+  LogBrewMetadataEntry{(key_value), LOGBREW_METADATA_BOOL, NULL, 0.0, (value)}
+#define LOGBREW_METADATA_NULL_VALUE(key_value) \
+  LogBrewMetadataEntry{(key_value), LOGBREW_METADATA_NULL, NULL, 0.0, false}
+#else
 #define LOGBREW_METADATA_STRING_VALUE(key_value, value) \
   ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_STRING, (value), 0.0, false})
-
 #define LOGBREW_METADATA_NUMBER_VALUE(key_value, value) \
   ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_NUMBER, NULL, (value), false})
-
 #define LOGBREW_METADATA_BOOL_VALUE(key_value, value) \
   ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_BOOL, NULL, 0.0, (value)})
+#define LOGBREW_METADATA_NULL_VALUE(key_value) \
+  ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_NULL, NULL, 0.0, false})
+#endif
+
+#define LOGBREW_TELEMETRY_CONTEXT_SCHEMA_VERSION 1U
+#define LOGBREW_MAX_CONTEXT_TAGS 32U
+#define LOGBREW_MAX_BREADCRUMBS 64U
+#define LOGBREW_MAX_STACK_FRAMES 32U
+#define LOGBREW_MAX_SPAN_EVENTS 8U
+#define LOGBREW_MAX_SPAN_LINKS 8U
+#define LOGBREW_MAX_METADATA_ENTRIES 128U
+#define LOGBREW_MAX_METADATA_KEY_LENGTH 128U
+#define LOGBREW_MAX_METADATA_STRING_LENGTH 4096U
+
+typedef struct {
+  const char *name;
+  const char *version;
+} LogBrewNamedVersion;
+
+typedef struct {
+  const char *environment;
+  const char *release;
+} LogBrewDeploymentContext;
+
+typedef struct {
+  const char *name;
+  const char *version;
+  const char *build;
+} LogBrewOperatingSystemContext;
+
+typedef struct {
+  const char *family;
+  const char *model;
+  const char *architecture;
+} LogBrewDeviceContext;
+
+typedef struct {
+  const char *name;
+  const char *version;
+  const char *build;
+} LogBrewApplicationContext;
+
+typedef struct {
+  const LogBrewNamedVersion *service;
+  const LogBrewDeploymentContext *deployment;
+  const LogBrewNamedVersion *runtime;
+  const LogBrewNamedVersion *framework;
+  const LogBrewOperatingSystemContext *operating_system;
+  const LogBrewDeviceContext *device;
+  const LogBrewApplicationContext *application;
+} LogBrewTelemetryResource;
+
+typedef struct {
+  const char *trace_id;
+  const char *span_id;
+  const char *parent_span_id;
+  bool sampled;
+  bool has_sampled;
+} LogBrewTelemetryTraceContext;
+
+typedef struct {
+  const char *id;
+  const char *previous_id;
+} LogBrewSessionContext;
+
+typedef enum {
+  LOGBREW_SUBJECT_ANONYMOUS,
+  LOGBREW_SUBJECT_USER
+} LogBrewSubjectKind;
+
+typedef struct {
+  const char *id;
+  LogBrewSubjectKind kind;
+} LogBrewSubjectContext;
+
+typedef struct {
+  const char *key;
+  const char *value;
+} LogBrewTelemetryTag;
+
+/**
+ * Caller-owned schema-v1 telemetry context. Client construction and telemetry
+ * scopes take bounded deep copies; per-event capture reads it synchronously.
+ * Subject identifiers must already be opaque and privacy-safe.
+ */
+typedef struct {
+  unsigned int schema_version;
+  const LogBrewTelemetryResource *resource;
+  const LogBrewTelemetryTraceContext *trace;
+  const LogBrewSessionContext *session;
+  const LogBrewSubjectContext *subject;
+  const LogBrewTelemetryTag *tags;
+  size_t tag_count;
+} LogBrewTelemetryContext;
+
+typedef struct {
+  LogBrewMetadata metadata;
+  const LogBrewTelemetryContext *context;
+} LogBrewEventOptions;
+
+#ifdef __cplusplus
+#define LOGBREW_EVENT_OPTIONS_NONE LogBrewEventOptions{{NULL, 0U}, NULL}
+#else
+#define LOGBREW_EVENT_OPTIONS_NONE ((LogBrewEventOptions){{NULL, 0U}, NULL})
+#endif
+
+typedef struct {
+  const LogBrewTelemetryContext *context;
+  bool disable_automatic_context;
+} LogBrewClientOptions;
+
+typedef struct {
+  void *snapshot;
+  const void *previous;
+  bool active;
+} LogBrewTelemetryScope;
+
+#define LOGBREW_TELEMETRY_SCOPE_INIT {NULL, NULL, false}
+
+typedef struct {
+  const char *type;
+  bool handled;
+} LogBrewIssueMechanism;
+
+typedef struct {
+  const char *type;
+  const LogBrewIssueMechanism *mechanism;
+} LogBrewIssueException;
+
+typedef struct {
+  const char *filename;
+  /** Zero means filename is NUL-terminated; helpers may set an exact slice. */
+  size_t filename_length;
+  unsigned int line;
+  unsigned int column;
+  const char *function;
+  const char *module;
+  bool in_app;
+  bool has_in_app;
+  const char *debug_id;
+} LogBrewIssueStackFrame;
+
+typedef struct {
+  const char *timestamp;
+  const char *type;
+  const char *category;
+  const char *level;
+  const char *message;
+  LogBrewMetadata data;
+} LogBrewIssueBreadcrumb;
+
+typedef struct {
+  const LogBrewIssueException *exception;
+  const LogBrewIssueStackFrame *stack_frames;
+  size_t stack_frame_count;
+  const LogBrewIssueBreadcrumb *breadcrumbs;
+  size_t breadcrumb_count;
+  bool breadcrumbs_truncated;
+} LogBrewIssueDetails;
+
+typedef struct {
+  const char *name;
+  const char *timestamp;
+  LogBrewMetadata metadata;
+} LogBrewSpanEvent;
+
+typedef struct {
+  const char *trace_id;
+  const char *span_id;
+  bool sampled;
+  bool has_sampled;
+  LogBrewMetadata metadata;
+} LogBrewSpanLink;
+
+typedef struct {
+  const LogBrewSpanEvent *events;
+  size_t event_count;
+  const LogBrewSpanLink *links;
+  size_t link_count;
+} LogBrewSpanEvidence;
 
 typedef struct {
   const char *session_id;
@@ -235,9 +425,43 @@ LogBrewStatus logbrew_client_new(
     LogBrewConfig config,
     LogBrewClient **out_client,
     LogBrewError *error);
+LogBrewStatus logbrew_client_new_with_options(
+    LogBrewConfig config,
+    LogBrewClientOptions options,
+    LogBrewClient **out_client,
+    LogBrewError *error);
 void logbrew_client_free(LogBrewClient *client);
 size_t logbrew_client_pending_events(const LogBrewClient *client);
 void logbrew_free_string(char *value);
+
+LogBrewStatus logbrew_telemetry_context_validate(
+    const LogBrewTelemetryContext *context,
+    LogBrewError *error);
+LogBrewStatus logbrew_telemetry_scope_enter(
+    LogBrewTelemetryScope *scope,
+    const LogBrewTelemetryContext *context,
+    LogBrewError *error);
+void logbrew_telemetry_scope_exit(LogBrewTelemetryScope *scope);
+
+LogBrewStatus logbrew_client_add_breadcrumb(
+    LogBrewClient *client,
+    LogBrewIssueBreadcrumb breadcrumb,
+    LogBrewError *error);
+void logbrew_client_clear_breadcrumbs(LogBrewClient *client);
+
+/**
+ * Builds a copy-safe frame that borrows file, function, and module until the
+ * synchronous issue capture call returns. The filename slice is sanitized.
+ */
+LogBrewStatus logbrew_issue_frame_from_location(
+    const char *file,
+    unsigned int line,
+    unsigned int column,
+    const char *function,
+    const char *module,
+    bool in_app,
+    LogBrewIssueStackFrame *out_frame,
+    LogBrewError *error);
 
 LogBrewStatus logbrew_client_preview_json(
     const LogBrewClient *client,
@@ -262,12 +486,26 @@ LogBrewStatus logbrew_client_release(
     const char *timestamp,
     LogBrewReleaseAttributes attributes,
     LogBrewError *error);
+LogBrewStatus logbrew_client_release_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewReleaseAttributes attributes,
+    LogBrewEventOptions options,
+    LogBrewError *error);
 
 LogBrewStatus logbrew_client_environment(
     LogBrewClient *client,
     const char *id,
     const char *timestamp,
     LogBrewEnvironmentAttributes attributes,
+    LogBrewError *error);
+LogBrewStatus logbrew_client_environment_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewEnvironmentAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error);
 
 LogBrewStatus logbrew_client_issue(
@@ -276,12 +514,34 @@ LogBrewStatus logbrew_client_issue(
     const char *timestamp,
     LogBrewIssueAttributes attributes,
     LogBrewError *error);
+LogBrewStatus logbrew_client_issue_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewIssueAttributes attributes,
+    LogBrewEventOptions options,
+    LogBrewError *error);
+LogBrewStatus logbrew_client_issue_with_details(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewIssueAttributes attributes,
+    LogBrewIssueDetails details,
+    LogBrewEventOptions options,
+    LogBrewError *error);
 
 LogBrewStatus logbrew_client_log(
     LogBrewClient *client,
     const char *id,
     const char *timestamp,
     LogBrewLogAttributes attributes,
+    LogBrewError *error);
+LogBrewStatus logbrew_client_log_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewLogAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error);
 
 LogBrewStatus logbrew_client_span(
@@ -290,12 +550,34 @@ LogBrewStatus logbrew_client_span(
     const char *timestamp,
     LogBrewSpanAttributes attributes,
     LogBrewError *error);
+LogBrewStatus logbrew_client_span_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewSpanAttributes attributes,
+    LogBrewEventOptions options,
+    LogBrewError *error);
+LogBrewStatus logbrew_client_span_with_evidence(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewSpanAttributes attributes,
+    LogBrewSpanEvidence evidence,
+    LogBrewEventOptions options,
+    LogBrewError *error);
 
 LogBrewStatus logbrew_client_metric(
     LogBrewClient *client,
     const char *id,
     const char *timestamp,
     LogBrewMetricAttributes attributes,
+    LogBrewError *error);
+LogBrewStatus logbrew_client_metric_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewMetricAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error);
 
 LogBrewStatus logbrew_client_action(
@@ -304,6 +586,13 @@ LogBrewStatus logbrew_client_action(
     const char *timestamp,
     LogBrewActionAttributes attributes,
     LogBrewError *error);
+LogBrewStatus logbrew_client_action_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewActionAttributes attributes,
+    LogBrewEventOptions options,
+    LogBrewError *error);
 
 LogBrewStatus logbrew_client_product_action(
     LogBrewClient *client,
@@ -311,12 +600,26 @@ LogBrewStatus logbrew_client_product_action(
     const char *timestamp,
     LogBrewProductActionAttributes attributes,
     LogBrewError *error);
+LogBrewStatus logbrew_client_product_action_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewProductActionAttributes attributes,
+    LogBrewEventOptions options,
+    LogBrewError *error);
 
 LogBrewStatus logbrew_client_network_milestone(
     LogBrewClient *client,
     const char *id,
     const char *timestamp,
     LogBrewNetworkMilestoneAttributes attributes,
+    LogBrewError *error);
+LogBrewStatus logbrew_client_network_milestone_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewNetworkMilestoneAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error);
 
 LogBrewStatus logbrew_trace_root_context(LogBrewTraceContext *out_context, LogBrewError *error);

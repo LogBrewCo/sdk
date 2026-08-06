@@ -1,7 +1,7 @@
 CC ?= cc
 CFLAGS ?= -std=c99 -Wall -Wextra -Wpedantic -Werror -Iinclude
 BUILD_DIR ?= build
-SDK_SRC = src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_trace.c
+SDK_SRC = src/logbrew.c src/logbrew_json.c src/logbrew_context.c src/logbrew_evidence.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_trace.c
 HTTP_SDK_SRC = $(SDK_SRC) src/logbrew_http_transport.c
 
 .PHONY: all test examples clean
@@ -12,10 +12,12 @@ test:
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) $(SDK_SRC) tests/test_logbrew.c -o "$(BUILD_DIR)/test_logbrew"
 	"$(BUILD_DIR)/test_logbrew"
+	$(CC) $(CFLAGS) $(SDK_SRC) tests/test_rich_telemetry.c -o "$(BUILD_DIR)/test_rich_telemetry"
+	"$(BUILD_DIR)/test_rich_telemetry" >/dev/null
 
 examples:
-	$(MAKE) -C examples CC="$(CC)" CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Werror -I../include" SDK_SRC="../src/logbrew.c ../src/logbrew_metric.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c ../src/logbrew_trace.c" run-readme-example >/dev/null
-	$(MAKE) -C examples CC="$(CC)" CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Werror -I../include" SDK_SRC="../src/logbrew.c ../src/logbrew_metric.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c ../src/logbrew_trace.c" run-real-user-smoke >/dev/null
+	$(MAKE) -C examples CC="$(CC)" CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Werror -I../include" SDK_SRC="../src/logbrew.c ../src/logbrew_json.c ../src/logbrew_context.c ../src/logbrew_evidence.c ../src/logbrew_metric.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c ../src/logbrew_trace.c" run-readme-example >/dev/null
+	$(MAKE) -C examples CC="$(CC)" CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Werror -I../include" SDK_SRC="../src/logbrew.c ../src/logbrew_json.c ../src/logbrew_context.c ../src/logbrew_evidence.c ../src/logbrew_metric.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c ../src/logbrew_trace.c" run-real-user-smoke >/dev/null
 
 clean:
 	rm -rf "$(BUILD_DIR)" examples/build

@@ -239,13 +239,30 @@ static LogBrewStatus append_named_bool(
   return status;
 }
 
+static bool timeline_metadata_key_is_reserved(const char *key) {
+  static const char *const reserved[] = {
+    "source", "sessionId", "traceId", "routeTemplate", "screen", "funnel", "step",
+    "method", "statusCode", "durationMs", "analyticsSchemaVersion", "analyticsKind",
+    "analyticsSurface"
+  };
+  size_t index;
+  for (index = 0U; index < sizeof(reserved) / sizeof(reserved[0]); index++) {
+    if (strcmp(key, reserved[index]) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static LogBrewStatus append_metadata(
     LogBrewTimelineBuffer *buffer,
     LogBrewMetadata metadata,
-    bool skip_product_analytics,
+    LogBrewMetadata overridden_by,
+    bool skip_timeline_reserved,
     bool *needs_comma,
     LogBrewError *error) {
   size_t index;
+  size_t prior;
   if (metadata.count > 0U && metadata.entries == NULL) {
     set_timeline_error(error, "validation_error", "metadata entries are required when count is non-zero");
     return LOGBREW_VALIDATION_ERROR;
@@ -256,10 +273,20 @@ static LogBrewStatus append_metadata(
     if (status != LOGBREW_OK) {
       return status;
     }
-    if (skip_product_analytics &&
-        (strcmp(entry.key, "analyticsSchemaVersion") == 0 ||
-         strcmp(entry.key, "analyticsKind") == 0 ||
-         strcmp(entry.key, "analyticsSurface") == 0)) {
+    for (prior = 0U; prior < index; prior++) {
+      if (strcmp(metadata.entries[prior].key, entry.key) == 0) {
+        set_timeline_error(error, "validation_error", "metadata contains a duplicate key");
+        return LOGBREW_VALIDATION_ERROR;
+      }
+    }
+    for (prior = 0U; prior < overridden_by.count; prior++) {
+      if (overridden_by.entries != NULL && overridden_by.entries[prior].key != NULL &&
+          strcmp(overridden_by.entries[prior].key, entry.key) == 0) {
+        break;
+      }
+    }
+    if (prior < overridden_by.count ||
+        (skip_timeline_reserved && timeline_metadata_key_is_reserved(entry.key))) {
       continue;
     }
     if (entry.kind == LOGBREW_METADATA_STRING) {
@@ -271,6 +298,11 @@ static LogBrewStatus append_metadata(
       status = append_named_number(buffer, entry.key, entry.number_value, needs_comma, error);
     } else if (entry.kind == LOGBREW_METADATA_BOOL) {
       status = append_named_bool(buffer, entry.key, entry.bool_value, needs_comma, error);
+    } else if (entry.kind == LOGBREW_METADATA_NULL) {
+      status = *needs_comma ? timeline_append_char(buffer, ',', error) : LOGBREW_OK;
+      if (status == LOGBREW_OK) status = append_json_string(buffer, entry.key, error);
+      if (status == LOGBREW_OK) status = timeline_append(buffer, ":null", error);
+      if (status == LOGBREW_OK) *needs_comma = true;
     } else {
       set_timeline_error(error, "validation_error", "metadata kind is unsupported");
       return LOGBREW_VALIDATION_ERROR;
@@ -325,18 +357,49 @@ static LogBrewStatus append_timeline_metadata_finish(
   return status;
 }
 
+static LogBrewStatus validate_timeline_metadata(
+    LogBrewMetadata base,
+    LogBrewMetadata override,
+    LogBrewError *error) {
+  LogBrewStatus status;
+  if (base.count > LOGBREW_MAX_METADATA_ENTRIES ||
+      override.count > LOGBREW_MAX_METADATA_ENTRIES ||
+      base.count > LOGBREW_MAX_METADATA_ENTRIES - override.count) {
+    set_timeline_error(error, "validation_error", "metadata contains too many entries");
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  status = logbrew_json_validate_metadata(
+      base, "metadata", LOGBREW_MAX_METADATA_ENTRIES, false,
+      LOGBREW_MAX_METADATA_STRING_LENGTH, error);
+  if (status == LOGBREW_OK) {
+    status = logbrew_json_validate_metadata(
+        override, "metadata", LOGBREW_MAX_METADATA_ENTRIES, false,
+        LOGBREW_MAX_METADATA_STRING_LENGTH, error);
+  }
+  return status;
+}
+
 static LogBrewStatus append_timeline_metadata(
     LogBrewTimelineBuffer *buffer,
     const char *source,
     LogBrewProductTimelineContext context,
     LogBrewMetadata metadata,
+    LogBrewMetadata override_metadata,
     const char *analytics_surface,
     bool *needs_comma,
     LogBrewError *error) {
   bool metadata_needs_comma = false;
-  LogBrewStatus status = append_timeline_metadata_start(buffer, source, context, needs_comma, &metadata_needs_comma, error);
+  LogBrewStatus status = validate_timeline_metadata(metadata, override_metadata, error);
   if (status == LOGBREW_OK) {
-    status = append_metadata(buffer, metadata, true, &metadata_needs_comma, error);
+    status = append_timeline_metadata_start(
+        buffer, source, context, needs_comma, &metadata_needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_metadata(buffer, metadata, override_metadata, true, &metadata_needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_metadata(buffer, override_metadata, (LogBrewMetadata){NULL, 0U}, true,
+                             &metadata_needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = append_named_number(buffer, "analyticsSchemaVersion", 1.0, &metadata_needs_comma, error);
@@ -359,10 +422,16 @@ static LogBrewStatus append_network_timeline_metadata(
     const char *method,
     const char *route_template,
     LogBrewNetworkMilestoneAttributes attributes,
+    LogBrewMetadata override_metadata,
     bool *needs_comma,
     LogBrewError *error) {
   bool metadata_needs_comma = false;
-  LogBrewStatus status = append_timeline_metadata_start(buffer, "c.network", context, needs_comma, &metadata_needs_comma, error);
+  LogBrewStatus status = validate_timeline_metadata(
+      attributes.metadata, override_metadata, error);
+  if (status == LOGBREW_OK) {
+    status = append_timeline_metadata_start(
+        buffer, "c.network", context, needs_comma, &metadata_needs_comma, error);
+  }
   if (status == LOGBREW_OK) {
     status = append_named_string(buffer, "method", method, &metadata_needs_comma, error);
   }
@@ -376,7 +445,11 @@ static LogBrewStatus append_network_timeline_metadata(
     status = append_named_number(buffer, "durationMs", attributes.duration_ms, &metadata_needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_metadata(buffer, attributes.metadata, true, &metadata_needs_comma, error);
+    status = append_metadata(buffer, attributes.metadata, override_metadata, true, &metadata_needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_metadata(buffer, override_metadata, (LogBrewMetadata){NULL, 0U}, true,
+                             &metadata_needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = append_timeline_metadata_finish(buffer, needs_comma, error);
@@ -384,26 +457,114 @@ static LogBrewStatus append_network_timeline_metadata(
   return status;
 }
 
+static bool timeline_scheme_equals(
+    const char *start,
+    const char *end,
+    const char *expected) {
+  size_t index;
+  size_t length = (size_t)(end - start);
+  if (length != strlen(expected)) {
+    return false;
+  }
+  for (index = 0U; index < length; index++) {
+    unsigned char current = (unsigned char)start[index];
+    char normalized = current >= (unsigned char)'A' && current <= (unsigned char)'Z'
+        ? (char)(current + ((unsigned char)'a' - (unsigned char)'A'))
+        : (char)current;
+    if (normalized != expected[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool timeline_uri_scheme_prefix(const char *start, const char *colon) {
+  const char *cursor;
+  bool starts_with_alpha =
+      ((unsigned char)start[0] >= (unsigned char)'A' &&
+       (unsigned char)start[0] <= (unsigned char)'Z') ||
+      ((unsigned char)start[0] >= (unsigned char)'a' &&
+       (unsigned char)start[0] <= (unsigned char)'z');
+  if (colon <= start || !starts_with_alpha) {
+    return false;
+  }
+  for (cursor = start + 1; cursor < colon; cursor++) {
+    unsigned char current = (unsigned char)*cursor;
+    if (!((current >= (unsigned char)'A' && current <= (unsigned char)'Z') ||
+          (current >= (unsigned char)'a' && current <= (unsigned char)'z') ||
+          (current >= (unsigned char)'0' && current <= (unsigned char)'9') ||
+          current == (unsigned char)'+' || current == (unsigned char)'-' ||
+          current == (unsigned char)'.')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool timeline_route_has_forbidden_control(const unsigned char *value, size_t length) {
+  size_t index;
+  for (index = 0U; index < length; index++) {
+    if (value[index] < 0x20U || value[index] == 0x7fU ||
+        (value[index] == 0xc2U && index + 1U < length &&
+         value[index + 1U] >= 0x80U && value[index + 1U] <= 0x9fU)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static LogBrewStatus copy_sanitized_route(const char *route_template, char **out_route, LogBrewError *error) {
   const char *start = route_template;
   const char *end;
   const char *scheme;
+  const char *colon;
+  const char *boundary;
+  size_t raw_length;
   size_t length;
   char *copy;
   *out_route = NULL;
   if (require_text("route_template", route_template, error) != LOGBREW_OK) {
     return LOGBREW_VALIDATION_ERROR;
   }
+  raw_length = strlen(route_template);
+  if (raw_length > 8192U || isspace((unsigned char)route_template[0]) ||
+      isspace((unsigned char)route_template[raw_length - 1U]) ||
+      timeline_route_has_forbidden_control((const unsigned char *)route_template, raw_length)) {
+    set_timeline_error(error, "validation_error", "route_template is invalid");
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (start[0] == '/' && start[1] == '/') {
+    set_timeline_error(error, "validation_error", "route_template must not use a protocol-relative host");
+    return LOGBREW_VALIDATION_ERROR;
+  }
   scheme = strstr(route_template, "://");
-  if (scheme != NULL && (strncmp(route_template, "http://", 7U) == 0 || strncmp(route_template, "https://", 8U) == 0)) {
-    start = strchr(scheme + 3, '/');
-    if (start == NULL) {
-      start = "/";
+  if (scheme != NULL) {
+    const char *authority;
+    const char *authority_end;
+    if (!(timeline_scheme_equals(route_template, scheme, "http") ||
+          timeline_scheme_equals(route_template, scheme, "https"))) {
+      set_timeline_error(error, "validation_error", "route_template uses an unsupported URL scheme");
+      return LOGBREW_VALIDATION_ERROR;
+    }
+    authority = scheme + 3;
+    authority_end = authority + strcspn(authority, "/?#");
+    if (authority_end == authority) {
+      set_timeline_error(error, "validation_error", "route_template URL host is invalid");
+      return LOGBREW_VALIDATION_ERROR;
+    }
+    start = *authority_end == '/' ? authority_end : "/";
+  } else {
+    colon = strchr(route_template, ':');
+    boundary = strpbrk(route_template, "/?#");
+    if (colon != NULL && (boundary == NULL || colon < boundary) &&
+        timeline_uri_scheme_prefix(route_template, colon)) {
+      set_timeline_error(error, "validation_error", "route_template uses an unsupported URL scheme");
+      return LOGBREW_VALIDATION_ERROR;
     }
   }
   end = start + strcspn(start, "?#");
   length = (size_t)(end - start);
-  if (length == 0U) {
+  if (length == 0U || length > 2048U) {
     set_timeline_error(error, "validation_error", "route_template must include a path before query or fragment");
     return LOGBREW_VALIDATION_ERROR;
   }
@@ -476,11 +637,21 @@ static LogBrewStatus copy_upper_method(const char *method, char out_method[16], 
     return status;
   }
   for (index = 0U; method[index] != '\0'; index++) {
+    unsigned char current = (unsigned char)method[index];
     if (index + 1U >= 16U) {
       set_timeline_error(error, "validation_error", "method is too long");
       return LOGBREW_VALIDATION_ERROR;
     }
-    out_method[index] = (char)toupper((unsigned char)method[index]);
+    if (!((current >= (unsigned char)'A' && current <= (unsigned char)'Z') ||
+          (current >= (unsigned char)'a' && current <= (unsigned char)'z') ||
+          (current >= (unsigned char)'0' && current <= (unsigned char)'9') ||
+          strchr("!#$%&'*+-.^_`|~", (int)current) != NULL)) {
+      set_timeline_error(error, "validation_error", "method contains invalid HTTP characters");
+      return LOGBREW_VALIDATION_ERROR;
+    }
+    out_method[index] = current >= (unsigned char)'a' && current <= (unsigned char)'z'
+        ? (char)(current - ((unsigned char)'a' - (unsigned char)'A'))
+        : (char)current;
   }
   out_method[index] = '\0';
   return LOGBREW_OK;
@@ -496,6 +667,17 @@ LogBrewStatus logbrew_client_product_action(
     const char *id,
     const char *timestamp,
     LogBrewProductActionAttributes attributes,
+    LogBrewError *error) {
+  return logbrew_client_product_action_with_options(
+      client, id, timestamp, attributes, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_product_action_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewProductActionAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error) {
   LogBrewTimelineBuffer buffer = {0};
   bool needs_comma = false;
@@ -535,6 +717,7 @@ LogBrewStatus logbrew_client_product_action(
         "c.action",
         context,
         attributes.metadata,
+        options.metadata,
         analytics_surface,
         &needs_comma,
         error);
@@ -548,7 +731,8 @@ LogBrewStatus logbrew_client_product_action(
     free(buffer.data);
     return status;
   }
-  return logbrew_client_push_action_json(client, id, timestamp, buffer.data, error);
+  return logbrew_client_push_event_json_with_context(
+      client, "action", id, timestamp, buffer.data, options.context, NULL, error);
 }
 
 LogBrewStatus logbrew_client_network_milestone(
@@ -556,6 +740,17 @@ LogBrewStatus logbrew_client_network_milestone(
     const char *id,
     const char *timestamp,
     LogBrewNetworkMilestoneAttributes attributes,
+    LogBrewError *error) {
+  return logbrew_client_network_milestone_with_options(
+      client, id, timestamp, attributes, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_network_milestone_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewNetworkMilestoneAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error) {
   LogBrewTimelineBuffer buffer = {0};
   LogBrewTimelineBuffer name_buffer = {0};
@@ -601,6 +796,7 @@ LogBrewStatus logbrew_client_network_milestone(
         normalized_method,
         sanitized_route,
         attributes,
+        options.metadata,
         &needs_comma,
         error);
   }
@@ -613,5 +809,6 @@ LogBrewStatus logbrew_client_network_milestone(
     free(buffer.data);
     return status;
   }
-  return logbrew_client_push_action_json(client, id, timestamp, buffer.data, error);
+  return logbrew_client_push_event_json_with_context(
+      client, "action", id, timestamp, buffer.data, options.context, NULL, error);
 }

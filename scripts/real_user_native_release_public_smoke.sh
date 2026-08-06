@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 artifact_id="native:LogBrewCo/sdk"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
-version="${1:-0.1.0}"
+version="${1:-0.2.0}"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-native-release-public.XXXXXX")"
 
 if [[ $# -gt 1 ]] || { [[ "$receipt_mode" != "0" ]] && [[ "$receipt_mode" != "1" ]]; }; then
@@ -242,7 +242,7 @@ PY
   fi
 else
   require_command curl
-  release_url="https://github.com/LogBrewCo/sdk/archive/refs/tags/v${version}.tar.gz"
+  release_url="https://github.com/LogBrewCo/sdk/archive/refs/tags/c/logbrew-c/v${version}.tar.gz"
   if ! curl \
     --fail \
     --location \
@@ -324,6 +324,9 @@ REQUIRED_FILES = {
     "c/logbrew-c/README.md",
     "c/logbrew-c/include/logbrew.h",
     "c/logbrew-c/src/logbrew.c",
+    "c/logbrew-c/src/logbrew_json.c",
+    "c/logbrew-c/src/logbrew_context.c",
+    "c/logbrew-c/src/logbrew_evidence.c",
     "c/logbrew-c/src/logbrew_internal.h",
     "c/logbrew-c/src/logbrew_metric.c",
     "c/logbrew-c/src/logbrew_recording_transport.c",
@@ -617,6 +620,9 @@ mkdir -p "$build_dir/objects" "$install_dir/include" "$install_dir/lib" \
 
 sdk_sources=(
   "src/logbrew.c"
+  "src/logbrew_json.c"
+  "src/logbrew_context.c"
+  "src/logbrew_evidence.c"
   "src/logbrew_metric.c"
   "src/logbrew_recording_transport.c"
   "src/logbrew_timeline.c"
@@ -670,6 +676,18 @@ int main(void) {
   LogBrewError error;
   LogBrewRecordingTransport transport;
   LogBrewTransportResponse response;
+  LogBrewNamedVersion service = {"checkout-api", "2.4.0"};
+  LogBrewTelemetryResource resource = {0};
+  LogBrewTelemetryContext context = {0};
+  LogBrewClientOptions options = {0};
+  LogBrewIssueMechanism mechanism = {"signal", false};
+  LogBrewIssueException exception = {"PaymentDeclined", &mechanism};
+  LogBrewIssueStackFrame frame = {0};
+  LogBrewIssueBreadcrumb breadcrumb = {0};
+  LogBrewIssueDetails details = {0};
+  LogBrewSpanEvent span_event = {0};
+  LogBrewSpanLink span_link = {0};
+  LogBrewSpanEvidence evidence = {0};
   const char *body;
   LogBrewConfig config = {
     "LOGBREW_API_KEY",
@@ -682,12 +700,60 @@ int main(void) {
     return 1;
   }
   logbrew_error_clear(&error);
-  require_success(logbrew_client_new(config, &client, &error));
+  resource.service = &service;
+  context.schema_version = LOGBREW_TELEMETRY_CONTEXT_SCHEMA_VERSION;
+  context.resource = &resource;
+  options.context = &context;
+  require_success(logbrew_client_new_with_options(config, options, &client, &error));
   require_success(logbrew_client_log(
       client,
       "evt_native_release_public_smoke",
       "2026-07-01T00:00:00Z",
       (LogBrewLogAttributes){"native release smoke", "info", "native-release"},
+      &error));
+  breadcrumb.timestamp = "2026-08-06T10:01:05.123Z";
+  breadcrumb.type = "http";
+  breadcrumb.category = "payment.request";
+  breadcrumb.level = "error";
+  breadcrumb.message = "authorization returned a terminal response";
+  require_success(logbrew_client_add_breadcrumb(client, breadcrumb, &error));
+  require_success(logbrew_issue_frame_from_location(
+      "/workspace/source/checkout.c?redaction_canary=value#fragment", 413U, 9U,
+      "authorize_payment", "checkout.payment", true, &frame, &error));
+  details.exception = &exception;
+  details.stack_frames = &frame;
+  details.stack_frame_count = 1U;
+  require_success(logbrew_client_issue_with_details(
+      client,
+      "evt_native_release_rich_issue",
+      "2026-08-06T10:01:06Z",
+      (LogBrewIssueAttributes){"Payment authorization failed", "error", NULL},
+      details,
+      LOGBREW_EVENT_OPTIONS_NONE,
+      &error));
+  span_event.name = "payment.authorization.rejected";
+  span_event.timestamp = "2026-08-06T10:01:05.900Z";
+  span_link.trace_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  span_link.span_id = "BBBBBBBBBBBBBBBB";
+  evidence.events = &span_event;
+  evidence.event_count = 1U;
+  evidence.links = &span_link;
+  evidence.link_count = 1U;
+  require_success(logbrew_client_span_with_evidence(
+      client,
+      "evt_native_release_rich_span",
+      "2026-08-06T10:01:07Z",
+      (LogBrewSpanAttributes){
+        "POST /payments/{id}/authorize",
+        "11111111111111111111111111111111",
+        "2222222222222222",
+        "3333333333333333",
+        "error",
+        184.5,
+        true
+      },
+      evidence,
+      LOGBREW_EVENT_OPTIONS_NONE,
       &error));
   logbrew_recording_transport_init(&transport, NULL, 0U);
   require_success(logbrew_client_flush(
@@ -702,6 +768,16 @@ int main(void) {
       || logbrew_client_pending_events(client) != 0U
       || body == NULL
       || strstr(body, "evt_native_release_public_smoke") == NULL
+      || strstr(body, "evt_native_release_rich_issue") == NULL
+      || strstr(body, "evt_native_release_rich_span") == NULL
+      || strstr(body, "\"context\":{\"schemaVersion\":1") == NULL
+      || strstr(body, "\"service\":{\"name\":\"checkout-api\",\"version\":\"2.4.0\"}") == NULL
+      || strstr(body, "\"exception\":{\"type\":\"PaymentDeclined\"") == NULL
+      || strstr(body, "\"filename\":\"checkout.c\"") == NULL
+      || strstr(body, "\"events\":[{\"name\":\"payment.authorization.rejected\"") == NULL
+      || strstr(body, "\"links\":[{\"traceId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"") == NULL
+      || strstr(body, "/workspace/source") != NULL
+      || strstr(body, "redaction_canary=value") != NULL
       || strstr(body, "LOGBREW_API_KEY") != NULL) {
     return 1;
   }

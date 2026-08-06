@@ -654,19 +654,23 @@ def validate_c(root: Path, failures: list[str]) -> None:
     require_path(root, "c/logbrew-c/README.md", failures)
     header_path = require_path(root, "c/logbrew-c/include/logbrew.h", failures)
     source_path = require_path(root, "c/logbrew-c/src/logbrew.c", failures)
+    require_path(root, "c/logbrew-c/src/logbrew_json.c", failures)
+    require_path(root, "c/logbrew-c/src/logbrew_context.c", failures)
+    require_path(root, "c/logbrew-c/src/logbrew_evidence.c", failures)
     require_path(root, "c/logbrew-c/src/logbrew_metric.c", failures)
     require_path(root, "c/logbrew-c/Makefile", failures)
     require_path(root, "c/logbrew-c/examples/Makefile", failures)
     require_path(root, "c/logbrew-c/examples/readme_example.c", failures)
     require_path(root, "c/logbrew-c/examples/real_user_smoke.c", failures)
     require_path(root, "c/logbrew-c/tests/test_logbrew.c", failures)
+    require_path(root, "c/logbrew-c/tests/test_rich_telemetry.c", failures)
     if not header_path.exists() or not source_path.exists():
         return
     header = header_path.read_text(encoding="utf-8")
     readme = (root / "c/logbrew-c/README.md").read_text(encoding="utf-8")
     location = "c/logbrew-c/include/logbrew.h"
     for needle in (
-        '#define LOGBREW_C_VERSION "0.1.0"',
+        '#define LOGBREW_C_VERSION "0.2.0"',
         "typedef struct LogBrewClient LogBrewClient;",
         "logbrew_client_flush",
         "LogBrewRecordingTransport",
@@ -677,6 +681,9 @@ def validate_c(root: Path, failures: list[str]) -> None:
         "logbrew_client_network_milestone",
         "LogBrewHttpTransport",
         "logbrew_http_transport_init",
+        "LogBrewTelemetryContext",
+        "logbrew_client_issue_with_details",
+        "logbrew_client_span_with_evidence",
     ):
         require(needle in header, failures, f"{location}: missing public C SDK symbol {needle}")
     for needle in (
@@ -688,6 +695,9 @@ def validate_c(root: Path, failures: list[str]) -> None:
         "logbrew_client_product_action",
         "logbrew_client_network_milestone",
         "logbrew_http_transport_init",
+        "Rich investigation context",
+        "logbrew_client_issue_with_details",
+        "logbrew_client_span_with_evidence",
         "copy into your own native application",
     ):
         require(needle in readme, failures, f"c/logbrew-c/README.md: missing guidance {needle}")
