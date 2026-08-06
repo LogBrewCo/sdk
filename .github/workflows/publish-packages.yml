@@ -249,6 +249,10 @@ jobs:
           done
           python3 scripts/check_npm_workspace_peer_release.py "${peer_release_args[@]}"
 
+          if [[ " ${package_dirs[*]} " == *" js/logbrew-react-native "* ]]; then
+            bash scripts/real_user_react_native_minimum_peer_smoke.sh
+          fi
+
           metadata_args=()
           selected_package_names=()
           selected_package_versions=()

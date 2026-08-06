@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/react-native",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "React Native offline delivery, Apple native diagnostics, screen, error, trace, action, and network timeline helpers for LogBrew.",
   "type": "module",
   "main": "./index.cjs",
@@ -240,7 +240,7 @@
     "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "peerDependencies": {
-    "@logbrew/sdk": "^0.1.5",
+    "@logbrew/sdk": "^0.1.7",
     "expo": ">=49",
     "react": ">=18",
     "react-native": ">=0.72"

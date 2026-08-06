@@ -34,7 +34,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.5"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.4"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.3"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.12"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.13"),
         }
         for relative_path, expected in npm_versions.items():
             manifest = json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
@@ -79,7 +79,16 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             manifest["peerDependencies"]["@logbrew/sdk"],
-            "^0.1.5",
+            "^0.1.7",
+        )
+
+        native_source = (
+            ROOT
+            / "js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            f'private static let sdkVersion = "{manifest["version"]}"',
+            native_source,
         )
 
     def test_node_runtime_metadata_matches_the_package_release(self) -> None:
@@ -176,6 +185,23 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "expected_react_native_package_version=\"$(node -p \"require('${repo_root}/js/logbrew-react-native/package.json').version\")\"",
             smoke,
         )
+
+    def test_react_native_minimum_public_peer_is_checked_before_publish(self) -> None:
+        smoke_name = "scripts/real_user_react_native_minimum_peer_smoke.sh"
+        smoke = (ROOT / smoke_name).read_text(encoding="utf-8")
+        workflow = (
+            ROOT / ".github/workflows/publish-packages.yml"
+        ).read_text(encoding="utf-8")
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn('"@logbrew/sdk@$minimum_sdk_version"', smoke)
+        self.assertIn('await import("@logbrew/react-native")', smoke)
+        self.assertIn('require("@logbrew/react-native")', smoke)
+        invocation = f"bash {smoke_name}"
+        publish = 'echo "Publishing ${package_name} from ${package_dir}"'
+        self.assertIn(invocation, workflow)
+        self.assertLess(workflow.index(invocation), workflow.index(publish))
+        self.assertIn(invocation, ci)
 
     def test_react_native_release_selector_accepts_name_and_package_directory(
         self,
