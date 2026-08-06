@@ -45,7 +45,7 @@ if [[ -z "$objc_command" ]]; then
   fi
 fi
 
-archive="$tmp_dir/logbrew-objc-0.1.0.tar.gz"
+archive="$tmp_dir/logbrew-objc-0.2.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 
 app_dir="$tmp_dir/native-objc-app"
@@ -54,6 +54,10 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWTelemetryContext.h"
+test -f "$sdk_dir/src/LBWTelemetryContext.m"
+test -f "$sdk_dir/src/LBWInvestigationEvidence.h"
+test -f "$sdk_dir/src/LBWInvestigationEvidence.m"
 test -f "$sdk_dir/src/LBWDeliveryEngine.h"
 test -f "$sdk_dir/src/LBWDeliveryEngine.m"
 test -f "$sdk_dir/src/LBWDeliveryEnginePrivate.h"
@@ -68,6 +72,9 @@ test -f "$sdk_dir/src/LogBrewLifecycle.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWTraceContext' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWTelemetry' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWIssueDiagnostics' "$sdk_dir/include/LogBrew.h"
+grep -q 'addBreadcrumb' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
@@ -96,6 +103,10 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWTelemetryContext.h"
+test -f "$sdk_dir/src/LBWTelemetryContext.m"
+test -f "$sdk_dir/src/LBWInvestigationEvidence.h"
+test -f "$sdk_dir/src/LBWInvestigationEvidence.m"
 test -f "$sdk_dir/src/LBWDeliveryEngine.h"
 test -f "$sdk_dir/src/LBWDeliveryEngine.m"
 test -f "$sdk_dir/src/LBWDeliveryEnginePrivate.h"
@@ -110,6 +121,9 @@ test -f "$sdk_dir/src/LogBrewLifecycle.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWTraceContext' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWTelemetry' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWIssueDiagnostics' "$sdk_dir/include/LogBrew.h"
+grep -q 'addBreadcrumb' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
@@ -131,6 +145,8 @@ grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h
 
 installed_core_sources=(
   "$sdk_dir/src/LogBrew.m"
+  "$sdk_dir/src/LBWTelemetryContext.m"
+  "$sdk_dir/src/LBWInvestigationEvidence.m"
   "$sdk_dir/src/LBWDeliveryEngine.m"
   "$sdk_dir/src/LBWDeliveryEngineDurable.m"
   "$sdk_dir/src/LBWDurableDeliveryStore.m"
@@ -192,6 +208,13 @@ static LBWClient *LBWNewClient(void) {
   NSError *error = nil;
   LBWConfig *config = [LBWConfig configWithAPIKey:@"LOGBREW_API_KEY"];
   config.sdkName = @"native-objc-app";
+  config.context = @{
+    @"schemaVersion": @1,
+    @"resource": @{
+      @"service": @{@"name": @"checkout-app", @"version": @"2.4.0"}
+    },
+    @"tags": @{@"plan": @"team"}
+  };
   LBWClient *client = [[LBWClient alloc] initWithConfig:config error:&error];
   if (client == nil) {
     LBWDie([NSString stringWithFormat:@"client init failed: %@", error]);
@@ -201,6 +224,16 @@ static LBWClient *LBWNewClient(void) {
 
 static void LBWQueueEvents(LBWClient *client) {
   NSError *error = nil;
+  LBWTelemetryScope *telemetryScope = [LBWTelemetry activateContext:@{
+    @"schemaVersion": @1,
+    @"resource": @{
+      @"deployment": @{@"environment": @"production", @"release": @"checkout@2.4.0"}
+    },
+    @"session": @{@"id": @"session_01", @"previousId": @"session_00"},
+    @"subject": @{@"id": @"subject_01", @"kind": @"user"},
+    @"tags": @{@"journey": @"checkout"}
+  } error:&error];
+  LBWMust(telemetryScope != nil, error);
   LBWMust([client releaseWithID:@"evt_release_001"
                       timestamp:@"2026-06-02T10:00:00Z"
                      attributes:@{
@@ -213,13 +246,38 @@ static void LBWQueueEvents(LBWClient *client) {
                           timestamp:@"2026-06-02T10:00:01Z"
                          attributes:@{@"name": @"production", @"region": @"global"}
                               error:&error], error);
+  LBWMust([client addBreadcrumb:@{
+    @"timestamp": @"2026-06-02T10:00:01Z",
+    @"category": @"checkout.submit",
+    @"type": @"navigation",
+    @"level": @"info",
+    @"message": @"Checkout submitted",
+    @"data": @{@"attempt": @2}
+  } error:&error], error);
+  NSError *captured = [NSError errorWithDomain:@"CheckoutError"
+                                           code:42
+                                       userInfo:@{NSLocalizedDescriptionKey: @"restricted-value-must-never-escape"}];
+  NSDictionary<NSString *, id> *builtIssue = [LBWIssueDiagnostics attributesForError:captured
+                                                                                title:@"Checkout timeout"
+                                                                                level:@"error"
+                                                                            mechanism:@"objc.error"
+                                                                               handled:YES
+                                                                                  file:@"/opt/app/Checkout.m?query=value"
+                                                                                  line:42U
+                                                                                column:7U
+                                                                              function:@"submitCheckout:"
+                                                                              metadata:nil
+                                                                               context:@{
+                                                                                 @"schemaVersion": @1,
+                                                                                 @"tags": @{@"step": @"confirm"}
+                                                                               }
+                                                                                 error:&error];
+  LBWMust(builtIssue != nil, error);
+  NSMutableDictionary<NSString *, id> *issue = [builtIssue mutableCopy];
+  issue[@"message"] = @"Request timed out after retry budget";
   LBWMust([client issueWithID:@"evt_issue_001"
                     timestamp:@"2026-06-02T10:00:02Z"
-                   attributes:@{
-                     @"title": @"Checkout timeout",
-                     @"level": @"error",
-                     @"message": @"Request timed out after retry budget"
-                   }
+                   attributes:issue
                         error:&error], error);
   LBWMust([client logWithID:@"evt_log_001"
                   timestamp:@"2026-06-02T10:00:03Z"
@@ -236,13 +294,29 @@ static void LBWQueueEvents(LBWClient *client) {
                     @"traceId": @"trace_001",
                     @"spanId": @"span_001",
                     @"status": @"ok",
-                    @"durationMs": @12.5
+                    @"durationMs": @12.5,
+                    @"events": @[
+                      @{
+                        @"name": @"health.cache_hit",
+                        @"timestamp": @"2026-06-02T10:00:04.100Z",
+                        @"metadata": @{@"cache": @"primary"}
+                      }
+                    ],
+                    @"links": @[
+                      @{
+                        @"traceId": @"11111111111111111111111111111111",
+                        @"spanId": @"2222222222222222",
+                        @"sampled": @YES,
+                        @"metadata": @{@"relationship": @"follows_from"}
+                      }
+                    ]
                   }
                        error:&error], error);
   LBWMust([client actionWithID:@"evt_action_001"
                      timestamp:@"2026-06-02T10:00:05Z"
                     attributes:@{@"name": @"deploy", @"status": @"success"}
                          error:&error], error);
+  [telemetryScope close];
 }
 
 static void LBWRequireCode(NSError *error, NSString *expectedCode, NSString *message) {
@@ -470,7 +544,53 @@ EOF
   -o "$app_dir/native_objc_app"
 "$app_dir/native_objc_app" > "$tmp_dir/native-app.stdout.json" 2> "$tmp_dir/native-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
+python3 - "$tmp_dir/native-app.stdout.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+raw = path.read_text()
+payload = json.loads(raw)
+events = {event["id"]: event for event in payload["events"]}
+
+for event in events.values():
+    context = event["attributes"]["context"]
+    resource = context["resource"]
+    assert context["schemaVersion"] == 1
+    assert resource["service"] == {"name": "checkout-app", "version": "2.4.0"}
+    assert resource["deployment"] == {
+        "environment": "production",
+        "release": "checkout@2.4.0",
+    }
+    assert resource["runtime"]["name"] == "objective-c"
+    assert resource["operatingSystem"]["name"]
+    assert resource["operatingSystem"]["version"]
+    assert resource["device"]["architecture"]
+    assert context["session"] == {"id": "session_01", "previousId": "session_00"}
+    assert context["subject"] == {"id": "subject_01", "kind": "user"}
+    assert context["tags"]["plan"] == "team"
+    assert context["tags"]["journey"] == "checkout"
+
+issue = events["evt_issue_001"]["attributes"]
+assert issue["context"]["tags"]["step"] == "confirm"
+assert issue["exception"] == {
+    "type": "CheckoutError",
+    "mechanism": {"type": "objc.error", "handled": True},
+}
+assert issue["stackFrames"][0]["filename"] == "Checkout.m"
+assert issue["stackFrames"][0]["function"] == "submitCheckout:"
+assert issue["breadcrumbs"][0]["category"] == "checkout.submit"
+assert "restricted-value-must-never-escape" not in raw
+assert "/opt/app" not in raw
+
+span = events["evt_span_001"]["attributes"]
+assert span["events"][0]["name"] == "health.cache_hit"
+assert span["links"][0]["traceId"] == "11111111111111111111111111111111"
+assert "trace" not in span["context"]
+PY
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
 
 cat > "$app_dir/http_app.m" <<'EOF'
@@ -727,10 +847,12 @@ grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-he
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 make -C "$sdk_dir/examples" OBJC="$objc_command" run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 make -C "$sdk_dir/examples" OBJC="$objc_command" run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 make -C "$sdk_dir/examples" OBJC="$objc_command" run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
 python3 "$repo_root/scripts/check_objc_trace_correlation_payload.py" \
   "$tmp_dir/trace-correlation.stdout.json" \

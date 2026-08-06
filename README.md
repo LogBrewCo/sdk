@@ -79,7 +79,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | PHP | [`logbrew/sdk`](php/logbrew-php) | Core PHP client, typed exception/stack/breadcrumb diagnostics, HTTP delivery, PSR-3/Monolog, native Symfony exception capture, and a config-cache-safe Laravel channel |
 | Ruby / Rails | [`logbrew-sdk`](ruby/logbrew-ruby) | Shared runtime/resource/session/subject context, typed exception/stack/breadcrumb diagnostics, automatic Rails request/error capture and delivery, stdlib `Logger`, and manual Rack helpers |
 | Rust | [`logbrew`](rust/logbrew) | Shared runtime/resource/trace/session/subject context, typed issue diagnostics, HTTP/Tower correlation, `tracing`, OpenTelemetry export, and delivery |
-| Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product with automatic and task-local typed context, handled-error/frame/breadcrumb diagnostics, span milestones/links, Apple-style logging, URLSession delivery, and opt-in bounded native crash replay; Objective-C vendoring for mixed or Objective-C-only apps |
+| Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product with automatic and task-local typed context, handled-error/frame/breadcrumb diagnostics, span milestones/links, Apple-style logging, URLSession delivery, and opt-in bounded native crash replay; Objective-C vendoring with schema-v1 shared context, structured NSError evidence, breadcrumbs, and span evidence for mixed or Objective-C-only apps |
 | Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client with shared runtime/resource/session/subject context, structured issue diagnostics, Android helpers, tracing, and HTTP delivery |
 | Kotlin OkHttp | [`co.logbrew:logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp request tracing, phase timings, and W3C trace propagation |
 | Unity | [`co.logbrew.unity`](unity/logbrew-unity) | Unity package with runtime helpers and HTTP delivery |
@@ -268,6 +268,10 @@ LogBrew SDKs favor conservative defaults:
   architecture as automatic shared context. It supports an explicit opt-out
   and does not probe hostnames, process details, environment variables, local
   accounts or paths, network/cloud identity, CPU details, or memory details.
+- The Objective-C source client adds only its runtime name, Apple operating-system
+  name/version, architecture, and populated application bundle name/version/build.
+  It supports an explicit opt-out and does not infer account, host, network,
+  unique-device, session, subject, or tag identity.
 - The browser client adds only low-entropy browser brand/significant version,
   platform, and mobile/desktop family when User-Agent Client Hints expose them;
   otherwise it reports the generic browser runtime. It never reads the legacy
