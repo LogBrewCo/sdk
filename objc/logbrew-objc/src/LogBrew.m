@@ -7,7 +7,7 @@
 
 #import <math.h>
 
-NSString *const LogBrewObjectiveCVersion = @"0.2.0";
+NSString *const LogBrewObjectiveCVersion = @"0.2.1";
 NSString *const LBWErrorDomain = @"co.logbrew.sdk";
 NSString *const LBWErrorStableCodeKey = @"LBWStableCode";
 NSString *const LBWErrorRetryableKey = @"LBWRetryable";
