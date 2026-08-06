@@ -27,6 +27,10 @@ struct LogBrewClient {
   LogBrewEvent *events;
   size_t event_count;
   size_t event_capacity;
+  LogBrewContextStorage *base_context;
+  char *breadcrumbs[LOGBREW_MAX_BREADCRUMBS];
+  size_t breadcrumb_count;
+  bool breadcrumbs_truncated;
 };
 
 static void set_error(LogBrewError *error, const char *code, const char *message, bool retryable) {
@@ -384,19 +388,6 @@ static LogBrewStatus append_named_number(
   return status;
 }
 
-static LogBrewStatus append_active_trace_metadata(LogBrewBuffer *buffer, bool *needs_comma, LogBrewError *error) {
-  char *metadata_json = NULL;
-  LogBrewStatus status = logbrew_trace_active_metadata_json(&metadata_json, error);
-  if (status != LOGBREW_OK || metadata_json == NULL) {
-    return status;
-  }
-  status = buffer_append(buffer, *needs_comma ? ",\"metadata\":" : "\"metadata\":", error);
-  if (status == LOGBREW_OK) status = buffer_append(buffer, metadata_json, error);
-  free(metadata_json);
-  if (status == LOGBREW_OK) *needs_comma = true;
-  return status;
-}
-
 static LogBrewStatus build_event_json(
     const char *event_type,
     const char *id,
@@ -466,14 +457,77 @@ static void clear_events(LogBrewClient *client) {
   client->event_count = 0U;
 }
 
-static LogBrewStatus push_event(
+static LogBrewStatus inject_context(
+    LogBrewClient *client,
+    char *attributes_json,
+    const LogBrewTelemetryContext *event_context,
+    const LogBrewSpanAttributes *signal_span,
+    char **out_json,
+    LogBrewError *error) {
+  char *context_json = NULL;
+  char *combined;
+  size_t attributes_length;
+  size_t context_length;
+  size_t prefix_length;
+  size_t marker_length;
+  size_t allocation_size;
+  LogBrewStatus status = logbrew_context_build_json(
+      client->base_context, signal_span, event_context, &context_json, error);
+  if (status != LOGBREW_OK) {
+    free(attributes_json);
+    return status;
+  }
+  if (context_json == NULL) {
+    *out_json = attributes_json;
+    return LOGBREW_OK;
+  }
+  attributes_length = strlen(attributes_json);
+  context_length = strlen(context_json);
+  if (attributes_length < 2U || attributes_json[0] != '{' || attributes_json[attributes_length - 1U] != '}') {
+    free(attributes_json);
+    free(context_json);
+    set_error(error, "serialization_error", "attributes JSON is invalid", false);
+    return LOGBREW_SERIALIZATION_ERROR;
+  }
+  prefix_length = attributes_length - 1U;
+  marker_length = attributes_length > 2U ? 11U : 10U;
+  if (prefix_length > ((size_t)-1) - context_length ||
+      prefix_length + context_length > ((size_t)-1) - marker_length - 2U) {
+    free(attributes_json);
+    free(context_json);
+    set_error(error, "allocation_error", "contextual attributes size overflow", false);
+    return LOGBREW_ALLOCATION_ERROR;
+  }
+  allocation_size = prefix_length + context_length + marker_length + 2U;
+  combined = (char *)malloc(allocation_size);
+  if (combined == NULL) {
+    free(attributes_json);
+    free(context_json);
+    set_error(error, "allocation_error", "out of memory", false);
+    return LOGBREW_ALLOCATION_ERROR;
+  }
+  memcpy(combined, attributes_json, prefix_length);
+  combined[prefix_length] = '\0';
+  (void)snprintf(combined + prefix_length,
+                 marker_length + context_length + 2U,
+                 "%s\"context\":%s}", attributes_length > 2U ? "," : "", context_json);
+  free(attributes_json);
+  free(context_json);
+  *out_json = combined;
+  return LOGBREW_OK;
+}
+
+static LogBrewStatus push_event_with_context(
     LogBrewClient *client,
     const char *event_type,
     const char *id,
     const char *timestamp,
     char *attributes_json,
+    const LogBrewTelemetryContext *event_context,
+    const LogBrewSpanAttributes *signal_span,
     LogBrewError *error) {
   char *event_json = NULL;
+  char *contextual_attributes_json = NULL;
   LogBrewStatus status;
   if (client == NULL) {
     free(attributes_json);
@@ -485,14 +539,19 @@ static LogBrewStatus push_event(
     set_error(error, "shutdown_error", "client is already shut down", false);
     return LOGBREW_SHUTDOWN_ERROR;
   }
+  status = inject_context(
+      client, attributes_json, event_context, signal_span, &contextual_attributes_json, error);
+  if (status != LOGBREW_OK) {
+    return status;
+  }
   status = require_non_empty("id", id, error);
   if (status == LOGBREW_OK) {
     status = require_timestamp(timestamp, error);
   }
   if (status == LOGBREW_OK) {
-    status = build_event_json(event_type, id, timestamp, attributes_json, &event_json, error);
+    status = build_event_json(event_type, id, timestamp, contextual_attributes_json, &event_json, error);
   }
-  free(attributes_json);
+  free(contextual_attributes_json);
   if (status != LOGBREW_OK) {
     return status;
   }
@@ -506,6 +565,16 @@ static LogBrewStatus push_event(
   return LOGBREW_OK;
 }
 
+static LogBrewStatus push_event(
+    LogBrewClient *client,
+    const char *event_type,
+    const char *id,
+    const char *timestamp,
+    char *attributes_json,
+    LogBrewError *error) {
+  return push_event_with_context(client, event_type, id, timestamp, attributes_json, NULL, NULL, error);
+}
+
 LogBrewStatus logbrew_client_push_event_json(
     LogBrewClient *client,
     const char *event_type,
@@ -516,16 +585,29 @@ LogBrewStatus logbrew_client_push_event_json(
   return push_event(client, event_type, id, timestamp, attributes_json, error);
 }
 
-LogBrewStatus logbrew_client_push_action_json(
+LogBrewStatus logbrew_client_push_event_json_with_context(
     LogBrewClient *client,
+    const char *event_type,
     const char *id,
     const char *timestamp,
     char *attributes_json,
+    const LogBrewTelemetryContext *event_context,
+    const LogBrewSpanAttributes *signal_span,
     LogBrewError *error) {
-  return logbrew_client_push_event_json(client, "action", id, timestamp, attributes_json, error);
+  return push_event_with_context(
+      client, event_type, id, timestamp, attributes_json, event_context, signal_span, error);
 }
 
 LogBrewStatus logbrew_client_new(LogBrewConfig config, LogBrewClient **out_client, LogBrewError *error) {
+  LogBrewClientOptions options = {0};
+  return logbrew_client_new_with_options(config, options, out_client, error);
+}
+
+LogBrewStatus logbrew_client_new_with_options(
+    LogBrewConfig config,
+    LogBrewClientOptions options,
+    LogBrewClient **out_client,
+    LogBrewError *error) {
   LogBrewClient *client;
   LogBrewStatus status;
   if (out_client == NULL) {
@@ -557,11 +639,18 @@ LogBrewStatus logbrew_client_new(LogBrewConfig config, LogBrewClient **out_clien
     return LOGBREW_ALLOCATION_ERROR;
   }
   client->max_retries = config.max_retries == 0U ? 2U : config.max_retries;
+  status = logbrew_context_storage_create(
+      options.context, !options.disable_automatic_context, &client->base_context, error);
+  if (status != LOGBREW_OK) {
+    logbrew_client_free(client);
+    return status;
+  }
   *out_client = client;
   return LOGBREW_OK;
 }
 
 void logbrew_client_free(LogBrewClient *client) {
+  size_t breadcrumb_index;
   if (client == NULL) {
     return;
   }
@@ -570,6 +659,10 @@ void logbrew_client_free(LogBrewClient *client) {
   free(client->api_key);
   free(client->sdk_name);
   free(client->sdk_version);
+  logbrew_context_storage_free(client->base_context);
+  for (breadcrumb_index = 0U; breadcrumb_index < client->breadcrumb_count; breadcrumb_index++) {
+    free(client->breadcrumbs[breadcrumb_index]);
+  }
   free(client);
 }
 
@@ -579,6 +672,48 @@ size_t logbrew_client_pending_events(const LogBrewClient *client) {
 
 void logbrew_free_string(char *value) {
   free(value);
+}
+
+LogBrewStatus logbrew_client_add_breadcrumb(
+    LogBrewClient *client,
+    LogBrewIssueBreadcrumb breadcrumb,
+    LogBrewError *error) {
+  char *breadcrumb_json = NULL;
+  LogBrewStatus status;
+  if (client == NULL) {
+    set_error(error, "config_error", "client is required", false);
+    return LOGBREW_CONFIG_ERROR;
+  }
+  if (client->closed) {
+    set_error(error, "shutdown_error", "client is already shut down", false);
+    return LOGBREW_SHUTDOWN_ERROR;
+  }
+  status = logbrew_evidence_breadcrumb_json(breadcrumb, &breadcrumb_json, error);
+  if (status != LOGBREW_OK) {
+    return status;
+  }
+  if (client->breadcrumb_count == LOGBREW_MAX_BREADCRUMBS) {
+    free(client->breadcrumbs[0]);
+    memmove(&client->breadcrumbs[0], &client->breadcrumbs[1],
+            (LOGBREW_MAX_BREADCRUMBS - 1U) * sizeof(client->breadcrumbs[0]));
+    client->breadcrumb_count--;
+    client->breadcrumbs_truncated = true;
+  }
+  client->breadcrumbs[client->breadcrumb_count++] = breadcrumb_json;
+  return LOGBREW_OK;
+}
+
+void logbrew_client_clear_breadcrumbs(LogBrewClient *client) {
+  size_t index;
+  if (client == NULL) {
+    return;
+  }
+  for (index = 0U; index < client->breadcrumb_count; index++) {
+    free(client->breadcrumbs[index]);
+    client->breadcrumbs[index] = NULL;
+  }
+  client->breadcrumb_count = 0U;
+  client->breadcrumbs_truncated = false;
 }
 
 LogBrewStatus logbrew_client_preview_json(const LogBrewClient *client, char **out_json, LogBrewError *error) {
@@ -739,11 +874,79 @@ static LogBrewStatus finish_attributes(LogBrewBuffer *buffer, char **out_json, L
   return LOGBREW_OK;
 }
 
+static LogBrewStatus append_event_metadata(
+    LogBrewBuffer *buffer,
+    LogBrewMetadata metadata,
+    bool include_active_trace,
+    bool *needs_comma,
+    LogBrewError *error) {
+  LogBrewJsonBuffer fragment = {0};
+  LogBrewMetadataEntry trace_entries[LOGBREW_TRACE_METADATA_ENTRY_COUNT];
+  LogBrewMetadata trace_metadata = {NULL, 0U};
+  bool fragment_comma = false;
+  if (include_active_trace) {
+    trace_metadata = logbrew_trace_metadata(NULL, trace_entries);
+  }
+  LogBrewStatus status = logbrew_json_append_metadata_member(
+      &fragment,
+      "metadata",
+      metadata,
+      trace_metadata,
+      LOGBREW_MAX_METADATA_ENTRIES,
+      false,
+      LOGBREW_MAX_METADATA_STRING_LENGTH,
+      &fragment_comma,
+      error);
+  if (status == LOGBREW_OK && fragment.length > 0U && *needs_comma) {
+    status = buffer_append_char(buffer, ',', error);
+  }
+  if (status == LOGBREW_OK && fragment.length > 0U) {
+    status = buffer_append(buffer, fragment.data, error);
+  }
+  if (status == LOGBREW_OK && fragment.length > 0U) {
+    *needs_comma = true;
+  }
+  logbrew_json_dispose(&fragment);
+  return status;
+}
+
+static LogBrewStatus append_raw_fragment(
+    LogBrewBuffer *buffer,
+    const char *fragment,
+    bool *needs_comma,
+    LogBrewError *error) {
+  LogBrewStatus status = LOGBREW_OK;
+  if (fragment == NULL || fragment[0] == '\0') {
+    return LOGBREW_OK;
+  }
+  if (*needs_comma) {
+    status = buffer_append_char(buffer, ',', error);
+  }
+  if (status == LOGBREW_OK) {
+    status = buffer_append(buffer, fragment, error);
+  }
+  if (status == LOGBREW_OK) {
+    *needs_comma = true;
+  }
+  return status;
+}
+
 LogBrewStatus logbrew_client_release(
     LogBrewClient *client,
     const char *id,
     const char *timestamp,
     LogBrewReleaseAttributes attributes,
+    LogBrewError *error) {
+  return logbrew_client_release_with_options(
+      client, id, timestamp, attributes, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_release_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewReleaseAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error) {
   LogBrewBuffer buffer = {0};
   bool needs_comma = false;
@@ -762,13 +965,16 @@ LogBrewStatus logbrew_client_release(
     status = append_optional_string(&buffer, "notes", attributes.notes, false, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
+    status = append_event_metadata(&buffer, options.metadata, false, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
   }
   if (status != LOGBREW_OK) {
     buffer_dispose(&buffer);
     return status;
   }
-  return push_event(client, "release", id, timestamp, attributes_json, error);
+  return push_event_with_context(client, "release", id, timestamp, attributes_json, options.context, NULL, error);
 }
 
 LogBrewStatus logbrew_client_environment(
@@ -776,6 +982,17 @@ LogBrewStatus logbrew_client_environment(
     const char *id,
     const char *timestamp,
     LogBrewEnvironmentAttributes attributes,
+    LogBrewError *error) {
+  return logbrew_client_environment_with_options(
+      client, id, timestamp, attributes, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_environment_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewEnvironmentAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error) {
   LogBrewBuffer buffer = {0};
   bool needs_comma = false;
@@ -791,13 +1008,16 @@ LogBrewStatus logbrew_client_environment(
     status = append_optional_string(&buffer, "region", attributes.region, false, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
+    status = append_event_metadata(&buffer, options.metadata, false, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
   }
   if (status != LOGBREW_OK) {
     buffer_dispose(&buffer);
     return status;
   }
-  return push_event(client, "environment", id, timestamp, attributes_json, error);
+  return push_event_with_context(client, "environment", id, timestamp, attributes_json, options.context, NULL, error);
 }
 
 LogBrewStatus logbrew_client_issue(
@@ -806,11 +1026,45 @@ LogBrewStatus logbrew_client_issue(
     const char *timestamp,
     LogBrewIssueAttributes attributes,
     LogBrewError *error) {
+  LogBrewIssueDetails details = {0};
+  return logbrew_client_issue_with_details(
+      client, id, timestamp, attributes, details, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_issue_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewIssueAttributes attributes,
+    LogBrewEventOptions options,
+    LogBrewError *error) {
+  LogBrewIssueDetails details = {0};
+  return logbrew_client_issue_with_details(client, id, timestamp, attributes, details, options, error);
+}
+
+LogBrewStatus logbrew_client_issue_with_details(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewIssueAttributes attributes,
+    LogBrewIssueDetails details,
+    LogBrewEventOptions options,
+    LogBrewError *error) {
   LogBrewBuffer buffer = {0};
   bool needs_comma = false;
   char *attributes_json = NULL;
+  char *evidence_fragment = NULL;
   const char *level = NULL;
-  LogBrewStatus status = require_non_empty("issue title", attributes.title, error);
+  LogBrewStatus status;
+  if (client == NULL) {
+    set_error(error, "config_error", "client is required", false);
+    return LOGBREW_CONFIG_ERROR;
+  }
+  if (client->closed) {
+    set_error(error, "shutdown_error", "client is already shut down", false);
+    return LOGBREW_SHUTDOWN_ERROR;
+  }
+  status = require_non_empty("issue title", attributes.title, error);
   if (status == LOGBREW_OK) {
     status = normalize_severity("issue level", attributes.level, &level, error);
   }
@@ -827,16 +1081,31 @@ LogBrewStatus logbrew_client_issue(
     status = append_optional_string(&buffer, "message", attributes.message, false, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_active_trace_metadata(&buffer, &needs_comma, error);
+    status = logbrew_evidence_issue_fragment(
+        details,
+        client->breadcrumbs,
+        client->breadcrumb_count,
+        client->breadcrumbs_truncated,
+        &evidence_fragment,
+        error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_raw_fragment(&buffer, evidence_fragment, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_event_metadata(
+        &buffer, options.metadata, options.metadata.count == 0U, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
   }
   if (status != LOGBREW_OK) {
+    free(evidence_fragment);
     buffer_dispose(&buffer);
     return status;
   }
-  return push_event(client, "issue", id, timestamp, attributes_json, error);
+  free(evidence_fragment);
+  return push_event_with_context(client, "issue", id, timestamp, attributes_json, options.context, NULL, error);
 }
 
 LogBrewStatus logbrew_client_log(
@@ -844,6 +1113,17 @@ LogBrewStatus logbrew_client_log(
     const char *id,
     const char *timestamp,
     LogBrewLogAttributes attributes,
+    LogBrewError *error) {
+  return logbrew_client_log_with_options(
+      client, id, timestamp, attributes, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_log_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewLogAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error) {
   LogBrewBuffer buffer = {0};
   bool needs_comma = false;
@@ -866,7 +1146,8 @@ LogBrewStatus logbrew_client_log(
     status = append_optional_string(&buffer, "logger", attributes.logger, false, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_active_trace_metadata(&buffer, &needs_comma, error);
+    status = append_event_metadata(
+        &buffer, options.metadata, options.metadata.count == 0U, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
@@ -875,7 +1156,7 @@ LogBrewStatus logbrew_client_log(
     buffer_dispose(&buffer);
     return status;
   }
-  return push_event(client, "log", id, timestamp, attributes_json, error);
+  return push_event_with_context(client, "log", id, timestamp, attributes_json, options.context, NULL, error);
 }
 
 LogBrewStatus logbrew_client_span(
@@ -884,10 +1165,35 @@ LogBrewStatus logbrew_client_span(
     const char *timestamp,
     LogBrewSpanAttributes attributes,
     LogBrewError *error) {
+  LogBrewSpanEvidence evidence = {0};
+  return logbrew_client_span_with_evidence(
+      client, id, timestamp, attributes, evidence, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_span_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewSpanAttributes attributes,
+    LogBrewEventOptions options,
+    LogBrewError *error) {
+  LogBrewSpanEvidence evidence = {0};
+  return logbrew_client_span_with_evidence(client, id, timestamp, attributes, evidence, options, error);
+}
+
+LogBrewStatus logbrew_client_span_with_evidence(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewSpanAttributes attributes,
+    LogBrewSpanEvidence evidence,
+    LogBrewEventOptions options,
+    LogBrewError *error) {
   static const char *const statuses[] = {"ok", "error"};
   LogBrewBuffer buffer = {0};
   bool needs_comma = false;
   char *attributes_json = NULL;
+  char *evidence_fragment = NULL;
   LogBrewStatus status = require_non_empty("span name", attributes.name, error);
   if (status == LOGBREW_OK) {
     status = require_non_empty("span trace_id", attributes.trace_id, error);
@@ -924,13 +1230,24 @@ LogBrewStatus logbrew_client_span(
     status = append_named_number(&buffer, "durationMs", attributes.duration_ms, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
+    status = logbrew_evidence_span_fragment(evidence, &evidence_fragment, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_raw_fragment(&buffer, evidence_fragment, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_event_metadata(&buffer, options.metadata, false, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
   }
   if (status != LOGBREW_OK) {
+    free(evidence_fragment);
     buffer_dispose(&buffer);
     return status;
   }
-  return push_event(client, "span", id, timestamp, attributes_json, error);
+  free(evidence_fragment);
+  return push_event_with_context(client, "span", id, timestamp, attributes_json, options.context, &attributes, error);
 }
 
 LogBrewStatus logbrew_client_action(
@@ -938,6 +1255,17 @@ LogBrewStatus logbrew_client_action(
     const char *id,
     const char *timestamp,
     LogBrewActionAttributes attributes,
+    LogBrewError *error) {
+  return logbrew_client_action_with_options(
+      client, id, timestamp, attributes, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_action_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewActionAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error) {
   static const char *const statuses[] = {"queued", "running", "success", "failure"};
   LogBrewBuffer buffer = {0};
@@ -957,7 +1285,8 @@ LogBrewStatus logbrew_client_action(
     status = append_named_string(&buffer, "status", attributes.status, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_active_trace_metadata(&buffer, &needs_comma, error);
+    status = append_event_metadata(
+        &buffer, options.metadata, options.metadata.count == 0U, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
@@ -966,7 +1295,7 @@ LogBrewStatus logbrew_client_action(
     buffer_dispose(&buffer);
     return status;
   }
-  return push_event(client, "action", id, timestamp, attributes_json, error);
+  return push_event_with_context(client, "action", id, timestamp, attributes_json, options.context, NULL, error);
 }
 
 void logbrew_recording_transport_init(

@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_native_release_public_smoke.sh"
 ARTIFACT_ID = "native:LogBrewCo/sdk"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 SOURCE_PATHS = (
     "LICENSE",
     "README.md",
@@ -25,6 +25,9 @@ SOURCE_PATHS = (
     "c/logbrew-c/README.md",
     "c/logbrew-c/include/logbrew.h",
     "c/logbrew-c/src/logbrew.c",
+    "c/logbrew-c/src/logbrew_json.c",
+    "c/logbrew-c/src/logbrew_context.c",
+    "c/logbrew-c/src/logbrew_evidence.c",
     "c/logbrew-c/src/logbrew_internal.h",
     "c/logbrew-c/src/logbrew_metric.c",
     "c/logbrew-c/src/logbrew_recording_transport.c",
@@ -63,7 +66,7 @@ def _source_archive(
 
 def _unsafe_archive(path: Path, kind: str, marker: str) -> None:
     if kind == "declared_size":
-        info = tarfile.TarInfo(f"sdk-0.1.0/{marker}")
+        info = tarfile.TarInfo(f"sdk-{VERSION}/{marker}")
         info.mode = 0o644
         info.mtime = 0
         info.size = 1024 * 1024 * 1024
@@ -73,31 +76,31 @@ def _unsafe_archive(path: Path, kind: str, marker: str) -> None:
         return
 
     with tarfile.open(path, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
-        _add_bytes(archive, "sdk-0.1.0/README.md", b"fixture")
+        _add_bytes(archive, f"sdk-{VERSION}/README.md", b"fixture")
         if kind == "traversal":
-            _add_bytes(archive, f"sdk-0.1.0/../../{marker}", b"unsafe")
+            _add_bytes(archive, f"sdk-{VERSION}/../../{marker}", b"unsafe")
         elif kind == "duplicate":
-            _add_bytes(archive, "sdk-0.1.0/README.md", b"duplicate")
+            _add_bytes(archive, f"sdk-{VERSION}/README.md", b"duplicate")
         elif kind in {"symlink", "hardlink", "fifo"}:
-            info = tarfile.TarInfo(f"sdk-0.1.0/{marker}")
+            info = tarfile.TarInfo(f"sdk-{VERSION}/{marker}")
             info.mtime = 0
             if kind == "symlink":
                 info.type = tarfile.SYMTYPE
                 info.linkname = f"../../{marker}"
             elif kind == "hardlink":
                 info.type = tarfile.LNKTYPE
-                info.linkname = "sdk-0.1.0/README.md"
+                info.linkname = f"sdk-{VERSION}/README.md"
             else:
                 info.type = tarfile.FIFOTYPE
             archive.addfile(info)
         elif kind == "oversize":
             content = b"x" * (16 * 1024 * 1024 + 1)
-            _add_bytes(archive, f"sdk-0.1.0/{marker}", content)
+            _add_bytes(archive, f"sdk-{VERSION}/{marker}", content)
         elif kind == "entries":
             for index in range(4097):
-                _add_bytes(archive, f"sdk-0.1.0/entry-{index}", b"")
+                _add_bytes(archive, f"sdk-{VERSION}/entry-{index}", b"")
         elif kind == "pax_size":
-            info = tarfile.TarInfo(f"sdk-0.1.0/{marker}")
+            info = tarfile.TarInfo(f"sdk-{VERSION}/{marker}")
             info.mode = 0o644
             info.mtime = 0
             info.size = 0
@@ -214,7 +217,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertIn("--max-time\n30\n", recorded_args)
         self.assertIn("--max-filesize\n67108864\n", recorded_args)
         self.assertIn(
-            "https://github.com/LogBrewCo/sdk/archive/refs/tags/v0.1.0.tar.gz",
+            "https://github.com/LogBrewCo/sdk/archive/refs/tags/c/logbrew-c/v0.2.0.tar.gz",
             recorded_args,
         )
 
@@ -319,13 +322,13 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             temp_dir = Path(raw_temp_dir)
             artifact_path = temp_dir / "source.tar.gz"
             _source_archive(artifact_path)
-            result = self._run_receipt(temp_dir, artifact_path, version="0.1.2")
+            result = self._run_receipt(temp_dir, artifact_path, version="0.2.2")
 
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "native release receipt failed at release identity\n")
-        self.assertNotIn("0.1.0", result.stderr)
-        self.assertNotIn("0.1.2", result.stderr)
+        self.assertNotIn("0.2.0", result.stderr)
+        self.assertNotIn("0.2.2", result.stderr)
 
     def test_receipt_mode_bounds_build_and_runtime_diagnostics(self) -> None:
         build_canary = b"COMPILER_CANARY_4C62"

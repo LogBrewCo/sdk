@@ -10,7 +10,8 @@ The SDK ships as source plus header. Add `include/logbrew.h` and the core files 
 
 ```bash
 cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude \
-  src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_trace.c \
+  src/logbrew.c src/logbrew_json.c src/logbrew_context.c src/logbrew_evidence.c \
+  src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_trace.c \
   your_app.c -o your_app
 ```
 
@@ -49,6 +50,125 @@ logbrew_recording_transport_free(&transport);
 logbrew_client_free(client);
 ```
 
+## Rich investigation context
+
+Every signal can carry the same schema-v1 resource, trace, session, opaque subject, and tag context through `LogBrewTelemetryContext`. The default constructor adds only portable automatic facts that are safe and useful for investigation: the C language standard, operating-system family, and CPU architecture when they are available at compile time. It does not inspect ambient machine, user, process, filesystem, network, account, or device identity data.
+
+Use `logbrew_client_new_with_options()` to add stable application context or to disable those conservative automatic facts. The client validates and deep-copies construction context:
+
+```c
+LogBrewNamedVersion service = {"checkout-api", "2.4.0"};
+LogBrewDeploymentContext deployment = {"production", "checkout@2.4.0"};
+LogBrewApplicationContext application = {"checkout-worker", "2.4.0", "204"};
+LogBrewTelemetryResource resource = {
+  .service = &service,
+  .deployment = &deployment,
+  .application = &application
+};
+LogBrewTelemetryTag tags[] = {
+  {"region", "eu-west"},
+  {"tier", "payments"}
+};
+LogBrewTelemetryContext context = {
+  .schema_version = LOGBREW_TELEMETRY_CONTEXT_SCHEMA_VERSION,
+  .resource = &resource,
+  .tags = tags,
+  .tag_count = sizeof(tags) / sizeof(tags[0])
+};
+LogBrewClientOptions options = {.context = &context};
+
+logbrew_client_new_with_options(config, options, &client, &error);
+```
+
+Context is merged field by field in this order: conservative automatic facts, client context, active thread-local telemetry scope, active W3C trace scope, signal-owned span identity, and per-event context. Later values win. Tags merge by key. A higher layer that changes a trace or span ID cannot inherit parent-span IDs from a different lower span.
+
+Use a telemetry scope for synchronous request or job boundaries. Initialize it with `LOGBREW_TELEMETRY_SCOPE_INIT`; scope context is deep-copied, scopes are non-copyable, enter and exit must happen on the same thread, and nested scopes must exit in last-in-first-out order. Pass an explicit `LogBrewEventOptions.context` or enter a new scope when work crosses a thread boundary:
+
+```c
+LogBrewSessionContext session = {"session_opaque_02", "session_opaque_01"};
+LogBrewSubjectContext subject = {"subject_sha256_abc123", LOGBREW_SUBJECT_USER};
+LogBrewTelemetryContext request_context = {
+  .schema_version = LOGBREW_TELEMETRY_CONTEXT_SCHEMA_VERSION,
+  .session = &session,
+  .subject = &subject
+};
+LogBrewTelemetryScope scope = LOGBREW_TELEMETRY_SCOPE_INIT;
+
+logbrew_telemetry_scope_enter(&scope, &request_context, &error);
+/* Capture releases, environments, issues, logs, spans, actions, or metrics. */
+logbrew_telemetry_scope_exit(&scope);
+```
+
+Subject IDs must already be opaque, stable identifiers. Do not pass an email address, name, phone number, authentication material, IP address, or another directly identifying value. Tags are capped at 32 strict machine keys and bounded string values. Use `LogBrewEventOptions.metadata` for primitive event-specific evidence; merged metadata is capped at `LOGBREW_MAX_METADATA_ENTRIES`, keys at `LOGBREW_MAX_METADATA_KEY_LENGTH`, string values at `LOGBREW_MAX_METADATA_STRING_LENGTH`, and `LOGBREW_METADATA_NULL_VALUE()` represents an explicitly unavailable value.
+
+### Issues, code locations, and breadcrumbs
+
+Use `logbrew_client_issue_with_details()` for evidence that lets a human or an agent answer what failed, where, whether it was handled, and what happened immediately beforehand. Exception messages, locals, arguments, environment variables, and raw stack strings are intentionally not part of this contract.
+
+```c
+LogBrewIssueMechanism mechanism = {"signal", false};
+LogBrewIssueException exception = {"PaymentDeclined", &mechanism};
+LogBrewIssueStackFrame frame;
+LogBrewIssueBreadcrumb breadcrumb = {
+  .timestamp = "2026-08-06T10:01:05.123Z",
+  .type = "http",
+  .category = "payment.request",
+  .level = "error",
+  .message = "authorization returned a terminal response"
+};
+LogBrewIssueDetails details = {0};
+
+logbrew_issue_frame_from_location(
+    __FILE__, __LINE__, 1U, __func__, "checkout.payment", true, &frame, &error);
+logbrew_client_add_breadcrumb(client, breadcrumb, &error);
+
+details.exception = &exception;
+details.stack_frames = &frame;
+details.stack_frame_count = 1U;
+
+logbrew_client_issue_with_details(
+    client,
+    "evt_issue_payment_001",
+    "2026-08-06T10:01:06Z",
+    (LogBrewIssueAttributes){"Payment authorization failed", "error", "Checkout could not authorize payment"},
+    details,
+    LOGBREW_EVENT_OPTIONS_NONE,
+    &error);
+```
+
+`logbrew_issue_frame_from_location()` keeps only the basename and removes query strings and fragments, so a compiler-provided absolute `__FILE__` value does not disclose a developer path. The returned frame is safe to copy and borrows the supplied file/function/module strings only until the synchronous issue capture returns. Direct frame values may use useful relative paths but absolute paths are rejected. Frames are capped at 32. The client retains the newest 64 validated breadcrumbs and sets `breadcrumbsTruncated` whenever older evidence was discarded. Breadcrumb data is limited to eight primitive, bounded fields. Breadcrumb messages must be application-redacted summaries, never raw URLs, headers, payloads, authentication material, or direct identities. Call `logbrew_client_clear_breadcrumbs()` at a privacy or lifecycle boundary.
+
+### Span events and links
+
+Use `logbrew_client_span_with_evidence()` for bounded milestones inside a span and links to other W3C trace/span identities:
+
+```c
+LogBrewSpanEvent event = {
+  .name = "payment.authorization.rejected",
+  .timestamp = "2026-08-06T10:01:05.900Z"
+};
+LogBrewSpanLink link = {
+  .trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  .span_id = "bbbbbbbbbbbbbbbb",
+  .sampled = false,
+  .has_sampled = true
+};
+LogBrewSpanEvidence evidence = {
+  .events = &event,
+  .event_count = 1U,
+  .links = &link,
+  .link_count = 1U
+};
+
+logbrew_client_span_with_evidence(
+    client, "evt_span_payment_001", "2026-08-06T10:01:07Z",
+    span, evidence, LOGBREW_EVENT_OPTIONS_NONE, &error);
+```
+
+Events and links are capped at eight each. Link IDs must be non-zero W3C hex values. Metadata remains primitive and should describe bounded diagnostic facts, never headers, payloads, authentication material, or direct identities.
+
+When a span's `trace_id`, `span_id`, and optional `parent_span_id` are valid W3C hex identifiers, that signal-owned identity is also emitted in typed context even after an active trace scope has ended. Legacy non-W3C span identifiers remain available in the span's required top-level fields, but they are not presented as W3C typed context.
+
 ## Metrics
 
 Use `logbrew_client_metric()` for explicit application-owned measurements that should appear alongside logs, errors, traces, and product timelines.
@@ -80,6 +200,8 @@ This SDK does not automatically collect native runtime, process, or framework me
 ## W3C Trace Correlation
 
 Use the trace helpers when a native C service or app receives a W3C `traceparent` value and wants logs, errors, actions, metrics, spans, and outgoing calls to line up on one trace. The helper validates the incoming context, rejects all-zero IDs, normalizes IDs to lowercase, and creates a fresh local span ID for this process.
+
+Trace scopes are thread-local and non-copyable. Enter and exit them on the same thread and in last-in-first-out order; an out-of-order exit is ignored so it cannot discard a still-active nested trace.
 
 ```c
 LogBrewTraceContext trace;
@@ -200,9 +322,9 @@ logbrew_client_network_milestone(
     &error);
 ```
 
-While a `LogBrewTraceScope` is active, `logbrew_client_issue()`, `logbrew_client_log()`, and `logbrew_client_action()` automatically include trace metadata. For metrics and product timeline helpers, use `logbrew_trace_metadata()` or `logbrew_trace_product_timeline_context()` so the correlation stays explicit at the call site.
+While a `LogBrewTraceScope` is active, every signal automatically receives the canonical trace inside its typed `context`. The original issue, log, and action calls also retain their compatibility trace metadata. Use `logbrew_trace_metadata()` only when an older flat-metadata consumer still needs those keys, and use `logbrew_trace_product_timeline_context()` when a product timeline explicitly owns a session or route-template correlation field.
 
-`logbrew_trace_continue_or_create_context()` is useful for request boundaries: valid incoming W3C context is continued; missing or malformed context falls back to a fresh local root without failing the request. `logbrew_trace_http_client_span_start()` creates a child span name from an HTTP method and sanitized route template, stripping query strings and fragments even when a full URL is passed. The SDK never serializes the raw incoming `traceparent` into telemetry, does not patch HTTP clients, and does not capture headers, request bodies, response bodies, raw URLs, query strings, or fragments.
+`logbrew_trace_continue_or_create_context()` is useful for request boundaries: valid incoming W3C context is continued; missing or malformed context falls back to a fresh local root without failing the request. `logbrew_trace_http_client_span_start()` creates a child span name from an HTTP method and sanitized route template, stripping query strings and fragments from relative templates or HTTP(S) URLs. Unsupported schemes, protocol-relative hosts, malformed hosts, and query-only values are rejected. The SDK never serializes the raw incoming `traceparent` into telemetry, does not patch HTTP clients, and does not capture headers, request bodies, response bodies, raw URLs, query strings, or fragments.
 
 ## Product Timelines
 

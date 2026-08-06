@@ -241,74 +241,27 @@ static LogBrewStatus append_named_number(
   return status;
 }
 
-static LogBrewStatus append_named_bool(
+static LogBrewStatus append_merged_metadata(
     LogBrewMetricBuffer *buffer,
-    const char *name,
-    bool value,
+    LogBrewMetadata base,
+    LogBrewMetadata override,
     bool *needs_comma,
     LogBrewError *error) {
-  LogBrewStatus status = *needs_comma ? metric_append_char(buffer, ',', error) : LOGBREW_OK;
-  if (status == LOGBREW_OK) {
-    status = append_json_string(buffer, name, error);
+  LogBrewJsonBuffer fragment = {0};
+  bool fragment_comma = false;
+  LogBrewStatus status = logbrew_json_append_metadata_member(
+      &fragment, "metadata", base, override, LOGBREW_MAX_METADATA_ENTRIES, false,
+      LOGBREW_MAX_METADATA_STRING_LENGTH, &fragment_comma, error);
+  if (status == LOGBREW_OK && fragment.length > 0U && *needs_comma) {
+    status = metric_append_char(buffer, ',', error);
   }
-  if (status == LOGBREW_OK) {
-    status = metric_append_char(buffer, ':', error);
+  if (status == LOGBREW_OK && fragment.length > 0U) {
+    status = metric_append(buffer, fragment.data, error);
   }
-  if (status == LOGBREW_OK) {
-    status = metric_append(buffer, value ? "true" : "false", error);
-  }
-  if (status == LOGBREW_OK) {
+  if (status == LOGBREW_OK && fragment.length > 0U) {
     *needs_comma = true;
   }
-  return status;
-}
-
-static LogBrewStatus append_metadata(
-    LogBrewMetricBuffer *buffer,
-    LogBrewMetadata metadata,
-    bool *needs_comma,
-    LogBrewError *error) {
-  size_t index;
-  bool metadata_needs_comma = false;
-  LogBrewStatus status;
-  if (metadata.count == 0U) {
-    return LOGBREW_OK;
-  }
-  if (metadata.count > 0U && metadata.entries == NULL) {
-    set_metric_error(error, "validation_error", "metadata entries are required when count is non-zero");
-    return LOGBREW_VALIDATION_ERROR;
-  }
-  status = metric_append(buffer, *needs_comma ? ",\"metadata\":{" : "\"metadata\":{", error);
-  if (status != LOGBREW_OK) {
-    return status;
-  }
-  for (index = 0U; index < metadata.count; index++) {
-    LogBrewMetadataEntry entry = metadata.entries[index];
-    status = require_text("metadata key", entry.key, error);
-    if (status != LOGBREW_OK) {
-      return status;
-    }
-    if (entry.kind == LOGBREW_METADATA_STRING) {
-      status = require_text("metadata string value", entry.string_value, error);
-      if (status == LOGBREW_OK) {
-        status = append_named_string(buffer, entry.key, entry.string_value, &metadata_needs_comma, error);
-      }
-    } else if (entry.kind == LOGBREW_METADATA_NUMBER) {
-      status = append_named_number(buffer, entry.key, entry.number_value, &metadata_needs_comma, error);
-    } else if (entry.kind == LOGBREW_METADATA_BOOL) {
-      status = append_named_bool(buffer, entry.key, entry.bool_value, &metadata_needs_comma, error);
-    } else {
-      set_metric_error(error, "validation_error", "metadata kind is unsupported");
-      return LOGBREW_VALIDATION_ERROR;
-    }
-    if (status != LOGBREW_OK) {
-      return status;
-    }
-  }
-  status = metric_append_char(buffer, '}', error);
-  if (status == LOGBREW_OK) {
-    *needs_comma = true;
-  }
+  logbrew_json_dispose(&fragment);
   return status;
 }
 
@@ -317,6 +270,17 @@ LogBrewStatus logbrew_client_metric(
     const char *id,
     const char *timestamp,
     LogBrewMetricAttributes attributes,
+    LogBrewError *error) {
+  return logbrew_client_metric_with_options(
+      client, id, timestamp, attributes, LOGBREW_EVENT_OPTIONS_NONE, error);
+}
+
+LogBrewStatus logbrew_client_metric_with_options(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewMetricAttributes attributes,
+    LogBrewEventOptions options,
     LogBrewError *error) {
   static const char *const kinds[] = {"counter", "gauge", "histogram"};
   static const char *const instant_temporalities[] = {"instant"};
@@ -372,7 +336,7 @@ LogBrewStatus logbrew_client_metric(
     status = append_named_string(&buffer, "temporality", attributes.temporality, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_metadata(&buffer, attributes.metadata, &needs_comma, error);
+    status = append_merged_metadata(&buffer, attributes.metadata, options.metadata, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = metric_append_char(&buffer, '}', error);
@@ -382,5 +346,6 @@ LogBrewStatus logbrew_client_metric(
     return status;
   }
   attributes_json = buffer.data;
-  return logbrew_client_push_event_json(client, "metric", id, timestamp, attributes_json, error);
+  return logbrew_client_push_event_json_with_context(
+      client, "metric", id, timestamp, attributes_json, options.context, NULL, error);
 }

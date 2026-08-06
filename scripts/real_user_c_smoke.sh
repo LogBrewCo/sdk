@@ -49,7 +49,7 @@ run_examples_make() {
   make --no-print-directory -C "$sdk_dir/examples" CC="$cc_command" "$@"
 }
 
-archive="$tmp_dir/logbrew-c-0.1.0.tar.gz"
+archive="$tmp_dir/logbrew-c-0.2.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 
 app_dir="$tmp_dir/native-app"
@@ -58,6 +58,9 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/logbrew.h"
 test -f "$sdk_dir/src/logbrew.c"
+test -f "$sdk_dir/src/logbrew_json.c"
+test -f "$sdk_dir/src/logbrew_context.c"
+test -f "$sdk_dir/src/logbrew_evidence.c"
 test -f "$sdk_dir/src/logbrew_http_transport.c"
 test -f "$sdk_dir/src/logbrew_internal.h"
 test -f "$sdk_dir/src/logbrew_metric.c"
@@ -75,6 +78,9 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/logbrew.h"
 test -f "$sdk_dir/src/logbrew.c"
+test -f "$sdk_dir/src/logbrew_json.c"
+test -f "$sdk_dir/src/logbrew_context.c"
+test -f "$sdk_dir/src/logbrew_evidence.c"
 test -f "$sdk_dir/src/logbrew_http_transport.c"
 test -f "$sdk_dir/src/logbrew_internal.h"
 test -f "$sdk_dir/src/logbrew_metric.c"
@@ -96,6 +102,9 @@ grep -q 'logbrew_trace_http_client_span_start' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_trace_http_client_span_attributes' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_trace_scope_enter' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_http_transport_init' "$sdk_dir/include/logbrew.h"
+grep -q 'LogBrewTelemetryContext' "$sdk_dir/include/logbrew.h"
+grep -q 'logbrew_client_issue_with_details' "$sdk_dir/include/logbrew.h"
+grep -q 'logbrew_client_span_with_evidence' "$sdk_dir/include/logbrew.h"
 
 cat > "$app_dir/main.c" <<'EOF'
 #include "logbrew.h"
@@ -358,6 +367,107 @@ static void exercise_opentelemetry_trace_bridge(void) {
   logbrew_client_free(client);
 }
 
+static void exercise_rich_investigation_context(void) {
+  LogBrewClient *client = NULL;
+  LogBrewError error;
+  LogBrewNamedVersion service = {"checkout-api", "2.4.0"};
+  LogBrewDeploymentContext deployment = {"production", "checkout@2.4.0"};
+  LogBrewTelemetryResource resource = {0};
+  LogBrewTelemetryContext base_context = {0};
+  LogBrewClientOptions client_options = {0};
+  LogBrewSessionContext session = {"opaque_session_02", "opaque_session_01"};
+  LogBrewTelemetryContext scoped_context = {0};
+  LogBrewTelemetryScope telemetry_scope = LOGBREW_TELEMETRY_SCOPE_INIT;
+  LogBrewTraceContext trace;
+  LogBrewTraceScope trace_scope;
+  LogBrewIssueMechanism mechanism = {"signal", false};
+  LogBrewIssueException exception = {"PaymentDeclined", &mechanism};
+  LogBrewIssueStackFrame frame;
+  LogBrewIssueBreadcrumb breadcrumb = {0};
+  LogBrewIssueDetails details = {0};
+  LogBrewSpanEvent span_event = {0};
+  LogBrewSpanLink span_link = {0};
+  LogBrewSpanEvidence evidence = {0};
+  char *preview = NULL;
+
+  resource.service = &service;
+  resource.deployment = &deployment;
+  base_context.schema_version = LOGBREW_TELEMETRY_CONTEXT_SCHEMA_VERSION;
+  base_context.resource = &resource;
+  client_options.context = &base_context;
+  logbrew_error_clear(&error);
+  must(logbrew_client_new_with_options(
+      (LogBrewConfig){"LOGBREW_API_KEY", "native-rich-consumer", LOGBREW_C_VERSION, 2U},
+      client_options,
+      &client,
+      &error), &error);
+  scoped_context.schema_version = LOGBREW_TELEMETRY_CONTEXT_SCHEMA_VERSION;
+  scoped_context.session = &session;
+  must(logbrew_telemetry_scope_enter(&telemetry_scope, &scoped_context, &error), &error);
+  must(logbrew_trace_context_from_traceparent(
+      "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", &trace, &error), &error);
+  must(logbrew_trace_scope_enter(&trace_scope, &trace, &error), &error);
+
+  breadcrumb.timestamp = "2026-08-06T10:01:05.123Z";
+  breadcrumb.type = "http";
+  breadcrumb.category = "payment.request";
+  breadcrumb.level = "error";
+  breadcrumb.message = "authorization returned a terminal response";
+  must(logbrew_client_add_breadcrumb(client, breadcrumb, &error), &error);
+  must(logbrew_issue_frame_from_location(
+      "/workspace/source/checkout.c?redaction_canary=value#fragment", 413U, 9U,
+      "authorize_payment", "checkout.payment", true, &frame, &error), &error);
+  details.exception = &exception;
+  details.stack_frames = &frame;
+  details.stack_frame_count = 1U;
+  must(logbrew_client_issue_with_details(
+      client,
+      "evt_rich_issue",
+      "2026-08-06T10:01:06Z",
+      (LogBrewIssueAttributes){"Payment authorization failed", "error", "Checkout could not authorize payment"},
+      details,
+      LOGBREW_EVENT_OPTIONS_NONE,
+      &error), &error);
+
+  span_event.name = "payment.authorization.rejected";
+  span_event.timestamp = "2026-08-06T10:01:05.900Z";
+  span_link.trace_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  span_link.span_id = "BBBBBBBBBBBBBBBB";
+  span_link.has_sampled = true;
+  span_link.sampled = false;
+  evidence.events = &span_event;
+  evidence.event_count = 1U;
+  evidence.links = &span_link;
+  evidence.link_count = 1U;
+  must(logbrew_client_span_with_evidence(
+      client,
+      "evt_rich_span",
+      "2026-08-06T10:01:07Z",
+      (LogBrewSpanAttributes){"POST /payments/{id}/authorize", trace.trace_id, trace.span_id,
+                              trace.parent_span_id, "error", 184.5, true},
+      evidence,
+      LOGBREW_EVENT_OPTIONS_NONE,
+      &error), &error);
+  must(logbrew_client_preview_json(client, &preview, &error), &error);
+  if (strstr(preview, "\"context\":{\"schemaVersion\":1") == NULL ||
+      strstr(preview, "\"service\":{\"name\":\"checkout-api\",\"version\":\"2.4.0\"}") == NULL ||
+      strstr(preview, "\"session\":{\"id\":\"opaque_session_02\",\"previousId\":\"opaque_session_01\"}") == NULL ||
+      strstr(preview, "\"exception\":{\"type\":\"PaymentDeclined\"") == NULL ||
+      strstr(preview, "\"filename\":\"checkout.c\"") == NULL ||
+      strstr(preview, "\"events\":[{\"name\":\"payment.authorization.rejected\"") == NULL ||
+      strstr(preview, "\"traceId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"") == NULL ||
+      strstr(preview, "/workspace/source") != NULL ||
+      strstr(preview, "redaction_canary=value") != NULL ||
+      strstr(preview, "LOGBREW_API_KEY") != NULL) {
+    fprintf(stderr, "rich investigation context failed\n");
+    exit(1);
+  }
+  logbrew_free_string(preview);
+  logbrew_trace_scope_exit(&trace_scope);
+  logbrew_telemetry_scope_exit(&telemetry_scope);
+  logbrew_client_free(client);
+}
+
 int main(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingStep steps[] = {
@@ -387,6 +497,7 @@ int main(void) {
   exercise_timeline_helpers();
   exercise_metric_helper();
   exercise_opentelemetry_trace_bridge();
+  exercise_rich_investigation_context();
   exercise_failure_paths();
   return 0;
 }
@@ -395,6 +506,9 @@ EOF
 "$cc_command" -std=c99 -Wall -Wextra -Wpedantic -Werror \
   -I"$sdk_dir/include" \
   "$sdk_dir/src/logbrew.c" \
+  "$sdk_dir/src/logbrew_json.c" \
+  "$sdk_dir/src/logbrew_context.c" \
+  "$sdk_dir/src/logbrew_evidence.c" \
   "$sdk_dir/src/logbrew_metric.c" \
   "$sdk_dir/src/logbrew_recording_transport.c" \
   "$sdk_dir/src/logbrew_timeline.c" \
@@ -403,7 +517,7 @@ EOF
   -o "$app_dir/native_app"
   "$app_dir/native_app" > "$tmp_dir/native-app.stdout.json" 2> "$tmp_dir/native-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
 
 if command -v curl-config >/dev/null 2>&1; then
@@ -532,6 +646,9 @@ PY
   "$cc_command" -std=c99 -Wall -Wextra -Wpedantic -Werror \
     -I"$sdk_dir/include" ${curl_cflags[@]+"${curl_cflags[@]}"} \
     "$sdk_dir/src/logbrew.c" \
+    "$sdk_dir/src/logbrew_json.c" \
+    "$sdk_dir/src/logbrew_context.c" \
+    "$sdk_dir/src/logbrew_evidence.c" \
     "$sdk_dir/src/logbrew_metric.c" \
     "$sdk_dir/src/logbrew_recording_transport.c" \
     "$sdk_dir/src/logbrew_timeline.c" \
@@ -573,10 +690,10 @@ grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-he
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 run_examples_make run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 run_examples_make run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 run_examples_make run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_c_trace_correlation_payload.py" "$tmp_dir/trace-correlation.stdout.json" "$tmp_dir/trace-correlation.stderr.json" >/dev/null
