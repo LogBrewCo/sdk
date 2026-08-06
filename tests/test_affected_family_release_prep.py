@@ -262,7 +262,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.8",),
             "scripts/real_user_maven_central_public_smoke.sh": (
                 "LOGBREW_MAVEN_JAVA_VERSION:-0.1.1",
-                "LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1",
+                "LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.0",
             ),
             "scripts/real_user_dotnet_public_nuget_smoke.sh": (
                 "LOGBREW_DOTNET_CORE_VERSION:-0.1.4",
