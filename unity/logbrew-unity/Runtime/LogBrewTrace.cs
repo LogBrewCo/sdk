@@ -402,6 +402,35 @@ namespace LogBrew.Unity
             return result;
         }
 
+        internal static OrderedJsonObject AddContextTraceMetadata(OrderedJsonObject attributes, TelemetryContext? context)
+        {
+            if (context?.TraceId == null)
+            {
+                return attributes;
+            }
+
+            var result = new OrderedJsonObject();
+            var addedMetadata = false;
+            foreach (var item in attributes.Values)
+            {
+                if (string.Equals(item.Key, "metadata", StringComparison.Ordinal) && item.Value is OrderedJsonObject metadata)
+                {
+                    result.Add("metadata", MetadataObjectWithContext(context, metadata));
+                    addedMetadata = true;
+                    continue;
+                }
+
+                result.Add(item.Key, item.Value);
+            }
+
+            if (!addedMetadata)
+            {
+                result.Add("metadata", MetadataObjectWithContext(context, null));
+            }
+
+            return result;
+        }
+
         private static List<TraceFrame> ActiveStack
         {
             get
@@ -470,6 +499,32 @@ namespace LogBrew.Unity
             foreach (var item in context.ToMetadata())
             {
                 result.Add(item.Key, item.Value);
+            }
+
+            return result;
+        }
+
+        private static OrderedJsonObject MetadataObjectWithContext(TelemetryContext context, OrderedJsonObject? metadata)
+        {
+            var result = new OrderedJsonObject();
+            if (metadata != null)
+            {
+                foreach (var item in metadata.Values)
+                {
+                    if (!TraceMetadataKeys.Contains(item.Key))
+                    {
+                        result.Add(item.Key, item.Value);
+                    }
+                }
+            }
+
+            result.Add("traceId", context.TraceId);
+            result.AddIfNotNull("spanId", context.SpanId);
+            result.AddIfNotNull("parentSpanId", context.ParentSpanId);
+            if (context.Sampled.HasValue)
+            {
+                result.Add("traceFlags", context.Sampled.Value ? "01" : "00");
+                result.Add("traceSampled", context.Sampled.Value);
             }
 
             return result;

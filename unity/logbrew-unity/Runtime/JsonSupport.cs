@@ -79,12 +79,34 @@ namespace LogBrew.Unity
 
         internal static object? RequireMetadataValue(string key, object? value)
         {
-            if (value == null || value is string || value is bool || value is int || value is long || value is float || value is double || value is decimal)
+            if (value == null || value is string || value is bool)
             {
                 return value;
             }
 
+            if (IsJsonNumber(value))
+            {
+                if ((value is double doubleValue && (double.IsNaN(doubleValue) || double.IsInfinity(doubleValue)))
+                    || (value is float floatValue && (float.IsNaN(floatValue) || float.IsInfinity(floatValue))))
+                {
+                    throw new SdkException("validation_error", "metadata value for " + key + " must be finite");
+                }
+
+                return value;
+            }
+
             throw new SdkException("validation_error", "metadata value for " + key + " must be a string, number, boolean, or null");
+        }
+
+        internal static bool IsJsonNumber(object value)
+        {
+            return value is byte
+                || value is short
+                || value is int
+                || value is long
+                || value is float
+                || value is double
+                || value is decimal;
         }
 
         internal static OrderedJsonObject CopyMetadata(IDictionary<string, object?> metadata)
@@ -160,7 +182,7 @@ namespace LogBrew.Unity
                 return;
             }
 
-            if (value is int || value is long || value is float || value is double || value is decimal)
+            if (Validation.IsJsonNumber(value))
             {
                 builder.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
                 return;

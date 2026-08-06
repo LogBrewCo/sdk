@@ -75,7 +75,8 @@ namespace LogBrew.Unity
                 previousState,
                 nextState,
                 durationMs,
-                MetadataFor(context));
+                MetadataFor(context),
+                ContextFor(context));
             currentState = nextState;
             currentStateStartedAtMs = now;
             return true;
@@ -95,6 +96,11 @@ namespace LogBrew.Unity
             }
 
             return metadata;
+        }
+
+        private TelemetryContext? ContextFor(UnityContext? context)
+        {
+            return TelemetryContext.Merge(defaultContext?.ToTelemetryContext(), context?.ToTelemetryContext());
         }
 
         private double ReadClock()

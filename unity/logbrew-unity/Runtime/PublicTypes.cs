@@ -412,6 +412,9 @@ namespace LogBrew.Unity
     public sealed class UnityContext
     {
         private readonly Dictionary<string, object?> metadata;
+        private string? platform;
+        private string? sessionId;
+        private TelemetryContext? telemetryContext;
 
         private UnityContext()
         {
@@ -426,6 +429,7 @@ namespace LogBrew.Unity
         public UnityContext WithPlatform(string platform)
         {
             Validation.RequireNonEmpty("unity platform", platform);
+            this.platform = platform;
             metadata["platform"] = platform;
             return this;
         }
@@ -447,7 +451,14 @@ namespace LogBrew.Unity
         public UnityContext WithSessionId(string sessionId)
         {
             Validation.RequireNonEmpty("unity sessionId", sessionId);
+            this.sessionId = sessionId;
             metadata["sessionId"] = sessionId;
+            return this;
+        }
+
+        public UnityContext WithTelemetryContext(TelemetryContext context)
+        {
+            telemetryContext = context ?? throw new ArgumentNullException(nameof(context));
             return this;
         }
 
@@ -473,6 +484,28 @@ namespace LogBrew.Unity
         {
             return new Dictionary<string, object?>(metadata);
         }
+
+        internal TelemetryContext? ToTelemetryContext()
+        {
+            TelemetryContext? derived = null;
+            if (sessionId != null || platform != null)
+            {
+                var builder = TelemetryContext.Create();
+                if (sessionId != null)
+                {
+                    builder.WithSession(sessionId);
+                }
+
+                if (platform != null)
+                {
+                    builder.WithTag("unity.platform", platform);
+                }
+
+                derived = builder.Build();
+            }
+
+            return TelemetryContext.Merge(derived, telemetryContext);
+        }
     }
 
     public sealed class ReleaseAttributes
@@ -489,6 +522,8 @@ namespace LogBrew.Unity
         public string? Notes { get; private set; }
 
         public IDictionary<string, object?>? Metadata { get; private set; }
+
+        internal TelemetryContext? Context { get; private set; }
 
         public static ReleaseAttributes Create(string version)
         {
@@ -513,6 +548,12 @@ namespace LogBrew.Unity
             return this;
         }
 
+        public ReleaseAttributes WithContext(TelemetryContext context)
+        {
+            Context = context ?? throw new ArgumentNullException(nameof(context));
+            return this;
+        }
+
         internal OrderedJsonObject ToJsonObject()
         {
             Validation.RequireNonEmpty("release version", Version);
@@ -525,6 +566,7 @@ namespace LogBrew.Unity
             payload.AddIfNotNull("commit", Commit);
             payload.AddIfNotNull("notes", Notes);
             payload.AddMetadata(Metadata);
+            payload.AddIfNotNull("context", Context?.ToJsonObject());
             return payload;
         }
     }
@@ -541,6 +583,8 @@ namespace LogBrew.Unity
         public string? Region { get; private set; }
 
         public IDictionary<string, object?>? Metadata { get; private set; }
+
+        internal TelemetryContext? Context { get; private set; }
 
         public static EnvironmentAttributes Create(string name)
         {
@@ -559,18 +603,28 @@ namespace LogBrew.Unity
             return this;
         }
 
+        public EnvironmentAttributes WithContext(TelemetryContext context)
+        {
+            Context = context ?? throw new ArgumentNullException(nameof(context));
+            return this;
+        }
+
         internal OrderedJsonObject ToJsonObject()
         {
             Validation.RequireNonEmpty("environment name", Name);
             var payload = new OrderedJsonObject().Add("name", Name);
             payload.AddIfNotNull("region", Region);
             payload.AddMetadata(Metadata);
+            payload.AddIfNotNull("context", Context?.ToJsonObject());
             return payload;
         }
     }
 
     public sealed class IssueAttributes
     {
+        private List<IssueStackFrame>? stackFrames;
+        private List<IssueBreadcrumb>? breadcrumbs;
+
         private IssueAttributes(string title, string level)
         {
             Title = title;
@@ -585,9 +639,53 @@ namespace LogBrew.Unity
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
+        public IssueExceptionInfo? Exception { get; private set; }
+
+        public IReadOnlyList<IssueStackFrame>? StackFrames
+        {
+            get { return stackFrames?.AsReadOnly(); }
+        }
+
+        public IReadOnlyList<IssueBreadcrumb>? Breadcrumbs
+        {
+            get { return breadcrumbs?.AsReadOnly(); }
+        }
+
+        public bool BreadcrumbsTruncated { get; private set; }
+
         public static IssueAttributes Create(string title, string level)
         {
             return new IssueAttributes(title, level);
+        }
+
+        public static IssueAttributes FromException(Exception error)
+        {
+            var exceptionType = IssueDiagnostics.SafeExceptionType(error);
+            return FromException(error, exceptionType, "unity.exception", true);
+        }
+
+        public static IssueAttributes FromException(Exception error, string mechanismType, bool handled)
+        {
+            var exceptionType = IssueDiagnostics.SafeExceptionType(error);
+            return FromException(error, exceptionType, mechanismType, handled);
+        }
+
+        public static IssueAttributes FromException(Exception error, string title, string mechanismType, bool handled)
+        {
+            var exceptionType = IssueDiagnostics.SafeExceptionType(error);
+            var attributes = Create(title, "error")
+                .WithException(
+                    IssueExceptionInfo.Create(exceptionType)
+                        .WithMechanism(IssueExceptionMechanism.Create(mechanismType, handled)));
+            var frames = IssueDiagnostics.StackFrames(error);
+            if (frames.Count > 0)
+            {
+                attributes.WithStackFrames(frames);
+            }
+
+            return attributes;
         }
 
         public IssueAttributes WithMessage(string message)
@@ -602,14 +700,172 @@ namespace LogBrew.Unity
             return this;
         }
 
+        public IssueAttributes WithContext(TelemetryContext context)
+        {
+            Context = context ?? throw new ArgumentNullException(nameof(context));
+            return this;
+        }
+
+        public IssueAttributes WithException(IssueExceptionInfo exception)
+        {
+            Exception = exception ?? throw new ArgumentNullException(nameof(exception));
+            return this;
+        }
+
+        public IssueAttributes WithStackFrame(IssueStackFrame frame)
+        {
+            if (frame == null)
+            {
+                throw new ArgumentNullException(nameof(frame));
+            }
+
+            if (stackFrames == null)
+            {
+                stackFrames = new List<IssueStackFrame>();
+            }
+
+            RequireStackFrameLimit(stackFrames.Count + 1);
+            stackFrames.Add(frame);
+            return this;
+        }
+
+        public IssueAttributes WithStackFrames(IEnumerable<IssueStackFrame> frames)
+        {
+            if (frames == null)
+            {
+                throw new ArgumentNullException(nameof(frames));
+            }
+
+            var copied = new List<IssueStackFrame>();
+            foreach (var frame in frames)
+            {
+                if (frame == null)
+                {
+                    throw IssueDiagnostics.Validation("issue stack frame must be provided");
+                }
+
+                copied.Add(frame);
+                RequireStackFrameLimit(copied.Count);
+            }
+
+            if (copied.Count == 0)
+            {
+                throw IssueDiagnostics.Validation("issue stackFrames must contain 1-32 frames");
+            }
+
+            stackFrames = copied;
+            return this;
+        }
+
+        public IssueAttributes WithBreadcrumb(IssueBreadcrumb breadcrumb)
+        {
+            if (breadcrumb == null)
+            {
+                throw new ArgumentNullException(nameof(breadcrumb));
+            }
+
+            if (breadcrumbs == null)
+            {
+                breadcrumbs = new List<IssueBreadcrumb>();
+            }
+
+            RequireBreadcrumbLimit(breadcrumbs.Count + 1);
+            breadcrumbs.Add(breadcrumb);
+            return this;
+        }
+
+        public IssueAttributes WithBreadcrumbs(IEnumerable<IssueBreadcrumb> values)
+        {
+            if (values == null)
+            {
+                throw new ArgumentNullException(nameof(values));
+            }
+
+            var copied = new List<IssueBreadcrumb>();
+            foreach (var breadcrumb in values)
+            {
+                if (breadcrumb == null)
+                {
+                    throw IssueDiagnostics.Validation("issue breadcrumb must be provided");
+                }
+
+                copied.Add(breadcrumb);
+                RequireBreadcrumbLimit(copied.Count);
+            }
+
+            if (copied.Count == 0)
+            {
+                throw IssueDiagnostics.Validation("issue breadcrumbs must contain 1-64 entries");
+            }
+
+            breadcrumbs = copied;
+            return this;
+        }
+
+        public IssueAttributes WithBreadcrumbsTruncated(bool truncated)
+        {
+            BreadcrumbsTruncated = truncated;
+            return this;
+        }
+
         internal OrderedJsonObject ToJsonObject()
+        {
+            return ToJsonObject(Array.Empty<IssueBreadcrumb>(), false);
+        }
+
+        internal OrderedJsonObject ToJsonObject(IReadOnlyList<IssueBreadcrumb> snapshot, bool snapshotTruncated)
         {
             Validation.RequireNonEmpty("issue title", Title);
             Validation.RequireAllowedValue("issue level", Level, LogBrewClient.IssueLevels);
             var payload = new OrderedJsonObject().Add("title", Title).Add("level", Level);
             payload.AddIfNotNull("message", Message);
+            payload.AddIfNotNull("exception", Exception?.ToJsonObject());
+            if (stackFrames != null)
+            {
+                payload.Add("stackFrames", stackFrames.Select(frame => frame.ToJsonObject()).ToList());
+            }
+
+            var resolvedBreadcrumbs = new List<IssueBreadcrumb>(snapshot);
+            if (breadcrumbs != null)
+            {
+                resolvedBreadcrumbs.AddRange(breadcrumbs);
+            }
+
+            if (resolvedBreadcrumbs.Count > IssueDiagnostics.MaxBreadcrumbs)
+            {
+                resolvedBreadcrumbs.RemoveRange(0, resolvedBreadcrumbs.Count - IssueDiagnostics.MaxBreadcrumbs);
+                snapshotTruncated = true;
+            }
+
+            if (resolvedBreadcrumbs.Count > 0)
+            {
+                payload.Add("breadcrumbs", resolvedBreadcrumbs.Select(breadcrumb => breadcrumb.ToJsonObject()).ToList());
+            }
+
+            if (BreadcrumbsTruncated || snapshotTruncated)
+            {
+                payload.Add("breadcrumbsTruncated", true);
+            }
+
             payload.AddMetadata(Metadata);
+            payload.AddIfNotNull("context", Context?.ToJsonObject());
             return payload;
+        }
+
+        private static void RequireStackFrameLimit(int count)
+        {
+            if (count > IssueDiagnostics.MaxStackFrames)
+            {
+                throw IssueDiagnostics.Validation("issue stackFrames must contain 1-32 frames");
+            }
+        }
+
+        private static void RequireBreadcrumbLimit(int count)
+        {
+            if (count > IssueDiagnostics.MaxBreadcrumbs)
+            {
+                throw IssueDiagnostics.Validation("issue breadcrumbs must contain 1-64 entries");
+            }
         }
     }
 
@@ -629,6 +885,8 @@ namespace LogBrew.Unity
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public static LogAttributes Create(string message, string level)
         {
             return new LogAttributes(message, level);
@@ -646,6 +904,12 @@ namespace LogBrew.Unity
             return this;
         }
 
+        public LogAttributes WithContext(TelemetryContext context)
+        {
+            Context = context ?? throw new ArgumentNullException(nameof(context));
+            return this;
+        }
+
         internal OrderedJsonObject ToJsonObject()
         {
             Validation.RequireNonEmpty("log message", Message);
@@ -653,12 +917,16 @@ namespace LogBrew.Unity
             var payload = new OrderedJsonObject().Add("message", Message).Add("level", Level);
             payload.AddIfNotNull("logger", Logger);
             payload.AddMetadata(Metadata);
+            payload.AddIfNotNull("context", Context?.ToJsonObject());
             return payload;
         }
     }
 
     public sealed class SpanAttributes
     {
+        private List<SpanEventSummary>? events;
+        private List<SpanLinkSummary>? links;
+
         private SpanAttributes(string name, string traceId, string spanId, string status)
         {
             Name = name;
@@ -681,6 +949,18 @@ namespace LogBrew.Unity
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
+        public IReadOnlyList<SpanEventSummary>? Events
+        {
+            get { return events?.AsReadOnly(); }
+        }
+
+        public IReadOnlyList<SpanLinkSummary>? Links
+        {
+            get { return links?.AsReadOnly(); }
+        }
+
         public static SpanAttributes Create(string name, string traceId, string spanId, string status)
         {
             return new SpanAttributes(name, traceId, spanId, status);
@@ -701,6 +981,108 @@ namespace LogBrew.Unity
         public SpanAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        public SpanAttributes WithContext(TelemetryContext context)
+        {
+            Context = context ?? throw new ArgumentNullException(nameof(context));
+            return this;
+        }
+
+        public SpanAttributes WithEvent(SpanEventSummary summary)
+        {
+            if (summary == null)
+            {
+                throw new ArgumentNullException(nameof(summary));
+            }
+
+            if (events == null)
+            {
+                events = new List<SpanEventSummary>();
+            }
+
+            if (events.Count == SpanEventSummary.MaxEvents)
+            {
+                throw new SdkException("validation_error", "span event summaries must contain at most 8 entries");
+            }
+
+            events.Add(summary);
+            return this;
+        }
+
+        public SpanAttributes WithEvents(IEnumerable<SpanEventSummary> summaries)
+        {
+            if (summaries == null)
+            {
+                throw new ArgumentNullException(nameof(summaries));
+            }
+
+            var copied = new List<SpanEventSummary>();
+            foreach (var summary in summaries)
+            {
+                if (summary == null)
+                {
+                    throw new SdkException("validation_error", "span event summary must be provided");
+                }
+
+                if (copied.Count == SpanEventSummary.MaxEvents)
+                {
+                    throw new SdkException("validation_error", "span event summaries must contain at most 8 entries");
+                }
+
+                copied.Add(summary);
+            }
+
+            events = copied;
+            return this;
+        }
+
+        public SpanAttributes WithLink(SpanLinkSummary summary)
+        {
+            if (summary == null)
+            {
+                throw new ArgumentNullException(nameof(summary));
+            }
+
+            if (links == null)
+            {
+                links = new List<SpanLinkSummary>();
+            }
+
+            if (links.Count == SpanLinkSummary.MaxLinks)
+            {
+                throw new SdkException("validation_error", "span link summaries must contain at most 8 entries");
+            }
+
+            links.Add(summary);
+            return this;
+        }
+
+        public SpanAttributes WithLinks(IEnumerable<SpanLinkSummary> summaries)
+        {
+            if (summaries == null)
+            {
+                throw new ArgumentNullException(nameof(summaries));
+            }
+
+            var copied = new List<SpanLinkSummary>();
+            foreach (var summary in summaries)
+            {
+                if (summary == null)
+                {
+                    throw new SdkException("validation_error", "span link summary must be provided");
+                }
+
+                if (copied.Count == SpanLinkSummary.MaxLinks)
+                {
+                    throw new SdkException("validation_error", "span link summaries must contain at most 8 entries");
+                }
+
+                copied.Add(summary);
+            }
+
+            links = copied;
             return this;
         }
 
@@ -732,6 +1114,17 @@ namespace LogBrew.Unity
             }
 
             payload.AddMetadata(Metadata);
+            if (events != null && events.Count > 0)
+            {
+                payload.Add("events", events.Select(summary => summary.ToJsonObject()).ToList());
+            }
+
+            if (links != null && links.Count > 0)
+            {
+                payload.Add("links", links.Select(summary => summary.ToJsonObject()).ToList());
+            }
+
+            payload.AddIfNotNull("context", Context?.ToJsonObject());
             return payload;
         }
     }
@@ -750,6 +1143,8 @@ namespace LogBrew.Unity
 
         public IDictionary<string, object?>? Metadata { get; private set; }
 
+        internal TelemetryContext? Context { get; private set; }
+
         public static ActionAttributes Create(string name, string status)
         {
             return new ActionAttributes(name, status);
@@ -761,12 +1156,19 @@ namespace LogBrew.Unity
             return this;
         }
 
+        public ActionAttributes WithContext(TelemetryContext context)
+        {
+            Context = context ?? throw new ArgumentNullException(nameof(context));
+            return this;
+        }
+
         internal OrderedJsonObject ToJsonObject()
         {
             Validation.RequireNonEmpty("action name", Name);
             Validation.RequireAllowedValue("action status", Status, LogBrewClient.ActionStatuses);
             var payload = new OrderedJsonObject().Add("name", Name).Add("status", Status);
             payload.AddMetadata(Metadata);
+            payload.AddIfNotNull("context", Context?.ToJsonObject());
             return payload;
         }
     }

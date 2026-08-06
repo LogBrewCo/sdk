@@ -49,8 +49,14 @@ if ! acquire_lock; then
   exit 1
 fi
 
-package_tgz="$tmp_dir/co.logbrew.unity-0.1.1.tgz"
-(cd "$package_dir" && tar -czf "$package_tgz" package.json README.md Runtime Samples~ examples)
+package_tgz="$tmp_dir/co.logbrew.unity-0.2.0.tgz"
+(cd "$package_dir" && tar -czf "$package_tgz" \
+  package.json \
+  README.md \
+  Runtime \
+  Samples~ \
+  examples \
+  tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj)
 
 project_dir="$tmp_dir/UnityProject"
 installed_package_dir="$project_dir/Packages/co.logbrew.unity"
@@ -73,7 +79,7 @@ project_manifest = json.loads(Path(sys.argv[1]).read_text())
 package_manifest = json.loads(Path(sys.argv[2]).read_text())
 if project_manifest["dependencies"].get("co.logbrew.unity") != "file:Packages/co.logbrew.unity":
     raise SystemExit("Unity project dependency entry missing")
-if package_manifest.get("name") != "co.logbrew.unity" or package_manifest.get("version") != "0.1.1":
+if package_manifest.get("name") != "co.logbrew.unity" or package_manifest.get("version") != "0.2.0":
     raise SystemExit("installed Unity package metadata mismatch")
 PY
 
@@ -141,20 +147,30 @@ EOF
 
 run_installed_sample InstalledReadme false "$tmp_dir/installed-readme.stdout.json" "$tmp_dir/installed-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
 
 run_installed_sample InstalledSmoke true "$tmp_dir/installed-smoke.stdout.json" "$tmp_dir/installed-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"richContextEvents":3' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/installed-smoke.stderr.json"
 
 test -f "$installed_package_dir/Runtime/LogBrewTrace.cs"
 test -f "$installed_package_dir/Runtime/UnityCoroutineTrace.cs"
 test -f "$installed_package_dir/Runtime/UnityLifecycleTracker.cs"
 test -f "$installed_package_dir/Runtime/UnityRequestTrace.cs"
+test -f "$installed_package_dir/Runtime/TelemetryContext.cs"
+test -f "$installed_package_dir/Runtime/TelemetryResource.cs"
+test -f "$installed_package_dir/Runtime/UnityRuntimeContext.cs"
+test -f "$installed_package_dir/Runtime/IssueDiagnostics.cs"
+test -f "$installed_package_dir/Runtime/MetricAttributes.cs"
+test -f "$installed_package_dir/Runtime/SpanEvidence.cs"
+test -f "$installed_package_dir/tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj"
+dotnet build "$installed_package_dir/tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj" --configuration Release --nologo >/dev/null
 test -f "$installed_package_dir/examples/trace_correlation/TraceCorrelation.cs"
 test -f "$installed_package_dir/examples/lifecycle_spans/LifecycleSpans.cs"
 test -f "$installed_package_dir/examples/lifecycle_tracker/LifecycleTracker.cs"
@@ -297,6 +313,70 @@ if (!helper.PreviewJson().Contains("\"sceneName\": \"MainMenu\"", StringComparis
     throw new InvalidOperationException("missing Unity context");
 }
 
+var richContext = TelemetryContext.Create()
+    .WithResource(TelemetryResource.Create()
+        .WithDeployment("production", "2.3.0")
+        .WithFramework("unity", "6000.1")
+        .WithApplication("Checkout Game", "2.3.0", "204")
+        .Build())
+    .WithSession("session_001")
+    .WithSubject("opaque_player_001", "user")
+    .WithTag("journey", "checkout")
+    .Build();
+var rich = LogBrewUnity.CreateClient(
+    "LOGBREW_API_KEY",
+    "checkout-game",
+    context: richContext,
+    includeAutomaticContext: false);
+rich.AddBreadcrumb(
+    IssueBreadcrumb.Create("2026-06-02T10:00:07Z", "checkout.request")
+        .WithType("http")
+        .WithLevel("warning")
+        .WithData(new Dictionary<string, object?> { ["attempt"] = 2 }));
+LogBrewUnity.CaptureException(
+    rich,
+    "evt_rich_issue_001",
+    "2026-06-02T10:00:08Z",
+    "NullReferenceException",
+    "Checkout.Submit () (at /workspace/game/Assets/Scripts/Checkout.cs:42)",
+    context);
+rich.Metric(
+    "evt_metric_001",
+    "2026-06-02T10:00:09Z",
+    MetricAttributes.Create("frame.duration", "histogram", 16.6, "ms", "delta"));
+rich.Span(
+    "evt_span_evidence_001",
+    "2026-06-02T10:00:10Z",
+    SpanAttributes.Create(
+            "checkout.submit",
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "00f067aa0ba902b7",
+            "error")
+        .WithEvent(SpanEventSummary.Create("retry"))
+        .WithLink(SpanLinkSummary.Create("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb")));
+var richPreview = rich.PreviewJson();
+foreach (var expected in new[]
+{
+    "\"schemaVersion\": 1",
+    "\"subject\"",
+    "\"breadcrumbs\"",
+    "\"filename\": \"Checkout.cs\"",
+    "\"type\": \"metric\"",
+    "\"events\"",
+    "\"links\""
+})
+{
+    if (!richPreview.Contains(expected, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("missing rich Unity telemetry: " + expected);
+    }
+}
+
+if (richPreview.Contains("/workspace/game", StringComparison.Ordinal))
+{
+    throw new InvalidOperationException("absolute source path leaked");
+}
+
 var httpEndpoint = Environment.GetEnvironmentVariable("LOGBREW_UNITY_HTTP_ENDPOINT")
     ?? throw new InvalidOperationException("missing HTTP endpoint");
 var http = NewClient(maxRetries: 1);
@@ -318,7 +398,7 @@ EnqueueAll(closed);
 closed.Shutdown(RecordingTransport.AlwaysAccept());
 Expect("shutdown_error", () => closed.Action("evt_action_002", "2026-06-02T10:00:06Z", ActionAttributes.Create("deploy", "success")));
 
-Console.Error.WriteLine("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"unityHelperEvents\":3,\"httpAttempts\":" + httpResponse.Attempts + "}");
+Console.Error.WriteLine("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"unityHelperEvents\":3,\"richContextEvents\":3,\"metricEvents\":1,\"httpAttempts\":" + httpResponse.Attempts + "}");
 CS
 
 intake_port="$(python3 - <<'PY'
@@ -385,9 +465,11 @@ LOGBREW_UNITY_HTTP_ENDPOINT="http://127.0.0.1:$intake_port/v1/events" \
 wait "$intake_pid"
 intake_pid=""
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"richContextEvents":3' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 python3 - "$intake_log" <<'PY'
 import json

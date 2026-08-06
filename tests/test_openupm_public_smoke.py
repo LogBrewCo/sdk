@@ -14,7 +14,7 @@ class OpenUpmPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_OPENUPM_VERSION",
-            'version="${1:-${LOGBREW_OPENUPM_VERSION:-0.1.1}}"',
+            'version="${1:-${LOGBREW_OPENUPM_VERSION:-0.2.0}}"',
             "https://package.openupm.com",
             "npm pack co.logbrew.unity@",
             "scopedRegistries",
@@ -23,6 +23,13 @@ class OpenUpmPublicSmokeTests(unittest.TestCase):
             "Runtime/UnityCoroutineTrace.cs",
             "Runtime/UnityLifecycleTracker.cs",
             "Runtime/UnityRequestTrace.cs",
+            "Runtime/TelemetryContext.cs",
+            "Runtime/TelemetryResource.cs",
+            "Runtime/UnityRuntimeContext.cs",
+            "Runtime/IssueDiagnostics.cs",
+            "Runtime/MetricAttributes.cs",
+            "Runtime/SpanEvidence.cs",
+            "tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj",
             "Samples~/ReadmeExample/ReadmeExample.cs",
             "Samples~/RealUserSmoke/RealUserSmoke.cs",
             "examples/trace_correlation/TraceCorrelation.cs",
@@ -36,6 +43,10 @@ class OpenUpmPublicSmokeTests(unittest.TestCase):
             "run-request-tracker",
             "run-coroutine-tracker",
             "dotnet run",
+            "dotnet build",
+            "--allow-additive-context",
+            'grep -q \'"richContextEvents":3\'',
+            'grep -q \'"metricEvents":1\'',
             "openupm public install smoke passed",
         ):
             self.assertIn(expected, body)

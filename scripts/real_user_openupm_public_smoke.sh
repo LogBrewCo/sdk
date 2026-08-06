@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-${LOGBREW_OPENUPM_VERSION:-0.1.1}}"
+version="${1:-${LOGBREW_OPENUPM_VERSION:-0.2.0}}"
 registry_url="${LOGBREW_OPENUPM_REGISTRY_URL:-https://package.openupm.com}"
 package_name="co.logbrew.unity"
 tmp_dir="$(mktemp -d)"
@@ -76,6 +76,13 @@ expected_files = {
     "Runtime/UnityHelpers.cs",
     "Runtime/UnityLifecycleTracker.cs",
     "Runtime/UnityRequestTrace.cs",
+    "Runtime/TelemetryContext.cs",
+    "Runtime/TelemetryResource.cs",
+    "Runtime/UnityRuntimeContext.cs",
+    "Runtime/IssueDiagnostics.cs",
+    "Runtime/MetricAttributes.cs",
+    "Runtime/SpanEvidence.cs",
+    "tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj",
     "Samples~/ReadmeExample/ReadmeExample.cs",
     "Samples~/RealUserSmoke/RealUserSmoke.cs",
     "examples/Makefile",
@@ -150,6 +157,13 @@ for required_file in \
   Runtime/UnityHelpers.cs \
   Runtime/UnityLifecycleTracker.cs \
   Runtime/UnityRequestTrace.cs \
+  Runtime/TelemetryContext.cs \
+  Runtime/TelemetryResource.cs \
+  Runtime/UnityRuntimeContext.cs \
+  Runtime/IssueDiagnostics.cs \
+  Runtime/MetricAttributes.cs \
+  Runtime/SpanEvidence.cs \
+  tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj \
   Samples~/ReadmeExample/ReadmeExample.cs \
   Samples~/RealUserSmoke/RealUserSmoke.cs \
   examples/Makefile \
@@ -160,6 +174,8 @@ for required_file in \
   examples/coroutine_tracker/CoroutineTracker.cs; do
   test -f "$installed_package_dir/$required_file"
 done
+
+dotnet build "$installed_package_dir/tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj" --configuration Release --nologo >/dev/null
 
 run_installed_sample() {
   local project_name="$1"
@@ -209,14 +225,16 @@ EOF
 
 run_installed_sample InstalledReadme false "$tmp_dir/installed-readme.stdout.json" "$tmp_dir/installed-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
 
 run_installed_sample InstalledSmoke true "$tmp_dir/installed-smoke.stdout.json" "$tmp_dir/installed-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"richContextEvents":3' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/installed-smoke.stderr.json"
 
 make --no-print-directory -C "$installed_package_dir/examples" run-trace-correlation > "$tmp_dir/installed-trace-correlation.stdout.json" 2> "$tmp_dir/installed-trace-correlation.stderr.json"
