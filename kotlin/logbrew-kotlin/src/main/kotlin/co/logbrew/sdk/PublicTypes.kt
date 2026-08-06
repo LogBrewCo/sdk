@@ -201,26 +201,65 @@ class RecordingTransport(
 
 data class AndroidContext(
     private val values: Map<String, Any?>,
+    private val telemetryContext: TelemetryContext? = null,
 ) {
     fun withActivityName(activityName: String): AndroidContext = withMetadata("activityName", activityName)
 
     fun withScreenName(screenName: String): AndroidContext = withMetadata("screenName", screenName)
 
-    fun withDeviceModel(deviceModel: String): AndroidContext = withMetadata("deviceModel", deviceModel)
+    fun withDeviceModel(deviceModel: String): AndroidContext =
+        withMetadata("deviceModel", deviceModel)
+            .withTelemetryContext(
+                TelemetryContext(resource = TelemetryResource(device = TelemetryDevice(model = deviceModel))),
+            )
 
-    fun withOsVersion(osVersion: String): AndroidContext = withMetadata("osVersion", osVersion)
+    fun withOsVersion(osVersion: String): AndroidContext =
+        withMetadata("osVersion", osVersion)
+            .withTelemetryContext(
+                TelemetryContext(
+                    resource = TelemetryResource(operatingSystem = TelemetryOperatingSystem("Android", osVersion)),
+                ),
+            )
 
-    fun withSessionId(sessionId: String): AndroidContext = withMetadata("sessionId", sessionId)
+    fun withSessionId(sessionId: String): AndroidContext =
+        withMetadata("sessionId", sessionId)
+            .withTelemetryContext(TelemetryContext(session = TelemetrySessionContext(sessionId)))
+
+    fun withApplication(
+        name: String? = null,
+        version: String? = null,
+        build: String? = null,
+    ): AndroidContext =
+        withTelemetryContext(
+            TelemetryContext(
+                resource = TelemetryResource(application = TelemetryApplication(name, version, build)),
+            ),
+        )
+
+    fun withTelemetryContext(context: TelemetryContext): AndroidContext =
+        copy(telemetryContext = TelemetryContext.merge(telemetryContext, context))
 
     fun withMetadata(
         key: String,
         value: Any?,
     ): AndroidContext {
         Validation.requireNonEmpty("android metadata key", key)
-        return AndroidContext(values + (key to Validation.requireMetadataValue(key, value)))
+        return copy(values = values + (key to Validation.requireMetadataValue(key, value)))
     }
 
     internal fun toMetadata(): Map<String, Any?> = values.toMap()
+
+    internal fun toTelemetryContext(): TelemetryContext? = telemetryContext
+
+    internal fun merging(other: AndroidContext?): AndroidContext {
+        if (other == null) {
+            return this
+        }
+        return AndroidContext(
+            values = values + other.values,
+            telemetryContext = TelemetryContext.merge(telemetryContext, other.telemetryContext),
+        )
+    }
 
     companion object {
         fun create(): AndroidContext = AndroidContext(emptyMap())
@@ -232,12 +271,15 @@ data class ReleaseAttributes(
     val commit: String? = null,
     val notes: String? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val context: TelemetryContext? = null,
 ) {
     fun withCommit(commit: String): ReleaseAttributes = copy(commit = commit)
 
     fun withNotes(notes: String): ReleaseAttributes = copy(notes = notes)
 
     fun withMetadata(metadata: Map<String, Any?>): ReleaseAttributes = copy(metadata = metadata)
+
+    fun withContext(context: TelemetryContext): ReleaseAttributes = copy(context = context.normalized())
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("release version", version)
@@ -247,6 +289,7 @@ data class ReleaseAttributes(
             .addIfNotNull("commit", commit)
             .addIfNotNull("notes", notes)
             .addMetadata(metadata)
+            .addIfNotNull("context", context?.toJsonObject())
     }
 
     companion object {
@@ -258,10 +301,13 @@ data class EnvironmentAttributes(
     val name: String,
     val region: String? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val context: TelemetryContext? = null,
 ) {
     fun withRegion(region: String): EnvironmentAttributes = copy(region = region)
 
     fun withMetadata(metadata: Map<String, Any?>): EnvironmentAttributes = copy(metadata = metadata)
+
+    fun withContext(context: TelemetryContext): EnvironmentAttributes = copy(context = context.normalized())
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("environment name", name)
@@ -269,6 +315,7 @@ data class EnvironmentAttributes(
             .add("name", name)
             .addIfNotNull("region", region)
             .addMetadata(metadata)
+            .addIfNotNull("context", context?.toJsonObject())
     }
 
     companion object {
@@ -281,19 +328,47 @@ data class IssueAttributes(
     val level: String,
     val message: String? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val exception: IssueException? = null,
+    val stackFrames: List<IssueStackFrame>? = null,
+    val breadcrumbs: List<IssueBreadcrumb>? = null,
+    val breadcrumbsTruncated: Boolean? = null,
+    val context: TelemetryContext? = null,
 ) {
     fun withMessage(message: String): IssueAttributes = copy(message = message)
 
     fun withMetadata(metadata: Map<String, Any?>): IssueAttributes = copy(metadata = metadata)
 
+    fun withException(exception: IssueException): IssueAttributes = copy(exception = exception)
+
+    fun withStackFrame(frame: IssueStackFrame): IssueAttributes =
+        copy(stackFrames = normalizeIssueStackFrames(stackFrames.orEmpty() + frame))
+
+    fun withStackFrames(frames: List<IssueStackFrame>): IssueAttributes = copy(stackFrames = normalizeIssueStackFrames(frames))
+
+    fun withBreadcrumb(breadcrumb: IssueBreadcrumb): IssueAttributes =
+        copy(breadcrumbs = normalizeIssueBreadcrumbs(breadcrumbs.orEmpty() + breadcrumb))
+
+    fun withBreadcrumbs(breadcrumbs: List<IssueBreadcrumb>): IssueAttributes = copy(breadcrumbs = normalizeIssueBreadcrumbs(breadcrumbs))
+
+    fun withBreadcrumbsTruncated(truncated: Boolean): IssueAttributes = copy(breadcrumbsTruncated = truncated)
+
+    fun withContext(context: TelemetryContext): IssueAttributes = copy(context = context.normalized())
+
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("issue title", title)
         val normalizedLevel = Validation.normalizeSeverity("issue level", level)
+        val normalizedFrames = normalizeIssueStackFrames(stackFrames)
+        val normalizedBreadcrumbs = normalizeIssueBreadcrumbs(breadcrumbs)
         return OrderedJsonObject()
             .add("title", title)
             .add("level", normalizedLevel)
             .addIfNotNull("message", message)
+            .addIfNotNull("exception", exception?.toJsonObject())
+            .addIfNotNull("stackFrames", normalizedFrames?.map { it.toJsonObject() })
+            .addIfNotNull("breadcrumbs", normalizedBreadcrumbs?.map { it.toJsonObject() })
+            .addIfNotNull("breadcrumbsTruncated", breadcrumbsTruncated)
             .addMetadata(metadata)
+            .addIfNotNull("context", context?.toJsonObject())
     }
 
     companion object {
@@ -301,6 +376,18 @@ data class IssueAttributes(
             title: String,
             level: String,
         ): IssueAttributes = IssueAttributes(title, level)
+
+        /**
+         * Creates a handled issue with safe exception identity and bounded structured frames.
+         * The exception message and raw stack text are omitted unless [message] is explicit.
+         */
+        fun fromThrowable(
+            throwable: Throwable,
+            title: String? = null,
+            mechanismType: String = "kotlin.exception",
+            handled: Boolean = true,
+            message: String? = null,
+        ): IssueAttributes = issueAttributesFromThrowable(throwable, title, mechanismType, handled, message)
     }
 }
 
@@ -309,10 +396,13 @@ data class LogAttributes(
     val level: String,
     val logger: String? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val context: TelemetryContext? = null,
 ) {
     fun withLogger(logger: String): LogAttributes = copy(logger = logger)
 
     fun withMetadata(metadata: Map<String, Any?>): LogAttributes = copy(metadata = metadata)
+
+    fun withContext(context: TelemetryContext): LogAttributes = copy(context = context.normalized())
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("log message", message)
@@ -322,6 +412,7 @@ data class LogAttributes(
             .add("level", normalizedLevel)
             .addIfNotNull("logger", logger)
             .addMetadata(metadata)
+            .addIfNotNull("context", context?.toJsonObject())
     }
 
     companion object {
@@ -341,6 +432,8 @@ data class SpanAttributes(
     val durationMs: Double? = null,
     val metadata: Map<String, Any?> = emptyMap(),
     val events: List<SpanEventSummary> = emptyList(),
+    val links: List<SpanLinkSummary> = emptyList(),
+    val context: TelemetryContext? = null,
 ) {
     fun withParentSpanId(parentSpanId: String): SpanAttributes = copy(parentSpanId = parentSpanId)
 
@@ -351,6 +444,12 @@ data class SpanAttributes(
     fun withEvent(event: SpanEventSummary): SpanAttributes = copy(events = events + event)
 
     fun withEvents(events: List<SpanEventSummary>): SpanAttributes = copy(events = this.events + events)
+
+    fun withLink(link: SpanLinkSummary): SpanAttributes = copy(links = links + link)
+
+    fun withLinks(links: List<SpanLinkSummary>): SpanAttributes = copy(links = this.links + links)
+
+    fun withContext(context: TelemetryContext): SpanAttributes = copy(context = context.normalized())
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("span name", name)
@@ -364,6 +463,7 @@ data class SpanAttributes(
         if (events.size > 8) {
             throw SdkException("validation_error", "span events must contain at most 8 entries")
         }
+        val normalizedLinks = normalizeSpanLinks(links)
 
         return OrderedJsonObject()
             .add("name", name)
@@ -378,7 +478,11 @@ data class SpanAttributes(
                 if (events.isNotEmpty()) {
                     payload.add("events", events.map { it.toJsonObject() })
                 }
+                if (normalizedLinks.isNotEmpty()) {
+                    payload.add("links", normalizedLinks.map { it.toJsonObject() })
+                }
             }.addMetadata(metadata)
+            .addIfNotNull("context", context?.toJsonObject())
     }
 
     companion object {
@@ -421,8 +525,11 @@ data class MetricAttributes(
     val unit: String,
     val temporality: String,
     val metadata: Map<String, Any?> = emptyMap(),
+    val context: TelemetryContext? = null,
 ) {
     fun withMetadata(metadata: Map<String, Any?>): MetricAttributes = copy(metadata = metadata)
+
+    fun withContext(context: TelemetryContext): MetricAttributes = copy(context = context.normalized())
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("metric name", name)
@@ -441,6 +548,7 @@ data class MetricAttributes(
             .add("unit", unit)
             .add("temporality", temporality)
             .addMetadata(metadata)
+            .addIfNotNull("context", context?.toJsonObject())
     }
 
     private fun allowedTemporalities(): Set<String> =
@@ -467,8 +575,11 @@ data class ActionAttributes(
     val name: String,
     val status: String,
     val metadata: Map<String, Any?> = emptyMap(),
+    val context: TelemetryContext? = null,
 ) {
     fun withMetadata(metadata: Map<String, Any?>): ActionAttributes = copy(metadata = metadata)
+
+    fun withContext(context: TelemetryContext): ActionAttributes = copy(context = context.normalized())
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("action name", name)
@@ -477,6 +588,7 @@ data class ActionAttributes(
             .add("name", name)
             .add("status", status)
             .addMetadata(metadata)
+            .addIfNotNull("context", context?.toJsonObject())
     }
 
     companion object {

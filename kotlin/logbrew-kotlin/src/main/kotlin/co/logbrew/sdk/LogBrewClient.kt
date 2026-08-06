@@ -5,6 +5,7 @@ class LogBrewClient private constructor(
     sdkName: String,
     sdkVersion: String,
     private val maxRetries: Int,
+    private val context: TelemetryContext?,
 ) {
     private val sdk =
         OrderedJsonObject()
@@ -13,6 +14,7 @@ class LogBrewClient private constructor(
             .add("version", sdkVersion)
     private val stateLock = Any()
     private val events = mutableListOf<Event>()
+    private val breadcrumbStore = IssueBreadcrumbStore()
     private var closed = false
 
     fun pendingEvents(): Int = synchronized(stateLock) { events.size }
@@ -31,7 +33,7 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: ReleaseAttributes,
     ) {
-        pushEvent("release", id, timestamp, attributes.toJsonObject())
+        pushEvent("release", id, timestamp, attributes.copy(context = resolvedContext(attributes.context)).toJsonObject())
     }
 
     fun environment(
@@ -39,7 +41,7 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: EnvironmentAttributes,
     ) {
-        pushEvent("environment", id, timestamp, attributes.toJsonObject())
+        pushEvent("environment", id, timestamp, attributes.copy(context = resolvedContext(attributes.context)).toJsonObject())
     }
 
     fun issue(
@@ -47,7 +49,14 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: IssueAttributes,
     ) {
-        pushEvent("issue", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
+        val snapshot = synchronized(stateLock) { breadcrumbStore.snapshot() }
+        val resolvedContext = resolvedContext(attributes.context)
+        val resolved =
+            attributes
+                .withBreadcrumbSnapshot(snapshot)
+                .withResolvedTraceMetadata(resolvedContext?.trace)
+                .copy(context = resolvedContext)
+        pushEvent("issue", id, timestamp, resolved.toJsonObject())
     }
 
     fun log(
@@ -55,7 +64,12 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: LogAttributes,
     ) {
-        pushEvent("log", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
+        val resolvedContext = resolvedContext(attributes.context)
+        val resolved =
+            attributes
+                .withResolvedTraceMetadata(resolvedContext?.trace)
+                .copy(context = resolvedContext)
+        pushEvent("log", id, timestamp, resolved.toJsonObject())
     }
 
     fun span(
@@ -63,7 +77,8 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: SpanAttributes,
     ) {
-        pushEvent("span", id, timestamp, attributes.toJsonObject())
+        val resolvedContext = resolvedSpanContext(attributes.context, attributes.telemetryTraceContext())
+        pushEvent("span", id, timestamp, attributes.copy(context = resolvedContext).toJsonObject())
     }
 
     fun metric(
@@ -71,7 +86,12 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: MetricAttributes,
     ) {
-        pushEvent("metric", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
+        val resolvedContext = resolvedContext(attributes.context)
+        val resolved =
+            attributes
+                .withResolvedTraceMetadata(resolvedContext?.trace)
+                .copy(context = resolvedContext)
+        pushEvent("metric", id, timestamp, resolved.toJsonObject())
     }
 
     fun action(
@@ -79,7 +99,28 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: ActionAttributes,
     ) {
-        pushEvent("action", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
+        val resolvedContext = resolvedContext(attributes.context)
+        val resolved =
+            attributes
+                .withResolvedTraceMetadata(resolvedContext?.trace)
+                .copy(context = resolvedContext)
+        pushEvent("action", id, timestamp, resolved.toJsonObject())
+    }
+
+    /** Adds one privacy-bounded breadcrumb to future issue snapshots. */
+    fun addBreadcrumb(breadcrumb: IssueBreadcrumb) {
+        synchronized(stateLock) {
+            requireOpen()
+            breadcrumbStore.add(breadcrumb)
+        }
+    }
+
+    /** Clears all client breadcrumbs and their truncation marker. */
+    fun clearBreadcrumbs() {
+        synchronized(stateLock) {
+            requireOpen()
+            breadcrumbStore.clear()
+        }
     }
 
     fun flush(transport: Transport): TransportResponse {
@@ -111,10 +152,33 @@ class LogBrewClient private constructor(
         Validation.requireNonEmpty("event id", id)
         Validation.requireTimestamp(timestamp)
         synchronized(stateLock) {
-            if (closed) {
-                throw SdkException("shutdown_error", "client is already shut down")
-            }
+            requireOpen()
             events += Event(type, timestamp, id, attributes)
+        }
+    }
+
+    private fun resolvedContext(eventContext: TelemetryContext?): TelemetryContext? {
+        var value = context
+        value = TelemetryContext.merge(value, LogBrewTelemetry.currentContext())
+        val activeTrace = LogBrewTrace.currentTraceContext()?.toTelemetryTraceContext()
+        if (activeTrace != null) {
+            value = TelemetryContext.merge(value, TelemetryContext(trace = activeTrace))
+        }
+        return TelemetryContext.merge(value, eventContext)
+    }
+
+    private fun resolvedSpanContext(
+        eventContext: TelemetryContext?,
+        signalTrace: TelemetryTraceContext?,
+    ): TelemetryContext? {
+        var value = TelemetryContext.merge(context.withoutTrace(), LogBrewTelemetry.currentContext().withoutTrace())
+        value = TelemetryContext.merge(value, eventContext.withoutTrace())
+        return TelemetryContext.merge(value, signalTrace?.let { TelemetryContext(trace = it) })
+    }
+
+    private fun requireOpen() {
+        if (closed) {
+            throw SdkException("shutdown_error", "client is already shut down")
         }
     }
 
@@ -158,11 +222,14 @@ class LogBrewClient private constructor(
         internal val instantTemporality = setOf("instant")
         internal val deltaCumulativeTemporalities = setOf("delta", "cumulative")
 
+        @JvmOverloads
         fun create(
             apiKey: String,
             sdkName: String,
             sdkVersion: String,
             maxRetries: Int = 2,
+            context: TelemetryContext? = null,
+            includeAutomaticContext: Boolean = true,
         ): LogBrewClient {
             Validation.requireNonEmpty("api_key", apiKey)
             Validation.requireNonEmpty("sdk_name", sdkName)
@@ -170,18 +237,81 @@ class LogBrewClient private constructor(
             if (maxRetries < 0) {
                 throw SdkException("validation_error", "max_retries must be non-negative")
             }
-            return LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries)
+            val baseContext =
+                TelemetryContext.merge(
+                    if (includeAutomaticContext) automaticTelemetryContext() else null,
+                    context,
+                )
+            return LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries, baseContext)
         }
     }
 }
 
-private fun IssueAttributes.withActiveTraceMetadata(): IssueAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
+private fun TelemetryContext?.withoutTrace(): TelemetryContext? {
+    if (this == null || trace == null) {
+        return this
+    }
+    if (resource == null && session == null && subject == null && tags == null) {
+        return null
+    }
+    return copy(trace = null).normalized()
+}
 
-private fun LogAttributes.withActiveTraceMetadata(): LogAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
+private fun IssueAttributes.withResolvedTraceMetadata(trace: TelemetryTraceContext?): IssueAttributes =
+    copy(metadata = resolvedTraceMetadata(metadata, trace))
 
-private fun MetricAttributes.withActiveTraceMetadata(): MetricAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
+private fun LogAttributes.withResolvedTraceMetadata(trace: TelemetryTraceContext?): LogAttributes =
+    copy(metadata = resolvedTraceMetadata(metadata, trace))
 
-private fun ActionAttributes.withActiveTraceMetadata(): ActionAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
+private fun MetricAttributes.withResolvedTraceMetadata(trace: TelemetryTraceContext?): MetricAttributes =
+    copy(metadata = resolvedTraceMetadata(metadata, trace))
+
+private fun ActionAttributes.withResolvedTraceMetadata(trace: TelemetryTraceContext?): ActionAttributes =
+    copy(metadata = resolvedTraceMetadata(metadata, trace))
+
+private fun SpanAttributes.telemetryTraceContext(): TelemetryTraceContext? {
+    val active = LogBrewTrace.currentTraceContext()
+    if (
+        active != null &&
+        active.traceId.equals(traceId, ignoreCase = true) &&
+        active.spanId.equals(spanId, ignoreCase = true) &&
+        active.parentSpanId.equals(parentSpanId, ignoreCase = true)
+    ) {
+        return active.toTelemetryTraceContext()
+    }
+    return try {
+        TelemetryContext(
+            trace =
+                TelemetryTraceContext(
+                    traceId = traceId,
+                    spanId = spanId,
+                    parentSpanId = parentSpanId,
+                ),
+        ).normalized().trace
+    } catch (_: SdkException) {
+        null
+    }
+}
+
+private fun resolvedTraceMetadata(
+    metadata: Map<String, Any?>,
+    trace: TelemetryTraceContext?,
+): Map<String, Any?> {
+    if (trace == null) {
+        return metadata
+    }
+    val traceKeys = setOf("traceId", "spanId", "parentSpanId", "traceFlags", "traceSampled")
+    val merged = linkedMapOf<String, Any?>()
+    metadata.forEach { (key, value) -> if (key !in traceKeys) merged[key] = value }
+    merged["traceId"] = trace.traceId
+    trace.spanId?.let { merged["spanId"] = it }
+    trace.parentSpanId?.let { merged["parentSpanId"] = it }
+    trace.sampled?.let { sampled ->
+        merged["traceFlags"] = if (sampled) "01" else "00"
+        merged["traceSampled"] = sampled
+    }
+    return merged.toMap()
+}
 
 private data class Event(
     val type: String,

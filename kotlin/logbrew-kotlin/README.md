@@ -13,7 +13,7 @@ The package is dependency-light, uses the Kotlin standard library only, and keep
 For Maven or Gradle publishing, use the package coordinates:
 
 ```text
-co.logbrew:logbrew-kotlin:0.1.1
+co.logbrew:logbrew-kotlin:0.2.0
 ```
 
 ## Usage
@@ -22,13 +22,22 @@ co.logbrew:logbrew-kotlin:0.1.1
 import co.logbrew.sdk.AndroidLogPriority
 import co.logbrew.sdk.HttpTransport
 import co.logbrew.sdk.IssueAttributes
+import co.logbrew.sdk.IssueBreadcrumb
+import co.logbrew.sdk.IssueBreadcrumbLevel
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewTelemetry
 import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.ReleaseAttributes
+import co.logbrew.sdk.SpanLinkSummary
+import co.logbrew.sdk.TelemetryContext
+import co.logbrew.sdk.TelemetryDeployment
+import co.logbrew.sdk.TelemetryNamedVersion
+import co.logbrew.sdk.TelemetryResource
+import co.logbrew.sdk.TelemetrySessionContext
 
 val client = LogBrewClient.create(
     apiKey = "LOGBREW_API_KEY",
@@ -87,6 +96,88 @@ LogBrewAndroid.captureNetworkMilestone(
 println(client.previewJson())
 val response = client.flush(RecordingTransport.alwaysAccept())
 ```
+
+## Shared Investigation Context
+
+Use `TelemetryContext` to give issues, logs, spans, metrics, actions, releases, and environments the same bounded service, deployment, runtime, framework, operating-system, device, application, trace, session, subject, and tag evidence. Configure stable defaults once on the client, then add a task/thread scope or a narrow event override:
+
+```kotlin
+val client = LogBrewClient.create(
+    apiKey = "LOGBREW_API_KEY",
+    sdkName = "checkout-android",
+    sdkVersion = "1.0.0",
+    context = TelemetryContext(
+        resource = TelemetryResource(
+            service = TelemetryNamedVersion("checkout", "2.4.0"),
+            deployment = TelemetryDeployment(environment = "production", release = "2026.08.06"),
+        ),
+        tags = mapOf("region" to "eu"),
+    ),
+)
+
+val session = TelemetryContext(session = TelemetrySessionContext("opaque-session-7"))
+LogBrewTelemetry.withContext(session) {
+    client.log(
+        "evt_log_001",
+        "2026-08-06T12:00:00Z",
+        LogAttributes.create("checkout failed", "error"),
+    )
+}
+```
+
+For non-span signals, context merges in this order: conservative automatic Kotlin/JVM context, explicit client context, `LogBrewTelemetry` context, active `LogBrewTrace` correlation, and event context. Later layers win; resource fields and tags merge by field, while trace, session, and subject sections replace the earlier section. A span's own trace IDs are always authoritative over generic context. Pass `includeAutomaticContext = false` when defaults are not appropriate. Automatic context reads only Kotlin/JVM version, operating-system name/version, and architecture; application-owned session and subject identity must be explicit.
+
+`LogBrewAndroid.createClient(...)` additionally supplies Android framework and application-name context. `AndroidContext.withDeviceModel(...)`, `withOsVersion(...)`, `withSessionId(...)`, and `withApplication(...)` promote those explicit values into typed context while retaining the existing compact Android metadata used by older readers.
+
+## Structured Issue Evidence
+
+Create issue evidence directly from a caught exception and record the steps that preceded it:
+
+```kotlin
+client.addBreadcrumb(
+    IssueBreadcrumb(
+        timestamp = "2026-08-06T12:00:00Z",
+        category = "navigation",
+        type = "screen",
+        level = IssueBreadcrumbLevel.INFO,
+        message = "Checkout opened",
+        data = mapOf("screen" to "Checkout"),
+    ),
+)
+
+client.issue(
+    id = "evt_issue_001",
+    timestamp = "2026-08-06T12:00:01Z",
+    attributes = IssueAttributes.fromThrowable(
+        throwable = caught,
+        mechanismType = "kotlin.exception",
+        handled = true,
+    ),
+)
+```
+
+`IssueAttributes.fromThrowable(...)` emits exception type, capture mechanism, handled state, and up to 32 newest-first structured frames with filename, function, module, and positive coordinates. It deliberately omits the exception message, raw stack text, locals, arguments, and absolute source paths. Pass the `message` argument only after the application has approved that text for telemetry. `LogBrewAndroid.captureThrowable(...)` uses the same safe default; `includeMessage = true` and `includeStackTrace = true` are separate explicit opt-ins.
+
+Use `IssueException`, `IssueExceptionMechanism`, and `IssueStackFrame` directly when the application already owns normalized exception or source-map evidence instead of a JVM `Throwable`.
+
+The client keeps at most 64 validated breadcrumbs in oldest-to-newest order. Older entries are evicted and the next issue carries `breadcrumbsTruncated = true`; call `clearBreadcrumbs()` at an application-owned privacy or session boundary. Breadcrumb data is limited to eight flat finite primitive fields.
+
+Use `SpanLinkSummary` when a span has a real non-parent relationship to another trace or span:
+
+```kotlin
+val linked = SpanLinkSummary(
+    traceId = "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId = "00f067aa0ba902b7",
+    sampled = true,
+    metadata = mapOf("relation" to "batch.parent"),
+)
+
+val attributes = SpanAttributes
+    .create("queue.consume", traceId, spanId, "ok")
+    .withLink(linked)
+```
+
+Links require non-zero W3C trace/span IDs, accept finite primitive metadata, and are capped at eight entries per span.
 
 ## W3C Trace Correlation
 
@@ -151,15 +242,20 @@ val contextParent = LogBrewOpenTelemetry.spanContextFromContext(otelContext)
 
 Those helpers return `null` when OpenTelemetry is absent, no valid span is active, or the object is not an OpenTelemetry span/context. They copy only trace ID, span ID, and trace flags, then create a fresh LogBrew child span. LogBrew does not read OTel attributes, tracestate, baggage, links, events, exporters, processors, payloads, or headers.
 
-While a `LogBrewTraceScope` is active, `LogBrewClient` automatically adds authoritative `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewAndroid.captureProductAction(...)`, `captureNetworkMilestone(...)`, `captureAndroidLog(...)`, and `captureThrowable(...)` receive the same correlation through the client. Trace metadata overwrites spoofed trace keys in app metadata, and the helper never captures raw propagation values, request bodies, response bodies, arbitrary headers, query strings, fragments, or visual replay. Use `LogBrewTrace.outgoingHeaders()` for app-owned HTTP clients when you want to forward only the normalized `traceparent` header.
+While a `LogBrewTraceScope` is active, `LogBrewClient` adds authoritative structured trace context to every signal and retains the compatible `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata on issue, log, action, and metric events. `LogBrewAndroid.captureProductAction(...)`, `captureNetworkMilestone(...)`, `captureAndroidLog(...)`, and `captureThrowable(...)` receive the same correlation through the client. Trace metadata overwrites spoofed trace keys in app metadata, and the helper never captures raw propagation values, request bodies, response bodies, arbitrary headers, query strings, fragments, or visual replay. Use `LogBrewTrace.outgoingHeaders()` for app-owned HTTP clients when you want to forward only the normalized `traceparent` header.
 
 If your app already uses `kotlinx-coroutines-core`, `LogBrewCoroutines` can create an optional coroutine context element that restores the active LogBrew trace whenever a coroutine resumes. The core LogBrew artifact does not depend on coroutines; the helper returns `null` when `kotlinx.coroutines.ThreadContextElement` is not on the app classpath:
 
 ```kotlin
 val trace = LogBrewTrace.continueOrCreate(incomingTraceparent)
 val traceElement = LogBrewCoroutines.traceContextElement(trace)
+val telemetryElement = LogBrewCoroutines.telemetryContextElement(session)
 
-withContext(Dispatchers.Default + (traceElement ?: EmptyCoroutineContext)) {
+withContext(
+    Dispatchers.Default +
+        (traceElement ?: EmptyCoroutineContext) +
+        (telemetryElement ?: EmptyCoroutineContext),
+) {
     client.log(
         "evt_coroutine_worker",
         "2026-06-02T10:00:29Z",
@@ -171,9 +267,14 @@ LogBrewTrace.use(trace).use {
     val currentTraceElement = LogBrewCoroutines.currentTraceContextElement()
     // Pass currentTraceElement to launch, async, or withContext when work may hop threads.
 }
+
+LogBrewTelemetry.use(session).use {
+    val currentContextElement = LogBrewCoroutines.currentTelemetryContextElement()
+    // Pass currentContextElement when shared investigation context may hop threads.
+}
 ```
 
-`LogBrewCoroutines` restores only the immutable `LogBrewTraceContext` that you provide or that is currently active. It does not install coroutine dispatchers, create spans automatically, capture coroutine names, collect baggage/tracestate, or read coroutine-local payloads.
+`LogBrewCoroutines` restores only the immutable `LogBrewTraceContext` and `TelemetryContext` that you provide or that are currently active. It does not install coroutine dispatchers, create spans automatically, capture coroutine names, collect baggage/tracestate, or read coroutine-local payloads.
 
 For app-owned Android or JVM request clients such as OkHttp or `HttpURLConnection`, use `LogBrewAndroid.startRequestSpan(...)` to create a child span and get exactly one `traceparent` header to attach to your request. Finish the span explicitly when the response or exception is available:
 
@@ -221,7 +322,7 @@ val body = LogBrewAndroid.withHttpURLConnectionSpan(
 }
 ```
 
-If you use OkHttp or another request client, keep using `startRequestSpan(...)`, `applyHeadersTo(...)`, `withTrace { ... }`, and `captureRequestSpan(...)` around the app-owned request execution. The request helpers sanitize methods and route templates, strip query strings and fragments, record status, duration, and exception type/message, and overwrite spoofed trace metadata. They do not install an OkHttp interceptor, patch `HttpURLConnection`, capture payloads, copy arbitrary headers, or send baggage/tracestate.
+If you use OkHttp or another request client, keep using `startRequestSpan(...)`, `applyHeadersTo(...)`, `withTrace { ... }`, and `captureRequestSpan(...)` around the app-owned request execution. The request helpers sanitize methods and route templates, strip query strings and fragments, record status, duration, and exception type, and overwrite spoofed trace metadata. They do not install an OkHttp interceptor, patch `HttpURLConnection`, capture exception descriptions or payloads, copy arbitrary headers, or send baggage/tracestate.
 
 ## Dependency Operation Spans
 
@@ -346,14 +447,15 @@ lifecycleTracker.captureTransition(
 
 ## Examples
 
-The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, and capturing Android activity, product action, API milestone, log, and exception events in your own app.
+The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, capturing Android activity/product/API telemetry, and producing rich privacy-bounded issue and trace evidence. Run `make run-rich-investigation` to inspect the complete context, breadcrumb, exception, frame, and span-link payload.
 
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
 - `LogBrewTrace` validates W3C `traceparent`, creates request/task-local-style scopes through `AutoCloseable`, adds active trace metadata to app-owned events, and creates outgoing `traceparent` headers without patching HTTP clients.
+- `TelemetryContext` supplies one schema-v1 resource/correlation envelope to all seven signal types, and `LogBrewTelemetry` scopes deterministic task/thread context without global user state.
 - `LogBrewOpenTelemetry` optionally copies trace ID, span ID, and trace flags from app-owned OpenTelemetry `Span`/`Context` objects when OpenTelemetry is already installed by the app; it returns `null` instead of installing exporters, processors, baggage, or tracestate support.
-- `LogBrewCoroutines` optionally creates a coroutine `ThreadContextElement` by reflection when `kotlinx-coroutines-core` is already installed by the app; it returns `null` instead of adding a coroutine dependency to LogBrew.
+- `LogBrewCoroutines` optionally creates trace and telemetry-context `ThreadContextElement` bridges by reflection when `kotlinx-coroutines-core` is already installed by the app; it returns `null` instead of adding a coroutine dependency to LogBrew.
 - `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata. `AndroidRequestSpan.applyHeadersTo(...)` writes only that header through your request builder, `withTrace { ... }` scopes request-local telemetry under the child span, and `withHttpURLConnectionSpan(...)` handles the same pattern for app-owned `HttpURLConnection` calls.
 - `LogBrewAndroid.createLifecycleTracker()` returns an `AndroidLifecycleTracker` for app-owned lifecycle callbacks; `captureTransition()` emits one `android.lifecycle:<previous>-><next>` span with previous-state duration, active trace correlation, primitive metadata, and same-state dedupe.
 - `LogBrewOperationTracing` creates explicit database, cache, and queue child spans around app-owned callables without driver patching, Java agents, client dependencies, query/parameter capture, cache key/value capture, message-body capture, arbitrary header capture, baggage, or tracestate.
@@ -365,5 +467,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `SdkException` exposes stable `code` and `detailMessage` values.
 - `LogBrewAndroid` helpers capture activity lifecycle, screen views, Android `Log` priority-style messages, caught `Throwable`s, and logcat-style messages without importing Android classes.
 - `captureProductAction()` and `captureNetworkMilestone()` enqueue explicit Android `action` events for app-owned product and API milestones with primitive metadata, query/hash-free route templates, and no automatic HTTP patching.
-- `captureAndroidLog()` accepts Android-compatible priority integers such as `AndroidLogPriority.WARN`, records the tag as the LogBrew logger, captures primitive Android context metadata, and records throwable type/message without stack text by default.
-- `captureThrowable()` turns caught exceptions into issue events with throwable type/message metadata and keeps stack text opt-in through `includeStackTrace = true`.
+- `captureAndroidLog()` accepts Android-compatible priority integers such as `AndroidLogPriority.WARN`, records the tag as the LogBrew logger, promotes explicit Android context, and records throwable type without message or stack text by default. `includeThrowableMessage` and `includeStackTrace` are explicit opt-ins.
+- `IssueAttributes.fromThrowable()` and `captureThrowable()` emit typed exception/mechanism/handled/frame evidence while omitting exception descriptions and raw stack text by default; message and stack capture remain separate explicit opt-ins.
+- `addBreadcrumb()` keeps the newest 64 validated steps and marks eviction; `clearBreadcrumbs()` resets the store at an app-owned privacy or session boundary.
+- `SpanLinkSummary` adds up to eight validated W3C relationships to a span without copying baggage, headers, or linked payloads.

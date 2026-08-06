@@ -251,6 +251,9 @@ build_kotlin_artifacts() {
   mkdir -p "$jar_stage/examples"
   cp -R "$package_dir/examples/readme_example" "$jar_stage/examples/readme_example"
   cp -R "$package_dir/examples/real_user_smoke" "$jar_stage/examples/real_user_smoke"
+  cp -R "$package_dir/examples/trace_correlation" "$jar_stage/examples/trace_correlation"
+  cp -R "$package_dir/examples/dependency_spans" "$jar_stage/examples/dependency_spans"
+  cp -R "$package_dir/examples/rich_investigation" "$jar_stage/examples/rich_investigation"
   cp "$package_dir/examples/Makefile" "$jar_stage/examples/Makefile"
   jar --create --file "$build_dir/$artifact-$version.jar" -C "$classes_dir" . -C "$jar_stage" .
 }

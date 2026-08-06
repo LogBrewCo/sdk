@@ -55,6 +55,21 @@ class MavenCentralBundleTests(unittest.TestCase):
         self.assertIn("plan_version()", body)
         self.assertNotIn("pom_value()", body)
 
+    def test_kotlin_bundle_contains_every_documented_installed_example(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        for example in (
+            "readme_example",
+            "real_user_smoke",
+            "trace_correlation",
+            "dependency_spans",
+            "rich_investigation",
+        ):
+            self.assertIn(
+                f'cp -R "$package_dir/examples/{example}" "$jar_stage/examples/{example}"',
+                body,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

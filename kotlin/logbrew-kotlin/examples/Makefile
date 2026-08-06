@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-trace-correlation run-dependency-spans
+.PHONY: help run run-readme-example run-real-user-smoke run-trace-correlation run-dependency-spans run-rich-investigation
 
 PACKAGE_DIR := $(abspath ..)
 
@@ -8,6 +8,7 @@ help:
 	@printf '%s\n' 'run-real-user-smoke -> make run-real-user-smoke'
 	@printf '%s\n' 'run-trace-correlation -> make run-trace-correlation'
 	@printf '%s\n' 'run-dependency-spans -> make run-dependency-spans'
+	@printf '%s\n' 'run-rich-investigation -> make run-rich-investigation'
 
 run: run-real-user-smoke
 
@@ -22,3 +23,6 @@ run-trace-correlation:
 
 run-dependency-spans:
 	@tmp_dir="$$(mktemp -d)" && trap 'rm -rf "$$tmp_dir"' EXIT && kotlinc "$(PACKAGE_DIR)"/src/main/kotlin/co/logbrew/sdk/*.kt "$(PACKAGE_DIR)"/examples/dependency_spans/DependencySpans.kt -jvm-target 11 -Werror -include-runtime -Xjdk-release=11 -d "$$tmp_dir/dependency-spans.jar" && java -cp "$$tmp_dir/dependency-spans.jar" DependencySpansKt
+
+run-rich-investigation:
+	@tmp_dir="$$(mktemp -d)" && trap 'rm -rf "$$tmp_dir"' EXIT && kotlinc "$(PACKAGE_DIR)"/src/main/kotlin/co/logbrew/sdk/*.kt "$(PACKAGE_DIR)"/examples/rich_investigation/RichInvestigation.kt -jvm-target 11 -Werror -include-runtime -Xjdk-release=11 -d "$$tmp_dir/rich-investigation.jar" && java -cp "$$tmp_dir/rich-investigation.jar" RichInvestigationKt

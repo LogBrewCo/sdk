@@ -80,8 +80,8 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Ruby / Rails | [`logbrew-sdk`](ruby/logbrew-ruby) | Shared runtime/resource/session/subject context, typed exception/stack/breadcrumb diagnostics, automatic Rails request/error capture and delivery, stdlib `Logger`, and manual Rack helpers |
 | Rust | [`logbrew`](rust/logbrew) | Shared runtime/resource/trace/session/subject context, typed issue diagnostics, HTTP/Tower correlation, `tracing`, OpenTelemetry export, and delivery |
 | Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product with automatic and task-local typed context, handled-error/frame/breadcrumb diagnostics, span milestones/links, Apple-style logging, URLSession delivery, and opt-in bounded native crash replay; Objective-C vendoring for mixed or Objective-C-only apps |
-| Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client, Android-style helper APIs, HTTP delivery |
-| Kotlin OkHttp | [`kotlin/logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp interceptor source package; Maven Central publication is pending, so use the core Kotlin package or local source until the artifact is published |
+| Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client with shared runtime/resource/session/subject context, structured issue diagnostics, Android helpers, tracing, and HTTP delivery |
+| Kotlin OkHttp | [`co.logbrew:logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp request tracing, phase timings, and W3C trace propagation |
 | Unity | [`co.logbrew.unity`](unity/logbrew-unity) | Unity package with runtime helpers and HTTP delivery |
 | C | [`logbrew-c`](c/logbrew-c) | C source/header client |
 | C++ | [`logbrew-cpp`](cpp/logbrew-cpp) | C++ RAII source/header client with optional HTTP delivery |

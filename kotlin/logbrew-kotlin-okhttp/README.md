@@ -10,11 +10,11 @@ Install from Maven Central:
 
 ```kotlin
 dependencies {
-    implementation("co.logbrew:logbrew-kotlin-okhttp:0.1.1")
+    implementation("co.logbrew:logbrew-kotlin-okhttp:0.2.0")
 }
 ```
 
-The package depends on `co.logbrew:logbrew-kotlin:0.1.1` and OkHttp `4.12.0`.
+The package depends on `co.logbrew:logbrew-kotlin:0.2.0` and OkHttp `4.12.0`.
 
 ## Usage
 
@@ -57,7 +57,7 @@ LogBrewTrace.use(LogBrewTrace.continueOrCreate(incomingTraceparent)).use {
 }
 ```
 
-`LogBrewOkHttpInterceptor` clones the immutable request, writes exactly one normalized `traceparent` header, runs `chain.proceed(...)` under the request child trace, captures response status or exception type/message, records duration, and rethrows the original OkHttp failure.
+`LogBrewOkHttpInterceptor` clones the immutable request, writes exactly one normalized `traceparent` header, runs `chain.proceed(...)` under the request child trace, captures response status or exception type without its potentially private description, records duration, and rethrows the original OkHttp failure.
 
 The interceptor does not capture request or response bodies, arbitrary headers, full URLs, query strings, fragments, cookies, baggage, tracestate, visual replay, RUM resources, support tickets, backend usage/quota state, or symbolication data. Telemetry capture failures are reported to an optional `LogBrewOkHttpCaptureFailureHandler` and do not break the app-owned HTTP call.
 
