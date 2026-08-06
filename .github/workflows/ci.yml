@@ -343,6 +343,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_react_native_smoke.sh
 
+      - name: Run React Native minimum public peer smoke test
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: bash scripts/real_user_react_native_minimum_peer_smoke.sh
+
       - name: Run React Native release bundle smoke test
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_react_native_bundle_smoke.sh
