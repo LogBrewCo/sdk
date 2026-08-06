@@ -96,18 +96,41 @@ internal object Validation {
         key: String,
         value: Any?,
     ): Any? {
-        if (value == null || value is String || value is Boolean || value is Int || value is Long || value is Float || value is Double) {
-            return value
+        requireNonEmpty("metadata key", key)
+        return when (value) {
+            null, is String, is Boolean, is Int, is Long -> {
+                value
+            }
+
+            is Float -> {
+                if (!value.isFinite()) {
+                    throw SdkException("validation_error", "metadata value for $key must be finite")
+                }
+                value
+            }
+
+            is Double -> {
+                if (!value.isFinite()) {
+                    throw SdkException("validation_error", "metadata value for $key must be finite")
+                }
+                value
+            }
+
+            else -> {
+                throw SdkException("validation_error", "metadata value for $key must be a string, number, boolean, or null")
+            }
         }
-        throw SdkException("validation_error", "metadata value for $key must be a string, number, boolean, or null")
+    }
+
+    fun copyMetadataMap(metadata: Map<String, Any?>): Map<String, Any?> {
+        val copied = linkedMapOf<String, Any?>()
+        metadata.forEach { (key, value) -> copied[key] = requireMetadataValue(key, value) }
+        return copied.toMap()
     }
 
     fun copyMetadata(metadata: Map<String, Any?>): OrderedJsonObject {
         val payload = OrderedJsonObject()
-        metadata.forEach { (key, value) ->
-            requireNonEmpty("metadata key", key)
-            payload.add(key, requireMetadataValue(key, value))
-        }
+        copyMetadataMap(metadata).forEach { (key, value) -> payload.add(key, value) }
         return payload
     }
 

@@ -63,7 +63,8 @@ fun main() {
     )
     AndroidRequestSpanTests.runAll()
     OperationTracingTests.runAll()
-    println("kotlin package tests ok (32 tests)")
+    RichInvestigationTests.runAll()
+    println("kotlin package tests ok (40 tests)")
 }
 
 private fun run(
@@ -543,8 +544,36 @@ private fun androidLogPriorityHelperCapturesThrowableSafely() {
     check("\"androidPriority\": \"WARN\"" in body)
     check("\"androidPriorityNumber\": 5" in body)
     check("\"throwableName\": \"IllegalArgumentException\"" in body)
-    check("\"throwableMessage\": \"bad cart\"" in body)
+    check("bad cart" !in body)
     check("\"throwableStackTrace\"" !in body)
+
+    val stackClient = newClient()
+    LogBrewAndroid.captureAndroidLog(
+        client = stackClient,
+        id = "evt_android_log_priority_stack_001",
+        timestamp = "2026-06-02T10:00:11Z",
+        priority = AndroidLogPriority.ERROR,
+        tag = "CheckoutActivity",
+        message = "cart validation failed",
+        throwable = throwable,
+        includeStackTrace = true,
+    )
+    val stackBody = stackClient.previewJson()
+    check("\"throwableStackTrace\"" in stackBody)
+    check("bad cart" !in stackBody)
+
+    val messageClient = newClient()
+    LogBrewAndroid.captureAndroidLog(
+        client = messageClient,
+        id = "evt_android_log_priority_message_001",
+        timestamp = "2026-06-02T10:00:11Z",
+        priority = AndroidLogPriority.ERROR,
+        tag = "CheckoutActivity",
+        message = "cart validation failed",
+        throwable = throwable,
+        includeThrowableMessage = true,
+    )
+    check("\"throwableMessage\": \"bad cart\"" in messageClient.previewJson())
 }
 
 private fun androidRequestSpanHelperCorrelatesOutboundRequests() {
@@ -600,7 +629,7 @@ private fun androidRequestSpanHelperCorrelatesOutboundRequests() {
     check("\"routeTemplate\": \"/api/checkout\"" in body)
     check("\"statusCode\": 503" in body)
     check("\"errorType\": \"IllegalStateException\"" in body)
-    check("\"errorMessage\": \"retry budget reached\"" in body)
+    check("retry budget reached" !in body)
     check("\"sessionId\": \"session_android_001\"" in body)
     check("card=redacted" !in body)
     check("#pay" !in body)
@@ -641,8 +670,11 @@ private fun androidThrowableHelperKeepsStackTraceOptIn() {
     )
     val safeBody = safeClient.previewJson()
     check("\"title\": \"IllegalStateException\"" in safeBody)
-    check("\"message\": \"payment failed\"" in safeBody)
-    check("\"throwableName\": \"IllegalStateException\"" in safeBody)
+    check("\"type\": \"IllegalStateException\"" in safeBody)
+    check("\"type\": \"android.exception\"" in safeBody)
+    check("\"handled\": true" in safeBody)
+    check("\"stackFrames\"" in safeBody)
+    check("payment failed" !in safeBody)
     check("\"throwableStackTrace\"" !in safeBody)
 
     val stackClient = newClient()
@@ -653,7 +685,19 @@ private fun androidThrowableHelperKeepsStackTraceOptIn() {
         throwable = throwable,
         includeStackTrace = true,
     )
-    check("\"throwableStackTrace\"" in stackClient.previewJson())
+    val stackBody = stackClient.previewJson()
+    check("\"throwableStackTrace\"" in stackBody)
+    check("payment failed" !in stackBody)
+
+    val messageClient = newClient()
+    LogBrewAndroid.captureThrowable(
+        client = messageClient,
+        id = "evt_android_throwable_message_001",
+        timestamp = "2026-06-02T10:00:13Z",
+        throwable = throwable,
+        includeMessage = true,
+    )
+    check("\"message\": \"payment failed\"" in messageClient.previewJson())
 }
 
 private fun traceContextHelpersValidateAndCorrelate() {

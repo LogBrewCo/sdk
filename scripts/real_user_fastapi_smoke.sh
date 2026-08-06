@@ -57,7 +57,7 @@ test_client_requirement="httpx2==2.3.0"
 if [[ -n "$LOGBREW_FASTAPI_HTTPX_VERSION" ]]; then
   test_client_requirement="httpx==${LOGBREW_FASTAPI_HTTPX_VERSION}"
 fi
-app_dependencies=("$core_wheel" "$fastapi_wheel[celery]" mypy "$test_client_requirement")
+app_dependencies=("$core_wheel" "${fastapi_wheel}[celery]" mypy "$test_client_requirement")
 if [[ -n "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" ]]; then
   app_dependencies=("fastapi==${LOGBREW_FASTAPI_FRAMEWORK_VERSION}" "${app_dependencies[@]}")
 fi

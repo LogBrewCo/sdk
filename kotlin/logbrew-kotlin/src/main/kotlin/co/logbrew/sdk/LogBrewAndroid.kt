@@ -19,6 +19,7 @@ class AndroidRequestSpan internal constructor(
     val traceContext: LogBrewTraceContext,
     val headers: Map<String, String>,
     internal val metadata: Map<String, Any?>,
+    internal val context: AndroidContext,
 ) {
     val traceparent: String
         get() = headers.getValue("traceparent")
@@ -66,9 +67,9 @@ class AndroidLifecycleTracker internal constructor(
         val previousState = currentState
         val durationMs = (safeRealtimeMs - currentStateStartedAtMs).coerceAtLeast(0.0)
         val spanContext = LogBrewTrace.childContext(parentTraceContext)
+        val combinedContext = baseContext.merging(context)
         val safeMetadata =
-            baseContext.toMetadata() +
-                (context?.toMetadata() ?: emptyMap()) +
+            combinedContext.toMetadata() +
                 baseMetadata +
                 compactMetadata(metadata) +
                 mapOf(
@@ -80,13 +81,14 @@ class AndroidLifecycleTracker internal constructor(
         client.span(
             id,
             timestamp,
-            LogBrewTrace.spanAttributes(
-                name = "android.lifecycle:$previousState->$safeNextState",
-                status = "ok",
-                durationMs = durationMs,
-                metadata = safeMetadata,
-                context = spanContext,
-            ),
+            LogBrewTrace
+                .spanAttributes(
+                    name = "android.lifecycle:$previousState->$safeNextState",
+                    status = "ok",
+                    durationMs = durationMs,
+                    metadata = safeMetadata,
+                    context = spanContext,
+                ).withAndroidContext(combinedContext),
         )
 
         currentState = safeNextState
@@ -96,18 +98,38 @@ class AndroidLifecycleTracker internal constructor(
 }
 
 object LogBrewAndroid {
-    private const val SDK_VERSION: String = "0.1.0"
+    private const val SDK_VERSION: String = "0.2.0"
     private const val PRODUCT_ANALYTICS_SCHEMA_VERSION: Int = 1
     private const val MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH: Int = 256
 
     val sdkVersion: String
         get() = SDK_VERSION
 
+    @JvmOverloads
     fun createClient(
         apiKey: String,
         appName: String,
         maxRetries: Int = 2,
-    ): LogBrewClient = LogBrewClient.create(apiKey, appName, SDK_VERSION, maxRetries)
+        context: TelemetryContext? = null,
+        includeAutomaticContext: Boolean = true,
+    ): LogBrewClient {
+        val androidContext =
+            TelemetryContext(
+                resource =
+                    TelemetryResource(
+                        framework = TelemetryNamedVersion("android"),
+                        application = TelemetryApplication(name = appName),
+                    ),
+            )
+        return LogBrewClient.create(
+            apiKey = apiKey,
+            sdkName = appName,
+            sdkVersion = SDK_VERSION,
+            maxRetries = maxRetries,
+            context = TelemetryContext.merge(androidContext, context),
+            includeAutomaticContext = includeAutomaticContext,
+        )
+    }
 
     fun captureActivityStarted(
         client: LogBrewClient,
@@ -118,7 +140,11 @@ object LogBrewAndroid {
     ) {
         Validation.requireNonEmpty("android activityName", activityName)
         val metadata = context.toMetadata() + mapOf("activityName" to activityName, "lifecycle" to "started")
-        client.action(id, timestamp, ActionAttributes.create("activity_started", "success").withMetadata(metadata))
+        client.action(
+            id,
+            timestamp,
+            ActionAttributes.create("activity_started", "success").withMetadata(metadata).withAndroidContext(context),
+        )
     }
 
     fun captureScreenView(
@@ -136,7 +162,11 @@ object LogBrewAndroid {
                 analyticsMetadata
         val metadata =
             if ("analyticsSurface" in analyticsMetadata) mergedMetadata else mergedMetadata - "analyticsSurface"
-        client.action(id, timestamp, ActionAttributes.create("screen_view", "success").withMetadata(metadata))
+        client.action(
+            id,
+            timestamp,
+            ActionAttributes.create("screen_view", "success").withMetadata(metadata).withAndroidContext(context),
+        )
     }
 
     fun captureProductAction(
@@ -158,7 +188,7 @@ object LogBrewAndroid {
                 analyticsMetadata
         val safeMetadata =
             if ("analyticsSurface" in analyticsMetadata) mergedMetadata else mergedMetadata - "analyticsSurface"
-        client.action(id, timestamp, ActionAttributes.create(name, status).withMetadata(safeMetadata))
+        client.action(id, timestamp, ActionAttributes.create(name, status).withMetadata(safeMetadata).withAndroidContext(context))
     }
 
     fun captureNetworkMilestone(
@@ -191,7 +221,10 @@ object LogBrewAndroid {
         client.action(
             id,
             timestamp,
-            ActionAttributes.create("$safeMethod $safeRouteTemplate", actionStatus).withMetadata(timelineMetadata),
+            ActionAttributes
+                .create("$safeMethod $safeRouteTemplate", actionStatus)
+                .withMetadata(timelineMetadata)
+                .withAndroidContext(context),
         )
     }
 
@@ -222,6 +255,7 @@ object LogBrewAndroid {
             traceContext = requestContext,
             headers = LogBrewTrace.outgoingHeaders(requestContext),
             metadata = safeMetadata,
+            context = context,
         )
     }
 
@@ -267,13 +301,14 @@ object LogBrewAndroid {
         client.span(
             id,
             timestamp,
-            LogBrewTrace.spanAttributes(
-                name = "${requestSpan.method} ${requestSpan.routeTemplate}",
-                status = spanStatus,
-                durationMs = safeDurationMs,
-                metadata = spanMetadata,
-                context = requestSpan.traceContext,
-            ),
+            LogBrewTrace
+                .spanAttributes(
+                    name = "${requestSpan.method} ${requestSpan.routeTemplate}",
+                    status = spanStatus,
+                    durationMs = safeDurationMs,
+                    metadata = spanMetadata,
+                    context = requestSpan.traceContext,
+                ).withAndroidContext(requestSpan.context),
         )
     }
 
@@ -334,7 +369,15 @@ object LogBrewAndroid {
         Validation.requireNonEmpty("android priority", priority)
         Validation.requireNonEmpty("android tag", tag)
         val metadata = context.toMetadata() + mapOf("androidPriority" to priority)
-        client.log(id, timestamp, LogAttributes.create(message, mapLogLevel(priority)).withLogger(tag).withMetadata(metadata))
+        client.log(
+            id,
+            timestamp,
+            LogAttributes
+                .create(message, mapLogLevel(priority))
+                .withLogger(tag)
+                .withMetadata(metadata)
+                .withAndroidContext(context),
+        )
     }
 
     fun captureAndroidLog(
@@ -347,6 +390,7 @@ object LogBrewAndroid {
         throwable: Throwable? = null,
         context: AndroidContext = AndroidContext.create(),
         includeStackTrace: Boolean = false,
+        includeThrowableMessage: Boolean = false,
     ) {
         client.log(
             id,
@@ -358,6 +402,7 @@ object LogBrewAndroid {
                 throwable = throwable,
                 context = context,
                 includeStackTrace = includeStackTrace,
+                includeThrowableMessage = includeThrowableMessage,
             ),
         )
     }
@@ -371,7 +416,15 @@ object LogBrewAndroid {
         context: AndroidContext = AndroidContext.create(),
     ) {
         val metadata = context.toMetadata() + mapOf("source" to "android")
-        client.issue(id, timestamp, IssueAttributes.create(title, "error").withMessage(stackTrace).withMetadata(metadata))
+        client.issue(
+            id,
+            timestamp,
+            IssueAttributes
+                .create(title, "error")
+                .withMessage(stackTrace)
+                .withMetadata(metadata)
+                .withAndroidContext(context),
+        )
     }
 
     fun captureThrowable(
@@ -382,11 +435,27 @@ object LogBrewAndroid {
         context: AndroidContext = AndroidContext.create(),
         title: String = throwableTitle(throwable),
         includeStackTrace: Boolean = false,
+        includeMessage: Boolean = false,
     ) {
         Validation.requireNonEmpty("android throwable title", title)
-        val metadata = context.toMetadata() + throwableMetadata(throwable, includeStackTrace) + mapOf("source" to "android")
-        val message = throwable.message?.takeIf { it.isNotBlank() } ?: title
-        client.issue(id, timestamp, IssueAttributes.create(title, "error").withMessage(message).withMetadata(metadata))
+        val metadata =
+            context.toMetadata() +
+                mapOf("source" to "android") +
+                if (includeStackTrace) mapOf("throwableStackTrace" to stackTraceWithoutMessage(throwable)) else emptyMap()
+        val message = if (includeMessage) throwable.message?.takeIf { it.isNotBlank() } else null
+        client.issue(
+            id,
+            timestamp,
+            IssueAttributes
+                .fromThrowable(
+                    throwable = throwable,
+                    title = title,
+                    mechanismType = "android.exception",
+                    handled = true,
+                    message = message,
+                ).withMetadata(metadata)
+                .withAndroidContext(context),
+        )
     }
 
     fun logAttributesFromAndroidLog(
@@ -396,6 +465,7 @@ object LogBrewAndroid {
         throwable: Throwable? = null,
         context: AndroidContext = AndroidContext.create(),
         includeStackTrace: Boolean = false,
+        includeThrowableMessage: Boolean = false,
     ): LogAttributes {
         Validation.requireNonEmpty("android tag", tag)
         val priorityName = androidPriorityName(priority)
@@ -406,8 +476,12 @@ object LogBrewAndroid {
                     "androidPriorityNumber" to priority,
                     "source" to "android",
                 ) +
-                (throwable?.let { throwableMetadata(it, includeStackTrace) } ?: emptyMap())
-        return LogAttributes.create(message, logLevelFromAndroidPriority(priority)).withLogger(tag).withMetadata(metadata)
+                (throwable?.let { throwableMetadata(it, includeStackTrace, includeThrowableMessage) } ?: emptyMap())
+        return LogAttributes
+            .create(message, logLevelFromAndroidPriority(priority))
+            .withLogger(tag)
+            .withMetadata(metadata)
+            .withAndroidContext(context)
     }
 
     private fun mapLogLevel(priority: String): String =
@@ -513,7 +587,7 @@ object LogBrewAndroid {
     private fun requestErrorMetadata(error: Throwable): Map<String, Any?> =
         mapOf(
             "errorType" to throwableTitle(error),
-        ) + optionalMetadata("errorMessage", error.message?.takeIf { it.isNotBlank() })
+        )
 
     private fun responseCodeOrNull(connection: HttpURLConnection): Int? =
         try {
@@ -530,20 +604,44 @@ object LogBrewAndroid {
     private fun throwableMetadata(
         throwable: Throwable,
         includeStackTrace: Boolean,
+        includeMessage: Boolean,
     ): Map<String, Any?> {
         val metadata =
             mutableMapOf<String, Any?>(
                 "throwableName" to throwableTitle(throwable),
             )
-        throwable.message?.takeIf { it.isNotBlank() }?.let {
-            metadata["throwableMessage"] = it
+        if (includeMessage) {
+            throwable.message?.takeIf { it.isNotBlank() }?.let {
+                metadata["throwableMessage"] = it
+            }
         }
         if (includeStackTrace) {
-            metadata["throwableStackTrace"] = throwable.stackTraceToString()
+            metadata["throwableStackTrace"] = stackTraceWithoutMessage(throwable)
         }
         return metadata
     }
+
+    private fun stackTraceWithoutMessage(throwable: Throwable): String =
+        buildString {
+            append(throwableTitle(throwable))
+            throwable.stackTrace.forEach { frame ->
+                append("\n\tat ")
+                append(frame)
+            }
+        }
 }
+
+private fun ActionAttributes.withAndroidContext(context: AndroidContext): ActionAttributes =
+    context.toTelemetryContext()?.let(::withContext) ?: this
+
+private fun IssueAttributes.withAndroidContext(context: AndroidContext): IssueAttributes =
+    context.toTelemetryContext()?.let(::withContext) ?: this
+
+private fun LogAttributes.withAndroidContext(context: AndroidContext): LogAttributes =
+    context.toTelemetryContext()?.let(::withContext) ?: this
+
+private fun SpanAttributes.withAndroidContext(context: AndroidContext): SpanAttributes =
+    context.toTelemetryContext()?.let(::withContext) ?: this
 
 private fun checkedLifecycleState(
     label: String,

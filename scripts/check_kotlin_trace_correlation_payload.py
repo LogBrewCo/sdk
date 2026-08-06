@@ -136,7 +136,6 @@ def main() -> None:
         "routeTemplate": "/api/checkout",
         "statusCode": 503,
         "errorType": "IllegalStateException",
-        "errorMessage": "retry budget reached",
         "phase": "payment",
         "traceId": TRACE_ID,
         "spanId": request_span_id,
@@ -146,6 +145,8 @@ def main() -> None:
     }.items():
         if request_metadata.get(key) != value:
             raise SystemExit(f"unexpected request metadata {key}: {request_metadata.get(key)!r}")
+    if "errorMessage" in request_metadata or "retry budget reached" in Path(sys.argv[1]).read_text(encoding="utf-8"):
+        raise SystemExit("request span leaked a private exception description")
 
     request_log_attributes = request_log.get("attributes")
     if not isinstance(request_log_attributes, dict):

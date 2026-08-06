@@ -86,6 +86,8 @@ on_error() {
     "$tmp_dir/installed-smoke.stderr.json" \
     "$tmp_dir/installed-trace-correlation.stdout.json" \
     "$tmp_dir/installed-trace-correlation.stderr.json" \
+    "$tmp_dir/installed-rich-investigation.stdout.json" \
+    "$tmp_dir/installed-rich-investigation.stderr.json" \
     "$tmp_dir/smoke-app.stdout.json" \
     "$tmp_dir/smoke-app.stderr.json" \
     "$tmp_dir/intake.jsonl"; do
@@ -145,6 +147,7 @@ cp -R "$package_dir/examples/readme_example" "$tmp_dir/jar-stage/examples/readme
 cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_user_smoke"
 cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
 cp -R "$package_dir/examples/dependency_spans" "$tmp_dir/jar-stage/examples/dependency_spans"
+cp -R "$package_dir/examples/rich_investigation" "$tmp_dir/jar-stage/examples/rich_investigation"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
 jar --create --file "$kotlin_jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
 jar --list --file "$kotlin_jar" > "$tmp_dir/jar-contents.txt"
@@ -163,6 +166,13 @@ grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryResource.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTelemetry.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueException.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueBreadcrumb.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueStackFrame.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/SpanLinkSummary.class$' "$tmp_dir/jar-contents.txt"
 
 okhttp_classpath="$tmp_dir/classes:$(fetch_kotlin_okhttp_deps "$tmp_dir/okhttp-deps")"
 kotlinc "$okhttp_package_dir"/src/main/kotlin/co/logbrew/sdk/okhttp/*.kt \
@@ -425,7 +435,10 @@ cat > "$coroutines_app/CoroutinesApp.kt" <<'KT'
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewClient
 import co.logbrew.sdk.LogBrewCoroutines
+import co.logbrew.sdk.LogBrewTelemetry
 import co.logbrew.sdk.LogBrewTrace
+import co.logbrew.sdk.TelemetryContext
+import co.logbrew.sdk.TelemetrySessionContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -436,11 +449,16 @@ fun main() = runBlocking {
     val trace = LogBrewTrace.continueOrCreate("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
     val coroutineElement = LogBrewCoroutines.traceContextElement(trace)
         ?: error("expected kotlinx.coroutines ThreadContextElement bridge")
+    val telemetryContext = TelemetryContext(session = TelemetrySessionContext("session-coroutine"))
+    val telemetryElement = LogBrewCoroutines.telemetryContextElement(telemetryContext)
+        ?: error("expected telemetry ThreadContextElement bridge")
 
     check(LogBrewTrace.currentTraceContext() == null)
-    withContext(Dispatchers.Default + coroutineElement) {
+    check(LogBrewTelemetry.currentContext() == null)
+    withContext(Dispatchers.Default + coroutineElement + telemetryElement) {
         delay(1)
         check(LogBrewTrace.currentTraceContext() == trace)
+        check(LogBrewTelemetry.currentContext()?.session?.id == "session-coroutine")
         client.log(
             "evt_kotlin_coroutine_log_001",
             "2026-06-02T10:00:29Z",
@@ -451,6 +469,7 @@ fun main() = runBlocking {
         )
     }
     check(LogBrewTrace.currentTraceContext() == null)
+    check(LogBrewTelemetry.currentContext() == null)
 
     LogBrewTrace.use(trace).use {
         val currentElement = LogBrewCoroutines.currentTraceContextElement()
@@ -467,6 +486,17 @@ fun main() = runBlocking {
         check(LogBrewTrace.currentTraceContext() == trace)
     }
     check(LogBrewTrace.currentTraceContext() == null)
+
+    LogBrewTelemetry.use(telemetryContext).use {
+        val currentElement = LogBrewCoroutines.currentTelemetryContextElement()
+            ?: error("expected current telemetry coroutine element")
+        withContext(currentElement + Dispatchers.Default) {
+            delay(1)
+            check(LogBrewTelemetry.currentContext()?.session?.id == "session-coroutine")
+        }
+        check(LogBrewTelemetry.currentContext()?.session?.id == "session-coroutine")
+    }
+    check(LogBrewTelemetry.currentContext() == null)
 
     val body = client.previewJson()
     check("\"traceId\": \"${trace.traceId}\"" in body)
@@ -587,6 +617,7 @@ test -f "$extract_dir/examples/readme_example/ReadmeExample.kt"
 test -f "$extract_dir/examples/real_user_smoke/RealUserSmoke.kt"
 test -f "$extract_dir/examples/trace_correlation/TraceCorrelation.kt"
 test -f "$extract_dir/examples/dependency_spans/DependencySpans.kt"
+test -f "$extract_dir/examples/rich_investigation/RichInvestigation.kt"
 test -f "$extract_dir/examples/Makefile"
 grep -q 'HttpTransport' "$extract_dir/README.md"
 grep -q 'captureProductAction' "$extract_dir/README.md"
@@ -610,6 +641,12 @@ grep -q 'spanContextFromCurrentSpan' "$extract_dir/README.md"
 grep -q 'spanContextFromSpan' "$extract_dir/README.md"
 grep -q 'spanContextFromContext' "$extract_dir/README.md"
 grep -q 'fromOpenTelemetrySpanContext' "$extract_dir/README.md"
+grep -q 'TelemetryContext' "$extract_dir/README.md"
+grep -q 'LogBrewTelemetry' "$extract_dir/README.md"
+grep -q 'IssueBreadcrumb' "$extract_dir/README.md"
+grep -q 'SpanLinkSummary' "$extract_dir/README.md"
+grep -q 'telemetryContextElement' "$extract_dir/README.md"
+grep -q 'currentTelemetryContextElement' "$extract_dir/README.md"
 
 kotlinc "$extract_dir/examples/dependency_spans/DependencySpans.kt" \
   -classpath "$maven_dir/logbrew-kotlin-$kotlin_version.jar" \
@@ -648,7 +685,8 @@ run_app \
   "$tmp_dir/installed-readme.stderr.json" \
   "$extract_dir/examples/readme_example/ReadmeExample.kt"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
 
 run_app \
@@ -659,7 +697,8 @@ run_app \
   "$extract_dir/examples/readme_example/ReadmeExample.kt" \
   "$extract_dir/examples/real_user_smoke/RealUserSmoke.kt"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"androidTimelineEvents":2' "$tmp_dir/installed-smoke.stderr.json"
@@ -674,6 +713,21 @@ run_app \
 python3 "$repo_root/scripts/check_kotlin_trace_correlation_payload.py" \
   "$tmp_dir/installed-trace-correlation.stdout.json" \
   "$tmp_dir/installed-trace-correlation.stderr.json"
+
+run_app \
+  installed-rich-investigation \
+  RichInvestigationKt \
+  "$tmp_dir/installed-rich-investigation.stdout.json" \
+  "$tmp_dir/installed-rich-investigation.stderr.json" \
+  "$extract_dir/examples/rich_investigation/RichInvestigation.kt"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-rich-investigation.stdout.json" >/dev/null
+grep -q '"richIssueEvents":1' "$tmp_dir/installed-rich-investigation.stderr.json"
+grep -q '"linkedSpanEvents":1' "$tmp_dir/installed-rich-investigation.stderr.json"
+grep -q '"privateThrowableTextOmitted":true' "$tmp_dir/installed-rich-investigation.stderr.json"
+if grep -q 'private checkout detail' "$tmp_dir/installed-rich-investigation.stdout.json"; then
+  echo "installed rich investigation example leaked private throwable text" >&2
+  exit 1
+fi
 
 smoke_app="$tmp_dir/smoke-app"
 mkdir -p "$smoke_app"
@@ -807,6 +861,10 @@ fun main() {
     check("\"androidPriority\": \"INFO\"" in helperPreview)
     check("\"androidPriorityNumber\": 4" in helperPreview)
     check("\"throwableName\": \"IllegalStateException\"" in helperPreview)
+    check("\"type\": \"android.exception\"" in helperPreview)
+    check("\"handled\": true" in helperPreview)
+    check("\"stackFrames\"" in helperPreview)
+    check("checkout failed" !in helperPreview)
     check("\"throwableStackTrace\"" !in helperPreview)
 
     val timeline = newClient()
@@ -961,7 +1019,8 @@ run_app \
 wait "$intake_pid"
 intake_pid=""
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/smoke-app.stderr.json"

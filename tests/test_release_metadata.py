@@ -674,7 +674,7 @@ keywords = ["logbrew"]
 
         self.assertEqual(failures, [])
 
-    def test_maven_metadata_advances_only_the_java_sdk(self) -> None:
+    def test_maven_metadata_matches_each_release_family(self) -> None:
         self.assertIn(
             "<version>0.1.2</version>",
             (ROOT / "java" / "logbrew-java" / "pom.xml").read_text(encoding="utf-8"),
@@ -683,7 +683,7 @@ keywords = ["logbrew"]
             ROOT / "kotlin" / "logbrew-kotlin" / "pom.xml",
             ROOT / "kotlin" / "logbrew-kotlin-okhttp" / "pom.xml",
         ):
-            self.assertIn("<version>0.1.1</version>", pom_path.read_text(encoding="utf-8"))
+            self.assertIn("<version>0.2.0</version>", pom_path.read_text(encoding="utf-8"))
 
     def test_maven_central_public_smoke_covers_kotlin_okhttp_artifact(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_maven_central_public_smoke.sh").read_text(encoding="utf-8")

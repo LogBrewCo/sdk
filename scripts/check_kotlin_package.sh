@@ -204,7 +204,10 @@ grep -q '^co/logbrew/sdk/LogBrewCoroutines.kt$' "$tmp_dir/sources-jar-contents.t
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueDiagnostics.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/PublicTypes.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/SpanLinkSummary.kt$' "$tmp_dir/sources-jar-contents.txt"
 
 mkdir -p "$tmp_dir/javadoc-stage"
 cp "$package_dir/README.md" "$tmp_dir/javadoc-stage/README.md"
@@ -219,6 +222,7 @@ cp -R "$package_dir/examples/readme_example" "$tmp_dir/jar-stage/examples/readme
 cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_user_smoke"
 cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
 cp -R "$package_dir/examples/dependency_spans" "$tmp_dir/jar-stage/examples/dependency_spans"
+cp -R "$package_dir/examples/rich_investigation" "$tmp_dir/jar-stage/examples/rich_investigation"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
 jar --create --file "$tmp_dir/logbrew-kotlin-$kotlin_version.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-kotlin-$kotlin_version.jar" > "$tmp_dir/jar-contents.txt"
@@ -239,6 +243,15 @@ grep -q '^co/logbrew/sdk/DatabaseOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/CacheOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/QueueOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/SpanLinkSummary.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryResource.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/TelemetryTraceContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTelemetry.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueException.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueExceptionMechanism.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueStackFrame.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/IssueBreadcrumb.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidLifecycleTracker.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHeaderSetter.class$' "$tmp_dir/jar-contents.txt"
@@ -254,6 +267,7 @@ grep -q '^examples/readme_example/ReadmeExample.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/real_user_smoke/RealUserSmoke.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/trace_correlation/TraceCorrelation.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/dependency_spans/DependencySpans.kt$' "$tmp_dir/jar-contents.txt"
+grep -q '^examples/rich_investigation/RichInvestigation.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/Makefile$' "$tmp_dir/jar-contents.txt"
 
 python3 - "$tmp_dir/logbrew-kotlin-$kotlin_version.jar" "$kotlin_version" <<'PY'
@@ -285,6 +299,16 @@ for needle in (
     "CacheOperation",
     "QueueOperation",
     "SpanEventSummary",
+    "SpanLinkSummary",
+    "TelemetryContext",
+    "TelemetryResource",
+    "LogBrewTelemetry",
+    "IssueException",
+    "IssueStackFrame",
+    "IssueBreadcrumb",
+    "addBreadcrumb",
+    "includeAutomaticContext",
+    "includeThrowableMessage",
     "databaseOperation",
     "cacheOperation",
     "queueOperation",
@@ -293,6 +317,8 @@ for needle in (
     "payload-like values",
     "traceContextElement",
     "currentTraceContextElement",
+    "telemetryContextElement",
+    "currentTelemetryContextElement",
     "spanContextFromCurrentSpan",
     "spanContextFromSpan",
     "spanContextFromContext",
@@ -344,7 +370,8 @@ run_example \
   "$tmp_dir/readme-example.stderr.json" \
   "$package_dir/examples/readme_example/ReadmeExample.kt"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-example.stderr.json"
 
 run_example \
@@ -355,7 +382,8 @@ run_example \
   "$package_dir/examples/readme_example/ReadmeExample.kt" \
   "$package_dir/examples/real_user_smoke/RealUserSmoke.kt"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
+  "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"androidLifecycleSpans":1' "$tmp_dir/real-user-smoke.stderr.json"
@@ -368,6 +396,7 @@ grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-dependency-spans -> make run-dependency-spans' "$tmp_dir/examples-help.txt"
+grep -qx 'run-rich-investigation -> make run-rich-investigation' "$tmp_dir/examples-help.txt"
 
 run_example \
   dependency-spans \
@@ -377,6 +406,21 @@ run_example \
   "$package_dir/examples/dependency_spans/DependencySpans.kt"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
 grep -q '"dependencySpans":3' "$tmp_dir/dependency-spans.stderr.json"
+
+run_example \
+  rich-investigation \
+  RichInvestigationKt \
+  "$tmp_dir/rich-investigation.stdout.json" \
+  "$tmp_dir/rich-investigation.stderr.json" \
+  "$package_dir/examples/rich_investigation/RichInvestigation.kt"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/rich-investigation.stdout.json" >/dev/null
+grep -q '"richIssueEvents":1' "$tmp_dir/rich-investigation.stderr.json"
+grep -q '"linkedSpanEvents":1' "$tmp_dir/rich-investigation.stderr.json"
+grep -q '"privateThrowableTextOmitted":true' "$tmp_dir/rich-investigation.stderr.json"
+if grep -q 'private checkout detail' "$tmp_dir/rich-investigation.stdout.json"; then
+  echo "rich investigation example leaked private throwable text" >&2
+  exit 1
+fi
 
 run_example \
   trace-correlation \

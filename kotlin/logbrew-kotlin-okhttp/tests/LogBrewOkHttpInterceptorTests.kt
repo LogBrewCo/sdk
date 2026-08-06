@@ -63,7 +63,7 @@ private fun okHttpInterceptorCapturesResponse() {
                 .Builder()
                 .url("https://mobile.example.test/api/orders?cart=123#pay")
                 .header("traceparent", "00-00000000000000000000000000000001-0000000000000001-01")
-                .header("x-private-header", "do-not-capture")
+                .header("x-redacted-header", "do-not-capture")
                 .build(),
             code = 201,
         ) { proceededRequest ->
@@ -98,7 +98,7 @@ private fun okHttpInterceptorCapturesResponse() {
     check("\"parentSpanId\": \"${parent.spanId}\"" in body)
     check("cart=123" !in body)
     check("#pay" !in body)
-    check("x-private-header" !in body)
+    check("x-redacted-header" !in body)
     check("do-not-capture" !in body)
     check("traceparent" !in body)
 }
@@ -139,7 +139,7 @@ private fun okHttpInterceptorCapturesFailure() {
     check("\"name\": \"GET /api/fail/{id}\"" in body)
     check("\"status\": \"error\"" in body)
     check("\"errorType\": \"IOException\"" in body)
-    check("\"errorMessage\": \"network down\"" in body)
+    check("network down" !in body)
     check("debug_code=abc" !in body)
     check("traceparent" !in body)
 }
@@ -154,7 +154,7 @@ private fun okHttpInterceptorPrefersRequestRouteTemplateTag() {
         LogBrewOkHttpRouteTemplates.tag(
             Request
                 .Builder()
-                .url("https://mobile.example.test/api/orders/ord_123/private?cart=123#pay")
+                .url("https://mobile.example.test/api/orders/ord_123/restricted?cart=123#pay")
                 .build(),
             "/api/orders/{order_id}",
         )
@@ -407,8 +407,8 @@ private fun okHttpCallFactoryPreservesRouteTemplateTag() {
         )
     val request =
         LogBrewOkHttpRouteTemplates.tag(
-            Request.Builder().url("https://mobile.example.test/api/users/user_123").build(),
-            "/api/users/{user_id}",
+            Request.Builder().url("https://mobile.example.test/api/accounts/account_123").build(),
+            "/api/accounts/{account_id}",
         )
     var delegatedRequest: Request? = null
     val call =
@@ -424,7 +424,7 @@ private fun okHttpCallFactoryPreservesRouteTemplateTag() {
 
     val routeTemplate =
         LogBrewOkHttpRouteTemplates.get(delegatedRequest ?: error("expected delegated request"))
-    check(routeTemplate == "/api/users/{user_id}")
+    check(routeTemplate == "/api/accounts/{account_id}")
     check(
         delegatedRequest
             .tag(LogBrewTraceContext::class.java)
