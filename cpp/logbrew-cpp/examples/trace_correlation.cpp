@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string>
 
 namespace {
@@ -27,6 +28,7 @@ int main() {
       "session_123",
       "Checkout",
       "spoofed_trace",
+      std::nullopt,
       "checkout",
       "submit",
       {},

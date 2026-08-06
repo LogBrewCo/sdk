@@ -49,7 +49,7 @@ run_examples_make() {
   make --no-print-directory -C "$sdk_dir/examples" CXX="$cxx_command" "$@"
 }
 
-archive="$tmp_dir/logbrew-cpp-0.1.0.tar.gz"
+archive="$tmp_dir/logbrew-cpp-0.2.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 
 app_dir="$tmp_dir/native-cpp-app"
@@ -76,6 +76,14 @@ grep -q 'capture_network_milestone' "$sdk_dir/include/logbrew.hpp"
 grep -q 'MetricAttributes' "$sdk_dir/include/logbrew.hpp"
 grep -q 'metric(' "$sdk_dir/include/logbrew.hpp"
 grep -q 'TraceContext' "$sdk_dir/include/logbrew.hpp"
+grep -q 'TelemetryContext' "$sdk_dir/include/logbrew.hpp"
+grep -q 'TelemetryScope' "$sdk_dir/include/logbrew.hpp"
+grep -q 'EventOptions' "$sdk_dir/include/logbrew.hpp"
+grep -q 'IssueDetails' "$sdk_dir/include/logbrew.hpp"
+grep -q 'IssueBreadcrumb' "$sdk_dir/include/logbrew.hpp"
+grep -q 'SpanEvidence' "$sdk_dir/include/logbrew.hpp"
+grep -q 'SpanLink' "$sdk_dir/include/logbrew.hpp"
+grep -q 'issue_frame_from_location' "$sdk_dir/include/logbrew.hpp"
 grep -q 'TraceScope' "$sdk_dir/include/logbrew.hpp"
 grep -q 'trace_context_from_traceparent' "$sdk_dir/include/logbrew.hpp"
 grep -q 'OpenTelemetrySpanContext' "$sdk_dir/include/logbrew.hpp"
@@ -242,6 +250,98 @@ void exercise_metric_helper() {
   require_condition(preview.find("\"queue\":\"checkout\"") != std::string::npos, "metric metadata missing");
 }
 
+void exercise_rich_investigation_context() {
+  logbrew::TelemetryResource resource;
+  resource.service = logbrew::NamedVersion{"checkout-api", "2.4.0"};
+  resource.deployment = logbrew::DeploymentContext{"production", "2026.08.06"};
+  resource.application = logbrew::ApplicationContext{"checkout-app", "8.2.0", "820"};
+  logbrew::TelemetryContext context;
+  context.resource = resource;
+  context.session = logbrew::SessionContext{"session_opaque", std::nullopt};
+  context.subject = logbrew::SubjectContext{"subject_opaque", logbrew::SubjectKind::user};
+  context.tags = {{"region", "eu-central"}};
+  logbrew::ClientOptions options;
+  options.context = context;
+  options.disable_automatic_context = true;
+  logbrew::LogBrewClient client(
+      logbrew::Config{"LOGBREW_API_KEY", "native-cpp-rich-app", logbrew::version, 2},
+      options);
+
+  client.add_breadcrumb(logbrew::IssueBreadcrumb{
+      "2026-08-06T10:01:05Z",
+      "http",
+      "payment.request",
+      "error",
+      "authorization returned a terminal response",
+      {{"statusClass", "5xx"}},
+  });
+  logbrew::IssueDetails details;
+  details.exception = logbrew::IssueException{
+      "PaymentDeclined",
+      logbrew::IssueMechanism{"signal", false},
+  };
+  details.stack_frames = {logbrew::issue_frame_from_location(
+      "/private/source/checkout.cpp?redaction_canary=value#fragment",
+      413U,
+      9U,
+      "authorize_payment",
+      "checkout.payment",
+      true)};
+  client.issue(
+      "evt_cpp_rich_issue",
+      "2026-08-06T10:01:06Z",
+      logbrew::IssueAttributes{"Payment authorization failed", "error", std::nullopt},
+      details,
+      logbrew::EventOptions{{{"attempt", 2}}, std::nullopt});
+
+  logbrew::SpanEvidence evidence;
+  evidence.events = {{
+      "payment.authorization.rejected",
+      "2026-08-06T10:01:05.900Z",
+      {{"provider", "gateway"}},
+  }};
+  evidence.links = {{
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "BBBBBBBBBBBBBBBB",
+      false,
+      {{"relationship", "retry_of"}},
+  }};
+  client.span(
+      "evt_cpp_rich_span",
+      "2026-08-06T10:01:07Z",
+      logbrew::SpanAttributes{
+          "POST /payments/{id}/authorize",
+          "11111111111111111111111111111111",
+          "2222222222222222",
+          "3333333333333333",
+          "error",
+          184.5,
+      },
+      evidence);
+
+  const std::string preview = client.preview_json();
+  require_condition(preview.find("\"context\":{\"schemaVersion\":1") != std::string::npos,
+                    "typed telemetry context missing");
+  require_condition(preview.find("\"subject\":{\"id\":\"subject_opaque\",\"kind\":\"user\"}") !=
+                        std::string::npos,
+                    "opaque subject context missing");
+  require_condition(preview.find("\"exception\":{\"type\":\"PaymentDeclined\"") != std::string::npos,
+                    "issue exception evidence missing");
+  require_condition(preview.find("\"filename\":\"checkout.cpp\"") != std::string::npos,
+                    "sanitized issue frame missing");
+  require_condition(preview.find("\"breadcrumbs\":[") != std::string::npos,
+                    "issue breadcrumbs missing");
+  require_condition(preview.find("\"events\":[{\"name\":\"payment.authorization.rejected\"") !=
+                        std::string::npos,
+                    "span events missing");
+  require_condition(preview.find("\"links\":[{\"traceId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"") !=
+                        std::string::npos,
+                    "normalized span links missing");
+  require_condition(preview.find("/private/source") == std::string::npos, "absolute source path leaked");
+  require_condition(preview.find("redaction_canary") == std::string::npos, "source query leaked");
+  require_condition(preview.find("LOGBREW_API_KEY") == std::string::npos, "API key leaked into payload");
+}
+
 void exercise_open_telemetry_bridge() {
   const FakeOpenTelemetrySpanContext otel_context(
       true,
@@ -338,6 +438,7 @@ int main() {
               << ",\"sentBodies\":" << transport.sent_bodies().size() << "}\n";
     exercise_timeline_helpers();
     exercise_metric_helper();
+    exercise_rich_investigation_context();
     exercise_open_telemetry_bridge();
     exercise_failure_paths();
     return 0;
@@ -355,7 +456,7 @@ EOF
   -o "$app_dir/native_cpp_app"
 "$app_dir/native_cpp_app" > "$tmp_dir/native-app.stdout.json" 2> "$tmp_dir/native-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
 
 if command -v curl-config >/dev/null 2>&1; then
@@ -512,10 +613,10 @@ grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-he
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 run_examples_make run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 run_examples_make run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 run_examples_make run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_cpp_trace_correlation_payload.py" \

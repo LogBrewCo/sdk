@@ -30,6 +30,9 @@ mkdir -p "$tmp_dir/build"
 "$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/tests/test_logbrew.cpp" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
+"$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/tests/test_rich_context.cpp" -o "$tmp_dir/build/test_rich_context"
+"$tmp_dir/build/test_rich_context"
+
 if command -v curl-config >/dev/null 2>&1; then
   curl_cflags=()
   curl_libs=()
@@ -53,13 +56,13 @@ fi
 "$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/examples/readme_example.cpp" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
 "$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/examples/real_user_smoke.cpp" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
 "$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/examples/trace_correlation.cpp" -o "$tmp_dir/build/trace_correlation"
@@ -73,7 +76,7 @@ grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 
-archive="$tmp_dir/logbrew-cpp-0.1.0.tar.gz"
+archive="$tmp_dir/logbrew-cpp-0.2.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 tar -tzf "$archive" > "$tmp_dir/archive-contents.txt"
 grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
@@ -86,6 +89,7 @@ grep -qx 'examples/real_user_smoke.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/trace_correlation.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_logbrew.cpp' "$tmp_dir/archive-contents.txt"
+grep -qx 'tests/test_rich_context.cpp' "$tmp_dir/archive-contents.txt"
 
 extracted_dir="$tmp_dir/extracted"
 mkdir -p "$extracted_dir"
@@ -113,6 +117,12 @@ for needle in (
     "capture_product_action",
     "capture_network_milestone",
     "W3C Trace Correlation",
+    "Rich Investigation Context",
+    "Issue Evidence",
+    "Span Evidence",
+    "TelemetryContext",
+    "IssueDetails",
+    "SpanEvidence",
     "TraceScope",
     "trace_context_from_traceparent",
     "OpenTelemetrySpanContext",
@@ -137,6 +147,16 @@ for needle in (
     "capture_product_action",
     "capture_network_milestone",
     "TraceContext",
+    "TelemetryContext",
+    "TelemetryScope",
+    "EventOptions",
+    "IssueDetails",
+    "IssueStackFrame",
+    "IssueBreadcrumb",
+    "SpanEvidence",
+    "SpanEvent",
+    "SpanLink",
+    "issue_frame_from_location",
     "TraceScope",
     "trace_context_from_traceparent",
     "OpenTelemetrySpanContext",

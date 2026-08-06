@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -12,12 +13,21 @@
 
 namespace logbrew {
 
-inline constexpr const char *version = "0.1.0";
+inline constexpr const char *version = "0.2.0";
 inline constexpr const char *http_transport_default_endpoint = "https://api.logbrew.co/v1/events";
 inline constexpr std::size_t trace_id_length = 32U;
 inline constexpr std::size_t span_id_length = 16U;
 inline constexpr std::size_t trace_flags_length = 2U;
 inline constexpr std::size_t traceparent_length = 55U;
+inline constexpr unsigned int telemetry_context_schema_version = 1U;
+inline constexpr std::size_t max_context_tags = 32U;
+inline constexpr std::size_t max_breadcrumbs = 64U;
+inline constexpr std::size_t max_stack_frames = 32U;
+inline constexpr std::size_t max_span_events = 8U;
+inline constexpr std::size_t max_span_links = 8U;
+inline constexpr std::size_t max_metadata_entries = 128U;
+inline constexpr std::size_t max_metadata_key_length = 128U;
+inline constexpr std::size_t max_metadata_string_length = 4096U;
 
 class SdkException final : public std::runtime_error {
 public:
@@ -59,10 +69,8 @@ struct HttpHeader {
 
 class HttpTransport final : public Transport {
 public:
-  explicit HttpTransport(
-      std::string endpoint = http_transport_default_endpoint,
-      std::vector<HttpHeader> headers = {},
-      long timeout_ms = 10000L);
+  explicit HttpTransport(std::string endpoint = http_transport_default_endpoint, std::vector<HttpHeader> headers = {},
+                         long timeout_ms = 10000L);
 
   TransportResponse send(const std::string &api_key, const std::string &body) override;
 
@@ -71,6 +79,111 @@ private:
   std::vector<HttpHeader> headers_;
   long timeout_ms_;
 };
+
+struct NamedVersion {
+  std::string name;
+  std::optional<std::string> version;
+};
+
+struct DeploymentContext {
+  std::optional<std::string> environment;
+  std::optional<std::string> release;
+};
+
+struct OperatingSystemContext {
+  std::string name;
+  std::optional<std::string> version;
+  std::optional<std::string> build;
+};
+
+struct DeviceContext {
+  std::optional<std::string> family;
+  std::optional<std::string> model;
+  std::optional<std::string> architecture;
+};
+
+struct ApplicationContext {
+  std::optional<std::string> name;
+  std::optional<std::string> version;
+  std::optional<std::string> build;
+};
+
+struct TelemetryResource {
+  std::optional<NamedVersion> service;
+  std::optional<DeploymentContext> deployment;
+  std::optional<NamedVersion> runtime;
+  std::optional<NamedVersion> framework;
+  std::optional<OperatingSystemContext> operating_system;
+  std::optional<DeviceContext> device;
+  std::optional<ApplicationContext> application;
+};
+
+struct TelemetryTraceContext {
+  std::string trace_id;
+  std::optional<std::string> span_id;
+  std::optional<std::string> parent_span_id;
+  std::optional<bool> sampled;
+};
+
+struct SessionContext {
+  std::string id;
+  std::optional<std::string> previous_id;
+};
+
+enum class SubjectKind {
+  anonymous,
+  user,
+};
+
+struct SubjectContext {
+  std::string id;
+  SubjectKind kind = SubjectKind::anonymous;
+};
+
+using Tags = std::map<std::string, std::string>;
+
+struct TelemetryContext {
+  unsigned int schema_version = telemetry_context_schema_version;
+  std::optional<TelemetryResource> resource;
+  std::optional<TelemetryTraceContext> trace;
+  std::optional<SessionContext> session;
+  std::optional<SubjectContext> subject;
+  Tags tags;
+};
+
+struct ClientOptions {
+  std::optional<TelemetryContext> context;
+  bool disable_automatic_context = false;
+};
+
+namespace detail {
+
+template <typename Context> struct ScopeState {
+  Context context;
+  std::shared_ptr<ScopeState<Context>> previous;
+  bool active = true;
+};
+
+} // namespace detail
+
+class TelemetryScope final {
+public:
+  explicit TelemetryScope(TelemetryContext context);
+  ~TelemetryScope();
+
+  TelemetryScope(const TelemetryScope &) = delete;
+  TelemetryScope &operator=(const TelemetryScope &) = delete;
+  TelemetryScope(TelemetryScope &&) = delete;
+  TelemetryScope &operator=(TelemetryScope &&) = delete;
+
+  [[nodiscard]] const TelemetryContext &context() const noexcept;
+
+private:
+  std::shared_ptr<detail::ScopeState<TelemetryContext>> state_;
+};
+
+void validate_telemetry_context(const TelemetryContext &context);
+[[nodiscard]] const TelemetryContext *current_telemetry_context() noexcept;
 
 struct Config {
   std::string api_key;
@@ -147,6 +260,70 @@ private:
 
 using Metadata = std::map<std::string, MetadataValue>;
 
+struct EventOptions {
+  Metadata metadata = {};
+  std::optional<TelemetryContext> context;
+};
+
+struct IssueMechanism {
+  std::string type;
+  bool handled = true;
+};
+
+struct IssueException {
+  std::string type;
+  std::optional<IssueMechanism> mechanism;
+};
+
+struct IssueStackFrame {
+  std::string filename;
+  unsigned int line = 0U;
+  unsigned int column = 0U;
+  std::optional<std::string> function;
+  std::optional<std::string> module;
+  std::optional<bool> in_app;
+  std::optional<std::string> debug_id;
+};
+
+struct IssueBreadcrumb {
+  std::string timestamp;
+  std::optional<std::string> type;
+  std::string category;
+  std::optional<std::string> level;
+  std::optional<std::string> message;
+  Metadata data = {};
+};
+
+struct IssueDetails {
+  std::optional<IssueException> exception;
+  std::vector<IssueStackFrame> stack_frames;
+  std::vector<IssueBreadcrumb> breadcrumbs;
+  bool breadcrumbs_truncated = false;
+};
+
+struct SpanEvent {
+  std::string name;
+  std::optional<std::string> timestamp;
+  Metadata metadata = {};
+};
+
+struct SpanLink {
+  std::string trace_id;
+  std::string span_id;
+  std::optional<bool> sampled;
+  Metadata metadata = {};
+};
+
+struct SpanEvidence {
+  std::vector<SpanEvent> events;
+  std::vector<SpanLink> links;
+};
+
+[[nodiscard]] IssueStackFrame issue_frame_from_location(std::string file, unsigned int line, unsigned int column,
+                                                        std::optional<std::string> function = std::nullopt,
+                                                        std::optional<std::string> module = std::nullopt,
+                                                        bool in_app = true);
+
 struct OpenTelemetrySpanContext {
   std::string trace_id;
   std::string span_id;
@@ -169,12 +346,13 @@ public:
 
   TraceScope(const TraceScope &) = delete;
   TraceScope &operator=(const TraceScope &) = delete;
+  TraceScope(TraceScope &&) = delete;
+  TraceScope &operator=(TraceScope &&) = delete;
 
   [[nodiscard]] const TraceContext &context() const noexcept;
 
 private:
-  TraceContext context_;
-  const TraceContext *previous_ = nullptr;
+  std::shared_ptr<detail::ScopeState<TraceContext>> state_;
 };
 
 struct MetricAttributes {
@@ -196,6 +374,7 @@ struct ProductTimelineContext {
   std::optional<std::string> session_id;
   std::optional<std::string> screen;
   std::optional<std::string> trace_id;
+  std::optional<std::string> route_template;
   std::optional<std::string> funnel;
   std::optional<std::string> step;
   Metadata metadata = {};
@@ -221,14 +400,10 @@ struct NetworkMilestoneAttributes {
 [[nodiscard]] TraceContext create_trace_context(std::string trace_flags = "01");
 [[nodiscard]] TraceContext trace_context_from_traceparent(const std::string &traceparent);
 [[nodiscard]] TraceContext continue_or_create_trace_context(const std::string &traceparent);
-[[nodiscard]] OpenTelemetrySpanContext open_telemetry_span_context(
-    std::string trace_id,
-    std::string span_id,
-    std::string trace_flags = "01");
-[[nodiscard]] OpenTelemetrySpanContext open_telemetry_span_context_from_sampled(
-    std::string trace_id,
-    std::string span_id,
-    bool sampled);
+[[nodiscard]] OpenTelemetrySpanContext open_telemetry_span_context(std::string trace_id, std::string span_id,
+                                                                   std::string trace_flags = "01");
+[[nodiscard]] OpenTelemetrySpanContext open_telemetry_span_context_from_sampled(std::string trace_id,
+                                                                                std::string span_id, bool sampled);
 template <typename OpenTelemetrySpanContextLike>
 [[nodiscard]] std::optional<OpenTelemetrySpanContext>
 try_open_telemetry_span_context_from_span_context(const OpenTelemetrySpanContextLike &context) {
@@ -242,10 +417,9 @@ try_open_telemetry_span_context_from_span_context(const OpenTelemetrySpanContext
   context.span_id().ToLowerBase16(span_id);
   context.trace_flags().ToLowerBase16(trace_flags);
   try {
-    return open_telemetry_span_context(
-        std::string(trace_id.data(), trace_id.size()),
-        std::string(span_id.data(), span_id.size()),
-        std::string(trace_flags.data(), trace_flags.size()));
+    return open_telemetry_span_context(std::string(trace_id.data(), trace_id.size()),
+                                       std::string(span_id.data(), span_id.size()),
+                                       std::string(trace_flags.data(), trace_flags.size()));
   } catch (const SdkException &) {
     return std::nullopt;
   }
@@ -268,8 +442,7 @@ try_open_telemetry_span_context_from_span(const OpenTelemetrySpanLike &span) {
 }
 
 template <typename OpenTelemetrySpanLike>
-[[nodiscard]] OpenTelemetrySpanContext
-open_telemetry_span_context_from_span(const OpenTelemetrySpanLike &span) {
+[[nodiscard]] OpenTelemetrySpanContext open_telemetry_span_context_from_span(const OpenTelemetrySpanLike &span) {
   auto copied = try_open_telemetry_span_context_from_span(span);
   if (!copied.has_value()) {
     throw SdkException("validation_error", "OpenTelemetry span is invalid");
@@ -296,23 +469,18 @@ open_telemetry_span_context_from_span_pointer(const OpenTelemetrySpanPointerLike
   return *copied;
 }
 
-[[nodiscard]] TraceContext trace_context_from_opentelemetry_span_context(
-    const OpenTelemetrySpanContext &context);
+[[nodiscard]] TraceContext trace_context_from_opentelemetry_span_context(const OpenTelemetrySpanContext &context);
 [[nodiscard]] const TraceContext *current_trace_context() noexcept;
 [[nodiscard]] Metadata trace_metadata(const TraceContext *context = nullptr);
-[[nodiscard]] ProductTimelineContext trace_product_timeline_context(
-    ProductTimelineContext context,
-    const TraceContext *trace = nullptr);
-[[nodiscard]] SpanAttributes trace_span_attributes(
-    std::string name,
-    std::string status,
-    std::optional<double> duration_ms = std::nullopt,
-    const TraceContext *context = nullptr);
-[[nodiscard]] SpanAttributes trace_span_attributes_from_opentelemetry_span_context(
-    std::string name,
-    std::string status,
-    const OpenTelemetrySpanContext &context,
-    std::optional<double> duration_ms = std::nullopt);
+[[nodiscard]] ProductTimelineContext trace_product_timeline_context(ProductTimelineContext context,
+                                                                    const TraceContext *trace = nullptr);
+[[nodiscard]] SpanAttributes trace_span_attributes(std::string name, std::string status,
+                                                   std::optional<double> duration_ms = std::nullopt,
+                                                   const TraceContext *context = nullptr);
+[[nodiscard]] SpanAttributes
+trace_span_attributes_from_opentelemetry_span_context(std::string name, std::string status,
+                                                      const OpenTelemetrySpanContext &context,
+                                                      std::optional<double> duration_ms = std::nullopt);
 [[nodiscard]] std::map<std::string, std::string> traceparent_headers(const TraceContext *context = nullptr);
 
 class RecordingTransport final : public Transport {
@@ -349,6 +517,7 @@ private:
 class LogBrewClient final {
 public:
   explicit LogBrewClient(Config config);
+  LogBrewClient(Config config, ClientOptions options);
 
   [[nodiscard]] std::size_t pending_events() const noexcept;
   [[nodiscard]] std::string preview_json() const;
@@ -356,15 +525,33 @@ public:
   TransportResponse flush(Transport &transport);
   TransportResponse shutdown(Transport &transport);
 
+  void add_breadcrumb(IssueBreadcrumb breadcrumb);
+  void clear_breadcrumbs() noexcept;
+
   void release(std::string id, std::string timestamp, ReleaseAttributes attributes);
+  void release(std::string id, std::string timestamp, ReleaseAttributes attributes, EventOptions options);
   void environment(std::string id, std::string timestamp, EnvironmentAttributes attributes);
+  void environment(std::string id, std::string timestamp, EnvironmentAttributes attributes, EventOptions options);
   void issue(std::string id, std::string timestamp, IssueAttributes attributes);
+  void issue(std::string id, std::string timestamp, IssueAttributes attributes, EventOptions options);
+  void issue(std::string id, std::string timestamp, IssueAttributes attributes, IssueDetails details,
+             EventOptions options = {});
   void log(std::string id, std::string timestamp, LogAttributes attributes);
+  void log(std::string id, std::string timestamp, LogAttributes attributes, EventOptions options);
   void span(std::string id, std::string timestamp, SpanAttributes attributes);
+  void span(std::string id, std::string timestamp, SpanAttributes attributes, EventOptions options);
+  void span(std::string id, std::string timestamp, SpanAttributes attributes, SpanEvidence evidence,
+            EventOptions options = {});
   void metric(std::string id, std::string timestamp, MetricAttributes attributes);
+  void metric(std::string id, std::string timestamp, MetricAttributes attributes, EventOptions options);
   void action(std::string id, std::string timestamp, ActionAttributes attributes);
+  void action(std::string id, std::string timestamp, ActionAttributes attributes, EventOptions options);
   void capture_product_action(std::string id, std::string timestamp, ProductActionAttributes attributes);
+  void capture_product_action(std::string id, std::string timestamp, ProductActionAttributes attributes,
+                              EventOptions options);
   void capture_network_milestone(std::string id, std::string timestamp, NetworkMilestoneAttributes attributes);
+  void capture_network_milestone(std::string id, std::string timestamp, NetworkMilestoneAttributes attributes,
+                                 EventOptions options);
 
 private:
   struct Event {
@@ -375,7 +562,8 @@ private:
   };
 
   [[nodiscard]] static std::string event_json(const Event &event);
-  void push_event(std::string type, std::string id, std::string timestamp, std::string attributes_json);
+  void push_event(std::string type, std::string id, std::string timestamp, std::string attributes_json,
+                  const std::optional<TelemetryContext> &event_context, const SpanAttributes *signal_span = nullptr);
   [[nodiscard]] TransportResponse flush_internal(Transport &transport);
 
   std::string api_key_;
@@ -384,6 +572,9 @@ private:
   std::size_t max_retries_;
   bool closed_ = false;
   std::vector<Event> events_;
+  std::optional<TelemetryContext> base_context_;
+  std::vector<IssueBreadcrumb> breadcrumbs_;
+  bool breadcrumbs_truncated_ = false;
 };
 
 } // namespace logbrew

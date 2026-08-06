@@ -84,7 +84,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Kotlin OkHttp | [`co.logbrew:logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp request tracing, phase timings, and W3C trace propagation |
 | Unity | [`co.logbrew.unity`](unity/logbrew-unity) | Unity package with runtime helpers and HTTP delivery |
 | C | [`logbrew-c`](c/logbrew-c) | C source/header client |
-| C++ | [`logbrew-cpp`](cpp/logbrew-cpp) | C++ RAII source/header client with optional HTTP delivery |
+| C++ | [`logbrew-cpp`](cpp/logbrew-cpp) | C++17 RAII source/header client with typed context, rich issue/span evidence, and optional HTTP delivery |
 
 ## Quick Start
 

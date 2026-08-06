@@ -39,6 +39,30 @@ def require_trace_metadata(attributes: dict[str, object], span_id: str) -> None:
             raise SystemExit(f"unexpected metadata {key}: {metadata.get(key)!r}")
 
 
+def require_typed_trace_context(attributes: dict[str, object], span_id: str) -> None:
+    context = attributes.get("context")
+    if not isinstance(context, dict) or context.get("schemaVersion") != 1:
+        raise SystemExit("missing schema-v1 typed context")
+    trace = context.get("trace")
+    expected = {
+        "traceId": TRACE_ID,
+        "spanId": span_id,
+        "parentSpanId": PARENT_SPAN_ID,
+        "sampled": True,
+    }
+    if not isinstance(trace, dict):
+        raise SystemExit("missing typed trace context")
+    for key, value in expected.items():
+        if trace.get(key) != value:
+            raise SystemExit(f"unexpected typed trace {key}: {trace.get(key)!r}")
+    resource = context.get("resource")
+    runtime = resource.get("runtime") if isinstance(resource, dict) else None
+    if not isinstance(runtime, dict) or runtime.get("name") != "cpp" or runtime.get("version") != "c++17":
+        raise SystemExit("missing conservative C++ runtime context")
+    if "session" in context or "subject" in context:
+        raise SystemExit("automatic context invented session or subject identity")
+
+
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: check_cpp_trace_correlation_payload.py <stdout.json> <stderr.json>")
@@ -77,6 +101,7 @@ def main() -> None:
         if not isinstance(attributes, dict):
             raise SystemExit("event attributes must be objects")
         require_trace_metadata(attributes, span_id)
+        require_typed_trace_context(attributes, span_id)
 
     span_attributes = span.get("attributes")
     if not isinstance(span_attributes, dict):
@@ -91,17 +116,20 @@ def main() -> None:
     }.items():
         if span_attributes.get(key) != value:
             raise SystemExit(f"unexpected span {key}: {span_attributes.get(key)!r}")
+    require_typed_trace_context(span_attributes, span_id)
 
     metric_attributes = metric.get("attributes")
     if not isinstance(metric_attributes, dict):
         raise SystemExit("metric attributes must be an object")
     require_trace_metadata(metric_attributes, span_id)
+    require_typed_trace_context(metric_attributes, span_id)
 
     for event, label in ((product_action, "product"), (network, "network")):
         attributes = event.get("attributes")
         if not isinstance(attributes, dict):
             raise SystemExit(f"{label} attributes must be an object")
         require_trace_metadata(attributes, span_id)
+        require_typed_trace_context(attributes, span_id)
     network_attributes = network.get("attributes")
     if not isinstance(network_attributes, dict) or network_attributes.get("name") != "POST /api/checkout":
         raise SystemExit("network route was not sanitized")

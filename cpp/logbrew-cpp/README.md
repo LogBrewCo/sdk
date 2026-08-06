@@ -56,6 +56,125 @@ c++ -std=c++17 -Wall -Wextra -Wpedantic \
 
 `HttpTransport` validates `http://` and `https://` endpoints, sends `authorization: Bearer <api key>` and `content-type: application/json`, rejects custom overrides for those reserved headers, supports safe additional headers, and maps libcurl request failures into retryable transport errors. It does not patch global HTTP clients, inspect application traffic, collect request or response payloads, or capture arbitrary headers from your app.
 
+## Rich Investigation Context
+
+Use `TelemetryContext` to give people and AI coding assistants the stable facts needed to connect an issue, log, trace, action, release, and metric without repeating unstructured metadata on every event.
+
+```cpp
+logbrew::TelemetryResource resource;
+resource.service = logbrew::NamedVersion{"checkout-api", "2.4.0"};
+resource.deployment = logbrew::DeploymentContext{"production", "2026.08.06"};
+resource.framework = logbrew::NamedVersion{"checkout-runtime", "4.1.0"};
+
+logbrew::TelemetryContext context;
+context.resource = resource;
+context.session = logbrew::SessionContext{"session_opaque_current", std::nullopt};
+context.subject = logbrew::SubjectContext{"subject_opaque_42", logbrew::SubjectKind::user};
+context.tags = {{"region", "eu-central"}, {"tier", "gold"}};
+
+logbrew::ClientOptions client_options;
+client_options.context = context;
+logbrew::LogBrewClient client(
+    logbrew::Config{"LOGBREW_API_KEY", "checkout-native", logbrew::version, 2},
+    client_options);
+```
+
+The default client adds only conservative process facts that are safe and useful across events: the C++ language level, OS family, and CPU architecture. It never infers user or account identity, machine-unique values, location, or application-owned values. Set `ClientOptions::disable_automatic_context` when even those process facts are not appropriate.
+
+`TelemetryScope` adds a copied thread-local layer for one request or operation. `EventOptions` can add final per-event metadata and context:
+
+```cpp
+logbrew::TelemetryContext operation;
+operation.tags = {{"worker", "payment-authorizer"}};
+logbrew::TelemetryScope scope(operation);
+
+logbrew::EventOptions event_options;
+event_options.metadata = {{"attempt", 2}, {"cacheHit", false}};
+event_options.context = logbrew::TelemetryContext{
+    logbrew::telemetry_context_schema_version,
+    std::nullopt,
+    std::nullopt,
+    logbrew::SessionContext{"session_opaque_retry", "session_opaque_current"},
+    std::nullopt,
+    {{"feature", "payments"}},
+};
+
+client.log(
+    "evt_payment_retry",
+    "2026-08-06T10:01:00Z",
+    logbrew::LogAttributes{"payment authorization retry", "warning", "checkout"},
+    event_options);
+```
+
+Context precedence is deterministic: conservative automatic facts, client context, the active `TelemetryScope`, active W3C `TraceScope`, the span's own identity for span events, then the event override. Values are copied at client/scope construction, tags merge by key, and the final payload is validated before queue admission.
+
+## Issue Evidence
+
+Issues can include type-only exception identity, mechanism and handled state, structured source frames, and the newest 64 privacy-safe breadcrumbs:
+
+```cpp
+client.add_breadcrumb(logbrew::IssueBreadcrumb{
+    "2026-08-06T10:01:05Z",
+    "http",
+    "payment.request",
+    "info",
+    "authorization request completed",
+    {{"statusClass", "5xx"}},
+});
+
+logbrew::IssueDetails details;
+details.exception = logbrew::IssueException{
+    "PaymentDeclined",
+    logbrew::IssueMechanism{"signal", false},
+};
+details.stack_frames = {logbrew::issue_frame_from_location(
+    __FILE__, __LINE__, 1U, "authorize_payment", "checkout.payment", true)};
+
+client.issue(
+    "evt_payment_failed",
+    "2026-08-06T10:01:06Z",
+    logbrew::IssueAttributes{"Payment authorization failed", "error", std::nullopt},
+    details);
+```
+
+`issue_frame_from_location(...)` removes query and fragment data and keeps only the source basename. Manually supplied absolute frame paths are rejected. Breadcrumbs allow at most eight flat primitive data values each; the client retains the newest 64 and emits `breadcrumbsTruncated` when older evidence was dropped. Exception messages, raw stacks, locals, arguments, request bodies, and environment values are never inferred.
+
+## Span Evidence
+
+Attach bounded milestones and causal links when a trace needs more than timing and status:
+
+```cpp
+logbrew::SpanEvidence evidence;
+evidence.events = {{
+    "payment.authorization.rejected",
+    "2026-08-06T10:01:05.900Z",
+    {{"provider", "gateway"}},
+}};
+evidence.links = {{
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bbbbbbbbbbbbbbbb",
+    false,
+    {{"relationship", "retry_of"}},
+}};
+
+client.span(
+    "evt_payment_span",
+    "2026-08-06T10:01:07Z",
+    logbrew::SpanAttributes{
+        "POST /payments/{id}/authorize",
+        "11111111111111111111111111111111",
+        "2222222222222222",
+        "3333333333333333",
+        "error",
+        184.5,
+    },
+    evidence);
+```
+
+Each span accepts at most eight events and eight links. Link identifiers must be non-zero W3C hex values and are normalized to lowercase. Event and link metadata is flat, primitive, finite, and bounded.
+
+Across all signals, event metadata is limited to 128 entries, keys to 128 bytes, strings to 4096 bytes, and context tags to 32 low-cardinality entries. Screenshots, attachments, replay, view hierarchy, raw stack text, and automatic user identity are not part of this SDK contract.
+
 ## Metrics
 
 Use `client.metric(...)` for explicit application-owned measurements that should appear alongside logs, errors, traces, and product timelines.
@@ -163,7 +282,7 @@ For explicit OTel objects, use `try_open_telemetry_span_context_from_span_contex
 
 `OpenTelemetrySpanContext` is dependency-free and accepts the stable string values your app reads from its own OTel objects, or the validated IDs copied by the template adapters above. It creates a fresh LogBrew child span under the OTel parent and can also feed `trace_span_attributes_from_opentelemetry_span_context(...)` for a single explicit span event. It does not install OpenTelemetry, read tracestate or baggage, patch HTTP clients, capture payloads, copy arbitrary headers, or serialize raw propagation metadata.
 
-When a `TraceScope` is active, `LogBrewClient` automatically adds primitive `traceId`, `spanId`, `parentSpanId`, `sampled`, and `traceFlags` metadata to issue, log, action, and metric events. `trace_span_attributes(...)` reuses the same active span ID for an explicit span event, `trace_product_timeline_context(...)` adds the active trace ID to product timelines, and `traceparent_headers()` returns only a normalized `traceparent` header for app-owned outbound requests. These helpers do not patch HTTP clients, capture request/response payloads, serialize raw incoming propagation headers, or include URL query strings and hashes.
+When a `TraceScope` is active, `LogBrewClient` adds normalized typed trace context to every signal and preserves the existing primitive `traceId`, `spanId`, `parentSpanId`, `sampled`, and `traceFlags` metadata projection on issue, log, action, and metric events for compatibility. `trace_span_attributes(...)` reuses the same active span ID for an explicit span event, `trace_product_timeline_context(...)` adds the active trace ID to product timelines, and `traceparent_headers()` returns only a normalized `traceparent` header for app-owned outbound requests. These helpers do not patch HTTP clients, capture request/response payloads, serialize raw incoming propagation headers, or include URL query strings and hashes.
 
 ## Example Source
 
