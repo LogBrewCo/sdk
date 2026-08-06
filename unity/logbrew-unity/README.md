@@ -45,6 +45,96 @@ string preview = client.PreviewJson();
 TransportResponse response = client.Flush(RecordingTransport.AlwaysAccept());
 ```
 
+## Shared Context and Metrics
+
+`TelemetryContext` gives issues, logs, spans, metrics, actions, releases, and environments the same bounded service, deployment, Unity/runtime, OS, device architecture, application, trace, session, subject, and tag evidence. Configure stable defaults once, add an ambient scope for one player flow, and use an event override only for facts that change on that event:
+
+```csharp
+var defaults = TelemetryContext.Create()
+    .WithResource(TelemetryResource.Create()
+        .WithDeployment("production", "2.3.0")
+        .WithApplication("Checkout Game", "2.3.0", "204")
+        .Build())
+    .WithTag("region", "eu")
+    .Build();
+
+var client = LogBrewUnity.CreateClient(
+    "LOGBREW_API_KEY",
+    "checkout-game",
+    context: defaults);
+
+var playerFlow = TelemetryContext.Create()
+    .WithSession("opaque-session-7")
+    .WithSubject("opaque-player-42", "user")
+    .WithTag("journey", "checkout")
+    .Build();
+
+using (LogBrewTelemetry.ActivateContext(playerFlow))
+{
+    client.Metric(
+        "evt_frame_duration_001",
+        "2026-06-02T10:00:09Z",
+        MetricAttributes.Create("frame.duration", "histogram", 16.6, "ms", "delta")
+            .WithMetadata(new Dictionary<string, object?> { ["scene"] = "Checkout" }));
+}
+```
+
+By default the client adds non-unique runtime, OS, architecture, application, Unity framework, and platform facts when they are available. Pass `includeAutomaticContext: false` to omit runtime-discovered values; the explicit game name and SDK framework identity remain. Subject and session IDs are never discovered from accounts, device identifiers, cookies, or platform services. Provide only opaque IDs approved by your application, and clear or replace the scope at your own privacy boundary.
+
+Metric kinds are `counter`, `gauge`, and `histogram`. Gauges require `instant`; counters and histograms require `delta` or `cumulative` and non-negative values. Values must be finite and units must be non-empty. Keep metric metadata low-cardinality: scene, route template, game mode, or feature flag names are suitable; player IDs, request IDs, raw URLs, and payload values are not.
+
+## Rich Issue Evidence
+
+Keep breadcrumbs as bounded machine-readable steps, then capture either an application-owned `Exception` or a Unity log-callback stack. The client retains the newest 64 breadcrumbs, marks eviction with `breadcrumbsTruncated`, keeps at most 32 frames, reduces absolute source paths to basenames, and never copies an automatic exception message into the issue:
+
+```csharp
+client.AddBreadcrumb(
+    IssueBreadcrumb.Create("2026-06-02T10:00:07Z", "checkout.request")
+        .WithType("http")
+        .WithLevel("warning")
+        .WithMessage("retry started")
+        .WithData(new Dictionary<string, object?> { ["attempt"] = 2 }));
+
+try
+{
+    SubmitCheckout();
+}
+catch (Exception error)
+{
+    LogBrewUnity.CaptureException(
+        client,
+        "evt_checkout_issue_001",
+        "2026-06-02T10:00:08Z",
+        error,
+        handled: true,
+        context: UnityContext.Create().WithSceneName("Checkout"));
+}
+```
+
+Use `IssueExceptionInfo`, `IssueExceptionMechanism`, and `IssueStackFrame` when your game already owns normalized source-map or IL2CPP symbol evidence. Call `ClearBreadcrumbs()` at a player, session, consent, or account boundary. Breadcrumb data accepts at most eight flat finite primitive fields; it rejects nested objects and unbounded text.
+
+## Span Events and Links
+
+Use bounded span events for important points inside one operation and links for causal-but-not-parent relationships such as queued work or batch fan-in:
+
+```csharp
+client.Span(
+    "evt_checkout_span_001",
+    "2026-06-02T10:00:10Z",
+    SpanAttributes.Create(
+            "checkout.submit",
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "00f067aa0ba902b7",
+            "error")
+        .WithEvent(SpanEventSummary.Create("retry")
+            .WithMetadata(new Dictionary<string, object?> { ["attempt"] = 2 }))
+        .WithLink(SpanLinkSummary.Create(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbb").WithSampled(false)));
+```
+
+Each span accepts at most eight events and eight links. Event/link metadata is flat and primitive. Links require normalized non-zero W3C trace and span IDs; they are evidence, not a parent-child claim.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when the game or realtime app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors or proxies:
@@ -121,14 +211,14 @@ using (LogBrewTrace.Activate(trace))
 }
 ```
 
-Issue, log, action, and Unity helper events inherit active trace metadata while the scope is active. Spans stay explicit through `LogBrewTrace.SpanAttributes(...)`. Request spans are app-owned: `StartRequestSpan(...)` returns only `traceparent`, and `CaptureRequestSpan(...)` records route-only metadata, optional fixed `UnityRequestTimings` phase durations, and response byte counts without query strings, payloads, or copied request headers.
+All seven signal types support typed trace context. Issue, log, metric, action, release, and environment events inherit the active trace while the scope is active; issue, log, metric, and action events also keep compatible primitive correlation fields. Spans stay explicit through `LogBrewTrace.SpanAttributes(...)`. Request spans are app-owned: `StartRequestSpan(...)` returns only `traceparent`, and `CaptureRequestSpan(...)` records route-only metadata, optional fixed `UnityRequestTimings` phase durations, and response byte counts without query strings, payloads, or copied request headers.
 For app-owned `UnityWebRequest` calls, create a `UnityRequestTracker` and pass `request.SetRequestHeader` when starting the request; after `yield return request.SendWebRequest()`, call `Capture(...)` with the response status, Unity error type, and optional fixed request timing phases. The tracker writes exactly one `traceparent`, computes duration from your realtime clock, and records the existing sanitized request span without wrapping or patching Unity networking.
 For app-owned lifecycle callbacks, create a `UnityLifecycleTracker` in your own `MonoBehaviour`, then call `CapturePause(...)` from `OnApplicationPause` or `CaptureFocus(...)` from `OnApplicationFocus`. The tracker deduplicates repeated pause/focus notifications and records previous-state duration spans, but it does not create hidden GameObjects, subscribe globally, infer session health, or patch Unity APIs.
-For app-owned coroutines, use `LogBrewUnity.TraceCoroutine(...)` when you only need trace reactivation across `yield` boundaries. Use `UnityCoroutineTracker` when you also want a completion/failure span with duration from your realtime clock. Both helpers return an `IEnumerator` that you pass to your own `StartCoroutine(...)`; neither creates hidden `MonoBehaviour` objects, patches coroutine scheduling, or subscribes to lifecycle events.
+For app-owned coroutines, use `LogBrewUnity.TraceCoroutine(...)` when you need trace and telemetry-context reactivation across `yield` boundaries. Use `UnityCoroutineTracker` when you also want a completion/failure span with duration from your realtime clock. Both helpers return an `IEnumerator` that you pass to your own `StartCoroutine(...)`; neither creates hidden `MonoBehaviour` objects, patches coroutine scheduling, or subscribes to lifecycle events.
 
 ## Sample Source
 
-The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle, request, and coroutine spans, tracking app-owned lifecycle callbacks, applying app-owned request headers, recording request timing phases, preserving coroutine trace context, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
+The package includes sample source for creating a client, sending through `HttpTransport`, adding shared context, recording metrics, breadcrumbs, structured exceptions and frames, span events and links, scene transitions, lifecycle/request/coroutine spans, and W3C `traceparent` correlation in your own game or realtime app.
 
 ## Behavior
 
@@ -138,7 +228,10 @@ The package includes sample source for creating a client, sending through `HttpT
 - `HttpTransport` uses `HttpClient`, supports endpoint/header/timeout settings, and maps request failures to retryable `TransportException.Network(...)` failures.
 - `LogBrewUnity.CaptureSceneLoaded()` records Unity scene transitions as action events.
 - `LogBrewUnity.CaptureLogMessage()` maps Unity log types to LogBrew log levels.
-- `LogBrewUnity.CaptureException()` records Unity exception details as issue events.
+- `LogBrewUnity.CaptureException()` records typed exception identity, mechanism/handled state, bounded basename-only frames, and the current breadcrumb snapshot without automatically copying private exception messages.
+- `MetricAttributes` validates counter, gauge, and histogram measurements and carries the same context and trace correlation as other signals.
+- `TelemetryContext` merges client, ambient, active-trace, and event context in that order; event values win without mutating the caller's context.
+- `SpanEventSummary` and `SpanLinkSummary` add up to eight bounded evidence records of each kind to a span.
 - `LogBrewUnity.CaptureLifecycleSpan()` records app-owned lifecycle transitions such as `active -> paused` as spans with previous-state duration.
 - `UnityLifecycleTracker` turns app-owned pause/focus callbacks into deduplicated lifecycle spans without hidden `MonoBehaviour` creation or global subscriptions.
 - `LogBrewUnity.StartRequestSpan()` returns a child trace context plus `traceparent` header for app-owned request clients such as `UnityWebRequest`.
@@ -147,5 +240,5 @@ The package includes sample source for creating a client, sending through `HttpT
 - `UnityRequestTracker` combines app-owned request header injection with completion capture, duration calculation, and optional request timings while leaving `UnityWebRequest` ownership with your code.
 - `LogBrewUnity.TraceCoroutine()` captures an explicit or active trace and reactivates it while each app-owned coroutine step executes.
 - `UnityCoroutineTracker` wraps an app-owned coroutine with child trace context and records one completion or exception-type-only failure span.
-- `UnityContext` adds scene, object, platform, session, and frame metadata while keeping the core event builders independent from `UnityEngine`.
-- `LogBrewTrace` adds active trace metadata to issue, log, action, span, and Unity helper events without global HTTP patching or payload/header capture.
+- `UnityContext` adds scene, object, platform, session, frame, and optional typed telemetry context while keeping core event builders independent from a compile-time `UnityEngine` dependency.
+- `LogBrewTrace` adds active typed trace context to all signals without global HTTP patching or payload/header capture.

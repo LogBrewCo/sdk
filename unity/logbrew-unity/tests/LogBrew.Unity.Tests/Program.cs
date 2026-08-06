@@ -3,6 +3,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using LogBrew.Unity;
 
 namespace LogBrew.Unity.Tests
@@ -34,7 +35,18 @@ namespace LogBrew.Unity.Tests
             Run("unity_request_timings_are_fixed_and_privacy_bounded", UnityRequestTimingsAreFixedAndPrivacyBounded);
             Run("unity_coroutine_wrapper_reactivates_trace_per_step", UnityCoroutineWrapperReactivatesTracePerStep);
             Run("unity_coroutine_tracker_records_completion_and_failure_spans", UnityCoroutineTrackerRecordsCompletionAndFailureSpans);
-            Console.WriteLine("unity package tests ok (23 tests)");
+            Run("shared_context_and_metrics_serialize", SharedContextAndMetricsSerialize);
+            Run("issue_diagnostics_and_breadcrumbs_serialize", IssueDiagnosticsAndBreadcrumbsSerialize);
+            Run("span_events_and_links_serialize", SpanEventsAndLinksSerialize);
+            Run("default_unity_context_covers_every_signal", DefaultUnityContextCoversEverySignal);
+            Run("active_trace_covers_every_signal", ActiveTraceCoversEverySignal);
+            Run("context_scopes_merge_with_trace_precedence", ContextScopesMergeWithTracePrecedence);
+            Run("context_validation_fails_closed", ContextValidationFailsClosed);
+            Run("metadata_numbers_are_finite_and_serializable", MetadataNumbersAreFiniteAndSerializable);
+            Run("exception_projection_omits_private_message_and_paths", ExceptionProjectionOmitsPrivateMessageAndPaths);
+            Run("breadcrumb_buffer_is_bounded_and_clearable", BreadcrumbBufferIsBoundedAndClearable);
+            Run("unity_stack_trace_parser_emits_typed_frames", UnityStackTraceParserEmitsTypedFrames);
+            Console.WriteLine("unity package tests ok (34 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -501,10 +513,13 @@ namespace LogBrew.Unity.Tests
                 () => now,
                 UnityContext.Create().WithPlatform("ios").WithSceneName("Checkout"));
             var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+            var requestContext = TelemetryContext.Create().WithSession("request_session").Build();
+            UnityTrackedRequest request;
 
+            using (LogBrewTelemetry.ActivateContext(requestContext))
             using (LogBrewTrace.Activate(trace))
             {
-                var request = tracker.Start(
+                request = tracker.Start(
                     "put",
                     "https://api.example.test/api/checkout?cache=1#poll",
                     (name, value) =>
@@ -517,16 +532,17 @@ namespace LogBrew.Unity.Tests
                 AssertEqual(request.Headers["traceparent"], headers["traceparent"]);
                 AssertEqual(traceId, request.RequestSpan.TraceContext.TraceId);
                 AssertEqual(trace.SpanId, request.RequestSpan.TraceContext.ParentSpanId ?? string.Empty);
-                now = 1184.5;
-                tracker.Capture(
-                    request,
-                    503,
-                    "UnityWebRequestError",
-                    UnityContext.Create()
-                        .WithFrame(128)
-                        .WithMetadata("traceparent", "spoofed_traceparent")
-                        .WithMetadata("traceId", "spoofed_trace"));
             }
+
+            now = 1184.5;
+            tracker.Capture(
+                request,
+                503,
+                "UnityWebRequestError",
+                UnityContext.Create()
+                    .WithFrame(128)
+                    .WithMetadata("traceparent", "spoofed_traceparent")
+                    .WithMetadata("traceId", "spoofed_trace"));
 
             ExpectArgumentNull("client", () =>
             {
@@ -571,6 +587,7 @@ namespace LogBrew.Unity.Tests
             AssertContains(body, "\"platform\": \"ios\"");
             AssertContains(body, "\"sceneName\": \"Checkout\"");
             AssertContains(body, "\"frame\": 128");
+            AssertContains(body, "\"id\": \"request_session\"");
             AssertDoesNotContain(body, "api.example.test");
             AssertDoesNotContain(body, "cache=1");
             AssertDoesNotContain(body, "#poll");
@@ -714,7 +731,9 @@ namespace LogBrew.Unity.Tests
             const string parentSpanId = "00f067aa0ba902b7";
             var client = NewClient();
             var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+            var telemetryContext = TelemetryContext.Create().WithSession("coroutine_session").Build();
             UnityTraceCoroutine coroutine;
+            using (LogBrewTelemetry.ActivateContext(telemetryContext))
             using (LogBrewTrace.Activate(trace))
             {
                 coroutine = LogBrewUnity.TraceCoroutine(TraceAwareCoroutine(client));
@@ -737,6 +756,7 @@ namespace LogBrew.Unity.Tests
             AssertContains(body, "\"traceId\": \"" + traceId + "\"");
             AssertContains(body, "\"spanId\": \"" + trace.SpanId + "\"");
             AssertContains(body, "\"parentSpanId\": \"" + parentSpanId + "\"");
+            AssertContains(body, "\"id\": \"coroutine_session\"");
             AssertContains(body, "\"phase\": \"resume\"");
             AssertDoesNotContain(body, "spoofed_trace");
             AssertDoesNotContain(body, "spoofed_span");
@@ -759,9 +779,13 @@ namespace LogBrew.Unity.Tests
                 idFactory: () => eventIds.Dequeue(),
                 timestampFactory: () => timestamps.Dequeue(),
                 realtimeMilliseconds: () => clockMs,
-                context: UnityContext.Create().WithPlatform("ios").WithSceneName("Checkout"));
+                context: UnityContext.Create().WithPlatform("ios").WithSceneName("Checkout").WithSessionId("tracked_session"));
 
             UnityTrackedCoroutine coroutine;
+            var coroutineContext = TelemetryContext.Create()
+                .WithSubject("opaque_coroutine_player", "anonymous")
+                .Build();
+            using (LogBrewTelemetry.ActivateContext(coroutineContext))
             using (LogBrewTrace.Activate(trace))
             {
                 coroutine = tracker.Trace(
@@ -789,6 +813,8 @@ namespace LogBrew.Unity.Tests
             AssertContains(body, "\"outcome\": \"completed\"");
             AssertContains(body, "\"traceId\": \"" + traceId + "\"");
             AssertContains(body, "\"parentSpanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"id\": \"tracked_session\"");
+            AssertContains(body, "\"id\": \"opaque_coroutine_player\"");
             AssertContains(body, "\"platform\": \"ios\"");
             AssertContains(body, "\"sceneName\": \"Checkout\"");
             AssertContains(body, "\"frame\": 128");
@@ -888,6 +914,361 @@ namespace LogBrew.Unity.Tests
             throw new FormatException("boom");
         }
 
+        private static void SharedContextAndMetricsSerialize()
+        {
+            var baseContext = TelemetryContext.Create()
+                .WithResource(TelemetryResource.Create()
+                    .WithService("checkout-game", "1.4.0")
+                    .WithFramework("unity", "6000.1")
+                    .WithApplication("Checkout Game", "2.3.0", "204")
+                    .Build())
+                .WithSession("session_001")
+                .WithSubject("opaque_player_001", "user")
+                .WithTag("journey", "checkout")
+                .Build();
+            var eventContext = TelemetryContext.Create()
+                .WithTag("journey", "payment")
+                .WithTag("feature", "one-click")
+                .Build();
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                context: baseContext,
+                includeAutomaticContext: false);
+
+            client.Metric(
+                "evt_metric_001",
+                "2026-06-02T10:00:06Z",
+                MetricAttributes.Create("frame.duration", "histogram", 16.6, "ms", "delta")
+                    .WithMetadata(new Dictionary<string, object?> { ["scene"] = "Checkout" })
+                    .WithContext(eventContext));
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"type\": \"metric\"");
+            AssertContains(body, "\"name\": \"frame.duration\"");
+            AssertContains(body, "\"schemaVersion\": 1");
+            AssertContains(body, "\"service\"");
+            AssertContains(body, "\"name\": \"checkout-game\"");
+            AssertContains(body, "\"framework\"");
+            AssertContains(body, "\"version\": \"6000.1\"");
+            AssertContains(body, "\"id\": \"session_001\"");
+            AssertContains(body, "\"id\": \"opaque_player_001\"");
+            AssertContains(body, "\"journey\": \"payment\"");
+            AssertContains(body, "\"feature\": \"one-click\"");
+            AssertContains(body, "\"scene\": \"Checkout\"");
+
+            Expect("validation_error", () => client.Metric(
+                "evt_metric_bad",
+                "2026-06-02T10:00:07Z",
+                MetricAttributes.Create("frame.duration", "histogram", -1, "ms", "delta")));
+        }
+
+        private static void IssueDiagnosticsAndBreadcrumbsSerialize()
+        {
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                includeAutomaticContext: false);
+            client.AddBreadcrumb(
+                IssueBreadcrumb.Create("2026-08-02T08:15:29.123Z", "checkout.request")
+                    .WithType("http")
+                    .WithLevel("info")
+                    .WithMessage("payment retry started")
+                    .WithData(new Dictionary<string, object?>
+                    {
+                        ["attempt"] = 2,
+                        ["cached"] = false
+                    }));
+            client.Issue(
+                "evt_issue_diagnostics",
+                "2026-08-02T08:15:31Z",
+                IssueAttributes.Create("Checkout failed", "error")
+                    .WithException(
+                        IssueExceptionInfo.Create("NullReferenceException")
+                            .WithMechanism(IssueExceptionMechanism.Create("unity.log_callback", true)))
+                    .WithStackFrame(
+                        IssueStackFrame.Create("/workspace/game/Assets/Scripts/Checkout.cs?debug=true#frame", 42, 7)
+                            .WithFunction("Checkout.Submit")
+                            .WithModule("Assembly-CSharp")
+                            .WithInApp(true)));
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"exception\"");
+            AssertContains(body, "\"type\": \"NullReferenceException\"");
+            AssertContains(body, "\"type\": \"unity.log_callback\"");
+            AssertContains(body, "\"handled\": true");
+            AssertContains(body, "\"stackFrames\"");
+            AssertContains(body, "\"filename\": \"Checkout.cs\"");
+            AssertContains(body, "\"function\": \"Checkout.Submit\"");
+            AssertContains(body, "\"breadcrumbs\"");
+            AssertContains(body, "\"category\": \"checkout.request\"");
+            AssertContains(body, "\"attempt\": 2");
+            AssertDoesNotContain(body, "/workspace/game");
+            AssertDoesNotContain(body, "debug=true");
+        }
+
+        private static void SpanEventsAndLinksSerialize()
+        {
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                includeAutomaticContext: false);
+            client.Span(
+                "evt_span_evidence",
+                "2026-08-02T08:15:31Z",
+                SpanAttributes.Create(
+                        "checkout.submit",
+                        "4bf92f3577b34da6a3ce929d0e0e4736",
+                        "00f067aa0ba902b7",
+                        "error")
+                    .WithEvent(
+                        SpanEventSummary.Create("retry")
+                            .WithTimestamp("2026-08-02T08:15:30Z")
+                            .WithMetadata(new Dictionary<string, object?> { ["attempt"] = 2 }))
+                    .WithLink(
+                        SpanLinkSummary.Create(
+                                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                "bbbbbbbbbbbbbbbb")
+                            .WithSampled(false)));
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"events\"");
+            AssertContains(body, "\"name\": \"retry\"");
+            AssertContains(body, "\"attempt\": 2");
+            AssertContains(body, "\"links\"");
+            AssertContains(body, "\"traceId\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"");
+            AssertContains(body, "\"spanId\": \"bbbbbbbbbbbbbbbb\"");
+            AssertContains(body, "\"sampled\": false");
+        }
+
+        private static void DefaultUnityContextCoversEverySignal()
+        {
+            var client = NewClient();
+            EnqueueAll(client);
+            client.Metric(
+                "evt_metric_default_context",
+                "2026-06-02T10:00:06Z",
+                MetricAttributes.Create("frame.duration", "histogram", 16.6, "ms", "delta"));
+            var body = client.PreviewJson();
+            AssertEqual(7, CountOccurrences(body, "\"context\""));
+            AssertContains(body, "\"name\": \"logbrew-unity\"");
+            AssertContains(body, "\"version\": \"0.2.0\"");
+            AssertContains(body, "\"service\"");
+            AssertContains(body, "\"name\": \"logbrew-unity-tests\"");
+            AssertContains(body, "\"framework\"");
+            AssertContains(body, "\"name\": \"unity\"");
+            AssertContains(body, "\"runtime\"");
+            AssertContains(body, "\"name\": \"dotnet\"");
+        }
+
+        private static void ActiveTraceCoversEverySignal()
+        {
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                includeAutomaticContext: false);
+            var trace = LogBrewTraceContext.CreateRoot();
+            using (LogBrewTrace.Activate(trace))
+            {
+                client.Release("evt_trace_release", "2026-08-02T08:15:30Z", ReleaseAttributes.Create("2.3.0"));
+                client.Environment("evt_trace_environment", "2026-08-02T08:15:30Z", EnvironmentAttributes.Create("production"));
+                client.Issue("evt_trace_issue", "2026-08-02T08:15:30Z", IssueAttributes.Create("Checkout failed", "error"));
+                client.Log("evt_trace_log", "2026-08-02T08:15:30Z", LogAttributes.Create("checkout failed", "error"));
+                client.Span("evt_trace_span", "2026-08-02T08:15:30Z", LogBrewTrace.SpanAttributes("checkout.submit"));
+                client.Metric(
+                    "evt_trace_metric",
+                    "2026-08-02T08:15:30Z",
+                    MetricAttributes.Create("checkout.duration", "histogram", 42, "ms", "delta"));
+                client.Action("evt_trace_action", "2026-08-02T08:15:30Z", ActionAttributes.Create("checkout.submit", "failure"));
+            }
+
+            var body = client.PreviewJson();
+            AssertEqual(7, CountOccurrences(body, "\"trace\": {"));
+            AssertContains(body, "\"traceId\": \"" + trace.TraceId + "\"");
+        }
+
+        private static void ContextScopesMergeWithTracePrecedence()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var baseContext = TelemetryContext.Create()
+                .WithSession("base_session")
+                .WithTag("journey", "checkout")
+                .Build();
+            var ambient = TelemetryContext.Create()
+                .WithSubject("opaque_player", "anonymous")
+                .WithTag("surface", "store")
+                .Build();
+            var eventOverride = TelemetryContext.Create()
+                .WithTag("journey", "payment")
+                .Build();
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                context: baseContext,
+                includeAutomaticContext: false);
+
+            using (LogBrewTelemetry.ActivateContext(ambient))
+            using (LogBrewTrace.Activate(trace))
+            {
+                client.Log(
+                    "evt_context_merge",
+                    "2026-08-02T08:15:31Z",
+                    LogAttributes.Create("checkout failed", "error").WithContext(eventOverride));
+            }
+
+            AssertTrue(LogBrewTelemetry.CurrentContext == null, "context scope should unwind");
+            var body = client.PreviewJson();
+            AssertContains(body, "\"id\": \"base_session\"");
+            AssertContains(body, "\"id\": \"opaque_player\"");
+            AssertContains(body, "\"surface\": \"store\"");
+            AssertContains(body, "\"journey\": \"payment\"");
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"spanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"traceSampled\": true");
+        }
+
+        private static void ContextValidationFailsClosed()
+        {
+            Expect("validation_error", () => TelemetryContext.Create().Build());
+            Expect("validation_error", () => TelemetryContext.Create().WithSession("same", "same").Build());
+            Expect("validation_error", () => TelemetryContext.Create().WithSubject("opaque", "email").Build());
+            Expect("validation_error", () => TelemetryContext.Create().WithTag("bad key", "value").Build());
+            Expect("validation_error", () => TelemetryContext.Create().WithTag("safe", "line\nvalue").Build());
+            var tooManyTags = TelemetryContext.Create();
+            for (var index = 0; index < 33; index++)
+            {
+                tooManyTags.WithTag("tag" + index.ToString(CultureInfo.InvariantCulture), "value");
+            }
+
+            Expect("validation_error", () => tooManyTags.Build());
+            Expect("validation_error", () => NewClient().Metric(
+                "evt_metric_temporality",
+                "2026-08-02T08:15:31Z",
+                MetricAttributes.Create("queue.depth", "gauge", 2, "items", "delta")));
+            Expect("validation_error", () => NewClient().Metric(
+                "evt_metric_nan",
+                "2026-08-02T08:15:31Z",
+                MetricAttributes.Create("queue.depth", "gauge", double.NaN, "items", "instant")));
+        }
+
+        private static void MetadataNumbersAreFiniteAndSerializable()
+        {
+            var client = LogBrewClient.Create(
+                apiKey: "LOGBREW_API_KEY",
+                gameName: "named-argument-client",
+                sdkVersion: "0.2.0",
+                includeAutomaticContext: false);
+            client.Log(
+                "evt_metadata_numbers",
+                "2026-08-02T08:15:31Z",
+                LogAttributes.Create("numeric metadata", "info").WithMetadata(new Dictionary<string, object?>
+                {
+                    ["byteValue"] = (byte)7,
+                    ["shortValue"] = (short)9
+                }));
+            var body = client.PreviewJson();
+            AssertContains(body, "\"byteValue\": 7");
+            AssertContains(body, "\"shortValue\": 9");
+            Expect("validation_error", () => client.Log(
+                "evt_metadata_nan",
+                "2026-08-02T08:15:32Z",
+                LogAttributes.Create("invalid metadata", "info").WithMetadata(
+                    new Dictionary<string, object?> { ["value"] = double.NaN })));
+        }
+
+        private static void ExceptionProjectionOmitsPrivateMessageAndPaths()
+        {
+            Exception captured;
+            try
+            {
+                ThrowSensitiveException();
+                throw new InvalidOperationException("expected exception");
+            }
+            catch (InvalidOperationException error) when (error.Message == "payment details must not be captured")
+            {
+                captured = error;
+            }
+
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                includeAutomaticContext: false);
+            LogBrewUnity.CaptureException(
+                client,
+                "evt_exception_projection",
+                "2026-08-02T08:15:31Z",
+                captured,
+                handled: false);
+            var body = client.PreviewJson();
+            AssertContains(body, "\"type\": \"System.InvalidOperationException\"");
+            AssertContains(body, "\"type\": \"unity.exception\"");
+            AssertContains(body, "\"handled\": false");
+            AssertContains(body, "\"stackFrames\"");
+            AssertContains(body, "\"function\": \"ThrowSensitiveException\"");
+            AssertDoesNotContain(body, "payment details must not be captured");
+            AssertDoesNotContain(body, "/" + "Users/");
+        }
+
+        private static void BreadcrumbBufferIsBoundedAndClearable()
+        {
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                includeAutomaticContext: false);
+            for (var index = 0; index < 65; index++)
+            {
+                client.AddBreadcrumb(IssueBreadcrumb.Create(
+                    "2026-08-02T08:15:30Z",
+                    "checkout.step" + index.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            client.Issue(
+                "evt_breadcrumb_buffer",
+                "2026-08-02T08:15:31Z",
+                IssueAttributes.Create("Checkout failed", "error"));
+            var body = client.PreviewJson();
+            AssertEqual(64, CountOccurrences(body, "\"category\""));
+            AssertContains(body, "\"breadcrumbsTruncated\": true");
+            AssertDoesNotContain(body, "checkout.step0\"");
+            AssertContains(body, "checkout.step64\"");
+
+            client.Flush(RecordingTransport.AlwaysAccept());
+            client.ClearBreadcrumbs();
+            client.Issue(
+                "evt_breadcrumb_cleared",
+                "2026-08-02T08:15:32Z",
+                IssueAttributes.Create("Checkout failed again", "error"));
+            AssertDoesNotContain(client.PreviewJson(), "\"breadcrumbs\"");
+        }
+
+        private static void UnityStackTraceParserEmitsTypedFrames()
+        {
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                includeAutomaticContext: false);
+            LogBrewUnity.CaptureException(
+                client,
+                "evt_unity_stack",
+                "2026-08-02T08:15:31Z",
+                "CheckoutFailure: checkout state missing",
+                "Checkout.Submit () (at /workspace/game/Assets/Scripts/Checkout.cs:42)\nUnityEngine.Debug:LogException(Exception)");
+            var body = client.PreviewJson();
+            AssertContains(body, "\"type\": \"CheckoutFailure\"");
+            AssertContains(body, "\"filename\": \"Checkout.cs\"");
+            AssertContains(body, "\"line\": 42");
+            AssertContains(body, "\"function\": \"Checkout.Submit\"");
+            AssertDoesNotContain(body, "/workspace/game");
+            AssertDoesNotContain(body, "UnityEngine.Debug:LogException");
+        }
+
+        private static void ThrowSensitiveException()
+        {
+            throw new InvalidOperationException("payment details must not be captured");
+        }
+
         private static IEnumerator EmptyCoroutine()
         {
             yield break;
@@ -899,6 +1280,19 @@ namespace LogBrew.Unity.Tests
             {
                 throw new InvalidOperationException("missing " + needle);
             }
+        }
+
+        private static int CountOccurrences(string haystack, string needle)
+        {
+            var count = 0;
+            var index = 0;
+            while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += needle.Length;
+            }
+
+            return count;
         }
 
         private static void AssertDoesNotContain(string haystack, string needle)

@@ -10,12 +10,14 @@ namespace LogBrew.Unity
     {
         private readonly IEnumerator routine;
         private readonly LogBrewTraceContext context;
+        private readonly TelemetryContext? telemetryContext;
         private bool disposed;
 
-        internal UnityTraceCoroutine(IEnumerator routine, LogBrewTraceContext context)
+        internal UnityTraceCoroutine(IEnumerator routine, LogBrewTraceContext context, TelemetryContext? telemetryContext)
         {
             this.routine = routine;
             this.context = context;
+            this.telemetryContext = telemetryContext;
         }
 
         public object? Current
@@ -33,6 +35,7 @@ namespace LogBrew.Unity
                 return false;
             }
 
+            using (ActivateTelemetryContext(telemetryContext))
             using (LogBrewTrace.Activate(context))
             {
                 return routine.MoveNext();
@@ -46,6 +49,7 @@ namespace LogBrew.Unity
                 return;
             }
 
+            using (ActivateTelemetryContext(telemetryContext))
             using (LogBrewTrace.Activate(context))
             {
                 routine.Reset();
@@ -61,10 +65,28 @@ namespace LogBrew.Unity
 
             if (routine is IDisposable disposable)
             {
-                disposable.Dispose();
+                using (ActivateTelemetryContext(telemetryContext))
+                using (LogBrewTrace.Activate(context))
+                {
+                    disposable.Dispose();
+                }
             }
 
             disposed = true;
+        }
+
+        internal static IDisposable ActivateTelemetryContext(TelemetryContext? context)
+        {
+            return context == null ? EmptyScope.Instance : LogBrewTelemetry.ActivateContext(context);
+        }
+
+        private sealed class EmptyScope : IDisposable
+        {
+            internal static readonly EmptyScope Instance = new EmptyScope();
+
+            public void Dispose()
+            {
+            }
         }
     }
 
@@ -76,6 +98,7 @@ namespace LogBrew.Unity
         private readonly Func<string> timestampFactory;
         private readonly Func<double> realtimeMilliseconds;
         private readonly LogBrewTraceContext context;
+        private readonly TelemetryContext? telemetryContext;
         private readonly string name;
         private readonly Dictionary<string, object?> metadata;
         private readonly double startedAtMs;
@@ -89,6 +112,7 @@ namespace LogBrew.Unity
             Func<string> timestampFactory,
             Func<double> realtimeMilliseconds,
             LogBrewTraceContext context,
+            TelemetryContext? telemetryContext,
             string name,
             IDictionary<string, object?> metadata)
         {
@@ -98,6 +122,7 @@ namespace LogBrew.Unity
             this.timestampFactory = timestampFactory;
             this.realtimeMilliseconds = realtimeMilliseconds;
             this.context = context;
+            this.telemetryContext = telemetryContext;
             this.name = name;
             this.metadata = new Dictionary<string, object?>(metadata, StringComparer.Ordinal);
             startedAtMs = ValidateCoroutineClock(realtimeMilliseconds());
@@ -121,6 +146,7 @@ namespace LogBrew.Unity
             bool hasNext;
             try
             {
+                using (UnityTraceCoroutine.ActivateTelemetryContext(telemetryContext))
                 using (LogBrewTrace.Activate(context))
                 {
                     hasNext = routine.MoveNext();
@@ -147,6 +173,7 @@ namespace LogBrew.Unity
                 return;
             }
 
+            using (UnityTraceCoroutine.ActivateTelemetryContext(telemetryContext))
             using (LogBrewTrace.Activate(context))
             {
                 routine.Reset();
@@ -162,7 +189,11 @@ namespace LogBrew.Unity
 
             if (routine is IDisposable disposable)
             {
-                disposable.Dispose();
+                using (UnityTraceCoroutine.ActivateTelemetryContext(telemetryContext))
+                using (LogBrewTrace.Activate(context))
+                {
+                    disposable.Dispose();
+                }
             }
 
             disposed = true;
@@ -188,15 +219,18 @@ namespace LogBrew.Unity
             }
 
             var durationMs = Math.Max(0, ValidateCoroutineClock(realtimeMilliseconds()) - startedAtMs);
-            client.Span(
-                idFactory(),
-                timestampFactory(),
-                LogBrewTrace.SpanAttributes(
-                    "unity.coroutine:" + name,
-                    status,
-                    durationMs,
-                    currentMetadata,
-                    context));
+            var attributes = LogBrewTrace.SpanAttributes(
+                "unity.coroutine:" + name,
+                status,
+                durationMs,
+                currentMetadata,
+                context);
+            if (telemetryContext != null)
+            {
+                attributes.WithContext(telemetryContext);
+            }
+
+            client.Span(idFactory(), timestampFactory(), attributes);
         }
 
         internal static double ValidateCoroutineClock(double value)
@@ -258,6 +292,9 @@ namespace LogBrew.Unity
                 timestampFactory,
                 realtimeMilliseconds,
                 LogBrewTraceContext.CreateChild(parentContext),
+                TelemetryContext.Merge(
+                    LogBrewTelemetry.CurrentContext,
+                    TelemetryContext.Merge(defaultContext?.ToTelemetryContext(), context?.ToTelemetryContext())),
                 normalizedName,
                 MetadataFor(context));
         }
@@ -289,7 +326,8 @@ namespace LogBrew.Unity
     {
         public static UnityTraceCoroutine TraceCoroutine(
             IEnumerator routine,
-            LogBrewTraceContext? context = null)
+            LogBrewTraceContext? context = null,
+            TelemetryContext? telemetryContext = null)
         {
             if (routine == null)
             {
@@ -297,7 +335,10 @@ namespace LogBrew.Unity
             }
 
             var capturedContext = context ?? LogBrewTrace.Current ?? LogBrewTraceContext.CreateRoot();
-            return new UnityTraceCoroutine(routine, capturedContext);
+            return new UnityTraceCoroutine(
+                routine,
+                capturedContext,
+                TelemetryContext.Merge(LogBrewTelemetry.CurrentContext, telemetryContext));
         }
     }
 }

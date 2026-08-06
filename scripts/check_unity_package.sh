@@ -52,7 +52,7 @@ from pathlib import Path
 manifest = json.loads(Path(sys.argv[1]).read_text())
 expected = {
     "name": "co.logbrew.unity",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "displayName": "LogBrew Unity SDK",
     "unity": "2021.3",
     "license": "MIT",
@@ -71,9 +71,16 @@ if samples != {"Samples~/ReadmeExample", "Samples~/RealUserSmoke"}:
 PY
 
 dotnet run --project "$package_dir/tests/LogBrew.Unity.Tests/LogBrew.Unity.Tests.csproj" --configuration Release
+dotnet build "$package_dir/tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj" --configuration Release --nologo
 
-package_tgz="$tmp_dir/co.logbrew.unity-0.1.1.tgz"
-(cd "$package_dir" && tar -czf "$package_tgz" package.json README.md Runtime Samples~ examples)
+package_tgz="$tmp_dir/co.logbrew.unity-0.2.0.tgz"
+(cd "$package_dir" && tar -czf "$package_tgz" \
+  package.json \
+  README.md \
+  Runtime \
+  Samples~ \
+  examples \
+  tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj)
 tar -tzf "$package_tgz" > "$tmp_dir/package-contents.txt"
 grep -qx 'package.json' "$tmp_dir/package-contents.txt"
 grep -qx 'README.md' "$tmp_dir/package-contents.txt"
@@ -86,6 +93,13 @@ grep -qx 'Runtime/UnityLifecycleTracker.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/UnityRequestTrace.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/JsonSupport.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/UnityHelpers.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'Runtime/TelemetryContext.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'Runtime/TelemetryResource.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'Runtime/UnityRuntimeContext.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'Runtime/IssueDiagnostics.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'Runtime/MetricAttributes.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'Runtime/SpanEvidence.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'tests/LogBrew.Unity.Compatibility/LogBrew.Unity.Compatibility.csproj' "$tmp_dir/package-contents.txt"
 grep -qx 'Samples~/ReadmeExample/ReadmeExample.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Samples~/RealUserSmoke/RealUserSmoke.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/package-contents.txt"
@@ -107,7 +121,7 @@ with tarfile.open(package_tgz, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
 if manifest["name"] != "co.logbrew.unity":
     raise SystemExit("wrong package name")
-for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "HttpTransport", "LogBrewTrace", "UnityLifecycleTracker", "UnityRequestTracker", "UnityRequestTimings", "UnityCoroutineTracker", "TraceCoroutine", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.co/v1/events", "sample source"):
+for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "TelemetryContext", "MetricAttributes", "IssueBreadcrumb", "IssueStackFrame", "SpanEventSummary", "SpanLinkSummary", "HttpTransport", "LogBrewTrace", "UnityLifecycleTracker", "UnityRequestTracker", "UnityRequestTimings", "UnityCoroutineTracker", "TraceCoroutine", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.co/v1/events", "sample source"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 PY
@@ -159,14 +173,16 @@ EOF
 
 run_sample ReadmeSample false "$tmp_dir/readme-sample.stdout.json" "$tmp_dir/readme-sample.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-sample.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-sample.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-sample.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-sample.stderr.json"
 
 run_sample RealUserSample true "$tmp_dir/real-user-sample.stdout.json" "$tmp_dir/real-user-sample.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-sample.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-sample.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-sample.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-sample.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/real-user-sample.stderr.json"
+grep -q '"richContextEvents":3' "$tmp_dir/real-user-sample.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/real-user-sample.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/real-user-sample.stderr.json"
 
 make --no-print-directory -C "$package_dir/examples" run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"

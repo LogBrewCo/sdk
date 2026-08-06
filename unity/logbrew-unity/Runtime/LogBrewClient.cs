@@ -13,17 +13,25 @@ namespace LogBrew.Unity
         internal static readonly string[] LogLevels = { "debug", "info", "warning", "error" };
         internal static readonly string[] SpanStatuses = { "ok", "error" };
         internal static readonly string[] ActionStatuses = { "queued", "running", "success", "failure" };
+        internal static readonly string[] MetricKinds = { "counter", "gauge", "histogram" };
+        internal static readonly string[] InstantTemporality = { "instant" };
+        internal static readonly string[] DeltaCumulativeTemporalities = { "delta", "cumulative" };
 
         private readonly string apiKey;
         private readonly OrderedJsonObject sdk;
         private readonly int maxRetries;
+        private readonly TelemetryContext? context;
+        private readonly object stateLock = new object();
         private readonly List<Event> events;
+        private readonly List<IssueBreadcrumb> breadcrumbs = new List<IssueBreadcrumb>();
+        private bool breadcrumbsTruncated;
         private bool closed;
 
-        private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries)
+        private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries, TelemetryContext? context)
         {
             this.apiKey = apiKey;
             this.maxRetries = maxRetries;
+            this.context = context;
             events = new List<Event>();
             sdk = new OrderedJsonObject()
                 .Add("name", sdkName)
@@ -31,7 +39,13 @@ namespace LogBrew.Unity
                 .Add("version", sdkVersion);
         }
 
-        public static LogBrewClient Create(string apiKey, string gameName, string sdkVersion, int maxRetries = 2)
+        public static LogBrewClient Create(
+            string apiKey,
+            string gameName,
+            string sdkVersion,
+            int maxRetries = 2,
+            TelemetryContext? context = null,
+            bool includeAutomaticContext = true)
         {
             Validation.RequireNonEmpty("api_key", apiKey);
             Validation.RequireNonEmpty("game_name", gameName);
@@ -41,19 +55,26 @@ namespace LogBrew.Unity
                 throw new SdkException("validation_error", "max_retries must be non-negative");
             }
 
-            return new LogBrewClient(apiKey, gameName, sdkVersion, maxRetries);
+            var baseContext = TelemetryContext.Merge(
+                includeAutomaticContext ? TelemetryContext.RuntimeDefaults() : null,
+                context);
+            return new LogBrewClient(apiKey, gameName, sdkVersion, maxRetries, baseContext);
         }
 
         public int PendingEvents()
         {
-            return events.Count;
+            lock (stateLock)
+            {
+                return events.Count;
+            }
         }
 
         public string PreviewJson()
         {
-            return JsonWriter.Write(new OrderedJsonObject()
-                .Add("sdk", sdk)
-                .Add("events", events.Select(item => item.ToJsonObject()).ToList()));
+            lock (stateLock)
+            {
+                return PreviewJsonLocked();
+            }
         }
 
         public void Release(string id, string timestamp, ReleaseAttributes attributes)
@@ -63,7 +84,8 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("release", id, timestamp, attributes.ToJsonObject());
+            var resolvedContext = ResolvedContext(attributes.Context);
+            PushEvent("release", id, timestamp, AttributesWithContext(attributes.ToJsonObject(), resolvedContext));
         }
 
         public void Environment(string id, string timestamp, EnvironmentAttributes attributes)
@@ -73,7 +95,8 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("environment", id, timestamp, attributes.ToJsonObject());
+            var resolvedContext = ResolvedContext(attributes.Context);
+            PushEvent("environment", id, timestamp, AttributesWithContext(attributes.ToJsonObject(), resolvedContext));
         }
 
         public void Issue(string id, string timestamp, IssueAttributes attributes)
@@ -83,7 +106,20 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("issue", id, timestamp, LogBrewTrace.AddActiveTraceMetadata(attributes.ToJsonObject()));
+            List<IssueBreadcrumb> breadcrumbSnapshot;
+            bool snapshotTruncated;
+            lock (stateLock)
+            {
+                breadcrumbSnapshot = new List<IssueBreadcrumb>(breadcrumbs);
+                snapshotTruncated = breadcrumbsTruncated;
+            }
+
+            var resolvedContext = ResolvedContext(attributes.Context);
+            PushEvent(
+                "issue",
+                id,
+                timestamp,
+                AttributesWithContextAndTrace(attributes.ToJsonObject(breadcrumbSnapshot.AsReadOnly(), snapshotTruncated), resolvedContext));
         }
 
         public void Log(string id, string timestamp, LogAttributes attributes)
@@ -93,7 +129,8 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("log", id, timestamp, LogBrewTrace.AddActiveTraceMetadata(attributes.ToJsonObject()));
+            var resolvedContext = ResolvedContext(attributes.Context);
+            PushEvent("log", id, timestamp, AttributesWithContextAndTrace(attributes.ToJsonObject(), resolvedContext));
         }
 
         public void Span(string id, string timestamp, SpanAttributes attributes)
@@ -103,7 +140,19 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("span", id, timestamp, attributes.ToJsonObject());
+            var resolvedContext = ResolvedSpanContext(attributes);
+            PushEvent("span", id, timestamp, AttributesWithContext(attributes.ToJsonObject(), resolvedContext));
+        }
+
+        public void Metric(string id, string timestamp, MetricAttributes attributes)
+        {
+            if (attributes == null)
+            {
+                throw new ArgumentNullException(nameof(attributes));
+            }
+
+            var resolvedContext = ResolvedContext(attributes.Context);
+            PushEvent("metric", id, timestamp, AttributesWithContextAndTrace(attributes.ToJsonObject(), resolvedContext));
         }
 
         public void Action(string id, string timestamp, ActionAttributes attributes)
@@ -113,7 +162,39 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("action", id, timestamp, LogBrewTrace.AddActiveTraceMetadata(attributes.ToJsonObject()));
+            var resolvedContext = ResolvedContext(attributes.Context);
+            PushEvent("action", id, timestamp, AttributesWithContextAndTrace(attributes.ToJsonObject(), resolvedContext));
+        }
+
+        public void AddBreadcrumb(IssueBreadcrumb breadcrumb)
+        {
+            if (breadcrumb == null)
+            {
+                throw new ArgumentNullException(nameof(breadcrumb));
+            }
+
+            breadcrumb.ToJsonObject();
+            lock (stateLock)
+            {
+                RequireOpen();
+                if (breadcrumbs.Count == IssueDiagnostics.MaxBreadcrumbs)
+                {
+                    breadcrumbs.RemoveAt(0);
+                    breadcrumbsTruncated = true;
+                }
+
+                breadcrumbs.Add(breadcrumb);
+            }
+        }
+
+        public void ClearBreadcrumbs()
+        {
+            lock (stateLock)
+            {
+                RequireOpen();
+                breadcrumbs.Clear();
+                breadcrumbsTruncated = false;
+            }
         }
 
         public TransportResponse Flush(ITransport transport)
@@ -123,12 +204,11 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(transport));
             }
 
-            if (closed)
+            lock (stateLock)
             {
-                throw new SdkException("shutdown_error", "client is already shut down");
+                RequireOpen();
+                return FlushInternal(transport);
             }
-
-            return FlushInternal(transport);
         }
 
         public TransportResponse Shutdown(ITransport transport)
@@ -138,26 +218,94 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(transport));
             }
 
-            if (closed)
+            lock (stateLock)
             {
-                throw new SdkException("shutdown_error", "client is already shut down");
+                RequireOpen();
+                var response = FlushInternal(transport);
+                closed = true;
+                return response;
             }
-
-            var response = FlushInternal(transport);
-            closed = true;
-            return response;
         }
 
         private void PushEvent(string type, string id, string timestamp, OrderedJsonObject attributes)
+        {
+            Validation.RequireNonEmpty("event id", id);
+            Validation.RequireTimestamp(timestamp);
+            lock (stateLock)
+            {
+                RequireOpen();
+                events.Add(new Event(type, timestamp, id, attributes));
+            }
+        }
+
+        private string PreviewJsonLocked()
+        {
+            return JsonWriter.Write(new OrderedJsonObject()
+                .Add("sdk", sdk)
+                .Add("events", events.Select(item => item.ToJsonObject()).ToList()));
+        }
+
+        private TelemetryContext? ResolvedContext(TelemetryContext? eventContext)
+        {
+            var resolved = TelemetryContext.Merge(context, LogBrewTelemetry.CurrentContext);
+            var activeTrace = LogBrewTrace.Current;
+            if (activeTrace != null)
+            {
+                resolved = TelemetryContext.WithTrace(resolved, activeTrace);
+            }
+
+            return TelemetryContext.Merge(resolved, eventContext);
+        }
+
+        private TelemetryContext? ResolvedSpanContext(SpanAttributes attributes)
+        {
+            var resolved = TelemetryContext.Merge(context?.WithoutTrace(), LogBrewTelemetry.CurrentContext?.WithoutTrace());
+            resolved = TelemetryContext.Merge(resolved, attributes.Context?.WithoutTrace());
+            try
+            {
+                var activeTrace = LogBrewTrace.Current;
+                var sampled = activeTrace != null
+                    && string.Equals(activeTrace.TraceId, attributes.TraceId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(activeTrace.SpanId, attributes.SpanId, StringComparison.OrdinalIgnoreCase)
+                    ? activeTrace.Sampled
+                    : (bool?)null;
+                var trace = TelemetryContext.Create()
+                    .WithTrace(attributes.TraceId, attributes.SpanId, attributes.ParentSpanId, sampled)
+                    .Build();
+                return TelemetryContext.Merge(resolved, trace);
+            }
+            catch (SdkException)
+            {
+                return resolved;
+            }
+        }
+
+        private static OrderedJsonObject AttributesWithContext(OrderedJsonObject attributes, TelemetryContext? resolvedContext)
+        {
+            var result = new OrderedJsonObject();
+            foreach (var item in attributes.Values)
+            {
+                if (!string.Equals(item.Key, "context", StringComparison.Ordinal))
+                {
+                    result.Add(item.Key, item.Value);
+                }
+            }
+
+            result.AddIfNotNull("context", resolvedContext?.ToJsonObject());
+            return result;
+        }
+
+        private static OrderedJsonObject AttributesWithContextAndTrace(OrderedJsonObject attributes, TelemetryContext? resolvedContext)
+        {
+            return AttributesWithContext(LogBrewTrace.AddContextTraceMetadata(attributes, resolvedContext), resolvedContext);
+        }
+
+        private void RequireOpen()
         {
             if (closed)
             {
                 throw new SdkException("shutdown_error", "client is already shut down");
             }
-
-            Validation.RequireNonEmpty("event id", id);
-            Validation.RequireTimestamp(timestamp);
-            events.Add(new Event(type, timestamp, id, attributes));
         }
 
         private TransportResponse FlushInternal(ITransport transport)
@@ -167,7 +315,7 @@ namespace LogBrew.Unity
                 return new TransportResponse(204, 0);
             }
 
-            var body = PreviewJson();
+            var body = PreviewJsonLocked();
             var maxAttempts = maxRetries + 1;
             for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {

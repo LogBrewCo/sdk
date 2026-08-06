@@ -7,11 +7,16 @@ namespace LogBrew.Unity
 {
     public sealed class UnityRequestSpan
     {
-        internal UnityRequestSpan(LogBrewTraceContext traceContext, string method, string routeTemplate)
+        internal UnityRequestSpan(
+            LogBrewTraceContext traceContext,
+            string method,
+            string routeTemplate,
+            TelemetryContext? telemetryContext)
         {
             TraceContext = traceContext;
             Method = method;
             RouteTemplate = routeTemplate;
+            TelemetryContext = telemetryContext;
         }
 
         public LogBrewTraceContext TraceContext { get; }
@@ -19,6 +24,8 @@ namespace LogBrew.Unity
         public string Method { get; }
 
         public string RouteTemplate { get; }
+
+        internal TelemetryContext? TelemetryContext { get; }
 
         public IReadOnlyDictionary<string, string> Headers
         {
@@ -182,7 +189,8 @@ namespace LogBrew.Unity
                 statusCode,
                 elapsedMs,
                 errorType,
-                MetadataFor(context, timings));
+                MetadataFor(context, timings),
+                ContextFor(context));
         }
 
         private Dictionary<string, object?> MetadataFor(UnityContext? currentContext, UnityRequestTimings? timings)
@@ -198,6 +206,11 @@ namespace LogBrew.Unity
 
             LogBrewUnity.AddRequestTimings(metadata, timings);
             return metadata;
+        }
+
+        private TelemetryContext? ContextFor(UnityContext? currentContext)
+        {
+            return TelemetryContext.Merge(context?.ToTelemetryContext(), currentContext?.ToTelemetryContext());
         }
 
         private static double ValidateRequestClock(double value)
@@ -234,7 +247,11 @@ namespace LogBrew.Unity
             var requestContext = parentContext == null
                 ? LogBrewTraceContext.CreateRoot()
                 : LogBrewTraceContext.CreateChild(parentContext);
-            return new UnityRequestSpan(requestContext, normalizedMethod, normalizedRouteTemplate);
+            return new UnityRequestSpan(
+                requestContext,
+                normalizedMethod,
+                normalizedRouteTemplate,
+                LogBrewTelemetry.CurrentContext);
         }
 
         public static void CaptureRequestSpan(
@@ -266,7 +283,8 @@ namespace LogBrew.Unity
                 statusCode,
                 durationMs,
                 errorType,
-                MetadataWithTimings(context, timings));
+                MetadataWithTimings(context, timings),
+                context?.ToTelemetryContext());
         }
 
         internal static void CaptureRequestSpanWithMetadata(
@@ -277,7 +295,8 @@ namespace LogBrew.Unity
             int? statusCode,
             double? durationMs,
             string? errorType,
-            IDictionary<string, object?> metadata)
+            IDictionary<string, object?> metadata,
+            TelemetryContext? context = null)
         {
             ValidateStatusCode(statusCode);
             ValidateRequestDuration(durationMs);
@@ -295,15 +314,19 @@ namespace LogBrew.Unity
                 metadata["errorType"] = normalizedErrorType;
             }
 
-            client.Span(
-                id,
-                timestamp,
-                LogBrewTrace.SpanAttributes(
-                    requestSpan.Method + " " + requestSpan.RouteTemplate,
-                    RequestStatus(statusCode, normalizedErrorType),
-                    durationMs,
-                    metadata,
-                    requestSpan.TraceContext));
+            var attributes = LogBrewTrace.SpanAttributes(
+                requestSpan.Method + " " + requestSpan.RouteTemplate,
+                RequestStatus(statusCode, normalizedErrorType),
+                durationMs,
+                metadata,
+                requestSpan.TraceContext);
+            var resolvedContext = TelemetryContext.Merge(requestSpan.TelemetryContext, context);
+            if (resolvedContext != null)
+            {
+                attributes.WithContext(resolvedContext);
+            }
+
+            client.Span(id, timestamp, attributes);
         }
 
         private static Dictionary<string, object?> MetadataWithTimings(UnityContext? context, UnityRequestTimings? timings)
