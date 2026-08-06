@@ -713,14 +713,23 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     require_path(root, "cpp/logbrew-cpp/examples/readme_example.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/examples/real_user_smoke.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/tests/test_logbrew.cpp", failures)
+    require_path(root, "cpp/logbrew-cpp/tests/test_rich_context.cpp", failures)
     if not header_path.exists() or not source_path.exists():
         return
     header = header_path.read_text(encoding="utf-8")
     readme = (root / "cpp/logbrew-cpp/README.md").read_text(encoding="utf-8")
     location = "cpp/logbrew-cpp/include/logbrew.hpp"
     for needle in (
-        'inline constexpr const char *version = "0.1.0"',
+        'inline constexpr const char *version = "0.2.0"',
         "class LogBrewClient",
+        "TelemetryContext",
+        "TelemetryScope",
+        "EventOptions",
+        "IssueDetails",
+        "IssueBreadcrumb",
+        "SpanEvidence",
+        "SpanLink",
+        "issue_frame_from_location",
         "MetricAttributes",
         "metric(",
         "class HttpTransport",
@@ -737,6 +746,9 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
         "client.metric",
         "low-cardinality",
         "Sending To LogBrew",
+        "Rich Investigation Context",
+        "Issue Evidence",
+        "Span Evidence",
         "HttpTransport",
         "client.flush",
         "copy into your own native application",

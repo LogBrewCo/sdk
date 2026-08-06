@@ -10,6 +10,8 @@ test:
 	@mkdir -p "$(BUILD_DIR)"
 	$(CXX) $(CXXFLAGS) src/logbrew.cpp tests/test_logbrew.cpp -o "$(BUILD_DIR)/test_logbrew"
 	"$(BUILD_DIR)/test_logbrew"
+	$(CXX) $(CXXFLAGS) src/logbrew.cpp tests/test_rich_context.cpp -o "$(BUILD_DIR)/test_rich_context"
+	"$(BUILD_DIR)/test_rich_context"
 
 examples:
 	$(MAKE) -C examples CXX="$(CXX)" CXXFLAGS="-std=c++17 -Wall -Wextra -Wpedantic -Werror -I../include" SDK_SRC="../src/logbrew.cpp" run-readme-example >/dev/null
