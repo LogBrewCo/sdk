@@ -105,7 +105,7 @@ def read_package_metadata(
         ) from error
     except (OSError, TimeoutError, urllib.error.URLError) as error:
         raise PublicationPlanError(
-            f"npm registry lookup failed for {package_name}: {error}"
+            f"npm registry lookup failed for {package_name}"
         ) from error
 
     if len(raw) > MAX_METADATA_BYTES:
