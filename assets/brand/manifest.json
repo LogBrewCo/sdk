@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "canonicalSource": "assets/brand/logbrew-logo-espresso-bg-1600.svg",
+  "canonicalGeometrySha256": "2be61a3c1553e6462f2340b8bbe980395dd7299e375e1b24d8744681d93efcb4",
+  "assets": [
+    {
+      "path": "assets/brand/logbrew-logo-espresso-bg-1600.svg",
+      "sha256": "e69a094cd7ba393648d210551439346ceee664d2347a56967182572dab6aab62",
+      "kind": "svg",
+      "width": 1600,
+      "height": 1600,
+      "presentation": "espresso_app_icon",
+      "generation": "canonical_source"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-espresso-bg-512.svg",
+      "sha256": "e3ed29b2585916ec460439543ed3ad2b30d4dd06a16348702f4d5537fed1f962",
+      "kind": "svg",
+      "width": 512,
+      "height": 512,
+      "presentation": "espresso_app_icon",
+      "generation": "svg_derivative"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-transparent-1600.svg",
+      "sha256": "92181328c881b18c746d33f3a2466a22e1892d826823ff8e493ffa9dbd5a9f09",
+      "kind": "svg",
+      "width": 1600,
+      "height": 1600,
+      "presentation": "transparent_inline",
+      "generation": "svg_derivative"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-transparent-512.svg",
+      "sha256": "45df98d8a03bb02a4566eacb7f5c0359e0b9067e8239be3e36f00d8e79df9581",
+      "kind": "svg",
+      "width": 512,
+      "height": 512,
+      "presentation": "transparent_inline",
+      "generation": "svg_derivative"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-espresso-bg-1600.png",
+      "sha256": "81e7993181611eae43338bef5df1f548ac1a79d926947fcee8679f6a4c1e489d",
+      "kind": "png_rgb",
+      "width": 1600,
+      "height": 1600,
+      "presentation": "espresso_app_icon",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-espresso-bg-512.png",
+      "sha256": "61819be053c9b40d7e0ffd1387ab01413712ad6fd20045d6afde3c7f8666d5e0",
+      "kind": "png_rgb",
+      "width": 512,
+      "height": 512,
+      "presentation": "espresso_app_icon",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-espresso-bg-128.png",
+      "sha256": "3bbde3e8e35c9ae79f448ef7a1488078307eeebac60a46594a2289880171bcb5",
+      "kind": "png_rgb",
+      "width": 128,
+      "height": 128,
+      "presentation": "espresso_app_icon",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-transparent-1600.png",
+      "sha256": "4e75634906834ff1f94e9b8a83cfe5fa2e689612954c34ad99b1c4f382ade410",
+      "kind": "png_rgba",
+      "width": 1600,
+      "height": 1600,
+      "presentation": "transparent_inline",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-transparent-512.png",
+      "sha256": "a98dd05599862a0ba52c065c83fc60d386d04fa8b1efe46d11b0b6d4b5c4c8bc",
+      "kind": "png_rgba",
+      "width": 512,
+      "height": 512,
+      "presentation": "transparent_inline",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/logbrew-logo-transparent-128.png",
+      "sha256": "5d3ff62b95197dd030436872bdb388e7f9c81af4b3095041e36a2e5d0250e0e6",
+      "kind": "png_rgba",
+      "width": 128,
+      "height": 128,
+      "presentation": "transparent_inline",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/app-store-icon-1024.png",
+      "sha256": "5be612050e458a0b64df1bd83c7275b9ee57915da8b8d36c1dfa15b9d65e6717",
+      "kind": "png_rgb",
+      "width": 1024,
+      "height": 1024,
+      "presentation": "espresso_app_icon",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/google-play-icon-512.png",
+      "sha256": "61819be053c9b40d7e0ffd1387ab01413712ad6fd20045d6afde3c7f8666d5e0",
+      "kind": "png_rgb",
+      "width": 512,
+      "height": 512,
+      "presentation": "espresso_app_icon",
+      "generation": "rsvg"
+    },
+    {
+      "path": "assets/brand/github-social-preview.png",
+      "sha256": "6b71e19bfc56ad276fb3a1e1b93a9716d3715e5e91bbf02ddca7429986047dbc",
+      "kind": "png_rgb",
+      "width": 1280,
+      "height": 640,
+      "presentation": "sdk_social_card",
+      "generation": "guarded_composition"
+    }
+  ],
+  "exactCopies": [
+    [
+      "assets/brand/google-play-icon-512.png",
+      "assets/brand/logbrew-logo-espresso-bg-512.png"
+    ]
+  ],
+  "legacySha256": [
+    "b09041fd352d054cc6b659c06069305cfd78bf0ba1e50fe3b8f0ce8acd03ccfc",
+    "6f1f41a5431422e54357f3fbe70c66d0af9ba7d86ddb62048a4d14b257b267ed",
+    "f431cdd5b03da722e53961a70a5bf546124ccfff4388fb930be5de410efdb3cd",
+    "b9b5bde3371315a216127429f03911c52ff057719f30494680a32b0f2bc562cc",
+    "0a8d724ccd6c920118f8bb786d88da3dbe20bf9484f0bea3182f78eeaf85c858",
+    "c3ad04be03cd0dffef8bfcdfd76d2cedb25ef91eaef8c81c01eb4a880ce99c07",
+    "fd5e52cf185fb324846f2c0a0f47032c7a2bc712d0fb8d5f6066959dce94f5f0",
+    "8c61192a53dd7a7852e2678e5330fdee05999387a885cc8172c10666bb3dc91d",
+    "ef2cdb5d4791fbef13fc2e4d71533a15bab262eea5886484f4f9969bc8b9dd34",
+    "76765bf8535f23ca75ee2b320db7bc7173295ce7b52f00072453932b48e98971",
+    "83c1891deb02049b1d03e07a31df1942882e3bbca68789533d4861665936d9b9",
+    "38a185a0e24f89e8341f9b8a183bec6a2ec80afe92b13854a2dce30ce03c3da9",
+    "bef30ad5fb6bbd4005c6c02247b158c55e624332048e251c012abce658106c68",
+    "d04441de755c235d23390292bc3ed51438051f2824afbe0fd5e4a1e1569afb3b",
+    "3d30bb47262a233883260140ee4ef3b1e0b4449b5689f442a87f3b7c8e6943a1",
+    "9ab4634f1c07736b69763219aa5923a7b3a3e583ddf9b22f49a70e795d801a2d"
+  ]
+}
