@@ -2162,6 +2162,7 @@ test("metric helper validates explicit metric attributes", () => {
   const client = sampleClient();
   client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
     name: "queue.depth",
+    description: "Number of items waiting in the checkout queue.",
     kind: "gauge",
     value: -3,
     unit: "{item}",
@@ -2176,6 +2177,7 @@ test("metric helper validates explicit metric attributes", () => {
     timestamp: "2026-06-02T10:00:06Z",
     attributes: {
       name: "queue.depth",
+      description: "Number of items waiting in the checkout queue.",
       kind: "gauge",
       value: -3,
       unit: "{item}",
@@ -2217,6 +2219,19 @@ test("metric helper rejects unsafe values", () => {
     }),
     /metric temporality for gauge must be one of: instant/
   );
+  for (const description of [null, "", "   ", "M".repeat(1025), "request\u0085count", "request\u2028count"]) {
+    assert.throws(
+      () => client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+        name: "checkout.queue_depth",
+        description,
+        kind: "gauge",
+        value: 3,
+        unit: "{item}",
+        temporality: "instant"
+      }),
+      /metric description must be a non-blank string of at most 1024 non-control characters/
+    );
+  }
 });
 
 test("unauthenticated response surfaces clean error", async () => {

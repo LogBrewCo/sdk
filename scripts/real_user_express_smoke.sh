@@ -339,6 +339,9 @@ if (autoPayload.events[1].type !== "metric" || autoPayload.events[1].id !== "evt
 if (autoPayload.events[1].attributes.name !== "http.server.duration") {
   throw new Error(`unexpected request metric name: ${autoTransport.lastBody()}`);
 }
+if (autoPayload.events[1].attributes.description !== "Duration of one completed server request.") {
+  throw new Error(`missing request metric description: ${autoTransport.lastBody()}`);
+}
 if (autoPayload.events[1].attributes.kind !== "histogram" || autoPayload.events[1].attributes.unit !== "ms") {
   throw new Error(`unexpected request metric shape: ${autoTransport.lastBody()}`);
 }

@@ -482,6 +482,9 @@ if (metricEvent.type !== "metric" || metricEvent.id !== "evt_next_metric_001") {
 if (metricEvent.attributes.name !== "http.server.duration" || metricEvent.attributes.kind !== "histogram") {
   throw new Error(`unexpected metric shape: ${metricTransport.lastBody()}`);
 }
+if (metricEvent.attributes.description !== "Duration of one completed server request.") {
+  throw new Error(`missing metric description: ${metricTransport.lastBody()}`);
+}
 if (metricEvent.attributes.value !== 23 || metricEvent.attributes.unit !== "ms") {
   throw new Error(`unexpected metric value: ${metricTransport.lastBody()}`);
 }

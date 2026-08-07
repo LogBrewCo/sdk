@@ -623,6 +623,8 @@ export type SupportTicketDraft = {
 /** Public metric event attributes. Use low-cardinality metadata only. */
 export type MetricAttributes = {
   name: string;
+  /** Optional stable, single-line meaning; 1 to 1,024 Unicode characters. */
+  description?: string;
   kind: "counter" | "histogram";
   value: number;
   unit: string;
@@ -631,6 +633,8 @@ export type MetricAttributes = {
   context?: TelemetryContext;
 } | {
   name: string;
+  /** Optional stable, single-line meaning; 1 to 1,024 Unicode characters. */
+  description?: string;
   kind: "gauge";
   value: number;
   unit: string;

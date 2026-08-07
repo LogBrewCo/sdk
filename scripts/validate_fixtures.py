@@ -51,7 +51,7 @@ OPTIONAL_ATTRIBUTES = {
     "log": {"logger", "metadata", "context"},
     "span": {"parentSpanId", "durationMs", "metadata", "events", "links", "context"},
     "action": {"metadata", "context"},
-    "metric": {"metadata", "context"},
+    "metric": {"description", "metadata", "context"},
 }
 REQUIRED_STRING_ATTRIBUTES = {
     event_type: required_attributes - {"value"}
@@ -487,6 +487,23 @@ def _validate_optional_attributes(index: int, event_type: str, attributes: dict[
 
 
 def _validate_metric_attributes(index: int, attributes: dict[str, Any]) -> None:
+    description = attributes.get("description")
+    if "description" in attributes and (
+        not isinstance(description, str)
+        or not description.strip()
+        or len(description) > 1024
+        or any(
+            ord(character) <= 31
+            or 127 <= ord(character) <= 159
+            or ord(character) in {0x2028, 0x2029}
+            for character in description
+        )
+    ):
+        raise ValidationError(
+            f"event {index} attribute description must be a non-blank string of at most "
+            "1024 non-control characters"
+        )
+
     value = attributes["value"]
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValidationError(f"event {index} attribute value must be a finite number")

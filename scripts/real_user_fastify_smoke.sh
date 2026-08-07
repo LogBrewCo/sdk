@@ -386,6 +386,9 @@ if (metricPayload.events.length !== 1 || metricEvent.type !== "metric" || metric
 if (metricEvent.attributes.name !== "http.server.duration") {
   throw new Error(`unexpected metric name: ${metricOnlyTransport.lastBody()}`);
 }
+if (metricEvent.attributes.description !== "Duration of one completed server request.") {
+  throw new Error(`missing metric description: ${metricOnlyTransport.lastBody()}`);
+}
 if (metricEvent.attributes.kind !== "histogram" || metricEvent.attributes.unit !== "ms" || metricEvent.attributes.temporality !== "delta") {
   throw new Error(`unexpected metric shape: ${metricOnlyTransport.lastBody()}`);
 }
