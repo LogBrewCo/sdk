@@ -146,6 +146,12 @@ class NpmPublicationPlanTests(unittest.TestCase):
             workflow,
         )
         self.assertNotIn("const plan = require(process.argv[1]);", workflow)
+        self.assertNotIn("mapfile -t existing_npm_versions < <(", workflow)
+        self.assertIn(
+            'mapfile -t missing_npm_packages < "$missing_npm_packages_file"',
+            workflow,
+        )
+        self.assertIn("npm publication preflight returned an invalid receipt", workflow)
         self.assertLess(workflow.index(planner), workflow.index(collision))
         self.assertLess(workflow.index(collision), workflow.index(publish))
 
