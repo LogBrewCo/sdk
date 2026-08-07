@@ -141,6 +141,11 @@ class NpmPublicationPlanTests(unittest.TestCase):
         publish = 'echo "Publishing ${package_name} from ${package_dir}"'
         self.assertIn(planner, workflow)
         self.assertIn(collision, workflow)
+        self.assertIn(
+            'JSON.parse(fs.readFileSync(process.argv[1], "utf8"))',
+            workflow,
+        )
+        self.assertNotIn("const plan = require(process.argv[1]);", workflow)
         self.assertLess(workflow.index(planner), workflow.index(collision))
         self.assertLess(workflow.index(collision), workflow.index(publish))
 
