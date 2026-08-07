@@ -181,7 +181,7 @@ app.useGlobalInterceptors(new LogBrewInterceptor({
 }));
 ```
 
-This emits an explicit `http.server.duration` histogram with primitive metadata for `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Route templates are preferred when Nest exposes them through the underlying HTTP adapter, and query strings or hashes are omitted by default. Use `captureRequests: false` with `captureRequestMetrics: true` when you only want request metrics.
+This emits an explicit `http.server.duration` histogram with the stable description `Duration of one completed server request.` and primitive metadata for `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Route templates are preferred when Nest exposes them through the underlying HTTP adapter, and query strings or hashes are omitted by default. Use `captureRequests: false` with `captureRequestMetrics: true` when you only want request metrics.
 
 ## NestJS Logger
 

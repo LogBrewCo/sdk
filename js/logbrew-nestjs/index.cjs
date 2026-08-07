@@ -290,6 +290,7 @@ function createRequestMetricEvent(request, response, {
     timestamp: now(),
     attributes: {
       name: metricName,
+      description: "Duration of one completed server request.",
       kind: "histogram",
       value: Math.max(0, Number(durationMs)),
       unit: "ms",

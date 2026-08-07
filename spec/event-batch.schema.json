@@ -532,6 +532,12 @@
               "required": ["name", "kind", "value", "unit", "temporality"],
               "properties": {
                 "name": { "type": "string", "minLength": 1 },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028-\\u2029]+$"
+                },
                 "kind": {
                   "type": "string",
                   "enum": ["counter", "gauge", "histogram"]

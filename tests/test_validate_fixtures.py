@@ -26,6 +26,7 @@ class ValidateFixturesTests(unittest.TestCase):
             "id": "evt_metric_001",
             "attributes": {
                 "name": "checkout.requests",
+                "description": "Number of checkout requests accepted by the application.",
                 "kind": "counter",
                 "value": 42,
                 "unit": "{request}",
@@ -411,6 +412,33 @@ class ValidateFixturesTests(unittest.TestCase):
         payload["events"].append(self.metric_event())
         validate_payload(payload)
 
+    def test_metric_description_accepts_the_public_character_limit(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"].append(self.metric_event())
+        payload["events"][6]["attributes"]["description"] = "M" * 1024
+        validate_payload(payload)
+
+    def test_rejects_invalid_metric_descriptions(self) -> None:
+        invalid_descriptions = [
+            None,
+            "",
+            "   ",
+            "M" * 1025,
+            "request\u0085count",
+            "request\u2028count",
+        ]
+        for description in invalid_descriptions:
+            with self.subTest(description=repr(description)):
+                payload = self.load_valid_payload()
+                payload["events"].append(self.metric_event())
+                payload["events"][6]["attributes"]["description"] = description
+                with self.assertRaisesRegex(
+                    ValidationError,
+                    "event 6 attribute description must be a non-blank string of at most "
+                    "1024 non-control characters",
+                ):
+                    validate_payload(payload)
+
     def test_rejects_boolean_metric_value(self) -> None:
         payload = self.load_valid_payload()
         payload["events"].append(self.metric_event())
@@ -544,6 +572,17 @@ class ValidateFixturesTests(unittest.TestCase):
             ]
         )
         self.assertEqual(schema_temporalities, validator_temporalities)
+
+    def test_schema_describes_bounded_metric_descriptions(self) -> None:
+        schema = self.load_schema()
+        description = schema["$defs"]["metricEvent"]["allOf"][1]["properties"]["attributes"][
+            "properties"
+        ]["description"]
+
+        self.assertEqual(description["type"], "string")
+        self.assertEqual(description["minLength"], 1)
+        self.assertEqual(description["maxLength"], 1024)
+        self.assertIn("\\S", description["pattern"])
 
     def test_schema_describes_bounded_span_links(self) -> None:
         schema = self.load_schema()

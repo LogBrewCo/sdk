@@ -250,6 +250,7 @@ Use `client.metric()` when application code already knows the measurement name, 
 ```js
 client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
   name: "checkout.requests",
+  description: "Number of checkout requests accepted by the application.",
   kind: "counter",
   value: 42,
   unit: "{request}",
@@ -258,7 +259,7 @@ client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
 });
 ```
 
-Metric `kind` must be `counter`, `gauge`, or `histogram`. Counters and histograms must be non-negative and use `delta` or `cumulative` temporality; gauges use `instant` temporality and may be negative. Keep metric metadata primitive and low-cardinality, such as service, region, or route template.
+Metric `kind` must be `counter`, `gauge`, or `histogram`. Counters and histograms must be non-negative and use `delta` or `cumulative` temporality; gauges use `instant` temporality and may be negative. An optional `description` gives humans and investigation tools stable meaning for the measurement; keep it generic, single-line, between 1 and 1,024 Unicode characters, and free of identifiers, personal data, or changing values. It is not a query dimension. Keep metric metadata primitive and low-cardinality, such as service, region, or route template.
 
 ## W3C Trace Context
 

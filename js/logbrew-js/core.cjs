@@ -23,6 +23,7 @@ const PRODUCT_ANALYTICS_SCHEMA_VERSION = 1;
 const PRODUCT_ANALYTICS_KINDS = Object.freeze(["page_view", "screen_view", "interaction"]);
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 const METRIC_KINDS = new Set(["counter", "gauge", "histogram"]);
+const MAX_METRIC_DESCRIPTION_LENGTH = 1024;
 const NON_NEGATIVE_METRIC_KINDS = new Set(["counter", "histogram"]);
 const METRIC_TEMPORALITIES_BY_KIND = new Map([
   ["counter", new Set(["delta", "cumulative"])],
@@ -2272,14 +2273,43 @@ function validateMetric(attributes) {
   if (NON_NEGATIVE_METRIC_KINDS.has(attributes.kind) && attributes.value < 0) {
     throw new SdkError("validation_error", `metric ${attributes.kind} value must be non-negative`);
   }
+  const description = metricDescriptionOrUndefined(attributes.description);
 
   return withMetadata({
     name: attributes.name,
+    ...(description === undefined ? {} : { description }),
     kind: attributes.kind,
     value: attributes.value,
     unit: attributes.unit,
     temporality: attributes.temporality
   }, attributes.metadata, attributes.context);
+}
+
+function metricDescriptionOrUndefined(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  const characters = typeof value === "string" ? Array.from(value) : [];
+  if (
+    typeof value !== "string"
+    || value.trim() === ""
+    || characters.length > MAX_METRIC_DESCRIPTION_LENGTH
+    || characters.some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (
+        code <= 31
+        || (code >= 127 && code <= 159)
+        || code === 0x2028
+        || code === 0x2029
+      );
+    })
+  ) {
+    throw new SdkError(
+      "validation_error",
+      `metric description must be a non-blank string of at most ${MAX_METRIC_DESCRIPTION_LENGTH} non-control characters`
+    );
+  }
+  return value.trim();
 }
 
 function productActionDetails(action) {

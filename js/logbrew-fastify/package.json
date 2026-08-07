@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/fastify",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Fastify plugin helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
