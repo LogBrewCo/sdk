@@ -284,16 +284,34 @@ jobs:
             }
           ' "$npm_version"
 
-          missing_npm_packages=()
-          if [[ "$DRY_RUN" != "true" ]]; then
-            for package_name in "${selected_package_names[@]}"; do
-              if [[ "$package_name" == "co.logbrew.unity" ]]; then
-                continue
-              fi
-              if ! npm view "$package_name" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
-                missing_npm_packages+=("$package_name")
-              fi
-            done
+          npm_publication_plan="$(mktemp)"
+          publication_plan_args=(--registry "https://registry.npmjs.org")
+          for package_version in "${selected_package_versions[@]}"; do
+            if [[ "$package_version" == co.logbrew.unity=* ]]; then
+              continue
+            fi
+            publication_plan_args+=(--package "$package_version")
+          done
+          python3 scripts/plan_npm_publication.py \
+            "${publication_plan_args[@]}" > "$npm_publication_plan"
+          mapfile -t existing_npm_versions < <(
+            node -e '
+              const plan = require(process.argv[1]);
+              for (const identity of plan.existingVersions) console.log(identity);
+            ' "$npm_publication_plan"
+          )
+          mapfile -t missing_npm_packages < <(
+            node -e '
+              const plan = require(process.argv[1]);
+              for (const name of plan.missingPackagePages) console.log(name);
+            ' "$npm_publication_plan"
+          )
+          rm -f "$npm_publication_plan"
+          if [[ "${#existing_npm_versions[@]}" -gt 0 ]]; then
+            printf 'Selected npm versions already exist and are immutable:\n' >&2
+            printf -- '- %s\n' "${existing_npm_versions[@]}" >&2
+            echo "Advance every colliding package version before retrying the selected release." >&2
+            exit 1
           fi
 
           npm_userconfig="$(mktemp)"
@@ -316,7 +334,7 @@ jobs:
               exit 1
             fi
             printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NPM_TOKEN" > "$npm_userconfig"
-          elif [[ "${#missing_npm_packages[@]}" -gt 0 ]]; then
+          elif [[ "$DRY_RUN" != "true" && "${#missing_npm_packages[@]}" -gt 0 ]]; then
             printf 'Missing npm package pages before publish:\n' >&2
             printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
             if [[ "$ALLOW_INITIAL_NPM_PUBLISH" != "true" ]]; then
