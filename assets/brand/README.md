@@ -17,6 +17,7 @@ it is not another editable logo source.
 - `logbrew-logo-transparent-1600.svg` and `.png`: master transparent logo for in-product UI.
 - `logbrew-logo-transparent-512.svg` and `.png`: transparent logo for website/app UI.
 - `logbrew-logo-transparent-128.png`: NuGet/package icon source.
+- `app-icon-256.png`: compact launcher and installer icon source.
 - `app-store-icon-1024.png`: Apple App Store source icon.
 - `google-play-icon-512.png`: Google Play listing icon.
 - `github-social-preview.png`: GitHub repository social preview image.

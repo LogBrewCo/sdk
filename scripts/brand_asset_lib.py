@@ -22,6 +22,7 @@ SVG_DERIVATIVES = {
 }
 
 PNG_DERIVATIVES = {
+    "assets/brand/app-icon-256.png": ("espresso-bg", 256),
     "assets/brand/app-store-icon-1024.png": ("espresso-bg", 1024),
     "assets/brand/google-play-icon-512.png": ("espresso-bg", 512),
     "assets/brand/logbrew-logo-espresso-bg-128.png": ("espresso-bg", 128),

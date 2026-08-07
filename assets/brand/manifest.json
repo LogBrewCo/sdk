@@ -94,6 +94,15 @@
       "generation": "rsvg"
     },
     {
+      "path": "assets/brand/app-icon-256.png",
+      "sha256": "4547f1d32a87f90177bd430b70b4471e2aa5aceb99181c039e8233acbc561152",
+      "kind": "png_rgb",
+      "width": 256,
+      "height": 256,
+      "presentation": "espresso_app_icon",
+      "generation": "rsvg"
+    },
+    {
       "path": "assets/brand/app-store-icon-1024.png",
       "sha256": "5be612050e458a0b64df1bd83c7275b9ee57915da8b8d36c1dfa15b9d65e6717",
       "kind": "png_rgb",
