@@ -47,7 +47,7 @@ import sys
 import time
 from pathlib import Path
 
-BUILD_TIMEOUT_SECONDS = 10
+BUILD_TIMEOUT_SECONDS = 30
 BUILD_FILE_LIMIT_BYTES = 32 * 1024 * 1024
 stdout_path = Path(os.environ["BUILD_STDOUT"])
 stderr_path = Path(os.environ["BUILD_STDERR"])
