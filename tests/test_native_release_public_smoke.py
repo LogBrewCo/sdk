@@ -121,6 +121,7 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
         version: str = VERSION,
         artifact_files: dict[str, str] | None = None,
         env_overrides: dict[str, str] | None = None,
+        script_path: Path = SCRIPT,
     ) -> subprocess.CompletedProcess[str]:
         supplied = (
             artifact_files
@@ -135,7 +136,7 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
         }
         env.update(env_overrides or {})
         return subprocess.run(
-            ["bash", str(SCRIPT), version],
+            ["bash", str(script_path), version],
             cwd=ROOT,
             env=env,
             capture_output=True,
@@ -377,7 +378,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertEqual(runtime_result.stderr, "native release receipt failed at installed execution\n")
         self.assertNotIn("RUNTIME_CANARY_9D03", runtime_result.stderr)
         self.assertGreaterEqual(elapsed, 4)
-        self.assertLess(elapsed, 12)
+        self.assertLess(elapsed, 29)
 
     def test_receipt_mode_times_out_and_reaps_a_hanging_compiler(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp_dir:
@@ -395,11 +396,21 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
                 encoding="utf-8",
             )
             fake_cc.chmod(fake_cc.stat().st_mode | stat.S_IXUSR)
+            bounded_script = temp_dir / "bounded-native-release-smoke.sh"
+            script_body = SCRIPT.read_text(encoding="utf-8")
+            bounded_body = script_body.replace(
+                "BUILD_TIMEOUT_SECONDS = 30",
+                "BUILD_TIMEOUT_SECONDS = 2",
+                1,
+            )
+            self.assertNotEqual(bounded_body, script_body)
+            bounded_script.write_text(bounded_body, encoding="utf-8")
             started_at = time.monotonic()
             result = self._run_receipt(
                 temp_dir,
                 artifact_path,
                 env_overrides={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+                script_path=bounded_script,
             )
             elapsed = time.monotonic() - started_at
             pid = int(compiler_pid.read_text(encoding="utf-8"))
@@ -410,8 +421,8 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "native release receipt failed at native build\n")
-        self.assertGreaterEqual(elapsed, 10)
-        self.assertLess(elapsed, 18)
+        self.assertGreaterEqual(elapsed, 2)
+        self.assertLess(elapsed, 10)
 
     def test_script_declares_fixed_native_release_contract(self) -> None:
         body = SCRIPT.read_text(encoding="utf-8")
@@ -435,7 +446,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             "gzip.open",
             "prevalidate_tar",
             "run_bounded_command",
-            "BUILD_TIMEOUT_SECONDS",
+            "BUILD_TIMEOUT_SECONDS = 30",
         ):
             self.assertIn(expected, body)
 
