@@ -296,13 +296,15 @@ jobs:
             "${publication_plan_args[@]}" > "$npm_publication_plan"
           mapfile -t existing_npm_versions < <(
             node -e '
-              const plan = require(process.argv[1]);
+              const fs = require("node:fs");
+              const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
               for (const identity of plan.existingVersions) console.log(identity);
             ' "$npm_publication_plan"
           )
           mapfile -t missing_npm_packages < <(
             node -e '
-              const plan = require(process.argv[1]);
+              const fs = require("node:fs");
+              const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
               for (const name of plan.missingPackagePages) console.log(name);
             ' "$npm_publication_plan"
           )
