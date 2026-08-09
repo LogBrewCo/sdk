@@ -27,11 +27,11 @@ classifiers = [
 ]
 dependencies = [
   "fastapi>=0.111.1",
-  "logbrew-sdk>=0.1.7,<0.2.0"
+  "logbrew-sdk>=0.1.9,<0.2.0"
 ]
 
 [project.optional-dependencies]
-celery = ["logbrew-sdk[celery]>=0.1.7,<0.2.0"]
+celery = ["logbrew-sdk[celery]>=0.1.9,<0.2.0"]
 
 [project.urls]
 Repository = "https://github.com/LogBrewCo/sdk"

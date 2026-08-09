@@ -179,17 +179,30 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn(source_tests, readiness)
         self.assertLess(readiness.index(metadata_install), readiness.index(source_tests))
 
-    def test_fastapi_celery_extra_requires_the_fixed_core_without_bloating_base_install(self) -> None:
+    def test_python_integrations_require_the_description_core_without_bloating_fastapi(self) -> None:
         project = tomllib.loads(
             (ROOT / "python/logbrew_fastapi/pyproject.toml").read_text(encoding="utf-8")
         )["project"]
 
         self.assertEqual(
             project["optional-dependencies"]["celery"],
-            ["logbrew-sdk[celery]>=0.1.7,<0.2.0"],
+            ["logbrew-sdk[celery]>=0.1.9,<0.2.0"],
         )
         self.assertNotIn("celery>=5,<6", project["dependencies"])
-        self.assertIn("logbrew-sdk>=0.1.7,<0.2.0", project["dependencies"])
+        self.assertIn("logbrew-sdk>=0.1.9,<0.2.0", project["dependencies"])
+
+        for relative_path in (
+            "python/logbrew_flask/pyproject.toml",
+            "python/logbrew_django/pyproject.toml",
+        ):
+            integration = tomllib.loads(
+                (ROOT / relative_path).read_text(encoding="utf-8")
+            )["project"]
+            with self.subTest(relative_path=relative_path):
+                self.assertIn(
+                    "logbrew-sdk>=0.1.9,<0.2.0",
+                    integration["dependencies"],
+                )
 
     def test_react_native_bundle_smoke_reads_package_versions(self) -> None:
         smoke = (
