@@ -45,7 +45,7 @@ if [[ -z "$objc_command" ]]; then
   fi
 fi
 
-archive="$tmp_dir/logbrew-objc-0.2.1.tar.gz"
+archive="$tmp_dir/logbrew-objc-0.2.2.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 
 app_dir="$tmp_dir/native-objc-app"

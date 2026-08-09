@@ -18,16 +18,16 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_pac
 
 
 PUBLIC_VERSION = "0.1.0"
-RUST_VERSION = "0.1.2"
-RUBYGEMS_VERSION = "0.1.3"
-PACKAGIST_VERSION = "0.1.8"
-DOTNET_VERSION = "0.1.5"
+RUST_VERSION = "0.1.3"
+RUBYGEMS_VERSION = "0.1.4"
+PACKAGIST_VERSION = "0.1.9"
+DOTNET_VERSION = "0.1.6"
 DOTNET_ASPNETCORE_VERSION = "0.1.1"
 DOTNET_OTEL_VERSION = "0.1.1"
-DOTNET_HTTPCLIENT_VERSION = "0.1.0"
-UNITY_VERSION = "0.2.0"
-MAVEN_VERSION = "0.2.0"
-JAVA_MAVEN_VERSION = "0.1.2"
+DOTNET_HTTPCLIENT_VERSION = "0.1.1"
+UNITY_VERSION = "0.2.1"
+MAVEN_VERSION = "0.2.1"
+JAVA_MAVEN_VERSION = "0.1.3"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
@@ -73,7 +73,7 @@ PYTHON_PACKAGES = {
         "dependencies": {"Django>=4.2.30,<6", "logbrew-sdk>=0.1.6,<0.2.0"},
         "package": "logbrew_django",
         "requires_python": ">=3.10",
-        "version": "0.1.4",
+        "version": "0.1.5",
     },
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
@@ -82,7 +82,7 @@ PYTHON_PACKAGES = {
         "optional_dependencies": {"celery": {"logbrew-sdk[celery]>=0.1.7,<0.2.0"}},
         "package": "logbrew_fastapi",
         "requires_python": ">=3.10",
-        "version": "0.1.8",
+        "version": "0.1.9",
     },
     "python/logbrew_flask": {
         "name": "logbrew-flask",
@@ -90,7 +90,7 @@ PYTHON_PACKAGES = {
         "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.6,<0.2.0"},
         "package": "logbrew_flask",
         "requires_python": ">=3.10",
-        "version": "0.1.2",
+        "version": "0.1.3",
     },
     "python/logbrew_py": {
         "name": "logbrew-sdk",
@@ -106,7 +106,7 @@ PYTHON_PACKAGES = {
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.8",
+        "version": "0.1.9",
     },
 }
 
@@ -639,7 +639,7 @@ def validate_go(root: Path, failures: list[str]) -> None:
         "go/logbrew/gin/go.mod: expected go 1.24.0",
     )
     require(
-        "github.com/LogBrewCo/sdk/go/logbrew v0.1.5" in gin_content,
+        "github.com/LogBrewCo/sdk/go/logbrew v0.1.6" in gin_content,
         failures,
         "go/logbrew/gin/go.mod: expected parent LogBrew module requirement",
     )
@@ -670,7 +670,7 @@ def validate_c(root: Path, failures: list[str]) -> None:
     readme = (root / "c/logbrew-c/README.md").read_text(encoding="utf-8")
     location = "c/logbrew-c/include/logbrew.h"
     for needle in (
-        '#define LOGBREW_C_VERSION "0.2.0"',
+        '#define LOGBREW_C_VERSION "0.2.1"',
         "typedef struct LogBrewClient LogBrewClient;",
         "logbrew_client_flush",
         "LogBrewRecordingTransport",
@@ -720,7 +720,7 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     readme = (root / "cpp/logbrew-cpp/README.md").read_text(encoding="utf-8")
     location = "cpp/logbrew-cpp/include/logbrew.hpp"
     for needle in (
-        'inline constexpr const char *version = "0.2.0"',
+        'inline constexpr const char *version = "0.2.1"',
         "class LogBrewClient",
         "TelemetryContext",
         "TelemetryScope",
@@ -786,9 +786,9 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     readme = (root / "objc/logbrew-objc/README.md").read_text(encoding="utf-8")
     location = "objc/logbrew-objc/include/LogBrew.h"
     require(
-        'LogBrewObjectiveCVersion = @"0.2.1"' in source,
+        'LogBrewObjectiveCVersion = @"0.2.2"' in source,
         failures,
-        "objc/logbrew-objc/src/LogBrew.m: Objective-C source version must be 0.2.1",
+        "objc/logbrew-objc/src/LogBrew.m: Objective-C source version must be 0.2.2",
     )
     for needle in (
         "LogBrewObjectiveCVersion",

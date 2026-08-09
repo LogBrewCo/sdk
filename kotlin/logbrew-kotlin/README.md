@@ -13,7 +13,7 @@ The package is dependency-light, uses the Kotlin standard library only, and keep
 For Maven or Gradle publishing, use the package coordinates:
 
 ```text
-co.logbrew:logbrew-kotlin:0.2.0
+co.logbrew:logbrew-kotlin:0.2.1
 ```
 
 ## Usage

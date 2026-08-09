@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name = "logbrew-sdk"
-  spec.version = "0.1.3"
+  spec.version = "0.1.4"
   spec.summary = "Public LogBrew Ruby SDK"
   spec.description = "Public LogBrew Ruby SDK with typed issue diagnostics, automatic Rails request/error capture, and standard-library delivery."
   spec.authors = ["LogBrew"]

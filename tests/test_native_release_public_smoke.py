@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_native_release_public_smoke.sh"
 ARTIFACT_ID = "native:LogBrewCo/sdk"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 SOURCE_PATHS = (
     "LICENSE",
     "README.md",
@@ -218,7 +218,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertIn("--max-time\n30\n", recorded_args)
         self.assertIn("--max-filesize\n67108864\n", recorded_args)
         self.assertIn(
-            "https://github.com/LogBrewCo/sdk/archive/refs/tags/c/logbrew-c/v0.2.0.tar.gz",
+            "https://github.com/LogBrewCo/sdk/archive/refs/tags/c/logbrew-c/v0.2.1.tar.gz",
             recorded_args,
         )
 
@@ -328,7 +328,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "native release receipt failed at release identity\n")
-        self.assertNotIn("0.2.0", result.stderr)
+        self.assertNotIn("0.2.1", result.stderr)
         self.assertNotIn("0.2.2", result.stderr)
 
     def test_receipt_mode_bounds_build_and_runtime_diagnostics(self) -> None:

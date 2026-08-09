@@ -654,7 +654,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 """
 [package]
 name = "logbrew"
-version = "0.1.2"
+version = "0.1.3"
 license = "MIT"
 repository = "https://github.com/LogBrewCo/sdk"
 readme = "README.md"
@@ -676,14 +676,14 @@ keywords = ["logbrew"]
 
     def test_maven_metadata_matches_each_release_family(self) -> None:
         self.assertIn(
-            "<version>0.1.2</version>",
+            "<version>0.1.3</version>",
             (ROOT / "java" / "logbrew-java" / "pom.xml").read_text(encoding="utf-8"),
         )
         for pom_path in (
             ROOT / "kotlin" / "logbrew-kotlin" / "pom.xml",
             ROOT / "kotlin" / "logbrew-kotlin-okhttp" / "pom.xml",
         ):
-            self.assertIn("<version>0.2.0</version>", pom_path.read_text(encoding="utf-8"))
+            self.assertIn("<version>0.2.1</version>", pom_path.read_text(encoding="utf-8"))
 
     def test_maven_central_public_smoke_covers_kotlin_okhttp_artifact(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_maven_central_public_smoke.sh").read_text(encoding="utf-8")
@@ -1806,7 +1806,7 @@ jobs:
             ):
                 (package_dir / relative).write_text("# fixture\n", encoding="utf-8")
             (package_dir / "lib" / "logbrew" / "version.rb").write_text(
-                'VERSION = "0.1.3"\n',
+                'VERSION = "0.1.4"\n',
                 encoding="utf-8",
             )
             (root / "scripts" / "real_user_ruby_rails_smoke.sh").write_text(
@@ -1817,7 +1817,7 @@ jobs:
                 """
 Gem::Specification.new do |spec|
   spec.name = "logbrew-sdk"
-  spec.version = "0.1.3"
+  spec.version = "0.1.4"
   spec.summary = "Public LogBrew Ruby SDK"
   spec.description = "Public LogBrew Ruby SDK for building, validating, and flushing event batches."
   spec.authors = ["LogBrew"]

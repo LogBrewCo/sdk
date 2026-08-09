@@ -3,7 +3,7 @@ module github.com/LogBrewCo/sdk/go/logbrew/gin
 go 1.24.0
 
 require (
-	github.com/LogBrewCo/sdk/go/logbrew v0.1.5
+	github.com/LogBrewCo/sdk/go/logbrew v0.1.6
 	github.com/gin-gonic/gin v1.11.0
 )
 
