@@ -214,6 +214,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     assert_eq!(span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
     assert_eq!(span["spanId"], "b7ad6b7169203331");
     assert_eq!(metric["name"], "http.server.duration");
+    assert_eq!(metric["description"], "Duration of one completed server request.");
     assert_eq!(issue["metadata"]["traceId"], span["traceId"]);
     assert_eq!(issue["metadata"]["spanId"], span["spanId"]);
     assert_eq!(issue["exception"]["mechanism"]["type"], "tower.service");

@@ -224,6 +224,7 @@ internal static class TraceCorrelationTests
             "\"status\": \"error\"",
             "\"name\": \"POST /checkout/:cart_id\"",
             "\"name\": \"http.server.duration\"",
+            "\"description\": \"Duration of one completed server request.\"",
             "\"exceptionMessage\": \"payment provider failed\""
         })
         {

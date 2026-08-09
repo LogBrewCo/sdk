@@ -109,6 +109,7 @@ func main() {
 
 	must(client.Metric("evt_metric_http_server_duration", "2026-06-02T10:00:05Z", logbrew.MetricAttributes{
 		Name:        "http.server.duration",
+		Description: "Duration of one completed server request.",
 		Kind:        "histogram",
 		Value:       networkDurationMs,
 		Unit:        "ms",

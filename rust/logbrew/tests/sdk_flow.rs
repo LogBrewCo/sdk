@@ -368,6 +368,7 @@ fn metric_event_preview_and_validation() {
                 "ms",
                 "delta",
             )
+            .with_description("  Duration of one completed checkout request.  ")
             .with_metadata(metadata),
         )
         .unwrap();
@@ -376,6 +377,10 @@ fn metric_event_preview_and_validation() {
     let event = &payload["events"][0];
     assert_eq!(event["type"], "metric");
     assert_eq!(event["attributes"]["kind"], "histogram");
+    assert_eq!(
+        event["attributes"]["description"],
+        "Duration of one completed checkout request."
+    );
     assert_eq!(event["attributes"]["value"], 42.5);
     assert_eq!(event["attributes"]["temporality"], "delta");
     assert_eq!(
@@ -424,6 +429,26 @@ fn metric_event_preview_and_validation() {
         )
         .unwrap_err();
     assert_eq!(error.message, "metric metadata values must be primitive");
+
+    for description in [
+        "   ".to_string(),
+        "M".repeat(1025),
+        "request\u{0085}count".to_string(),
+        "request\u{2028}count".to_string(),
+    ] {
+        let error = sample_client()
+            .metric(
+                "evt_metric_invalid",
+                "2026-06-02T10:00:06Z",
+                MetricEvent::new("queue.depth", "gauge", 3.0, "1", "instant")
+                    .with_description(description),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            "metric description must be a non-blank string of at most 1024 non-control characters"
+        );
+    }
 }
 
 #[test]
@@ -820,6 +845,10 @@ fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
 
     let metric = &payload["events"][1]["attributes"];
     assert_eq!(metric["name"], "http.server.duration");
+    assert_eq!(
+        metric["description"],
+        "Duration of one completed server request."
+    );
     assert_eq!(metric["kind"], "histogram");
     assert_eq!(metric["value"], 183.4);
     assert_eq!(metric["unit"], "ms");

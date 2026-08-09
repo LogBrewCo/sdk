@@ -426,6 +426,7 @@ class ValidateFixturesTests(unittest.TestCase):
             "M" * 1025,
             "request\u0085count",
             "request\u2028count",
+            "request\ud800count",
         ]
         for description in invalid_descriptions:
             with self.subTest(description=repr(description)):
@@ -583,6 +584,7 @@ class ValidateFixturesTests(unittest.TestCase):
         self.assertEqual(description["minLength"], 1)
         self.assertEqual(description["maxLength"], 1024)
         self.assertIn("\\S", description["pattern"])
+        self.assertIn("\\ud800-\\udfff", description["pattern"])
 
     def test_schema_describes_bounded_span_links(self) -> None:
         schema = self.load_schema()

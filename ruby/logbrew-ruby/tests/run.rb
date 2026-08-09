@@ -112,6 +112,7 @@ client.metric(
   "evt_metric_001",
   "2026-06-02T10:00:06Z",
   name: "queue.depth",
+  description: "  Number of items waiting in the checkout queue.  ",
   kind: "gauge",
   value: -2.0,
   unit: "{items}",
@@ -121,6 +122,7 @@ client.metric(
 metric_payload = client.preview_json
 assert(metric_payload.include?('"type": "metric"'), "expected metric event type")
 assert(metric_payload.include?('"kind": "gauge"'), "expected metric kind")
+assert(metric_payload.include?('"description": "Number of items waiting in the checkout queue."'), "expected metric description")
 assert(metric_payload.include?('"value": -2.0'), "expected gauge value")
 assert(metric_payload.include?('"unit": "{items}"'), "expected metric unit")
 assert(metric_payload.include?('"temporality": "instant"'), "expected metric temporality")
@@ -335,6 +337,22 @@ tests += 1
 
 expect_error("validation_error", "metric temporality for gauge must be one of: instant") do
   sample_client.metric("evt_metric_001", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: 2, unit: "{items}", temporality: "delta")
+end
+tests += 1
+
+[nil, 42, "   ", "M" * 1025, "request\u0085count", "request\u2028count"].each do |description|
+  expect_error("validation_error", "metric description must be a non-blank string of at most 1024 non-control characters") do
+    sample_client.metric(
+      "evt_metric_bad_description",
+      "2026-06-02T10:00:06Z",
+      name: "queue.depth",
+      description: description,
+      kind: "gauge",
+      value: 2,
+      unit: "{items}",
+      temporality: "instant"
+    )
+  end
 end
 tests += 1
 

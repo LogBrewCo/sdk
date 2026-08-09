@@ -69,6 +69,7 @@ int main(void) {
                        timestamp:@"2026-06-02T10:00:06Z"
                       attributes:@{
                         @"name": @"http.server.duration",
+                        @"description": @"Duration of one completed server request.",
                         @"kind": @"histogram",
                         @"value": @184.5,
                         @"unit": @"ms",

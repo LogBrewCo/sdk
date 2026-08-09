@@ -64,7 +64,15 @@ int main(void) {
   must(logbrew_client_span(client, "evt_c_trace_span_001", "2026-06-02T10:00:05Z", span, &error), &error);
   must(logbrew_client_span(client, "evt_c_trace_http_client_span_001", "2026-06-02T10:00:05Z", outbound_span, &error), &error);
   must(logbrew_client_metric(client, "evt_c_trace_metric_001", "2026-06-02T10:00:06Z",
-      (LogBrewMetricAttributes){"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata}, &error), &error);
+      (LogBrewMetricAttributes){
+        "http.server.duration",
+        "histogram",
+        37.5,
+        "ms",
+        "delta",
+        trace_metadata,
+        "Duration of one completed server request."
+      }, &error), &error);
   must(logbrew_client_product_action(client, "evt_c_trace_product_action_001", "2026-06-02T10:00:07Z",
       (LogBrewProductActionAttributes){"checkout.submit", "failure", timeline_context, {NULL, 0U}}, &error), &error);
   must(logbrew_client_network_milestone(client, "evt_c_trace_network_001", "2026-06-02T10:00:08Z",

@@ -188,12 +188,13 @@ logbrew_client_metric(
       42.0,
       "{items}",
       "instant",
-      {metric_metadata, sizeof(metric_metadata) / sizeof(metric_metadata[0])}
+      {metric_metadata, sizeof(metric_metadata) / sizeof(metric_metadata[0])},
+      "Number of items waiting in the checkout queue."
     },
     &error);
 ```
 
-Metric `kind` must be `counter`, `gauge`, or `histogram`. Gauges use `instant` temporality; counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Values must be finite, units must be non-empty, and metadata should stay low-cardinality: service, queue, route template, or feature flag names are appropriate; user IDs, raw URLs, per-session identifiers, request IDs, headers, and payload fields are not.
+Metric `kind` must be `counter`, `gauge`, or `histogram`. Gauges use `instant` temporality; counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Values must be finite and units must be non-empty. The optional final `description` field gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values encoded as UTF-8, and free of identifiers, personal data, or changing values. It is not a query dimension. Metadata should stay low-cardinality: service, queue, route template, or feature flag names are appropriate; user IDs, raw URLs, per-session identifiers, request IDs, headers, and payload fields are not.
 
 This SDK does not automatically collect native runtime, process, or framework metrics yet. Add only the measurements your app owns and wants LogBrew to correlate with logs, errors, traces, and product timelines.
 

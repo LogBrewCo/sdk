@@ -77,6 +77,51 @@ namespace LogBrew.Unity
             }
         }
 
+        internal static string? NormalizeMetricDescription(string? value)
+        {
+            if (value == null)
+            {
+                return null;
+            }
+
+            var normalized = value.Trim();
+            var scalarCount = 0;
+            for (var index = 0; index < normalized.Length; index++)
+            {
+                var character = normalized[index];
+                int scalar;
+                if (char.IsHighSurrogate(character) && index + 1 < normalized.Length && char.IsLowSurrogate(normalized[index + 1]))
+                {
+                    scalar = char.ConvertToUtf32(character, normalized[++index]);
+                }
+                else if (char.IsSurrogate(character))
+                {
+                    throw InvalidMetricDescription();
+                }
+                else
+                {
+                    scalar = character;
+                }
+
+                scalarCount++;
+                if (scalar <= 0x1f || (scalar >= 0x7f && scalar <= 0x9f) || scalar == 0x2028 || scalar == 0x2029)
+                {
+                    throw InvalidMetricDescription();
+                }
+            }
+
+            if (scalarCount == 0 || scalarCount > 1024)
+            {
+                throw InvalidMetricDescription();
+            }
+            return normalized;
+        }
+
+        private static SdkException InvalidMetricDescription()
+        {
+            return new SdkException("validation_error", "metric description must be a non-blank string of at most 1024 non-control characters");
+        }
+
         internal static object? RequireMetadataValue(string key, object? value)
         {
             if (value == null || value is string || value is bool)

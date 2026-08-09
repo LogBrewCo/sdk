@@ -111,6 +111,7 @@ static async Task AspNetCoreMiddlewareCapturesRequestSpanMetricAndActiveTrace()
         "\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"",
         "\"parentSpanId\": \"00f067aa0ba902b7\"",
         "\"name\": \"http.server.duration\"",
+        "\"description\": \"Duration of one completed server request.\"",
         "\"source\": \"aspnetcore.request\"",
         "\"framework\": \"aspnetcore\"",
         "\"endpointName\": \"checkout_route\""

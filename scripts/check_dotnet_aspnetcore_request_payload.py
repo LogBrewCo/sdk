@@ -78,6 +78,10 @@ def main() -> int:
     require(span_attributes["parentSpanId"] == PARENT_SPAN_ID, "span parent span mismatch")
     require(span_attributes["durationMs"] >= 0, "span duration must be non-negative")
     require(metric["attributes"]["name"] == "http.server.duration", "metric name mismatch")
+    require(
+        metric["attributes"].get("description") == "Duration of one completed server request.",
+        "metric is missing its stable meaning",
+    )
 
     for event, label in ((log, "log"), (span, "span"), (metric, "metric")):
         meta = metadata(event)

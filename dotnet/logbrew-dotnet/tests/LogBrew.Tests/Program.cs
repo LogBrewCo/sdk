@@ -307,11 +307,13 @@ metricClient.Metric(
     "evt_metric_001",
     "2026-06-02T10:00:06Z",
     MetricAttributes.Create("queue.depth", "gauge", -2.0, "{items}", "instant")
+        .WithDescription("  Number of items waiting in the checkout queue.  ")
         .WithMetadata(new Dictionary<string, object?> { ["service"] = "worker", ["queue"] = "default" }));
 var metricPreview = metricClient.PreviewJson();
 AssertTrue(metricClient.PendingEvents() == 1, "expected metric to queue one event");
 AssertTrue(metricPreview.Contains("\"type\": \"metric\"", StringComparison.Ordinal), "expected metric event type");
 AssertTrue(metricPreview.Contains("\"name\": \"queue.depth\"", StringComparison.Ordinal), "expected metric name");
+AssertTrue(metricPreview.Contains("\"description\": \"Number of items waiting in the checkout queue.\"", StringComparison.Ordinal), "expected metric description");
 AssertTrue(metricPreview.Contains("\"kind\": \"gauge\"", StringComparison.Ordinal), "expected metric kind");
 AssertTrue(metricPreview.Contains("\"value\": -2", StringComparison.Ordinal), "expected gauge value");
 AssertTrue(metricPreview.Contains("\"unit\": \"{items}\"", StringComparison.Ordinal), "expected metric unit");
@@ -326,6 +328,14 @@ ExpectSdkError("validation_error", "metric counter value must be non-negative", 
     SampleClient().Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes.Create("jobs.completed", "counter", -1.0, "1", "delta")));
 ExpectSdkError("validation_error", "metric temporality for gauge must be one of", () =>
     SampleClient().Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes.Create("queue.depth", "gauge", 2.0, "{items}", "delta")));
+foreach (var description in new[] { "   ", new string('M', 1025), "request\u0085count", "request\u2028count" })
+{
+    ExpectSdkError("validation_error", "metric description must be a non-blank string of at most 1024 non-control characters", () =>
+        SampleClient().Metric(
+            "evt_metric_001",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.Create("queue.depth", "gauge", 2.0, "{items}", "instant").WithDescription(description)));
+}
 tests++;
 
 var productTimelineMetadata = new Dictionary<string, object?>

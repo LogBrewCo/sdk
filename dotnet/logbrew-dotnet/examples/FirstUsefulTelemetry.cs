@@ -102,6 +102,7 @@ public static class Program
             "evt_metric_http_server_duration",
             "2026-06-02T10:00:05Z",
             MetricAttributes.Create("http.server.duration", "histogram", 183.4, "ms", "delta")
+                .WithDescription("Duration of one completed server request.")
                 .WithContext(requestContext)
                 .WithMetadata(new Dictionary<string, object?>
                 {

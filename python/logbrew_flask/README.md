@@ -54,7 +54,7 @@ def order_detail(order_id: int) -> dict[str, str | None]:
     return {"traceId": trace.trace_id if trace else None}
 ```
 
-Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for each request. Apps can pass `span_id_factory` when deterministic child span ids are useful for controlled diagnostics; production apps usually let LogBrew generate span ids.
+Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for each request. Each generated metric carries the stable description `Duration of one completed server request.` so its purpose remains clear in investigations. Apps can pass `span_id_factory` when deterministic child span ids are useful for controlled diagnostics; production apps usually let LogBrew generate span ids.
 
 ## Outbound HTTP Child Spans
 

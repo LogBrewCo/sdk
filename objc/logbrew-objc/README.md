@@ -178,6 +178,7 @@ Use `metricWithID:timestamp:attributes:error:` for explicit product, service, or
            timestamp:@"2026-06-02T10:00:06Z"
           attributes:@{
             @"name": @"checkout.latency",
+            @"description": @"Duration of one completed checkout request.",
             @"kind": @"histogram",
             @"value": @184.5,
             @"unit": @"ms",
@@ -190,7 +191,7 @@ Use `metricWithID:timestamp:attributes:error:` for explicit product, service, or
                error:&error];
 ```
 
-Metric kinds are `counter`, `gauge`, and `histogram`. Gauges use `instant` temporality; counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Keep metric metadata low-cardinality and primitive, such as route templates, feature names, plan tiers, or platform names. Do not place user IDs, session IDs, trace IDs, raw URLs, query strings, headers, payloads, or free-form user text in metric metadata.
+Metric kinds are `counter`, `gauge`, and `histogram`. Gauges use `instant` temporality; counters and histograms use `delta` or `cumulative` temporality and must be non-negative. An optional `description` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Keep metric metadata low-cardinality and primitive, such as route templates, feature names, plan tiers, or platform names. Do not place user IDs, session IDs, trace IDs, raw URLs, query strings, headers, payloads, or free-form user text in metric metadata.
 
 ## Sending To LogBrew
 

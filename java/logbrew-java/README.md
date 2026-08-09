@@ -187,11 +187,12 @@ client.metric(
     "evt_metric_queue_depth",
     "2026-06-02T10:00:06Z",
     MetricAttributes.create("queue.depth", "gauge", 42.0, "{items}", "instant")
+        .description("Number of items waiting in the checkout queue.")
         .metadata(Map.of("service", "worker"))
 );
 ```
 
-Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect JVM, runtime, or framework metrics yet.
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. An optional `description(...)` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Keep metadata low-cardinality and primitive. This SDK does not automatically collect JVM, runtime, or framework metrics yet.
 
 ## Typed Issue Diagnostics
 

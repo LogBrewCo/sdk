@@ -214,6 +214,7 @@ public final class LogBrewTraceTest {
         assertContains(payload, "\"type\": \"metric\"");
         assertContains(payload, "\"name\": \"POST /checkout/{cart_id}\"");
         assertContains(payload, "\"name\": \"http.server.duration\"");
+        assertContains(payload, "\"description\": \"Duration of one completed server request.\"");
         assertContains(payload, "\"status\": \"error\"");
         assertContains(payload, "\"value\": 183.4");
         assertContains(payload, "\"routeTemplate\": \"/checkout/{cart_id}\"");

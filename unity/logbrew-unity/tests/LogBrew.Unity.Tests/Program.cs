@@ -940,12 +940,14 @@ namespace LogBrew.Unity.Tests
                 "evt_metric_001",
                 "2026-06-02T10:00:06Z",
                 MetricAttributes.Create("frame.duration", "histogram", 16.6, "ms", "delta")
+                    .WithDescription("  Duration of one rendered frame.  ")
                     .WithMetadata(new Dictionary<string, object?> { ["scene"] = "Checkout" })
                     .WithContext(eventContext));
 
             var body = client.PreviewJson();
             AssertContains(body, "\"type\": \"metric\"");
             AssertContains(body, "\"name\": \"frame.duration\"");
+            AssertContains(body, "\"description\": \"Duration of one rendered frame.\"");
             AssertContains(body, "\"schemaVersion\": 1");
             AssertContains(body, "\"service\"");
             AssertContains(body, "\"name\": \"checkout-game\"");
@@ -961,6 +963,14 @@ namespace LogBrew.Unity.Tests
                 "evt_metric_bad",
                 "2026-06-02T10:00:07Z",
                 MetricAttributes.Create("frame.duration", "histogram", -1, "ms", "delta")));
+            foreach (var description in new[] { "   ", new string('M', 1025), "frame\u0085duration", "frame\u2028duration" })
+            {
+                Expect("validation_error", () => client.Metric(
+                    "evt_metric_bad_description",
+                    "2026-06-02T10:00:07Z",
+                    MetricAttributes.Create("frame.duration", "histogram", 16.6, "ms", "delta")
+                        .WithDescription(description)));
+            }
         }
 
         private static void IssueDiagnosticsAndBreadcrumbsSerialize()

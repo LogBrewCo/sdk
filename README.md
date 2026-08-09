@@ -15,7 +15,7 @@ This repository contains the public SDK packages, framework integrations, event 
 - Logs from direct calls or app-owned logger integrations.
 - Spans and W3C `traceparent` context for request tracing.
 - Actions for important user or system events.
-- Explicit metrics when your application already knows the measurement name, value, unit, kind, and temporality.
+- Explicit metrics when your application already knows the measurement name, stable purpose, value, unit, kind, and temporality.
 - A shared, versioned context for privacy-bounded resource, deployment, trace, session, opaque subject, and low-cardinality tag correlation across every signal.
 
 User-facing severity categories are `info`, `warning`, `error`, and `critical`. SDKs keep accepting common runtime aliases where they are idiomatic, such as `trace`, `debug`, `warn`, and `fatal`, but queued payloads normalize those aliases to the canonical categories before they are sent. See the [LogBrew severity contract](docs/severity-contract.md) for the full mapping.
@@ -222,12 +222,13 @@ Each package README has ecosystem-specific install commands, logger integration 
 
 ## Metrics
 
-Metrics are explicit: the SDKs do not automatically collect runtime, framework, database, or host metrics yet. Their purpose is to aggregate behavior over time—rates, latency distributions, saturation, and release-to-release change—while logs/actions describe discrete facts and traces explain individual executions.
+Metrics are explicit: core SDKs do not automatically collect runtime, framework, database, or host metrics. Opt-in framework request helpers may emit a bounded request-duration metric. Their purpose is to aggregate behavior over time—rates, latency distributions, saturation, and release-to-release change—while logs/actions describe discrete facts and traces explain individual executions.
 
 Use metric helpers when your application already has a bounded measurement:
 
 - `counter` and `histogram` values use `delta` or `cumulative` temporality and must be non-negative.
 - `gauge` values use `instant` temporality and may go up or down.
+- Add an optional stable description that explains what the measurement means. SDKs trim it, limit it to 1024 Unicode scalar values, and reject unsafe control characters. Do not put identifiers, personal data, request values, or other changing content in it.
 - Metadata should be primitive and low-cardinality, such as region, route template, operation, status class, queue, or worker name. Keep service and deployment identity in typed context.
 - Do not use event, trace, session, user, raw URL, or other high-cardinality values as metric dimensions. Typed context may still link one metric event to an investigation without making those values aggregation keys.
 

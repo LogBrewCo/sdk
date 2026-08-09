@@ -28,6 +28,7 @@ inline constexpr std::size_t max_span_links = 8U;
 inline constexpr std::size_t max_metadata_entries = 128U;
 inline constexpr std::size_t max_metadata_key_length = 128U;
 inline constexpr std::size_t max_metadata_string_length = 4096U;
+inline constexpr std::size_t max_metric_description_length = 1024U;
 
 class SdkException final : public std::runtime_error {
 public:
@@ -362,6 +363,7 @@ struct MetricAttributes {
   std::string unit;
   std::string temporality;
   Metadata metadata = {};
+  std::optional<std::string> description = std::nullopt;
 };
 
 struct ActionAttributes {

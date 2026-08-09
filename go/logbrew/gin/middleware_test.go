@@ -109,6 +109,7 @@ func TestMiddlewareCapturesRouteTraceAndOptInMetricWithoutSensitiveRequestData(t
 	})
 	metric := events[2].Attributes
 	if metric["name"] != "http.server.duration" || metric["kind"] != "histogram" ||
+		metric["description"] != "Duration of one completed server request." ||
 		metric["value"] != float64(25) || metric["unit"] != "ms" || metric["temporality"] != "delta" {
 		t.Fatalf("unexpected Gin request metric: %#v", metric)
 	}

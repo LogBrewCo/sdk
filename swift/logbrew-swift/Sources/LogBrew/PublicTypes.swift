@@ -305,6 +305,7 @@ public struct ActionAttributes: Codable, Equatable, Sendable {
 
 public struct MetricAttributes: Codable, Equatable, Sendable {
     public let name: String
+    public let description: String?
     public let kind: MetricKind
     public let value: Double
     public let unit: String
@@ -320,8 +321,10 @@ public struct MetricAttributes: Codable, Equatable, Sendable {
         temporality: MetricTemporality,
         metadata: Metadata? = nil,
         context: TelemetryContext? = nil,
+        description: String? = nil,
     ) {
         self.name = name
+        self.description = description
         self.kind = kind
         self.value = value
         self.unit = unit

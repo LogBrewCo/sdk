@@ -138,6 +138,7 @@ def handle_checkout_request(
         "2026-06-15T08:00:05Z",
         {
             "name": "checkout.duration",
+            "description": "Duration of one completed checkout operation.",
             "kind": "histogram",
             "value": 128,
             "unit": "ms",
@@ -206,6 +207,11 @@ def assert_first_useful_payload(payload: dict[str, object], *, trace_id: str) ->
     network_metadata = network_attributes.get("metadata")
     if not isinstance(network_metadata, dict) or network_metadata.get("routeTemplate") != "/payments/:payment_id":
         raise RuntimeError(f"unexpected network route template: {network_event}")
+
+    metric_event = find_event(events, "evt_metric_checkout_duration")
+    metric_attributes = require_attributes(metric_event)
+    if metric_attributes.get("description") != "Duration of one completed checkout operation.":
+        raise RuntimeError(f"metric is missing its stable meaning: {metric_event}")
 
 
 def find_event(events: list[object], event_id: str) -> dict[str, object]:

@@ -93,6 +93,30 @@ if expected_path_suffix and not any(expected_path_suffix in line for line in mat
 PY
 }
 
+assert_cargo_tree_compatible_version() {
+	local tree_path="$1"
+	local package_name="$2"
+	local minimum_major="$3"
+	local minimum_minor="$4"
+	python3 - "$tree_path" "$package_name" "$minimum_major" "$minimum_minor" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+tree_path, package_name, minimum_major, minimum_minor = sys.argv[1:]
+tree_text = Path(tree_path).read_text()
+pattern = re.compile(rf"\b{re.escape(package_name)} v(\d+)\.(\d+)\.(\d+)\b")
+matches = [tuple(map(int, match.groups())) for match in pattern.finditer(tree_text)]
+minimum = (int(minimum_major), int(minimum_minor), 0)
+maximum = (int(minimum_major) + 1, 0, 0)
+if not matches or any(version < minimum or version >= maximum for version in matches):
+    raise SystemExit(
+        f"expected every resolved {package_name} version to be >= {minimum!r} and < {maximum!r}; "
+        f"found {matches!r}\n{tree_text}"
+    )
+PY
+}
+
 cargo package --allow-dirty --no-verify --manifest-path "$repo_root/rust/logbrew/Cargo.toml" --target-dir "$tmp_dir/cargo-package" >/dev/null
 crate_path="$tmp_dir/cargo-package/package/$crate_name.crate"
 test -f "$crate_path"
@@ -699,7 +723,8 @@ fn installed_metric_helper_previews_and_validates_measurements() {
         .metric(
             "evt_metric_test",
             "2026-06-02T10:00:06Z",
-            MetricEvent::new("checkout.request.duration", "histogram", 42.5, "ms", "delta"),
+            MetricEvent::new("checkout.request.duration", "histogram", 42.5, "ms", "delta")
+                .with_description("Duration of one completed checkout request."),
         )
         .expect("metric should queue");
 
@@ -709,6 +734,7 @@ fn installed_metric_helper_previews_and_validates_measurements() {
         "preview did not contain metric event: {payload}"
     );
     assert!(payload.contains("\"checkout.request.duration\""));
+    assert!(payload.contains("\"description\": \"Duration of one completed checkout request.\""));
 
     assert!(
         client
@@ -874,6 +900,7 @@ grep -q 'Create an action event with its required name and status fields\.' targ
 test -f target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Public metric-event builder for explicit low-cardinality metric measurements\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Create a metric event with name, kind, value, unit, and temporality fields\.' target/doc/logbrew/struct.MetricEvent.html
+grep -q 'Attach a stable display meaning; do not include identifiers or changing values\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Attach primitive, low-cardinality metadata to the metric payload\.' target/doc/logbrew/struct.MetricEvent.html
 test -f target/doc/logbrew/struct.TelemetryContext.html
 grep -q 'Versioned privacy-bounded context available on every LogBrew signal\.' target/doc/logbrew/struct.TelemetryContext.html
@@ -1264,7 +1291,7 @@ PY
 cargo tree --locked --charset ascii > http-cargo-tree.txt
 grep -q '^http-app v0.1.0 (' http-cargo-tree.txt
 assert_cargo_tree_package http-cargo-tree.txt logbrew "$crate_version" "/extracted-crate/$crate_name"
-assert_cargo_tree_package http-cargo-tree.txt ureq 3.3.0
+assert_cargo_tree_compatible_version http-cargo-tree.txt ureq 3 3
 
 cat > src/main.rs <<'EOF'
 use logbrew::{HttpTransport, HttpTransportConfig, LogBrewClient, ReleaseEvent};

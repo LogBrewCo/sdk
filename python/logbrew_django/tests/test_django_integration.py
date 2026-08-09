@@ -120,6 +120,7 @@ class DjangoIntegrationTests(unittest.TestCase):
         self.assertEqual([event["type"] for event in payload["events"]], ["metric"])
         metric = payload["events"][0]["attributes"]
         self.assertEqual(metric["name"], "http.server.duration")
+        self.assertEqual(metric["description"], "Duration of one completed server request.")
         self.assertEqual(metric["kind"], "histogram")
         self.assertGreaterEqual(metric["value"], 0)
         self.assertEqual(metric["unit"], "ms")

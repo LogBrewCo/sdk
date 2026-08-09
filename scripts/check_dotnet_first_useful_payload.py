@@ -161,6 +161,10 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         f"unexpected first-useful metric shape: {metric!r}",
     )
     _require(
+        metric.get("description") == "Duration of one completed server request.",
+        "first-useful metric is missing its stable meaning",
+    )
+    _require(
         metric["metadata"].get("routeTemplate") == "/checkout/:cart_id",
         "first-useful metric must use route-template metadata",
     )

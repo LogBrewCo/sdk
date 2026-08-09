@@ -132,6 +132,7 @@ public final class FirstUsefulTelemetry {
             "evt_metric_http_server_duration",
             "2026-06-02T10:00:05Z",
             MetricAttributes.create("http.server.duration", "histogram", 183.4, "ms", "delta")
+                .description("Duration of one completed server request.")
                 .metadata(Map.of(
                     "method", "POST",
                     "routeTemplate", ROUTE_TEMPLATE,

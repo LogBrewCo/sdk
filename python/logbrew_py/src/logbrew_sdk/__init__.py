@@ -187,6 +187,7 @@ class ActionAttributes(TypedDict, total=False):
 class MetricAttributes(TypedDict, total=False):
     """Public metric event attributes."""
     name: str
+    description: str
     kind: Literal["counter", "gauge", "histogram"]
     value: float
     unit: str
@@ -228,6 +229,7 @@ METRIC_TEMPORALITIES_BY_KIND = {
 }
 METRIC_KINDS = set(METRIC_TEMPORALITIES_BY_KIND)
 NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
+MAX_METRIC_DESCRIPTION_LENGTH = 1_024
 DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.co/v1/events"
 _HTTP_USER_AGENT_PRODUCT = "logbrew-sdk-python"
 DEFAULT_MAX_QUEUE_SIZE = 10_000
@@ -1356,6 +1358,26 @@ def require_finite_number(label: str, value: Any) -> None:
         raise SdkError("validation_error", f"{label} must be a finite number")
 
 
+def metric_description_or_none(value: Any) -> str | None:
+    normalized = value.strip() if isinstance(value, str) else ""
+    if (
+        not normalized
+        or len(normalized) > MAX_METRIC_DESCRIPTION_LENGTH
+        or any(
+            ord(character) <= 31
+            or 127 <= ord(character) <= 159
+            or 0xD800 <= ord(character) <= 0xDFFF
+            or ord(character) in {0x2028, 0x2029}
+            for character in normalized
+        )
+    ):
+        raise SdkError(
+            "validation_error",
+            "metric description must be a non-blank string of at most 1024 non-control characters",
+        )
+    return normalized
+
+
 def require_timestamp(timestamp: Any) -> None:
     require_non_empty("timestamp", timestamp)
     if timestamp.endswith("Z"):
@@ -1571,9 +1593,15 @@ def validate_metric(attributes: MetricAttributes) -> dict[str, Any]:
     )
     if kind in NON_NEGATIVE_METRIC_KINDS and value < 0:
         raise SdkError("validation_error", f"metric {kind} value must be non-negative")
+    description = (
+        metric_description_or_none(attributes.get("description"))
+        if "description" in attributes
+        else None
+    )
     return with_common_attributes(
         {
             "name": attributes["name"],
+            **({"description": description} if description is not None else {}),
             "kind": kind,
             "value": value,
             "unit": attributes["unit"],

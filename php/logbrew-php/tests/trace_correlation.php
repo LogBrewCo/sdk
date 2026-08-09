@@ -213,6 +213,7 @@ assertTrue(($spanAttributes['parentSpanId'] ?? null) === '00f067aa0ba902b7', 'ex
 assertTrue(($spanAttributes['name'] ?? null) === 'POST /checkout/:cart_id', 'expected sanitized PHP request span name');
 assertTrue(($spanAttributes['status'] ?? null) === 'error', 'expected 5xx request span error status');
 assertTrue(($metricAttributes['name'] ?? null) === 'http.server.duration', 'expected PHP request duration metric');
+assertTrue(($metricAttributes['description'] ?? null) === 'Duration of one completed server request.', 'expected PHP request duration description');
 assertTrue((phpTraceMetadata($metricEvent)['statusCode'] ?? null) === 503, 'expected PHP metric status code metadata');
 assertTrue((phpTraceMetadata($logEvent)['context.cartId'] ?? null) === 'cart_123', 'expected PHP PSR context metadata');
 assertTrue((phpTraceMetadata($issueEvent)['exceptionMessage'] ?? null) === 'payment provider failed', 'expected PHP issue metadata');

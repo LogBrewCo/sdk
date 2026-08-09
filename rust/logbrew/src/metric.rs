@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 /// Public metric-event builder for explicit low-cardinality metric measurements.
 pub struct MetricEvent {
     name: String,
+    description: Option<String>,
     kind: String,
     value: f64,
     unit: String,
@@ -27,6 +28,7 @@ impl MetricEvent {
     ) -> Self {
         Self {
             name: name.into(),
+            description: None,
             kind: kind.into(),
             value,
             unit: unit.into(),
@@ -34,6 +36,12 @@ impl MetricEvent {
             metadata: None,
             context: None,
         }
+    }
+
+    /// Attach a stable display meaning; do not include identifiers or changing values.
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
     }
 
     /// Attach primitive, low-cardinality metadata to the metric payload.
@@ -69,6 +77,12 @@ impl MetricEvent {
         }
         let mut map = Map::new();
         map.insert("name".to_string(), Value::String(self.name));
+        if let Some(description) = self.description {
+            map.insert(
+                "description".to_string(),
+                Value::String(normalize_metric_description(&description)?),
+            );
+        }
         map.insert("kind".to_string(), Value::String(self.kind));
         map.insert("value".to_string(), Value::from(self.value));
         map.insert("unit".to_string(), Value::String(self.unit));
@@ -77,6 +91,23 @@ impl MetricEvent {
         context_entry(&mut map, self.context)?;
         Ok(map)
     }
+}
+
+fn normalize_metric_description(value: &str) -> Result<String, SdkError> {
+    let normalized = value.trim();
+    let invalid_character = normalized.chars().any(|character| {
+        character <= '\u{001f}'
+            || ('\u{007f}'..='\u{009f}').contains(&character)
+            || character == '\u{2028}'
+            || character == '\u{2029}'
+    });
+    if normalized.is_empty() || normalized.chars().count() > 1024 || invalid_character {
+        return Err(SdkError::new(
+            "validation_error",
+            "metric description must be a non-blank string of at most 1024 non-control characters",
+        ));
+    }
+    Ok(normalized.to_string())
 }
 
 fn validate_metric_temporality(kind: &str, temporality: &str, value: f64) -> Result<(), SdkError> {

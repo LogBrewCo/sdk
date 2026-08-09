@@ -526,10 +526,14 @@ data class MetricAttributes(
     val temporality: String,
     val metadata: Map<String, Any?> = emptyMap(),
     val context: TelemetryContext? = null,
+    val description: String? = null,
 ) {
     fun withMetadata(metadata: Map<String, Any?>): MetricAttributes = copy(metadata = metadata)
 
     fun withContext(context: TelemetryContext): MetricAttributes = copy(context = context.normalized())
+
+    /** Adds a stable display meaning; never use identifiers or changing values. */
+    fun withDescription(description: String): MetricAttributes = copy(description = description)
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("metric name", name)
@@ -543,6 +547,7 @@ data class MetricAttributes(
 
         return OrderedJsonObject()
             .add("name", name)
+            .addIfNotNull("description", Validation.normalizeMetricDescription(description))
             .add("kind", kind)
             .add("value", value)
             .add("unit", unit)

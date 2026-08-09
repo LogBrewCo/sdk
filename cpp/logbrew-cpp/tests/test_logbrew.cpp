@@ -206,17 +206,40 @@ void metric_helper_validates_and_serializes() {
           "{items}",
           "instant",
           {{"queue", "checkout"}, {"sampled", true}},
+          std::string{"  Number of work items currently waiting in the checkout queue.  "},
       });
 
   const std::string json = client.preview_json();
   EXPECT_TRUE(json.find("\"type\":\"metric\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"name\":\"queue.depth\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"description\":\"Number of work items currently waiting in the checkout queue.\"") !=
+              std::string::npos);
   EXPECT_TRUE(json.find("\"kind\":\"gauge\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"value\":42") != std::string::npos);
   EXPECT_TRUE(json.find("\"unit\":\"{items}\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"temporality\":\"instant\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"queue\":\"checkout\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"sampled\":true") != std::string::npos);
+}
+
+void metric_description_validation_is_enforced() {
+  const auto expect_invalid = [](std::string description) {
+    auto client = new_client();
+    logbrew::MetricAttributes metric{"queue.depth", "gauge", 42.0, "{items}", "instant"};
+    metric.description = std::move(description);
+    try {
+      client.metric("evt_metric_bad_description", "2026-06-02T10:00:06Z", std::move(metric));
+      EXPECT_TRUE(false);
+    } catch (const logbrew::SdkException &error) {
+      EXPECT_TRUE(error.code() == "validation_error");
+    }
+  };
+
+  expect_invalid("   ");
+  expect_invalid(std::string(logbrew::max_metric_description_length + 1U, 'a'));
+  expect_invalid(u8"request\u0085count");
+  expect_invalid(u8"request\u2028count");
+  expect_invalid(std::string{"invalid\xC3"});
 }
 
 void trace_context_helpers_validate_and_correlate() {
@@ -610,6 +633,7 @@ int main() {
   preview_json_contains_all_supported_event_types();
   product_timeline_helpers_capture_safe_metadata();
   metric_helper_validates_and_serializes();
+  metric_description_validation_is_enforced();
   trace_context_helpers_validate_and_correlate();
   flush_success_clears_queue();
   empty_flush_is_no_op();

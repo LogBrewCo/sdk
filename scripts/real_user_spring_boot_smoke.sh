@@ -242,6 +242,10 @@ public class Main implements CommandLineRunner {
         require(body.contains("\"name\": \"cache:get\""), "auto-configured Spring cache get span");
         require(body.contains("\"name\": \"cache:evictIfPresent\""), "auto-configured Spring cache evict span");
         require(body.contains("\"name\": \"http.server.duration\""), "captures request duration metric");
+        require(
+            body.contains("\"description\": \"Duration of one completed server request.\""),
+            "captures request duration metric meaning"
+        );
         require(body.contains("\"dbSystem\": \"postgresql\""), "records configured JDBC system");
         require(body.contains("\"dbName\": \"orders\""), "records configured JDBC database name");
         require(body.contains("\"cacheSystem\": \"spring-cache\""), "records configured cache system");

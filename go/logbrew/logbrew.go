@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -530,6 +531,7 @@ type ActionAttributes struct {
 // event.
 type MetricAttributes struct {
 	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
 	Kind        string            `json:"kind"`
 	Value       float64           `json:"value"`
 	Unit        string            `json:"unit"`
@@ -587,7 +589,7 @@ func (c *Client) Action(id, timestamp string, attributes ActionAttributes) error
 }
 
 // Metric queues an explicit, application-owned metric event after validating
-// name, kind, value, unit, temporality, and optional metadata.
+// name, optional description, kind, value, unit, temporality, and optional metadata.
 func (c *Client) Metric(id, timestamp string, attributes MetricAttributes) error {
 	validated, err := validateMetric(attributes)
 	if err != nil {
@@ -1126,6 +1128,10 @@ func validateMetric(attributes MetricAttributes) (map[string]any, error) {
 	if slices.Contains(nonNegativeMetricKinds, attributes.Kind) && attributes.Value < 0 {
 		return nil, &SdkError{Code: "validation_error", Message: fmt.Sprintf("metric %s value must be non-negative", attributes.Kind)}
 	}
+	description, err := metricDescription(attributes.Description)
+	if err != nil {
+		return nil, err
+	}
 	result := map[string]any{
 		"name":        attributes.Name,
 		"kind":        attributes.Kind,
@@ -1133,10 +1139,29 @@ func validateMetric(attributes MetricAttributes) (map[string]any, error) {
 		"unit":        attributes.Unit,
 		"temporality": attributes.Temporality,
 	}
+	if description != "" {
+		result["description"] = description
+	}
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}
 	return addTelemetryContext(result, attributes.Context)
+}
+
+func metricDescription(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	normalized := strings.TrimSpace(value)
+	if normalized == "" || !utf8.ValidString(normalized) || utf8.RuneCountInString(normalized) > 1024 {
+		return "", &SdkError{Code: "validation_error", Message: "metric description must be a non-blank string of at most 1024 non-control characters"}
+	}
+	for _, character := range normalized {
+		if character <= 0x1f || (character >= 0x7f && character <= 0x9f) || character == '\u2028' || character == '\u2029' {
+			return "", &SdkError{Code: "validation_error", Message: "metric description must be a non-blank string of at most 1024 non-control characters"}
+		}
+	}
+	return normalized, nil
 }
 
 func addTelemetryContext(attributes map[string]any, context *TelemetryContext) (map[string]any, error) {

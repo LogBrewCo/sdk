@@ -524,7 +524,7 @@ int main(void) {
   must(logbrew_client_action_with_options(client, "evt_action_rich_001", "2026-08-06T10:01:11Z",
       (LogBrewActionAttributes){"checkout.submit", "failure"}, empty_options, &error), &error);
   must(logbrew_client_metric_with_options(client, "evt_metric_rich_001", "2026-08-06T10:01:12Z",
-      (LogBrewMetricAttributes){"payment.authorization.failures", "counter", 1.0, "{failure}", "delta", {NULL, 0U}},
+      (LogBrewMetricAttributes){"payment.authorization.failures", "counter", 1.0, "{failure}", "delta", {NULL, 0U}, NULL},
       empty_options, &error), &error);
 
   must(logbrew_client_preview_json(client, &json, &error), &error);

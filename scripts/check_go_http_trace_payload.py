@@ -97,6 +97,10 @@ def check_payload(payload_path: Path, stderr_path: Path) -> None:
         metric.get("name") == "http.server.duration" and metric.get("kind") == "histogram",
         f"unexpected request metric shape: {metric!r}",
     )
+    _require(
+        metric.get("description") == "Duration of one completed server request.",
+        "request metric is missing its stable meaning",
+    )
     _require(metric.get("unit") == "ms", f"unexpected request metric unit: {metric!r}")
     metric_metadata = _metadata(by_type["metric"])
     _require(

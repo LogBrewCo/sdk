@@ -43,7 +43,15 @@ int main() {
                 logbrew::ActionAttributes{"checkout.submit", "failure", {{"traceId", "spoofed_trace"}}});
   client.span("evt_cpp_trace_span_001", "2026-06-02T10:00:05Z", span);
   client.metric("evt_cpp_trace_metric_001", "2026-06-02T10:00:06Z",
-                logbrew::MetricAttributes{"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata});
+                logbrew::MetricAttributes{
+                    "http.server.duration",
+                    "histogram",
+                    37.5,
+                    "ms",
+                    "delta",
+                    trace_metadata,
+                    std::string{"Duration of one completed server request."},
+                });
   client.capture_product_action("evt_cpp_trace_product_action_001", "2026-06-02T10:00:07Z",
                                 logbrew::ProductActionAttributes{"checkout.submit", "failure", timeline_context, {}});
   client.capture_network_milestone(

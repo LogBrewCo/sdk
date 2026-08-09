@@ -51,6 +51,7 @@ def main() -> int:
     require(metric["value"] == 183.4, "bad metric value")
     require(metric["unit"] == "ms", "bad metric unit")
     require(metric["temporality"] == "delta", "bad metric temporality")
+    require(metric["description"] == "Duration of one completed server request.", "bad metric description")
     require(metric["metadata"] == metadata, "metric/span metadata should match")
 
     text = Path(sys.argv[1]).read_text()

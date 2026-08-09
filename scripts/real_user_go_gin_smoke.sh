@@ -252,6 +252,7 @@ func TestInstalledGinMiddlewareRequestTracePanicAndPrivacy(t *testing.T) {
 		!strings.Contains(payload, `"stackFrames": [`) ||
 		!strings.Contains(payload, `"filename": "gin_integration_test.go"`) ||
 		!strings.Contains(payload, `"name": "http.server.duration"`) ||
+		!strings.Contains(payload, `"description": "Duration of one completed server request."`) ||
 		!strings.Contains(payload, `"service": "checkout-api"`) {
 		t.Fatalf("installed Gin telemetry missing expected correlation: %s", payload)
 	}

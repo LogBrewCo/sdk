@@ -18,6 +18,7 @@ struct MetricTests {
                 unit: "items",
                 temporality: .instant,
                 metadata: ["queue": "checkout", "shard": 1],
+                description: "  Number of items waiting in the checkout queue.  ",
             ),
         )
 
@@ -30,12 +31,40 @@ struct MetricTests {
         #expect(events.count == 1)
         #expect(event["type"] as? String == "metric")
         #expect(attributes["name"] as? String == "queue.depth")
+        #expect(attributes["description"] as? String == "Number of items waiting in the checkout queue.")
         #expect(attributes["kind"] as? String == "gauge")
         #expect((attributes["value"] as? NSNumber)?.doubleValue == -2)
         #expect(attributes["unit"] as? String == "items")
         #expect(attributes["temporality"] as? String == "instant")
         #expect(metadata["queue"] as? String == "checkout")
         #expect(metadata["shard"] as? Int == 1)
+    }
+
+    @Test("metric helper rejects unsafe descriptions")
+    func metricHelperRejectsUnsafeDescriptions() throws {
+        let descriptions = [
+            "   ",
+            String(repeating: "M", count: 1025),
+            "request\u{0085}count",
+            "request\u{2028}count",
+        ]
+        for description in descriptions {
+            let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
+            #expect(throws: SdkError.self) {
+                try client.metric(
+                    "evt_metric_bad_description",
+                    timestamp: "2026-06-02T10:00:06Z",
+                    attributes: MetricAttributes(
+                        name: "queue.depth",
+                        kind: .gauge,
+                        value: 5,
+                        unit: "items",
+                        temporality: .instant,
+                        description: description,
+                    ),
+                )
+            }
+        }
     }
 
     @Test("metric helper rejects invalid values and temporalities")

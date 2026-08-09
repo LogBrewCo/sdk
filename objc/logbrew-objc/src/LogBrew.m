@@ -331,6 +331,46 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
   return normalized;
 }
 
+static NSString *_Nullable LBWNormalizeMetricDescription(
+    NSString *value,
+    NSError *_Nullable *_Nullable error) {
+  NSString *normalized = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSUInteger index = 0U;
+  NSUInteger scalarCount = 0U;
+  BOOL invalid = [normalized length] == 0U;
+  while (!invalid && index < [normalized length]) {
+    unichar first = [normalized characterAtIndex:index++];
+    UTF32Char scalar = first;
+    if (CFStringIsSurrogateHighCharacter(first)) {
+      if (index >= [normalized length]) {
+        invalid = YES;
+        break;
+      }
+      unichar second = [normalized characterAtIndex:index++];
+      if (!CFStringIsSurrogateLowCharacter(second)) {
+        invalid = YES;
+        break;
+      }
+      scalar = CFStringGetLongCharacterForSurrogatePair(first, second);
+    } else if (CFStringIsSurrogateLowCharacter(first)) {
+      invalid = YES;
+      break;
+    }
+    scalarCount++;
+    invalid = scalarCount > 1024U || scalar <= 0x1FU || (scalar >= 0x7FU && scalar <= 0x9FU) ||
+        scalar == 0x2028U || scalar == 0x2029U;
+  }
+  if (invalid) {
+    LBWSetError(error, LBWMakeError(
+        LBWErrorKindValidation,
+        @"validation_error",
+        @"metric description must be a non-blank string of at most 1024 non-control characters",
+        NO));
+    return nil;
+  }
+  return normalized;
+}
+
 @implementation LBWConfig
 
 - (instancetype)init {
@@ -828,6 +868,16 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
                error:(NSError **)error {
   NSMutableDictionary<NSString *, id> *clean = [NSMutableDictionary dictionary];
   NSString *name = LBWStringAttribute(attributes, @"name", @"metric name", YES, YES, error);
+  NSString *description = LBWStringAttribute(attributes, @"description", @"metric description", NO, YES, error);
+  if (description == nil && attributes[@"description"] != nil) {
+    return NO;
+  }
+  if (description != nil) {
+    description = LBWNormalizeMetricDescription(description, error);
+    if (description == nil) {
+      return NO;
+    }
+  }
   NSString *kind = LBWStringAttribute(attributes, @"kind", @"metric kind", YES, YES, error);
   NSNumber *value = LBWFiniteNumberAttribute(attributes, @"value", @"metric value", error);
   NSString *unit = LBWStringAttribute(attributes, @"unit", @"metric unit", YES, YES, error);
@@ -854,6 +904,9 @@ static NSString *_Nullable LBWBoundedProductAnalyticsSurface(
     }
   }
   clean[@"name"] = name;
+  if (description != nil) {
+    clean[@"description"] = description;
+  }
   clean[@"kind"] = kind;
   clean[@"value"] = value;
   clean[@"unit"] = unit;

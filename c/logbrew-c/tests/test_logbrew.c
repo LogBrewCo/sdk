@@ -235,7 +235,8 @@ static void metric_helper_validates_and_serializes(void) {
     42.0,
     "{items}",
     "instant",
-    {metadata, sizeof(metadata) / sizeof(metadata[0])}
+    {metadata, sizeof(metadata) / sizeof(metadata[0])},
+    "  Number of items waiting in the checkout queue.  "
   };
   logbrew_error_clear(&error);
   EXPECT_TRUE(logbrew_client_metric(client, "evt_metric_001", "2026-06-02T10:00:06Z",
@@ -243,6 +244,7 @@ static void metric_helper_validates_and_serializes(void) {
   EXPECT_TRUE(logbrew_client_preview_json(client, &json, &error) == LOGBREW_OK);
   EXPECT_TRUE(strstr(json, "\"type\":\"metric\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"name\":\"queue.depth\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"description\":\"Number of items waiting in the checkout queue.\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"kind\":\"gauge\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"value\":42") != NULL);
   EXPECT_TRUE(strstr(json, "\"unit\":\"{items}\"") != NULL);
@@ -271,6 +273,13 @@ static void metric_helper_validates_and_serializes(void) {
   EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_value", "2026-06-02T10:00:06Z",
       metric, &error) == LOGBREW_VALIDATION_ERROR);
   metric.value = 42.0;
+  metric.description = "request\302\205count";
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_description", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_VALIDATION_ERROR);
+  metric.description = "request\342\200\250";
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_description_end", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_VALIDATION_ERROR);
+  metric.description = NULL;
   metric.metadata.entries = NULL;
   metric.metadata.count = 1U;
   EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_metadata", "2026-06-02T10:00:06Z",
@@ -356,7 +365,8 @@ static void trace_context_helpers_validate_and_correlate(void) {
       (LogBrewActionAttributes){"checkout.submit", "failure"}, &error) == LOGBREW_OK);
   EXPECT_TRUE(logbrew_client_span(client, "evt_trace_span", "2026-06-02T10:00:05Z", span, &error) == LOGBREW_OK);
   EXPECT_TRUE(logbrew_client_metric(client, "evt_trace_metric", "2026-06-02T10:00:06Z",
-      (LogBrewMetricAttributes){"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata}, &error) == LOGBREW_OK);
+      (LogBrewMetricAttributes){"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata, NULL},
+      &error) == LOGBREW_OK);
   EXPECT_TRUE(logbrew_client_product_action(client, "evt_trace_product_action", "2026-06-02T10:00:07Z",
       (LogBrewProductActionAttributes){"checkout.submit", "failure", timeline_context, {NULL, 0U}}, &error) == LOGBREW_OK);
   EXPECT_TRUE(logbrew_client_preview_json(client, &json, &error) == LOGBREW_OK);

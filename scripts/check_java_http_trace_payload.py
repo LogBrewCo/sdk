@@ -97,6 +97,7 @@ def main() -> int:
     assert metric_attrs["kind"] == "histogram"
     assert metric_attrs["value"] == 183.4
     assert metric_attrs["unit"] == "ms"
+    assert metric_attrs["description"] == "Duration of one completed server request."
 
     serialized = json.dumps(payload, sort_keys=True)
     forbidden = ["cart=private", "#review", "traceparent", "00-4bf92f"]

@@ -86,6 +86,10 @@ def main():
     require(metadata(issue_event).get("routeTemplate") == "/checkout/:cart_id", "issue route metadata missing")
     require(action_event["attributes"]["metadata"]["routeTemplate"] == "/checkout/:cart_id", "action route must be sanitized")
     require(metric_event["attributes"]["name"] == "http.server.duration", "metric name mismatch")
+    require(
+        metric_event["attributes"].get("description") == "Duration of one completed server request.",
+        "metric is missing its stable meaning",
+    )
     require(metadata(metric_event).get("statusCode") == 202, "metric status metadata missing")
 
 

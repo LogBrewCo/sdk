@@ -145,11 +145,13 @@ fun main() {
         "2026-06-02T10:00:06Z",
         MetricAttributes
             .create("queue.depth", "gauge", 42.0, "{items}", "instant")
+            .withDescription("Number of items waiting in the checkout queue.")
             .withMetadata(mapOf("queue" to "checkout")),
     )
     val metricPreview = metricClient.previewJson()
     check("\"type\": \"metric\"" in metricPreview)
     check("\"name\": \"queue.depth\"" in metricPreview)
+    check("\"description\": \"Number of items waiting in the checkout queue.\"" in metricPreview)
     check("\"temporality\": \"instant\"" in metricPreview)
     check("\"queue\": \"checkout\"" in metricPreview)
 

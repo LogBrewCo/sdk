@@ -531,6 +531,7 @@ class LogBrewSdkTests(unittest.TestCase):
             "2026-06-02T10:00:06Z",
             {
                 "name": "queue.depth",
+                "description": "  Number of items waiting in the checkout queue.  ",
                 "kind": "gauge",
                 "value": -2,
                 "unit": "{items}",
@@ -546,6 +547,7 @@ class LogBrewSdkTests(unittest.TestCase):
             event["attributes"],
             {
                 "name": "queue.depth",
+                "description": "Number of items waiting in the checkout queue.",
                 "kind": "gauge",
                 "value": -2,
                 "unit": "{items}",
@@ -553,6 +555,35 @@ class LogBrewSdkTests(unittest.TestCase):
                 "metadata": {"service": "worker", "queue": "critical"},
             },
         )
+
+    def test_metric_rejects_unsafe_description(self) -> None:
+        descriptions = (
+            None,
+            42,
+            "",
+            "   ",
+            "M" * 1_025,
+            "request\u0085count",
+            "request\u2028count",
+            "request\ud800count",
+        )
+        for description in descriptions:
+            with self.subTest(description=description), self.assertRaisesRegex(
+                SdkError,
+                "metric description must be a non-blank string of at most 1024 non-control characters",
+            ):
+                sample_client().metric(
+                    "evt_metric_001",
+                    "2026-06-02T10:00:06Z",
+                    {
+                        "name": "queue.depth",
+                        "description": description,  # type: ignore[typeddict-item]
+                        "kind": "gauge",
+                        "value": 2,
+                        "unit": "{items}",
+                        "temporality": "instant",
+                    },
+                )
 
     def test_metric_rejects_non_finite_value(self) -> None:
         client = sample_client()

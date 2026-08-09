@@ -2299,6 +2299,7 @@ function metricDescriptionOrUndefined(value) {
       return code !== undefined && (
         code <= 31
         || (code >= 127 && code <= 159)
+        || (code >= 0xd800 && code <= 0xdfff)
         || code === 0x2028
         || code === 0x2029
       );
