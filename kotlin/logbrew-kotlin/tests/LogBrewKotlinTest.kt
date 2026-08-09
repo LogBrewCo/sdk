@@ -146,11 +146,13 @@ private fun metricEventValidatesAndSerializesAttributes() {
         "2026-06-02T10:00:06Z",
         MetricAttributes
             .create("queue.depth", "gauge", 42.0, "{items}", "instant")
+            .withDescription("  Number of items waiting in the checkout queue.  ")
             .withMetadata(mapOf("queue" to "checkout", "shard" to 1)),
     )
     val body = client.previewJson()
     check("\"type\": \"metric\"" in body)
     check("\"name\": \"queue.depth\"" in body)
+    check("\"description\": \"Number of items waiting in the checkout queue.\"" in body)
     check("\"kind\": \"gauge\"" in body)
     check("\"value\": 42.0" in body)
     check("\"unit\": \"{items}\"" in body)
@@ -179,6 +181,17 @@ private fun metricValueAndTemporalityValidationFailsCleanly() {
             "2026-06-02T10:00:06Z",
             MetricAttributes.create("queue.depth", "gauge", Double.NaN, "{items}", "instant"),
         )
+    }
+    listOf("   ", "M".repeat(1_025), "request\u0085count", "request\u2028count", "request\ud800count").forEach { description ->
+        expect("validation_error") {
+            newClient().metric(
+                "evt_metric_bad_description",
+                "2026-06-02T10:00:06Z",
+                MetricAttributes
+                    .create("queue.depth", "gauge", 2.0, "{items}", "instant")
+                    .withDescription(description),
+            )
+        }
     }
 }
 

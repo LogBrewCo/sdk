@@ -128,6 +128,7 @@ final class LogBrewHttpRequestTelemetry
         if ($metricEventId !== null) {
             $this->client->metric($metricEventId, $timestamp, [
                 'name' => 'http.server.duration',
+                'description' => 'Duration of one completed server request.',
                 'kind' => 'histogram',
                 'value' => $durationMs,
                 'unit' => 'ms',

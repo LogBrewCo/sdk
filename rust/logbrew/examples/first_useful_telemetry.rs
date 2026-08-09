@@ -127,6 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "evt_metric_http_server_duration",
                 "2026-06-02T10:00:05Z",
                 MetricEvent::new("http.server.duration", "histogram", 183.4, "ms", "delta")
+                    .with_description("Duration of one completed server request.")
                     .with_metadata(metric_metadata),
             )?;
 

@@ -278,6 +278,7 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 	if h.config.CaptureRequestMetric {
 		metric := MetricAttributesWithTrace(request.Context(), MetricAttributes{
 			Name:        "http.server.duration",
+			Description: "Duration of one completed server request.",
 			Kind:        "histogram",
 			Value:       durationMs,
 			Unit:        "ms",

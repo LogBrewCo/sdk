@@ -8,6 +8,7 @@ import java.util.Map;
  */
 public final class MetricAttributes {
     private final String name;
+    private String description;
     private final String kind;
     private final double value;
     private final String unit;
@@ -29,6 +30,15 @@ public final class MetricAttributes {
      */
     public static MetricAttributes create(String name, String kind, double value, String unit, String temporality) {
         return new MetricAttributes(name, kind, value, unit, temporality);
+    }
+
+    /**
+     * Sets an optional stable display meaning. It is not a query dimension and
+     * must not contain identifiers, personal data, or changing values.
+     */
+    public MetricAttributes description(String description) {
+        this.description = description;
+        return this;
     }
 
     /**
@@ -57,6 +67,7 @@ public final class MetricAttributes {
 
         Map<String, Object> mapped = new LinkedHashMap<>();
         mapped.put("name", name);
+        Validation.putOptionalString(mapped, "description", Validation.normalizeMetricDescription(description));
         mapped.put("kind", kind);
         mapped.put("value", Double.valueOf(value));
         mapped.put("unit", unit);

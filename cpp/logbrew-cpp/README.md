@@ -189,10 +189,11 @@ client.metric(
         42.0,
         "{items}",
         "instant",
-        {{"queue", "checkout"}}});
+        {{"queue", "checkout"}},
+        std::string{"Number of work items currently waiting in the checkout queue."}});
 ```
 
-Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality. Keep metric metadata primitive and low-cardinality, such as stable route templates, queue names, feature names, regions, or coarse result categories. Do not attach user IDs, request IDs, per-session identifiers, raw URLs, payloads, or unbounded labels as metric metadata.
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality. The optional `description` is trimmed, limited to 1024 Unicode scalar values, and must explain the metric's stable generic meaning. It is not a query dimension: do not put identifiers, personal data, request values, or other changing content in it. Keep metric metadata primitive and low-cardinality, such as stable route templates, queue names, feature names, regions, or coarse result categories. Do not attach user IDs, request IDs, per-session identifiers, raw URLs, payloads, or unbounded labels as metric metadata.
 
 The C++ SDK does not automatically collect runtime or framework metrics. Add the measurements your application owns, then send them with the same `client.flush(...)` path as other events.
 

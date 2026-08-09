@@ -119,6 +119,7 @@ func validateMetric(_ attributes: MetricAttributes) throws -> MetricAttributes {
         }
     }
     try validateMetadata(attributes.metadata, label: "metric metadata")
+    let description = try attributes.description.map(normalizeMetricDescription)
     return try MetricAttributes(
         name: attributes.name,
         kind: attributes.kind,
@@ -127,7 +128,25 @@ func validateMetric(_ attributes: MetricAttributes) throws -> MetricAttributes {
         temporality: attributes.temporality,
         metadata: attributes.metadata,
         context: attributes.context.map { try validateTelemetryContext($0) },
+        description: description,
     )
+}
+
+private func normalizeMetricDescription(_ value: String) throws -> String {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let invalidCharacter = normalized.unicodeScalars.contains { scalar in
+        scalar.value <= 0x1F
+            || (0x7F ... 0x9F).contains(scalar.value)
+            || scalar.value == 0x2028
+            || scalar.value == 0x2029
+    }
+    guard !normalized.isEmpty, normalized.unicodeScalars.count <= 1024, !invalidCharacter else {
+        throw SdkError(
+            code: "validation_error",
+            message: "metric description must be a non-blank string of at most 1024 non-control characters",
+        )
+    }
+    return normalized
 }
 
 func requireNonEmpty(_ label: String, _ value: String) throws {

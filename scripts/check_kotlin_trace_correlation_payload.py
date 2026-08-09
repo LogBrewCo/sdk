@@ -94,6 +94,12 @@ def main() -> None:
             raise SystemExit("event attributes must be objects")
         require_trace_metadata(attributes, span_id)
 
+    metric_attributes = metric.get("attributes")
+    if not isinstance(metric_attributes, dict):
+        raise SystemExit("metric attributes must be an object")
+    if metric_attributes.get("description") != "Duration of one completed server request.":
+        raise SystemExit("metric is missing its stable meaning")
+
     span_attributes = span.get("attributes")
     if not isinstance(span_attributes, dict):
         raise SystemExit("span attributes must be an object")

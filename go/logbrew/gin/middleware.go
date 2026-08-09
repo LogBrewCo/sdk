@@ -333,6 +333,7 @@ func (m *middleware) capture(
 		metricMetadata := mergeMetadata(metadata, trace.Metadata())
 		metric := logbrew.MetricAttributesWithTrace(c.Request.Context(), logbrew.MetricAttributes{
 			Name:        m.metricName,
+			Description: "Duration of one completed server request.",
 			Kind:        "histogram",
 			Value:       durationMs,
 			Unit:        "ms",

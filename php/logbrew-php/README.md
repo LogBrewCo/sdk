@@ -233,6 +233,7 @@ use LogBrew\LogBrewClient;
 $client = LogBrewClient::create('LOGBREW_API_KEY', 'my-php-app', '1.0.0');
 $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
     'name' => 'queue.depth',
+    'description' => 'Number of items waiting in the checkout queue.',
     'kind' => 'gauge',
     'value' => 42,
     'unit' => '{items}',
@@ -241,7 +242,7 @@ $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
 ]);
 ```
 
-Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as queue or route pattern and put shared identity in `TelemetryContext`. The runtime identity described above is context, not a runtime measurement: this SDK does not automatically collect PHP memory, CPU, FPM, framework, or database metrics yet.
+Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. An optional `description` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Prefer stable, low-cardinality primitive metadata such as queue or route pattern and put shared identity in `TelemetryContext`. The runtime identity described above is context, not a runtime measurement: this SDK does not automatically collect PHP memory, CPU, FPM, framework, or database metrics yet.
 
 ## Product and Network Timelines
 

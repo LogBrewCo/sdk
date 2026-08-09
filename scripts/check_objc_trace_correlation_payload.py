@@ -74,6 +74,10 @@ def main() -> None:
     ):
         assert_trace_metadata(metadata_for(payload, event_id), local_span_id)
 
+    metric_attributes = event_by_id(payload, "evt_trace_metric_001").get("attributes", {})
+    if metric_attributes.get("description") != "Duration of one completed server request.":
+        fail("metric is missing its stable meaning")
+
     issue_metadata = metadata_for(payload, "evt_trace_issue_001")
     if issue_metadata.get("traceId") == "caller_supplied_trace":
         fail("caller-supplied traceId overrode active trace metadata")

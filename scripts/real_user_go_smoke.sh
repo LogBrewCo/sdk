@@ -656,6 +656,7 @@ func TestInstalledClientMetricPreview(t *testing.T) {
 		"2026-06-02T10:00:06Z",
 		logbrew.MetricAttributes{
 			Name:        "queue.depth",
+			Description: "Number of checkout jobs waiting to be processed.",
 			Kind:        "gauge",
 			Value:       42,
 			Unit:        "{items}",
@@ -675,6 +676,9 @@ func TestInstalledClientMetricPreview(t *testing.T) {
 	}
 	if !strings.Contains(payload, "\"temporality\": \"instant\"") {
 		t.Fatalf("preview missing metric temporality: %s", payload)
+	}
+	if !strings.Contains(payload, "\"description\": \"Number of checkout jobs waiting to be processed.\"") {
+		t.Fatalf("preview missing metric description: %s", payload)
 	}
 }
 
@@ -2012,7 +2016,8 @@ grep -q 'fail' shutdown-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.Metric > metric-doc.txt
 grep -Fq 'func (c *Client) Metric(id, timestamp string, attributes MetricAttributes) error' metric-doc.txt
 grep -q 'Metric queues an explicit, application-owned metric event after validating' metric-doc.txt
-grep -q 'name, kind, value, unit, temporality, and optional metadata' metric-doc.txt
+grep -q 'name, optional description, kind, value, unit, temporality, and optional' metric-doc.txt
+grep -q 'metadata\.' metric-doc.txt
 GOFLAGS=-mod=readonly go list -deps -json ./... > dependency-list.json
 python3 - <<'PY'
 import json

@@ -944,7 +944,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.metric(
         "evt_metric_001",
         "2026-06-02T10:00:06Z",
-        MetricEvent::new("checkout.request.duration", "histogram", 42.5, "ms", "delta"),
+        MetricEvent::new("checkout.request.duration", "histogram", 42.5, "ms", "delta")
+            .with_description("Duration of one completed checkout request."),
     )?;
 
     println!("{}", client.preview_json()?);
@@ -952,7 +953,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Metric kinds are `counter`, `gauge`, and `histogram`. Gauge metrics use `instant` temporality; counter and histogram metrics use `delta` or `cumulative` temporality and must be non-negative.
+Metric kinds are `counter`, `gauge`, and `histogram`. Gauge metrics use `instant` temporality; counter and histogram metrics use `delta` or `cumulative` temporality and must be non-negative. An optional `with_description(...)` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension.
 
 ## Product And Network Timelines
 

@@ -15,6 +15,8 @@ namespace LogBrew
 
         public string Name { get; }
 
+        public string? Description { get; private set; }
+
         public string Kind { get; }
 
         public double Value { get; }
@@ -35,6 +37,13 @@ namespace LogBrew
         public MetricAttributes WithMetadata(IDictionary<string, object?> metadata)
         {
             Metadata = metadata;
+            return this;
+        }
+
+        /// <summary>Adds a stable display meaning; never use identifiers or changing values.</summary>
+        public MetricAttributes WithDescription(string description)
+        {
+            Description = description;
             return this;
         }
 
@@ -59,7 +68,9 @@ namespace LogBrew
             }
 
             var payload = new OrderedJsonObject()
-                .Add("name", Name)
+                .Add("name", Name);
+            payload.AddIfNotNull("description", Validation.NormalizeMetricDescription(Description));
+            payload
                 .Add("kind", Kind)
                 .Add("value", Value)
                 .Add("unit", Unit)

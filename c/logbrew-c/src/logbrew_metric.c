@@ -85,6 +85,103 @@ static LogBrewStatus require_finite_number(const char *label, double value, LogB
   return LOGBREW_VALIDATION_ERROR;
 }
 
+static bool metric_utf8_continuation(unsigned char value) {
+  return value >= 0x80U && value <= 0xbfU;
+}
+
+static bool metric_description_codepoint(
+    const unsigned char *value,
+    size_t length,
+    size_t *index,
+    unsigned long *codepoint) {
+  unsigned char first = value[*index];
+  if (first < 0x80U) {
+    *codepoint = first;
+    *index += 1U;
+    return true;
+  }
+  if (first >= 0xc2U && first <= 0xdfU && *index + 1U < length && metric_utf8_continuation(value[*index + 1U])) {
+    *codepoint = ((unsigned long)(first & 0x1fU) << 6U) | (unsigned long)(value[*index + 1U] & 0x3fU);
+    *index += 2U;
+    return true;
+  }
+  if (first >= 0xe0U && first <= 0xefU && *index + 2U < length &&
+      metric_utf8_continuation(value[*index + 1U]) && metric_utf8_continuation(value[*index + 2U]) &&
+      !(first == 0xe0U && value[*index + 1U] < 0xa0U) &&
+      !(first == 0xedU && value[*index + 1U] > 0x9fU)) {
+    *codepoint = ((unsigned long)(first & 0x0fU) << 12U) |
+        ((unsigned long)(value[*index + 1U] & 0x3fU) << 6U) |
+        (unsigned long)(value[*index + 2U] & 0x3fU);
+    *index += 3U;
+    return true;
+  }
+  if (first >= 0xf0U && first <= 0xf4U && *index + 3U < length &&
+      metric_utf8_continuation(value[*index + 1U]) && metric_utf8_continuation(value[*index + 2U]) &&
+      metric_utf8_continuation(value[*index + 3U]) &&
+      !(first == 0xf0U && value[*index + 1U] < 0x90U) &&
+      !(first == 0xf4U && value[*index + 1U] > 0x8fU)) {
+    *codepoint = ((unsigned long)(first & 0x07U) << 18U) |
+        ((unsigned long)(value[*index + 1U] & 0x3fU) << 12U) |
+        ((unsigned long)(value[*index + 2U] & 0x3fU) << 6U) |
+        (unsigned long)(value[*index + 3U] & 0x3fU);
+    *index += 4U;
+    return true;
+  }
+  return false;
+}
+
+static LogBrewStatus normalize_metric_description(
+    const char *value,
+    char **normalized,
+    LogBrewError *error) {
+  const unsigned char *start;
+  const unsigned char *end;
+  size_t length;
+  size_t index = 0U;
+  size_t scalar_count = 0U;
+  bool invalid = false;
+  char *copy;
+  *normalized = NULL;
+  if (value == NULL) {
+    return LOGBREW_OK;
+  }
+  start = (const unsigned char *)value;
+  while (*start != '\0' && isspace(*start)) {
+    start++;
+  }
+  end = start + strlen((const char *)start);
+  while (end > start && isspace(*(end - 1U))) {
+    end--;
+  }
+  length = (size_t)(end - start);
+  while (index < length) {
+    unsigned long codepoint = 0UL;
+    if (!metric_description_codepoint(start, length, &index, &codepoint)) {
+      break;
+    }
+    scalar_count++;
+    if (codepoint <= 0x1fUL || (codepoint >= 0x7fUL && codepoint <= 0x9fUL) ||
+        codepoint == 0x2028UL || codepoint == 0x2029UL) {
+      invalid = true;
+      break;
+    }
+  }
+  if (length == 0U || invalid || index != length || scalar_count > 1024U) {
+    set_metric_error(error, "validation_error",
+        "metric description must be a non-blank string of at most 1024 non-control characters");
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  copy = (char *)malloc(length + 1U);
+  if (copy == NULL) {
+    set_metric_error(error, "allocation_error", "out of memory");
+    return LOGBREW_ALLOCATION_ERROR;
+  }
+  memcpy(copy, start, length);
+  copy[length] = '\0';
+  *normalized = copy;
+  return LOGBREW_OK;
+}
+
 static void metric_buffer_dispose(LogBrewMetricBuffer *buffer) {
   free(buffer->data);
   buffer->data = NULL;
@@ -288,6 +385,7 @@ LogBrewStatus logbrew_client_metric_with_options(
   LogBrewMetricBuffer buffer = {0};
   bool needs_comma = false;
   char *attributes_json = NULL;
+  char *description = NULL;
   LogBrewStatus status = require_text("metric name", attributes.name, error);
   if (status == LOGBREW_OK) {
     status = require_allowed("metric kind", attributes.kind, kinds, sizeof(kinds) / sizeof(kinds[0]), error);
@@ -318,10 +416,16 @@ LogBrewStatus logbrew_client_metric_with_options(
     }
   }
   if (status == LOGBREW_OK) {
+    status = normalize_metric_description(attributes.description, &description, error);
+  }
+  if (status == LOGBREW_OK) {
     status = metric_append_char(&buffer, '{', error);
   }
   if (status == LOGBREW_OK) {
     status = append_named_string(&buffer, "name", attributes.name, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK && description != NULL) {
+    status = append_named_string(&buffer, "description", description, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = append_named_string(&buffer, "kind", attributes.kind, &needs_comma, error);
@@ -342,9 +446,11 @@ LogBrewStatus logbrew_client_metric_with_options(
     status = metric_append_char(&buffer, '}', error);
   }
   if (status != LOGBREW_OK) {
+    free(description);
     metric_buffer_dispose(&buffer);
     return status;
   }
+  free(description);
   attributes_json = buffer.data;
   return logbrew_client_push_event_json_with_context(
       client, "metric", id, timestamp, attributes_json, options.context, NULL, error);

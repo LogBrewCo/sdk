@@ -92,6 +92,24 @@ internal object Validation {
         }
     }
 
+    fun normalizeMetricDescription(value: String?): String? {
+        if (value == null) {
+            return null
+        }
+        val normalized = value.trim()
+        val invalidCharacter =
+            normalized.codePoints().anyMatch { character ->
+                character <= 0x1f || character in 0x7f..0x9f || character in 0xd800..0xdfff || character == 0x2028 || character == 0x2029
+            }
+        if (normalized.isEmpty() || normalized.codePointCount(0, normalized.length) > 1024 || invalidCharacter) {
+            throw SdkException(
+                "validation_error",
+                "metric description must be a non-blank string of at most 1024 non-control characters",
+            )
+        }
+        return normalized
+    }
+
     fun requireMetadataValue(
         key: String,
         value: Any?,

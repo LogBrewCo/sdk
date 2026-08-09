@@ -63,6 +63,7 @@ internal static class ServerRequestTelemetryTests
         Require(preview.Contains("\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"", StringComparison.Ordinal), "expected trace correlation");
         Require(preview.Contains("\"parentSpanId\": \"00f067aa0ba902b7\"", StringComparison.Ordinal), "expected incoming parent span");
         Require(preview.Contains("\"name\": \"http.server.duration\"", StringComparison.Ordinal), "expected request duration metric");
+        Require(preview.Contains("\"description\": \"Duration of one completed server request.\"", StringComparison.Ordinal), "expected request duration description");
         Require(preview.Contains("\"framework\": \"aspnetcore\"", StringComparison.Ordinal), "expected framework metadata");
         Require(preview.Contains("\"user.id\": \"user_123\"", StringComparison.Ordinal), "expected primitive user-safe metadata");
         Require(!preview.Contains("coupon=dropme", StringComparison.Ordinal), "query text must not be captured");

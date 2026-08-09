@@ -195,6 +195,7 @@ def create_request_metric_attributes(
         duration_value = 0.0
     return {
         "name": metric_name,
+        "description": "Duration of one completed server request.",
         "kind": "histogram",
         "value": duration_value,
         "unit": "ms",

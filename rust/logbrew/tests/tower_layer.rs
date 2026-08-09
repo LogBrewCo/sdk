@@ -194,6 +194,10 @@ async fn tower_request_telemetry_layer_queues_span_and_metric() {
     assert_eq!(span["metadata"]["statusCodeClass"], "2xx");
     assert_eq!(span["metadata"]["framework"], "tower");
     assert_eq!(metric["name"], "http.server.duration");
+    assert_eq!(
+        metric["description"],
+        "Duration of one completed server request."
+    );
     assert_eq!(metric["metadata"], span["metadata"]);
     assert_eq!(span["context"], metric["context"]);
     assert_eq!(span["context"]["resource"]["framework"]["name"], "tower");

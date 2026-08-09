@@ -121,6 +121,8 @@ def main() -> None:
     metric_attributes = metric.get("attributes")
     if not isinstance(metric_attributes, dict):
         raise SystemExit("metric attributes must be an object")
+    if metric_attributes.get("description") != "Duration of one completed server request.":
+        raise SystemExit("metric is missing its stable meaning")
     require_trace_metadata(metric_attributes, span_id)
     require_typed_trace_context(metric_attributes, span_id)
 

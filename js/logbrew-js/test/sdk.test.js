@@ -2219,7 +2219,7 @@ test("metric helper rejects unsafe values", () => {
     }),
     /metric temporality for gauge must be one of: instant/
   );
-  for (const description of [null, "", "   ", "M".repeat(1025), "request\u0085count", "request\u2028count"]) {
+  for (const description of [null, "", "   ", "M".repeat(1025), "request\u0085count", "request\u2028count", "request\ud800count"]) {
     assert.throws(
       () => client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
         name: "checkout.queue_depth",

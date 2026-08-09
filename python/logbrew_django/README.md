@@ -136,7 +136,7 @@ def checkout_view(request, order_id):
 
 Run `python -m logbrew_django.examples dependency-spans` to see a local request span parenting SQLite, cache, and queue child spans from an installed package. LogBrew does not patch database drivers, cache clients, queue frameworks, or broker metadata globally, and the helpers avoid SQL values, cache keys/values, queue bodies, headers, baggage, and tracestate.
 
-Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
+Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests. Each generated metric carries the stable description `Duration of one completed server request.` so its purpose remains clear in investigations:
 
 ```python
 configure_logbrew(

@@ -93,6 +93,7 @@ LogBrew::Telemetry.with_context(request_context) do
       "evt_metric_http_server_duration",
       "2026-06-02T10:00:05Z",
       name: "http.server.duration",
+      description: "Duration of one completed server request.",
       kind: "histogram",
       value: 183.4,
       unit: "ms",

@@ -56,6 +56,7 @@ client.metric(
     timestamp = "2026-06-02T10:00:06Z",
     attributes = MetricAttributes
         .create("checkout.duration", "histogram", 120.0, "ms", "delta")
+        .withDescription("Duration of one completed checkout operation.")
         .withMetadata(mapOf("route" to "/checkout")),
 )
 
@@ -381,11 +382,12 @@ client.metric(
     timestamp = "2026-06-02T10:00:06Z",
     attributes = MetricAttributes
         .create("queue.depth", "gauge", 42.0, "{items}", "instant")
+        .withDescription("Number of items waiting in the checkout queue.")
         .withMetadata(mapOf("queue" to "checkout")),
 )
 ```
 
-Use low-cardinality metadata such as route templates, queue names, feature names, or region names. Avoid raw URLs, user identifiers, stack traces, or high-cardinality labels.
+An optional `withDescription(...)` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Use low-cardinality metadata such as route templates, queue names, feature names, or region names. Avoid raw URLs, user identifiers, stack traces, or high-cardinality labels.
 
 ## Android Product Timelines
 
@@ -459,7 +461,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata. `AndroidRequestSpan.applyHeadersTo(...)` writes only that header through your request builder, `withTrace { ... }` scopes request-local telemetry under the child span, and `withHttpURLConnectionSpan(...)` handles the same pattern for app-owned `HttpURLConnection` calls.
 - `LogBrewAndroid.createLifecycleTracker()` returns an `AndroidLifecycleTracker` for app-owned lifecycle callbacks; `captureTransition()` emits one `android.lifecycle:<previous>-><next>` span with previous-state duration, active trace correlation, primitive metadata, and same-state dedupe.
 - `LogBrewOperationTracing` creates explicit database, cache, and queue child spans around app-owned callables without driver patching, Java agents, client dependencies, query/parameter capture, cache key/value capture, message-body capture, arbitrary header capture, baggage, or tracestate.
-- `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
+- `metric(...)` queues explicit, application-owned metric events with name, bounded description, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `HttpTransport` uses JDK `HttpURLConnection`, supports endpoint/header/connect-timeout/read-timeout settings, and maps request failures to retryable `TransportException.network(...)` failures.

@@ -495,6 +495,7 @@ def _validate_metric_attributes(index: int, attributes: dict[str, Any]) -> None:
         or any(
             ord(character) <= 31
             or 127 <= ord(character) <= 159
+            or 0xD800 <= ord(character) <= 0xDFFF
             or ord(character) in {0x2028, 0x2029}
             for character in description
         )

@@ -188,6 +188,7 @@ func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
 		t.Fatalf("request span is not correlated: %#v", parsed.Events[2].Attributes)
 	}
 	if parsed.Events[3].Attributes["name"] != "http.server.duration" ||
+		parsed.Events[3].Attributes["description"] != "Duration of one completed server request." ||
 		parsed.Events[3].Attributes["kind"] != "histogram" ||
 		parsed.Events[3].Attributes["unit"] != "ms" {
 		t.Fatalf("unexpected request duration metric: %#v", parsed.Events[3].Attributes)

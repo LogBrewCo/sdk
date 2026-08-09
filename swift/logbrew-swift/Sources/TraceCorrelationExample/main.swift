@@ -96,6 +96,7 @@ try LogBrewTrace.withContext(trace) {
             unit: "ms",
             temporality: .delta,
             metadata: ["routeTemplate": "/api/checkout"],
+            description: "Duration of one completed checkout operation.",
         ),
     )
     try client.span(

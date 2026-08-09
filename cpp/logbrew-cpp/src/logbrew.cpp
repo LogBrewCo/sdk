@@ -169,6 +169,67 @@ void require_bounded_text(const std::string &label, const std::string &value, st
   }
 }
 
+[[nodiscard]] std::string normalized_metric_description(std::string value) {
+  value = trim_copy(value);
+  if (value.empty()) {
+    throw SdkException("validation_error", "metric description must be non-empty");
+  }
+
+  std::size_t scalar_count = 0U;
+  for (std::size_t index = 0U; index < value.size();) {
+    const auto first = static_cast<unsigned char>(value[index]);
+    std::uint32_t scalar = 0U;
+    std::size_t width = 0U;
+    if (first <= 0x7FU) {
+      scalar = first;
+      width = 1U;
+    } else if (first >= 0xC2U && first <= 0xDFU && index + 1U < value.size()) {
+      const auto second = static_cast<unsigned char>(value[index + 1U]);
+      if ((second & 0xC0U) != 0x80U) {
+        throw SdkException("validation_error", "metric description contains invalid UTF-8");
+      }
+      scalar = (static_cast<std::uint32_t>(first & 0x1FU) << 6U) | static_cast<std::uint32_t>(second & 0x3FU);
+      width = 2U;
+    } else if (first >= 0xE0U && first <= 0xEFU && index + 2U < value.size()) {
+      const auto second = static_cast<unsigned char>(value[index + 1U]);
+      const auto third = static_cast<unsigned char>(value[index + 2U]);
+      const bool valid_second = (second & 0xC0U) == 0x80U && !(first == 0xE0U && second < 0xA0U) &&
+                                !(first == 0xEDU && second >= 0xA0U);
+      if (!valid_second || (third & 0xC0U) != 0x80U) {
+        throw SdkException("validation_error", "metric description contains invalid UTF-8");
+      }
+      scalar = (static_cast<std::uint32_t>(first & 0x0FU) << 12U) |
+               (static_cast<std::uint32_t>(second & 0x3FU) << 6U) | static_cast<std::uint32_t>(third & 0x3FU);
+      width = 3U;
+    } else if (first >= 0xF0U && first <= 0xF4U && index + 3U < value.size()) {
+      const auto second = static_cast<unsigned char>(value[index + 1U]);
+      const auto third = static_cast<unsigned char>(value[index + 2U]);
+      const auto fourth = static_cast<unsigned char>(value[index + 3U]);
+      const bool valid_second = (second & 0xC0U) == 0x80U && !(first == 0xF0U && second < 0x90U) &&
+                                !(first == 0xF4U && second >= 0x90U);
+      if (!valid_second || (third & 0xC0U) != 0x80U || (fourth & 0xC0U) != 0x80U) {
+        throw SdkException("validation_error", "metric description contains invalid UTF-8");
+      }
+      scalar = (static_cast<std::uint32_t>(first & 0x07U) << 18U) |
+               (static_cast<std::uint32_t>(second & 0x3FU) << 12U) |
+               (static_cast<std::uint32_t>(third & 0x3FU) << 6U) | static_cast<std::uint32_t>(fourth & 0x3FU);
+      width = 4U;
+    } else {
+      throw SdkException("validation_error", "metric description contains invalid UTF-8");
+    }
+
+    if (scalar <= 0x1FU || (scalar >= 0x7FU && scalar <= 0x9FU) || scalar == 0x2028U || scalar == 0x2029U) {
+      throw SdkException("validation_error", "metric description contains forbidden control characters");
+    }
+    scalar_count += 1U;
+    if (scalar_count > max_metric_description_length) {
+      throw SdkException("validation_error", "metric description is too long");
+    }
+    index += width;
+  }
+  return value;
+}
+
 [[nodiscard]] bool is_machine_key(const std::string &value, std::size_t maximum_length,
                                   const std::string &extra_characters) {
   if (value.empty() || value.size() > maximum_length || !is_ascii_alpha(static_cast<unsigned char>(value.front()))) {
@@ -1710,10 +1771,14 @@ void LogBrewClient::metric(std::string id, std::string timestamp, MetricAttribut
       throw SdkException("validation_error", "metric value must be non-negative for counter and histogram");
     }
   }
+  if (attributes.description.has_value()) {
+    attributes.description = normalized_metric_description(std::move(*attributes.description));
+  }
   const Metadata metadata =
       merge_active_trace_metadata(merge_metadata(std::move(attributes.metadata), options.metadata));
   const std::string attributes_json = object_json([&](std::ostringstream &output, bool &needs_comma) {
     append_field(output, needs_comma, "name", attributes.name);
+    append_optional_field(output, needs_comma, "description", attributes.description, true);
     append_field(output, needs_comma, "kind", attributes.kind);
     append_number_field(output, needs_comma, "value", attributes.value);
     append_field(output, needs_comma, "unit", attributes.unit);

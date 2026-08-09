@@ -454,6 +454,7 @@ namespace LogBrew
                         metricEventId,
                         timestamp,
                         MetricAttributes.Create("http.server.duration", "histogram", durationMs, "ms", "delta")
+                            .WithDescription("Duration of one completed server request.")
                             .WithMetadata(LogBrewTrace.MetadataWithTrace(Trace, RequestMetadata(statusCode, metadata)))
                             .WithContext(Trace.ToTelemetryContext()));
                 }

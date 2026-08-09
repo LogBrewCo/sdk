@@ -58,6 +58,7 @@ fun main() {
             "2026-06-02T10:00:24Z",
             MetricAttributes
                 .create("http.server.duration", "histogram", 37.5, "ms", "delta")
+                .withDescription("Duration of one completed server request.")
                 .withMetadata(mapOf("routeTemplate" to "/checkout/{cart_id}")),
         )
         LogBrewAndroid.captureProductAction(

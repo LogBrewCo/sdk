@@ -48,7 +48,8 @@ try client.metric(
         value: 42,
         unit: "items",
         temporality: .instant,
-        metadata: ["queue": "checkout"]
+        metadata: ["queue": "checkout"],
+        description: "Number of items waiting in the checkout queue."
     )
 )
 try client.captureNetworkMilestone(
@@ -228,7 +229,7 @@ try client.metric(
 )
 ```
 
-Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Gauges use `instant` temporality and may be negative. Keep metric metadata low-cardinality and primitive, such as route template or queue name. Put shared service, deployment, runtime, session, subject, trace, and tag evidence in `TelemetryContext` so the metric can be compared with related issues, logs, actions, and spans. Avoid raw URLs, query strings, stack traces, authentication data, and unbounded labels.
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Gauges use `instant` temporality and may be negative. An optional `description` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Keep metric metadata low-cardinality and primitive, such as route template or queue name. Put shared service, deployment, runtime, session, subject, trace, and tag evidence in `TelemetryContext` so the metric can be compared with related issues, logs, actions, and spans. Avoid raw URLs, query strings, stack traces, authentication data, and unbounded labels.
 
 The Swift SDK does not automatically collect app runtime, URLSession, SwiftUI, or database metrics. Add explicit measurements where they are meaningful for your product, or keep those signals in framework-owned integrations when you add them.
 

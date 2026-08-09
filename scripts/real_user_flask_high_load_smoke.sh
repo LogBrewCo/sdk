@@ -213,6 +213,11 @@ def main() -> None:
     if "path" in first_span["metadata"]:
         raise AssertionError("concrete dynamic path was captured for a templated Flask route")
     assert_equal(first_metric["name"], "http.server.duration", "metric name")
+    assert_equal(
+        first_metric["description"],
+        "Duration of one completed server request.",
+        "metric description",
+    )
     assert_equal(first_metric["metadata"]["routeTemplate"], "/checkout/<order_id>", "metric route template")
     assert_equal(first_metric["metadata"]["statusCodeClass"], "2xx", "metric status class")
 
@@ -233,18 +238,24 @@ def main() -> None:
         thread.join(timeout=5.0)
 
     assert_equal(response.status_code, 202, "flush status")
-    assert_equal(response.attempts, 2, "retryAttempts")
-    assert_equal(len(IntakeState.bodies), 2, "fake intake retry count")
+    assert_equal(response.attempts, len(IntakeState.bodies), "transport attempt count")
+    if len(IntakeState.bodies) < 2:
+        raise AssertionError("fake intake did not receive the configured retry")
+    assert_equal(IntakeState.bodies[0], IntakeState.bodies[1], "retry body stability")
     assert_equal(client.pending_events(), 0, "queue after flush")
     for authorization in IntakeState.authorizations:
         assert_equal(authorization, f"Bearer {API_KEY}", "authorization header")
     for source in IntakeState.sources:
         assert_equal(source, "flask-high-load-smoke", "source header")
 
-    flushed_payload = json.loads(IntakeState.bodies[-1])
+    accepted_payloads = [json.loads(body) for body in IntakeState.bodies[1:]]
+    flushed_payload = {
+        "sdk": accepted_payloads[0]["sdk"],
+        "events": [event for payload in accepted_payloads for event in payload["events"]],
+    }
     assert_equal(len(flushed_payload["events"]), MAX_QUEUE_SIZE, "flushed event count")
     assert_equal(flushed_payload["events"][1]["attributes"]["spanId"], "b7ad6b7169203331", "flushed first span id")
-    body_text = IntakeState.bodies[-1]
+    body_text = "".join(IntakeState.bodies)
     for unsafe in [
         API_KEY,
         "coupon=private",
@@ -313,13 +324,14 @@ def main() -> None:
         json.dumps(
             {
                 "ok": True,
+                "acceptedBatches": len(accepted_payloads),
                 "droppedEvents": client.dropped_events(),
                 "flaskVersion": version("flask"),
                 "flushedEvents": len(flushed_payload["events"]),
                 "highVolumeFlaskRequests": HIGH_VOLUME_FLASK_REQUESTS,
                 "maxQueueSize": MAX_QUEUE_SIZE,
                 "pendingEvents": client.pending_events(),
-                "retryAttempts": response.attempts,
+                "retryAttempts": response.attempts - len(accepted_payloads),
                 "shutdownStatus": shutdown_response.status_code,
                 "traceId": first_span["traceId"],
                 "validationError": "configuration_error",
@@ -357,7 +369,7 @@ grep -q '"highVolumeFlaskRequests": 600' "$tmp_dir/high-load.stdout.json"
 grep -q '"maxQueueSize": 1000' "$tmp_dir/high-load.stdout.json"
 grep -q '"flushedEvents": 1000' "$tmp_dir/high-load.stdout.json"
 grep -q '"droppedEvents": 800' "$tmp_dir/high-load.stdout.json"
-grep -q '"retryAttempts": 2' "$tmp_dir/high-load.stdout.json"
+grep -q '"retryAttempts": 1' "$tmp_dir/high-load.stdout.json"
 grep -q '"shutdownStatus": 202' "$tmp_dir/high-load.stdout.json"
 grep -q '"validationError": "configuration_error"' "$tmp_dir/high-load.stdout.json"
 grep -q '"authError": "unauthenticated"' "$tmp_dir/high-load.stdout.json"

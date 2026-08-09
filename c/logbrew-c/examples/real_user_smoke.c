@@ -199,7 +199,8 @@ static void exercise_metric_helper(void) {
         42.0,
         "{items}",
         "instant",
-        {metadata, sizeof(metadata) / sizeof(metadata[0])}
+        {metadata, sizeof(metadata) / sizeof(metadata[0])},
+        "Number of checkout jobs waiting to be processed."
       }, &error), &error);
   must(logbrew_client_preview_json(client, &preview, &error), &error);
   if (strstr(preview, "\"type\":\"metric\"") == NULL ||
@@ -208,6 +209,7 @@ static void exercise_metric_helper(void) {
       strstr(preview, "\"value\":42") == NULL ||
       strstr(preview, "\"unit\":\"{items}\"") == NULL ||
       strstr(preview, "\"temporality\":\"instant\"") == NULL ||
+      strstr(preview, "\"description\":\"Number of checkout jobs waiting to be processed.\"") == NULL ||
       strstr(preview, "\"queue\":\"checkout\"") == NULL ||
       strstr(preview, "\"sampled\":true") == NULL) {
     fprintf(stderr, "metric helper preview failed\n");
@@ -216,7 +218,7 @@ static void exercise_metric_helper(void) {
   logbrew_free_string(preview);
 
   status = logbrew_client_metric(client, "evt_bad_counter", "2026-06-02T10:00:06Z",
-      (LogBrewMetricAttributes){"jobs.processed", "counter", -1.0, "1", "delta", {NULL, 0U}}, &error);
+      (LogBrewMetricAttributes){"jobs.processed", "counter", -1.0, "1", "delta", {NULL, 0U}, NULL}, &error);
   if (status != LOGBREW_VALIDATION_ERROR || strcmp(error.code, "validation_error") != 0) {
     fprintf(stderr, "metric validation failure failed\n");
     exit(1);

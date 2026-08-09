@@ -173,6 +173,7 @@ public final class LogBrewHttpRequestTelemetry {
         validateStatusCode(statusCode);
         return MetricAttributes
             .create("http.server.duration", "histogram", durationMs, "ms", "delta")
+            .description("Duration of one completed server request.")
             .metadata(requestMetadata(statusCode))
             .context(traceContext.telemetryContext());
     }

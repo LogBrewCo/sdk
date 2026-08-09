@@ -275,6 +275,7 @@ private extension MetricAttributes {
             temporality: temporality,
             metadata: metadata,
             context: context,
+            description: description,
         )
     }
 
@@ -287,6 +288,7 @@ private extension MetricAttributes {
             temporality: temporality,
             metadata: correlationMetadata(metadata, context: context),
             context: context,
+            description: description,
         )
     }
 }

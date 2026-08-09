@@ -55,6 +55,10 @@ def main() -> int:
         metadata = require_dict(attributes.get("metadata"), f"{event_id} metadata")
         assert_trace_metadata(event_id, metadata, span_id)
 
+    metric_attributes = require_dict(by_id["evt_metric_001"].get("attributes"), "metric attributes")
+    if metric_attributes.get("description") != "Duration of one completed checkout operation.":
+        raise SystemExit("metric is missing its stable meaning")
+
     network_metadata = require_dict(by_id["evt_network_milestone_001"]["attributes"]["metadata"], "network metadata")
     if network_metadata.get("routeTemplate") != "/api/checkout":
         raise SystemExit("network route template was not sanitized")

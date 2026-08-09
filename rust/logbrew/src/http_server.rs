@@ -188,6 +188,7 @@ impl HttpRequestTelemetry {
         span = span.with_context(context.clone());
         let metric = self.duration_ms.map(|duration_ms| {
             MetricEvent::new(self.metric_name, "histogram", duration_ms, "ms", "delta")
+                .with_description("Duration of one completed server request.")
                 .with_metadata(metadata)
                 .with_context(context)
         });

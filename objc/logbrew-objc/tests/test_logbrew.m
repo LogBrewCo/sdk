@@ -391,6 +391,7 @@ static void LBWExerciseMetricHelper(void) {
                        timestamp:@"2026-06-02T10:00:06Z"
                       attributes:@{
                         @"name": @"checkout.latency",
+                        @"description": @"  Duration of one completed checkout request.  ",
                         @"kind": @"histogram",
                         @"value": @184.5,
                         @"unit": @"ms",
@@ -409,6 +410,8 @@ static void LBWExerciseMetricHelper(void) {
   NSDictionary<NSString *, id> *metadata = metricAttributes[@"metadata"];
   LBWAssert([events[0][@"type"] isEqualToString:@"metric"], @"metric type failed");
   LBWAssert([metricAttributes[@"name"] isEqualToString:@"checkout.latency"], @"metric name failed");
+  LBWAssert([metricAttributes[@"description"] isEqualToString:@"Duration of one completed checkout request."],
+      @"metric description failed");
   LBWAssert([metricAttributes[@"kind"] isEqualToString:@"histogram"], @"metric kind failed");
   LBWAssert([metricAttributes[@"value"] doubleValue] == 184.5, @"metric value failed");
   LBWAssert([metricAttributes[@"unit"] isEqualToString:@"ms"], @"metric unit failed");
@@ -449,6 +452,23 @@ static void LBWExerciseMetricHelper(void) {
                 }
                      error:&error];
   LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"nested metric metadata failed");
+  NSString *c1Description = [NSString stringWithFormat:@"request%Ccount", (unichar)0x0085U];
+  NSString *lineSeparatorDescription = [NSString stringWithFormat:@"request%Ccount", (unichar)0x2028U];
+  for (NSString *description in @[@"   ", [@"M" stringByPaddingToLength:1025U withString:@"M" startingAtIndex:0U],
+                                   c1Description, lineSeparatorDescription]) {
+    ok = [client metricWithID:@"evt_bad_metric_description"
+                    timestamp:@"2026-06-02T10:00:06Z"
+                   attributes:@{
+                     @"name": @"queue.depth",
+                     @"description": description,
+                     @"kind": @"gauge",
+                     @"value": @3,
+                     @"unit": @"1",
+                     @"temporality": @"instant"
+                   }
+                        error:&error];
+    LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"bad metric description failed");
+  }
 }
 
 static void LBWExerciseTraceHelpers(void) {

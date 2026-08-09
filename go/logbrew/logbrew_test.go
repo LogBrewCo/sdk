@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -443,6 +444,7 @@ func TestMetricEventValidatesExplicitContract(t *testing.T) {
 
 	err := client.Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes{
 		Name:        "queue.depth",
+		Description: "  Number of items waiting in the checkout queue.  ",
 		Kind:        "gauge",
 		Value:       -2,
 		Unit:        "{items}",
@@ -469,6 +471,7 @@ func TestMetricEventValidatesExplicitContract(t *testing.T) {
 	}
 	expected := map[string]any{
 		"name":        "queue.depth",
+		"description": "Number of items waiting in the checkout queue.",
 		"kind":        "gauge",
 		"value":       -2.0,
 		"unit":        "{items}",
@@ -482,6 +485,21 @@ func TestMetricEventValidatesExplicitContract(t *testing.T) {
 	metadata := attributes["metadata"].(map[string]any)
 	if metadata["service"] != "worker" || metadata["queue"] != "critical" {
 		t.Fatalf("unexpected metric metadata: %#v", metadata)
+	}
+}
+
+func TestMetricRejectsUnsafeDescription(t *testing.T) {
+	for _, description := range []string{
+		"   ", strings.Repeat("M", 1025), "request\u0085count", "request\u2028count", "request" + string([]byte{0xed, 0xa0, 0x80}) + "count",
+	} {
+		t.Run(fmt.Sprintf("%q", description), func(t *testing.T) {
+			err := sampleClient(t).Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes{
+				Name: "queue.depth", Description: description, Kind: "gauge", Value: 2, Unit: "{items}", Temporality: "instant",
+			})
+			if err == nil || !strings.Contains(err.Error(), "metric description must be a non-blank string of at most 1024 non-control characters") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 

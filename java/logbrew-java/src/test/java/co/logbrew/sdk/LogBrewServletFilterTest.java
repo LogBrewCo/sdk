@@ -66,6 +66,7 @@ public final class LogBrewServletFilterTest {
         assertContains(payload, "\"type\": \"metric\"");
         assertContains(payload, "\"name\": \"POST /checkout/{cartId}\"");
         assertContains(payload, "\"name\": \"http.server.duration\"");
+        assertContains(payload, "\"description\": \"Duration of one completed server request.\"");
         assertContains(payload, "\"status\": \"ok\"");
         assertContains(payload, "\"routeTemplate\": \"/checkout/{cartId}\"");
         assertContains(payload, "\"statusCode\": 201");

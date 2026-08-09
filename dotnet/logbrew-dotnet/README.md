@@ -231,13 +231,14 @@ client.Metric(
     "evt_metric_001",
     "2026-06-02T10:00:06Z",
     MetricAttributes.Create("queue.depth", "gauge", 42, "{items}", "instant")
+        .WithDescription("Number of items waiting in the checkout queue.")
         .WithContext(
             TelemetryContext.Create()
                 .WithTag("queue", "default")
                 .Build()));
 ```
 
-Use a `counter` for an amount that accumulates, such as completed jobs or failures; use a `gauge` for a point-in-time level, such as queue depth or active connections; and use a `histogram` sample for a distribution, such as request duration or payload size. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable route templates and low-cardinality dimensions—never raw user, session, trace, URL, or request IDs as metric tags. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
+Use a `counter` for an amount that accumulates, such as completed jobs or failures; use a `gauge` for a point-in-time level, such as queue depth or active connections; and use a `histogram` sample for a distribution, such as request duration or payload size. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. An optional `WithDescription(...)` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Prefer stable route templates and low-cardinality dimensions—never raw user, session, trace, URL, or request IDs as metric tags. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
 
 ## Product and Network Timelines
 

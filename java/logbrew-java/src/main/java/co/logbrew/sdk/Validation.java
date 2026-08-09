@@ -184,6 +184,27 @@ final class Validation {
         }
     }
 
+    static String normalizeMetricDescription(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.strip();
+        boolean invalidCharacter = normalized.codePoints().anyMatch(character ->
+            character <= 0x1f
+                || (character >= 0x7f && character <= 0x9f)
+                || (character >= 0xd800 && character <= 0xdfff)
+                || character == 0x2028
+                || character == 0x2029
+        );
+        if (normalized.isEmpty() || normalized.codePointCount(0, normalized.length()) > 1024 || invalidCharacter) {
+            throw new SdkException(
+                "validation_error",
+                "metric description must be a non-blank string of at most 1024 non-control characters"
+            );
+        }
+        return normalized;
+    }
+
     private static SdkException timestampError(String timestamp) {
         return new SdkException("validation_error", "timestamp must include a timezone offset: " + timestamp);
     }

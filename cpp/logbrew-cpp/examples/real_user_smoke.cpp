@@ -87,12 +87,16 @@ void exercise_metric_helper() {
           "{items}",
           "instant",
           {{"queue", "checkout"}},
+          std::string{"Number of checkout jobs waiting to be processed."},
       });
 
   const std::string preview = metric_client.preview_json();
   require_condition(preview.find("\"type\":\"metric\"") != std::string::npos, "metric event missing");
   require_condition(preview.find("\"name\":\"queue.depth\"") != std::string::npos, "metric name missing");
   require_condition(preview.find("\"temporality\":\"instant\"") != std::string::npos, "metric temporality missing");
+  require_condition(
+      preview.find("\"description\":\"Number of checkout jobs waiting to be processed.\"") != std::string::npos,
+      "metric description missing");
   require_condition(preview.find("\"queue\":\"checkout\"") != std::string::npos, "metric metadata missing");
 }
 

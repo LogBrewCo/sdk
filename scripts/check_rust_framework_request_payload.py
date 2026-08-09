@@ -52,6 +52,7 @@ def validate_payload(
     require(metric["value"] == span["durationMs"], "metric/span duration should match")
     require(metric["unit"] == "ms", "bad metric unit")
     require(metric["temporality"] == "delta", "bad metric temporality")
+    require(metric["description"] == "Duration of one completed server request.", "bad metric description")
     require(metric["metadata"] == metadata, "metric/span metadata should match")
     context = span.get("context")
     require(isinstance(context, dict), "span is missing typed context")

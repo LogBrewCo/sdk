@@ -54,6 +54,7 @@ public final class LogBrewClientTest {
         testDropCallbackFailureDoesNotInterruptCapture();
         testNegativeSpanDurationFailsValidation();
         testMetricEventValidatesExplicitContract();
+        testMetricRejectsUnsafeDescription();
         testMetricRejectsNonFiniteValue();
         testMetricRejectsNegativeCounterValue();
         testMetricRejectsInvalidTemporalityForKind();
@@ -224,18 +225,36 @@ public final class LogBrewClientTest {
             "evt_metric_001",
             "2026-06-02T10:00:06Z",
             MetricAttributes.create("queue.depth", "gauge", -2.0, "{items}", "instant")
+                .description("  Number of items waiting in the checkout queue.  ")
                 .metadata(Map.of("service", "worker", "queue", "critical"))
         );
 
         String payload = client.previewJson();
         assertContains(payload, "\"type\": \"metric\"");
         assertContains(payload, "\"name\": \"queue.depth\"");
+        assertContains(payload, "\"description\": \"Number of items waiting in the checkout queue.\"");
         assertContains(payload, "\"kind\": \"gauge\"");
         assertContains(payload, "\"value\": -2.0");
         assertContains(payload, "\"unit\": \"{items}\"");
         assertContains(payload, "\"temporality\": \"instant\"");
         assertContains(payload, "\"service\": \"worker\"");
         assertContains(payload, "\"queue\": \"critical\"");
+        testsRun++;
+    }
+
+    private void testMetricRejectsUnsafeDescription() {
+        for (String description : new String[] {"   ", "M".repeat(1025), "request\u0085count", "request\u2028count", "request\ud800count"}) {
+            SdkException error = expectSdkException(() -> sampleClient().metric(
+                "evt_metric_001",
+                "2026-06-02T10:00:06Z",
+                MetricAttributes.create("queue.depth", "gauge", 2.0, "{items}", "instant")
+                    .description(description)
+            ));
+            assertContains(
+                error.getMessage(),
+                "metric description must be a non-blank string of at most 1024 non-control characters"
+            );
+        }
         testsRun++;
     }
 

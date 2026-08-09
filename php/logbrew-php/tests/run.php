@@ -622,6 +622,7 @@ require __DIR__ . '/bounded_batching.php';
 $client = sampleClient();
 $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
     'name' => 'queue.depth',
+    'description' => '  Number of items waiting in the checkout queue.  ',
     'kind' => 'gauge',
     'value' => -2.0,
     'unit' => '{items}',
@@ -633,6 +634,7 @@ assertTrue($client->pendingEvents() === 1, 'expected metric event to queue');
 foreach ([
     '"type": "metric"',
     '"name": "queue.depth"',
+    '"description": "Number of items waiting in the checkout queue."',
     '"kind": "gauge"',
     '"value": -2',
     '"unit": "{items}"',
@@ -671,6 +673,19 @@ expectThrows(
     ]),
     'metric temporality for gauge must be one of'
 );
+foreach (['   ', str_repeat('M', 1_025), "request\u{0085}count", "request\u{2028}count"] as $description) {
+    expectThrows(
+        fn () => sampleClient()->metric('evt_metric_invalid_description', '2026-06-02T10:00:06Z', [
+            'name' => 'queue.depth',
+            'description' => $description,
+            'kind' => 'gauge',
+            'value' => 2,
+            'unit' => '{items}',
+            'temporality' => 'instant',
+        ]),
+        'metric description must be a non-blank string of at most 1024 non-control characters'
+    );
+}
 
 $productMetadata = [
     'cartTier' => 'gold',

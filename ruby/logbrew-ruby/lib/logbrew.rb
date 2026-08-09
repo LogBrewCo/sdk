@@ -825,6 +825,26 @@ module LogBrew
       value
     end
 
+    def normalize_metric_description(value)
+      unless value.is_a?(String) && value.valid_encoding?
+        raise SdkError.new(
+          "validation_error",
+          "metric description must be a non-blank string of at most 1024 non-control characters"
+        )
+      end
+      normalized = value.strip
+      invalid = normalized.each_codepoint.any? do |character|
+        character <= 0x1f || (character >= 0x7f && character <= 0x9f) || character == 0x2028 || character == 0x2029
+      end
+      if normalized.empty? || normalized.each_codepoint.count > 1024 || invalid
+        raise SdkError.new(
+          "validation_error",
+          "metric description must be a non-blank string of at most 1024 non-control characters"
+        )
+      end
+      normalized
+    end
+
     def read(attributes, key)
       return nil unless attributes.is_a?(Hash)
 
@@ -1368,6 +1388,8 @@ module LogBrew
 
     def validate_metric(attributes)
       name = Validation.read(attributes, "name")
+      description_present = attributes.is_a?(Hash) && (attributes.key?("description") || attributes.key?(:description))
+      description = Validation.normalize_metric_description(Validation.read(attributes, "description")) if description_present
       kind = Validation.read(attributes, "kind")
       unit = Validation.read(attributes, "unit")
       temporality = Validation.read(attributes, "temporality")
@@ -1383,11 +1405,12 @@ module LogBrew
       with_metadata(
         {
           "name" => name,
+          "description" => description,
           "kind" => kind,
           "value" => value,
           "unit" => unit,
           "temporality" => temporality
-        },
+        }.compact,
         attributes
       )
     end

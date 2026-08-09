@@ -453,6 +453,7 @@ Use `Metric` for explicit, application-owned measurements. LogBrew validates the
 ```go
 must(client.Metric("evt_metric_queue_depth", "2026-06-02T10:00:06Z", logbrew.MetricAttributes{
   Name:        "queue.depth",
+  Description: "Number of items waiting in the checkout queue.",
   Kind:        "gauge",
   Value:       42,
   Unit:        "{items}",
@@ -461,7 +462,7 @@ must(client.Metric("evt_metric_queue_depth", "2026-06-02T10:00:06Z", logbrew.Met
 }))
 ```
 
-Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect runtime or framework metrics yet.
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. An optional `Description` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Keep metadata low-cardinality and primitive. This SDK does not automatically collect runtime or framework metrics yet.
 
 ## Trace Context
 

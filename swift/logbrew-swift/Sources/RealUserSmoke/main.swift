@@ -150,11 +150,13 @@ try metricClient.metric(
         unit: "items",
         temporality: .instant,
         metadata: ["queue": "checkout"],
+        description: "Number of items waiting in the checkout queue.",
     ),
 )
 let metricPreview = try metricClient.previewJSON()
 precondition(metricPreview.contains(#""type" : "metric""#))
 precondition(metricPreview.contains(#""name" : "queue.depth""#))
+precondition(metricPreview.contains(#""description" : "Number of items waiting in the checkout queue.""#))
 precondition(metricPreview.contains(#""temporality" : "instant""#))
 
 let timelineClient = try LogBrewClient.create(

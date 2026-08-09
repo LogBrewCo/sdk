@@ -76,6 +76,7 @@ namespace LogBrew;
  * }
  * @phpstan-type MetricAttributes array{
  *   name: string,
+ *   description?: string,
  *   kind: 'counter'|'gauge'|'histogram',
  *   value: int|float,
  *   unit: string,
@@ -104,6 +105,7 @@ final class LogBrewClient
     private const DELTA_CUMULATIVE_TEMPORALITIES = ['delta', 'cumulative'];
     private const INSTANT_TEMPORALITY = ['instant'];
     private const NON_NEGATIVE_METRIC_KINDS = ['counter', 'histogram'];
+    private const MAX_METRIC_DESCRIPTION_LENGTH = 1_024;
 
     /** @var list<array<string, mixed>> */
     private array $events = [];
@@ -647,7 +649,7 @@ final class LogBrewClient
             'issue' => ['title', 'level', 'message'],
             'log' => ['message', 'level', 'logger'],
             'span' => ['name', 'traceId', 'spanId', 'parentSpanId', 'status'],
-            'metric' => ['name', 'kind', 'unit', 'temporality'],
+            'metric' => ['name', 'description', 'kind', 'unit', 'temporality'],
             'action' => ['name', 'status'],
             default => [],
         };
@@ -841,6 +843,9 @@ final class LogBrewClient
     private function validateMetric(array $attributes): array
     {
         $name = self::requireStringAttribute($attributes, 'name', 'metric name');
+        $description = array_key_exists('description', $attributes)
+            ? self::normalizeMetricDescription($attributes['description'])
+            : null;
         $kind = self::requireStringAttribute($attributes, 'kind', 'metric kind');
         self::requireAllowedValue('metric kind', $kind, self::METRIC_KINDS);
         $value = self::requireFiniteNumber('metric value', $attributes['value'] ?? null);
@@ -855,13 +860,14 @@ final class LogBrewClient
             throw new SdkError('validation_error', sprintf('metric %s value must be non-negative', $kind));
         }
 
-        return $this->withMetadata([
+        return $this->withMetadata(array_filter([
             'name' => $name,
+            'description' => $description,
             'kind' => $kind,
             'value' => $value,
             'unit' => $unit,
             'temporality' => $temporality,
-        ], $attributes['metadata'] ?? null);
+        ], static fn (mixed $item): bool => $item !== null), $attributes['metadata'] ?? null);
     }
 
     /**
@@ -951,6 +957,31 @@ final class LogBrewClient
         if (trim($value) === '') {
             throw new SdkError('validation_error', sprintf('%s must be non-empty', $label));
         }
+    }
+
+    private static function normalizeMetricDescription(mixed $value): string
+    {
+        if (!is_string($value)) {
+            throw new SdkError(
+                'validation_error',
+                'metric description must be a non-blank string of at most 1024 non-control characters'
+            );
+        }
+        $normalized = preg_replace('/^\s+|\s+$/u', '', $value);
+        $length = is_string($normalized) ? preg_match_all('/./us', $normalized) : false;
+        if (
+            !is_string($normalized)
+            || $normalized === ''
+            || $length === false
+            || $length > self::MAX_METRIC_DESCRIPTION_LENGTH
+            || preg_match('/[\x{0000}-\x{001F}\x{007F}-\x{009F}\x{2028}\x{2029}]/u', $normalized) === 1
+        ) {
+            throw new SdkError(
+                'validation_error',
+                'metric description must be a non-blank string of at most 1024 non-control characters'
+            );
+        }
+        return $normalized;
     }
 
     /**

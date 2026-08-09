@@ -123,6 +123,10 @@ def main():
     require(metadata(log_event).get("CartId") == "cart_123", "structured logger metadata missing")
     require(metadata(metric_event).get("framework") == "aspnetcore", "metric framework metadata missing")
     require(metric_event["attributes"]["name"] == "http.server.duration", "metric name mismatch")
+    require(
+        metric_event["attributes"].get("description") == "Duration of one completed server request.",
+        "metric is missing its stable meaning",
+    )
     require(action_event["attributes"]["metadata"]["routeTemplate"] == "/checkout/:cart_id", "action route mismatch")
     require(action_event["attributes"]["metadata"]["traceId"] == TRACE_ID, "action trace id mismatch")
 

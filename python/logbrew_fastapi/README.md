@@ -187,7 +187,7 @@ celery_telemetry = instrument_celery_app_with_logbrew_spans(
 
 Producer and worker spans share W3C trace context. An unexpected final task failure emits one trace-correlated issue with task name and exception type only; retries and exception types declared through `task.throws` stay span-only. Task IDs, arguments, results, headers, exception messages, and stack traces are excluded. Uninstall direct instrumentation after tasks drain and before shutting down its client. Separate prefork workers need child-owned clients; follow the [core Celery lifecycle and encrypted persistence setup](https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_py#automatic-celery-spans) instead of sharing the FastAPI process client across forks.
 
-Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
+Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests. Each generated metric carries the stable description `Duration of one completed server request.` so its purpose remains clear in investigations:
 
 ```python
 logbrew = init_logbrew(

@@ -164,6 +164,8 @@ typedef struct {
   const char *unit;
   const char *temporality;
   LogBrewMetadata metadata;
+  /** Optional stable display meaning; never use identifiers or changing values. */
+  const char *description;
 } LogBrewMetricAttributes;
 
 #ifdef __cplusplus

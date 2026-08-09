@@ -75,13 +75,14 @@ using (LogBrewTelemetry.ActivateContext(playerFlow))
         "evt_frame_duration_001",
         "2026-06-02T10:00:09Z",
         MetricAttributes.Create("frame.duration", "histogram", 16.6, "ms", "delta")
+            .WithDescription("Duration of one rendered frame.")
             .WithMetadata(new Dictionary<string, object?> { ["scene"] = "Checkout" }));
 }
 ```
 
 By default the client adds non-unique runtime, OS, architecture, application, Unity framework, and platform facts when they are available. Pass `includeAutomaticContext: false` to omit runtime-discovered values; the explicit game name and SDK framework identity remain. Subject and session IDs are never discovered from accounts, device identifiers, cookies, or platform services. Provide only opaque IDs approved by your application, and clear or replace the scope at your own privacy boundary.
 
-Metric kinds are `counter`, `gauge`, and `histogram`. Gauges require `instant`; counters and histograms require `delta` or `cumulative` and non-negative values. Values must be finite and units must be non-empty. Keep metric metadata low-cardinality: scene, route template, game mode, or feature flag names are suitable; player IDs, request IDs, raw URLs, and payload values are not.
+Metric kinds are `counter`, `gauge`, and `histogram`. Gauges require `instant`; counters and histograms require `delta` or `cumulative` and non-negative values. Values must be finite and units must be non-empty. An optional `WithDescription(...)` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Keep metric metadata low-cardinality: scene, route template, game mode, or feature flag names are suitable; player IDs, request IDs, raw URLs, and payload values are not.
 
 ## Rich Issue Evidence
 
