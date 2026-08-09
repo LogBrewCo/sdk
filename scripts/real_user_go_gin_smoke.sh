@@ -99,10 +99,10 @@ with zipfile.ZipFile(parent_zip) as archive:
 with zipfile.ZipFile(gin_zip) as archive:
     names = set(archive.namelist())
     for expected in (
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.0/go.mod",
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.0/go.sum",
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.0/middleware.go",
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.0/README.md",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/go.mod",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/go.sum",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/middleware.go",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/README.md",
     ):
         if expected not in names:
             raise SystemExit(f"missing Gin module artifact file: {expected}")
@@ -116,7 +116,7 @@ export GOSUMDB=off
 
 go mod init logbrew-go-gin-smoke >/dev/null
 go mod edit -go=1.24.0
-go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.0 >/dev/null
+go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1 >/dev/null
 grep -q 'github.com/LogBrewCo/sdk/go/logbrew/gin v0.1.1' go.mod
 if grep -q '^replace ' go.mod; then
 	echo "installed Gin module proof must not use a source replacement" >&2
@@ -131,7 +131,7 @@ if grep -q 'github.com/LogBrewCo/sdk/go/logbrew/gin' go.mod; then
 	echo "expected go get @none to remove Gin module requirement" >&2
 	exit 1
 fi
-go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.0 >/dev/null
+go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1 >/dev/null
 
 cat > gin_integration_test.go <<'GO'
 package integration

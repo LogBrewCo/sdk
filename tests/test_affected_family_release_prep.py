@@ -303,7 +303,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         swift_readme = (ROOT / "swift/logbrew-swift/README.md").read_text(encoding="utf-8")
 
         self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.5', go_smoke)
-        self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.0', go_gin_smoke)
+        self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1', go_gin_smoke)
         self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.8', swift_smoke)
         self.assertIn('from: "0.1.2"', swift_readme)
 
