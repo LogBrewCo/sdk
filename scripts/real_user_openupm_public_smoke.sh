@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-${LOGBREW_OPENUPM_VERSION:-0.2.1}}"
+version="${1:-${LOGBREW_OPENUPM_VERSION:-0.2.0}}"
 registry_url="${LOGBREW_OPENUPM_REGISTRY_URL:-https://package.openupm.com}"
 package_name="co.logbrew.unity"
 tmp_dir="$(mktemp -d)"

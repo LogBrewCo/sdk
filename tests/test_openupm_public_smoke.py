@@ -14,7 +14,7 @@ class OpenUpmPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_OPENUPM_VERSION",
-            'version="${1:-${LOGBREW_OPENUPM_VERSION:-0.2.1}}"',
+            'version="${1:-${LOGBREW_OPENUPM_VERSION:-0.2.0}}"',
             "https://package.openupm.com",
             "npm pack co.logbrew.unity@",
             "scopedRegistries",

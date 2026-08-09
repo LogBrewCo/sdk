@@ -112,7 +112,7 @@ done
 
         for expected in (
             "LOGBREW_SWIFTPM_VERSION",
-            'package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.9}}"',
+            'package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.8}}"',
             'package_url="${LOGBREW_SWIFTPM_URL:-https://github.com/LogBrewCo/sdk.git}"',
             'package_identity="${LOGBREW_SWIFTPM_PACKAGE_IDENTITY:-sdk}"',
             "LOGBREW_SWIFTPM_EXPECTED_REVISION",

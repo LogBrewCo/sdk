@@ -57,10 +57,10 @@ print(
 PY
     )
 else
-    sdk_version="${legacy_args[0]:-${LOGBREW_PYPI_SDK_VERSION:-0.1.9}}"
-    fastapi_version="${legacy_args[1]:-${LOGBREW_PYPI_FASTAPI_VERSION:-0.1.9}}"
-    django_version="${legacy_args[2]:-${LOGBREW_PYPI_DJANGO_VERSION:-0.1.5}}"
-    flask_version="${legacy_args[3]:-${LOGBREW_PYPI_FLASK_VERSION:-0.1.3}}"
+    sdk_version="${legacy_args[0]:-${LOGBREW_PYPI_SDK_VERSION:-0.1.8}}"
+    fastapi_version="${legacy_args[1]:-${LOGBREW_PYPI_FASTAPI_VERSION:-0.1.8}}"
+    django_version="${legacy_args[2]:-${LOGBREW_PYPI_DJANGO_VERSION:-0.1.4}}"
+    flask_version="${legacy_args[3]:-${LOGBREW_PYPI_FLASK_VERSION:-0.1.2}}"
 fi
 
 fastapi_celery_extra="$(python3 - "$fastapi_version" <<'PY'
