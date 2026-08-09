@@ -49,7 +49,7 @@ if ! acquire_lock; then
   exit 1
 fi
 
-package_tgz="$tmp_dir/co.logbrew.unity-0.2.0.tgz"
+package_tgz="$tmp_dir/co.logbrew.unity-0.2.1.tgz"
 (cd "$package_dir" && tar -czf "$package_tgz" \
   package.json \
   README.md \
@@ -79,7 +79,7 @@ project_manifest = json.loads(Path(sys.argv[1]).read_text())
 package_manifest = json.loads(Path(sys.argv[2]).read_text())
 if project_manifest["dependencies"].get("co.logbrew.unity") != "file:Packages/co.logbrew.unity":
     raise SystemExit("Unity project dependency entry missing")
-if package_manifest.get("name") != "co.logbrew.unity" or package_manifest.get("version") != "0.2.0":
+if package_manifest.get("name") != "co.logbrew.unity" or package_manifest.get("version") != "0.2.1":
     raise SystemExit("installed Unity package metadata mismatch")
 PY
 

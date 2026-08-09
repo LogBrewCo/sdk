@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.4}}"
+requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.5}}"
 module_version="v${requested_version#v}"
 export LOGBREW_GO_MODULE_VERSION="$module_version"
 module_path="github.com/LogBrewCo/sdk/go/logbrew"

@@ -31,7 +31,7 @@ import {
 } from "./persistent-queue.js";
 
 const DEFAULT_SDK_NAME = "logbrew-node";
-const DEFAULT_SDK_VERSION = "0.1.6";
+const DEFAULT_SDK_VERSION = "0.1.7";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;

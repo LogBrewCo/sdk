@@ -4,7 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rubygems-public.XXXXXX")"
 
-version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.1}}"
+version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.3}}"
 source_url="https://rubygems.org"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
@@ -171,7 +171,7 @@ support_draft = LogBrew::SupportTicketDraft.create(
   diagnostics: {
     apiKey: "lbw_ingest_hidden",
     endpoint: "https://api.example/ingest?debug=true#frag",
-    localPath: "/Users/example/app/.env",
+    localPath: "/home/example/app/.env",
     error: RuntimeError.new("diagnostic detail")
   }
 )
@@ -181,7 +181,7 @@ raise "support ticket draft did not redact API key" unless support_diagnostics.f
 raise "support ticket draft did not redact URL" unless support_diagnostics.fetch("endpoint") == "[redacted-url]/ingest"
 raise "support ticket draft did not redact local path" unless support_diagnostics.fetch("localPath") == "[redacted-path]"
 support_json = JSON.generate(support_draft)
-raise "support ticket draft leaked sensitive diagnostics" if support_json.include?("diagnostic detail") || support_json.include?("api.example") || support_json.include?("/Users/example")
+raise "support ticket draft leaked sensitive diagnostics" if support_json.include?("diagnostic detail") || support_json.include?("api.example") || support_json.include?("/home/example")
 
 puts JSON.generate(
   gem_version: spec.version.to_s,

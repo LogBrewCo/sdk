@@ -12,9 +12,9 @@
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
     <SignAssembly>false</SignAssembly>
-    <LogBrewCoreDependencyVersion>[0.1.5, 0.2.0)</LogBrewCoreDependencyVersion>
+    <LogBrewCoreDependencyVersion>[0.1.6, 0.2.0)</LogBrewCoreDependencyVersion>
     <PackageId>LogBrew.HttpClient</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
     <Description>Explicit LogBrew IHttpClientFactory integration for privacy-bounded outbound HTTP correlation.</Description>

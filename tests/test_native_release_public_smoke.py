@@ -17,7 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_native_release_public_smoke.sh"
 ARTIFACT_ID = "native:LogBrewCo/sdk"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
+PUBLIC_VERSION = "0.2.0"
 SOURCE_PATHS = (
     "LICENSE",
     "README.md",
@@ -168,7 +169,16 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_temp_dir:
             temp_dir = Path(raw_temp_dir)
             artifact_path = temp_dir / "source.tar.gz"
-            _source_archive(artifact_path)
+            public_header = (ROOT / "c/logbrew-c/include/logbrew.h").read_bytes().replace(
+                b'#define LOGBREW_C_VERSION "0.2.1"',
+                b'#define LOGBREW_C_VERSION "0.2.0"',
+                1,
+            )
+            _source_archive(
+                artifact_path,
+                version=PUBLIC_VERSION,
+                mutations={"c/logbrew-c/include/logbrew.h": public_header},
+            )
             fake_bin = temp_dir / "bin"
             fake_bin.mkdir()
             curl_args = temp_dir / "curl-args.txt"
@@ -201,7 +211,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             env.pop("LOGBREW_RELEASE_RECEIPT_MODE", None)
             env.pop("LOGBREW_RELEASE_ARTIFACT_FILES_JSON", None)
             result = subprocess.run(
-                ["bash", str(SCRIPT), VERSION],
+                ["bash", str(SCRIPT)],
                 cwd=ROOT,
                 env=env,
                 capture_output=True,
@@ -328,7 +338,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "native release receipt failed at release identity\n")
-        self.assertNotIn("0.2.0", result.stderr)
+        self.assertNotIn("0.2.1", result.stderr)
         self.assertNotIn("0.2.2", result.stderr)
 
     def test_receipt_mode_bounds_build_and_runtime_diagnostics(self) -> None:

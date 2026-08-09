@@ -27,48 +27,66 @@ def maven_version(path: Path) -> str | None:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.8"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.9"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.2"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.3"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
-            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.6"),
+            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.7"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.5"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.4"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.13"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.14"),
         }
         for relative_path, expected in npm_versions.items():
             manifest = json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
             self.assertEqual((manifest["name"], manifest["version"]), expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.8"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.8"),
-            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.2"),
-            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.4"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.9"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.9"),
+            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.3"),
+            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.5"),
         }
         for relative_path, expected in pypi_versions.items():
             project = tomllib.loads((ROOT / relative_path).read_text(encoding="utf-8"))["project"]
             self.assertEqual((project["name"], project["version"]), expected)
 
         rust = tomllib.loads((ROOT / "rust/logbrew/Cargo.toml").read_text(encoding="utf-8"))
-        self.assertEqual(rust["package"]["version"], "0.1.2")
+        self.assertEqual(rust["package"]["version"], "0.1.3")
         ruby = (ROOT / "ruby/logbrew-ruby/logbrew-sdk.gemspec").read_text(encoding="utf-8")
         self.assertIsNotNone(
-            re.search(r'^\s*spec\.version\s*=\s*"0\.1\.3"$', ruby, re.MULTILINE),
+            re.search(r'^\s*spec\.version\s*=\s*"0\.1\.4"$', ruby, re.MULTILINE),
             ruby,
         )
-        self.assertEqual(maven_version(ROOT / "java/logbrew-java/pom.xml"), "0.1.2")
+        self.assertEqual(maven_version(ROOT / "java/logbrew-java/pom.xml"), "0.1.3")
         self.assertEqual(
             xml_value(ROOT / "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", "Version"),
-            "0.1.5",
+            "0.1.6",
         )
         self.assertEqual(
             xml_value(
                 ROOT / "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
                 "Version",
             ),
-            "0.1.0",
+            "0.1.1",
         )
+
+    def test_native_family_versions_advance(self) -> None:
+        self.assertIn(
+            '#define LOGBREW_C_VERSION "0.2.1"',
+            (ROOT / "c/logbrew-c/include/logbrew.h").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            'inline constexpr const char *version = "0.2.1"',
+            (ROOT / "cpp/logbrew-cpp/include/logbrew.hpp").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            'LogBrewObjectiveCVersion = @"0.2.2"',
+            (ROOT / "objc/logbrew-objc/src/LogBrew.m").read_text(encoding="utf-8"),
+        )
+        unity = json.loads(
+            (ROOT / "unity/logbrew-unity/package.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual((unity["name"], unity["version"]), ("co.logbrew.unity", "0.2.1"))
 
     def test_react_native_release_requires_the_fixed_mobile_core(self) -> None:
         manifest = json.loads(
@@ -161,17 +179,30 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn(source_tests, readiness)
         self.assertLess(readiness.index(metadata_install), readiness.index(source_tests))
 
-    def test_fastapi_celery_extra_requires_the_fixed_core_without_bloating_base_install(self) -> None:
+    def test_python_integrations_require_the_description_core_without_bloating_fastapi(self) -> None:
         project = tomllib.loads(
             (ROOT / "python/logbrew_fastapi/pyproject.toml").read_text(encoding="utf-8")
         )["project"]
 
         self.assertEqual(
             project["optional-dependencies"]["celery"],
-            ["logbrew-sdk[celery]>=0.1.7,<0.2.0"],
+            ["logbrew-sdk[celery]>=0.1.9,<0.2.0"],
         )
         self.assertNotIn("celery>=5,<6", project["dependencies"])
-        self.assertIn("logbrew-sdk>=0.1.7,<0.2.0", project["dependencies"])
+        self.assertIn("logbrew-sdk>=0.1.9,<0.2.0", project["dependencies"])
+
+        for relative_path in (
+            "python/logbrew_flask/pyproject.toml",
+            "python/logbrew_django/pyproject.toml",
+        ):
+            integration = tomllib.loads(
+                (ROOT / relative_path).read_text(encoding="utf-8")
+            )["project"]
+            with self.subTest(relative_path=relative_path):
+                self.assertIn(
+                    "logbrew-sdk>=0.1.9,<0.2.0",
+                    integration["dependencies"],
+                )
 
     def test_react_native_bundle_smoke_reads_package_versions(self) -> None:
         smoke = (
@@ -230,8 +261,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )
 
     def test_maven_and_nuget_package_versions_match_the_release_matrix(self) -> None:
-        self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin/pom.xml"), "0.2.0")
-        self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin-okhttp/pom.xml"), "0.2.0")
+        self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin/pom.xml"), "0.2.1")
+        self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin-okhttp/pom.xml"), "0.2.1")
 
         expected = {
             "LogBrew.AspNetCore": "0.1.1",
@@ -244,58 +275,60 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(xml_value(project, "Version"), version)
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
-        self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.2")
-        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.3")
-        self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.8")
-        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.5")
+        self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.3")
+        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.4")
+        self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.9")
+        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.6")
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.1")
-        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.0")
-        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.2")
-        self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.0")
+        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.1")
+        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.3")
+        self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.1")
         self.assertEqual(
             {
                 value["name"]: value["version"]
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.8",
-                "logbrew-fastapi": "0.1.8",
-                "logbrew-flask": "0.1.2",
-                "logbrew-django": "0.1.4",
+                "logbrew-sdk": "0.1.9",
+                "logbrew-fastapi": "0.1.9",
+                "logbrew-flask": "0.1.3",
+                "logbrew-django": "0.1.5",
             },
         )
 
     def test_tag_distributed_receipts_keep_public_baselines_until_release(self) -> None:
         go_smoke = (ROOT / "scripts/real_user_go_public_module_smoke.sh").read_text(encoding="utf-8")
+        go_gin_smoke = (ROOT / "scripts/real_user_go_gin_smoke.sh").read_text(encoding="utf-8")
         swift_smoke = (ROOT / "scripts/real_user_swiftpm_public_smoke.sh").read_text(encoding="utf-8")
         swift_readme = (ROOT / "swift/logbrew-swift/README.md").read_text(encoding="utf-8")
 
-        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.4', go_smoke)
-        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.1', swift_smoke)
+        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.5', go_smoke)
+        self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1', go_gin_smoke)
+        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.8', swift_smoke)
         self.assertIn('from: "0.1.2"', swift_readme)
 
     def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
         receipt_defaults = {
             "scripts/real_user_npm_public_registry_smoke.sh": (
-                "LOGBREW_NPM_SDK_VERSION:-0.1.3",
-                "LOGBREW_NPM_BROWSER_VERSION:-0.1.0",
-                "LOGBREW_NPM_NODE_VERSION:-0.1.1",
-                "LOGBREW_NPM_NEXT_VERSION:-0.1.0",
-                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.0",
+                "LOGBREW_NPM_SDK_VERSION:-0.1.8",
+                "LOGBREW_NPM_BROWSER_VERSION:-0.1.2",
+                "LOGBREW_NPM_NODE_VERSION:-0.1.6",
+                "LOGBREW_NPM_NEXT_VERSION:-0.1.4",
+                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.13",
             ),
-            "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.0",),
-            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.1",),
+            "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.2",),
+            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.3",),
             "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.8",),
             "scripts/real_user_maven_central_public_smoke.sh": (
-                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.1",
+                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.2",
                 "LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.0",
             ),
             "scripts/real_user_dotnet_public_nuget_smoke.sh": (
-                "LOGBREW_DOTNET_CORE_VERSION:-0.1.4",
+                "LOGBREW_DOTNET_CORE_VERSION:-0.1.5",
                 "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.0",
             ),
             "scripts/real_user_python_public_pypi_smoke.sh": (
-                "LOGBREW_PYPI_SDK_VERSION:-0.1.7",
+                "LOGBREW_PYPI_SDK_VERSION:-0.1.8",
                 "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.8",
                 "LOGBREW_PYPI_FLASK_VERSION:-0.1.2",
                 "LOGBREW_PYPI_DJANGO_VERSION:-0.1.4",

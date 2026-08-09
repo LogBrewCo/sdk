@@ -1062,7 +1062,7 @@ namespace LogBrew.Unity.Tests
             var body = client.PreviewJson();
             AssertEqual(7, CountOccurrences(body, "\"context\""));
             AssertContains(body, "\"name\": \"logbrew-unity\"");
-            AssertContains(body, "\"version\": \"0.2.0\"");
+            AssertContains(body, "\"version\": \"0.2.1\"");
             AssertContains(body, "\"service\"");
             AssertContains(body, "\"name\": \"logbrew-unity-tests\"");
             AssertContains(body, "\"framework\"");
