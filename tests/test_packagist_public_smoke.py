@@ -29,8 +29,8 @@ class PackagistPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_PACKAGIST_VERSION",
-            'version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.8}}"',
-            "getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.8'",
+            'version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.9}}"',
+            "getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.9'",
             "https://repo.packagist.org",
             "composer config license proprietary",
             "composer require",
@@ -51,6 +51,7 @@ class PackagistPublicSmokeTests(unittest.TestCase):
             "LogBrew\\TraceparentSpanInput",
             "monolog/monolog",
             "metric(",
+            "Duration of one completed server request.",
             "Traceparent::parse",
             "ProductTimeline::networkMilestone",
             "LogBrewOperationTracing::databaseOperation",

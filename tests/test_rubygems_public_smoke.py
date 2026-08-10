@@ -14,7 +14,7 @@ class RubyGemsPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_RUBYGEMS_VERSION",
-            'version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.3}}"',
+            'version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.4}}"',
             "https://rubygems.org",
             "gem install",
             "gem list --local",
