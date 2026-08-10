@@ -56,7 +56,7 @@ const {
 } = require("./xhr-spans.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
-const DEFAULT_SDK_VERSION = "0.1.2";
+const DEFAULT_SDK_VERSION = "0.1.3";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;

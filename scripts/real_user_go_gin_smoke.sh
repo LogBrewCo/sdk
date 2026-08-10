@@ -65,7 +65,7 @@ def write_module(
 write_module(
     "github.com/LogBrewCo/sdk/go/logbrew",
     repo_root / "go/logbrew",
-    "v0.1.6",
+    "v0.1.7",
     exclude_nested=True,
 )
 write_module(
@@ -75,7 +75,7 @@ write_module(
 )
 PY
 
-parent_zip="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.6.zip"
+parent_zip="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.7.zip"
 gin_zip="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/gin/@v/v0.1.1.zip"
 test -f "$parent_zip"
 test -f "$gin_zip"
@@ -89,10 +89,10 @@ gin_zip = Path(sys.argv[2])
 with zipfile.ZipFile(parent_zip) as archive:
     names = set(archive.namelist())
     for nested in ("gin", "otel"):
-        if f"github.com/LogBrewCo/sdk/go/logbrew@v0.1.6/{nested}/go.mod" in names:
+        if f"github.com/LogBrewCo/sdk/go/logbrew@v0.1.7/{nested}/go.mod" in names:
             raise SystemExit(f"root Go module zip should not include nested {nested} module")
     readme = archive.read(
-        "github.com/LogBrewCo/sdk/go/logbrew@v0.1.6/README.md"
+        "github.com/LogBrewCo/sdk/go/logbrew@v0.1.7/README.md"
     ).decode("utf-8")
     if "github.com/LogBrewCo/sdk/go/logbrew/gin" not in readme:
         raise SystemExit("root README missing Gin module guidance")
@@ -123,7 +123,7 @@ if grep -q '^replace ' go.mod; then
 	exit 1
 fi
 go list -m all > "$tmp_dir/go-gin-modules-before-remove.txt"
-grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.6$' "$tmp_dir/go-gin-modules-before-remove.txt"
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.7$' "$tmp_dir/go-gin-modules-before-remove.txt"
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew/gin v0.1.1$' "$tmp_dir/go-gin-modules-before-remove.txt"
 grep -q '^github.com/gin-gonic/gin v1.11.0$' "$tmp_dir/go-gin-modules-before-remove.txt"
 go get github.com/LogBrewCo/sdk/go/logbrew/gin@none >/dev/null

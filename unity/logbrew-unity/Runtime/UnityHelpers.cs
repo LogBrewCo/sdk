@@ -7,7 +7,7 @@ namespace LogBrew.Unity
 {
     public static partial class LogBrewUnity
     {
-        public const string SdkVersion = "0.2.1";
+        public const string SdkVersion = "0.2.2";
 
         public static LogBrewClient CreateClient(
             string apiKey,

@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_native_release_public_smoke.sh"
 ARTIFACT_ID = "native:LogBrewCo/sdk"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 PUBLIC_VERSION = "0.2.1"
 SOURCE_PATHS = (
     "LICENSE",
@@ -169,7 +169,11 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_temp_dir:
             temp_dir = Path(raw_temp_dir)
             artifact_path = temp_dir / "source.tar.gz"
-            public_header = (ROOT / "c/logbrew-c/include/logbrew.h").read_bytes()
+            public_header = (ROOT / "c/logbrew-c/include/logbrew.h").read_bytes().replace(
+                b'#define LOGBREW_C_VERSION "0.2.2"',
+                b'#define LOGBREW_C_VERSION "0.2.1"',
+                1,
+            )
             _source_archive(
                 artifact_path,
                 version=PUBLIC_VERSION,
@@ -329,13 +333,13 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             temp_dir = Path(raw_temp_dir)
             artifact_path = temp_dir / "source.tar.gz"
             _source_archive(artifact_path)
-            result = self._run_receipt(temp_dir, artifact_path, version="0.2.2")
+            result = self._run_receipt(temp_dir, artifact_path, version="0.2.3")
 
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "native release receipt failed at release identity\n")
-        self.assertNotIn("0.2.1", result.stderr)
         self.assertNotIn("0.2.2", result.stderr)
+        self.assertNotIn("0.2.3", result.stderr)
 
     def test_receipt_mode_bounds_build_and_runtime_diagnostics(self) -> None:
         build_canary = b"COMPILER_CANARY_4C62"

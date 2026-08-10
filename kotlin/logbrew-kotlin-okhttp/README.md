@@ -10,11 +10,11 @@ Install from Maven Central:
 
 ```kotlin
 dependencies {
-    implementation("co.logbrew:logbrew-kotlin-okhttp:0.2.1")
+    implementation("co.logbrew:logbrew-kotlin-okhttp:0.2.2")
 }
 ```
 
-The package depends on `co.logbrew:logbrew-kotlin:0.2.1` and OkHttp `4.12.0`.
+The package depends on `co.logbrew:logbrew-kotlin:0.2.2` and OkHttp `4.12.0`.
 
 ## Usage
 
