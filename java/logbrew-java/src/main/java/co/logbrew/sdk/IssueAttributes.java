@@ -15,6 +15,7 @@ public final class IssueAttributes {
     private Map<String, ?> metadata;
     private TelemetryContext context;
     private IssueException exception;
+    private IssueExceptionChain exceptionChain;
     private List<IssueStackFrame> stackFrames;
     private List<IssueBreadcrumb> breadcrumbs;
     private boolean breadcrumbsTruncated;
@@ -57,15 +58,17 @@ public final class IssueAttributes {
         boolean handled
     ) {
         String exceptionType = IssueDiagnostics.safeExceptionType(error);
+        IssueExceptionMechanism mechanism = IssueExceptionMechanism.create(mechanismType, handled);
         IssueAttributes attributes = create(title, "error")
             .exception(
                 IssueException.create(exceptionType)
-                    .mechanism(IssueExceptionMechanism.create(mechanismType, handled))
+                    .mechanism(mechanism)
             );
-        List<IssueStackFrame> frames = IssueDiagnostics.stackFrames(error);
-        if (!frames.isEmpty()) {
-            attributes.stackFrames(frames);
+        IssueDiagnostics.StackEvidence stack = IssueDiagnostics.stackEvidence(error);
+        if (!stack.frames().isEmpty()) {
+            attributes.stackFrames(stack.frames());
         }
+        attributes.exceptionChain(IssueExceptionChain.fromThrowable(error, mechanism, stack));
         return attributes;
     }
 
@@ -99,6 +102,17 @@ public final class IssueAttributes {
             throw new SdkException("validation_error", "issue exception must be provided");
         }
         this.exception = exception;
+        return this;
+    }
+
+    /**
+     * Sets an optional bounded parent-first exception chain.
+     */
+    public IssueAttributes exceptionChain(IssueExceptionChain exceptionChain) {
+        if (exceptionChain == null) {
+            throw new SdkException("validation_error", "issue exceptionChain must be provided");
+        }
+        this.exceptionChain = exceptionChain;
         return this;
     }
 
@@ -193,6 +207,9 @@ public final class IssueAttributes {
         Validation.putOptionalString(value, "message", message);
         if (exception != null) {
             value.put("exception", exception.toMap());
+        }
+        if (exceptionChain != null) {
+            value.put("exceptionChain", exceptionChain.toMap(exception, stackFrames));
         }
         if (stackFrames != null) {
             List<Map<String, Object>> mappedFrames = new ArrayList<>();

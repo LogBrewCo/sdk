@@ -11,8 +11,11 @@ namespace LogBrew
         {
             ManualDiagnosticsSerializeWithBoundsAndStableOrdering();
             ExceptionProjectionIsTypedBoundedAndPrivacySafe();
+            ExceptionChainsPreserveRuntimeStructureWithoutMessages();
+            ManualExceptionChainsExposeExplicitCaptureStates();
+            DeepExceptionChainsAreBoundedAndMarkedTruncated();
             InvalidDiagnosticsFailClosed();
-            return 3;
+            return 6;
         }
 
         private static void ManualDiagnosticsSerializeWithBoundsAndStableOrdering()
@@ -122,6 +125,132 @@ namespace LogBrew
             Require(CountOccurrences(preview, "\"filename\"") <= 64, "two projected exceptions must remain capped at 32 frames each");
         }
 
+        private static void ExceptionChainsPreserveRuntimeStructureWithoutMessages()
+        {
+            var cause = CaptureInvalidOperation("sensitive cause details");
+            Exception wrapped;
+            try
+            {
+                throw new InvalidOperationException("sensitive wrapper details", cause);
+            }
+            catch (InvalidOperationException error)
+            {
+                wrapped = error;
+            }
+
+            var aggregateFirst = CaptureInvalidOperation("sensitive aggregate first");
+            var aggregateSecond = CaptureArgumentException("sensitive aggregate second");
+            Exception aggregate;
+            try
+            {
+                throw new AggregateException(
+                    "sensitive aggregate wrapper",
+                    aggregateFirst,
+                    aggregateSecond);
+            }
+            catch (AggregateException error)
+            {
+                aggregate = error;
+            }
+
+            var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-chain-tests", "0.1.0");
+            client.Issue(
+                "evt_issue_cause_chain",
+                "2026-08-02T08:15:31Z",
+                IssueAttributes.FromException(wrapped));
+            client.Issue(
+                "evt_issue_aggregate_chain",
+                "2026-08-02T08:15:32Z",
+                IssueAttributes.FromException(aggregate));
+
+            var preview = client.PreviewJson();
+            Require(CountOccurrences(preview, "\"exceptionChain\"") == 2, "each runtime exception must include one chain");
+            Require(preview.Contains("\"relationship\": \"reported\"", StringComparison.Ordinal), "chain root relationship missing");
+            Require(preview.Contains("\"relationship\": \"cause\"", StringComparison.Ordinal), "inner exception relationship missing");
+            Require(CountOccurrences(preview, "\"relationship\": \"aggregate_member\"") == 2, "aggregate members must remain separate");
+            Require(preview.Contains("\"parentId\": 0", StringComparison.Ordinal), "child exception must reference its parent");
+            Require(preview.Contains("\"messageState\": \"redacted\"", StringComparison.Ordinal), "automatic messages must report redaction");
+            Require(preview.Contains("\"stackFramesState\": \"captured\"", StringComparison.Ordinal), "per-exception stack state missing");
+            Require(preview.Contains("\"type\": \"dotnet.inner_exception\"", StringComparison.Ordinal), "inner exception mechanism missing");
+            Require(preview.Contains("\"type\": \"dotnet.aggregate_member\"", StringComparison.Ordinal), "aggregate mechanism missing");
+            foreach (var sensitive in new[]
+            {
+                "sensitive cause details",
+                "sensitive wrapper details",
+                "sensitive aggregate first",
+                "sensitive aggregate second",
+                "sensitive aggregate wrapper"
+            })
+            {
+                Require(!preview.Contains(sensitive, StringComparison.Ordinal), "automatic chain leaked an exception message");
+            }
+        }
+
+        private static void ManualExceptionChainsExposeExplicitCaptureStates()
+        {
+            var mechanism = IssueExceptionMechanism.Create("dotnet.manual", true);
+            var rootFrame = IssueStackFrame.Create("CheckoutService.cs", 42, 7)
+                .WithFunction("SubmitAsync")
+                .WithModule("Checkout.Api.CheckoutService")
+                .WithInApp(true);
+            var chain = IssueExceptionChain.Create(new[]
+            {
+                IssueExceptionChainEntry.Create(
+                        0,
+                        IssueExceptionRelationship.Reported,
+                        "CheckoutFailure")
+                    .WithMechanism(mechanism)
+                    .WithMessage("checkout failed", true)
+                    .WithStackFrames(new[] { rootFrame }),
+                IssueExceptionChainEntry.Create(
+                        1,
+                        IssueExceptionRelationship.Context,
+                        "RequestContextFailure")
+                    .WithParentId(0)
+                    .WithModule("Checkout.Api")
+                    .WithMechanism(IssueExceptionMechanism.Create("dotnet.context", true))
+                    .WithRedactedMessage()
+            }, true);
+
+            var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-manual-chain-tests", "0.1.0");
+            client.Issue(
+                "evt_issue_manual_chain",
+                "2026-08-02T08:15:31Z",
+                IssueAttributes.Create("Checkout failed", "error")
+                    .WithException(IssueExceptionInfo.Create("CheckoutFailure").WithMechanism(mechanism))
+                    .WithStackFrame(rootFrame)
+                    .WithExceptionChain(chain));
+
+            var preview = client.PreviewJson();
+            Require(preview.Contains("\"message\": \"checkout failed\"", StringComparison.Ordinal), "manual captured message missing");
+            Require(preview.Contains("\"messageState\": \"truncated\"", StringComparison.Ordinal), "manual truncated message state missing");
+            Require(preview.Contains("\"relationship\": \"context\"", StringComparison.Ordinal), "manual context relationship missing");
+            Require(preview.Contains("\"stackFramesState\": \"not_captured\"", StringComparison.Ordinal), "manual missing stack state missing");
+            Require(preview.Contains("\"truncated\": true", StringComparison.Ordinal), "manual chain truncation receipt missing");
+        }
+
+        private static void DeepExceptionChainsAreBoundedAndMarkedTruncated()
+        {
+            Exception error = new InvalidOperationException("sensitive depth 9");
+            for (var depth = 8; depth >= 0; depth--)
+            {
+                error = new InvalidOperationException(
+                    "sensitive depth " + depth.ToString(CultureInfo.InvariantCulture),
+                    error);
+            }
+
+            var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-deep-chain-tests", "0.1.0");
+            client.Issue(
+                "evt_issue_deep_chain",
+                "2026-08-02T08:15:31Z",
+                IssueAttributes.FromException(error));
+            var preview = client.PreviewJson();
+            Require(CountOccurrences(preview, "\"relationship\": \"reported\"") == 1, "deep chain must have one root");
+            Require(CountOccurrences(preview, "\"relationship\": \"cause\"") == 7, "deep chain must stop at eight nodes");
+            Require(preview.Contains("\"truncated\": true", StringComparison.Ordinal), "bounded deep chain must report truncation");
+            Require(!preview.Contains("sensitive depth", StringComparison.Ordinal), "deep chain leaked an exception message");
+        }
+
         private static void InvalidDiagnosticsFailClosed()
         {
             ExpectSdkError(
@@ -150,6 +279,41 @@ namespace LogBrew
             ExpectSdkError(
                 "issue stackFrames must contain 1-32 frames",
                 () => IssueAttributes.Create("failure", "error").WithStackFrames(Array.Empty<IssueStackFrame>()));
+            ExpectSdkError(
+                "issue exceptionChain entry 0 must be the parentless reported exception",
+                () => Capture(IssueAttributes.Create("failure", "error")
+                    .WithException(IssueExceptionInfo.Create("Failure"))
+                    .WithExceptionChain(IssueExceptionChain.Create(new[]
+                    {
+                        IssueExceptionChainEntry.Create(0, IssueExceptionRelationship.Cause, "Failure")
+                    }))));
+            ExpectSdkError(
+                "issue exceptionChain parent relationship is invalid",
+                () => Capture(IssueAttributes.Create("failure", "error")
+                    .WithException(IssueExceptionInfo.Create("Failure"))
+                    .WithExceptionChain(IssueExceptionChain.Create(new[]
+                    {
+                        IssueExceptionChainEntry.Create(0, IssueExceptionRelationship.Reported, "Failure"),
+                        IssueExceptionChainEntry.Create(1, IssueExceptionRelationship.Cause, "Cause")
+                            .WithParentId(1)
+                    }))));
+            ExpectSdkError(
+                "issue exceptionChain reported exception must match exception",
+                () => Capture(IssueAttributes.Create("failure", "error")
+                    .WithException(IssueExceptionInfo.Create("Failure"))
+                    .WithExceptionChain(IssueExceptionChain.Create(new[]
+                    {
+                        IssueExceptionChainEntry.Create(0, IssueExceptionRelationship.Reported, "DifferentFailure")
+                    }))));
+            ExpectSdkError(
+                "issue exceptionChain reported stack must match stackFrames",
+                () => Capture(IssueAttributes.Create("failure", "error")
+                    .WithException(IssueExceptionInfo.Create("Failure"))
+                    .WithStackFrame(IssueStackFrame.Create("Failure.cs", 1, 1))
+                    .WithExceptionChain(IssueExceptionChain.Create(new[]
+                    {
+                        IssueExceptionChainEntry.Create(0, IssueExceptionRelationship.Reported, "Failure")
+                    }))));
 
             var frames = new List<IssueStackFrame>();
             for (var index = 0; index < 33; index++)
@@ -176,6 +340,30 @@ namespace LogBrew
         {
             var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-invalid-issue-tests", "0.1.0");
             client.Issue("evt_issue_invalid", "2026-08-02T08:15:31Z", attributes);
+        }
+
+        private static InvalidOperationException CaptureInvalidOperation(string message)
+        {
+            try
+            {
+                throw new InvalidOperationException(message);
+            }
+            catch (InvalidOperationException error)
+            {
+                return error;
+            }
+        }
+
+        private static ArgumentException CaptureArgumentException(string message)
+        {
+            try
+            {
+                throw new ArgumentException(message);
+            }
+            catch (ArgumentException error)
+            {
+                return error;
+            }
         }
 
         private static void ExpectSdkError(string messageFragment, Action callback)

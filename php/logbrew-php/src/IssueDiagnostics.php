@@ -19,6 +19,19 @@ use Throwable;
  * @phpstan-import-type SeverityAlias from LogBrewClient
  * @phpstan-type IssueExceptionMechanism array{type: string, handled: bool}
  * @phpstan-type IssueException array{type: string, mechanism?: IssueExceptionMechanism}
+ * @phpstan-type IssueExceptionChainEntry array{
+ *   id: int,
+ *   parentId?: int,
+ *   relationship: 'reported'|'cause'|'context'|'aggregate_member'|'suppressed',
+ *   type: string,
+ *   message?: string,
+ *   messageState: 'captured'|'truncated'|'redacted'|'not_captured',
+ *   module?: string,
+ *   mechanism?: IssueExceptionMechanism,
+ *   stackFrames?: list<IssueStackFrame>,
+ *   stackFramesState: 'captured'|'truncated'|'not_captured'
+ * }
+ * @phpstan-type IssueExceptionChain array{entries: non-empty-list<IssueExceptionChainEntry>, truncated: bool}
  * @phpstan-type IssueStackFrame array{
  *   filename: string,
  *   line: int,
@@ -42,6 +55,7 @@ use Throwable;
  *   level: Severity|SeverityAlias,
  *   message?: string,
  *   exception?: IssueException,
+ *   exceptionChain?: IssueExceptionChain,
  *   stackFrames?: list<IssueStackFrame>,
  *   breadcrumbs?: list<IssueBreadcrumb>,
  *   breadcrumbsTruncated?: bool,
@@ -53,8 +67,11 @@ final class IssueDiagnostics
 {
     public const MAX_STACK_FRAMES = 32;
     public const MAX_BREADCRUMBS = 64;
+    public const MAX_EXCEPTIONS = 8;
 
     private const MAX_EXCEPTION_TYPE_LENGTH = 256;
+    private const MAX_EXCEPTION_MESSAGE_LENGTH = 1_024;
+    private const MAX_EXCEPTION_MODULE_LENGTH = 512;
     private const MAX_MECHANISM_TYPE_LENGTH = 64;
     private const MAX_STACK_FILENAME_LENGTH = 2_048;
     private const MAX_STACK_FUNCTION_LENGTH = 256;
@@ -113,9 +130,16 @@ final class IssueDiagnostics
         if ($message !== null) {
             $attributes['message'] = $message;
         }
-        if ($includeStackFrames) {
-            $attributes['stackFrames'] = self::stackFramesFromThrowable($error);
+        $rootStack = $includeStackFrames ? self::stackEvidenceFromThrowable($error) : null;
+        if ($rootStack !== null) {
+            $attributes['stackFrames'] = $rootStack['frames'];
         }
+        $attributes['exceptionChain'] = self::exceptionChainFromThrowable(
+            $error,
+            $attributes['exception'],
+            $rootStack,
+            $includeStackFrames
+        );
         if ($breadcrumbs !== null) {
             $attributes['breadcrumbs'] = $breadcrumbs;
         }
@@ -187,11 +211,19 @@ final class IssueDiagnostics
      */
     public static function stackFramesFromThrowable(Throwable $error): array
     {
+        return self::stackEvidenceFromThrowable($error)['frames'];
+    }
+
+    /**
+     * @return array{frames: non-empty-list<IssueStackFrame>, truncated: bool}
+     */
+    private static function stackEvidenceFromThrowable(Throwable $error): array
+    {
         $frames = [];
         $currentFile = $error->getFile();
         $currentLine = $error->getLine();
-
-        foreach ($error->getTrace() as $sourceFrame) {
+        $trace = $error->getTrace();
+        foreach ($trace as $sourceFrame) {
             if (count($frames) >= self::MAX_STACK_FRAMES) {
                 break;
             }
@@ -204,7 +236,10 @@ final class IssueDiagnostics
             $frames[] = self::generatedStackFrame($currentFile, $currentLine, []);
         }
 
-        return $frames;
+        return [
+            'frames' => $frames,
+            'truncated' => count($trace) + 1 > self::MAX_STACK_FRAMES,
+        ];
     }
 
     /**
@@ -265,6 +300,15 @@ final class IssueDiagnostics
         if (array_key_exists('exception', $attributes)) {
             $validated['exception'] = self::validateException($attributes['exception']);
         }
+        if (array_key_exists('exceptionChain', $attributes)) {
+            $validated['exceptionChain'] = self::validateExceptionChain(
+                $attributes['exceptionChain'],
+                $validated['exception'] ?? null,
+                array_key_exists('stackFrames', $attributes)
+                    ? self::validateStackFrames($attributes['stackFrames'])
+                    : null
+            );
+        }
         if (array_key_exists('stackFrames', $attributes)) {
             $validated['stackFrames'] = self::validateStackFrames($attributes['stackFrames']);
         }
@@ -297,6 +341,76 @@ final class IssueDiagnostics
         return self::validBoundedText($error::class, self::MAX_EXCEPTION_TYPE_LENGTH, true)
             ? $error::class
             : 'Throwable';
+    }
+
+    /**
+     * @param IssueException $rootException
+     * @param array{frames: non-empty-list<IssueStackFrame>, truncated: bool}|null $rootStack
+     * @return IssueExceptionChain
+     */
+    private static function exceptionChainFromThrowable(
+        Throwable $error,
+        array $rootException,
+        ?array $rootStack,
+        bool $includeStackFrames
+    ): array {
+        $entries = [];
+        $seen = [];
+        $current = $error;
+        $parentId = null;
+        $truncated = false;
+
+        while ($current !== null) {
+            $objectId = spl_object_id($current);
+            if (isset($seen[$objectId])) {
+                $truncated = true;
+                break;
+            }
+            $seen[$objectId] = true;
+            if (count($entries) >= self::MAX_EXCEPTIONS) {
+                $truncated = true;
+                break;
+            }
+
+            $id = count($entries);
+            $stack = $id === 0
+                ? $rootStack
+                : ($includeStackFrames ? self::stackEvidenceFromThrowable($current) : null);
+            $reflection = new ReflectionClass($current);
+            $module = $reflection->getNamespaceName();
+            $entry = [
+                'id' => $id,
+                'relationship' => $id === 0 ? 'reported' : 'cause',
+                'type' => self::throwableType($current),
+                'messageState' => $current->getMessage() === '' ? 'not_captured' : 'redacted',
+                'stackFramesState' => $stack === null
+                    ? 'not_captured'
+                    : ($stack['truncated'] ? 'truncated' : 'captured'),
+            ];
+            if ($id === 0 && array_key_exists('mechanism', $rootException)) {
+                $entry['mechanism'] = $rootException['mechanism'];
+            } elseif ($id > 0) {
+                $entry['mechanism'] = ['type' => 'php.previous', 'handled' => true];
+            }
+            if ($parentId !== null) {
+                $entry['parentId'] = $parentId;
+            }
+            if ($module !== '' && self::validBoundedText($module, self::MAX_EXCEPTION_MODULE_LENGTH, true)) {
+                $entry['module'] = $module;
+            }
+            if ($stack !== null) {
+                $entry['stackFrames'] = $stack['frames'];
+            }
+            $entries[] = $entry;
+            $parentId = $id;
+            $current = $current->getPrevious();
+        }
+
+        return self::validateExceptionChain(
+            ['entries' => $entries, 'truncated' => $truncated],
+            $rootException,
+            $rootStack['frames'] ?? null
+        );
     }
 
     /**
@@ -382,6 +496,144 @@ final class IssueDiagnostics
         }
 
         return ['type' => $type, 'handled' => $handled];
+    }
+
+    /**
+     * @param IssueException|null $legacyException
+     * @param list<IssueStackFrame>|null $legacyStackFrames
+     * @return IssueExceptionChain
+     */
+    private static function validateExceptionChain(
+        mixed $value,
+        ?array $legacyException,
+        ?array $legacyStackFrames
+    ): array {
+        $chain = self::requireObject('issue exceptionChain', $value);
+        self::rejectUnknownKeys('issue exceptionChain', $chain, ['entries', 'truncated']);
+        $sourceEntries = $chain['entries'] ?? null;
+        if (
+            !is_array($sourceEntries)
+            || !array_is_list($sourceEntries)
+            || count($sourceEntries) < 1
+            || count($sourceEntries) > self::MAX_EXCEPTIONS
+        ) {
+            throw self::validation('issue exceptionChain entries must contain 1-8 exceptions');
+        }
+        if (!array_key_exists('truncated', $chain) || !is_bool($chain['truncated'])) {
+            throw self::validation('issue exceptionChain truncated must be a boolean');
+        }
+
+        $entries = [];
+        foreach ($sourceEntries as $index => $entryValue) {
+            $entry = self::requireObject("issue exceptionChain entry {$index}", $entryValue);
+            self::rejectUnknownKeys(
+                "issue exceptionChain entry {$index}",
+                $entry,
+                [
+                    'id',
+                    'parentId',
+                    'relationship',
+                    'type',
+                    'message',
+                    'messageState',
+                    'module',
+                    'mechanism',
+                    'stackFrames',
+                    'stackFramesState',
+                ]
+            );
+            if (($entry['id'] ?? null) !== $index) {
+                throw self::validation('issue exceptionChain ids must be contiguous and match array order');
+            }
+            $relationship = $entry['relationship'] ?? null;
+            $parent = $entry['parentId'] ?? null;
+            if ($index === 0) {
+                if ($relationship !== 'reported' || array_key_exists('parentId', $entry)) {
+                    throw self::validation(
+                        'issue exceptionChain entry 0 must be the parentless reported exception'
+                    );
+                }
+            } else {
+                if (
+                    !in_array($relationship, ['cause', 'context', 'aggregate_member', 'suppressed'], true)
+                    || !is_int($parent)
+                    || $parent < 0
+                    || $parent >= $index
+                ) {
+                    throw self::validation('issue exceptionChain parent relationship is invalid');
+                }
+            }
+
+            $validated = [
+                'id' => $index,
+                'relationship' => $relationship,
+                'type' => self::boundedText(
+                    'issue exceptionChain type',
+                    $entry['type'] ?? null,
+                    self::MAX_EXCEPTION_TYPE_LENGTH,
+                    true
+                ),
+            ];
+            if ($index > 0) {
+                if (!is_int($parent)) {
+                    throw self::validation('issue exceptionChain parent relationship is invalid');
+                }
+                $validated['parentId'] = $parent;
+            }
+            $messageState = $entry['messageState'] ?? null;
+            if (in_array($messageState, ['captured', 'truncated'], true)) {
+                $validated['message'] = self::boundedText(
+                    'issue exceptionChain message',
+                    $entry['message'] ?? null,
+                    self::MAX_EXCEPTION_MESSAGE_LENGTH
+                );
+            } elseif (
+                !in_array($messageState, ['redacted', 'not_captured'], true)
+                || array_key_exists('message', $entry)
+            ) {
+                throw self::validation('issue exceptionChain message must match messageState');
+            }
+            $validated['messageState'] = $messageState;
+            if (array_key_exists('module', $entry)) {
+                $validated['module'] = self::boundedText(
+                    'issue exceptionChain module',
+                    $entry['module'],
+                    self::MAX_EXCEPTION_MODULE_LENGTH,
+                    true
+                );
+            }
+            if (array_key_exists('mechanism', $entry)) {
+                $validated['mechanism'] = self::validateMechanism($entry['mechanism']);
+            }
+            $stackState = $entry['stackFramesState'] ?? null;
+            if (in_array($stackState, ['captured', 'truncated'], true)) {
+                $validated['stackFrames'] = self::validateStackFrames($entry['stackFrames'] ?? null);
+            } elseif ($stackState !== 'not_captured' || array_key_exists('stackFrames', $entry)) {
+                throw self::validation('issue exceptionChain stackFrames must match stackFramesState');
+            }
+            $validated['stackFramesState'] = $stackState;
+            $entries[] = $validated;
+        }
+
+        $reported = $entries[0];
+        $reportedException = ['type' => $reported['type']];
+        if (array_key_exists('mechanism', $reported)) {
+            $reportedException['mechanism'] = $reported['mechanism'];
+        }
+        if ($legacyException === null || $reportedException !== $legacyException) {
+            throw self::validation('issue exceptionChain reported exception must match exception');
+        }
+        if (
+            ($reported['stackFramesState'] === 'not_captured' && $legacyStackFrames !== null)
+            || (
+                $reported['stackFramesState'] !== 'not_captured'
+                && ($reported['stackFrames'] ?? null) !== $legacyStackFrames
+            )
+        ) {
+            throw self::validation('issue exceptionChain reported stack must match stackFrames');
+        }
+
+        return ['entries' => $entries, 'truncated' => $chain['truncated']];
     }
 
     /** @return list<IssueStackFrame> */

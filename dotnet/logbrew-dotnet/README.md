@@ -107,6 +107,14 @@ function and module names. It deliberately omits the exception message, raw
 stack text, source snippets, locals, and absolute paths; add an approved issue
 message explicitly only when your application has a suitable data policy.
 
+The same projection now follows `InnerException` and `AggregateException`
+members into a bounded parent-first `IssueExceptionChain`. Automatic messages
+are marked redacted rather than copied, per-node stack availability is explicit,
+and cycles or the eight-node cap set `truncated`. Manual
+`IssueExceptionChain` values are supported when the application owns richer
+normalized evidence. See the shared
+[exception-chain contract](../../docs/exception-chain-evidence.md).
+
 ```csharp
 using System;
 using System.Collections.Generic;

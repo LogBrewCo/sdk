@@ -162,6 +162,10 @@ test("React Native error events preserve an ordered bounded Metro stack", async 
           debugId
         }
       ]);
+      assert.deepEqual(
+        event.attributes.exceptionChain.entries[0].stackFrames,
+        event.attributes.stackFrames
+      );
       const serialized = JSON.stringify(event.attributes);
       assert.equal(serialized.includes("mobile.example.test"), false);
       assert.equal(serialized.includes("hidden=value"), false);

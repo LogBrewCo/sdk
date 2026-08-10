@@ -110,24 +110,30 @@ public extension IssueAttributes {
     ) -> IssueAttributes {
         let exceptionType = safeSwiftErrorType(error)
         let fileModule = fileID.split(separator: "/", maxSplits: 1).first.map(String.init)
+        let exceptionMechanism = IssueExceptionMechanism(type: mechanism, handled: handled)
+        let rootFrame = IssueStackFrame(
+            filename: fileID,
+            line: line,
+            column: column,
+            function: function,
+            module: fileModule,
+            inApp: true,
+        )
         return IssueAttributes(
             title: title ?? exceptionType,
             level: level,
             message: message,
             exception: IssueException(
                 type: exceptionType,
-                mechanism: IssueExceptionMechanism(type: mechanism, handled: handled),
+                mechanism: exceptionMechanism,
             ),
-            stackFrames: [
-                IssueStackFrame(
-                    filename: fileID,
-                    line: line,
-                    column: column,
-                    function: function,
-                    module: fileModule,
-                    inApp: true,
-                ),
-            ],
+            exceptionChain: swiftExceptionChain(
+                from: error,
+                rootType: exceptionType,
+                rootMechanism: exceptionMechanism,
+                rootFrame: rootFrame,
+            ),
+            stackFrames: [rootFrame],
             breadcrumbs: breadcrumbs,
             breadcrumbsTruncated: breadcrumbsTruncated,
             metadata: metadata,
@@ -171,6 +177,13 @@ let maximumIssueBreadcrumbs = 64
 func normalizeIssueAttributes(_ value: IssueAttributes) throws -> IssueAttributes {
     let exception = try value.exception.map(validateIssueException)
     let stackFrames = try normalizeIssueStackFrames(value.stackFrames)
+    let exceptionChain = try value.exceptionChain.map {
+        try normalizeIssueExceptionChain(
+            $0,
+            exception: exception,
+            stackFrames: stackFrames,
+        )
+    }
     let breadcrumbs = try normalizeIssueBreadcrumbs(value.breadcrumbs)
     let breadcrumbsWereCapped = (value.breadcrumbs?.count ?? 0) > maximumIssueBreadcrumbs
     let context = try value.context.map { try validateTelemetryContext($0) }
@@ -180,6 +193,7 @@ func normalizeIssueAttributes(_ value: IssueAttributes) throws -> IssueAttribute
         level: value.level,
         message: value.message,
         exception: exception,
+        exceptionChain: exceptionChain,
         stackFrames: stackFrames,
         breadcrumbs: breadcrumbs,
         breadcrumbsTruncated: breadcrumbsWereCapped ? true : value.breadcrumbsTruncated,
@@ -204,6 +218,7 @@ func issueAttributes(
         level: value.level,
         message: value.message,
         exception: value.exception,
+        exceptionChain: value.exceptionChain,
         stackFrames: value.stackFrames,
         breadcrumbs: capped,
         breadcrumbsTruncated: value.breadcrumbsTruncated == true
@@ -256,7 +271,7 @@ func validateIssueBreadcrumb(_ value: IssueBreadcrumb) throws -> IssueBreadcrumb
     )
 }
 
-private func normalizeIssueStackFrames(_ values: [IssueStackFrame]?) throws -> [IssueStackFrame]? {
+func normalizeIssueStackFrames(_ values: [IssueStackFrame]?) throws -> [IssueStackFrame]? {
     guard let values else {
         return nil
     }
@@ -355,7 +370,7 @@ private func sanitizedIssueFilename(_ value: String) throws -> String {
     )
 }
 
-private func issueText(
+func issueText(
     _ value: String,
     label: String,
     maximum: Int,
@@ -370,16 +385,6 @@ private func issueText(
     return normalized
 }
 
-private func safeSwiftErrorType(_ error: any Error) -> String {
-    let reflected = String(reflecting: Swift.type(of: error))
-    let normalized = reflected.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !normalized.isEmpty, !containsForbiddenControl(normalized) else {
-        return "Swift.Error"
-    }
-    let filtered = normalized.filter { $0 != "?" && $0 != "#" }
-    return String(filtered.prefix(256))
-}
-
-private func issueValidationError(_ message: String) -> SdkError {
+func issueValidationError(_ message: String) -> SdkError {
     SdkError(code: "validation_error", message: message)
 }

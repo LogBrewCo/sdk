@@ -182,6 +182,15 @@ client.issue("evt_issue_checkout", "2026-06-02T10:00:02Z", issue)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+The helper walks `Error::source()` into a bounded parent-first chain without
+formatting either error. Automatic messages are marked redacted, source stacks
+remain explicitly unavailable unless application code owns frames, and a
+panicking accessor, cycle, or the eight-node cap marks the graph truncated.
+`IssueExceptionChain` and `IssueExceptionChainEntry` also accept manual
+normalized evidence with strict root parity. Tower error issues reuse this
+contract. See the shared
+[exception-chain contract](../../docs/exception-chain-evidence.md).
+
 Pass a concrete error reference when exact type identity matters; a `dyn Error` trait object can expose only the trait-object type. Generated diagnostics never format the error or panic payload and never capture raw stack text, source lines, locals, arguments, or absolute paths. A frame retains only a basename, positive coordinates, and explicitly supplied bounded code identity. Frame lists are newest-first and capped at 32. Breadcrumbs are oldest-to-newest and capped at 64; each accepts at most eight flat finite primitive data fields. `IssueBreadcrumbBuffer` is caller-owned, retains the newest 64 entries, and marks the issue when older entries were evicted.
 
 `IssueEvent::from_panic_payload` creates a privacy-safe panic projection without installing a hook. If the application already owns `std::panic::set_hook`, call `IssueEvent::from_panic_info` inside that hook to retain Rust's exact panic location. The helper does not install, replace, flush, or otherwise take ownership of the process-global panic hook.

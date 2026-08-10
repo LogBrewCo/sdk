@@ -422,6 +422,24 @@ class LogBrewSdkTests(unittest.TestCase):
         self.assertEqual(attributes["stackFrames"][0]["filename"], "test_sdk.py")
         self.assertEqual(attributes["stackFrames"][0]["function"], "fail_checkout")
         self.assertEqual(attributes["stackFrames"][0]["module"], __name__)
+        self.assertEqual(
+            attributes["exceptionChain"],
+            {
+                "entries": [
+                    {
+                        "id": 0,
+                        "relationship": "reported",
+                        "type": "LookupError",
+                        "message": "payment method is unavailable",
+                        "messageState": "captured",
+                        "mechanism": {"type": "python.framework", "handled": False},
+                        "stackFrames": attributes["stackFrames"],
+                        "stackFramesState": "captured",
+                    }
+                ],
+                "truncated": False,
+            },
+        )
         self.assertNotIn("workspace", json.dumps(attributes))
 
         UnsafeError = type("Unsafe/Error", (Exception,), {})
@@ -430,7 +448,65 @@ class LogBrewSdkTests(unittest.TestCase):
             include_stack_frames=False,
         )
         self.assertEqual(unsafe_attributes["exception"]["type"], "Exception")
+        self.assertEqual(
+            unsafe_attributes["exceptionChain"]["entries"][0]["stackFramesState"],
+            "not_captured",
+        )
         self.assertNotIn("Unsafe/Error", json.dumps(unsafe_attributes))
+
+    def test_create_issue_attributes_preserves_cause_tree_and_explicit_states(self) -> None:
+        def fail_payment() -> None:
+            raise TimeoutError("payment provider timed out")
+
+        def submit_checkout() -> None:
+            try:
+                fail_payment()
+            except TimeoutError as cause:
+                raise RuntimeError("checkout failed") from cause
+
+        try:
+            submit_checkout()
+        except RuntimeError as error:
+            attributes = create_issue_attributes_from_exception(
+                error,
+                mechanism="python.framework",
+                handled=False,
+            )
+
+        chain = attributes["exceptionChain"]
+        self.assertFalse(chain["truncated"])
+        self.assertEqual(2, len(chain["entries"]))
+        reported, cause = chain["entries"]
+        self.assertEqual(
+            (reported["id"], reported["relationship"], reported["type"]),
+            (0, "reported", "RuntimeError"),
+        )
+        self.assertEqual(reported["messageState"], "captured")
+        self.assertEqual(reported["stackFramesState"], "captured")
+        self.assertEqual(
+            (cause["id"], cause["parentId"], cause["relationship"], cause["type"]),
+            (1, 0, "cause", "TimeoutError"),
+        )
+        self.assertEqual(cause["message"], "payment provider timed out")
+        self.assertEqual(cause["messageState"], "captured")
+        self.assertEqual(cause["mechanism"], {"type": "python.cause", "handled": True})
+        self.assertEqual(cause["stackFrames"][0]["function"], "fail_payment")
+
+    def test_exception_chain_caps_cycles_and_messages_without_hiding_state(self) -> None:
+        first = RuntimeError("a" * 1_100)
+        second = LookupError("underlying")
+        first.__cause__ = second
+        second.__cause__ = first
+
+        attributes = create_issue_attributes_from_exception(first, include_stack_frames=False)
+
+        chain = attributes["exceptionChain"]
+        self.assertTrue(chain["truncated"])
+        self.assertEqual(2, len(chain["entries"]))
+        self.assertEqual(chain["entries"][0]["messageState"], "truncated")
+        self.assertEqual(len(chain["entries"][0]["message"]), 1_024)
+        self.assertEqual(chain["entries"][0]["stackFramesState"], "not_captured")
+        self.assertNotIn("stackFrames", chain["entries"][0])
 
     def test_negative_span_duration_fails_validation(self) -> None:
         client = sample_client()

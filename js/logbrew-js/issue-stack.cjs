@@ -7,22 +7,28 @@ const SAFE_DEBUG_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 const LOCAL_ABSOLUTE_PATH_PATTERN = /^(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
 
 function buildIssueStackHelpers({ SdkError }) {
-  function javascriptStackFrames(stack, debugIdMap) {
+  function javascriptStackEvidence(stack, debugIdMap) {
     if (typeof stack !== "string" || stack.trim() === "") {
-      return [];
+      return { frames: [], truncated: false };
     }
     const frames = [];
+    let truncated = false;
     for (const rawLine of stack.split(/\r?\n/u)) {
       const parsed = parseJavaScriptStackFrame(rawLine);
       if (parsed) {
-        const debugId = debugIdForFrame(parsed.filename, debugIdMap, SdkError);
-        frames.push({ ...parsed, ...(debugId ? { debugId } : {}) });
         if (frames.length === MAX_ISSUE_STACK_FRAMES) {
+          truncated = true;
           break;
         }
+        const debugId = debugIdForFrame(parsed.filename, debugIdMap, SdkError);
+        frames.push({ ...parsed, ...(debugId ? { debugId } : {}) });
       }
     }
-    return frames;
+    return { frames, truncated };
+  }
+
+  function javascriptStackFrames(stack, debugIdMap) {
+    return javascriptStackEvidence(stack, debugIdMap).frames;
   }
 
   function validateIssueStackFrames(stackFrames) {
@@ -84,7 +90,7 @@ function buildIssueStackHelpers({ SdkError }) {
     });
   }
 
-  return { javascriptStackFrames, validateIssueStackFrames };
+  return { javascriptStackEvidence, javascriptStackFrames, validateIssueStackFrames };
 }
 
 function parseJavaScriptStackFrame(rawLine) {

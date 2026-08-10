@@ -122,7 +122,7 @@ Context merge order is automatic, client, task-local, active trace, then event; 
 
 ## Issue Diagnostics and Breadcrumbs
 
-Use `IssueAttributes.fromError(...)` for a handled Swift error. It records the dynamic error type, a stable mechanism and handled state, and a safe call-site frame using `#fileID`, `#line`, `#column`, and `#function`. It deliberately does not format the error, copy its description, capture raw stack text, read locals or arguments, or send an absolute source path. Pass an explicit `message` only when the application has approved that value for display.
+Use `IssueAttributes.fromError(...)` for a handled Swift error. It records the dynamic error type, a stable mechanism and handled state, and a safe call-site frame using `#fileID`, `#line`, `#column`, and `#function`. Bridged `NSError` underlying and aggregate errors become a bounded parent-first exception chain; automatic descriptions are marked redacted rather than copied, child stack absence is explicit, and cycles or the eight-node cap set the truncation receipt. It deliberately does not format the error, copy its description, capture raw stack text, read locals or arguments, or send an absolute source path. Pass an explicit `message` only when the application has approved that value for display. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
 
 ```swift
 enum CheckoutError: Error {

@@ -29,6 +29,8 @@ namespace LogBrew
 
         public IssueExceptionInfo? Exception { get; private set; }
 
+        public IssueExceptionChain? ExceptionChain { get; private set; }
+
         public IReadOnlyList<IssueStackFrame>? StackFrames
         {
             get { return stackFrames?.AsReadOnly(); }
@@ -72,11 +74,16 @@ namespace LogBrew
                 .WithException(
                     IssueExceptionInfo.Create(exceptionType)
                         .WithMechanism(IssueExceptionMechanism.Create(mechanismType, handled)));
-            var frames = IssueDiagnostics.StackFrames(error);
-            if (frames.Count > 0)
+            var stack = IssueDiagnostics.StackEvidence(error);
+            if (stack.Frames.Count > 0)
             {
-                attributes.WithStackFrames(frames);
+                attributes.WithStackFrames(stack.Frames);
             }
+
+            attributes.WithExceptionChain(IssueExceptionChain.FromException(
+                error,
+                attributes.Exception!.Mechanism!,
+                stack));
 
             return attributes;
         }
@@ -109,6 +116,13 @@ namespace LogBrew
             }
 
             Exception = exception;
+            return this;
+        }
+
+        public IssueAttributes WithExceptionChain(IssueExceptionChain exceptionChain)
+        {
+            ExceptionChain = exceptionChain ?? throw IssueDiagnostics.Validation(
+                "issue exceptionChain must be provided");
             return this;
         }
 
@@ -207,6 +221,9 @@ namespace LogBrew
             var payload = new OrderedJsonObject().Add("title", Title).Add("level", level);
             payload.AddIfNotNull("message", Message);
             payload.AddIfNotNull("exception", Exception?.ToJsonObject());
+            payload.AddIfNotNull(
+                "exceptionChain",
+                ExceptionChain?.ToJsonObject(Exception, StackFrames));
             if (stackFrames != null)
             {
                 payload.Add("stackFrames", stackFrames.Select(frame => frame.ToJsonObject()).ToList());

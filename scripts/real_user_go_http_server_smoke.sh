@@ -82,6 +82,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -370,7 +371,7 @@ func verifyInstalledEvents(t *testing.T, events []installedEvent) {
 			}
 			switch event.Attributes["title"] {
 			case "HTTP server panic":
-				assertKeys(t, event.Attributes, "context", "exception", "level", "metadata", "stackFrames", "title")
+				assertKeys(t, event.Attributes, "context", "exception", "exceptionChain", "level", "metadata", "stackFrames", "title")
 				assertKeys(t, metadata, "method", "panic", "panicType", "routeTemplate", "sampled", "spanId", "statusCode", "traceId")
 				assertEventContext(t, event.Attributes, metadata)
 				exception, ok := event.Attributes["exception"].(map[string]any)
@@ -406,6 +407,25 @@ func verifyInstalledEvents(t *testing.T, events []installedEvent) {
 				}
 				if !foundHandlerFrame {
 					t.Fatalf("panic frames omitted installed app handler: %#v", frames)
+				}
+				chain, ok := event.Attributes["exceptionChain"].(map[string]any)
+				if !ok {
+					t.Fatalf("panic exception chain missing or invalid: %#v", event.Attributes)
+				}
+				assertKeys(t, chain, "entries", "truncated")
+				entries, ok := chain["entries"].([]any)
+				if !ok || len(entries) != 1 || chain["truncated"] != false {
+					t.Fatalf("panic exception chain root mismatch: %#v", chain)
+				}
+				entry, ok := entries[0].(map[string]any)
+				if !ok {
+					t.Fatalf("panic exception chain entry invalid: %#v", entries[0])
+				}
+				assertKeys(t, entry, "id", "mechanism", "messageState", "relationship", "stackFrames", "stackFramesState", "type")
+				if entry["id"] != float64(0) || entry["relationship"] != "reported" || entry["type"] != exception["type"] ||
+					entry["messageState"] != "redacted" || entry["stackFramesState"] != "captured" ||
+					!reflect.DeepEqual(entry["mechanism"], mechanism) || !reflect.DeepEqual(entry["stackFrames"], frames) {
+					t.Fatalf("panic exception chain compatibility mismatch: entry=%#v exception=%#v frames=%#v", entry, exception, frames)
 				}
 				panicIssue = event.Attributes
 			case "HTTP server error response":

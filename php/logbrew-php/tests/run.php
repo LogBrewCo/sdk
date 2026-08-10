@@ -459,6 +459,22 @@ assertTrue(testValueAt($diagnosticAttributes, ['exception']) === [
     'type' => RuntimeException::class,
     'mechanism' => ['type' => 'php.exception', 'handled' => true],
 ], 'expected typed PHP exception mechanism');
+$diagnosticChain = testStringMap(
+    testValueAt($diagnosticAttributes, ['exceptionChain']),
+    'diagnostic exception chain'
+);
+$diagnosticChainEntries = testList($diagnosticChain['entries'] ?? null, 'diagnostic exception chain entries');
+$diagnosticReported = testStringMap($diagnosticChainEntries[0] ?? null, 'diagnostic reported exception');
+assertTrue(
+    count($diagnosticChainEntries) === 1
+        && ($diagnosticChain['truncated'] ?? null) === false
+        && ($diagnosticReported['relationship'] ?? null) === 'reported'
+        && ($diagnosticReported['type'] ?? null) === RuntimeException::class
+        && ($diagnosticReported['messageState'] ?? null) === 'redacted'
+        && ($diagnosticReported['stackFramesState'] ?? null) === 'captured'
+        && ($diagnosticReported['stackFrames'] ?? null) === ($diagnosticAttributes['stackFrames'] ?? null),
+    'expected matching PHP reported exception-chain evidence'
+);
 $diagnosticFrames = testList(testValueAt($diagnosticAttributes, ['stackFrames']), 'diagnostic stack frames');
 assertTrue(
     count($diagnosticFrames) >= 1 && count($diagnosticFrames) <= 32,
@@ -485,6 +501,108 @@ assertTrue(!str_contains($encodedDiagnostics, 'sensitive checkout failure'), 'ex
 assertTrue(!str_contains($encodedDiagnostics, dirname(__DIR__)), 'expected PHP absolute source path exclusion');
 assertTrue(!str_contains($encodedDiagnostics, 'MutatedException'), 'expected detached PHP issue diagnostics');
 
+$previousError = new InvalidArgumentException('private previous exception message');
+$wrappedError = new RuntimeException('private wrapper exception message', previous: $previousError);
+$wrappedAttributes = IssueDiagnostics::fromThrowable($wrappedError, mechanismType: 'php.exception', handled: true);
+$wrappedClient = sampleClient();
+$wrappedClient->issue('evt_issue_exception_chain', '2026-06-02T10:00:02Z', $wrappedAttributes);
+$wrappedPayload = testStringMap(
+    json_decode($wrappedClient->previewJson(), true, 512, JSON_THROW_ON_ERROR),
+    'wrapped exception payload'
+);
+$wrappedEventAttributes = testStringMap(
+    testValueAt($wrappedPayload, ['events', 0, 'attributes']),
+    'wrapped exception attributes'
+);
+$wrappedChain = testStringMap($wrappedEventAttributes['exceptionChain'] ?? null, 'wrapped exception chain');
+$wrappedEntries = testList($wrappedChain['entries'] ?? null, 'wrapped exception chain entries');
+assertTrue(count($wrappedEntries) === 2, 'expected reported and previous PHP exceptions');
+$wrappedCause = testStringMap($wrappedEntries[1] ?? null, 'wrapped exception cause');
+assertTrue(
+    ($wrappedCause['id'] ?? null) === 1
+        && ($wrappedCause['parentId'] ?? null) === 0
+        && ($wrappedCause['relationship'] ?? null) === 'cause'
+        && ($wrappedCause['type'] ?? null) === InvalidArgumentException::class
+        && ($wrappedCause['messageState'] ?? null) === 'redacted'
+        && ($wrappedCause['stackFramesState'] ?? null) === 'captured'
+        && testValueAt($wrappedCause, ['mechanism', 'type']) === 'php.previous',
+    'expected typed previous-exception evidence'
+);
+$encodedWrapped = json_encode($wrappedPayload, JSON_THROW_ON_ERROR);
+assertTrue(
+    !str_contains($encodedWrapped, 'private previous exception message')
+        && !str_contains($encodedWrapped, 'private wrapper exception message'),
+    'expected PHP exception-chain messages to remain redacted'
+);
+
+$deepError = new RuntimeException('private depth 9');
+for ($depth = 8; $depth >= 0; --$depth) {
+    $deepError = new RuntimeException("private depth {$depth}", previous: $deepError);
+}
+$deepAttributes = IssueDiagnostics::fromThrowable($deepError);
+$deepChain = testStringMap($deepAttributes['exceptionChain'] ?? null, 'deep exception chain');
+assertTrue(
+    count(testList($deepChain['entries'] ?? null, 'deep exception entries')) === 8
+        && ($deepChain['truncated'] ?? null) === true
+        && !str_contains(json_encode($deepAttributes, JSON_THROW_ON_ERROR), 'private depth'),
+    'expected bounded redacted PHP exception chain'
+);
+
+$manualFrame = IssueDiagnostics::stackFrame('Checkout.php', 41, 1, 'submit');
+$manualChainAttributes = IssueDiagnostics::validateIssueAttributes([
+    'title' => 'Checkout failed',
+    'level' => 'error',
+    'exception' => ['type' => 'CheckoutFailure', 'mechanism' => ['type' => 'php.manual', 'handled' => true]],
+    'exceptionChain' => [
+        'entries' => [
+            [
+                'id' => 0,
+                'relationship' => 'reported',
+                'type' => 'CheckoutFailure',
+                'message' => 'approved summary',
+                'messageState' => 'truncated',
+                'mechanism' => ['type' => 'php.manual', 'handled' => true],
+                'stackFrames' => [$manualFrame],
+                'stackFramesState' => 'captured',
+            ],
+            [
+                'id' => 1,
+                'parentId' => 0,
+                'relationship' => 'context',
+                'type' => 'RequestContextFailure',
+                'messageState' => 'redacted',
+                'stackFramesState' => 'not_captured',
+            ],
+        ],
+        'truncated' => true,
+    ],
+    'stackFrames' => [$manualFrame],
+]);
+assertTrue(
+    testValueAt($manualChainAttributes, ['exceptionChain', 'entries', 0, 'messageState']) === 'truncated'
+        && testValueAt($manualChainAttributes, ['exceptionChain', 'entries', 1, 'relationship']) === 'context'
+        && testValueAt($manualChainAttributes, ['exceptionChain', 'truncated']) === true,
+    'expected explicit PHP exception-chain states'
+);
+expectThrows(
+    fn () => IssueDiagnostics::validateIssueAttributes([
+        'title' => 'Bad chain',
+        'level' => 'error',
+        'exception' => ['type' => 'CheckoutFailure'],
+        'exceptionChain' => [
+            'entries' => [[
+                'id' => 0,
+                'relationship' => 'cause',
+                'type' => 'CheckoutFailure',
+                'messageState' => 'not_captured',
+                'stackFramesState' => 'not_captured',
+            ]],
+            'truncated' => false,
+        ],
+    ]),
+    'issue exceptionChain entry 0 must be the parentless reported exception'
+);
+
 $explicitFrame = IssueDiagnostics::stackFrame(
     '/opt/example/src/CheckoutService.php?debug=fixture#payment',
     41,
@@ -509,6 +627,10 @@ assertTrue(
         && testValueAt($anonymousAttributes, ['exception', 'type']) === 'anonymous_exception'
         && !array_key_exists('stackFrames', $anonymousAttributes),
     'expected privacy-safe anonymous PHP exception identity'
+);
+assertTrue(
+    testValueAt($anonymousAttributes, ['exceptionChain', 'entries', 0, 'stackFramesState']) === 'not_captured',
+    'expected explicit PHP omitted-stack state'
 );
 
 expectThrows(

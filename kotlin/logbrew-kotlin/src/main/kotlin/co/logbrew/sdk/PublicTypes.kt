@@ -329,6 +329,7 @@ data class IssueAttributes(
     val message: String? = null,
     val metadata: Map<String, Any?> = emptyMap(),
     val exception: IssueException? = null,
+    val exceptionChain: IssueExceptionChain? = null,
     val stackFrames: List<IssueStackFrame>? = null,
     val breadcrumbs: List<IssueBreadcrumb>? = null,
     val breadcrumbsTruncated: Boolean? = null,
@@ -339,6 +340,8 @@ data class IssueAttributes(
     fun withMetadata(metadata: Map<String, Any?>): IssueAttributes = copy(metadata = metadata)
 
     fun withException(exception: IssueException): IssueAttributes = copy(exception = exception)
+
+    fun withExceptionChain(exceptionChain: IssueExceptionChain): IssueAttributes = copy(exceptionChain = exceptionChain)
 
     fun withStackFrame(frame: IssueStackFrame): IssueAttributes =
         copy(stackFrames = normalizeIssueStackFrames(stackFrames.orEmpty() + frame))
@@ -364,6 +367,7 @@ data class IssueAttributes(
             .add("level", normalizedLevel)
             .addIfNotNull("message", message)
             .addIfNotNull("exception", exception?.toJsonObject())
+            .addIfNotNull("exceptionChain", exceptionChain?.toJsonObject(exception, normalizedFrames))
             .addIfNotNull("stackFrames", normalizedFrames?.map { it.toJsonObject() })
             .addIfNotNull("breadcrumbs", normalizedBreadcrumbs?.map { it.toJsonObject() })
             .addIfNotNull("breadcrumbsTruncated", breadcrumbsTruncated)

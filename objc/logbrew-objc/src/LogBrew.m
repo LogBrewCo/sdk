@@ -682,19 +682,27 @@ static NSString *_Nullable LBWNormalizeMetricDescription(
   if (message != nil) {
     clean[@"message"] = message;
   }
+  NSDictionary<NSString *, id> *exception = nil;
   if (attributes[@"exception"] != nil) {
-    NSDictionary<NSString *, id> *exception = nil;
     if (!LBWValidateIssueException(attributes[@"exception"], &exception, error)) {
       return NO;
     }
     clean[@"exception"] = exception;
   }
+  NSArray<NSDictionary<NSString *, id> *> *stackFrames = nil;
   if (attributes[@"stackFrames"] != nil) {
-    NSArray<NSDictionary<NSString *, id> *> *stackFrames = nil;
     if (!LBWValidateIssueStackFrames(attributes[@"stackFrames"], &stackFrames, error)) {
       return NO;
     }
     clean[@"stackFrames"] = stackFrames;
+  }
+  if (attributes[@"exceptionChain"] != nil) {
+    NSDictionary<NSString *, id> *exceptionChain = nil;
+    if (!LBWValidateIssueExceptionChain(
+        attributes[@"exceptionChain"], exception, stackFrames, &exceptionChain, error)) {
+      return NO;
+    }
+    clean[@"exceptionChain"] = exceptionChain;
   }
   NSArray<NSDictionary<NSString *, id> *> *storedBreadcrumbs;
   BOOL storedTruncated;

@@ -1,0 +1,43 @@
+import Foundation
+@_spi(CrashReplay) import LogBrew
+
+func nativeCrashExceptionChain(for exception: IssueException) -> IssueExceptionChain {
+    IssueExceptionChain(entries: [
+        IssueExceptionChainEntry(
+            id: 0,
+            relationship: .reported,
+            type: exception.type,
+            messageState: .notCaptured,
+            mechanism: exception.mechanism,
+            stackFramesState: .notCaptured,
+        ),
+    ])
+}
+
+func nativeCrashExceptionChainMatches(
+    _ value: Any?,
+    expected exception: IssueException,
+) -> Bool {
+    guard let value else {
+        // Preserve retry identity for an event queued by an older SDK before chains existed.
+        return true
+    }
+    guard let chain = value as? [String: Any] else {
+        return false
+    }
+    guard let mechanism = exception.mechanism else {
+        return false
+    }
+    let expected = [
+        "entries": [[
+            "id": 0,
+            "relationship": "reported",
+            "type": exception.type,
+            "messageState": "not_captured",
+            "mechanism": ["type": mechanism.type, "handled": mechanism.handled],
+            "stackFramesState": "not_captured",
+        ]],
+        "truncated": false,
+    ] as NSDictionary
+    return chain as NSDictionary == expected
+}

@@ -283,6 +283,173 @@ class ValidateFixturesTests(unittest.TestCase):
 
         validate_payload(payload)
 
+    def test_issue_exception_chain_preserves_reported_wrapper_and_underlying_cause(self) -> None:
+        payload = self.load_valid_payload()
+        attributes = self.issue_attributes(payload)
+        reported_frame = {
+            "filename": "checkout.py",
+            "line": 41,
+            "column": 1,
+            "function": "submit",
+            "module": "checkout.api",
+            "inApp": True,
+        }
+        cause_frame = {
+            "filename": "payments.py",
+            "line": 17,
+            "column": 1,
+            "function": "authorize",
+            "module": "checkout.payments",
+            "inApp": True,
+        }
+        attributes["exception"] = {
+            "type": "CheckoutError",
+            "mechanism": {"type": "python.middleware", "handled": False},
+        }
+        attributes["stackFrames"] = [reported_frame]
+        attributes["exceptionChain"] = {
+            "entries": [
+                {
+                    "id": 0,
+                    "relationship": "reported",
+                    "type": "CheckoutError",
+                    "message": "Checkout could not complete",
+                    "messageState": "captured",
+                    "module": "checkout.api",
+                    "mechanism": {"type": "python.middleware", "handled": False},
+                    "stackFrames": [reported_frame],
+                    "stackFramesState": "captured",
+                },
+                {
+                    "id": 1,
+                    "parentId": 0,
+                    "relationship": "cause",
+                    "type": "PaymentTimeout",
+                    "messageState": "redacted",
+                    "module": "checkout.payments",
+                    "mechanism": {"type": "python.cause", "handled": True},
+                    "stackFrames": [cause_frame],
+                    "stackFramesState": "truncated",
+                },
+            ],
+            "truncated": False,
+        }
+
+        validate_payload(payload)
+
+    def test_issue_exception_chain_rejects_contradictory_or_unbounded_evidence(self) -> None:
+        def attributes_with_chain() -> dict:
+            payload = self.load_valid_payload()
+            attributes = self.issue_attributes(payload)
+            frame = {"filename": "checkout.py", "line": 41, "column": 1}
+            attributes["exception"] = {"type": "CheckoutError"}
+            attributes["stackFrames"] = [frame]
+            attributes["exceptionChain"] = {
+                "entries": [
+                    {
+                        "id": 0,
+                        "relationship": "reported",
+                        "type": "CheckoutError",
+                        "message": "Checkout could not complete",
+                        "messageState": "captured",
+                        "stackFrames": [frame],
+                        "stackFramesState": "captured",
+                    },
+                    {
+                        "id": 1,
+                        "parentId": 0,
+                        "relationship": "cause",
+                        "type": "PaymentTimeout",
+                        "messageState": "not_captured",
+                        "stackFramesState": "not_captured",
+                    },
+                ],
+                "truncated": False,
+            }
+            return attributes
+
+        cases = (
+            (
+                lambda value: value["exceptionChain"]["entries"][1].update({"parentId": 1}),
+                "must reference an earlier parent",
+            ),
+            (
+                lambda value: value["exceptionChain"]["entries"][1].update(
+                    {"message": "must not survive"}
+                ),
+                "message must be absent for not_captured",
+            ),
+            (
+                lambda value: value["exceptionChain"]["entries"][1].update(
+                    {"stackFrames": [{"filename": "x.py", "line": 1, "column": 1}]}
+                ),
+                "stackFrames must be absent for not_captured",
+            ),
+            (
+                lambda value: value["exception"].update({"type": "DifferentError"}),
+                "reported exception must match exception",
+            ),
+            (
+                lambda value: value.update(
+                    {"stackFrames": [{"filename": "different.py", "line": 1, "column": 1}]}
+                ),
+                "reported stack must match stackFrames",
+            ),
+        )
+        for mutate, expected in cases:
+            with self.subTest(expected=expected):
+                payload = self.load_valid_payload()
+                attributes = attributes_with_chain()
+                next(
+                    event for event in payload["events"] if event["type"] == "issue"
+                )["attributes"] = attributes
+                mutate(attributes)
+                with self.assertRaisesRegex(ValidationError, expected):
+                    validate_payload(payload)
+
+        payload = self.load_valid_payload()
+        attributes = attributes_with_chain()
+        next(event for event in payload["events"] if event["type"] == "issue")[
+            "attributes"
+        ] = attributes
+        template = attributes["exceptionChain"]["entries"][1]
+        attributes["exceptionChain"]["entries"] = [
+            {
+                **template,
+                "id": index,
+                **(
+                    {"relationship": "reported", "parentId": None}
+                    if index == 0
+                    else {"relationship": "cause", "parentId": index - 1}
+                ),
+            }
+            for index in range(9)
+        ]
+        del attributes["exceptionChain"]["entries"][0]["parentId"]
+        with self.assertRaisesRegex(ValidationError, "must contain 1-8 exceptions"):
+            validate_payload(payload)
+
+    def test_schema_exposes_bounded_exception_chain_states(self) -> None:
+        definitions = self.load_schema()["$defs"]
+        chain = definitions["issueExceptionChain"]
+        entry = definitions["issueExceptionChainEntry"]
+        self.assertEqual(8, chain["properties"]["entries"]["maxItems"])
+        self.assertEqual(
+            ["captured", "truncated", "redacted", "not_captured"],
+            entry["properties"]["messageState"]["enum"],
+        )
+        self.assertEqual(
+            ["captured", "truncated", "not_captured"],
+            entry["properties"]["stackFramesState"]["enum"],
+        )
+        issue_attributes = definitions["issueEvent"]["allOf"][1]["properties"][
+            "attributes"
+        ]
+        self.assertEqual(
+            {"$ref": "#/$defs/issueExceptionChain"},
+            issue_attributes["properties"]["exceptionChain"],
+        )
+
     def test_issue_diagnostics_reject_invalid_or_unbounded_values(self) -> None:
         cases = (
             ({"exception": {"type": "CheckoutError", "mechanism": {"type": "react.error_boundary"}}}, "handled"),

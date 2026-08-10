@@ -1,6 +1,7 @@
 use logbrew::{
-    IssueBreadcrumb, IssueBreadcrumbBuffer, IssueEvent, IssueStackFrame, LogBrewClient, Metadata,
-    MetadataValue,
+    IssueBreadcrumb, IssueBreadcrumbBuffer, IssueEvent, IssueException, IssueExceptionChain,
+    IssueExceptionChainEntry, IssueExceptionMechanism, IssueExceptionRelationship, IssueStackFrame,
+    LogBrewClient, Metadata, MetadataValue,
 };
 use serde_json::Value;
 use std::error::Error;
@@ -16,6 +17,32 @@ impl fmt::Display for CheckoutFailure {
 }
 
 impl Error for CheckoutFailure {}
+
+#[derive(Debug)]
+struct PaymentFailure;
+
+impl fmt::Display for PaymentFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("private payment provider response")
+    }
+}
+
+impl Error for PaymentFailure {}
+
+#[derive(Debug)]
+struct CheckoutFailureWithSource(PaymentFailure);
+
+impl fmt::Display for CheckoutFailureWithSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("private checkout wrapper text")
+    }
+}
+
+impl Error for CheckoutFailureWithSource {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
 
 fn sample_client() -> LogBrewClient {
     LogBrewClient::builder("logbrew-rust", "0.1.0")
@@ -94,6 +121,107 @@ fn error_projection_builds_typed_bounded_diagnostics_without_error_text() {
     assert!(!text.contains("private checkout error text"));
     assert!(!text.contains("file:///redacted"));
     assert!(!text.contains("account=not-for-telemetry"));
+}
+
+#[test]
+fn error_projection_preserves_causal_relationships_and_explicit_evidence_states() {
+    let error = CheckoutFailureWithSource(PaymentFailure);
+    let root_frame = IssueStackFrame::new("checkout.rs", 42, 7)
+        .with_function("checkout::submit")
+        .with_in_app(true);
+    let issue = IssueEvent::from_error_with_mechanism(&error, "rust.error", true)
+        .with_stack_frames([root_frame])
+        .with_stack_frames_truncated(true);
+    let mut client = sample_client();
+    client
+        .issue("evt_issue_cause", "2026-06-02T10:00:02Z", issue)
+        .expect("causal issue should queue");
+
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    let chain = &attributes["exceptionChain"];
+    let entries = chain["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(chain["truncated"], false);
+
+    let root = &entries[0];
+    assert_eq!(root["id"], 0);
+    assert_eq!(root["relationship"], "reported");
+    assert_eq!(root["messageState"], "redacted");
+    assert!(root.get("message").is_none());
+    assert_eq!(root["stackFramesState"], "truncated");
+    assert_eq!(root["stackFrames"], attributes["stackFrames"]);
+    assert_eq!(root["type"], attributes["exception"]["type"]);
+    assert_eq!(root["mechanism"], attributes["exception"]["mechanism"]);
+
+    let cause = &entries[1];
+    assert_eq!(cause["id"], 1);
+    assert_eq!(cause["parentId"], 0);
+    assert_eq!(cause["relationship"], "cause");
+    assert!(
+        cause["type"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(cause["mechanism"]["type"], "rust.source");
+    assert_eq!(cause["mechanism"]["handled"], true);
+    assert_eq!(cause["messageState"], "redacted");
+    assert_eq!(cause["stackFramesState"], "not_captured");
+    assert!(cause.get("message").is_none());
+    assert!(cause.get("stackFrames").is_none());
+
+    let text = payload.to_string();
+    assert!(!text.contains("private payment provider response"));
+    assert!(!text.contains("private checkout wrapper text"));
+}
+
+#[test]
+fn manual_exception_chain_keeps_approved_messages_and_per_node_stacks() {
+    let root_mechanism = IssueExceptionMechanism::new("rust.manual", true);
+    let root_frame = IssueStackFrame::new("checkout.rs", 42, 7)
+        .with_function("checkout::submit")
+        .with_in_app(true);
+    let cause_frame = IssueStackFrame::new("payments.rs", 18, 3)
+        .with_function("payments::authorize")
+        .with_in_app(true);
+    let root = IssueExceptionChainEntry::new(
+        0,
+        IssueExceptionRelationship::Reported,
+        "checkout::CheckoutFailure",
+    )
+    .with_mechanism(root_mechanism.clone())
+    .with_redacted_message()
+    .with_stack_frames([root_frame.clone()], true);
+    let cause = IssueExceptionChainEntry::new(
+        1,
+        IssueExceptionRelationship::Cause,
+        "payments::AuthorizationFailure",
+    )
+    .with_parent_id(0)
+    .with_message("provider rejected the authorization", false)
+    .with_stack_frames([cause_frame], false);
+    let issue = IssueEvent::new("checkout::CheckoutFailure", "error")
+        .with_exception(
+            IssueException::new("checkout::CheckoutFailure").with_mechanism(root_mechanism),
+        )
+        .with_stack_frames([root_frame])
+        .with_stack_frames_truncated(true)
+        .with_exception_chain(IssueExceptionChain::new([root, cause], false));
+    let mut client = sample_client();
+    client
+        .issue("evt_issue_manual_chain", "2026-06-02T10:00:02Z", issue)
+        .expect("manual chain should queue");
+
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    let entries = attributes["exceptionChain"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["stackFramesState"], "truncated");
+    assert_eq!(entries[0]["stackFrames"], attributes["stackFrames"]);
+    assert_eq!(entries[1]["messageState"], "captured");
+    assert_eq!(entries[1]["message"], "provider rejected the authorization");
+    assert_eq!(entries[1]["stackFramesState"], "captured");
+    assert_eq!(entries[1]["stackFrames"][0]["filename"], "payments.rs");
 }
 
 #[test]

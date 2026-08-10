@@ -243,12 +243,25 @@ func TestHTTPHandlerCapturesCorrelatedPanicIssueAndRepanics(t *testing.T) {
 		t.Fatalf("panic telemetry is not correlated: %#v %#v", span, issue)
 	}
 	exception, ok := issue["exception"].(map[string]any)
-	if !ok || exception["type"] != "error" {
+	if !ok || exception["type"] != "*errors.errorString" {
 		t.Fatalf("panic issue missing type-only exception identity: %#v", issue)
 	}
 	mechanism, ok := exception["mechanism"].(map[string]any)
 	if !ok || mechanism["type"] != "net_http.middleware" || mechanism["handled"] != false {
 		t.Fatalf("panic issue missing escape mechanism: %#v", exception)
+	}
+	chain, ok := issue["exceptionChain"].(map[string]any)
+	if !ok || chain["truncated"] != false {
+		t.Fatalf("panic issue missing exception chain: %#v", issue)
+	}
+	chainEntries, ok := chain["entries"].([]any)
+	if !ok || len(chainEntries) != 1 {
+		t.Fatalf("panic issue has invalid exception chain: %#v", chain)
+	}
+	reported := chainEntries[0].(map[string]any)
+	if reported["type"] != exception["type"] || reported["relationship"] != "reported" ||
+		reported["messageState"] != "redacted" || reported["stackFramesState"] != "captured" {
+		t.Fatalf("panic chain lost reported evidence: %#v", reported)
 	}
 	frames, ok := issue["stackFrames"].([]any)
 	if !ok || len(frames) == 0 || len(frames) > 32 {

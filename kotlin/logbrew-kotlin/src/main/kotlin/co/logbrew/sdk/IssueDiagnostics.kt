@@ -1,10 +1,15 @@
 package co.logbrew.sdk
 
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.Locale
 
 internal const val MAX_ISSUE_STACK_FRAMES = 32
 internal const val MAX_ISSUE_BREADCRUMBS = 64
+internal const val MAX_ISSUE_EXCEPTIONS = 8
 private const val MAX_EXCEPTION_TYPE_LENGTH = 256
+private const val MAX_EXCEPTION_MESSAGE_LENGTH = 1024
+private const val MAX_EXCEPTION_MODULE_LENGTH = 512
 private const val MAX_FRAME_FILENAME_LENGTH = 2048
 private const val MAX_FRAME_FUNCTION_LENGTH = 256
 private const val MAX_FRAME_MODULE_LENGTH = 512
@@ -46,6 +51,36 @@ data class IssueException(
             ).addIfNotNull("mechanism", mechanism?.toJsonObject())
 }
 
+/** How one runtime exception relates to its earlier parent node. */
+enum class IssueExceptionRelationship(
+    internal val wireValue: String,
+) {
+    REPORTED("reported"),
+    CAUSE("cause"),
+    CONTEXT("context"),
+    AGGREGATE_MEMBER("aggregate_member"),
+    SUPPRESSED("suppressed"),
+}
+
+/** Explicit capture state for one exception message. */
+enum class IssueExceptionMessageState(
+    internal val wireValue: String,
+) {
+    CAPTURED("captured"),
+    TRUNCATED("truncated"),
+    REDACTED("redacted"),
+    NOT_CAPTURED("not_captured"),
+}
+
+/** Explicit capture state for one exception stack. */
+enum class IssueExceptionStackFramesState(
+    internal val wireValue: String,
+) {
+    CAPTURED("captured"),
+    TRUNCATED("truncated"),
+    NOT_CAPTURED("not_captured"),
+}
+
 /** Privacy-bounded source identity for one issue stack frame. */
 data class IssueStackFrame(
     val filename: String,
@@ -85,6 +120,147 @@ data class IssueStackFrame(
             .addIfNotNull("module", value.module)
             .addIfNotNull("inApp", value.inApp)
             .addIfNotNull("debugId", value.debugId)
+    }
+}
+
+/** One parent-first runtime exception with its own bounded stack evidence. */
+data class IssueExceptionChainEntry(
+    val id: Int,
+    val relationship: IssueExceptionRelationship,
+    val type: String,
+    val parentId: Int? = null,
+    val message: String? = null,
+    val messageState: IssueExceptionMessageState = IssueExceptionMessageState.NOT_CAPTURED,
+    val module: String? = null,
+    val mechanism: IssueExceptionMechanism? = null,
+    val stackFrames: List<IssueStackFrame>? = null,
+    val stackFramesState: IssueExceptionStackFramesState = IssueExceptionStackFramesState.NOT_CAPTURED,
+) {
+    internal fun normalized(): IssueExceptionChainEntry {
+        val normalizedMessage =
+            when (messageState) {
+                IssueExceptionMessageState.CAPTURED,
+                IssueExceptionMessageState.TRUNCATED,
+                -> {
+                    message?.let {
+                        issueText(it, "issue exceptionChain message", MAX_EXCEPTION_MESSAGE_LENGTH)
+                    } ?: throw issueError("issue exceptionChain message must match messageState")
+                }
+
+                IssueExceptionMessageState.REDACTED,
+                IssueExceptionMessageState.NOT_CAPTURED,
+                -> {
+                    if (message != null) {
+                        throw issueError("issue exceptionChain message must match messageState")
+                    }
+                    null
+                }
+            }
+        val normalizedFrames =
+            when (stackFramesState) {
+                IssueExceptionStackFramesState.CAPTURED,
+                IssueExceptionStackFramesState.TRUNCATED,
+                -> {
+                    normalizeIssueStackFrames(stackFrames)
+                        ?: throw issueError("issue exceptionChain stackFrames must match stackFramesState")
+                }
+
+                IssueExceptionStackFramesState.NOT_CAPTURED -> {
+                    if (stackFrames != null) {
+                        throw issueError("issue exceptionChain stackFrames must match stackFramesState")
+                    }
+                    null
+                }
+            }
+        return copy(
+            type =
+                issueText(
+                    type,
+                    "issue exceptionChain type",
+                    MAX_EXCEPTION_TYPE_LENGTH,
+                    disallowLocationDelimiters = true,
+                ),
+            message = normalizedMessage,
+            module =
+                module?.let {
+                    issueText(
+                        it,
+                        "issue exceptionChain module",
+                        MAX_EXCEPTION_MODULE_LENGTH,
+                        disallowLocationDelimiters = true,
+                    )
+                },
+            mechanism = mechanism?.normalized(),
+            stackFrames = normalizedFrames,
+        )
+    }
+
+    internal fun toJsonObject(): OrderedJsonObject {
+        val value = normalized()
+        return OrderedJsonObject()
+            .add("id", value.id)
+            .addIfNotNull("parentId", value.parentId)
+            .add("relationship", value.relationship.wireValue)
+            .add("type", value.type)
+            .addIfNotNull("message", value.message)
+            .add("messageState", value.messageState.wireValue)
+            .addIfNotNull("module", value.module)
+            .addIfNotNull("mechanism", value.mechanism?.toJsonObject())
+            .addIfNotNull("stackFrames", value.stackFrames?.map { it.toJsonObject() })
+            .add("stackFramesState", value.stackFramesState.wireValue)
+    }
+}
+
+/** At most eight parent-first runtime exceptions with explicit omission states. */
+data class IssueExceptionChain(
+    val entries: List<IssueExceptionChainEntry>,
+    val truncated: Boolean = false,
+) {
+    internal fun toJsonObject(
+        legacyException: IssueException?,
+        legacyFrames: List<IssueStackFrame>?,
+    ): OrderedJsonObject {
+        if (entries.isEmpty() || entries.size > MAX_ISSUE_EXCEPTIONS) {
+            throw issueError("issue exceptionChain entries must contain 1-8 exceptions")
+        }
+        val normalizedEntries = entries.map { it.normalized() }
+        normalizedEntries.forEachIndexed { index, entry ->
+            if (entry.id != index) {
+                throw issueError("issue exceptionChain ids must be contiguous and match array order")
+            }
+            if (index == 0) {
+                if (entry.relationship != IssueExceptionRelationship.REPORTED || entry.parentId != null) {
+                    throw issueError("issue exceptionChain entry 0 must be the parentless reported exception")
+                }
+            } else if (
+                entry.relationship == IssueExceptionRelationship.REPORTED ||
+                entry.parentId == null ||
+                entry.parentId !in 0 until index
+            ) {
+                throw issueError("issue exceptionChain parent relationship is invalid")
+            }
+        }
+
+        val root = normalizedEntries.first()
+        val normalizedLegacyException = legacyException?.normalized()
+        if (
+            normalizedLegacyException == null ||
+            root.type != normalizedLegacyException.type ||
+            root.mechanism != normalizedLegacyException.mechanism
+        ) {
+            throw issueError("issue exceptionChain reported exception must match exception")
+        }
+        val normalizedLegacyFrames = normalizeIssueStackFrames(legacyFrames)
+        if (
+            (root.stackFramesState == IssueExceptionStackFramesState.NOT_CAPTURED && normalizedLegacyFrames != null) ||
+            (root.stackFramesState != IssueExceptionStackFramesState.NOT_CAPTURED && root.stackFrames != normalizedLegacyFrames)
+        ) {
+            throw issueError("issue exceptionChain reported stack must match stackFrames")
+        }
+
+        return OrderedJsonObject()
+            .add("entries", normalizedEntries.map { it.toJsonObject() })
+            .add("truncated", truncated)
     }
 }
 
@@ -165,7 +341,8 @@ internal fun issueAttributesFromThrowable(
     message: String? = null,
 ): IssueAttributes {
     val exceptionType = safeThrowableType(throwable)
-    val frames = safeThrowableFrames(throwable)
+    val mechanism = IssueExceptionMechanism(mechanismType, handled)
+    val stack = safeThrowableStack(throwable)
     return IssueAttributes(
         title = title ?: exceptionType,
         level = "error",
@@ -173,9 +350,10 @@ internal fun issueAttributesFromThrowable(
         exception =
             IssueException(
                 type = exceptionType,
-                mechanism = IssueExceptionMechanism(mechanismType, handled),
+                mechanism = mechanism,
             ),
-        stackFrames = frames.takeIf { it.isNotEmpty() },
+        exceptionChain = exceptionChainFromThrowable(throwable, mechanism, stack),
+        stackFrames = stack.frames.takeIf { it.isNotEmpty() },
     )
 }
 
@@ -233,15 +411,132 @@ private fun safeThrowableType(throwable: Throwable): String {
     }
 }
 
-private fun safeThrowableFrames(throwable: Throwable): List<IssueStackFrame> {
+private data class ThrowableStackEvidence(
+    val frames: List<IssueStackFrame>,
+    val truncated: Boolean,
+)
+
+private fun safeThrowableStack(throwable: Throwable): ThrowableStackEvidence {
     val elements =
         try {
             throwable.stackTrace
         } catch (_: Exception) {
-            return emptyList()
+            return ThrowableStackEvidence(emptyList(), truncated = false)
         }
-    return elements.take(MAX_ISSUE_STACK_FRAMES).mapNotNull(::safeStackFrame)
+    return ThrowableStackEvidence(
+        frames = elements.take(MAX_ISSUE_STACK_FRAMES).mapNotNull(::safeStackFrame),
+        truncated = elements.size > MAX_ISSUE_STACK_FRAMES,
+    )
 }
+
+private fun exceptionChainFromThrowable(
+    throwable: Throwable,
+    rootMechanism: IssueExceptionMechanism,
+    rootStack: ThrowableStackEvidence,
+): IssueExceptionChain {
+    val entries = mutableListOf<IssueExceptionChainEntry>()
+    val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
+    var truncated = false
+
+    fun add(
+        error: Throwable,
+        parentId: Int?,
+        relationship: IssueExceptionRelationship,
+        mechanism: IssueExceptionMechanism,
+        knownStack: ThrowableStackEvidence? = null,
+    ) {
+        if (entries.size >= MAX_ISSUE_EXCEPTIONS) {
+            truncated = true
+            return
+        }
+        val id = entries.size
+        val stack = knownStack ?: safeThrowableStack(error)
+        val messageState =
+            if (safeThrowableHasMessage(error)) {
+                IssueExceptionMessageState.REDACTED
+            } else {
+                IssueExceptionMessageState.NOT_CAPTURED
+            }
+        entries +=
+            IssueExceptionChainEntry(
+                id = id,
+                parentId = parentId,
+                relationship = relationship,
+                type = safeThrowableType(error),
+                messageState = messageState,
+                module = safeThrowableModule(error),
+                mechanism = mechanism,
+                stackFrames = stack.frames.takeIf { it.isNotEmpty() },
+                stackFramesState =
+                    when {
+                        stack.frames.isEmpty() -> IssueExceptionStackFramesState.NOT_CAPTURED
+                        stack.truncated -> IssueExceptionStackFramesState.TRUNCATED
+                        else -> IssueExceptionStackFramesState.CAPTURED
+                    },
+            )
+
+        safeThrowableCause(error)?.let { cause ->
+            if (seen.add(cause)) {
+                add(
+                    cause,
+                    id,
+                    IssueExceptionRelationship.CAUSE,
+                    IssueExceptionMechanism("kotlin.cause", handled = true),
+                )
+            } else {
+                truncated = true
+            }
+        }
+        safeThrowableSuppressed(error).forEach { suppressed ->
+            if (seen.add(suppressed)) {
+                add(
+                    suppressed,
+                    id,
+                    IssueExceptionRelationship.SUPPRESSED,
+                    IssueExceptionMechanism("kotlin.suppressed", handled = true),
+                )
+            } else {
+                truncated = true
+            }
+        }
+    }
+
+    seen.add(throwable)
+    add(throwable, null, IssueExceptionRelationship.REPORTED, rootMechanism, rootStack)
+    return IssueExceptionChain(entries.toList(), truncated)
+}
+
+private fun safeThrowableModule(throwable: Throwable): String? =
+    try {
+        safeIssueText(
+            throwable.javaClass.`package`?.name,
+            MAX_EXCEPTION_MODULE_LENGTH,
+            disallowLocationDelimiters = true,
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+private fun safeThrowableHasMessage(throwable: Throwable): Boolean =
+    try {
+        !throwable.message.isNullOrBlank()
+    } catch (_: Exception) {
+        false
+    }
+
+private fun safeThrowableCause(throwable: Throwable): Throwable? =
+    try {
+        throwable.cause
+    } catch (_: Exception) {
+        null
+    }
+
+private fun safeThrowableSuppressed(throwable: Throwable): List<Throwable> =
+    try {
+        throwable.suppressed.toList()
+    } catch (_: Exception) {
+        emptyList()
+    }
 
 private fun safeStackFrame(element: StackTraceElement): IssueStackFrame? {
     val module = safeIssueText(element.className, MAX_FRAME_MODULE_LENGTH, disallowLocationDelimiters = true)
@@ -399,3 +694,18 @@ private fun breadcrumbPrimitiveError(key: String): SdkException =
     issueError("issue breadcrumb data value for $key must be a finite primitive")
 
 private fun issueError(message: String): SdkException = SdkException("validation_error", message)
+
+private fun IssueExceptionMechanism.normalized(): IssueExceptionMechanism =
+    copy(type = issueMachineName(type, "issue exception mechanism type", breadcrumbNamePattern))
+
+private fun IssueException.normalized(): IssueException =
+    copy(
+        type =
+            issueText(
+                type,
+                "issue exception type",
+                MAX_EXCEPTION_TYPE_LENGTH,
+                disallowLocationDelimiters = true,
+            ),
+        mechanism = mechanism?.normalized(),
+    )

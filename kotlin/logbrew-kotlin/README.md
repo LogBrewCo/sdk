@@ -157,9 +157,9 @@ client.issue(
 )
 ```
 
-`IssueAttributes.fromThrowable(...)` emits exception type, capture mechanism, handled state, and up to 32 newest-first structured frames with filename, function, module, and positive coordinates. It deliberately omits the exception message, raw stack text, locals, arguments, and absolute source paths. Pass the `message` argument only after the application has approved that text for telemetry. `LogBrewAndroid.captureThrowable(...)` uses the same safe default; `includeMessage = true` and `includeStackTrace = true` are separate explicit opt-ins.
+`IssueAttributes.fromThrowable(...)` emits exception type, capture mechanism, handled state, and up to 32 newest-first structured frames with filename, function, module, and positive coordinates. It follows JVM causes into a bounded parent-first exception chain, marks automatic messages redacted, and makes per-node stack absence and graph truncation explicit. It deliberately omits the exception message, raw stack text, locals, arguments, and absolute source paths. Pass the `message` argument only after the application has approved that text for telemetry. `LogBrewAndroid.captureThrowable(...)` uses the same safe default; `includeMessage = true` and `includeStackTrace = true` are separate explicit opt-ins. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
 
-Use `IssueException`, `IssueExceptionMechanism`, and `IssueStackFrame` directly when the application already owns normalized exception or source-map evidence instead of a JVM `Throwable`.
+Use `IssueException`, `IssueExceptionMechanism`, `IssueExceptionChain`, `IssueExceptionChainEntry`, and `IssueStackFrame` directly when the application already owns normalized exception or source-map evidence instead of a JVM `Throwable`.
 
 The client keeps at most 64 validated breadcrumbs in oldest-to-newest order. Older entries are evicted and the next issue carries `breadcrumbsTruncated = true`; call `clearBreadcrumbs()` at an application-owned privacy or session boundary. Breadcrumb data is limited to eight flat finite primitive fields.
 

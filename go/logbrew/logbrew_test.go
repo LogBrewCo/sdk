@@ -328,6 +328,166 @@ func TestIssueDiagnosticsAreValidatedDetachedAndNormalized(t *testing.T) {
 	}
 }
 
+func TestIssueAttributesFromErrorPreservesUnwrapEvidenceWithoutErrorText(t *testing.T) {
+	cause := errors.New("private cause message")
+	wrapped := fmt.Errorf("private wrapper message: %w", cause)
+	attributes, err := IssueAttributesFromError(wrapped, "Checkout failed", "go.error", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sampleClient(t)
+	if err := client.Issue("evt_issue_error_chain", "2026-08-02T08:15:31Z", attributes); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, privateValue := range []string{"private cause message", "private wrapper message"} {
+		if strings.Contains(preview, privateValue) {
+			t.Fatalf("error chain leaked %q: %s", privateValue, preview)
+		}
+	}
+	var payload struct {
+		Events []struct {
+			Attributes map[string]any `json:"attributes"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(preview), &payload); err != nil {
+		t.Fatal(err)
+	}
+	queued := payload.Events[0].Attributes
+	exception := queued["exception"].(map[string]any)
+	if exception["type"] != "*fmt.wrapError" {
+		t.Fatalf("reported error type missing: %#v", exception)
+	}
+	chain := queued["exceptionChain"].(map[string]any)
+	entries := chain["entries"].([]any)
+	if len(entries) != 2 || chain["truncated"] != false {
+		t.Fatalf("unexpected error chain: %#v", chain)
+	}
+	reported := entries[0].(map[string]any)
+	underlying := entries[1].(map[string]any)
+	if reported["relationship"] != "reported" || reported["messageState"] != "redacted" ||
+		reported["stackFramesState"] != "captured" || reported["type"] != exception["type"] {
+		t.Fatalf("reported error evidence missing: %#v", reported)
+	}
+	if underlying["parentId"] != float64(0) || underlying["relationship"] != "cause" ||
+		underlying["type"] != "*errors.errorString" || underlying["messageState"] != "redacted" ||
+		underlying["stackFramesState"] != "not_captured" || underlying["stackFrames"] != nil {
+		t.Fatalf("underlying error evidence missing: %#v", underlying)
+	}
+	if !reflect.DeepEqual(reported["stackFrames"], queued["stackFrames"]) {
+		t.Fatalf("reported stack does not match legacy stack: %#v", queued)
+	}
+
+	joined := errors.Join(errors.New("private first member"), errors.New("private second member"))
+	joinedAttributes, err := IssueAttributesFromError(joined, "Batch failed", "go.error", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinedClient := sampleClient(t)
+	if err := joinedClient.Issue("evt_issue_joined_chain", "2026-08-02T08:15:31Z", joinedAttributes); err != nil {
+		t.Fatal(err)
+	}
+	joinedPreview, err := joinedClient.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(joinedPreview, `"relationship": "aggregate_member"`) != 2 ||
+		strings.Contains(joinedPreview, "private first member") || strings.Contains(joinedPreview, "private second member") {
+		t.Fatalf("joined error evidence is incomplete or unsafe: %s", joinedPreview)
+	}
+
+	deep := error(errors.New("private depth 9"))
+	for depth := 8; depth >= 0; depth-- {
+		deep = fmt.Errorf("private depth %d: %w", depth, deep)
+	}
+	deepAttributes, err := IssueAttributesFromError(deep, "Deep failure", "go.error", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deepClient := sampleClient(t)
+	if err := deepClient.Issue("evt_issue_deep_chain", "2026-08-02T08:15:31Z", deepAttributes); err != nil {
+		t.Fatal(err)
+	}
+	deepPreview, err := deepClient.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(deepPreview, `"relationship": "reported"`) != 1 ||
+		strings.Count(deepPreview, `"relationship": "cause"`) != 7 ||
+		!strings.Contains(deepPreview, `"truncated": true`) || strings.Contains(deepPreview, "private depth") {
+		t.Fatalf("deep error chain did not preserve its bound: %s", deepPreview)
+	}
+}
+
+func TestIssueExceptionChainManualStatesAndContradictions(t *testing.T) {
+	mechanism := &IssueExceptionMechanism{Type: "go.manual", Handled: true}
+	frame := IssueStackFrame{Filename: "checkout.go", Line: 42, Column: 1, Function: "submit"}
+	attributes := IssueAttributes{
+		Title:     "Checkout failed",
+		Level:     "error",
+		Exception: &IssueException{Type: "CheckoutFailure", Mechanism: mechanism},
+		ExceptionChain: &IssueExceptionChain{
+			Entries: []IssueExceptionChainEntry{
+				{
+					ID:               0,
+					Relationship:     IssueExceptionReported,
+					Type:             "CheckoutFailure",
+					Message:          "approved summary",
+					MessageState:     IssueExceptionMessageTruncated,
+					Mechanism:        mechanism,
+					StackFrames:      []IssueStackFrame{frame},
+					StackFramesState: IssueExceptionStackFramesCaptured,
+				},
+				{
+					ID:               1,
+					ParentID:         intPtr(0),
+					Relationship:     IssueExceptionContext,
+					Type:             "RequestContextFailure",
+					MessageState:     IssueExceptionMessageRedacted,
+					StackFramesState: IssueExceptionStackFramesNotCaptured,
+				},
+			},
+			Truncated: true,
+		},
+		StackFrames: []IssueStackFrame{frame},
+	}
+	client := sampleClient(t)
+	if err := client.Issue("evt_issue_manual_chain", "2026-08-02T08:15:31Z", attributes); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"message": "approved summary"`,
+		`"messageState": "truncated"`,
+		`"relationship": "context"`,
+		`"stackFramesState": "not_captured"`,
+		`"truncated": true`,
+	} {
+		if !strings.Contains(preview, expected) {
+			t.Fatalf("manual chain missing %s: %s", expected, preview)
+		}
+	}
+
+	bad := attributes
+	bad.ExceptionChain = &IssueExceptionChain{Entries: []IssueExceptionChainEntry{{
+		ID:               0,
+		Relationship:     IssueExceptionCause,
+		Type:             "CheckoutFailure",
+		MessageState:     IssueExceptionMessageNotCaptured,
+		StackFramesState: IssueExceptionStackFramesNotCaptured,
+	}}}
+	if err := sampleClient(t).Issue("evt_issue_bad_chain", "2026-08-02T08:15:31Z", bad); err == nil ||
+		!strings.Contains(err.Error(), "entry 0 must be the parentless reported exception") {
+		t.Fatalf("contradictory chain did not fail closed: %v", err)
+	}
+}
+
 func TestIssueDiagnosticsRejectInvalidBoundsAndValues(t *testing.T) {
 	validFrame := IssueStackFrame{Filename: "checkout.go", Line: 1, Column: 1}
 	validBreadcrumb := IssueBreadcrumb{Timestamp: "2026-08-02T08:15:30Z", Category: "checkout"}

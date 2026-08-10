@@ -1,11 +1,15 @@
 use crate::{IssueEvent, Metadata, SdkError};
 use serde_json::{Map, Value};
 use std::collections::VecDeque;
+use std::error::Error;
 
 pub(crate) const MAX_STACK_FRAMES: usize = 32;
 pub(crate) const MAX_BREADCRUMBS: usize = 64;
+pub(crate) const MAX_EXCEPTIONS: usize = 8;
 
 const MAX_EXCEPTION_TYPE: usize = 256;
+const MAX_EXCEPTION_MESSAGE: usize = 1024;
+const MAX_EXCEPTION_MODULE: usize = 512;
 const MAX_MECHANISM_TYPE: usize = 64;
 const MAX_FRAME_FILENAME: usize = 2048;
 const MAX_FRAME_FUNCTION: usize = 256;
@@ -84,6 +88,471 @@ impl IssueException {
         }
         Ok(value)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How one runtime exception relates to its earlier parent node.
+pub enum IssueExceptionRelationship {
+    /// The exception passed to the capture API.
+    Reported,
+    /// A causal error returned by `Error::source`.
+    Cause,
+    /// Context retained while another exception was handled.
+    Context,
+    /// One member of an aggregate exception.
+    AggregateMember,
+    /// A runtime-suppressed exception.
+    Suppressed,
+}
+
+impl IssueExceptionRelationship {
+    fn wire_value(self) -> &'static str {
+        match self {
+            Self::Reported => "reported",
+            Self::Cause => "cause",
+            Self::Context => "context",
+            Self::AggregateMember => "aggregate_member",
+            Self::Suppressed => "suppressed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Explicit capture state for one exception message.
+pub enum IssueExceptionMessageState {
+    /// An approved message was captured in full.
+    Captured,
+    /// An approved message was captured with truncation.
+    Truncated,
+    /// A message existed but was deliberately removed.
+    Redacted,
+    /// The runtime or caller did not provide a message.
+    NotCaptured,
+}
+
+impl IssueExceptionMessageState {
+    fn wire_value(self) -> &'static str {
+        match self {
+            Self::Captured => "captured",
+            Self::Truncated => "truncated",
+            Self::Redacted => "redacted",
+            Self::NotCaptured => "not_captured",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Explicit capture state for one exception stack.
+pub enum IssueExceptionStackFramesState {
+    /// All retained frames were captured.
+    Captured,
+    /// Frames were captured but the runtime provided more than the bound.
+    Truncated,
+    /// No stack was available for this exception node.
+    NotCaptured,
+}
+
+impl IssueExceptionStackFramesState {
+    fn wire_value(self) -> &'static str {
+        match self {
+            Self::Captured => "captured",
+            Self::Truncated => "truncated",
+            Self::NotCaptured => "not_captured",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// One parent-first runtime exception with its own bounded evidence states.
+pub struct IssueExceptionChainEntry {
+    id: usize,
+    parent_id: Option<usize>,
+    relationship: IssueExceptionRelationship,
+    exception_type: String,
+    message: Option<String>,
+    message_state: IssueExceptionMessageState,
+    module: Option<String>,
+    mechanism: Option<IssueExceptionMechanism>,
+    stack_frames: Option<Vec<IssueStackFrame>>,
+    stack_frames_state: IssueExceptionStackFramesState,
+}
+
+impl IssueExceptionChainEntry {
+    /// Create one exception node. IDs must match parent-first array order.
+    pub fn new(
+        id: usize,
+        relationship: IssueExceptionRelationship,
+        exception_type: impl Into<String>,
+    ) -> Self {
+        Self {
+            id,
+            parent_id: None,
+            relationship,
+            exception_type: exception_type.into(),
+            message: None,
+            message_state: IssueExceptionMessageState::NotCaptured,
+            module: None,
+            mechanism: None,
+            stack_frames: None,
+            stack_frames_state: IssueExceptionStackFramesState::NotCaptured,
+        }
+    }
+
+    /// Reference an earlier parent node.
+    pub fn with_parent_id(mut self, parent_id: usize) -> Self {
+        self.parent_id = Some(parent_id);
+        self
+    }
+
+    /// Attach an approved message and whether it was truncated.
+    pub fn with_message(mut self, message: impl Into<String>, truncated: bool) -> Self {
+        self.message = Some(message.into());
+        self.message_state = if truncated {
+            IssueExceptionMessageState::Truncated
+        } else {
+            IssueExceptionMessageState::Captured
+        };
+        self
+    }
+
+    /// Report that a message existed but was deliberately redacted.
+    pub fn with_redacted_message(mut self) -> Self {
+        self.message = None;
+        self.message_state = IssueExceptionMessageState::Redacted;
+        self
+    }
+
+    /// Attach an optional module or Rust namespace.
+    pub fn with_module(mut self, module: impl Into<String>) -> Self {
+        self.module = Some(module.into());
+        self
+    }
+
+    /// Attach a capture mechanism and handled state.
+    pub fn with_mechanism(mut self, mechanism: IssueExceptionMechanism) -> Self {
+        self.mechanism = Some(mechanism);
+        self
+    }
+
+    /// Attach 1-32 frames and whether more frames existed.
+    pub fn with_stack_frames<I>(mut self, frames: I, truncated: bool) -> Self
+    where
+        I: IntoIterator<Item = IssueStackFrame>,
+    {
+        self.stack_frames = Some(frames.into_iter().collect());
+        self.stack_frames_state = if truncated {
+            IssueExceptionStackFramesState::Truncated
+        } else {
+            IssueExceptionStackFramesState::Captured
+        };
+        self
+    }
+
+    fn attributes(&self) -> Result<Map<String, Value>, SdkError> {
+        let mut value = Map::new();
+        value.insert("id".to_string(), Value::from(self.id));
+        if let Some(parent_id) = self.parent_id {
+            value.insert("parentId".to_string(), Value::from(parent_id));
+        }
+        value.insert(
+            "relationship".to_string(),
+            Value::String(self.relationship.wire_value().to_string()),
+        );
+        value.insert(
+            "type".to_string(),
+            Value::String(require_exception_type(&self.exception_type)?),
+        );
+        match self.message_state {
+            IssueExceptionMessageState::Captured | IssueExceptionMessageState::Truncated => {
+                let Some(message) = &self.message else {
+                    return Err(validation(
+                        "issue exceptionChain message must match messageState",
+                    ));
+                };
+                value.insert(
+                    "message".to_string(),
+                    Value::String(require_text(
+                        "issue exceptionChain message",
+                        message,
+                        MAX_EXCEPTION_MESSAGE,
+                        false,
+                    )?),
+                );
+            }
+            IssueExceptionMessageState::Redacted | IssueExceptionMessageState::NotCaptured => {
+                if self.message.is_some() {
+                    return Err(validation(
+                        "issue exceptionChain message must match messageState",
+                    ));
+                }
+            }
+        }
+        value.insert(
+            "messageState".to_string(),
+            Value::String(self.message_state.wire_value().to_string()),
+        );
+        if let Some(module) = &self.module {
+            value.insert(
+                "module".to_string(),
+                Value::String(require_text(
+                    "issue exceptionChain module",
+                    module,
+                    MAX_EXCEPTION_MODULE,
+                    true,
+                )?),
+            );
+        }
+        if let Some(mechanism) = &self.mechanism {
+            value.insert(
+                "mechanism".to_string(),
+                Value::Object(mechanism.attributes()?),
+            );
+        }
+        match self.stack_frames_state {
+            IssueExceptionStackFramesState::Captured
+            | IssueExceptionStackFramesState::Truncated => {
+                let Some(frames) = &self.stack_frames else {
+                    return Err(validation(
+                        "issue exceptionChain stackFrames must match stackFramesState",
+                    ));
+                };
+                if frames.is_empty() || frames.len() > MAX_STACK_FRAMES {
+                    return Err(validation(
+                        "issue exceptionChain stackFrames must match stackFramesState",
+                    ));
+                }
+                value.insert(
+                    "stackFrames".to_string(),
+                    Value::Array(
+                        frames
+                            .iter()
+                            .map(|frame| frame.attributes().map(Value::Object))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                );
+            }
+            IssueExceptionStackFramesState::NotCaptured => {
+                if self.stack_frames.is_some() {
+                    return Err(validation(
+                        "issue exceptionChain stackFrames must match stackFramesState",
+                    ));
+                }
+            }
+        }
+        value.insert(
+            "stackFramesState".to_string(),
+            Value::String(self.stack_frames_state.wire_value().to_string()),
+        );
+        Ok(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// At most eight parent-first runtime exceptions.
+pub struct IssueExceptionChain {
+    entries: Vec<IssueExceptionChainEntry>,
+    truncated: bool,
+    bind_root_legacy_stack: bool,
+}
+
+impl IssueExceptionChain {
+    /// Create a manually approved exception chain.
+    pub fn new<I>(entries: I, truncated: bool) -> Self
+    where
+        I: IntoIterator<Item = IssueExceptionChainEntry>,
+    {
+        Self {
+            entries: entries.into_iter().collect(),
+            truncated,
+            bind_root_legacy_stack: false,
+        }
+    }
+
+    pub(crate) fn from_error<E>(
+        error: &E,
+        exception_type: String,
+        mechanism: IssueExceptionMechanism,
+    ) -> Self
+    where
+        E: Error + ?Sized,
+    {
+        let root_module = exception_module(&exception_type);
+        let mut root =
+            IssueExceptionChainEntry::new(0, IssueExceptionRelationship::Reported, exception_type)
+                .with_mechanism(mechanism)
+                .with_redacted_message();
+        if let Some(module) = root_module {
+            root = root.with_module(module);
+        }
+        let mut entries = vec![root];
+        let mut seen = Vec::<*const ()>::new();
+        let mut parent_id = 0;
+        let mut current = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| error.source()))
+            .ok()
+            .flatten();
+        let mut truncated = false;
+        while let Some(source) = current {
+            let pointer = std::ptr::from_ref(source).cast::<()>();
+            if seen.contains(&pointer) || entries.len() >= MAX_EXCEPTIONS {
+                truncated = true;
+                break;
+            }
+            seen.push(pointer);
+            let id = entries.len();
+            let source_type = source_error_type_name(source);
+            let mut entry = IssueExceptionChainEntry::new(
+                id,
+                IssueExceptionRelationship::Cause,
+                source_type.clone(),
+            )
+            .with_parent_id(parent_id)
+            .with_mechanism(IssueExceptionMechanism::new("rust.source", true))
+            .with_redacted_message();
+            if let Some(module) = exception_module(&source_type) {
+                entry = entry.with_module(module);
+            }
+            entries.push(entry);
+            parent_id = id;
+            current = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.source()))
+                .ok()
+                .flatten();
+        }
+        Self {
+            entries,
+            truncated,
+            bind_root_legacy_stack: true,
+        }
+    }
+
+    pub(crate) fn reported_panic(mechanism: IssueExceptionMechanism) -> Self {
+        Self {
+            entries: vec![
+                IssueExceptionChainEntry::new(0, IssueExceptionRelationship::Reported, "panic")
+                    .with_mechanism(mechanism)
+                    .with_redacted_message(),
+            ],
+            truncated: false,
+            bind_root_legacy_stack: true,
+        }
+    }
+
+    pub(crate) fn attributes(
+        &self,
+        legacy_exception: Option<&IssueException>,
+        legacy_frames: Option<&Vec<IssueStackFrame>>,
+        root_stack_truncated: bool,
+    ) -> Result<Map<String, Value>, SdkError> {
+        if self.entries.is_empty() || self.entries.len() > MAX_EXCEPTIONS {
+            return Err(validation(
+                "issue exceptionChain entries must contain 1-8 exceptions",
+            ));
+        }
+        let mut entries = self.entries.clone();
+        if self.bind_root_legacy_stack {
+            let root = entries.first_mut().expect("non-empty chain checked");
+            match legacy_frames {
+                Some(frames) if !frames.is_empty() => {
+                    root.stack_frames = Some(frames.clone());
+                    root.stack_frames_state = if root_stack_truncated {
+                        IssueExceptionStackFramesState::Truncated
+                    } else {
+                        IssueExceptionStackFramesState::Captured
+                    };
+                }
+                _ => {
+                    root.stack_frames = None;
+                    root.stack_frames_state = IssueExceptionStackFramesState::NotCaptured;
+                }
+            }
+        }
+
+        for (index, entry) in entries.iter().enumerate() {
+            if entry.id != index {
+                return Err(validation(
+                    "issue exceptionChain ids must be contiguous and match array order",
+                ));
+            }
+            if index == 0 {
+                if entry.relationship != IssueExceptionRelationship::Reported
+                    || entry.parent_id.is_some()
+                {
+                    return Err(validation(
+                        "issue exceptionChain entry 0 must be the parentless reported exception",
+                    ));
+                }
+            } else if entry.relationship == IssueExceptionRelationship::Reported
+                || entry.parent_id.is_none_or(|parent_id| parent_id >= index)
+            {
+                return Err(validation(
+                    "issue exceptionChain parent relationship is invalid",
+                ));
+            }
+        }
+
+        let mapped_entries = entries
+            .iter()
+            .map(IssueExceptionChainEntry::attributes)
+            .collect::<Result<Vec<_>, _>>()?;
+        let Some(legacy_exception) = legacy_exception else {
+            return Err(validation(
+                "issue exceptionChain reported exception must match exception",
+            ));
+        };
+        let root = mapped_entries.first().expect("non-empty chain checked");
+        let mut root_exception = Map::new();
+        root_exception.insert(
+            "type".to_string(),
+            root.get("type").expect("validated root type").clone(),
+        );
+        if let Some(mechanism) = root.get("mechanism") {
+            root_exception.insert("mechanism".to_string(), mechanism.clone());
+        }
+        if root_exception != legacy_exception.attributes()? {
+            return Err(validation(
+                "issue exceptionChain reported exception must match exception",
+            ));
+        }
+        let legacy_stack = legacy_frames
+            .map(|frames| {
+                frames
+                    .iter()
+                    .map(|frame| frame.attributes().map(Value::Object))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
+        let legacy_stack_value = legacy_stack.map(Value::Array);
+        let root_stack_state = root
+            .get("stackFramesState")
+            .and_then(Value::as_str)
+            .expect("validated root stack state");
+        if (root_stack_state == "not_captured" && legacy_stack_value.is_some())
+            || (root_stack_state != "not_captured"
+                && root.get("stackFrames") != legacy_stack_value.as_ref())
+        {
+            return Err(validation(
+                "issue exceptionChain reported stack must match stackFrames",
+            ));
+        }
+
+        let mut value = Map::new();
+        value.insert(
+            "entries".to_string(),
+            Value::Array(mapped_entries.into_iter().map(Value::Object).collect()),
+        );
+        value.insert("truncated".to_string(), Value::Bool(self.truncated));
+        Ok(value)
+    }
+}
+
+fn source_error_type_name(error: &(dyn Error + 'static)) -> String {
+    let candidate = std::any::type_name_of_val(error);
+    safe_text(candidate, MAX_EXCEPTION_TYPE, true, "Error")
+}
+
+fn exception_module(exception_type: &str) -> Option<String> {
+    let (module, _) = exception_type.rsplit_once("::")?;
+    let value = safe_text(module, MAX_EXCEPTION_MODULE, true, "");
+    (!value.is_empty()).then_some(value)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

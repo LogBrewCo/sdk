@@ -57,6 +57,7 @@ def _remove_additive_investigation_evidence(
     allowed_fields: dict[str, dict[str, type[Any]]] = {
         "issue": {
             "exception": dict,
+            "exceptionChain": dict,
             "stackFrames": list,
             "breadcrumbs": list,
             "breadcrumbsTruncated": bool,

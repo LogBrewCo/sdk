@@ -324,6 +324,14 @@ call stack is meaningful. It never captures source lines, locals, panic/error
 values, or raw stack text. Explicit frames receive the same validation and
 absolute filenames are reduced to basenames before queueing.
 
+`CreateIssueExceptionChain()` follows standard `Unwrap() error` and
+`Unwrap() []error` relationships without formatting either value. It emits a
+bounded parent-first cause or aggregate graph, records redacted/missing message
+and stack states, detects cycles, and validates entry zero against the legacy
+exception and frames. Panic, Gin, and `net/http` helpers use this same contract
+instead of emitting a weaker wrapper-only shape. See the shared
+[exception-chain contract](../../docs/exception-chain-evidence.md).
+
 ## High-Load Behavior
 
 `NewClient` keeps the in-memory event queue bounded to 1,000 events by default. Set `Config.MaxQueueSize` when your service needs a larger or smaller local buffer. When the queue is full, LogBrew drops new events instead of blocking app logging or discarding already-buffered release/environment/request context. Use `DroppedEvents()` for a local counter and `OnEventDropped` for an advisory callback:

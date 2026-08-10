@@ -1078,6 +1078,197 @@ void validate_issue_stack_frame(const IssueStackFrame &frame) {
   });
 }
 
+[[nodiscard]] std::string issue_stack_frames_json(const std::vector<IssueStackFrame> &frames) {
+  if (frames.empty() || frames.size() > max_stack_frames) {
+    throw SdkException("validation_error", "issue exceptionChain stackFrames must contain 1-32 frames");
+  }
+  std::ostringstream output;
+  output << '[';
+  for (std::size_t index = 0U; index < frames.size(); index++) {
+    if (index > 0U) {
+      output << ',';
+    }
+    output << issue_stack_frame_json(frames[index]);
+  }
+  output << ']';
+  return output.str();
+}
+
+[[nodiscard]] std::string issue_mechanism_json(const IssueMechanism &mechanism) {
+  if (!is_machine_key(mechanism.type, 64U, "_.:-")) {
+    throw SdkException("validation_error", "issue exception mechanism type is invalid");
+  }
+  return object_json([&](std::ostringstream &output, bool &needs_comma) {
+    append_field(output, needs_comma, "type", mechanism.type);
+    append_bool_field(output, needs_comma, "handled", mechanism.handled);
+  });
+}
+
+[[nodiscard]] const char *issue_relationship_name(IssueExceptionRelationship relationship) {
+  switch (relationship) {
+  case IssueExceptionRelationship::reported:
+    return "reported";
+  case IssueExceptionRelationship::cause:
+    return "cause";
+  case IssueExceptionRelationship::context:
+    return "context";
+  case IssueExceptionRelationship::aggregate_member:
+    return "aggregate_member";
+  case IssueExceptionRelationship::suppressed:
+    return "suppressed";
+  }
+  throw SdkException("validation_error", "issue exceptionChain relationship is invalid");
+}
+
+[[nodiscard]] const char *issue_message_state_name(IssueExceptionMessageState state) {
+  switch (state) {
+  case IssueExceptionMessageState::captured:
+    return "captured";
+  case IssueExceptionMessageState::truncated:
+    return "truncated";
+  case IssueExceptionMessageState::redacted:
+    return "redacted";
+  case IssueExceptionMessageState::not_captured:
+    return "not_captured";
+  }
+  throw SdkException("validation_error", "issue exceptionChain messageState is invalid");
+}
+
+[[nodiscard]] const char *issue_stack_state_name(IssueExceptionStackState state) {
+  switch (state) {
+  case IssueExceptionStackState::captured:
+    return "captured";
+  case IssueExceptionStackState::truncated:
+    return "truncated";
+  case IssueExceptionStackState::not_captured:
+    return "not_captured";
+  }
+  throw SdkException("validation_error", "issue exceptionChain stackFramesState is invalid");
+}
+
+[[nodiscard]] bool issue_message_is_present(IssueExceptionMessageState state) {
+  switch (state) {
+  case IssueExceptionMessageState::captured:
+  case IssueExceptionMessageState::truncated:
+    return true;
+  case IssueExceptionMessageState::redacted:
+  case IssueExceptionMessageState::not_captured:
+    return false;
+  }
+  throw SdkException("validation_error", "issue exceptionChain messageState is invalid");
+}
+
+[[nodiscard]] bool issue_stack_is_present(IssueExceptionStackState state) {
+  switch (state) {
+  case IssueExceptionStackState::captured:
+  case IssueExceptionStackState::truncated:
+    return true;
+  case IssueExceptionStackState::not_captured:
+    return false;
+  }
+  throw SdkException("validation_error", "issue exceptionChain stackFramesState is invalid");
+}
+
+[[nodiscard]] std::string issue_exception_chain_entry_json(const IssueExceptionChainEntry &entry,
+                                                           std::size_t index) {
+  if (entry.id != index) {
+    throw SdkException("validation_error", "issue exceptionChain ids must be contiguous and match array order");
+  }
+  const char *relationship = issue_relationship_name(entry.relationship);
+  if (index == 0U) {
+    if (entry.parent_id.has_value() || entry.relationship != IssueExceptionRelationship::reported) {
+      throw SdkException("validation_error",
+                         "issue exceptionChain entry 0 must be the parentless reported exception");
+    }
+  } else if (!entry.parent_id.has_value() || *entry.parent_id >= index ||
+             entry.relationship == IssueExceptionRelationship::reported) {
+    throw SdkException("validation_error", "issue exceptionChain parent relationship is invalid");
+  }
+  require_bounded_text("issue exceptionChain type", entry.type, 256U, true);
+  const bool has_message = issue_message_is_present(entry.message_state);
+  if (has_message != entry.message.has_value()) {
+    throw SdkException("validation_error", "issue exceptionChain message must match messageState");
+  }
+  if (entry.message.has_value()) {
+    require_bounded_text("issue exceptionChain message", *entry.message, 1024U);
+  }
+  if (entry.module.has_value()) {
+    require_bounded_text("issue exceptionChain module", *entry.module, 512U, true);
+  }
+  const bool has_stack = issue_stack_is_present(entry.stack_frames_state);
+  if (has_stack != !entry.stack_frames.empty()) {
+    throw SdkException("validation_error", "issue exceptionChain stackFrames must match stackFramesState");
+  }
+  const std::optional<std::string> frames_json = has_stack
+      ? std::optional<std::string>(issue_stack_frames_json(entry.stack_frames))
+      : std::nullopt;
+  return object_json([&](std::ostringstream &output, bool &needs_comma) {
+    append_raw_field(output, needs_comma, "id", std::to_string(entry.id));
+    if (entry.parent_id.has_value()) {
+      append_raw_field(output, needs_comma, "parentId", std::to_string(*entry.parent_id));
+    }
+    append_field(output, needs_comma, "relationship", relationship);
+    append_field(output, needs_comma, "type", entry.type);
+    append_optional_field(output, needs_comma, "message", entry.message, true);
+    append_field(output, needs_comma, "messageState", issue_message_state_name(entry.message_state));
+    append_optional_field(output, needs_comma, "module", entry.module, true);
+    if (entry.mechanism.has_value()) {
+      append_raw_field(output, needs_comma, "mechanism", issue_mechanism_json(*entry.mechanism));
+    }
+    if (frames_json.has_value()) {
+      append_raw_field(output, needs_comma, "stackFrames", *frames_json);
+    }
+    append_field(output, needs_comma, "stackFramesState", issue_stack_state_name(entry.stack_frames_state));
+  });
+}
+
+[[nodiscard]] bool issue_mechanisms_equal(const std::optional<IssueMechanism> &left,
+                                          const std::optional<IssueMechanism> &right) {
+  if (left.has_value() != right.has_value()) {
+    return false;
+  }
+  return !left.has_value() || (left->type == right->type && left->handled == right->handled);
+}
+
+[[nodiscard]] std::string issue_exception_chain_json(const IssueExceptionChain &chain,
+                                                     const std::optional<IssueException> &legacy_exception,
+                                                     const std::vector<IssueStackFrame> &legacy_frames) {
+  if (chain.entries.empty() || chain.entries.size() > max_exception_chain_entries) {
+    throw SdkException("validation_error", "issue exceptionChain entries must contain 1-8 exceptions");
+  }
+  std::vector<std::string> entries;
+  entries.reserve(chain.entries.size());
+  for (std::size_t index = 0U; index < chain.entries.size(); index++) {
+    entries.push_back(issue_exception_chain_entry_json(chain.entries[index], index));
+  }
+  const IssueExceptionChainEntry &root = chain.entries.front();
+  if (!legacy_exception.has_value() || root.type != legacy_exception->type ||
+      !issue_mechanisms_equal(root.mechanism, legacy_exception->mechanism)) {
+    throw SdkException("validation_error", "issue exceptionChain reported exception must match exception");
+  }
+  if (issue_stack_is_present(root.stack_frames_state)) {
+    if (legacy_frames.empty() || issue_stack_frames_json(root.stack_frames) != issue_stack_frames_json(legacy_frames)) {
+      throw SdkException("validation_error", "issue exceptionChain reported stack must match stackFrames");
+    }
+  } else if (!legacy_frames.empty()) {
+    throw SdkException("validation_error", "issue exceptionChain reported stack must match stackFrames");
+  }
+
+  return object_json([&](std::ostringstream &output, bool &needs_comma) {
+    std::ostringstream entry_array;
+    entry_array << '[';
+    for (std::size_t index = 0U; index < entries.size(); index++) {
+      if (index > 0U) {
+        entry_array << ',';
+      }
+      entry_array << entries[index];
+    }
+    entry_array << ']';
+    append_raw_field(output, needs_comma, "entries", entry_array.str());
+    append_bool_field(output, needs_comma, "truncated", chain.truncated);
+  });
+}
+
 [[nodiscard]] std::string issue_breadcrumb_json(const IssueBreadcrumb &breadcrumb) {
   require_timestamp(breadcrumb.timestamp);
   if (!is_machine_key(breadcrumb.category, 64U, "_.:-")) {
@@ -1139,6 +1330,10 @@ void append_issue_evidence(std::ostringstream &output, bool &needs_comma, const 
     }
     frames << ']';
     append_raw_field(output, needs_comma, "stackFrames", frames.str());
+  }
+  if (details.exception_chain.has_value()) {
+    append_raw_field(output, needs_comma, "exceptionChain",
+                     issue_exception_chain_json(*details.exception_chain, details.exception, details.stack_frames));
   }
 
   const std::size_t explicit_start =

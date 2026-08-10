@@ -258,6 +258,247 @@ static LogBrewStatus append_frame(
   return status;
 }
 
+static bool optional_text_equal(const char *left, const char *right) {
+  if (left == NULL || right == NULL) return left == right;
+  return strcmp(left, right) == 0;
+}
+
+static bool frame_filename_equal(
+    const LogBrewIssueStackFrame *left,
+    const LogBrewIssueStackFrame *right) {
+  size_t left_length;
+  size_t right_length;
+  if (left->filename == NULL || right->filename == NULL) return left->filename == right->filename;
+  left_length = left->filename_length > 0U ? left->filename_length : strlen(left->filename);
+  right_length = right->filename_length > 0U ? right->filename_length : strlen(right->filename);
+  return left_length == right_length && memcmp(left->filename, right->filename, left_length) == 0;
+}
+
+static bool frames_equal(
+    const LogBrewIssueStackFrame *left,
+    const LogBrewIssueStackFrame *right,
+    size_t count) {
+  size_t index;
+  for (index = 0U; index < count; index++) {
+    if (!frame_filename_equal(&left[index], &right[index]) ||
+        left[index].line != right[index].line ||
+        left[index].column != right[index].column ||
+        !optional_text_equal(left[index].function, right[index].function) ||
+        !optional_text_equal(left[index].module, right[index].module) ||
+        left[index].in_app != right[index].in_app ||
+        left[index].has_in_app != right[index].has_in_app ||
+        !optional_text_equal(left[index].debug_id, right[index].debug_id)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool mechanisms_equal(
+    const LogBrewIssueMechanism *left,
+    const LogBrewIssueMechanism *right) {
+  if (left == NULL || right == NULL) return left == right;
+  return optional_text_equal(left->type, right->type) && left->handled == right->handled;
+}
+
+static const char *relationship_name(LogBrewIssueExceptionRelationship value) {
+  switch (value) {
+    case LOGBREW_EXCEPTION_RELATIONSHIP_REPORTED: return "reported";
+    case LOGBREW_EXCEPTION_RELATIONSHIP_CAUSE: return "cause";
+    case LOGBREW_EXCEPTION_RELATIONSHIP_CONTEXT: return "context";
+    case LOGBREW_EXCEPTION_RELATIONSHIP_AGGREGATE_MEMBER: return "aggregate_member";
+    case LOGBREW_EXCEPTION_RELATIONSHIP_SUPPRESSED: return "suppressed";
+    default: return NULL;
+  }
+}
+
+static const char *message_state_name(LogBrewIssueExceptionMessageState value) {
+  switch (value) {
+    case LOGBREW_EXCEPTION_MESSAGE_NOT_CAPTURED: return "not_captured";
+    case LOGBREW_EXCEPTION_MESSAGE_CAPTURED: return "captured";
+    case LOGBREW_EXCEPTION_MESSAGE_TRUNCATED: return "truncated";
+    case LOGBREW_EXCEPTION_MESSAGE_REDACTED: return "redacted";
+    default: return NULL;
+  }
+}
+
+static const char *stack_state_name(LogBrewIssueExceptionStackState value) {
+  switch (value) {
+    case LOGBREW_EXCEPTION_STACK_NOT_CAPTURED: return "not_captured";
+    case LOGBREW_EXCEPTION_STACK_CAPTURED: return "captured";
+    case LOGBREW_EXCEPTION_STACK_TRUNCATED: return "truncated";
+    default: return NULL;
+  }
+}
+
+static LogBrewStatus append_mechanism_member(
+    LogBrewJsonBuffer *buffer,
+    const LogBrewIssueMechanism *mechanism,
+    bool *needs_comma,
+    LogBrewError *error) {
+  bool mechanism_comma = false;
+  LogBrewStatus status = LOGBREW_OK;
+  if (!evidence_machine_key(mechanism->type, 64U, "_.:-")) {
+    logbrew_internal_set_error(error, "validation_error", "issue exception mechanism type is invalid", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (*needs_comma) status = logbrew_json_append_char(buffer, ',', error);
+  if (status == LOGBREW_OK) status = logbrew_json_append(buffer, "\"mechanism\":{", error);
+  if (status == LOGBREW_OK) status = logbrew_json_append_named_string(
+      buffer, "type", mechanism->type, &mechanism_comma, error);
+  if (status == LOGBREW_OK) status = logbrew_json_append_named_bool(
+      buffer, "handled", mechanism->handled, &mechanism_comma, error);
+  if (status == LOGBREW_OK) status = logbrew_json_append_char(buffer, '}', error);
+  if (status == LOGBREW_OK) *needs_comma = true;
+  return status;
+}
+
+static LogBrewStatus append_exception_chain_entry(
+    LogBrewJsonBuffer *buffer,
+    const LogBrewIssueExceptionChainEntry *entry,
+    size_t index,
+    LogBrewError *error) {
+  const char *relationship = relationship_name(entry->relationship);
+  const char *message_state = message_state_name(entry->message_state);
+  const char *stack_state = stack_state_name(entry->stack_frames_state);
+  bool needs_comma = true;
+  size_t frame_index;
+  LogBrewStatus status = LOGBREW_OK;
+  if (entry->id != index) {
+    logbrew_internal_set_error(
+        error, "validation_error", "issue exceptionChain ids must be contiguous and match array order", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (index == 0U) {
+    if (entry->has_parent_id || entry->relationship != LOGBREW_EXCEPTION_RELATIONSHIP_REPORTED) {
+      logbrew_internal_set_error(error, "validation_error",
+          "issue exceptionChain entry 0 must be the parentless reported exception", false);
+      return LOGBREW_VALIDATION_ERROR;
+    }
+  } else if (!entry->has_parent_id || entry->parent_id >= index || relationship == NULL ||
+      entry->relationship == LOGBREW_EXCEPTION_RELATIONSHIP_REPORTED) {
+    logbrew_internal_set_error(
+        error, "validation_error", "issue exceptionChain parent relationship is invalid", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (relationship == NULL || validate_text(
+      "issue exceptionChain type", entry->type, 256U, true, error) != LOGBREW_OK) {
+    if (relationship == NULL) {
+      logbrew_internal_set_error(
+          error, "validation_error", "issue exceptionChain relationship is invalid", false);
+    }
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (message_state == NULL ||
+      ((entry->message_state == LOGBREW_EXCEPTION_MESSAGE_CAPTURED ||
+        entry->message_state == LOGBREW_EXCEPTION_MESSAGE_TRUNCATED)
+          ? validate_text("issue exceptionChain message", entry->message, 1024U, false, error) != LOGBREW_OK
+          : entry->message != NULL)) {
+    if (message_state == NULL || entry->message != NULL) {
+      logbrew_internal_set_error(
+          error, "validation_error", "issue exceptionChain message must match messageState", false);
+    }
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (entry->module != NULL && validate_text(
+      "issue exceptionChain module", entry->module, 512U, true, error) != LOGBREW_OK) {
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (entry->mechanism != NULL && !evidence_machine_key(entry->mechanism->type, 64U, "_.:-")) {
+    logbrew_internal_set_error(error, "validation_error", "issue exception mechanism type is invalid", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (stack_state == NULL ||
+      ((entry->stack_frames_state == LOGBREW_EXCEPTION_STACK_CAPTURED ||
+        entry->stack_frames_state == LOGBREW_EXCEPTION_STACK_TRUNCATED)
+          ? entry->stack_frames == NULL || entry->stack_frame_count == 0U ||
+              entry->stack_frame_count > LOGBREW_MAX_STACK_FRAMES
+          : entry->stack_frames != NULL || entry->stack_frame_count != 0U)) {
+    logbrew_internal_set_error(
+        error, "validation_error", "issue exceptionChain stackFrames must match stackFramesState", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+
+  status = logbrew_json_append_format(buffer, error, "{\"id\":%zu", entry->id);
+  if (status == LOGBREW_OK && entry->has_parent_id) {
+    status = logbrew_json_append_format(buffer, error, ",\"parentId\":%zu", entry->parent_id);
+  }
+  if (status == LOGBREW_OK) status = logbrew_json_append_named_string(
+      buffer, "relationship", relationship, &needs_comma, error);
+  if (status == LOGBREW_OK) status = logbrew_json_append_named_string(
+      buffer, "type", entry->type, &needs_comma, error);
+  if (status == LOGBREW_OK && entry->message != NULL) status = logbrew_json_append_named_string(
+      buffer, "message", entry->message, &needs_comma, error);
+  if (status == LOGBREW_OK) status = logbrew_json_append_named_string(
+      buffer, "messageState", message_state, &needs_comma, error);
+  if (status == LOGBREW_OK && entry->module != NULL) status = logbrew_json_append_named_string(
+      buffer, "module", entry->module, &needs_comma, error);
+  if (status == LOGBREW_OK && entry->mechanism != NULL) status = append_mechanism_member(
+      buffer, entry->mechanism, &needs_comma, error);
+  if (status == LOGBREW_OK && entry->stack_frame_count > 0U) {
+    if (needs_comma) status = logbrew_json_append_char(buffer, ',', error);
+    if (status == LOGBREW_OK) status = logbrew_json_append(buffer, "\"stackFrames\":[", error);
+    for (frame_index = 0U; status == LOGBREW_OK && frame_index < entry->stack_frame_count; frame_index++) {
+      if (frame_index > 0U) status = logbrew_json_append_char(buffer, ',', error);
+      if (status == LOGBREW_OK) status = append_frame(buffer, &entry->stack_frames[frame_index], error);
+    }
+    if (status == LOGBREW_OK) status = logbrew_json_append_char(buffer, ']', error);
+    if (status == LOGBREW_OK) needs_comma = true;
+  }
+  if (status == LOGBREW_OK) status = logbrew_json_append_named_string(
+      buffer, "stackFramesState", stack_state, &needs_comma, error);
+  if (status == LOGBREW_OK) status = logbrew_json_append_char(buffer, '}', error);
+  return status;
+}
+
+static LogBrewStatus append_exception_chain(
+    LogBrewJsonBuffer *buffer,
+    const LogBrewIssueExceptionChain *chain,
+    const LogBrewIssueException *legacy_exception,
+    const LogBrewIssueStackFrame *legacy_frames,
+    size_t legacy_frame_count,
+    bool *needs_comma,
+    LogBrewError *error) {
+  const LogBrewIssueExceptionChainEntry *root;
+  bool chain_comma = false;
+  size_t index;
+  LogBrewStatus status = LOGBREW_OK;
+  if (chain->entries == NULL || chain->entry_count == 0U ||
+      chain->entry_count > LOGBREW_MAX_EXCEPTION_CHAIN_ENTRIES) {
+    logbrew_internal_set_error(
+        error, "validation_error", "issue exceptionChain entries must contain 1-8 exceptions", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  root = &chain->entries[0];
+  if (legacy_exception == NULL || !optional_text_equal(root->type, legacy_exception->type) ||
+      !mechanisms_equal(root->mechanism, legacy_exception->mechanism)) {
+    logbrew_internal_set_error(
+        error, "validation_error", "issue exceptionChain reported exception must match exception", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if ((root->stack_frames_state == LOGBREW_EXCEPTION_STACK_NOT_CAPTURED && legacy_frame_count != 0U) ||
+      (root->stack_frames_state != LOGBREW_EXCEPTION_STACK_NOT_CAPTURED &&
+       (root->stack_frame_count != legacy_frame_count || legacy_frames == NULL ||
+        !frames_equal(root->stack_frames, legacy_frames, legacy_frame_count)))) {
+    logbrew_internal_set_error(
+        error, "validation_error", "issue exceptionChain reported stack must match stackFrames", false);
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  if (*needs_comma) status = logbrew_json_append_char(buffer, ',', error);
+  if (status == LOGBREW_OK) status = logbrew_json_append(buffer, "\"exceptionChain\":{\"entries\":[", error);
+  for (index = 0U; status == LOGBREW_OK && index < chain->entry_count; index++) {
+    if (index > 0U) status = logbrew_json_append_char(buffer, ',', error);
+    if (status == LOGBREW_OK) status = append_exception_chain_entry(buffer, &chain->entries[index], index, error);
+  }
+  if (status == LOGBREW_OK) status = logbrew_json_append_char(buffer, ']', error);
+  if (status == LOGBREW_OK) chain_comma = true;
+  if (status == LOGBREW_OK) status = logbrew_json_append_named_bool(
+      buffer, "truncated", chain->truncated, &chain_comma, error);
+  if (status == LOGBREW_OK) status = logbrew_json_append_char(buffer, '}', error);
+  if (status == LOGBREW_OK) *needs_comma = true;
+  return status;
+}
+
 LogBrewStatus logbrew_evidence_breadcrumb_json(
     LogBrewIssueBreadcrumb breadcrumb,
     char **out_json,
@@ -355,6 +596,16 @@ LogBrewStatus logbrew_evidence_issue_fragment(
     }
     if (status == LOGBREW_OK) status = logbrew_json_append_char(&buffer, ']', error);
     if (status == LOGBREW_OK) needs_comma = true;
+  }
+  if (status == LOGBREW_OK && details.exception_chain != NULL) {
+    status = append_exception_chain(
+        &buffer,
+        details.exception_chain,
+        details.exception,
+        details.stack_frames,
+        details.stack_frame_count,
+        &needs_comma,
+        error);
   }
   if (status == LOGBREW_OK && combined > 0U) {
     size_t emitted = 0U;

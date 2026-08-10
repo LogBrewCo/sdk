@@ -643,6 +643,8 @@ namespace LogBrew.Unity
 
         public IssueExceptionInfo? Exception { get; private set; }
 
+        public IssueExceptionChain? ExceptionChain { get; private set; }
+
         public IReadOnlyList<IssueStackFrame>? StackFrames
         {
             get { return stackFrames?.AsReadOnly(); }
@@ -675,14 +677,16 @@ namespace LogBrew.Unity
         public static IssueAttributes FromException(Exception error, string title, string mechanismType, bool handled)
         {
             var exceptionType = IssueDiagnostics.SafeExceptionType(error);
+            var mechanism = IssueExceptionMechanism.Create(mechanismType, handled);
+            var stack = IssueDiagnostics.StackEvidence(error);
             var attributes = Create(title, "error")
                 .WithException(
                     IssueExceptionInfo.Create(exceptionType)
-                        .WithMechanism(IssueExceptionMechanism.Create(mechanismType, handled)));
-            var frames = IssueDiagnostics.StackFrames(error);
-            if (frames.Count > 0)
+                        .WithMechanism(mechanism))
+                .WithExceptionChain(IssueExceptionChain.FromException(error, mechanism, stack));
+            if (stack.Frames.Count > 0)
             {
-                attributes.WithStackFrames(frames);
+                attributes.WithStackFrames(stack.Frames);
             }
 
             return attributes;
@@ -709,6 +713,12 @@ namespace LogBrew.Unity
         public IssueAttributes WithException(IssueExceptionInfo exception)
         {
             Exception = exception ?? throw new ArgumentNullException(nameof(exception));
+            return this;
+        }
+
+        public IssueAttributes WithExceptionChain(IssueExceptionChain exceptionChain)
+        {
+            ExceptionChain = exceptionChain ?? throw new ArgumentNullException(nameof(exceptionChain));
             return this;
         }
 
@@ -824,6 +834,10 @@ namespace LogBrew.Unity
             {
                 payload.Add("stackFrames", stackFrames.Select(frame => frame.ToJsonObject()).ToList());
             }
+
+            payload.AddIfNotNull(
+                "exceptionChain",
+                ExceptionChain?.ToJsonObject(Exception, StackFrames));
 
             var resolvedBreadcrumbs = new List<IssueBreadcrumb>(snapshot);
             if (breadcrumbs != null)

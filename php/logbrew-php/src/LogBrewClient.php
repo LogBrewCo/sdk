@@ -36,6 +36,21 @@ namespace LogBrew;
  *   level: Severity|SeverityAlias,
  *   message?: string,
  *   exception?: array{type: string, mechanism?: array{type: string, handled: bool}},
+ *   exceptionChain?: array{
+ *     entries: non-empty-list<array{
+ *       id: int,
+ *       parentId?: int,
+ *       relationship: 'reported'|'cause'|'context'|'aggregate_member'|'suppressed',
+ *       type: string,
+ *       message?: string,
+ *       messageState: 'captured'|'truncated'|'redacted'|'not_captured',
+ *       module?: string,
+ *       mechanism?: array{type: string, handled: bool},
+ *       stackFrames?: list<array<string, mixed>>,
+ *       stackFramesState: 'captured'|'truncated'|'not_captured'
+ *     }>,
+ *     truncated: bool
+ *   },
  *   stackFrames?: list<array{
  *     filename: string,
  *     line: int,

@@ -479,8 +479,11 @@ rescue RuntimeError => error
 end
 ```
 
-The typed payload exposes exception type, mechanism and handled state, up to 32
-newest-first stack frames, and up to 64 oldest-to-newest breadcrumbs. Generated
+The typed payload exposes exception type, mechanism and handled state, a
+bounded parent-first Ruby `cause` chain, up to 32 newest-first stack frames,
+and up to 64 oldest-to-newest breadcrumbs. Automatic node messages are marked
+redacted, per-node stack availability is explicit, and cycles, unsafe cause
+access, or the eight-node cap mark truncation. Generated
 frames contain only basename, positive coordinates, and bounded function
 identity. Explicit frames can also carry module, `inApp`, and debug ID. A
 breadcrumb accepts a stable category/type, normalized level, bounded message,
@@ -494,6 +497,8 @@ and manual structured frame projection never captures raw backtrace strings,
 source code, locals, arguments, or absolute paths. The raw Rails/Rack backtrace
 option is separate and remains off by default. Run
 `make -C examples run-issue-diagnostics` for a complete inspectable payload.
+Rails, Rack, and Sidekiq issue capture reuse this same graph. See the shared
+[exception-chain contract](../../docs/exception-chain-evidence.md).
 
 ## Metrics
 

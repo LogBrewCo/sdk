@@ -445,15 +445,16 @@ type EnvironmentAttributes struct {
 
 // IssueAttributes describes the public payload fields for an issue event.
 type IssueAttributes struct {
-	Title                string            `json:"title"`
-	Level                string            `json:"level"`
-	Message              string            `json:"message,omitempty"`
-	Exception            *IssueException   `json:"exception,omitempty"`
-	StackFrames          []IssueStackFrame `json:"stackFrames,omitempty"`
-	Breadcrumbs          []IssueBreadcrumb `json:"breadcrumbs,omitempty"`
-	BreadcrumbsTruncated bool              `json:"breadcrumbsTruncated,omitempty"`
-	Metadata             map[string]any    `json:"metadata,omitempty"`
-	Context              *TelemetryContext `json:"context,omitempty"`
+	Title                string               `json:"title"`
+	Level                string               `json:"level"`
+	Message              string               `json:"message,omitempty"`
+	Exception            *IssueException      `json:"exception,omitempty"`
+	ExceptionChain       *IssueExceptionChain `json:"exceptionChain,omitempty"`
+	StackFrames          []IssueStackFrame    `json:"stackFrames,omitempty"`
+	Breadcrumbs          []IssueBreadcrumb    `json:"breadcrumbs,omitempty"`
+	BreadcrumbsTruncated bool                 `json:"breadcrumbsTruncated,omitempty"`
+	Metadata             map[string]any       `json:"metadata,omitempty"`
+	Context              *TelemetryContext    `json:"context,omitempty"`
 }
 
 // LogAttributes describes the public payload fields for a log event.
@@ -1008,6 +1009,17 @@ func validateIssue(attributes IssueAttributes) (map[string]any, error) {
 			return nil, err
 		}
 		result["exception"] = exception
+	}
+	if attributes.ExceptionChain != nil {
+		chain, err := cloneIssueExceptionChain(
+			attributes.ExceptionChain,
+			attributes.Exception,
+			attributes.StackFrames,
+		)
+		if err != nil {
+			return nil, err
+		}
+		result["exceptionChain"] = chain
 	}
 	if attributes.StackFrames != nil {
 		frames, err := cloneIssueStackFrames(attributes.StackFrames)

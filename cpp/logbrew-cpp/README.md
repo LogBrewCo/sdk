@@ -139,6 +139,14 @@ client.issue(
 
 `issue_frame_from_location(...)` removes query and fragment data and keeps only the source basename. Manually supplied absolute frame paths are rejected. Breadcrumbs allow at most eight flat primitive data values each; the client retains the newest 64 and emits `breadcrumbsTruncated` when older evidence was dropped. Exception messages, raw stacks, locals, arguments, request bodies, and environment values are never inferred.
 
+Portable C++ has no universal nested-exception interface. When application
+code owns that evidence, set `IssueDetails::exception_chain` with one to eight
+parent-first `IssueExceptionChainEntry` values. Relationships, message states,
+stack states, and the reported root are validated against the legacy
+exception/frames before queue admission, so the SDK preserves a useful graph
+without guessing from `what()` text. See the shared
+[exception-chain contract](../../docs/exception-chain-evidence.md).
+
 ## Span Evidence
 
 Attach bounded milestones and causal links when a trace needs more than timing and status:

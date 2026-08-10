@@ -223,8 +223,11 @@ namespace LogBrew.Unity
     {
         internal const int MaxStackFrames = 32;
         internal const int MaxBreadcrumbs = 64;
+        internal const int MaxExceptions = 8;
 
         private const int MaxExceptionType = 256;
+        private const int MaxExceptionMessage = 1024;
+        private const int MaxExceptionModule = 512;
         private const int MaxMechanismType = 64;
         private const int MaxFrameFilename = 2048;
         private const int MaxFrameFunction = 256;
@@ -242,6 +245,16 @@ namespace LogBrew.Unity
         internal static string RequireMechanismType(string value)
         {
             return RequireMachineName("issue exception mechanism type", value, MaxMechanismType, true);
+        }
+
+        internal static string RequireExceptionMessage(string value)
+        {
+            return RequireText("issue exceptionChain message", value, MaxExceptionMessage, false);
+        }
+
+        internal static string RequireExceptionModule(string value)
+        {
+            return RequireText("issue exceptionChain module", value, MaxExceptionModule, true);
         }
 
         internal static string RequireBreadcrumbName(string label, string value, bool allowColon)
@@ -437,6 +450,11 @@ namespace LogBrew.Unity
 
         internal static IReadOnlyList<IssueStackFrame> StackFrames(Exception error)
         {
+            return StackEvidence(error).Frames;
+        }
+
+        internal static IssueStackEvidence StackEvidence(Exception error)
+        {
             if (error == null)
             {
                 throw new ArgumentNullException(nameof(error));
@@ -446,7 +464,7 @@ namespace LogBrew.Unity
             var result = new List<IssueStackFrame>();
             if (sourceFrames == null)
             {
-                return result.AsReadOnly();
+                return new IssueStackEvidence(result.AsReadOnly(), false);
             }
 
             foreach (var sourceFrame in sourceFrames)
@@ -476,73 +494,119 @@ namespace LogBrew.Unity
                 result.Add(frame);
             }
 
-            return result.AsReadOnly();
+            return new IssueStackEvidence(
+                result.AsReadOnly(),
+                sourceFrames.Length > MaxStackFrames);
+        }
+
+        internal static string? SafeExceptionModule(Exception error)
+        {
+            var type = error.GetType();
+            return SafeText(type.Namespace, MaxExceptionModule, true, null);
         }
 
         internal static IReadOnlyList<IssueStackFrame> StackFramesFromUnityStackTrace(string stackTrace)
         {
+            return StackEvidenceFromUnityStackTrace(stackTrace).Frames;
+        }
+
+        internal static IssueStackEvidence StackEvidenceFromUnityStackTrace(string stackTrace)
+        {
             var result = new List<IssueStackFrame>();
             if (string.IsNullOrWhiteSpace(stackTrace))
             {
-                return result.AsReadOnly();
+                return new IssueStackEvidence(result.AsReadOnly(), false);
             }
 
+            var truncated = false;
             var lines = stackTrace.Replace('\r', '\n').Split('\n');
             foreach (var rawLine in lines)
             {
-                if (result.Count == MaxStackFrames)
-                {
-                    break;
-                }
-
-                var line = rawLine.Trim();
-                var locationStart = line.LastIndexOf("(at ", StringComparison.Ordinal);
-                var locationEnd = locationStart >= 0 ? line.LastIndexOf(')') : -1;
-                var location = string.Empty;
-                var functionText = string.Empty;
-                if (locationStart >= 0 && locationEnd > locationStart + 4)
-                {
-                    location = line.Substring(locationStart + 4, locationEnd - locationStart - 4);
-                    functionText = line.Substring(0, locationStart).Trim();
-                }
-                else
-                {
-                    var inMarker = line.LastIndexOf(" in ", StringComparison.Ordinal);
-                    var lineMarker = line.LastIndexOf(":line ", StringComparison.Ordinal);
-                    if (inMarker >= 0 && lineMarker > inMarker + 4)
-                    {
-                        var locationPath = line.Substring(inMarker + 4, lineMarker - inMarker - 4);
-                        var locationLine = line.Substring(lineMarker + 6).Trim();
-                        location = string.Join(":", new[] { locationPath, locationLine });
-                        functionText = line.Substring(0, inMarker).Trim();
-                    }
-                }
-
-                if (!TrySplitLocation(location, out var filename, out var sourceLine))
+                if (!TryUnityStackFrame(rawLine, out var frame))
                 {
                     continue;
                 }
 
-                var frame = IssueStackFrame.Create(filename, sourceLine, 1);
-                var function = SafeText(NormalizeUnityFunction(functionText), MaxFrameFunction, false, null);
-                if (function != null)
+                if (result.Count == MaxStackFrames)
                 {
-                    frame.WithFunction(function);
-                    var separator = function.LastIndexOf('.');
-                    if (separator > 0)
-                    {
-                        var module = SafeText(function.Substring(0, separator), MaxFrameModule, true, null);
-                        if (module != null)
-                        {
-                            frame.WithModule(module);
-                        }
-                    }
+                    truncated = true;
+                    continue;
                 }
 
                 result.Add(frame);
             }
 
-            return result.AsReadOnly();
+            return new IssueStackEvidence(result.AsReadOnly(), truncated);
+        }
+
+        private static bool TryUnityStackFrame(string rawLine, out IssueStackFrame frame)
+        {
+            frame = null!;
+            var line = rawLine.Trim();
+            var locationStart = line.LastIndexOf("(at ", StringComparison.Ordinal);
+            var locationEnd = locationStart >= 0 ? line.LastIndexOf(')') : -1;
+            var location = string.Empty;
+            var functionText = string.Empty;
+            if (locationStart >= 0 && locationEnd > locationStart + 4)
+            {
+                location = line.Substring(locationStart + 4, locationEnd - locationStart - 4);
+                functionText = line.Substring(0, locationStart).Trim();
+            }
+            else
+            {
+                ParseDotNetStackLocation(line, out location, out functionText);
+            }
+
+            if (!TrySplitLocation(location, out var filename, out var sourceLine))
+            {
+                return false;
+            }
+
+            frame = IssueStackFrame.Create(filename, sourceLine, 1);
+            AddUnityFrameFunction(frame, functionText);
+            return true;
+        }
+
+        private static void ParseDotNetStackLocation(
+            string line,
+            out string location,
+            out string functionText)
+        {
+            location = string.Empty;
+            functionText = string.Empty;
+            var inMarker = line.LastIndexOf(" in ", StringComparison.Ordinal);
+            var lineMarker = line.LastIndexOf(":line ", StringComparison.Ordinal);
+            if (inMarker < 0 || lineMarker <= inMarker + 4)
+            {
+                return;
+            }
+
+            var locationPath = line.Substring(inMarker + 4, lineMarker - inMarker - 4);
+            var locationLine = line.Substring(lineMarker + 6).Trim();
+            location = string.Join(":", new[] { locationPath, locationLine });
+            functionText = line.Substring(0, inMarker).Trim();
+        }
+
+        private static void AddUnityFrameFunction(IssueStackFrame frame, string functionText)
+        {
+            var function = SafeText(NormalizeUnityFunction(functionText), MaxFrameFunction, false, null);
+            if (function == null)
+            {
+                return;
+            }
+
+            frame.WithFunction(function);
+            var separator = function.LastIndexOf('.');
+            if (separator <= 0)
+            {
+                return;
+            }
+
+            var module = SafeText(function.Substring(0, separator), MaxFrameModule, true, null);
+            if (module != null)
+            {
+                frame.WithModule(module);
+            }
         }
 
         internal static SdkException Validation(string message)
