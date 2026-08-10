@@ -28,6 +28,58 @@ def health() -> dict[str, bool]:
     return {"ok": True}
 ```
 
+## Confirm The Hosted Trace
+
+A local `200` response or a `RecordingTransport` receipt confirms that the Flask
+integration created telemetry. It does not confirm that LogBrew accepted,
+stored, and indexed the event. Use the public CLI for end-to-end confirmation.
+
+First confirm that the CLI has account access. If it reports that it is not
+authenticated, a human must complete `logbrew login` before the account read:
+
+```bash
+logbrew status --json
+logbrew projects --json
+```
+
+Use a project-scoped **server ingest key** in the Flask process; never use the
+CLI account session for ingestion. The CLI can create an owner-only key file
+without printing the one-time key:
+
+```bash
+install -d -m 700 "$HOME/.logbrew"
+logbrew projects keys create <project_id> \
+  --kind server \
+  --label "Flask server" \
+  --ingest-key-file "$HOME/.logbrew/flask-app.ingest" \
+  --json
+
+export LOGBREW_SERVER_API_KEY="$(tr -d '\r\n' < "$HOME/.logbrew/flask-app.ingest")"
+export LOGBREW_SERVICE_NAME="flask-app"
+export LOGBREW_ENVIRONMENT="production"
+export LOGBREW_RELEASE="flask-app@1.0.0"
+```
+
+Run one real request, then read the same project and deployment scope. Explain
+one returned trace to confirm that the hosted investigation can use the
+captured evidence:
+
+```bash
+logbrew read traces \
+  --project <project_id> \
+  --service flask-app \
+  --environment production \
+  --release flask-app@1.0.0 \
+  --since 1h \
+  --json
+
+logbrew explain trace <trace_id> --json
+```
+
+The complete first-event flow, including new-project creation, correlated logs,
+exceptions, metrics, shutdown hooks, and recovery, is in the
+[Flask setup guide](https://docs.logbrew.co/guides/flask).
+
 The initializer owns an HTTP transport and sends on a background worker, so a
 telemetry request does not block the Flask response. The first accepted event
 wakes delivery immediately. Call `logbrew.client.shutdown()` from the normal

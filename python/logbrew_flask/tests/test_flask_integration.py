@@ -7,6 +7,7 @@ import time
 import unittest
 from collections.abc import Callable
 from importlib.metadata import version
+from pathlib import Path
 
 from flask import Flask
 from logbrew_flask import (
@@ -35,6 +36,31 @@ def wait_until(predicate: Callable[[], bool], *, timeout_seconds: float = 1.0) -
 
 
 class FlaskIntegrationTests(unittest.TestCase):
+    def test_readme_requires_hosted_readback_for_end_to_end_confirmation(self) -> None:
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+            encoding="utf-8"
+        )
+        normalized_readme = " ".join(readme.split())
+
+        for expected in (
+            "logbrew status --json",
+            "logbrew projects --json",
+            "logbrew projects keys create <project_id>",
+            "--kind server",
+            "logbrew read traces",
+            "logbrew explain trace <trace_id> --json",
+            "https://docs.logbrew.co/guides/flask",
+        ):
+            self.assertIn(expected, readme)
+
+        self.assertIn(
+            "It does not confirm that LogBrew accepted, stored, and indexed the event.",
+            normalized_readme,
+        )
+        self.assertIn(
+            "never use the CLI account session for ingestion", normalized_readme
+        )
+
     def test_init_logbrew_uses_app_configuration_and_delivers_in_background(self) -> None:
         transport = RecordingTransport.always_accept()
         app = Flask("checkout_api")
