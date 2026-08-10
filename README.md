@@ -132,6 +132,12 @@ Python:
 python3 -m pip install logbrew-sdk
 ```
 
+Framework applications should use the released adapter so request lifecycle,
+trace context, and exception capture are installed once: `logbrew-flask` for
+Flask, `logbrew-fastapi` for FastAPI, or `logbrew-django` for Django. Each
+adapter installs a compatible core dependency; do not reconstruct framework
+middleware from the core example.
+
 ```python
 from logbrew_sdk import LogBrewClient, RecordingTransport
 
