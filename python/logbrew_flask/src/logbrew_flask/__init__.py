@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from importlib.metadata import version
+from typing import Any, cast
 
 from flask import Flask, Response, g, request
 from flask.signals import got_request_exception
 from logbrew_sdk import (
+    HttpTransport,
     LogBrewClient,
     LogBrewTraceContext,
     MetricAttributes,
-    RecordingTransport,
     SdkError,
     SpanAttributes,
+    TelemetryContext,
+    Transport,
     TransportError,
     create_issue_attributes_from_exception,
     create_logbrew_trace_context,
@@ -28,13 +32,16 @@ from logbrew_sdk import (
     use_logbrew_trace,
 )
 
+LOGBREW_FLASK_EXTENSION_KEY = "logbrew"
+LOGBREW_FLASK_SDK_VERSION = "0.1.4"
+
 
 @dataclass(slots=True)
 class LogBrewFlaskConfig:
     """Runtime options used by the LogBrew Flask middleware."""
 
     client: LogBrewClient
-    transport: RecordingTransport | None = None
+    transport: Transport | None = None
     capture_successful_requests: bool = True
     capture_request_metrics: bool = False
     capture_exceptions: bool = True
@@ -43,6 +50,130 @@ class LogBrewFlaskConfig:
     service_name: str = "flask"
     request_metric_name: str = "http.server.duration"
     span_id_factory: Callable[[], str] | None = None
+
+
+def init_logbrew(
+    app: Flask,
+    *,
+    api_key: str | None = None,
+    service_name: str | None = None,
+    environment: str | None = None,
+    release: str | None = None,
+    transport: Transport | None = None,
+    capture_successful_requests: bool = True,
+    capture_request_metrics: bool = False,
+    capture_exceptions: bool = True,
+    flush_on_response: bool = False,
+    raise_flush_errors: bool = False,
+    request_metric_name: str = "http.server.duration",
+    span_id_factory: Callable[[], str] | None = None,
+) -> LogBrewFlaskConfig:
+    """Configure a Flask app from explicit values or standard LogBrew settings.
+
+    The default owns an HTTP transport and delivers captured telemetry on a
+    background worker. Set ``flush_on_response`` only when a controlled app
+    explicitly prefers synchronous response-path delivery.
+    """
+
+    existing = _existing_logbrew_config(app)
+    if existing is not None:
+        return existing
+
+    resolved_api_key = _resolve_setting(
+        app,
+        "LOGBREW_SERVER_API_KEY",
+        api_key,
+        required=True,
+    )
+    resolved_service_name = _resolve_setting(
+        app,
+        "LOGBREW_SERVICE_NAME",
+        service_name,
+        fallback=app.import_name,
+    )
+    assert resolved_api_key is not None
+    assert resolved_service_name is not None
+    resolved_environment = _resolve_setting(app, "LOGBREW_ENVIRONMENT", environment)
+    resolved_release = _resolve_setting(app, "LOGBREW_RELEASE", release)
+
+    resource: dict[str, Any] = {
+        "service": {"name": resolved_service_name},
+        "framework": {"name": "flask", "version": version("Flask")},
+    }
+    deployment = {
+        key: value
+        for key, value in (
+            ("environment", resolved_environment),
+            ("release", resolved_release),
+        )
+        if value is not None
+    }
+    if deployment:
+        resource["deployment"] = deployment
+    context = cast(
+        TelemetryContext,
+        {
+            "schemaVersion": 1,
+            "resource": resource,
+        },
+    )
+
+    selected_transport = transport if transport is not None else HttpTransport()
+    client = LogBrewClient.create(
+        api_key=resolved_api_key,
+        sdk_name="logbrew-flask",
+        sdk_version=LOGBREW_FLASK_SDK_VERSION,
+        context=context,
+        transport=None if flush_on_response else selected_transport,
+        automatic_delivery=not flush_on_response,
+        delivery_queue_threshold=1,
+    )
+    return add_logbrew_middleware(
+        app,
+        client=client,
+        transport=selected_transport if flush_on_response else None,
+        capture_successful_requests=capture_successful_requests,
+        capture_request_metrics=capture_request_metrics,
+        capture_exceptions=capture_exceptions,
+        flush_on_response=flush_on_response,
+        raise_flush_errors=raise_flush_errors,
+        service_name=resolved_service_name,
+        request_metric_name=request_metric_name,
+        span_id_factory=span_id_factory,
+    )
+
+
+def _resolve_setting(
+    app: Flask,
+    name: str,
+    explicit: str | None,
+    *,
+    fallback: str | None = None,
+    required: bool = False,
+) -> str | None:
+    value: object = explicit
+    if value is None:
+        value = app.config.get(name)
+    if value is None:
+        value = os.environ.get(name)
+    if value is None:
+        value = fallback
+    if value is None:
+        if required:
+            raise SdkError("configuration_error", f"{name} is required")
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise SdkError("configuration_error", f"{name} must be a non-empty string")
+    return value.strip()
+
+
+def _existing_logbrew_config(app: Flask) -> LogBrewFlaskConfig | None:
+    existing = app.extensions.get(LOGBREW_FLASK_EXTENSION_KEY)
+    if existing is None:
+        return None
+    if not isinstance(existing, LogBrewFlaskConfig):
+        raise SdkError("configuration_error", "Flask app extension name logbrew is already in use")
+    return existing
 
 
 def utc_timestamp() -> str:
@@ -70,8 +201,6 @@ def request_metadata(
         "method": request.method,
         "routeTemplate": route_template,
     }
-    if route_template == request.path:
-        metadata["path"] = request.path
     rule = getattr(request.url_rule, "rule", None)
     endpoint = getattr(request.url_rule, "endpoint", None)
     if isinstance(rule, str):
@@ -89,8 +218,9 @@ def request_route_template() -> str:
     """Return a low-cardinality Flask route template without query strings."""
 
     rule = getattr(request.url_rule, "rule", None)
-    template = rule if isinstance(rule, str) and rule else request.path
-    return route_template_only(template)
+    if not isinstance(rule, str) or not rule:
+        return "<unmatched>"
+    return route_template_only(rule)
 
 
 def route_template_only(value: str) -> str:
@@ -224,7 +354,7 @@ def add_logbrew_middleware(
     app: Flask,
     *,
     client: LogBrewClient,
-    transport: RecordingTransport | None = None,
+    transport: Transport | None = None,
     capture_successful_requests: bool = True,
     capture_request_metrics: bool = False,
     capture_exceptions: bool = True,
@@ -248,6 +378,11 @@ def add_logbrew_middleware(
         request_metric_name=request_metric_name,
         span_id_factory=span_id_factory,
     )
+    existing = _existing_logbrew_config(app)
+    if existing is not None:
+        if existing == config:
+            return existing
+        raise SdkError("configuration_error", "LogBrew Flask middleware is already configured")
 
     @app.before_request
     def logbrew_before_request() -> None:
@@ -310,6 +445,7 @@ def add_logbrew_middleware(
             capture_exception_and_span(config, exception)
 
     got_request_exception.connect(logbrew_got_request_exception, app, weak=False)
+    app.extensions[LOGBREW_FLASK_EXTENSION_KEY] = config
     return config
 
 
@@ -390,6 +526,7 @@ def request_logbrew_trace() -> LogBrewTraceContext | None:
 
 
 __all__ = [
+    "LOGBREW_FLASK_SDK_VERSION",
     "LogBrewFlaskConfig",
     "add_logbrew_middleware",
     "capture_exception",
@@ -398,6 +535,7 @@ __all__ = [
     "create_request_metric_attributes",
     "create_request_trace_context",
     "get_active_logbrew_trace",
+    "init_logbrew",
     "request_logbrew_trace",
     "request_metadata",
     "request_name",

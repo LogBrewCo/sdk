@@ -10,25 +10,17 @@ python3 -m pip install logbrew-sdk logbrew-flask
 
 The package is typed, ships `py.typed`, depends on the core `logbrew-sdk`, and keeps Flask as a normal framework dependency instead of monkeypatching Flask globally.
 
-Use a project-scoped server ingest key, for example `LOGBREW_SERVER_API_KEY`.
+Use a project-scoped server ingest key in `LOGBREW_SERVER_API_KEY`. The
+framework initializer also reads `LOGBREW_SERVICE_NAME`,
+`LOGBREW_ENVIRONMENT`, and `LOGBREW_RELEASE` when they are present.
 
 ```python
-import os
-
 from flask import Flask
-from logbrew_flask import add_logbrew_middleware
-from logbrew_sdk import LogBrewClient
-
-client = LogBrewClient.create(
-    api_key=os.environ["LOGBREW_SERVER_API_KEY"],
-    release=os.environ.get("LOGBREW_RELEASE"),
-    environment=os.environ.get("LOGBREW_ENVIRONMENT"),
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
-)
+from logbrew_flask import init_logbrew
 
 app = Flask(__name__)
-add_logbrew_middleware(app, client=client)
+logbrew = init_logbrew(app)
+client = logbrew.client
 
 
 @app.get("/health")
@@ -36,11 +28,23 @@ def health() -> dict[str, bool]:
     return {"ok": True}
 ```
 
+The initializer owns an HTTP transport and sends on a background worker, so a
+telemetry request does not block the Flask response. The first accepted event
+wakes delivery immediately. Call `logbrew.client.shutdown()` from the normal
+graceful worker-shutdown hook to flush any retained tail. Repeated
+`init_logbrew(app)` calls return the same app extension and do not install
+duplicate hooks.
+
+Use `add_logbrew_middleware()` when the application already owns a
+`LogBrewClient`. Pass a transport for response-path flushing, or give the
+client an owned transport and set `flush_on_response=False` for automatic
+background delivery.
+
 ## What It Captures
 
 The middleware records one request span for each captured response. It can also record request duration metrics and exception issues.
 
-Request spans use the Flask route template, such as `GET /orders/<int:order_id>`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. Valid inbound W3C `traceparent` headers are continued with a fresh child span id.
+Request spans use the Flask route template, such as `GET /orders/<int:order_id>`, for low-noise grouping. Span metadata includes `routeTemplate`. Concrete request paths are not emitted, and unmatched routes use the fixed `<unmatched>` label. Valid inbound W3C `traceparent` headers are continued with a fresh child span id.
 
 Handlers can call `get_active_logbrew_trace()` or use `LogBrewLoggingHandler`; logs emitted during the request share the active request trace and span.
 
@@ -123,7 +127,7 @@ Run `python -m logbrew_flask.examples dependency-spans` to see a request span wi
 
 ## Privacy Defaults
 
-LogBrew does not capture request bodies, response bodies, cookies, arbitrary headers, query strings, raw `traceparent` values, baggage, or tracestate. Exception issues include first-class exception type, `flask.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Exception messages keep the integration's existing `str(error)` behavior, so applications should avoid sensitive values in exception text.
+LogBrew does not capture concrete request paths, request bodies, response bodies, cookies, arbitrary headers, query strings, raw `traceparent` values, baggage, or tracestate. Exception issues include first-class exception type, `flask.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Exception messages keep the integration's existing `str(error)` behavior, so applications should avoid sensitive values in exception text.
 
 ## Delivery Failures
 

@@ -90,7 +90,7 @@ PYTHON_PACKAGES = {
         "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.9,<0.2.0"},
         "package": "logbrew_flask",
         "requires_python": ">=3.10",
-        "version": "0.1.3",
+        "version": "0.1.4",
     },
     "python/logbrew_py": {
         "name": "logbrew-sdk",

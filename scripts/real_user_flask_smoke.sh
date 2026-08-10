@@ -132,7 +132,7 @@ print(
             "traceId": first_span["traceId"],
             "parentSpanId": first_span["parentSpanId"],
             "spanId": first_span["spanId"],
-            "path": first_span["metadata"]["path"],
+            "routeTemplate": first_span["metadata"]["routeTemplate"],
             "body": {"sdk": client.sdk, "events": events},
         },
         indent=2,
@@ -171,8 +171,8 @@ if payload["parentSpanId"] != "00f067aa0ba902b7":
     raise SystemExit(f"unexpected parent span id: {payload['parentSpanId']}")
 if payload["spanId"] != "b7ad6b7169203331":
     raise SystemExit(f"unexpected child span id: {payload['spanId']}")
-if payload["path"] != "/health":
-    raise SystemExit(f"expected path without query text: {payload['path']}")
+if payload["routeTemplate"] != "/health":
+    raise SystemExit(f"unexpected route template: {payload['routeTemplate']}")
 Path(sys.argv[2]).write_text(json.dumps(payload["body"], indent=2), encoding="utf-8")
 PY
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/body.json" >/dev/null
@@ -224,7 +224,7 @@ check_json trailing-fields \
   'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
   'parentSpanId="00f067aa0ba902b7"' \
   'spanId="b7ad6b7169203331"' \
-  'path="/health"' \
+  'routeTemplate="/health"' \
   'events=4' \
   "$tmp_dir/smoke.stderr.json"
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples outbound-http > "$tmp_dir/outbound.stdout.json" 2> "$tmp_dir/outbound.stderr.json"

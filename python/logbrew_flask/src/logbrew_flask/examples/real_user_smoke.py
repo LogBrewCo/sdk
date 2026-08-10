@@ -66,7 +66,7 @@ print(
             "traceId": health_payload["traceId"],
             "spanId": health_payload["spanId"],
             "parentSpanId": first_span_attributes["parentSpanId"],
-            "path": first_span_metadata["path"],
+            "routeTemplate": first_span_metadata["routeTemplate"],
         },
         indent=2,
     ),

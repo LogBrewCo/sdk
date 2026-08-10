@@ -3,10 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import unittest
+from collections.abc import Callable
+from importlib.metadata import version
 
 from flask import Flask
-from logbrew_flask import add_logbrew_middleware, get_active_logbrew_trace
+from logbrew_flask import (
+    LOGBREW_FLASK_SDK_VERSION,
+    add_logbrew_middleware,
+    get_active_logbrew_trace,
+    init_logbrew,
+)
 from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport, SdkError
 
 
@@ -18,7 +26,61 @@ def make_client() -> LogBrewClient:
     )
 
 
+def wait_until(predicate: Callable[[], bool], *, timeout_seconds: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while not predicate():
+        if time.monotonic() >= deadline:
+            raise AssertionError("timed out waiting for LogBrew delivery")
+        time.sleep(0.01)
+
+
 class FlaskIntegrationTests(unittest.TestCase):
+    def test_init_logbrew_uses_app_configuration_and_delivers_in_background(self) -> None:
+        transport = RecordingTransport.always_accept()
+        app = Flask("checkout_api")
+        app.config.update(
+            LOGBREW_SERVER_API_KEY="LOGBREW_SERVER_API_KEY",
+            LOGBREW_SERVICE_NAME="checkout-api",
+            LOGBREW_ENVIRONMENT="test",
+            LOGBREW_RELEASE="checkout@1.2.3",
+        )
+
+        config = init_logbrew(app, transport=transport)
+        self.assertIs(init_logbrew(app, transport=transport), config)
+        self.assertEqual(LOGBREW_FLASK_SDK_VERSION, version("logbrew-flask"))
+
+        @app.get("/orders/<int:order_id>")
+        def order_detail(order_id: int) -> dict[str, int]:
+            return {"orderId": order_id}
+
+        response = app.test_client().get("/orders/42?private=drop")
+        self.assertEqual(response.status_code, 200)
+        wait_until(lambda: len(transport.sent_bodies) == 1)
+
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["span"])
+        event = payload["events"][0]
+        self.assertEqual(event["attributes"]["name"], "GET /orders/<int:order_id>")
+        resource = event["attributes"]["context"]["resource"]
+        self.assertEqual(resource["service"]["name"], "checkout-api")
+        self.assertEqual(resource["deployment"]["environment"], "test")
+        self.assertEqual(resource["deployment"]["release"], "checkout@1.2.3")
+        self.assertEqual(resource["framework"]["name"], "flask")
+        self.assertNotIn("/orders/42", transport.sent_bodies[0])
+        self.assertNotIn("private", transport.sent_bodies[0])
+        config.client.shutdown()
+
+    def test_init_logbrew_requires_a_server_ingest_key_without_reflecting_values(self) -> None:
+        app = Flask(__name__)
+        app.config["LOGBREW_SERVER_API_KEY"] = ""
+
+        with self.assertRaises(SdkError) as raised:
+            init_logbrew(app)
+
+        self.assertEqual(raised.exception.code, "configuration_error")
+        self.assertIn("LOGBREW_SERVER_API_KEY", str(raised.exception))
+        self.assertNotIn("api key value", str(raised.exception).lower())
+
     def test_successful_request_captures_and_flushes_span(self) -> None:
         sdk_client = make_client()
         transport = RecordingTransport.always_accept()
@@ -41,6 +103,26 @@ class FlaskIntegrationTests(unittest.TestCase):
         self.assertEqual(attributes["status"], "ok")
         self.assertEqual(attributes["metadata"]["framework"], "flask")
         self.assertEqual(attributes["metadata"]["status_code"], 200)
+
+    def test_repeated_middleware_install_is_idempotent(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = Flask(__name__)
+
+        first = add_logbrew_middleware(app, client=sdk_client, transport=transport)
+        second = add_logbrew_middleware(app, client=sdk_client, transport=transport)
+
+        self.assertIs(second, first)
+
+        @app.get("/health")
+        def health() -> dict[str, bool]:
+            return {"ok": True}
+
+        response = app.test_client().get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["span"])
 
     def test_request_metrics_can_be_captured_without_request_spans(self) -> None:
         sdk_client = make_client()
@@ -109,7 +191,7 @@ class FlaskIntegrationTests(unittest.TestCase):
         self.assertEqual(attributes["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736")
         self.assertEqual(attributes["parentSpanId"], "00f067aa0ba902b7")
         self.assertEqual(attributes["spanId"], "b7ad6b7169203331")
-        self.assertEqual(attributes["metadata"]["path"], "/trace")
+        self.assertNotIn("path", attributes["metadata"])
 
     def test_malformed_traceparent_uses_safe_local_trace_without_raw_header(self) -> None:
         sdk_client = make_client()
@@ -136,9 +218,26 @@ class FlaskIntegrationTests(unittest.TestCase):
         self.assertNotIn("parentSpanId", attributes)
         self.assertRegex(attributes["traceId"], re.compile(r"^[0-9a-f]{32}$"))
         self.assertEqual(attributes["spanId"], "b7ad6b7169203331")
-        self.assertEqual(attributes["metadata"]["path"], "/bad")
+        self.assertNotIn("path", attributes["metadata"])
         self.assertNotIn("traceparent", json.dumps(attributes))
         self.assertEqual(span_id_calls, 1)
+
+    def test_unmatched_route_does_not_capture_the_concrete_path(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = Flask(__name__)
+        add_logbrew_middleware(app, client=sdk_client, transport=transport)
+
+        response = app.test_client().get("/accounts/example-person@example.test?debug_marker=drop")
+
+        self.assertEqual(response.status_code, 404)
+        payload = json.loads(transport.sent_bodies[0])
+        attributes = payload["events"][0]["attributes"]
+        self.assertEqual(attributes["name"], "GET <unmatched>")
+        serialized = json.dumps(attributes)
+        self.assertNotIn("example-person", serialized)
+        self.assertNotIn("debug_marker", serialized)
+        self.assertNotIn("path", attributes["metadata"])
 
     def test_handler_logs_share_active_request_trace(self) -> None:
         sdk_client = make_client()
