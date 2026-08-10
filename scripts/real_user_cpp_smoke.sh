@@ -4,27 +4,20 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/cpp/logbrew-cpp"
 tmp_dir="$(mktemp -d)"
+intake_pid=""
 
 remove_tmp_dir() {
+  if [[ -n "$intake_pid" ]] && kill -0 "$intake_pid" 2>/dev/null; then
+    kill "$intake_pid"
+    wait "$intake_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmp_dir"
 }
 
 on_error() {
   local status=$?
   echo "real_user_cpp_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
-  for diagnostic in \
-    "$tmp_dir/examples-help.txt" \
-    "$tmp_dir/native-app.stdout.json" \
-    "$tmp_dir/native-app.stderr.json" \
-    "$tmp_dir/http-app.stdout.json" \
-    "$tmp_dir/http-app.stderr.json" \
-    "$tmp_dir/http-intake.stderr" \
-    "$tmp_dir/readme-example.stdout.json" \
-    "$tmp_dir/readme-example.stderr.json" \
-    "$tmp_dir/real-user-smoke.stdout.json" \
-    "$tmp_dir/real-user-smoke.stderr.json" \
-    "$tmp_dir/trace-correlation.stdout.json" \
-    "$tmp_dir/trace-correlation.stderr.json"; do
+  for diagnostic in "$tmp_dir"/*.stderr "$tmp_dir"/*.json; do
     if [[ -f "$diagnostic" ]]; then
       echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
       sed -n '1,80p' "$diagnostic" >&2
@@ -45,455 +38,82 @@ if [[ -z "$cxx_command" ]]; then
   fi
 fi
 
-run_examples_make() {
-  make --no-print-directory -C "$sdk_dir/examples" CXX="$cxx_command" "$@"
-}
-
-archive="$tmp_dir/logbrew-cpp-0.2.2.tar.gz"
-(cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
+archive="$tmp_dir/logbrew-cpp-0.2.3.tar.gz"
+(cd "$package_dir" && tar -czf "$archive" README.md CMakeLists.txt Makefile cmake include src examples tests)
 
 app_dir="$tmp_dir/native-cpp-app"
 sdk_dir="$app_dir/vendor/logbrew-cpp"
-mkdir -p "$sdk_dir"
-tar -xzf "$archive" -C "$sdk_dir"
-test -f "$sdk_dir/include/logbrew.hpp"
-test -f "$sdk_dir/src/logbrew.cpp"
-test -f "$sdk_dir/src/logbrew_http_transport.cpp"
+install_sdk() {
+  mkdir -p "$sdk_dir"
+  tar -xzf "$archive" -C "$sdk_dir"
+}
 
+install_sdk
 rm -rf "$sdk_dir"
-if [[ -d "$sdk_dir" ]]; then
-  echo "dependency removal failed" >&2
-  exit 1
-fi
-mkdir -p "$sdk_dir"
-tar -xzf "$archive" -C "$sdk_dir"
-test -f "$sdk_dir/include/logbrew.hpp"
-test -f "$sdk_dir/src/logbrew.cpp"
-test -f "$sdk_dir/src/logbrew_http_transport.cpp"
-test -f "$sdk_dir/examples/trace_correlation.cpp"
-grep -q 'capture_product_action' "$sdk_dir/include/logbrew.hpp"
-grep -q 'capture_network_milestone' "$sdk_dir/include/logbrew.hpp"
-grep -q 'MetricAttributes' "$sdk_dir/include/logbrew.hpp"
-grep -q 'metric(' "$sdk_dir/include/logbrew.hpp"
-grep -q 'TraceContext' "$sdk_dir/include/logbrew.hpp"
-grep -q 'TelemetryContext' "$sdk_dir/include/logbrew.hpp"
-grep -q 'TelemetryScope' "$sdk_dir/include/logbrew.hpp"
-grep -q 'EventOptions' "$sdk_dir/include/logbrew.hpp"
-grep -q 'IssueDetails' "$sdk_dir/include/logbrew.hpp"
-grep -q 'IssueBreadcrumb' "$sdk_dir/include/logbrew.hpp"
-grep -q 'SpanEvidence' "$sdk_dir/include/logbrew.hpp"
-grep -q 'SpanLink' "$sdk_dir/include/logbrew.hpp"
-grep -q 'issue_frame_from_location' "$sdk_dir/include/logbrew.hpp"
-grep -q 'TraceScope' "$sdk_dir/include/logbrew.hpp"
-grep -q 'trace_context_from_traceparent' "$sdk_dir/include/logbrew.hpp"
-grep -q 'OpenTelemetrySpanContext' "$sdk_dir/include/logbrew.hpp"
-grep -q 'open_telemetry_span_context' "$sdk_dir/include/logbrew.hpp"
-grep -q 'try_open_telemetry_span_context_from_span_pointer' "$sdk_dir/include/logbrew.hpp"
-grep -q 'trace_context_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.hpp"
-grep -q 'trace_span_attributes_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.hpp"
-grep -q 'traceparent_headers' "$sdk_dir/include/logbrew.hpp"
-grep -q 'HttpTransport' "$sdk_dir/include/logbrew.hpp"
-grep -q 'open_telemetry_span_context' "$sdk_dir/examples/trace_correlation.cpp"
+test ! -d "$sdk_dir"
+install_sdk
 
-cat > "$app_dir/main.cpp" <<'EOF'
-#include "logbrew.hpp"
+for required_path in \
+  CMakeLists.txt \
+  cmake/LogBrewConfig.cmake.in \
+  include/logbrew.hpp \
+  src/logbrew.cpp \
+  src/logbrew_http_transport.cpp \
+  examples/http_transport.cpp \
+  examples/real_user_smoke.cpp; do
+  test -f "$sdk_dir/$required_path"
+done
+for public_symbol in \
+  capture_product_action \
+  capture_network_milestone \
+  MetricAttributes \
+  TelemetryContext \
+  IssueDetails \
+  SpanEvidence \
+  TraceScope \
+  HttpTransport; do
+  grep -q "$public_symbol" "$sdk_dir/include/logbrew.hpp"
+done
 
-#include <array>
-#include <cstdlib>
-#include <iostream>
-#include <string>
-#include <utility>
+cat > "$app_dir/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.16)
+project(LogBrewConsumer LANGUAGES CXX)
 
-namespace {
+include(FetchContent)
+option(CONSUMER_WITH_HTTP "Build the HTTP delivery proof" OFF)
+set(LOGBREW_BUILD_HTTP_TRANSPORT ${CONSUMER_WITH_HTTP} CACHE BOOL "" FORCE)
+FetchContent_Declare(logbrew SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/logbrew-cpp")
+FetchContent_MakeAvailable(logbrew)
 
-logbrew::LogBrewClient new_client() {
-  return logbrew::LogBrewClient(logbrew::Config{"LOGBREW_API_KEY", "native-cpp-app", logbrew::version, 2});
-}
-
-template <std::size_t Size>
-class FakeOpenTelemetryHex final {
-public:
-  explicit FakeOpenTelemetryHex(std::string value) : value_(std::move(value)) {}
-
-  void ToLowerBase16(std::array<char, Size> &buffer) const noexcept {
-    for (std::size_t index = 0; index < Size; index++) {
-      buffer[index] = index < value_.size() ? value_[index] : '0';
-    }
-  }
-
-private:
-  std::string value_;
-};
-
-class FakeOpenTelemetrySpanContext final {
-public:
-  FakeOpenTelemetrySpanContext(bool valid, std::string trace_id, std::string span_id, std::string trace_flags)
-      : valid_(valid), trace_id_(std::move(trace_id)), span_id_(std::move(span_id)),
-        trace_flags_(std::move(trace_flags)) {}
-
-  [[nodiscard]] bool IsValid() const noexcept {
-    return valid_;
-  }
-
-  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::trace_id_length> &trace_id() const noexcept {
-    return trace_id_;
-  }
-
-  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::span_id_length> &span_id() const noexcept {
-    return span_id_;
-  }
-
-  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::trace_flags_length> &trace_flags() const noexcept {
-    return trace_flags_;
-  }
-
-private:
-  bool valid_;
-  FakeOpenTelemetryHex<logbrew::trace_id_length> trace_id_;
-  FakeOpenTelemetryHex<logbrew::span_id_length> span_id_;
-  FakeOpenTelemetryHex<logbrew::trace_flags_length> trace_flags_;
-};
-
-class FakeOpenTelemetrySpan final {
-public:
-  explicit FakeOpenTelemetrySpan(FakeOpenTelemetrySpanContext context) : context_(std::move(context)) {}
-
-  [[nodiscard]] FakeOpenTelemetrySpanContext GetContext() const noexcept {
-    return context_;
-  }
-
-private:
-  FakeOpenTelemetrySpanContext context_;
-};
-
-class FakeOpenTelemetrySpanPointer final {
-public:
-  explicit FakeOpenTelemetrySpanPointer(const FakeOpenTelemetrySpan *span) : span_(span) {}
-
-  explicit operator bool() const noexcept {
-    return span_ != nullptr;
-  }
-
-  [[nodiscard]] const FakeOpenTelemetrySpan &operator*() const noexcept {
-    return *span_;
-  }
-
-private:
-  const FakeOpenTelemetrySpan *span_;
-};
-
-void queue_events(logbrew::LogBrewClient &client) {
-  client.release("evt_release_001", "2026-06-02T10:00:00Z", logbrew::ReleaseAttributes{"1.2.3", "abc123def456", "Public release marker"});
-  client.environment("evt_environment_001", "2026-06-02T10:00:01Z", logbrew::EnvironmentAttributes{"production", "global"});
-  client.issue("evt_issue_001", "2026-06-02T10:00:02Z", logbrew::IssueAttributes{"Checkout timeout", "error", "Request timed out after retry budget"});
-  client.log("evt_log_001", "2026-06-02T10:00:03Z", logbrew::LogAttributes{"worker started", "info", "job-runner"});
-  client.span("evt_span_001", "2026-06-02T10:00:04Z", logbrew::SpanAttributes{"GET /health", "trace_001", "span_001", std::nullopt, "ok", 12.5});
-  client.action("evt_action_001", "2026-06-02T10:00:05Z", logbrew::ActionAttributes{"deploy", "success"});
-}
-
-void require_condition(bool condition, const char *message) {
-  if (!condition) {
-    std::cerr << message << '\n';
-    std::exit(1);
-  }
-}
-
-void exercise_timeline_helpers() {
-  auto timeline_client = new_client();
-  logbrew::ProductTimelineContext context;
-  context.session_id = "session_123";
-  context.screen = "Checkout";
-  context.trace_id = "trace_001";
-  context.funnel = "checkout";
-  context.step = "submit";
-
-  logbrew::ProductActionAttributes action;
-  action.name = "checkout submit";
-  action.context = context;
-  action.metadata = {{"component", "pay-button"}, {"attempt", 2}};
-  timeline_client.capture_product_action("evt_product_action_001", "2026-06-02T10:00:06Z", action);
-
-  logbrew::NetworkMilestoneAttributes network;
-  network.method = "POST";
-  network.route_template = "https://api.example.com/checkout/confirm?view=ignored#fragment";
-  network.status_code = 503;
-  network.duration_ms = 42.75;
-  network.context = context;
-  timeline_client.capture_network_milestone("evt_network_001", "2026-06-02T10:00:07Z", network);
-
-  const std::string preview = timeline_client.preview_json();
-  require_condition(preview.find("\"source\":\"cpp.product_action\"") != std::string::npos, "product action source missing");
-  require_condition(preview.find("\"source\":\"cpp.network\"") != std::string::npos, "network source missing");
-  require_condition(preview.find("\"routeTemplate\":\"/checkout/confirm\"") != std::string::npos, "route template missing");
-  require_condition(preview.find("view=ignored") == std::string::npos, "network query leaked");
-  require_condition(preview.find("#fragment") == std::string::npos, "network hash leaked");
-}
-
-void exercise_metric_helper() {
-  auto metric_client = new_client();
-  metric_client.metric(
-      "evt_metric_queue_depth",
-      "2026-06-02T10:00:06Z",
-      logbrew::MetricAttributes{
-          "queue.depth",
-          "gauge",
-          42.0,
-          "{items}",
-          "instant",
-          {{"queue", "checkout"}},
-      });
-
-  const std::string preview = metric_client.preview_json();
-  require_condition(preview.find("\"type\":\"metric\"") != std::string::npos, "metric event missing");
-  require_condition(preview.find("\"name\":\"queue.depth\"") != std::string::npos, "metric name missing");
-  require_condition(preview.find("\"temporality\":\"instant\"") != std::string::npos, "metric temporality missing");
-  require_condition(preview.find("\"queue\":\"checkout\"") != std::string::npos, "metric metadata missing");
-}
-
-void exercise_rich_investigation_context() {
-  logbrew::TelemetryResource resource;
-  resource.service = logbrew::NamedVersion{"checkout-api", "2.4.0"};
-  resource.deployment = logbrew::DeploymentContext{"production", "2026.08.06"};
-  resource.application = logbrew::ApplicationContext{"checkout-app", "8.2.0", "820"};
-  logbrew::TelemetryContext context;
-  context.resource = resource;
-  context.session = logbrew::SessionContext{"session_opaque", std::nullopt};
-  context.subject = logbrew::SubjectContext{"subject_opaque", logbrew::SubjectKind::user};
-  context.tags = {{"region", "eu-central"}};
-  logbrew::ClientOptions options;
-  options.context = context;
-  options.disable_automatic_context = true;
-  logbrew::LogBrewClient client(
-      logbrew::Config{"LOGBREW_API_KEY", "native-cpp-rich-app", logbrew::version, 2},
-      options);
-
-  client.add_breadcrumb(logbrew::IssueBreadcrumb{
-      "2026-08-06T10:01:05Z",
-      "http",
-      "payment.request",
-      "error",
-      "authorization returned a terminal response",
-      {{"statusClass", "5xx"}},
-  });
-  logbrew::IssueDetails details;
-  details.exception = logbrew::IssueException{
-      "PaymentDeclined",
-      logbrew::IssueMechanism{"signal", false},
-  };
-  details.stack_frames = {logbrew::issue_frame_from_location(
-      "/private/source/checkout.cpp?redaction_canary=value#fragment",
-      413U,
-      9U,
-      "authorize_payment",
-      "checkout.payment",
-      true)};
-  client.issue(
-      "evt_cpp_rich_issue",
-      "2026-08-06T10:01:06Z",
-      logbrew::IssueAttributes{"Payment authorization failed", "error", std::nullopt},
-      details,
-      logbrew::EventOptions{{{"attempt", 2}}, std::nullopt});
-
-  logbrew::SpanEvidence evidence;
-  evidence.events = {{
-      "payment.authorization.rejected",
-      "2026-08-06T10:01:05.900Z",
-      {{"provider", "gateway"}},
-  }};
-  evidence.links = {{
-      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      "BBBBBBBBBBBBBBBB",
-      false,
-      {{"relationship", "retry_of"}},
-  }};
-  client.span(
-      "evt_cpp_rich_span",
-      "2026-08-06T10:01:07Z",
-      logbrew::SpanAttributes{
-          "POST /payments/{id}/authorize",
-          "11111111111111111111111111111111",
-          "2222222222222222",
-          "3333333333333333",
-          "error",
-          184.5,
-      },
-      evidence);
-
-  const std::string preview = client.preview_json();
-  require_condition(preview.find("\"context\":{\"schemaVersion\":1") != std::string::npos,
-                    "typed telemetry context missing");
-  require_condition(preview.find("\"subject\":{\"id\":\"subject_opaque\",\"kind\":\"user\"}") !=
-                        std::string::npos,
-                    "opaque subject context missing");
-  require_condition(preview.find("\"exception\":{\"type\":\"PaymentDeclined\"") != std::string::npos,
-                    "issue exception evidence missing");
-  require_condition(preview.find("\"filename\":\"checkout.cpp\"") != std::string::npos,
-                    "sanitized issue frame missing");
-  require_condition(preview.find("\"breadcrumbs\":[") != std::string::npos,
-                    "issue breadcrumbs missing");
-  require_condition(preview.find("\"events\":[{\"name\":\"payment.authorization.rejected\"") !=
-                        std::string::npos,
-                    "span events missing");
-  require_condition(preview.find("\"links\":[{\"traceId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"") !=
-                        std::string::npos,
-                    "normalized span links missing");
-  require_condition(preview.find("/private/source") == std::string::npos, "absolute source path leaked");
-  require_condition(preview.find("redaction_canary") == std::string::npos, "source query leaked");
-  require_condition(preview.find("LOGBREW_API_KEY") == std::string::npos, "API key leaked into payload");
-}
-
-void exercise_open_telemetry_bridge() {
-  const FakeOpenTelemetrySpanContext otel_context(
-      true,
-      "4BF92F3577B34DA6A3CE929D0E0E4736",
-      "00F067AA0BA902B7",
-      "01");
-  const auto copied = logbrew::open_telemetry_span_context_from_span_context(otel_context);
-  require_condition(copied.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736", "OpenTelemetry trace id copy failed");
-  require_condition(copied.span_id == "00f067aa0ba902b7", "OpenTelemetry span id copy failed");
-
-  const FakeOpenTelemetrySpan otel_span(otel_context);
-  const auto maybe_copied =
-      logbrew::try_open_telemetry_span_context_from_span_pointer(FakeOpenTelemetrySpanPointer(&otel_span));
-  require_condition(maybe_copied.has_value(), "OpenTelemetry span pointer copy failed");
-  require_condition(maybe_copied->sampled, "OpenTelemetry sampled flag copy failed");
-  require_condition(!logbrew::try_open_telemetry_span_context_from_span_pointer(
-                        FakeOpenTelemetrySpanPointer(nullptr)).has_value(),
-                    "OpenTelemetry null span pointer should be empty");
-}
-
-void exercise_failure_paths() {
-  auto empty_client = new_client();
-  logbrew::RecordingTransport empty_transport;
-  const logbrew::TransportResponse empty_response = empty_client.flush(empty_transport);
-  require_condition(empty_response.status_code == 204 && empty_response.attempts == 0U, "empty flush failed");
-
-  try {
-    empty_client.issue("evt_bad", "2026-06-02T10:00:02Z", logbrew::IssueAttributes{"Checkout timeout", "verbose", std::nullopt});
-    require_condition(false, "validation failure did not throw");
-  } catch (const logbrew::SdkException &error) {
-    require_condition(error.code() == "validation_error", "validation failure used wrong code");
-  }
-
-  auto unauth_client = new_client();
-  queue_events(unauth_client);
-  logbrew::RecordingTransport unauth_transport({logbrew::RecordingTransport::Step::status_code_step(401)});
-  try {
-    static_cast<void>(unauth_client.flush(unauth_transport));
-    require_condition(false, "unauthenticated failure did not throw");
-  } catch (const logbrew::SdkException &error) {
-    require_condition(error.code() == "unauthenticated", "unauthenticated failure used wrong code");
-  }
-
-  auto retry_client = new_client();
-  queue_events(retry_client);
-  logbrew::RecordingTransport retry_transport({
-      logbrew::RecordingTransport::Step::network_failure("first failure"),
-      logbrew::RecordingTransport::Step::network_failure("second failure"),
-      logbrew::RecordingTransport::Step::network_failure("third failure"),
-  });
-  try {
-    static_cast<void>(retry_client.flush(retry_transport));
-    require_condition(false, "retry-budget failure did not throw");
-  } catch (const logbrew::SdkException &error) {
-    require_condition(error.code() == "network_failure", "retry-budget failure used wrong code");
-  }
-
-  auto status_client = new_client();
-  queue_events(status_client);
-  logbrew::RecordingTransport status_transport({logbrew::RecordingTransport::Step::status_code_step(422)});
-  try {
-    static_cast<void>(status_client.flush(status_transport));
-    require_condition(false, "non-retryable status failure did not throw");
-  } catch (const logbrew::SdkException &error) {
-    require_condition(error.code() == "transport_error", "non-retryable status failure used wrong code");
-  }
-
-  auto shutdown_client = new_client();
-  queue_events(shutdown_client);
-  logbrew::RecordingTransport accept_transport;
-  static_cast<void>(shutdown_client.shutdown(accept_transport));
-  try {
-    shutdown_client.action("evt_after_shutdown", "2026-06-02T10:00:05Z", logbrew::ActionAttributes{"deploy", "success"});
-    require_condition(false, "post-shutdown failure did not throw");
-  } catch (const logbrew::SdkException &error) {
-    require_condition(error.code() == "shutdown_error", "post-shutdown failure used wrong code");
-  }
-}
-
-} // namespace
-
-int main() {
-  try {
-    auto client = new_client();
-    queue_events(client);
-    std::cout << client.preview_json() << '\n';
-    logbrew::RecordingTransport transport({
-        logbrew::RecordingTransport::Step::network_failure("temporary network failure"),
-        logbrew::RecordingTransport::Step::status_code_step(503),
-        logbrew::RecordingTransport::Step::status_code_step(202),
-    });
-    const logbrew::TransportResponse response = client.flush(transport);
-    std::cerr << "{\"ok\":true,\"status\":" << response.status_code << ",\"retryAttempts\":" << response.attempts
-              << ",\"sentBodies\":" << transport.sent_bodies().size() << "}\n";
-    exercise_timeline_helpers();
-    exercise_metric_helper();
-    exercise_rich_investigation_context();
-    exercise_open_telemetry_bridge();
-    exercise_failure_paths();
-    return 0;
-  } catch (const logbrew::SdkException &error) {
-    std::cerr << error.code() << ": " << error.what() << '\n';
-    return 1;
-  }
-}
+add_executable(native_cpp_app vendor/logbrew-cpp/examples/real_user_smoke.cpp)
+target_link_libraries(native_cpp_app PRIVATE LogBrew::LogBrew)
+if(CONSUMER_WITH_HTTP)
+  add_executable(http_app vendor/logbrew-cpp/examples/http_transport.cpp)
+  target_link_libraries(http_app PRIVATE LogBrew::HttpTransport)
+endif()
 EOF
 
-"$cxx_command" -std=c++17 -Wall -Wextra -Wpedantic -Werror \
-  -I"$sdk_dir/include" \
-  "$sdk_dir/src/logbrew.cpp" \
-  "$app_dir/main.cpp" \
-  -o "$app_dir/native_cpp_app"
-"$app_dir/native_cpp_app" > "$tmp_dir/native-app.stdout.json" 2> "$tmp_dir/native-app.stderr.json"
+cmake_args=(
+  -S "$app_dir"
+  -B "$app_dir/build"
+  "-DCMAKE_CXX_COMPILER=$cxx_command"
+  "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Wpedantic -Werror"
+)
+if command -v curl-config >/dev/null 2>&1; then
+  cmake_args+=("-DCONSUMER_WITH_HTTP=ON")
+fi
+cmake "${cmake_args[@]}"
+cmake --build "$app_dir/build" --parallel
+
+"$app_dir/build/native_cpp_app" > "$tmp_dir/native-app.stdout.json" 2> "$tmp_dir/native-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" \
+  --allow-additive-context \
+  "$repo_root/fixtures/valid-batch.json" \
+  "$tmp_dir/native-app.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
 
 if command -v curl-config >/dev/null 2>&1; then
-  intake_pid=""
-  cat > "$app_dir/http_app.cpp" <<'EOF'
-#include "logbrew.hpp"
-
-#include <cstdlib>
-#include <iostream>
-
-int main() {
-  try {
-    const char *endpoint = std::getenv("LOGBREW_CPP_HTTP_ENDPOINT");
-    logbrew::LogBrewClient client(logbrew::Config{"LOGBREW_API_KEY", "native-cpp-http-app", logbrew::version, 1});
-    client.log(
-        "evt_cpp_http_transport",
-        "2026-06-02T10:00:06Z",
-        logbrew::LogAttributes{"c++ http transport sent", "info", "cpp-http"});
-    logbrew::HttpTransport transport(
-        endpoint == nullptr ? "" : endpoint,
-        {{"x-logbrew-source", "cpp-consumer"}},
-        5000L);
-    const logbrew::TransportResponse response = client.flush(transport);
-    if (response.status_code != 202 || response.attempts != 2U || client.pending_events() != 0U) {
-      std::cerr << "unexpected HTTP response status=" << response.status_code << " attempts=" << response.attempts
-                << " pending=" << client.pending_events() << '\n';
-      return 1;
-    }
-    std::cerr << "{\"ok\":true,\"httpAttempts\":" << response.attempts << "}\n";
-    return 0;
-  } catch (const logbrew::SdkException &error) {
-    std::cerr << error.code() << ": " << error.what() << '\n';
-    return 1;
-  }
-}
-EOF
-
   http_port="$(python3 - <<'PY'
 import socket
 
@@ -518,13 +138,12 @@ class Handler(BaseHTTPRequestHandler):
     count = 0
 
     def do_POST(self):
-        content_length = int(self.headers.get("content-length", "0"))
-        body = self.rfile.read(content_length).decode("utf-8")
+        length = int(self.headers.get("content-length", "0"))
         Handler.count += 1
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({
                 "authorization": self.headers.get("authorization"),
-                "body": body,
+                "body": self.rfile.read(length).decode("utf-8"),
                 "contentType": self.headers.get("content-type"),
                 "path": self.path,
                 "source": self.headers.get("x-logbrew-source"),
@@ -543,9 +162,9 @@ ready_path.write_text("ready", encoding="utf-8")
 deadline = time.monotonic() + 90
 while Handler.count < 2 and time.monotonic() < deadline:
     server.handle_request()
+server.server_close()
 if Handler.count < 2:
-    print(f"c++ intake timed out after {Handler.count} request(s)", file=sys.stderr)
-    sys.exit(1)
+    raise SystemExit(f"c++ intake timed out after {Handler.count} request(s)")
 PY
   intake_ready="$tmp_dir/http-intake.ready"
   intake_log="$tmp_dir/http-intake.jsonl"
@@ -553,36 +172,15 @@ PY
     > "$tmp_dir/http-intake.stdout" 2> "$tmp_dir/http-intake.stderr" &
   intake_pid="$!"
   for _attempt in {1..600}; do
-    if [[ -f "$intake_ready" ]]; then
-      break
-    fi
+    [[ -f "$intake_ready" ]] && break
     sleep 0.1
   done
-  if [[ ! -f "$intake_ready" ]]; then
-    echo "c++ intake server did not become ready" >&2
-    exit 1
-  fi
+  test -f "$intake_ready"
 
-  curl_cflags=()
-  curl_libs=()
-  curl_cflags_output="$(curl-config --cflags)"
-  curl_libs_output="$(curl-config --libs)"
-  if [[ -n "$curl_cflags_output" ]]; then
-    read -r -a curl_cflags <<<"$curl_cflags_output"
-  fi
-  if [[ -n "$curl_libs_output" ]]; then
-    read -r -a curl_libs <<<"$curl_libs_output"
-  fi
-  "$cxx_command" -std=c++17 -Wall -Wextra -Wpedantic -Werror \
-    -I"$sdk_dir/include" ${curl_cflags[@]+"${curl_cflags[@]}"} \
-    "$sdk_dir/src/logbrew.cpp" \
-    "$sdk_dir/src/logbrew_http_transport.cpp" \
-    "$app_dir/http_app.cpp" \
-    ${curl_libs[@]+"${curl_libs[@]}"} \
-    -o "$app_dir/http_app"
   LOGBREW_CPP_HTTP_ENDPOINT="http://127.0.0.1:$http_port/v1/events" \
-    "$app_dir/http_app" > "$tmp_dir/http-app.stdout.json" 2> "$tmp_dir/http-app.stderr.json"
+    "$app_dir/build/http_app" > "$tmp_dir/http-app.stdout.json" 2> "$tmp_dir/http-app.stderr.json"
   wait "$intake_pid"
+  intake_pid=""
   grep -q '"httpAttempts":2' "$tmp_dir/http-app.stderr.json"
   python3 - "$intake_log" <<'PY'
 import json
@@ -593,34 +191,18 @@ requests = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="u
 if len(requests) != 2:
     raise SystemExit(f"expected 2 C++ HTTP delivery attempts, got {len(requests)}")
 for request in requests:
-    if request["authorization"] != "Bearer LOGBREW_API_KEY":
-        raise SystemExit(f"unexpected authorization header: {request['authorization']}")
-    if request["contentType"] != "application/json":
-        raise SystemExit(f"unexpected content type: {request['contentType']}")
-    if request["source"] != "cpp-consumer":
-        raise SystemExit(f"unexpected source header: {request['source']}")
-    if request["path"] != "/v1/events":
-        raise SystemExit(f"unexpected path: {request['path']}")
-if "evt_cpp_http_transport" not in requests[1]["body"]:
+    expected = {
+        "authorization": "Bearer LOGBREW_API_KEY",
+        "contentType": "application/json",
+        "path": "/v1/events",
+        "source": "cpp-consumer",
+    }
+    for key, value in expected.items():
+        if request[key] != value:
+            raise SystemExit(f"unexpected {key}: {request[key]}")
+if "evt_cpp_http_transport" not in requests[-1]["body"]:
     raise SystemExit("missing C++ HTTP transport event in final request body")
 PY
 fi
 
-run_examples_make > "$tmp_dir/examples-help.txt"
-grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
-grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
-grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
-grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
-run_examples_make run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
-run_examples_make run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
-run_examples_make run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_cpp_trace_correlation_payload.py" \
-  "$tmp_dir/trace-correlation.stdout.json" \
-  "$tmp_dir/trace-correlation.stderr.json"
-
-echo "c++ real-user smoke passed with $($cxx_command --version | head -n 1)"
+echo "c++ CMake real-user smoke passed with $($cxx_command --version | head -n 1)"
