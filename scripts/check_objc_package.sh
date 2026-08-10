@@ -88,7 +88,7 @@ grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 
-archive="$tmp_dir/logbrew-objc-0.2.2.tar.gz"
+archive="$tmp_dir/logbrew-objc-0.2.3.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 tar -tzf "$archive" > "$tmp_dir/archive-contents.txt"
 grep -qx 'README.md' "$tmp_dir/archive-contents.txt"

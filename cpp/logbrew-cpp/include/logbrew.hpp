@@ -13,7 +13,7 @@
 
 namespace logbrew {
 
-inline constexpr const char *version = "0.2.1";
+inline constexpr const char *version = "0.2.2";
 inline constexpr const char *http_transport_default_endpoint = "https://api.logbrew.co/v1/events";
 inline constexpr std::size_t trace_id_length = 32U;
 inline constexpr std::size_t span_id_length = 16U;

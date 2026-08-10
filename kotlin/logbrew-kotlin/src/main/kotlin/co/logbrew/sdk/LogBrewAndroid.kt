@@ -98,7 +98,7 @@ class AndroidLifecycleTracker internal constructor(
 }
 
 object LogBrewAndroid {
-    private const val SDK_VERSION: String = "0.2.1"
+    private const val SDK_VERSION: String = "0.2.2"
     private const val PRODUCT_ANALYTICS_SCHEMA_VERSION: Int = 1
     private const val MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH: Int = 256
 

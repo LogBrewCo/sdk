@@ -7,6 +7,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sdkRoot = path.resolve(packageRoot, "../logbrew-js");
+const packageVersion = JSON.parse(
+  fs.readFileSync(path.join(packageRoot, "package.json"), "utf8")
+).version;
 
 async function withInstalledPackage(callback) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-rn-delivery-"));
@@ -60,6 +63,24 @@ function acceptedResponse(retryAfter = null) {
     }
   };
 }
+
+test("React Native default SDK identity matches the installed package", async () => {
+  await withInstalledPackage(async ({ createLogBrewReactNativeClient }) => {
+    const client = createLogBrewReactNativeClient({
+      automaticDelivery: false,
+      clientKey: "LOGBREW_CLIENT_KEY"
+    });
+
+    addSetupLog(client);
+    const payload = JSON.parse(client.previewJson());
+
+    assert.deepEqual(payload.sdk, {
+      language: "javascript",
+      name: "logbrew-react-native",
+      version: packageVersion
+    });
+  });
+});
 
 test("React Native fetch transport performs hosted delivery with the configured client transport", async () => {
   await withInstalledPackage(async ({

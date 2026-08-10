@@ -49,7 +49,7 @@ run_examples_make() {
   make --no-print-directory -C "$sdk_dir/examples" CC="$cc_command" "$@"
 }
 
-archive="$tmp_dir/logbrew-c-0.2.1.tar.gz"
+archive="$tmp_dir/logbrew-c-0.2.2.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
 
 app_dir="$tmp_dir/native-app"
