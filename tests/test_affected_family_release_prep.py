@@ -296,40 +296,40 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             },
         )
 
-    def test_tag_distributed_receipts_keep_public_baselines_until_release(self) -> None:
+    def test_tag_distributed_receipts_match_published_release(self) -> None:
         go_smoke = (ROOT / "scripts/real_user_go_public_module_smoke.sh").read_text(encoding="utf-8")
         go_gin_smoke = (ROOT / "scripts/real_user_go_gin_smoke.sh").read_text(encoding="utf-8")
         swift_smoke = (ROOT / "scripts/real_user_swiftpm_public_smoke.sh").read_text(encoding="utf-8")
         swift_readme = (ROOT / "swift/logbrew-swift/README.md").read_text(encoding="utf-8")
 
-        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.6', go_smoke)
-        self.assertIn('LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.1', go_smoke)
-        self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1', go_gin_smoke)
-        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.9', swift_smoke)
-        self.assertIn('from: "0.1.9"', swift_readme)
+        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.7', go_smoke)
+        self.assertIn('LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2', go_smoke)
+        self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2', go_gin_smoke)
+        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.10', swift_smoke)
+        self.assertIn('from: "0.1.10"', swift_readme)
 
     def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
         receipt_defaults = {
             "scripts/real_user_npm_public_registry_smoke.sh": (
-                "LOGBREW_NPM_SDK_VERSION:-0.1.9",
-                "LOGBREW_NPM_BROWSER_VERSION:-0.1.2",
-                "LOGBREW_NPM_NODE_VERSION:-0.1.7",
+                "LOGBREW_NPM_SDK_VERSION:-0.1.10",
+                "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
+                "LOGBREW_NPM_NODE_VERSION:-0.1.8",
                 "LOGBREW_NPM_NEXT_VERSION:-0.1.4",
-                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.14",
+                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.15",
             ),
-            "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.3",),
-            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.4",),
-            "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.9",),
+            "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.4",),
+            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.5",),
+            "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.10",),
             "scripts/real_user_maven_central_public_smoke.sh": (
-                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.3",
-                "LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.1",
+                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.4",
+                "LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.2",
             ),
             "scripts/real_user_dotnet_public_nuget_smoke.sh": (
-                "LOGBREW_DOTNET_CORE_VERSION:-0.1.6",
-                "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.1",
+                "LOGBREW_DOTNET_CORE_VERSION:-0.1.7",
+                "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.2",
             ),
             "scripts/real_user_python_public_pypi_smoke.sh": (
-                "LOGBREW_PYPI_SDK_VERSION:-0.1.10",
+                "LOGBREW_PYPI_SDK_VERSION:-0.1.11",
                 "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.9",
                 "LOGBREW_PYPI_FLASK_VERSION:-0.1.4",
                 "LOGBREW_PYPI_DJANGO_VERSION:-0.1.5",

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.6}}"
+requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.7}}"
 module_version="v${requested_version#v}"
 export LOGBREW_GO_MODULE_VERSION="$module_version"
 module_path="github.com/LogBrewCo/sdk/go/logbrew"
-gin_requested_version="${LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.1}"
+gin_requested_version="${LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2}"
 gin_module_version="v${gin_requested_version#v}"
 gin_module_path="github.com/LogBrewCo/sdk/go/logbrew/gin"
 tmp_dir="$(mktemp -d)"

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 artifact_id="native:LogBrewCo/sdk"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
-version="${1:-0.2.1}"
+version="${1:-0.2.2}"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-native-release-public.XXXXXX")"
 
 if [[ $# -gt 1 ]] || { [[ "$receipt_mode" != "0" ]] && [[ "$receipt_mode" != "1" ]]; }; then

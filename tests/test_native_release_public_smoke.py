@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_native_release_public_smoke.sh"
 ARTIFACT_ID = "native:LogBrewCo/sdk"
 VERSION = "0.2.2"
-PUBLIC_VERSION = "0.2.1"
+PUBLIC_VERSION = "0.2.2"
 SOURCE_PATHS = (
     "LICENSE",
     "README.md",
@@ -169,11 +169,7 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_temp_dir:
             temp_dir = Path(raw_temp_dir)
             artifact_path = temp_dir / "source.tar.gz"
-            public_header = (ROOT / "c/logbrew-c/include/logbrew.h").read_bytes().replace(
-                b'#define LOGBREW_C_VERSION "0.2.2"',
-                b'#define LOGBREW_C_VERSION "0.2.1"',
-                1,
-            )
+            public_header = (ROOT / "c/logbrew-c/include/logbrew.h").read_bytes()
             _source_archive(
                 artifact_path,
                 version=PUBLIC_VERSION,
@@ -228,7 +224,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertIn("--max-time\n30\n", recorded_args)
         self.assertIn("--max-filesize\n67108864\n", recorded_args)
         self.assertIn(
-            "https://github.com/LogBrewCo/sdk/archive/refs/tags/c/logbrew-c/v0.2.1.tar.gz",
+            "https://github.com/LogBrewCo/sdk/archive/refs/tags/c/logbrew-c/v0.2.2.tar.gz",
             recorded_args,
         )
 
