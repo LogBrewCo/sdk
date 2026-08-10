@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.8}}"
+version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.9}}"
 tmp_dir="$(mktemp -d)"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -142,7 +142,7 @@ use LogBrew\TransportResponse;
 use Monolog\Logger;
 use Psr\Log\LogLevel;
 
-$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.8';
+$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.9';
 $installedVersion = Composer\InstalledVersions::getPrettyVersion('logbrew/sdk');
 if (!Composer\InstalledVersions::isInstalled('logbrew/sdk')) {
     fwrite(STDERR, "logbrew/sdk is not installed according to Composer\n");
@@ -199,6 +199,7 @@ $client->action('evt_packagist_action', '2026-06-02T10:00:06Z', [
 ]);
 $client->metric('evt_packagist_metric', '2026-06-02T10:00:07Z', [
     'name' => 'http.server.duration',
+    'description' => 'Duration of one completed server request.',
     'kind' => 'histogram',
     'value' => 42.5,
     'unit' => 'ms',
@@ -340,6 +341,7 @@ foreach ([
     '"type": "issue"',
     '"type": "span"',
     '"type": "metric"',
+    '"description": "Duration of one completed server request."',
     '"type": "action"',
     '"id": "evt_packagist_traceparent_span"',
     '"id": "evt_packagist_product_action"',

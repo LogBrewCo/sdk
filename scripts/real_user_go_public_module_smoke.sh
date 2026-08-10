@@ -2,10 +2,13 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.5}}"
+requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.6}}"
 module_version="v${requested_version#v}"
 export LOGBREW_GO_MODULE_VERSION="$module_version"
 module_path="github.com/LogBrewCo/sdk/go/logbrew"
+gin_requested_version="${LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.1}"
+gin_module_version="v${gin_requested_version#v}"
+gin_module_path="github.com/LogBrewCo/sdk/go/logbrew/gin"
 tmp_dir="$(mktemp -d)"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
@@ -24,8 +27,12 @@ on_error() {
   for diagnostic in \
     "$tmp_dir/go.mod" \
     "$tmp_dir/go.sum" \
+    "$tmp_dir/app/go.mod" \
+    "$tmp_dir/app/go.sum" \
     "$tmp_dir/module.json" \
     "$tmp_dir/download.json" \
+    "$tmp_dir/gin-module.json" \
+    "$tmp_dir/gin-download.json" \
     "$tmp_dir/go-list-modules.txt" \
     "$tmp_dir/run.stdout.json" \
     "$tmp_dir/run.stderr.json" \
@@ -117,6 +124,7 @@ cd "$app_dir"
 
 go mod init logbrew.public.module.smoke >/dev/null
 go get github.com/LogBrewCo/sdk/go/logbrew@"$module_version" >/dev/null
+go get github.com/LogBrewCo/sdk/go/logbrew/gin@"$gin_module_version" >/dev/null
 
 cat > main.go <<'GO'
 package main
@@ -645,16 +653,112 @@ func (r fakeSQLResult) RowsAffected() (int64, error) {
 }
 GO
 
+cat > gin_public_test.go <<'GO'
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/LogBrewCo/sdk/go/logbrew"
+	logbrewgin "github.com/LogBrewCo/sdk/go/logbrew/gin"
+	"github.com/gin-gonic/gin"
+)
+
+func TestPublicGinModuleEmitsPurposeWithoutConcreteRequestData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "go-gin-public-module-smoke",
+		SDKVersion: "0.1.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	middleware, err := logbrewgin.NewMiddleware(logbrewgin.Config{
+		Client:                 client,
+		CaptureRequestMetrics: true,
+		SpanIDFactory:          func() string { return "b7ad6b7169203331" },
+		Now:                    func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.Use(middleware)
+	router.GET("/checkout/:cart_id", func(context *gin.Context) {
+		context.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/checkout/private-cart?coupon=private-code", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("unexpected status %d", recorder.Code)
+	}
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"type": "span"`,
+		`"type": "metric"`,
+		`"name": "http.server.duration"`,
+		`"description": "Duration of one completed server request."`,
+		`"routeTemplate": "/checkout/:cart_id"`,
+	} {
+		if !strings.Contains(payload, expected) {
+			t.Fatalf("installed Gin payload missing %s: %s", expected, payload)
+		}
+	}
+	for _, private := range []string{"private-cart", "coupon", "private-code"} {
+		if strings.Contains(payload, private) {
+			t.Fatalf("installed Gin payload leaked %q: %s", private, payload)
+		}
+	}
+}
+GO
+
 go mod tidy
-grep -q "require github.com/LogBrewCo/sdk/go/logbrew $module_version" go.mod
+grep -Eq "^[[:space:]]*github.com/LogBrewCo/sdk/go/logbrew[[:space:]]+$module_version([[:space:]]|$)" go.mod
+grep -Eq "^[[:space:]]*github.com/LogBrewCo/sdk/go/logbrew/gin[[:space:]]+$gin_module_version([[:space:]]|$)" go.mod
 grep -q "github.com/LogBrewCo/sdk/go/logbrew $module_version" go.sum
 
 go list -m all > "$tmp_dir/go-list-modules.txt"
 grep -q "github.com/LogBrewCo/sdk/go/logbrew $module_version" "$tmp_dir/go-list-modules.txt"
+grep -q "github.com/LogBrewCo/sdk/go/logbrew/gin $gin_module_version" "$tmp_dir/go-list-modules.txt"
 go list -m -json github.com/LogBrewCo/sdk/go/logbrew > "$tmp_dir/module.json"
 go mod download -json github.com/LogBrewCo/sdk/go/logbrew@"$module_version" > "$tmp_dir/download.json"
+go list -m -json "$gin_module_path" > "$tmp_dir/gin-module.json"
+go mod download -json "$gin_module_path@$gin_module_version" > "$tmp_dir/gin-download.json"
 
 python3 - "$tmp_dir/module.json" "$tmp_dir/download.json" "$module_path" "$module_version" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+module_payload = json.loads(Path(sys.argv[1]).read_text())
+download_payload = json.loads(Path(sys.argv[2]).read_text())
+module_path = sys.argv[3]
+module_version = sys.argv[4]
+
+for name, payload in (("go list", module_payload), ("go mod download", download_payload)):
+    if payload.get("Path") != module_path:
+        raise SystemExit(f"{name}: unexpected path {payload.get('Path')!r}")
+    if payload.get("Version") != module_version:
+        raise SystemExit(f"{name}: unexpected version {payload.get('Version')!r}")
+    if payload.get("Replace"):
+        raise SystemExit(f"{name}: module unexpectedly uses replace")
+for key in ("Info", "GoMod", "Zip", "Dir", "Sum", "GoModSum"):
+    if not download_payload.get(key):
+        raise SystemExit(f"go mod download: missing {key}")
+PY
+
+python3 - "$tmp_dir/gin-module.json" "$tmp_dir/gin-download.json" "$gin_module_path" "$gin_module_version" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -703,10 +807,25 @@ grep -q "SQLTransactionWithLogBrewSpan" "$module_dir/README.md"
 grep -q "SQLQueryContextWithLogBrewSpan" "$module_dir/README.md"
 grep -q "SQLExecContextWithLogBrewSpan" "$module_dir/README.md"
 
+gin_module_dir="$(python3 - "$tmp_dir/gin-module.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload["Dir"])
+PY
+)"
+test -f "$gin_module_dir/go.mod"
+test -f "$gin_module_dir/README.md"
+test -f "$gin_module_dir/middleware.go"
+grep -q "CaptureRequestMetrics" "$gin_module_dir/README.md"
+
 go mod verify > "$tmp_dir/go-mod-verify.txt"
 grep -q "all modules verified" "$tmp_dir/go-mod-verify.txt"
-go list -deps -json ./... > "$tmp_dir/go-list-deps.json"
+go list -deps -test -json ./... > "$tmp_dir/go-list-deps.json"
 grep -q '"ImportPath": "github.com/LogBrewCo/sdk/go/logbrew"' "$tmp_dir/go-list-deps.json"
+grep -q '"ImportPath": "github.com/LogBrewCo/sdk/go/logbrew/gin"' "$tmp_dir/go-list-deps.json"
 
 run_go_doc() {
   local output_name="$1"
@@ -729,6 +848,9 @@ run_go_doc go-doc-new-span-link.txt "$module_path" NewSpanLinkSummary
 run_go_doc go-doc-sql-transaction.txt "$module_path" SQLTransactionWithLogBrewSpan
 run_go_doc go-doc-sql-query.txt "$module_path" SQLQueryContextWithLogBrewSpan
 run_go_doc go-doc-sql-exec.txt "$module_path" SQLExecContextWithLogBrewSpan
+run_go_doc go-doc-gin-new-middleware.txt "$gin_module_path" NewMiddleware
+run_go_doc go-doc-gin-config.txt "$gin_module_path" Config
+run_go_doc go-doc-gin-trace-from-context.txt "$gin_module_path" TraceFromContext
 
 go run . > "$tmp_dir/run.stdout.json" 2> "$tmp_dir/run.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/run.stdout.json" >/dev/null
@@ -745,4 +867,5 @@ go run -mod=readonly . > "$tmp_dir/run-readonly.stdout.json" 2> "$tmp_dir/run-re
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/run-readonly.stdout.json" >/dev/null
 grep -q '"httpAttempts":2' "$tmp_dir/run-readonly.stderr.json"
 
-printf 'go public module install smoke passed for %s %s\n' "$module_path" "$module_version"
+printf 'go public module install smoke passed for %s %s and %s %s\n' \
+  "$module_path" "$module_version" "$gin_module_path" "$gin_module_version"
