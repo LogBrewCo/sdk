@@ -331,7 +331,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "scripts/real_user_python_public_pypi_smoke.sh": (
                 "LOGBREW_PYPI_SDK_VERSION:-0.1.9",
                 "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.9",
-                "LOGBREW_PYPI_FLASK_VERSION:-0.1.3",
+                "LOGBREW_PYPI_FLASK_VERSION:-0.1.4",
                 "LOGBREW_PYPI_DJANGO_VERSION:-0.1.5",
             ),
         }
