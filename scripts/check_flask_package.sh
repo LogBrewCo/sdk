@@ -65,7 +65,7 @@ check_json trailing-fields \
   'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
   'parentSpanId="00f067aa0ba902b7"' \
   'spanId="b7ad6b7169203331"' \
-  'path="/health"' \
+  'routeTemplate="/health"' \
   'events=4' \
   "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
@@ -83,7 +83,7 @@ check_json trailing-fields \
   'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
   'parentSpanId="00f067aa0ba902b7"' \
   'spanId="b7ad6b7169203331"' \
-  'path="/health"' \
+  'routeTemplate="/health"' \
   'events=4' \
   "$tmp_dir/packaged-smoke.stderr.json"
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples outbound-http > "$tmp_dir/packaged-outbound.stdout.json" 2> "$tmp_dir/packaged-outbound.stderr.json"
