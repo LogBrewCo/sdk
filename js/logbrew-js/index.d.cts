@@ -881,7 +881,10 @@ export declare function createNetworkMilestoneAttributes(
 /** Build a local-only, token-free support-ticket create payload draft without calling backend routes. */
 export declare function createSupportTicketDraft(input: SupportTicketDraftInput): SupportTicketDraft;
 
-/** Convert an Error-like value and its cause/AggregateError tree into safe bounded issue attributes. */
+/**
+ * Convert a JavaScript Error-like value into safe issue attributes with optional source-map Debug ID metadata.
+ * Parent-first cause and AggregateError evidence is bounded to the public exception-chain contract.
+ */
 export declare function createIssueAttributesFromError(
   error: unknown,
   options?: JavaScriptErrorIssueOptions
