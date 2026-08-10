@@ -76,7 +76,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             (ROOT / "c/logbrew-c/include/logbrew.h").read_text(encoding="utf-8"),
         )
         self.assertIn(
-            'inline constexpr const char *version = "0.2.2"',
+            'inline constexpr const char *version = "0.2.3"',
             (ROOT / "cpp/logbrew-cpp/include/logbrew.hpp").read_text(encoding="utf-8"),
         )
         self.assertIn(
