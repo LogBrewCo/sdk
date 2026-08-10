@@ -89,16 +89,27 @@ namespace LogBrew.Unity
 
             var metadata = MetadataFromContext(context);
             metadata["source"] = "unity";
+            var exceptionType = IssueDiagnostics.UnityExceptionType(title);
+            var mechanism = IssueExceptionMechanism.Create("unity.log_callback", true);
             var attributes = IssueAttributes.Create(title, "error")
                 .WithException(
-                    IssueExceptionInfo.Create(IssueDiagnostics.UnityExceptionType(title))
-                        .WithMechanism(IssueExceptionMechanism.Create("unity.log_callback", true)))
+                    IssueExceptionInfo.Create(exceptionType)
+                        .WithMechanism(mechanism))
                 .WithMetadata(metadata);
-            var frames = IssueDiagnostics.StackFramesFromUnityStackTrace(stackTrace);
-            if (frames.Count > 0)
+            var stack = IssueDiagnostics.StackEvidenceFromUnityStackTrace(stackTrace);
+            var root = IssueExceptionChainEntry.Create(
+                0,
+                IssueExceptionRelationship.Reported,
+                exceptionType)
+                .WithMechanism(mechanism)
+                .WithRedactedMessage();
+            if (stack.Frames.Count > 0)
             {
-                attributes.WithStackFrames(frames);
+                attributes.WithStackFrames(stack.Frames);
+                root.WithStackFrames(stack.Frames, stack.Truncated);
             }
+
+            attributes.WithExceptionChain(IssueExceptionChain.Create(new[] { root }));
 
             AddContext(attributes, context);
             client.Issue(id, timestamp, attributes);

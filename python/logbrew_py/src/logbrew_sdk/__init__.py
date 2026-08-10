@@ -44,7 +44,7 @@ from logbrew_sdk._automatic_delivery import (
 from logbrew_sdk._errors import SdkError
 from logbrew_sdk._event_queue import EventQueue, MemoryEventQueue, QueuedEvent
 from logbrew_sdk._issue_diagnostics import (
-    issue_stack_frames_from_exception,
+    issue_exception_chain_from_exception,
     safe_issue_exception_type,
     validate_issue_diagnostics,
 )
@@ -138,6 +138,37 @@ class IssueException(TypedDict):
     mechanism: NotRequired[IssueExceptionMechanism]
 
 
+IssueExceptionRelationship: TypeAlias = Literal[
+    "reported", "cause", "context", "aggregate_member", "suppressed"
+]
+IssueExceptionMessageState: TypeAlias = Literal[
+    "captured", "truncated", "redacted", "not_captured"
+]
+IssueExceptionStackFramesState: TypeAlias = Literal["captured", "truncated", "not_captured"]
+
+
+class IssueExceptionChainEntry(TypedDict):
+    """One node in a bounded parent-first runtime exception tree."""
+
+    id: int
+    relationship: IssueExceptionRelationship
+    type: str
+    messageState: IssueExceptionMessageState
+    stackFramesState: IssueExceptionStackFramesState
+    parentId: NotRequired[int]
+    message: NotRequired[str]
+    module: NotRequired[str]
+    mechanism: NotRequired[IssueExceptionMechanism]
+    stackFrames: NotRequired[list[IssueStackFrame]]
+
+
+class IssueExceptionChain(TypedDict):
+    """Bounded exception tree with explicit omission state."""
+
+    entries: list[IssueExceptionChainEntry]
+    truncated: bool
+
+
 IssueBreadcrumbLevel: TypeAlias = Literal["debug", "info", "warning", "error", "critical"]
 IssueBreadcrumbLevelInput: TypeAlias = IssueBreadcrumbLevel | Literal["trace", "log", "warn", "fatal"]
 IssueBreadcrumbDataValue: TypeAlias = str | int | float | bool | None
@@ -160,6 +191,7 @@ class IssueAttributes(TypedDict, total=False):
     level: str
     message: str
     exception: IssueException
+    exceptionChain: IssueExceptionChain
     stackFrames: list[IssueStackFrame]
     breadcrumbs: list[IssueBreadcrumb]
     breadcrumbsTruncated: bool
@@ -1477,14 +1509,19 @@ def create_issue_attributes_from_exception(
         raise SdkError("validation_error", "include_stack_frames must be a boolean")
 
     exception_type = safe_issue_exception_type(error)
-    if message is None:
-        try:
-            error_message = str(error) or exception_type
-        except Exception:
-            error_message = exception_type
-    else:
-        error_message = message
-    stack_frames = issue_stack_frames_from_exception(error) if include_stack_frames else []
+    exception_chain = issue_exception_chain_from_exception(
+        error,
+        mechanism=mechanism,
+        handled=handled,
+        include_stack_frames=include_stack_frames,
+    )
+    reported_exception = exception_chain["entries"][0]
+    error_message = (
+        cast(str, reported_exception.get("message", exception_type))
+        if message is None
+        else message
+    )
+    stack_frames = cast(list[IssueStackFrame], reported_exception.get("stackFrames", []))
     attributes: IssueAttributes = {
         "title": title if title is not None else exception_type,
         "level": level,
@@ -1493,7 +1530,8 @@ def create_issue_attributes_from_exception(
             "type": exception_type,
             "mechanism": {"type": mechanism, "handled": handled},
         },
-        **({"stackFrames": cast(list[IssueStackFrame], stack_frames)} if stack_frames else {}),
+        "exceptionChain": cast(IssueExceptionChain, exception_chain),
+        **({"stackFrames": stack_frames} if stack_frames else {}),
         **({"breadcrumbs": breadcrumbs} if breadcrumbs is not None else {}),
         **({"breadcrumbsTruncated": True} if breadcrumbs_truncated else {}),
         **({"metadata": dict(metadata)} if metadata is not None else {}),
@@ -1680,7 +1718,12 @@ __all__ = [
     "IssueBreadcrumbLevel",
     "IssueBreadcrumbLevelInput",
     "IssueException",
+    "IssueExceptionChain",
+    "IssueExceptionChainEntry",
     "IssueExceptionMechanism",
+    "IssueExceptionMessageState",
+    "IssueExceptionRelationship",
+    "IssueExceptionStackFramesState",
     "IssueStackFrame",
     "LogAttributes",
     "LogBrewAiohttpClientSessionInstrumentation",

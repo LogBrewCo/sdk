@@ -37,7 +37,17 @@ struct NativeCrashFrameCaptureTests {
         let attributes = try issueAttributes(for: report)
         let frames = try #require(attributes["nativeStackFrames"] as? [[String: Any]])
 
-        #expect(Set(attributes.keys) == ["exception", "level", "metadata", "nativeStackFrames", "title"])
+        #expect(
+            Set(attributes.keys) == [
+                "exception",
+                "exceptionChain",
+                "level",
+                "metadata",
+                "nativeStackFrames",
+                "title",
+            ],
+        )
+        try assertNativeCrashChain(attributes)
         #expect(frames as NSArray == expectedNativeStackFrames() as NSArray)
         #expect(frames.allSatisfy { Set($0.keys) == ["architecture", "imageUuid", "instructionOffset"] })
 
@@ -100,4 +110,18 @@ struct NativeCrashFrameCaptureTests {
         #expect(frames.count == 1)
         #expect(frames[0]["instructionOffset"] as? String == "00000000000000ff")
     }
+}
+
+private func assertNativeCrashChain(_ attributes: [String: Any]) throws {
+    let exception = try #require(attributes["exception"] as? [String: Any])
+    let chain = try #require(attributes["exceptionChain"] as? [String: Any])
+    let entries = try #require(chain["entries"] as? [[String: Any]])
+    #expect(entries.count == 1)
+    #expect(chain["truncated"] as? Bool == false)
+    #expect(entries[0]["relationship"] as? String == "reported")
+    #expect(entries[0]["type"] as? String == exception["type"] as? String)
+    #expect(entries[0]["mechanism"] as? NSDictionary == exception["mechanism"] as? NSDictionary)
+    #expect(entries[0]["messageState"] as? String == "not_captured")
+    #expect(entries[0]["stackFramesState"] as? String == "not_captured")
+    #expect(entries[0]["stackFrames"] == nil)
 }

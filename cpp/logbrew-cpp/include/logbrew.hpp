@@ -23,6 +23,7 @@ inline constexpr unsigned int telemetry_context_schema_version = 1U;
 inline constexpr std::size_t max_context_tags = 32U;
 inline constexpr std::size_t max_breadcrumbs = 64U;
 inline constexpr std::size_t max_stack_frames = 32U;
+inline constexpr std::size_t max_exception_chain_entries = 8U;
 inline constexpr std::size_t max_span_events = 8U;
 inline constexpr std::size_t max_span_links = 8U;
 inline constexpr std::size_t max_metadata_entries = 128U;
@@ -286,6 +287,35 @@ struct IssueStackFrame {
   std::optional<std::string> debug_id;
 };
 
+enum class IssueExceptionRelationship { reported, cause, context, aggregate_member, suppressed };
+
+enum class IssueExceptionMessageState { captured, truncated, redacted, not_captured };
+
+enum class IssueExceptionStackState { captured, truncated, not_captured };
+
+/**
+ * One bounded node in an exception graph. Portable C++ does not expose a
+ * universal cause API, so callers provide nested/aggregate relationships
+ * explicitly and LogBrew validates them before queue admission.
+ */
+struct IssueExceptionChainEntry {
+  std::size_t id = 0U;
+  std::optional<std::size_t> parent_id;
+  IssueExceptionRelationship relationship = IssueExceptionRelationship::reported;
+  std::string type;
+  std::optional<std::string> message;
+  IssueExceptionMessageState message_state = IssueExceptionMessageState::not_captured;
+  std::optional<std::string> module;
+  std::optional<IssueMechanism> mechanism;
+  std::vector<IssueStackFrame> stack_frames;
+  IssueExceptionStackState stack_frames_state = IssueExceptionStackState::not_captured;
+};
+
+struct IssueExceptionChain {
+  std::vector<IssueExceptionChainEntry> entries;
+  bool truncated = false;
+};
+
 struct IssueBreadcrumb {
   std::string timestamp;
   std::optional<std::string> type;
@@ -300,6 +330,7 @@ struct IssueDetails {
   std::vector<IssueStackFrame> stack_frames;
   std::vector<IssueBreadcrumb> breadcrumbs;
   bool breadcrumbs_truncated = false;
+  std::optional<IssueExceptionChain> exception_chain;
 };
 
 struct SpanEvent {

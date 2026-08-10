@@ -114,6 +114,15 @@ catch (Exception error)
 
 Use `IssueExceptionInfo`, `IssueExceptionMechanism`, and `IssueStackFrame` when your game already owns normalized source-map or IL2CPP symbol evidence. Call `ClearBreadcrumbs()` at a player, session, consent, or account boundary. Breadcrumb data accepts at most eight flat finite primitive fields; it rejects nested objects and unbounded text.
 
+Automatic exception capture follows `InnerException` and
+`AggregateException` members into a bounded parent-first
+`IssueExceptionChain`. Messages remain redacted, per-node stack availability is
+explicit, and cycles or the eight-node cap mark truncation. Games with
+normalized IL2CPP evidence can build the same graph through
+`IssueExceptionChainEntry`; the reported root must match the legacy exception
+and frames. See the shared
+[exception-chain contract](../../docs/exception-chain-evidence.md).
+
 ## Span Events and Links
 
 Use bounded span events for important points inside one operation and links for causal-but-not-parent relationships such as queued work or batch fan-in:

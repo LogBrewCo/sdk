@@ -1,0 +1,353 @@
+import Foundation
+
+/// How one runtime exception relates to its earlier parent node.
+public enum IssueExceptionRelationship: String, Codable, Equatable, Sendable {
+    case reported
+    case cause
+    case context
+    case aggregateMember = "aggregate_member"
+    case suppressed
+}
+
+/// Explicit capture state for one exception message.
+public enum IssueExceptionMessageState: String, Codable, Equatable, Sendable {
+    case captured
+    case truncated
+    case redacted
+    case notCaptured = "not_captured"
+}
+
+/// Explicit capture state for one exception stack.
+public enum IssueExceptionStackFramesState: String, Codable, Equatable, Sendable {
+    case captured
+    case truncated
+    case notCaptured = "not_captured"
+}
+
+/// One parent-first runtime exception with its own bounded evidence states.
+public struct IssueExceptionChainEntry: Codable, Equatable, Sendable {
+    public let id: Int
+    public let parentId: Int?
+    public let relationship: IssueExceptionRelationship
+    public let type: String
+    public let message: String?
+    public let messageState: IssueExceptionMessageState
+    public let module: String?
+    public let mechanism: IssueExceptionMechanism?
+    public let stackFrames: [IssueStackFrame]?
+    public let stackFramesState: IssueExceptionStackFramesState
+
+    public init(
+        id: Int,
+        parentId: Int? = nil,
+        relationship: IssueExceptionRelationship,
+        type: String,
+        message: String? = nil,
+        messageState: IssueExceptionMessageState = .notCaptured,
+        module: String? = nil,
+        mechanism: IssueExceptionMechanism? = nil,
+        stackFrames: [IssueStackFrame]? = nil,
+        stackFramesState: IssueExceptionStackFramesState = .notCaptured,
+    ) {
+        self.id = id
+        self.parentId = parentId
+        self.relationship = relationship
+        self.type = type
+        self.message = message
+        self.messageState = messageState
+        self.module = module
+        self.mechanism = mechanism
+        self.stackFrames = stackFrames
+        self.stackFramesState = stackFramesState
+    }
+}
+
+/// At most eight parent-first runtime exceptions.
+public struct IssueExceptionChain: Codable, Equatable, Sendable {
+    public let entries: [IssueExceptionChainEntry]
+    public let truncated: Bool
+
+    public init(entries: [IssueExceptionChainEntry], truncated: Bool = false) {
+        self.entries = entries
+        self.truncated = truncated
+    }
+}
+
+private struct PendingSwiftException {
+    let error: any Error
+    let parentId: Int?
+    let relationship: IssueExceptionRelationship
+    let mechanism: IssueExceptionMechanism
+}
+
+private let maximumIssueExceptions = 8
+private let multipleUnderlyingErrorsKey = "NSMultipleUnderlyingErrors"
+
+func swiftExceptionChain(
+    from error: any Error,
+    rootType: String,
+    rootMechanism: IssueExceptionMechanism,
+    rootFrame: IssueStackFrame,
+) -> IssueExceptionChain {
+    var pending = [PendingSwiftException(
+        error: error,
+        parentId: nil,
+        relationship: .reported,
+        mechanism: rootMechanism,
+    )]
+    var entries: [IssueExceptionChainEntry] = []
+    var seenErrors: [NSError] = []
+    var truncated = false
+    while !pending.isEmpty {
+        let current = pending.removeFirst()
+        let nsError = current.error as NSError
+        if swiftErrorWasSeen(nsError, in: seenErrors) {
+            truncated = true
+            continue
+        }
+        guard entries.count < maximumIssueExceptions else {
+            truncated = true
+            break
+        }
+        seenErrors.append(nsError)
+        let id = entries.count
+        entries.append(swiftExceptionEntry(current, id: id, rootType: rootType, rootFrame: rootFrame))
+        pending.append(contentsOf: swiftPendingChildren(nsError, parentId: id))
+    }
+    return IssueExceptionChain(entries: entries, truncated: truncated || !pending.isEmpty)
+}
+
+private func swiftErrorWasSeen(_ error: NSError, in seenErrors: [NSError]) -> Bool {
+    let identity = ObjectIdentifier(error)
+    return seenErrors.contains { ObjectIdentifier($0) == identity }
+}
+
+private func swiftExceptionEntry(
+    _ current: PendingSwiftException,
+    id: Int,
+    rootType: String,
+    rootFrame: IssueStackFrame,
+) -> IssueExceptionChainEntry {
+    let type = id == 0 ? rootType : safeSwiftErrorType(current.error)
+    return IssueExceptionChainEntry(
+        id: id,
+        parentId: current.parentId,
+        relationship: current.relationship,
+        type: type,
+        messageState: .redacted,
+        module: swiftExceptionModule(type),
+        mechanism: current.mechanism,
+        stackFrames: id == 0 ? [rootFrame] : nil,
+        stackFramesState: id == 0 ? .captured : .notCaptured,
+    )
+}
+
+private func swiftPendingChildren(
+    _ error: NSError,
+    parentId: Int,
+) -> [PendingSwiftException] {
+    swiftUnderlyingErrors(error).map { child in
+        PendingSwiftException(
+            error: child.error,
+            parentId: parentId,
+            relationship: child.relationship,
+            mechanism: IssueExceptionMechanism(
+                type: child.relationship == .aggregateMember
+                    ? "swift.aggregate_member"
+                    : "swift.underlying_error",
+                handled: true,
+            ),
+        )
+    }
+}
+
+private func swiftUnderlyingErrors(
+    _ error: NSError,
+) -> [(error: any Error, relationship: IssueExceptionRelationship)] {
+    if let aggregate = error.userInfo[multipleUnderlyingErrorsKey] as? [any Error], !aggregate.isEmpty {
+        return aggregate.map { ($0, .aggregateMember) }
+    }
+    if let underlying = error.userInfo[NSUnderlyingErrorKey] as? any Error {
+        return [(underlying, .cause)]
+    }
+    return []
+}
+
+func safeSwiftErrorType(_ error: any Error) -> String {
+    let reflected = String(reflecting: Swift.type(of: error))
+    let normalized = reflected.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty, !containsForbiddenControl(normalized) else {
+        return "Swift.Error"
+    }
+    let filtered = normalized.filter { $0 != "?" && $0 != "#" }
+    return String(filtered.prefix(256))
+}
+
+private func swiftExceptionModule(_ type: String) -> String? {
+    guard let delimiter = type.lastIndex(of: ".") else {
+        return nil
+    }
+    let value = String(type[..<delimiter])
+    return value.isEmpty ? nil : String(value.prefix(512))
+}
+
+func normalizeIssueExceptionChain(
+    _ value: IssueExceptionChain,
+    exception: IssueException?,
+    stackFrames: [IssueStackFrame]?,
+) throws -> IssueExceptionChain {
+    guard (1 ... maximumIssueExceptions).contains(value.entries.count) else {
+        throw issueValidationError("issue exceptionChain entries must contain 1-8 exceptions")
+    }
+    let entries = try value.entries.enumerated().map { index, entry in
+        try validateExceptionChainTopology(entry, at: index)
+        return try normalizeIssueExceptionChainEntry(entry)
+    }
+    try validateReportedException(entries[0], exception: exception, stackFrames: stackFrames)
+    return IssueExceptionChain(entries: entries, truncated: value.truncated)
+}
+
+private func validateExceptionChainTopology(
+    _ entry: IssueExceptionChainEntry,
+    at index: Int,
+) throws {
+    guard entry.id == index else {
+        throw issueValidationError(
+            "issue exceptionChain ids must be contiguous and match array order",
+        )
+    }
+    if index == 0 {
+        guard entry.relationship == .reported, entry.parentId == nil else {
+            throw issueValidationError(
+                "issue exceptionChain entry 0 must be the parentless reported exception",
+            )
+        }
+        return
+    }
+    guard entry.relationship != .reported,
+          let parentId = entry.parentId,
+          parentId >= 0,
+          parentId < index
+    else {
+        throw issueValidationError("issue exceptionChain parent relationship is invalid")
+    }
+}
+
+private func validateReportedException(
+    _ root: IssueExceptionChainEntry,
+    exception: IssueException?,
+    stackFrames: [IssueStackFrame]?,
+) throws {
+    guard let exception,
+          root.type == exception.type,
+          root.mechanism == exception.mechanism
+    else {
+        throw issueValidationError(
+            "issue exceptionChain reported exception must match exception",
+        )
+    }
+    let stackMatches = switch root.stackFramesState {
+    case .notCaptured:
+        stackFrames == nil
+    case .captured, .truncated:
+        root.stackFrames == stackFrames
+    }
+    guard stackMatches else {
+        throw issueValidationError(
+            "issue exceptionChain reported stack must match stackFrames",
+        )
+    }
+}
+
+private func normalizeIssueExceptionChainEntry(
+    _ value: IssueExceptionChainEntry,
+) throws -> IssueExceptionChainEntry {
+    let type = try issueText(
+        value.type,
+        label: "issue exceptionChain type",
+        maximum: 256,
+        disallowLocationDelimiters: true,
+    )
+    let message = try normalizedExceptionMessage(value)
+    let module = try value.module.map {
+        try issueText(
+            $0,
+            label: "issue exceptionChain module",
+            maximum: 512,
+            disallowLocationDelimiters: true,
+        )
+    }
+    let mechanism = try normalizedExceptionMechanism(value.mechanism, type: type)
+    let stack = try normalizedExceptionStack(value)
+    return IssueExceptionChainEntry(
+        id: value.id,
+        parentId: value.parentId,
+        relationship: value.relationship,
+        type: type,
+        message: message,
+        messageState: value.messageState,
+        module: module,
+        mechanism: mechanism,
+        stackFrames: stack.frames,
+        stackFramesState: stack.state,
+    )
+}
+
+private func normalizedExceptionMessage(
+    _ value: IssueExceptionChainEntry,
+) throws -> String? {
+    switch value.messageState {
+    case .captured, .truncated:
+        guard let message = value.message else {
+            throw issueValidationError("issue exceptionChain message must match messageState")
+        }
+        return try issueText(
+            message,
+            label: "issue exceptionChain message",
+            maximum: 1024,
+        )
+    case .redacted, .notCaptured:
+        guard value.message == nil else {
+            throw issueValidationError("issue exceptionChain message must match messageState")
+        }
+        return nil
+    }
+}
+
+private func normalizedExceptionMechanism(
+    _ mechanism: IssueExceptionMechanism?,
+    type: String,
+) throws -> IssueExceptionMechanism? {
+    guard let mechanism else {
+        return nil
+    }
+    let normalized = try validateIssueException(
+        IssueException(type: type, mechanism: mechanism),
+    )
+    guard let result = normalized.mechanism else {
+        throw issueValidationError("issue exception mechanism type is invalid")
+    }
+    return result
+}
+
+private func normalizedExceptionStack(
+    _ value: IssueExceptionChainEntry,
+) throws -> (frames: [IssueStackFrame]?, state: IssueExceptionStackFramesState) {
+    switch value.stackFramesState {
+    case .captured, .truncated:
+        guard let frames = value.stackFrames, !frames.isEmpty else {
+            throw issueValidationError(
+                "issue exceptionChain stackFrames must match stackFramesState",
+            )
+        }
+        let normalized = try normalizeIssueStackFrames(frames)
+        return (normalized, frames.count > 32 ? .truncated : value.stackFramesState)
+    case .notCaptured:
+        guard value.stackFrames == nil else {
+            throw issueValidationError(
+                "issue exceptionChain stackFrames must match stackFramesState",
+            )
+        }
+        return (nil, .notCaptured)
+    }
+}

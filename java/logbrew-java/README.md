@@ -212,9 +212,9 @@ try {
 }
 ```
 
-The automatic projection records the exception type plus at most 32 newest-first frames with basename, line, column, function, and module identity. It never records the exception message, raw stack text, source lines, local variables, or absolute paths. Add a display-safe issue message explicitly only when your application has approved it.
+The automatic projection records the exception type plus at most 32 newest-first frames with basename, line, column, function, and module identity. It also walks `getCause()` and suppressed exceptions into a bounded parent-first graph, marks automatic messages redacted rather than copying them, and reports missing or truncated per-node stacks explicitly. Cycles and the eight-node cap set the graph's truncation receipt. It never records the exception message, raw stack text, source lines, local variables, or absolute paths. Add a display-safe issue message explicitly only when your application has approved it. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
 
-For app-owned diagnostics, `IssueException`, `IssueExceptionMechanism`, `IssueStackFrame`, and `IssueBreadcrumb` expose the same validated event contract. Frame lists are capped at 32. Breadcrumb lists are capped at 64 and stay caller-supplied rather than process-global; each breadcrumb accepts an RFC 3339 timestamp, stable category/type, normalized level, bounded message, and at most eight flat finite primitive data fields. Use `breadcrumbsTruncated(true)` when older entries were evicted before the snapshot.
+For app-owned diagnostics, `IssueException`, `IssueExceptionMechanism`, `IssueExceptionChain`, `IssueExceptionChainEntry`, `IssueStackFrame`, and `IssueBreadcrumb` expose the same validated event contract. Frame lists are capped at 32. Breadcrumb lists are capped at 64 and stay caller-supplied rather than process-global; each breadcrumb accepts an RFC 3339 timestamp, stable category/type, normalized level, bounded message, and at most eight flat finite primitive data fields. Use `breadcrumbsTruncated(true)` when older entries were evicted before the snapshot.
 
 ## Product and Network Timelines
 

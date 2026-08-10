@@ -233,13 +233,8 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         return IssueAttributes(
             title: hangState == nil ? "Native application crash" : "Native application hang",
             level: hangState == .recovered ? .error : .fatal,
-            exception: IssueException(
-                type: hangState == nil ? "AppleNativeCrash" : "AppleNativeHang",
-                mechanism: IssueExceptionMechanism(
-                    type: mechanism.name,
-                    handled: hangState == .recovered,
-                ),
-            ),
+            exception: issueException,
+            exceptionChain: nativeCrashExceptionChain(for: issueException),
             metadata: metadata,
             nativeStackFrames: nativeStackFrames,
         )
@@ -262,6 +257,10 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
               attributes["level"] as? String == issueAttributes.level.canonicalValue,
               attributes["message"] == nil,
               exceptionMatches(attributes["exception"]),
+              nativeCrashExceptionChainMatches(
+                  attributes["exceptionChain"],
+                  expected: issueException,
+              ),
               attributes["stackFrames"] == nil,
               attributes["breadcrumbs"] == nil,
               attributes["breadcrumbsTruncated"] == nil,
@@ -303,6 +302,16 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
                 "handled": hangState == .recovered,
             ],
         ] as NSDictionary
+    }
+
+    private var issueException: IssueException {
+        IssueException(
+            type: hangState == nil ? "AppleNativeCrash" : "AppleNativeHang",
+            mechanism: IssueExceptionMechanism(
+                type: mechanism.name,
+                handled: hangState == .recovered,
+            ),
+        )
     }
 
     private func exceptionMatches(_ value: Any?) -> Bool {

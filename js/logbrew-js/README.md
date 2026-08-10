@@ -102,7 +102,7 @@ npx logbrew-release-artifacts upload-js \
 
 Non-loopback endpoints require `--allow-hosted`, a UUID `projectId` created by `manifest-js --project-id`, HTTPS, and no embedded auth values, query strings, or fragments. Local loopback preparation remains valid without a project ID. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
 
-When you capture a JavaScript error, use `createIssueAttributesFromError()` to keep error metadata structured and source-map-friendly without sending raw stack text by default. Pass a Debug ID map from your app-owned build setup when you want the issue event to carry release-artifact metadata:
+When you capture a JavaScript error, use `createIssueAttributesFromError()` to keep error metadata structured and source-map-friendly without sending raw stack text by default. The helper also follows `Error.cause` and `AggregateError.errors` into a bounded parent-first exception graph. Automatic messages are marked redacted, every node reports whether frames were captured, truncated, or unavailable, and unsafe accessors, cycles, or the eight-node cap mark the graph truncated instead of inventing evidence. React, browser, Node, Next.js, and React Native helpers reuse this same core projection. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md). Pass a Debug ID map from your app-owned build setup when you want the issue event to carry release-artifact metadata:
 
 ```js
 import { createIssueAttributesFromError, LogBrewClient } from "@logbrew/sdk";

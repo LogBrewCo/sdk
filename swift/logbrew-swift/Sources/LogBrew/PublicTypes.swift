@@ -169,6 +169,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
     public let level: IssueLevel
     public let message: String?
     public let exception: IssueException?
+    public let exceptionChain: IssueExceptionChain?
     public let stackFrames: [IssueStackFrame]?
     public let breadcrumbs: [IssueBreadcrumb]?
     public let breadcrumbsTruncated: Bool?
@@ -181,6 +182,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         level: IssueLevel,
         message: String? = nil,
         exception: IssueException? = nil,
+        exceptionChain: IssueExceptionChain? = nil,
         stackFrames: [IssueStackFrame]? = nil,
         breadcrumbs: [IssueBreadcrumb]? = nil,
         breadcrumbsTruncated: Bool? = nil,
@@ -191,6 +193,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         self.level = level
         self.message = message
         self.exception = exception
+        self.exceptionChain = exceptionChain
         self.stackFrames = stackFrames
         self.breadcrumbs = breadcrumbs
         self.breadcrumbsTruncated = breadcrumbsTruncated
@@ -205,6 +208,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         level: IssueLevel,
         message: String? = nil,
         exception: IssueException? = nil,
+        exceptionChain: IssueExceptionChain? = nil,
         stackFrames: [IssueStackFrame]? = nil,
         breadcrumbs: [IssueBreadcrumb]? = nil,
         breadcrumbsTruncated: Bool? = nil,
@@ -216,6 +220,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         self.level = level
         self.message = message
         self.exception = exception
+        self.exceptionChain = exceptionChain
         self.stackFrames = stackFrames
         self.breadcrumbs = breadcrumbs
         self.breadcrumbsTruncated = breadcrumbsTruncated

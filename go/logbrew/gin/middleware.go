@@ -314,14 +314,25 @@ func (m *middleware) capture(
 			Metadata: metadata,
 		}
 		if recovered != nil {
+			mechanism := &logbrew.IssueExceptionMechanism{
+				Type:    "gin.recovery",
+				Handled: false,
+			}
 			issueAttributes.Exception = &logbrew.IssueException{
-				Type: panicType(recovered),
-				Mechanism: &logbrew.IssueExceptionMechanism{
-					Type:    "gin.recovery",
-					Handled: false,
-				},
+				Type:      panicType(recovered),
+				Mechanism: mechanism,
 			}
 			issueAttributes.StackFrames = panicFrames
+			chain, chainErr := logbrew.CreateIssueExceptionChain(logbrew.IssueExceptionChainInput{
+				Value:       recovered,
+				Exception:   issueAttributes.Exception,
+				StackFrames: panicFrames,
+			})
+			if chainErr != nil {
+				m.report(chainErr)
+			} else {
+				issueAttributes.ExceptionChain = chain
+			}
 		}
 		issue := logbrew.IssueAttributesWithTrace(c.Request.Context(), issueAttributes)
 		if err := m.client.Issue(m.eventID("issue"), timestamp, issue); err != nil {
@@ -382,9 +393,9 @@ func statusCodeClass(statusCode int) string {
 }
 
 func panicType(recovered any) string {
-	switch recovered.(type) {
+	switch typed := recovered.(type) {
 	case error:
-		return "error"
+		return logbrew.IssueExceptionType(typed)
 	case string:
 		return "string"
 	default:

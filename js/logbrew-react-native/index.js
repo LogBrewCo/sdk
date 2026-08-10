@@ -10,6 +10,7 @@ import {
 } from "@logbrew/sdk";
 import {
   runtimeReactNativeDebugIdMap,
+  sanitizeReactNativeIssueExceptionChain,
   sanitizeReactNativeIssueMetadata,
   sanitizeReactNativeIssueStackFrames
 } from "./metadata.js";
@@ -625,11 +626,13 @@ export function createReactNativeErrorEvent(error, {
     trace: traceContext
   });
   const stackFrames = sanitizeReactNativeIssueStackFrames(attributes.stackFrames);
+  const exceptionChain = sanitizeReactNativeIssueExceptionChain(attributes.exceptionChain);
   return {
     id: id ?? idFactory({ error, message: details.message, screen }),
     timestamp: timestamp ?? now(),
     attributes: {
       ...attributes,
+      ...(exceptionChain ? { exceptionChain } : {}),
       ...(stackFrames ? { stackFrames } : {}),
       title: `React Native error: ${details.message}`,
       message: details.message,

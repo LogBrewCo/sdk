@@ -44,6 +44,7 @@ OPTIONAL_ATTRIBUTES = {
         "metadata",
         "stackFrames",
         "exception",
+        "exceptionChain",
         "breadcrumbs",
         "breadcrumbsTruncated",
         "context",
@@ -85,6 +86,15 @@ RESOURCE_FIELDS = {
 CONTEXT_TAG_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 ISSUE_DIAGNOSTIC_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
 ISSUE_BREADCRUMB_DATA_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+ISSUE_EXCEPTION_RELATIONSHIPS = {
+    "reported",
+    "cause",
+    "context",
+    "aggregate_member",
+    "suppressed",
+}
+ISSUE_EXCEPTION_MESSAGE_STATES = {"captured", "truncated", "redacted", "not_captured"}
+ISSUE_EXCEPTION_STACK_STATES = {"captured", "truncated", "not_captured"}
 
 
 class ValidationError(Exception):
@@ -324,10 +334,18 @@ def _validate_issue_stack_frames(index: int, attributes: dict[str, Any]) -> None
     frames = attributes.get("stackFrames")
     if frames is None:
         return
+    _validate_issue_stack_frame_values(index, frames, f"event {index} issue stackFrames")
+
+
+def _validate_issue_stack_frame_values(index: int, frames: Any, field_label: str) -> None:
     if not isinstance(frames, list) or not 1 <= len(frames) <= 32:
-        raise ValidationError(f"event {index} issue stackFrames must contain 1-32 entries")
+        raise ValidationError(f"{field_label} must contain 1-32 entries")
     for frame_index, frame in enumerate(frames):
-        label = f"event {index} issue stack frame {frame_index}"
+        label = (
+            f"event {index} issue stack frame {frame_index}"
+            if field_label == f"event {index} issue stackFrames"
+            else f"{field_label} frame {frame_index}"
+        )
         if not isinstance(frame, dict):
             raise ValidationError(f"{label} must be an object")
         _reject_unknown_keys(
@@ -413,6 +431,108 @@ def _validate_issue_exception(index: int, attributes: dict[str, Any]) -> None:
         raise ValidationError(f"{label} mechanism type is invalid")
     if not isinstance(mechanism.get("handled"), bool):
         raise ValidationError(f"{label} mechanism handled must be a boolean")
+
+
+def _validate_issue_exception_chain(index: int, attributes: dict[str, Any]) -> None:
+    chain = attributes.get("exceptionChain")
+    if chain is None:
+        return
+    label = f"event {index} issue exceptionChain"
+    if not isinstance(chain, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(chain, {"entries", "truncated"}, label)
+    entries = chain.get("entries")
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 8:
+        raise ValidationError(f"{label} entries must contain 1-8 exceptions")
+    if not isinstance(chain.get("truncated"), bool):
+        raise ValidationError(f"{label} truncated must be a boolean")
+
+    for entry_index, entry in enumerate(entries):
+        _validate_issue_exception_chain_entry(index, entry_index, entry)
+
+    reported = entries[0]
+    exception = attributes.get("exception")
+    if not isinstance(exception, dict) or exception != {
+        key: reported[key] for key in ("type", "mechanism") if key in reported
+    }:
+        raise ValidationError(f"{label} reported exception must match exception")
+
+    reported_stack_state = reported["stackFramesState"]
+    reported_stack = reported.get("stackFrames")
+    legacy_stack = attributes.get("stackFrames")
+    if reported_stack_state == "not_captured":
+        if legacy_stack is not None:
+            raise ValidationError(f"{label} reported stack must match stackFrames")
+    elif reported_stack != legacy_stack:
+        raise ValidationError(f"{label} reported stack must match stackFrames")
+
+
+def _validate_issue_exception_chain_entry(index: int, entry_index: int, value: Any) -> None:
+    label = f"event {index} issue exceptionChain entry {entry_index}"
+    if not isinstance(value, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(
+        value,
+        {
+            "id",
+            "parentId",
+            "relationship",
+            "type",
+            "message",
+            "messageState",
+            "module",
+            "mechanism",
+            "stackFrames",
+            "stackFramesState",
+        },
+        label,
+    )
+    entry_id = value.get("id")
+    if isinstance(entry_id, bool) or entry_id != entry_index:
+        raise ValidationError(f"{label} id must be the contiguous parent-first index")
+    relationship = value.get("relationship")
+    parent_id = value.get("parentId")
+    if entry_index == 0:
+        if relationship != "reported" or parent_id is not None:
+            raise ValidationError(f"{label} must be the parentless reported exception")
+    elif (
+        relationship not in ISSUE_EXCEPTION_RELATIONSHIPS - {"reported"}
+        or isinstance(parent_id, bool)
+        or not isinstance(parent_id, int)
+        or not 0 <= parent_id < entry_index
+    ):
+        raise ValidationError(f"{label} must reference an earlier parent")
+
+    if not _valid_diagnostic_text(value.get("type"), 256, reject_location=True):
+        raise ValidationError(f"{label} type is invalid")
+    if "module" in value and not _valid_diagnostic_text(
+        value["module"], 512, reject_location=True
+    ):
+        raise ValidationError(f"{label} module is invalid")
+    if "mechanism" in value:
+        _validate_issue_exception(
+            index,
+            {"exception": {"type": value["type"], "mechanism": value["mechanism"]}},
+        )
+
+    message_state = value.get("messageState")
+    if message_state not in ISSUE_EXCEPTION_MESSAGE_STATES:
+        raise ValidationError(f"{label} messageState is invalid")
+    message = value.get("message")
+    if message_state in {"captured", "truncated"}:
+        if not _valid_diagnostic_text(message, 1_024):
+            raise ValidationError(f"{label} message is invalid")
+    elif "message" in value:
+        raise ValidationError(f"{label} message must be absent for {message_state}")
+
+    stack_state = value.get("stackFramesState")
+    if stack_state not in ISSUE_EXCEPTION_STACK_STATES:
+        raise ValidationError(f"{label} stackFramesState is invalid")
+    stack_frames = value.get("stackFrames")
+    if stack_state in {"captured", "truncated"}:
+        _validate_issue_stack_frame_values(index, stack_frames, f"{label} stackFrames")
+    elif "stackFrames" in value:
+        raise ValidationError(f"{label} stackFrames must be absent for {stack_state}")
 
 
 def _validate_issue_breadcrumb_data(label: str, data: Any) -> None:
@@ -588,6 +708,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
         if event_type == "issue":
             _validate_issue_stack_frames(index, attributes)
             _validate_issue_exception(index, attributes)
+            _validate_issue_exception_chain(index, attributes)
             _validate_issue_breadcrumbs(index, attributes)
 
         if event_type == "metric":

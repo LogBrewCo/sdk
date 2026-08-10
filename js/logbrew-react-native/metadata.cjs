@@ -68,6 +68,22 @@ function sanitizeReactNativeIssueStackFrames(stackFrames) {
   }));
 }
 
+function sanitizeReactNativeIssueExceptionChain(exceptionChain) {
+  if (!exceptionChain || !Array.isArray(exceptionChain.entries)) {
+    return undefined;
+  }
+  return {
+    ...exceptionChain,
+    entries: exceptionChain.entries.map((entry) => {
+      const stackFrames = sanitizeReactNativeIssueStackFrames(entry.stackFrames);
+      return {
+        ...entry,
+        ...(stackFrames ? { stackFrames } : {})
+      };
+    })
+  };
+}
+
 function runtimeReactNativeDebugIdMap() {
   try {
     const registry = globalThis?.[REACT_NATIVE_DEBUG_ID_REGISTRY];
@@ -170,6 +186,7 @@ module.exports = {
   createSafeReactNativeMetadata,
   runtimeReactNativeDebugIdMap,
   safeReactNativeMetadataFactoryResult,
+  sanitizeReactNativeIssueExceptionChain,
   sanitizeReactNativeIssueMetadata,
   sanitizeReactNativeIssueStackFrames
 };

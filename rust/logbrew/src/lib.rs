@@ -31,8 +31,9 @@ pub use http_client::ReqwestCaptureError;
 pub use http_client::{HttpClientSpan, HttpClientSpanEvents};
 pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
 pub use issue_diagnostics::{
-    IssueBreadcrumb, IssueBreadcrumbBuffer, IssueException, IssueExceptionMechanism,
-    IssueStackFrame,
+    IssueBreadcrumb, IssueBreadcrumbBuffer, IssueException, IssueExceptionChain,
+    IssueExceptionChainEntry, IssueExceptionMechanism, IssueExceptionMessageState,
+    IssueExceptionRelationship, IssueExceptionStackFramesState, IssueStackFrame,
 };
 pub use metric::MetricEvent;
 #[cfg(feature = "opentelemetry-exporter")]
@@ -543,7 +544,9 @@ pub struct IssueEvent {
     level: String,
     message: Option<String>,
     exception: Option<IssueException>,
+    exception_chain: Option<IssueExceptionChain>,
     stack_frames: Option<Vec<IssueStackFrame>>,
+    stack_frames_truncated: bool,
     breadcrumbs: Option<Vec<IssueBreadcrumb>>,
     breadcrumbs_truncated: bool,
     metadata: Option<Map<String, Value>>,
@@ -558,7 +561,9 @@ impl IssueEvent {
             level: level.into(),
             message: None,
             exception: None,
+            exception_chain: None,
             stack_frames: None,
+            stack_frames_truncated: false,
             breadcrumbs: None,
             breadcrumbs_truncated: false,
             metadata: None,
@@ -581,7 +586,7 @@ impl IssueEvent {
 
     /// Create an error-level issue with an explicit capture mechanism and handled state.
     pub fn from_error_with_mechanism<E>(
-        _error: &E,
+        error: &E,
         mechanism_type: impl Into<String>,
         handled: bool,
     ) -> Self
@@ -589,10 +594,14 @@ impl IssueEvent {
         E: std::error::Error + ?Sized,
     {
         let exception_type = issue_diagnostics::error_type_name::<E>();
-        Self::new(exception_type.clone(), "error").with_exception(
-            IssueException::new(exception_type)
-                .with_mechanism(IssueExceptionMechanism::new(mechanism_type, handled)),
-        )
+        let mechanism = IssueExceptionMechanism::new(mechanism_type, handled);
+        let exception =
+            IssueException::new(exception_type.clone()).with_mechanism(mechanism.clone());
+        let exception_chain =
+            IssueExceptionChain::from_error(error, exception_type.clone(), mechanism);
+        Self::new(exception_type, "error")
+            .with_exception(exception)
+            .with_exception_chain(exception_chain)
     }
 
     /// Create a critical issue from a panic payload without formatting its text.
@@ -634,11 +643,10 @@ impl IssueEvent {
             Value::String("panic.message,stack.text,locals".to_string()),
         );
 
+        let mechanism = IssueExceptionMechanism::new(mechanism_type, handled);
         Self::new("panic", "critical")
-            .with_exception(
-                IssueException::new("panic")
-                    .with_mechanism(IssueExceptionMechanism::new(mechanism_type, handled)),
-            )
+            .with_exception(IssueException::new("panic").with_mechanism(mechanism.clone()))
+            .with_exception_chain(IssueExceptionChain::reported_panic(mechanism))
             .with_metadata(metadata)
     }
 
@@ -667,6 +675,12 @@ impl IssueEvent {
         self
     }
 
+    /// Attach an optional bounded parent-first exception chain.
+    pub fn with_exception_chain(mut self, exception_chain: IssueExceptionChain) -> Self {
+        self.exception_chain = Some(exception_chain);
+        self
+    }
+
     /// Append one optional privacy-bounded newest-first stack frame.
     pub fn with_stack_frame(mut self, frame: IssueStackFrame) -> Self {
         self.stack_frames.get_or_insert_with(Vec::new).push(frame);
@@ -679,6 +693,12 @@ impl IssueEvent {
         I: IntoIterator<Item = IssueStackFrame>,
     {
         self.stack_frames = Some(frames.into_iter().collect());
+        self
+    }
+
+    /// Mark that more stack frames existed than the retained 32-frame payload.
+    pub fn with_stack_frames_truncated(mut self, truncated: bool) -> Self {
+        self.stack_frames_truncated = truncated;
         self
     }
 
@@ -745,6 +765,16 @@ impl IssueEvent {
                         .map(|frame| frame.attributes().map(Value::Object))
                         .collect::<Result<Vec<_>, _>>()?,
                 ),
+            );
+        }
+        if let Some(exception_chain) = &self.exception_chain {
+            map.insert(
+                "exceptionChain".to_string(),
+                Value::Object(exception_chain.attributes(
+                    self.exception.as_ref(),
+                    self.stack_frames.as_ref(),
+                    self.stack_frames_truncated,
+                )?),
             );
         }
         if let Some(breadcrumbs) = &self.breadcrumbs {

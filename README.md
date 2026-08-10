@@ -11,7 +11,7 @@ This repository contains the public SDK packages, framework integrations, event 
 ## What You Can Capture
 
 - Releases and environments for deployment context.
-- Issues and handled errors with typed exception, mechanism, handled-state, bounded frame, and breadcrumb fields without raw stack text by default.
+- Issues and handled errors with a bounded parent-first exception graph, typed mechanism and handled state, explicit message/stack evidence states, structured frames, and breadcrumbs without raw stack text by default.
 - Logs from direct calls or app-owned logger integrations.
 - Spans and W3C `traceparent` context for request tracing.
 - Actions for important user or system events.
@@ -225,6 +225,13 @@ $client->flush(RecordingTransport::alwaysAccept());
 ```
 
 Each package README has ecosystem-specific install commands, logger integration examples, framework setup, copyable examples, and transport details. If your app does not use a framework integration, skip that package.
+
+Automatic issue helpers preserve native cause, context, aggregate, and
+suppressed relationships when their runtime exposes them. The root remains
+compatible with the existing `exception` and `stackFrames` fields; every
+missing, redacted, or truncated message/stack state is explicit and no SDK
+invents historical evidence. See the
+[exception-chain evidence contract](docs/exception-chain-evidence.md).
 
 ## Metrics
 

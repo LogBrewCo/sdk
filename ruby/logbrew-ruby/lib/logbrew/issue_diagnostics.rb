@@ -11,7 +11,10 @@ module LogBrew
   module IssueDiagnostics
     MAX_STACK_FRAMES = 32
     MAX_BREADCRUMBS = 64
+    MAX_EXCEPTIONS = 8
     MAX_EXCEPTION_TYPE = 256
+    MAX_EXCEPTION_MESSAGE = 1_024
+    MAX_EXCEPTION_MODULE = 512
     MAX_MECHANISM_TYPE = 64
     MAX_FRAME_FILENAME = 2_048
     MAX_FRAME_FUNCTION = 256
@@ -71,10 +74,17 @@ module LogBrew
         )
       }
       attributes["message"] = message unless message.nil?
+      root_stack = include_stack_frames ? stack_evidence_from_exception(error) : nil
       if include_stack_frames
-        frames = stack_frames_from_exception(error)
+        frames = root_stack.fetch(:frames)
         attributes["stackFrames"] = frames unless frames.empty?
       end
+      attributes["exceptionChain"] = exception_chain_from_exception(
+        error,
+        root_exception: attributes.fetch("exception"),
+        root_stack: root_stack,
+        include_stack_frames: include_stack_frames
+      )
       attributes["breadcrumbs"] = breadcrumbs unless breadcrumbs.nil?
       attributes["breadcrumbsTruncated"] = true if breadcrumbs_truncated
       attributes["metadata"] = metadata unless metadata.nil?
@@ -180,6 +190,13 @@ module LogBrew
         payload["message"] = message.dup
       end
       payload["exception"] = validate_exception(read_value(attributes, "exception")) if has_key?(attributes, "exception")
+      if has_key?(attributes, "exceptionChain")
+        payload["exceptionChain"] = validate_exception_chain(
+          read_value(attributes, "exceptionChain"),
+          payload["exception"],
+          has_key?(attributes, "stackFrames") ? validate_stack_frames(read_value(attributes, "stackFrames")) : nil
+        )
+      end
       payload["stackFrames"] = validate_stack_frames(read_value(attributes, "stackFrames")) if has_key?(attributes, "stackFrames")
       payload["breadcrumbs"] = validate_breadcrumbs(read_value(attributes, "breadcrumbs")) if has_key?(attributes, "breadcrumbs")
       if has_key?(attributes, "breadcrumbsTruncated")
@@ -228,6 +245,110 @@ module LogBrew
         "handled" => handled
       }
       value
+    end
+
+    def validate_exception_chain(input, legacy_exception, legacy_frames)
+      unless input.is_a?(Hash)
+        raise validation("issue exceptionChain must be an object")
+      end
+      reject_unknown_keys(input, %w[entries truncated], "issue exceptionChain")
+      entries_input = read_required(input, "entries", "issue exceptionChain entries")
+      unless entries_input.is_a?(Array) && entries_input.length.between?(1, MAX_EXCEPTIONS)
+        raise validation("issue exceptionChain entries must contain 1-8 exceptions")
+      end
+      truncated = read_required(input, "truncated", "issue exceptionChain truncated")
+      unless truncated == true || truncated == false
+        raise validation("issue exceptionChain truncated must be a boolean")
+      end
+
+      entries = entries_input.each_with_index.map do |entry_input, index|
+        validate_exception_chain_entry(entry_input, index)
+      end
+      root = entries.fetch(0)
+      root_exception = { "type" => root.fetch("type") }
+      root_exception["mechanism"] = root.fetch("mechanism") if root.key?("mechanism")
+      unless legacy_exception.is_a?(Hash) && root_exception == legacy_exception
+        raise validation("issue exceptionChain reported exception must match exception")
+      end
+      if root.fetch("stackFramesState") == "not_captured"
+        unless legacy_frames.nil?
+          raise validation("issue exceptionChain reported stack must match stackFrames")
+        end
+      elsif root["stackFrames"] != legacy_frames
+        raise validation("issue exceptionChain reported stack must match stackFrames")
+      end
+      { "entries" => entries, "truncated" => truncated }
+    end
+
+    def validate_exception_chain_entry(input, index)
+      unless input.is_a?(Hash)
+        raise validation("issue exceptionChain entry #{index} must be an object")
+      end
+      reject_unknown_keys(
+        input,
+        %w[id parentId relationship type message messageState module mechanism stackFrames stackFramesState],
+        "issue exceptionChain entry #{index}"
+      )
+      unless read_required(input, "id", "issue exceptionChain entry id") == index
+        raise validation("issue exceptionChain ids must be contiguous and match array order")
+      end
+      relationship = read_required(input, "relationship", "issue exceptionChain relationship")
+      if index.zero?
+        unless relationship == "reported" && !has_key?(input, "parentId")
+          raise validation("issue exceptionChain entry 0 must be the parentless reported exception")
+        end
+      else
+        parent_id = read_value(input, "parentId")
+        unless %w[cause context aggregate_member suppressed].include?(relationship) &&
+               parent_id.is_a?(Integer) && parent_id.between?(0, index - 1)
+          raise validation("issue exceptionChain parent relationship is invalid")
+        end
+      end
+
+      value = {
+        "id" => index,
+        "relationship" => relationship,
+        "type" => require_text(
+          "issue exceptionChain type",
+          read_required(input, "type", "issue exceptionChain type"),
+          MAX_EXCEPTION_TYPE,
+          true
+        )
+      }
+      value["parentId"] = read_value(input, "parentId") unless index.zero?
+      message_state = read_required(input, "messageState", "issue exceptionChain messageState")
+      if %w[captured truncated].include?(message_state)
+        value["message"] = require_text(
+          "issue exceptionChain message",
+          read_required(input, "message", "issue exceptionChain message"),
+          MAX_EXCEPTION_MESSAGE,
+          false
+        )
+      elsif !%w[redacted not_captured].include?(message_state) || has_key?(input, "message")
+        raise validation("issue exceptionChain message must match messageState")
+      end
+      value["messageState"] = message_state
+      if has_key?(input, "module")
+        value["module"] = require_text(
+          "issue exceptionChain module",
+          read_value(input, "module"),
+          MAX_EXCEPTION_MODULE,
+          true
+        )
+      end
+      value["mechanism"] = validate_exception_mechanism(read_value(input, "mechanism")) if has_key?(input, "mechanism")
+      stack_state = read_required(input, "stackFramesState", "issue exceptionChain stackFramesState")
+      if %w[captured truncated].include?(stack_state)
+        value["stackFrames"] = validate_stack_frames(read_required(input, "stackFrames", "issue exceptionChain stackFrames"))
+      elsif stack_state != "not_captured" || has_key?(input, "stackFrames")
+        raise validation("issue exceptionChain stackFrames must match stackFramesState")
+      end
+      value["stackFramesState"] = stack_state
+      value
+    end
+
+    def validate_exception_mechanism(mechanism)
+      validate_exception({ "type" => "Exception", "mechanism" => mechanism }).fetch("mechanism")
     end
 
     def validate_stack_frames(input)
@@ -380,16 +501,98 @@ module LogBrew
       "Exception"
     end
 
+    def exception_chain_from_exception(error, root_exception:, root_stack:, include_stack_frames:)
+      entries = []
+      seen = {}
+      current = error
+      parent_id = nil
+      truncated = false
+
+      until current.nil?
+        if seen.key?(current.object_id) || entries.length >= MAX_EXCEPTIONS
+          truncated = true
+          break
+        end
+        seen[current.object_id] = true
+        id = entries.length
+        stack = id.zero? ? root_stack : (include_stack_frames ? stack_evidence_from_exception(current) : nil)
+        entry = {
+          "id" => id,
+          "relationship" => id.zero? ? "reported" : "cause",
+          "type" => safe_exception_type(current),
+          "messageState" => safe_exception_has_message?(current) ? "redacted" : "not_captured",
+          "mechanism" => id.zero? ? root_exception["mechanism"] : { "type" => "ruby.cause", "handled" => true },
+          "stackFramesState" => if stack.nil? || stack.fetch(:frames).empty?
+                                  "not_captured"
+                                elsif stack.fetch(:truncated)
+                                  "truncated"
+                                else
+                                  "captured"
+                                end
+        }
+        entry["parentId"] = parent_id unless parent_id.nil?
+        exception_module = safe_exception_module(current)
+        entry["module"] = exception_module unless exception_module.nil?
+        entry["stackFrames"] = stack.fetch(:frames) unless stack.nil? || stack.fetch(:frames).empty?
+        entries << entry
+        parent_id = id
+        current = safe_exception_cause(current)
+      end
+
+      root_frames = root_stack&.fetch(:frames)
+      root_frames = nil if root_frames&.empty?
+      validate_exception_chain(
+        { "entries" => entries, "truncated" => truncated },
+        root_exception,
+        root_frames
+      )
+    end
+
+    def stack_evidence_from_exception(error)
+      locations = safe_backtrace_locations(error)
+      frames = locations.first(MAX_STACK_FRAMES).map { |location| frame_from_location(location) }.compact
+      return { frames: frames, truncated: locations.length > MAX_STACK_FRAMES } unless frames.empty?
+
+      lines = safe_backtrace(error)
+      {
+        frames: lines.first(MAX_STACK_FRAMES).map { |line| frame_from_backtrace_line(line) }.compact,
+        truncated: lines.length > MAX_STACK_FRAMES
+      }
+    end
+
+    def safe_exception_has_message?(error)
+      message = error.message
+      message.is_a?(String) && !message.strip.empty?
+    rescue StandardError
+      false
+    end
+
+    def safe_exception_module(error)
+      name = error.class.name
+      return nil unless name.is_a?(String) && name.include?("::")
+
+      safe_generated_text(name.split("::")[0...-1].join("::"), MAX_EXCEPTION_MODULE, true, nil)
+    rescue StandardError
+      nil
+    end
+
+    def safe_exception_cause(error)
+      cause = error.cause
+      cause.is_a?(Exception) ? cause : nil
+    rescue StandardError
+      nil
+    end
+
     def safe_backtrace_locations(error)
       locations = error.backtrace_locations
-      locations.respond_to?(:first) ? locations.first(MAX_STACK_FRAMES) : []
+      locations.respond_to?(:first) ? locations.first(MAX_STACK_FRAMES + 1) : []
     rescue StandardError
       []
     end
 
     def safe_backtrace(error)
       backtrace = error.backtrace
-      backtrace.is_a?(Array) ? backtrace.first(MAX_STACK_FRAMES) : []
+      backtrace.is_a?(Array) ? backtrace.first(MAX_STACK_FRAMES + 1) : []
     rescue StandardError
       []
     end
@@ -545,6 +748,9 @@ module LogBrew
 
     private_class_method(
       :validate_exception,
+      :validate_exception_chain,
+      :validate_exception_chain_entry,
+      :validate_exception_mechanism,
       :validate_stack_frames,
       :validate_stack_frame,
       :validate_breadcrumbs,
@@ -553,6 +759,11 @@ module LogBrew
       :validate_breadcrumb_data_value,
       :safe_backtrace_locations,
       :safe_backtrace,
+      :exception_chain_from_exception,
+      :stack_evidence_from_exception,
+      :safe_exception_has_message?,
+      :safe_exception_module,
+      :safe_exception_cause,
       :frame_from_location,
       :frame_from_backtrace_line,
       :safe_location_value,

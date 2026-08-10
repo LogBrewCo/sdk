@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import math
 import os
 import re
@@ -13,7 +14,9 @@ from logbrew_sdk._errors import SdkError
 
 MAX_ISSUE_STACK_FRAMES = 32
 MAX_ISSUE_BREADCRUMBS = 64
+MAX_ISSUE_EXCEPTIONS = 8
 MAX_EXCEPTION_TYPE_LENGTH = 256
+MAX_EXCEPTION_MESSAGE_LENGTH = 1_024
 MAX_MECHANISM_TYPE_LENGTH = 64
 MAX_STACK_FILENAME_LENGTH = 2048
 MAX_STACK_FUNCTION_LENGTH = 256
@@ -45,6 +48,15 @@ _BREADCRUMB_LEVEL_ALIASES = {
     "fatal": "critical",
     "critical": "critical",
 }
+_EXCEPTION_RELATIONSHIPS = {
+    "reported",
+    "cause",
+    "context",
+    "aggregate_member",
+    "suppressed",
+}
+_EXCEPTION_MESSAGE_STATES = {"captured", "truncated", "redacted", "not_captured"}
+_EXCEPTION_STACK_STATES = {"captured", "truncated", "not_captured"}
 
 
 def validate_issue_diagnostics(attributes: Mapping[str, Any]) -> dict[str, Any]:
@@ -55,6 +67,12 @@ def validate_issue_diagnostics(attributes: Mapping[str, Any]) -> dict[str, Any]:
         diagnostics["exception"] = _validate_exception(attributes["exception"])
     if "stackFrames" in attributes:
         diagnostics["stackFrames"] = validate_issue_stack_frames(attributes["stackFrames"])
+    if "exceptionChain" in attributes:
+        diagnostics["exceptionChain"] = _validate_exception_chain(
+            attributes["exceptionChain"],
+            diagnostics.get("exception"),
+            diagnostics.get("stackFrames"),
+        )
     if "breadcrumbs" in attributes:
         diagnostics["breadcrumbs"] = _validate_breadcrumbs(attributes["breadcrumbs"])
     if "breadcrumbsTruncated" in attributes:
@@ -80,8 +98,109 @@ def validate_issue_stack_frames(stack_frames: Any) -> list[dict[str, Any]]:
 def issue_stack_frames_from_exception(error: BaseException) -> list[dict[str, Any]]:
     """Project traceback code identity without source lines, locals, or absolute paths."""
 
+    return _issue_stack_projection(error, include_stack_frames=True)[0]
+
+
+def issue_exception_chain_from_exception(
+    error: BaseException,
+    *,
+    mechanism: str,
+    handled: bool,
+    include_stack_frames: bool = True,
+) -> dict[str, Any]:
+    """Project one bounded parent-first exception tree without locals or source text."""
+
     if not isinstance(error, BaseException):
         raise SdkError("validation_error", "issue error must be an exception")
+    if not isinstance(include_stack_frames, bool):
+        raise SdkError("validation_error", "include_stack_frames must be a boolean")
+
+    entries: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    truncated = False
+
+    def append_exception(
+        current: BaseException,
+        *,
+        parent_id: int | None,
+        relationship: str,
+        mechanism_type: str,
+        mechanism_handled: bool,
+    ) -> None:
+        nonlocal truncated
+        identity = id(current)
+        if identity in seen or len(entries) >= MAX_ISSUE_EXCEPTIONS:
+            truncated = True
+            return
+        seen.add(identity)
+
+        entry_id = len(entries)
+        message, message_state = _exception_message(current)
+        stack_frames, stack_state = _issue_stack_projection(
+            current,
+            include_stack_frames=include_stack_frames,
+        )
+        module = _safe_exception_module(current)
+        entry: dict[str, Any] = {
+            "id": entry_id,
+            **({"parentId": parent_id} if parent_id is not None else {}),
+            "relationship": relationship,
+            "type": safe_issue_exception_type(current),
+            **({"message": message} if message is not None else {}),
+            "messageState": message_state,
+            **({"module": module} if module is not None else {}),
+            "mechanism": {"type": mechanism_type, "handled": mechanism_handled},
+            **({"stackFrames": stack_frames} if stack_frames else {}),
+            "stackFramesState": stack_state,
+        }
+        entries.append(entry)
+
+        cause = getattr(current, "__cause__", None)
+        suppress_context = bool(getattr(current, "__suppress_context__", False))
+        context = getattr(current, "__context__", None)
+        if isinstance(cause, BaseException):
+            append_exception(
+                cause,
+                parent_id=entry_id,
+                relationship="cause",
+                mechanism_type="python.cause",
+                mechanism_handled=True,
+            )
+        elif not suppress_context and isinstance(context, BaseException):
+            append_exception(
+                context,
+                parent_id=entry_id,
+                relationship="context",
+                mechanism_type="python.context",
+                mechanism_handled=True,
+            )
+
+        for member in _exception_group_members(current):
+            append_exception(
+                member,
+                parent_id=entry_id,
+                relationship="aggregate_member",
+                mechanism_type="python.aggregate_member",
+                mechanism_handled=True,
+            )
+
+    append_exception(
+        error,
+        parent_id=None,
+        relationship="reported",
+        mechanism_type=mechanism,
+        mechanism_handled=handled,
+    )
+    return {"entries": entries, "truncated": truncated}
+
+
+def _issue_stack_projection(
+    error: BaseException,
+    *,
+    include_stack_frames: bool,
+) -> tuple[list[dict[str, Any]], str]:
+    if not include_stack_frames:
+        return [], "not_captured"
 
     frames: list[dict[str, Any]] = []
     traceback = error.__traceback__
@@ -103,7 +222,41 @@ def issue_stack_frames_from_exception(error: BaseException) -> list[dict[str, An
         traceback = traceback.tb_next
 
     most_recent_first = list(reversed(frames))[:MAX_ISSUE_STACK_FRAMES]
-    return [_validate_stack_frame(frame) for frame in most_recent_first]
+    validated = [_validate_stack_frame(frame) for frame in most_recent_first]
+    if not validated:
+        return [], "not_captured"
+    return validated, "truncated" if len(frames) > MAX_ISSUE_STACK_FRAMES else "captured"
+
+
+def _exception_message(error: BaseException) -> tuple[str | None, str]:
+    try:
+        message = " ".join(str(error).split())
+    except Exception:
+        return None, "not_captured"
+    if not message:
+        return None, "not_captured"
+    if len(message) > MAX_EXCEPTION_MESSAGE_LENGTH:
+        return message[:MAX_EXCEPTION_MESSAGE_LENGTH], "truncated"
+    return message, "captured"
+
+
+def _safe_exception_module(error: BaseException) -> str | None:
+    module = getattr(type(error), "__module__", None)
+    if module in {None, "builtins", "__builtins__"} or not isinstance(module, str):
+        return None
+    return (
+        module
+        if _valid_bounded_text(module, MAX_STACK_MODULE_LENGTH, reject_location_text=True)
+        else None
+    )
+
+
+def _exception_group_members(error: BaseException) -> tuple[BaseException, ...]:
+    group_type = getattr(builtins, "BaseExceptionGroup", None)
+    if not isinstance(group_type, type) or not isinstance(error, group_type):
+        return ()
+    members = getattr(error, "exceptions", ())
+    return tuple(member for member in members if isinstance(member, BaseException))
 
 
 def safe_issue_exception_type(error: BaseException) -> str:
@@ -133,6 +286,142 @@ def _validate_exception(value: Any) -> dict[str, Any]:
     validated: dict[str, Any] = {"type": exception_type}
     if "mechanism" in exception:
         validated["mechanism"] = _validate_mechanism(exception["mechanism"])
+    return validated
+
+
+def _validate_exception_chain(
+    value: Any,
+    legacy_exception: Any,
+    legacy_stack_frames: Any,
+) -> dict[str, Any]:
+    chain = _require_object("issue exceptionChain", value)
+    _reject_unknown_keys("issue exceptionChain", chain, {"entries", "truncated"})
+    entries = chain.get("entries")
+    if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_ISSUE_EXCEPTIONS:
+        raise SdkError(
+            "validation_error",
+            f"issue exceptionChain entries must contain 1-{MAX_ISSUE_EXCEPTIONS} exceptions",
+        )
+    truncated = chain.get("truncated")
+    if not isinstance(truncated, bool):
+        raise SdkError("validation_error", "issue exceptionChain truncated must be a boolean")
+    validated_entries = [
+        _validate_exception_chain_entry(entry, entry_index)
+        for entry_index, entry in enumerate(entries)
+    ]
+    reported = validated_entries[0]
+    reported_exception = {
+        key: reported[key] for key in ("type", "mechanism") if key in reported
+    }
+    if legacy_exception != reported_exception:
+        raise SdkError(
+            "validation_error",
+            "issue exceptionChain reported exception must match exception",
+        )
+    reported_frames = reported.get("stackFrames")
+    if reported["stackFramesState"] == "not_captured":
+        if legacy_stack_frames is not None:
+            raise SdkError(
+                "validation_error",
+                "issue exceptionChain reported stack must match stackFrames",
+            )
+    elif reported_frames != legacy_stack_frames:
+        raise SdkError(
+            "validation_error",
+            "issue exceptionChain reported stack must match stackFrames",
+        )
+    return {"entries": validated_entries, "truncated": truncated}
+
+
+def _validate_exception_chain_entry(value: Any, entry_index: int) -> dict[str, Any]:
+    label = f"issue exceptionChain entry {entry_index}"
+    entry = _require_object(label, value)
+    _reject_unknown_keys(
+        label,
+        entry,
+        {
+            "id",
+            "parentId",
+            "relationship",
+            "type",
+            "message",
+            "messageState",
+            "module",
+            "mechanism",
+            "stackFrames",
+            "stackFramesState",
+        },
+    )
+    entry_id = entry.get("id")
+    if isinstance(entry_id, bool) or entry_id != entry_index:
+        raise SdkError(
+            "validation_error",
+            f"{label} id must be the contiguous parent-first index",
+        )
+    relationship = entry.get("relationship")
+    parent_id = entry.get("parentId")
+    if entry_index == 0:
+        if relationship != "reported" or parent_id is not None:
+            raise SdkError(
+                "validation_error",
+                f"{label} must be the parentless reported exception",
+            )
+    elif (
+        relationship not in _EXCEPTION_RELATIONSHIPS - {"reported"}
+        or isinstance(parent_id, bool)
+        or not isinstance(parent_id, int)
+        or not 0 <= parent_id < entry_index
+    ):
+        raise SdkError("validation_error", f"{label} must reference an earlier parent")
+
+    validated: dict[str, Any] = {
+        "id": entry_id,
+        **({"parentId": parent_id} if parent_id is not None else {}),
+        "relationship": relationship,
+        "type": _bounded_text(
+            f"{label} type",
+            entry.get("type"),
+            MAX_EXCEPTION_TYPE_LENGTH,
+            reject_location_text=True,
+        ),
+    }
+    if "module" in entry:
+        validated["module"] = _bounded_text(
+            f"{label} module",
+            entry["module"],
+            MAX_STACK_MODULE_LENGTH,
+            reject_location_text=True,
+        )
+    if "mechanism" in entry:
+        validated["mechanism"] = _validate_mechanism(entry["mechanism"])
+
+    message_state = entry.get("messageState")
+    if message_state not in _EXCEPTION_MESSAGE_STATES:
+        raise SdkError("validation_error", f"{label} messageState is invalid")
+    if message_state in {"captured", "truncated"}:
+        validated["message"] = _bounded_text(
+            f"{label} message",
+            entry.get("message"),
+            MAX_EXCEPTION_MESSAGE_LENGTH,
+        )
+    elif "message" in entry:
+        raise SdkError(
+            "validation_error",
+            f"{label} message must be absent for {message_state}",
+        )
+    validated["messageState"] = message_state
+
+    stack_state = entry.get("stackFramesState")
+    if stack_state not in _EXCEPTION_STACK_STATES:
+        raise SdkError("validation_error", f"{label} stackFramesState is invalid")
+    if stack_state in {"captured", "truncated"}:
+        validated["stackFrames"] = validate_issue_stack_frames(entry.get("stackFrames"))
+    elif "stackFrames" in entry:
+        raise SdkError(
+            "validation_error",
+            f"{label} stackFrames must be absent for {stack_state}",
+        )
+    validated["stackFramesState"] = stack_state
     return validated
 
 

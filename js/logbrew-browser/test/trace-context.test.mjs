@@ -248,6 +248,12 @@ test("installed browser errors attach release artifact Debug ID metadata without
         function: "ignored"
       }
     ]);
+    assert.deepEqual(
+      issue.attributes.exceptionChain.entries[0].stackFrames,
+      issue.attributes.stackFrames
+    );
+    assert.equal(issue.attributes.exceptionChain.entries[1].relationship, "cause");
+    assert.equal(issue.attributes.exceptionChain.entries[1].messageState, "redacted");
 
     const serialized = JSON.stringify(issue);
     assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|errorStack|nestedDropped|dynamic-user-marker/u);

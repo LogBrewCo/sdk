@@ -17,6 +17,8 @@ public final class IssueDiagnosticsTest {
 
     private void run() {
         testThrowableProjectionIsStructuredAndPrivacyBounded();
+        testThrowableChainPreservesCausesSuppressedEvidenceAndBounds();
+        testManualExceptionChainStatesAndContradictions();
         testExplicitDiagnosticsAreNormalizedAndDetached();
         testStackFrameBoundsAndIdentityValidation();
         testBreadcrumbBoundsAndPrimitiveValidation();
@@ -63,6 +65,111 @@ public final class IssueDiagnosticsTest {
         assertNotContains(payload, "/opt/example");
         assertNotContains(payload, "../private");
         assertNotContains(payload, "query=hidden");
+        testsRun++;
+    }
+
+    private void testThrowableChainPreservesCausesSuppressedEvidenceAndBounds() {
+        IllegalArgumentException cause = new IllegalArgumentException("private cause message");
+        cause.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("app.checkout.PaymentClient", "charge", "PaymentClient.java", 18)
+        });
+        IllegalStateException suppressed = new IllegalStateException("private suppressed message");
+        suppressed.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("app.checkout.AuditWriter", "write", "AuditWriter.java", 29)
+        });
+        RuntimeException error = new RuntimeException("reported-message-canary", cause);
+        error.addSuppressed(suppressed);
+        error.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("app.checkout.CheckoutHandler", "submit", "CheckoutHandler.java", 42)
+        });
+
+        LogBrewClient client = sampleClient();
+        client.issue(
+            "evt_java_exception_chain",
+            "2026-06-02T10:00:02Z",
+            IssueAttributes.fromThrowable(error, "java.exception", false)
+        );
+        String payload = client.previewJson();
+        assertContains(payload, "\"exceptionChain\": {");
+        assertContains(payload, "\"relationship\": \"reported\"");
+        assertContains(payload, "\"relationship\": \"cause\"");
+        assertContains(payload, "\"relationship\": \"suppressed\"");
+        assertContains(payload, "\"parentId\": 0");
+        assertContains(payload, "\"messageState\": \"redacted\"");
+        assertContains(payload, "\"stackFramesState\": \"captured\"");
+        assertContains(payload, "\"type\": \"java.cause\"");
+        assertContains(payload, "\"type\": \"java.suppressed\"");
+        assertContains(payload, "PaymentClient.java");
+        assertContains(payload, "AuditWriter.java");
+        assertNotContains(payload, "reported-message-canary");
+        assertNotContains(payload, "private cause message");
+        assertNotContains(payload, "private suppressed message");
+
+        Throwable deep = new IllegalStateException("private depth 9");
+        for (int depth = 8; depth >= 0; depth--) {
+            deep = new IllegalStateException("private depth " + depth, deep);
+        }
+        LogBrewClient deepClient = sampleClient();
+        deepClient.issue(
+            "evt_java_exception_chain_deep",
+            "2026-06-02T10:00:02Z",
+            IssueAttributes.fromThrowable(deep)
+        );
+        String deepPayload = deepClient.previewJson();
+        assertOccurrences(deepPayload, "\"relationship\": \"reported\"", 1);
+        assertOccurrences(deepPayload, "\"relationship\": \"cause\"", 7);
+        assertContains(deepPayload, "\"truncated\": true");
+        assertNotContains(deepPayload, "private depth");
+        testsRun++;
+    }
+
+    private void testManualExceptionChainStatesAndContradictions() {
+        IssueExceptionMechanism mechanism = IssueExceptionMechanism.create("java.manual", true);
+        IssueStackFrame rootFrame = IssueStackFrame
+            .create("Checkout.java", 42, 3)
+            .function("submit")
+            .module("app.checkout.Checkout");
+        IssueExceptionChain chain = IssueExceptionChain.create(List.of(
+            IssueExceptionChainEntry
+                .create(0, IssueExceptionRelationship.REPORTED, "CheckoutFailure")
+                .mechanism(mechanism)
+                .message("approved summary", true)
+                .stackFrames(List.of(rootFrame), false),
+            IssueExceptionChainEntry
+                .create(1, IssueExceptionRelationship.CONTEXT, "RequestContextFailure")
+                .parentId(0)
+                .mechanism(IssueExceptionMechanism.create("java.context", true))
+                .redactedMessage()
+        ), true);
+        LogBrewClient client = sampleClient();
+        client.issue(
+            "evt_java_manual_chain",
+            "2026-06-02T10:00:02Z",
+            IssueAttributes.create("Checkout failed", "error")
+                .exception(IssueException.create("CheckoutFailure").mechanism(mechanism))
+                .stackFrame(rootFrame)
+                .exceptionChain(chain)
+        );
+        String payload = client.previewJson();
+        assertContains(payload, "\"message\": \"approved summary\"");
+        assertContains(payload, "\"messageState\": \"truncated\"");
+        assertContains(payload, "\"relationship\": \"context\"");
+        assertContains(payload, "\"stackFramesState\": \"not_captured\"");
+        assertContains(payload, "\"truncated\": true");
+
+        expectSdkException(() -> sampleClient().issue(
+            "evt_java_bad_chain",
+            "2026-06-02T10:00:02Z",
+            IssueAttributes.create("Bad chain", "error")
+                .exception(IssueException.create("CheckoutFailure"))
+                .exceptionChain(IssueExceptionChain.create(List.of(
+                    IssueExceptionChainEntry.create(
+                        0,
+                        IssueExceptionRelationship.CAUSE,
+                        "CheckoutFailure"
+                    )
+                ), false))
+        ), "entry 0 must be the parentless reported exception");
         testsRun++;
     }
 
@@ -223,6 +330,20 @@ public final class IssueDiagnosticsTest {
         int secondIndex = value.indexOf(second);
         if (firstIndex < 0 || secondIndex <= firstIndex) {
             throw new AssertionError("expected " + first + " before " + second + " in " + value);
+        }
+    }
+
+    private static void assertOccurrences(String value, String needle, int expected) {
+        int count = 0;
+        int offset = 0;
+        while ((offset = value.indexOf(needle, offset)) >= 0) {
+            count++;
+            offset += needle.length();
+        }
+        if (count != expected) {
+            throw new AssertionError(
+                "expected " + expected + " occurrences of " + needle + " but found " + count
+            );
         }
     }
 }

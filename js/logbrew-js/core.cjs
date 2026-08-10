@@ -129,14 +129,17 @@ const {
   traceMetadataFromLogContext
 } = buildLogContextHelpers({ SdkError });
 
-const { javascriptStackFrames, validateIssueStackFrames } = buildIssueStackHelpers({ SdkError });
+const {
+  javascriptStackEvidence,
+  validateIssueStackFrames
+} = buildIssueStackHelpers({ SdkError });
 const {
   MAX_ISSUE_BREADCRUMBS,
   cloneIssueDiagnostics,
   createIssueException,
   validateIssueBreadcrumb,
   validateIssueDiagnostics
-} = buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp });
+} = buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssueStackFrames });
 const {
   cloneTelemetryContext,
   mergeTelemetryContexts,
@@ -1363,7 +1366,8 @@ function createIssueAttributesFromError(error, options = {}) {
     throw new SdkError("validation_error", "error issue options must be an object");
   }
   const details = errorDetails(error);
-  const stackFrames = javascriptStackFrames(details.stack, options.debugIdMap);
+  const stackEvidence = javascriptStackEvidence(details.stack, options.debugIdMap);
+  const stackFrames = stackEvidence.frames;
   const frame = stackFrames[0] ?? null;
   const source = stringOrUndefined(options.source) ?? "javascript.error";
   const metadata = {
@@ -1388,38 +1392,164 @@ function createIssueAttributesFromError(error, options = {}) {
     ...(options.includeErrorStack === true && details.stack ? { errorStack: details.stack } : {})
   };
 
+  const exception = createIssueException(
+    boundedIssueExceptionType(details.name),
+    stringOrUndefined(options.mechanism) ?? "javascript.error",
+    options.handled === undefined ? true : options.handled
+  );
+  const exceptionChain = createJavaScriptExceptionChain(error, {
+    details,
+    exception,
+    stackEvidence,
+    debugIdMap: options.debugIdMap
+  });
   return {
     title: stringOrUndefined(options.title) ?? details.name,
     level: normalizeSeverity("issue level", options.level ?? "error"),
     ...(stringOrUndefined(options.message) ? { message: options.message } : details.message ? { message: details.message } : {}),
-    exception: createIssueException(
-      boundedIssueExceptionType(details.name),
-      stringOrUndefined(options.mechanism) ?? "javascript.error",
-      options.handled === undefined ? true : options.handled
-    ),
+    exception,
+    exceptionChain,
     ...(stackFrames.length > 0 ? { stackFrames } : {}),
     metadata: compactMetadata(metadata)
   };
 }
 
+function createJavaScriptExceptionChain(error, root) {
+  const state = {
+    entries: [],
+    seen: new Set(),
+    truncated: false,
+    debugIdMap: root.debugIdMap
+  };
+  if (isObjectLike(error)) {
+    state.seen.add(error);
+  }
+  appendJavaScriptExceptionNode(error, undefined, "reported", state, root);
+  collectJavaScriptExceptionChildren(error, 0, state);
+  return { entries: state.entries, truncated: state.truncated };
+}
+
+function appendJavaScriptExceptionNode(value, parentId, relationship, state, known = undefined) {
+  if (state.entries.length >= 8) {
+    state.truncated = true;
+    return undefined;
+  }
+  const details = known?.details ?? errorDetails(value);
+  const stackEvidence = known?.stackEvidence
+    ?? javascriptStackEvidence(details.stack, state.debugIdMap);
+  const mechanism = known?.exception?.mechanism ?? {
+    type: relationship === "aggregate_member" ? "javascript.aggregate_member" : "javascript.cause",
+    handled: true
+  };
+  const messageEvidence = exceptionMessageEvidence(details.message);
+  const id = state.entries.length;
+  state.entries.push({
+    id,
+    ...(parentId === undefined ? {} : { parentId }),
+    relationship,
+    type: known?.exception?.type ?? errorCauseType(value),
+    ...messageEvidence,
+    mechanism,
+    ...(stackEvidence.frames.length === 0 ? {} : { stackFrames: stackEvidence.frames }),
+    stackFramesState: stackEvidence.frames.length === 0
+      ? "not_captured"
+      : stackEvidence.truncated
+        ? "truncated"
+        : "captured"
+  });
+  return id;
+}
+
+function collectJavaScriptExceptionChildren(value, parentId, state) {
+  if (!isObjectLike(value)) {
+    return;
+  }
+  const cause = safeProperty(value, "cause");
+  if (cause.available && cause.value !== undefined && cause.value !== null) {
+    collectJavaScriptExceptionChild(cause.value, parentId, "cause", state);
+  } else if (!cause.available) {
+    state.truncated = true;
+  }
+  const errors = safeProperty(value, "errors");
+  if (!errors.available) {
+    state.truncated = true;
+  } else if (Array.isArray(errors.value)) {
+    for (const child of errors.value) {
+      collectJavaScriptExceptionChild(child, parentId, "aggregate_member", state);
+    }
+  }
+}
+
+function collectJavaScriptExceptionChild(value, parentId, relationship, state) {
+  if (state.entries.length >= 8) {
+    state.truncated = true;
+    return;
+  }
+  if (isObjectLike(value)) {
+    if (state.seen.has(value)) {
+      state.truncated = true;
+      return;
+    }
+    state.seen.add(value);
+  }
+  const id = appendJavaScriptExceptionNode(value, parentId, relationship, state);
+  if (id !== undefined) {
+    collectJavaScriptExceptionChildren(value, id, state);
+  }
+}
+
+function exceptionMessageEvidence(value) {
+  if (typeof value !== "string") {
+    return { messageState: "not_captured" };
+  }
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized === "") {
+    return { messageState: "not_captured" };
+  }
+  return { messageState: "redacted" };
+}
+
 function errorDetails(error) {
   if (error instanceof Error) {
+    const name = safeProperty(error, "name");
+    const message = safeProperty(error, "message");
+    const stack = safeProperty(error, "stack");
     return {
-      name: stringOrUndefined(error.name) ?? "Error",
-      message: stringOrUndefined(error.message),
-      stack: typeof error.stack === "string" && error.stack.trim() !== "" ? error.stack : undefined
+      name: name.available ? stringOrUndefined(name.value) ?? "Error" : "Error",
+      message: message.available ? stringOrUndefined(message.value) : undefined,
+      stack: stack.available && typeof stack.value === "string" && stack.value.trim() !== ""
+        ? stack.value
+        : undefined
     };
   }
   if (error && typeof error === "object") {
-    const name = typeof error.name === "string" && error.name.trim() !== "" ? error.name : "Error";
-    const message = typeof error.message === "string" && error.message.trim() !== "" ? error.message : undefined;
-    const stack = typeof error.stack === "string" && error.stack.trim() !== "" ? error.stack : undefined;
-    return { name, message, stack };
+    const name = safeProperty(error, "name");
+    const message = safeProperty(error, "message");
+    const stack = safeProperty(error, "stack");
+    return {
+      name: name.available && typeof name.value === "string" && name.value.trim() !== ""
+        ? name.value
+        : "Error",
+      message: message.available && typeof message.value === "string" && message.value.trim() !== ""
+        ? message.value
+        : undefined,
+      stack: stack.available && typeof stack.value === "string" && stack.value.trim() !== ""
+        ? stack.value
+        : undefined
+    };
   }
   if (typeof error === "string" && error.trim() !== "") {
     return { name: "Error", message: error };
   }
   return { name: "Error" };
+}
+
+function safeProperty(value, name) {
+  try {
+    return { available: true, value: value[name] };
+  } catch {
+    return { available: false, value: undefined };
+  }
 }
 
 function boundedIssueExceptionType(value) {
@@ -1488,12 +1618,18 @@ function collectNestedErrorCauses(parent, state) {
   if (!isObjectLike(parent)) {
     return;
   }
-  if ("cause" in parent) {
-    collectErrorCause(parent.cause, "cause", state);
+  const cause = safeProperty(parent, "cause");
+  if (!cause.available) {
+    state.truncated = true;
+  } else if (cause.value !== undefined && cause.value !== null) {
+    collectErrorCause(cause.value, "cause", state);
   }
-  if (Array.isArray(parent.errors)) {
+  const errors = safeProperty(parent, "errors");
+  if (!errors.available) {
+    state.truncated = true;
+  } else if (Array.isArray(errors.value)) {
     state.sawExceptionGroup = true;
-    for (const [index, child] of parent.errors.entries()) {
+    for (const [index, child] of errors.value.entries()) {
       collectErrorCause(child, `errors[${index}]`, state);
     }
   }
@@ -1523,12 +1659,21 @@ function collectErrorCause(value, source, state) {
 
 function errorCauseType(value) {
   if (isObjectLike(value)) {
-    const constructorName = safeCauseTypeName(value.constructor?.name);
+    const constructor = safeProperty(value, "constructor");
+    const constructorNameValue = constructor.available && isObjectLike(constructor.value)
+      ? safeProperty(constructor.value, "name")
+      : { available: false, value: undefined };
+    const constructorName = constructorNameValue.available
+      ? safeCauseTypeName(constructorNameValue.value)
+      : undefined;
     if (value instanceof Error) {
       if (constructorName && constructorName !== "Error") {
         return constructorName;
       }
-      const builtinName = BUILTIN_ERROR_NAMES.has(value.name) ? value.name : undefined;
+      const name = safeProperty(value, "name");
+      const builtinName = name.available && BUILTIN_ERROR_NAMES.has(name.value)
+        ? name.value
+        : undefined;
       return builtinName ?? constructorName ?? "Error";
     }
     return constructorName ?? "Object";

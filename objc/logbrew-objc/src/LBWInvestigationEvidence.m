@@ -175,6 +175,23 @@ static NSNumber *_Nullable LBWEvidencePositiveInteger(
   return @((int32_t)number);
 }
 
+static NSNumber *_Nullable LBWEvidenceNonnegativeInteger(
+    id value,
+    NSString *label,
+    NSUInteger maximum,
+    NSError *_Nullable *_Nullable error) {
+  if (![value isKindOfClass:[NSNumber class]] || LBWEvidenceIsBoolean(value)) {
+    LBWEvidenceFail(error, [label stringByAppendingString:@" must be a nonnegative integer"]);
+    return nil;
+  }
+  double number = [value doubleValue];
+  if (!isfinite(number) || number < 0.0 || number > (double)maximum || floor(number) != number) {
+    LBWEvidenceFail(error, [label stringByAppendingString:@" must be a nonnegative integer"]);
+    return nil;
+  }
+  return @((NSUInteger)number);
+}
+
 static NSString *_Nullable LBWSanitizedFilename(id value, NSError *_Nullable *_Nullable error) {
   if (![value isKindOfClass:[NSString class]]) {
     LBWEvidenceFail(error, @"issue stack frame filename must be a string");
@@ -208,6 +225,27 @@ static NSString *_Nullable LBWSanitizedFilename(id value, NSError *_Nullable *_N
   return LBWEvidenceString(normalized, @"issue stack frame filename", 2048U, YES, error);
 }
 
+static NSDictionary<NSString *, id> *_Nullable LBWValidateIssueMechanism(
+    id rawValue,
+    NSError *_Nullable *_Nullable error) {
+  NSDictionary *mechanism = LBWEvidenceDictionary(rawValue, @"issue exception mechanism", error);
+  if (mechanism == nil || !LBWEvidenceAllowedKeys(
+      mechanism, @[@"type", @"handled"], @"issue exception mechanism", error)) {
+    return nil;
+  }
+  id rawType = mechanism[@"type"];
+  if (![rawType isKindOfClass:[NSString class]] ||
+      !LBWEvidenceMachineKey(rawType, 64U, @"_.:-")) {
+    LBWEvidenceFail(error, @"issue exception mechanism type is invalid");
+    return nil;
+  }
+  if (!LBWEvidenceIsBoolean(mechanism[@"handled"])) {
+    LBWEvidenceFail(error, @"issue exception mechanism handled must be a boolean");
+    return nil;
+  }
+  return @{@"type": rawType, @"handled": mechanism[@"handled"]};
+}
+
 BOOL LBWValidateIssueException(
     id rawValue,
     NSDictionary<NSString *, id> **output,
@@ -222,20 +260,11 @@ BOOL LBWValidateIssueException(
   }
   NSMutableDictionary *clean = [@{@"type": type} mutableCopy];
   if (value[@"mechanism"] != nil) {
-    NSDictionary *mechanism = LBWEvidenceDictionary(value[@"mechanism"], @"issue exception mechanism", error);
-    if (mechanism == nil || !LBWEvidenceAllowedKeys(
-        mechanism, @[@"type", @"handled"], @"issue exception mechanism", error)) {
+    NSDictionary<NSString *, id> *mechanism = LBWValidateIssueMechanism(value[@"mechanism"], error);
+    if (mechanism == nil) {
       return NO;
     }
-    id rawType = mechanism[@"type"];
-    if (![rawType isKindOfClass:[NSString class]] ||
-        !LBWEvidenceMachineKey(rawType, 64U, @"_.:-")) {
-      return LBWEvidenceFail(error, @"issue exception mechanism type is invalid");
-    }
-    if (!LBWEvidenceIsBoolean(mechanism[@"handled"])) {
-      return LBWEvidenceFail(error, @"issue exception mechanism handled must be a boolean");
-    }
-    clean[@"mechanism"] = @{@"type": rawType, @"handled": mechanism[@"handled"]};
+    clean[@"mechanism"] = mechanism;
   }
   *output = [clean copy];
   return YES;
@@ -296,6 +325,160 @@ BOOL LBWValidateIssueStackFrames(
     [cleanFrames addObject:[clean copy]];
   }
   *output = [cleanFrames copy];
+  return YES;
+}
+
+BOOL LBWValidateIssueExceptionChain(
+    id rawValue,
+    NSDictionary<NSString *, id> *legacyException,
+    NSArray<NSDictionary<NSString *, id> *> *legacyStackFrames,
+    NSDictionary<NSString *, id> **output,
+    NSError *_Nullable *_Nullable error) {
+  NSDictionary *value = LBWEvidenceDictionary(rawValue, @"issue exceptionChain", error);
+  if (value == nil || !LBWEvidenceAllowedKeys(
+      value, @[@"entries", @"truncated"], @"issue exceptionChain", error)) {
+    return NO;
+  }
+  id rawEntries = value[@"entries"];
+  if (![rawEntries isKindOfClass:[NSArray class]] || [(NSArray *)rawEntries count] == 0U ||
+      [(NSArray *)rawEntries count] > 8U) {
+    return LBWEvidenceFail(error, @"issue exceptionChain entries must contain 1-8 exceptions");
+  }
+  if (!LBWEvidenceIsBoolean(value[@"truncated"])) {
+    return LBWEvidenceFail(error, @"issue exceptionChain truncated must be a boolean");
+  }
+
+  NSArray<NSString *> *childRelationships = @[@"cause", @"context", @"aggregate_member", @"suppressed"];
+  NSArray<NSString *> *messageStates = @[@"captured", @"truncated", @"redacted", @"not_captured"];
+  NSArray<NSString *> *stackStates = @[@"captured", @"truncated", @"not_captured"];
+  NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray array];
+  for (NSUInteger index = 0U; index < [(NSArray *)rawEntries count]; index++) {
+    NSDictionary *entry = LBWEvidenceDictionary(
+        ((NSArray *)rawEntries)[index],
+        [NSString stringWithFormat:@"issue exceptionChain entry %lu", (unsigned long)index],
+        error);
+    if (entry == nil || !LBWEvidenceAllowedKeys(
+        entry,
+        @[
+          @"id", @"parentId", @"relationship", @"type", @"message", @"messageState", @"module",
+          @"mechanism", @"stackFrames", @"stackFramesState"
+        ],
+        [NSString stringWithFormat:@"issue exceptionChain entry %lu", (unsigned long)index],
+        error)) {
+      return NO;
+    }
+    NSNumber *entryID = LBWEvidenceNonnegativeInteger(
+        entry[@"id"], @"issue exceptionChain entry id", 7U, error);
+    if (entryID == nil || [entryID unsignedIntegerValue] != index) {
+      if (entryID != nil) {
+        LBWEvidenceFail(error, @"issue exceptionChain ids must be contiguous and match array order");
+      }
+      return NO;
+    }
+    id relationship = entry[@"relationship"];
+    if (index == 0U) {
+      if (![relationship isKindOfClass:[NSString class]] || ![relationship isEqualToString:@"reported"] ||
+          entry[@"parentId"] != nil) {
+        return LBWEvidenceFail(
+            error, @"issue exceptionChain entry 0 must be the parentless reported exception");
+      }
+    } else {
+      NSNumber *parentID = LBWEvidenceNonnegativeInteger(
+          entry[@"parentId"], @"issue exceptionChain parentId", 7U, error);
+      if (![relationship isKindOfClass:[NSString class]] || ![childRelationships containsObject:relationship] ||
+          parentID == nil || [parentID unsignedIntegerValue] >= index) {
+        if (parentID != nil || ![relationship isKindOfClass:[NSString class]] ||
+            ![childRelationships containsObject:relationship]) {
+          LBWEvidenceFail(error, @"issue exceptionChain parent relationship is invalid");
+        }
+        return NO;
+      }
+    }
+    NSString *type = LBWEvidenceString(entry[@"type"], @"issue exceptionChain type", 256U, YES, error);
+    if (type == nil) {
+      return NO;
+    }
+    id messageState = entry[@"messageState"];
+    if (![messageState isKindOfClass:[NSString class]] || ![messageStates containsObject:messageState]) {
+      return LBWEvidenceFail(error, @"issue exceptionChain messageState is invalid");
+    }
+    BOOL messageRequired = [messageState isEqualToString:@"captured"] ||
+        [messageState isEqualToString:@"truncated"];
+    NSString *message = nil;
+    if (messageRequired) {
+      message = LBWEvidenceString(entry[@"message"], @"issue exceptionChain message", 1024U, NO, error);
+      if (message == nil) {
+        return NO;
+      }
+    } else if (entry[@"message"] != nil) {
+      return LBWEvidenceFail(error, @"issue exceptionChain message must match messageState");
+    }
+
+    NSMutableDictionary<NSString *, id> *clean = [@{
+      @"id": entryID,
+      @"relationship": relationship,
+      @"type": type,
+      @"messageState": messageState
+    } mutableCopy];
+    if (index > 0U) {
+      clean[@"parentId"] = entry[@"parentId"];
+    }
+    if (message != nil) {
+      clean[@"message"] = message;
+    }
+    if (entry[@"module"] != nil) {
+      NSString *module = LBWEvidenceString(
+          entry[@"module"], @"issue exceptionChain module", 512U, YES, error);
+      if (module == nil) {
+        return NO;
+      }
+      clean[@"module"] = module;
+    }
+    if (entry[@"mechanism"] != nil) {
+      NSDictionary<NSString *, id> *mechanism = LBWValidateIssueMechanism(entry[@"mechanism"], error);
+      if (mechanism == nil) {
+        return NO;
+      }
+      clean[@"mechanism"] = mechanism;
+    }
+    id stackState = entry[@"stackFramesState"];
+    if (![stackState isKindOfClass:[NSString class]] || ![stackStates containsObject:stackState]) {
+      return LBWEvidenceFail(error, @"issue exceptionChain stackFramesState is invalid");
+    }
+    BOOL stackRequired = [stackState isEqualToString:@"captured"] ||
+        [stackState isEqualToString:@"truncated"];
+    if (stackRequired) {
+      NSArray<NSDictionary<NSString *, id> *> *frames = nil;
+      if (!LBWValidateIssueStackFrames(entry[@"stackFrames"], &frames, error)) {
+        return NO;
+      }
+      if ([entry[@"stackFrames"] count] > 32U && ![stackState isEqualToString:@"truncated"]) {
+        return LBWEvidenceFail(error, @"issue exceptionChain stackFrames must match stackFramesState");
+      }
+      clean[@"stackFrames"] = frames;
+    } else if (entry[@"stackFrames"] != nil) {
+      return LBWEvidenceFail(error, @"issue exceptionChain stackFrames must match stackFramesState");
+    }
+    clean[@"stackFramesState"] = stackState;
+    [entries addObject:[clean copy]];
+  }
+
+  NSDictionary<NSString *, id> *root = entries[0];
+  NSMutableDictionary<NSString *, id> *reportedException = [@{@"type": root[@"type"]} mutableCopy];
+  if (root[@"mechanism"] != nil) {
+    reportedException[@"mechanism"] = root[@"mechanism"];
+  }
+  if (legacyException == nil || ![reportedException isEqualToDictionary:legacyException]) {
+    return LBWEvidenceFail(error, @"issue exceptionChain reported exception must match exception");
+  }
+  if ([root[@"stackFramesState"] isEqualToString:@"not_captured"]) {
+    if (legacyStackFrames != nil) {
+      return LBWEvidenceFail(error, @"issue exceptionChain reported stack must match stackFrames");
+    }
+  } else if (legacyStackFrames == nil || ![root[@"stackFrames"] isEqualToArray:legacyStackFrames]) {
+    return LBWEvidenceFail(error, @"issue exceptionChain reported stack must match stackFrames");
+  }
+  *output = @{@"entries": [entries copy], @"truncated": value[@"truncated"]};
   return YES;
 }
 
@@ -497,6 +680,106 @@ static NSString *LBWCanonicalIssueLevel(NSString *value) {
   return @"";
 }
 
+static NSString *LBWExceptionTypeForError(NSError *capturedError) {
+  NSString *exceptionType = LBWEvidenceString(
+      capturedError.domain, @"issue exception type", 256U, YES, nil);
+  if (exceptionType == nil) {
+    exceptionType = NSStringFromClass([capturedError class]);
+  }
+  return exceptionType;
+}
+
+static BOOL LBWErrorHasCapturedMessage(NSError *capturedError) {
+  NSDictionary *userInfo = capturedError.userInfo;
+  return userInfo[NSLocalizedDescriptionKey] != nil ||
+      userInfo[NSLocalizedFailureReasonErrorKey] != nil ||
+      userInfo[NSLocalizedRecoverySuggestionErrorKey] != nil;
+}
+
+static void LBWCollectNSErrorException(
+    NSError *capturedError,
+    NSNumber *_Nullable parentID,
+    NSString *relationship,
+    NSDictionary<NSString *, id> *mechanism,
+    NSArray<NSDictionary<NSString *, id> *> *_Nullable knownStackFrames,
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries,
+    NSMutableSet<NSValue *> *seen,
+    BOOL *truncated,
+    BOOL handled) {
+  if ([entries count] >= 8U) {
+    *truncated = YES;
+    return;
+  }
+  NSValue *identity = [NSValue valueWithPointer:(__bridge const void *)capturedError];
+  if ([seen containsObject:identity]) {
+    *truncated = YES;
+    return;
+  }
+  [seen addObject:identity];
+
+  NSUInteger identifier = [entries count];
+  NSMutableDictionary<NSString *, id> *entry = [@{
+    @"id": @(identifier),
+    @"relationship": relationship,
+    @"type": LBWExceptionTypeForError(capturedError),
+    @"messageState": LBWErrorHasCapturedMessage(capturedError) ? @"redacted" : @"not_captured",
+    @"mechanism": mechanism,
+    @"stackFramesState": knownStackFrames != nil ? @"captured" : @"not_captured"
+  } mutableCopy];
+  if (parentID != nil) {
+    entry[@"parentId"] = parentID;
+  }
+  NSString *module = LBWEvidenceString(
+      NSStringFromClass([capturedError class]), @"issue exceptionChain module", 512U, YES, nil);
+  if (module != nil) {
+    entry[@"module"] = module;
+  }
+  if (knownStackFrames != nil) {
+    entry[@"stackFrames"] = knownStackFrames;
+  }
+  [entries addObject:[entry copy]];
+
+  id rawUnderlying = capturedError.userInfo[NSUnderlyingErrorKey];
+  if ([rawUnderlying isKindOfClass:[NSError class]]) {
+    LBWCollectNSErrorException(
+        rawUnderlying,
+        @(identifier),
+        @"cause",
+        @{@"type": @"objc.underlying_error", @"handled": @(handled)},
+        nil,
+        entries,
+        seen,
+        truncated,
+        handled);
+  } else if (rawUnderlying != nil) {
+    *truncated = YES;
+  }
+
+  if (@available(macOS 11.3, iOS 14.5, tvOS 14.5, watchOS 7.4, *)) {
+    id rawMultiple = capturedError.userInfo[NSMultipleUnderlyingErrorsKey];
+    if ([rawMultiple isKindOfClass:[NSArray class]]) {
+      for (id rawChild in (NSArray *)rawMultiple) {
+        if (![rawChild isKindOfClass:[NSError class]]) {
+          *truncated = YES;
+          continue;
+        }
+        LBWCollectNSErrorException(
+            rawChild,
+            @(identifier),
+            @"aggregate_member",
+            @{@"type": @"objc.aggregate_member", @"handled": @(handled)},
+            nil,
+            entries,
+            seen,
+            truncated,
+            handled);
+      }
+    } else if (rawMultiple != nil) {
+      *truncated = YES;
+    }
+  }
+}
+
 @implementation LBWIssueDiagnostics
 
 + (NSDictionary<NSString *, id> *)attributesForError:(NSError *)capturedError
@@ -511,10 +794,7 @@ static NSString *LBWCanonicalIssueLevel(NSString *value) {
                                               metadata:(NSDictionary<NSString *, id> *)metadata
                                                context:(NSDictionary<NSString *, id> *)context
                                                  error:(NSError **)error {
-  NSString *exceptionType = LBWEvidenceString(capturedError.domain, @"issue exception type", 256U, YES, nil);
-  if (exceptionType == nil) {
-    exceptionType = NSStringFromClass([capturedError class]);
-  }
+  NSString *exceptionType = LBWExceptionTypeForError(capturedError);
   NSString *cleanTitle = title != nil
       ? LBWEvidenceString(title, @"issue title", NSUIntegerMax, NO, error)
       : exceptionType;
@@ -547,14 +827,39 @@ static NSString *LBWCanonicalIssueLevel(NSString *value) {
     }
     frame[@"function"] = cleanFunction;
   }
+  NSDictionary<NSString *, id> *exception = @{
+    @"type": exceptionType,
+    @"mechanism": @{@"type": mechanism, @"handled": @(handled)}
+  };
+  NSArray<NSDictionary<NSString *, id> *> *stackFrames = @[[frame copy]];
+  NSMutableArray<NSDictionary<NSString *, id> *> *chainEntries = [NSMutableArray array];
+  NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+  BOOL chainTruncated = NO;
+  LBWCollectNSErrorException(
+      capturedError,
+      nil,
+      @"reported",
+      exception[@"mechanism"],
+      stackFrames,
+      chainEntries,
+      seen,
+      &chainTruncated,
+      handled);
+  NSDictionary<NSString *, id> *exceptionChain = @{
+    @"entries": [chainEntries copy],
+    @"truncated": @(chainTruncated)
+  };
+  NSDictionary<NSString *, id> *cleanExceptionChain = nil;
+  if (!LBWValidateIssueExceptionChain(
+      exceptionChain, exception, stackFrames, &cleanExceptionChain, error)) {
+    return nil;
+  }
   NSMutableDictionary *attributes = [@{
     @"title": cleanTitle,
     @"level": cleanLevel,
-    @"exception": @{
-      @"type": exceptionType,
-      @"mechanism": @{@"type": mechanism, @"handled": @(handled)}
-    },
-    @"stackFrames": @[[frame copy]]
+    @"exception": exception,
+    @"stackFrames": stackFrames,
+    @"exceptionChain": cleanExceptionChain
   } mutableCopy];
   if (metadata != nil) {
     NSDictionary *cleanMetadata = LBWValidatePrimitiveMetadata(metadata, @"issue metadata", 0U, NO, error);

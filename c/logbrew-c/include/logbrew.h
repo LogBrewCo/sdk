@@ -192,6 +192,7 @@ typedef struct {
 #define LOGBREW_MAX_CONTEXT_TAGS 32U
 #define LOGBREW_MAX_BREADCRUMBS 64U
 #define LOGBREW_MAX_STACK_FRAMES 32U
+#define LOGBREW_MAX_EXCEPTION_CHAIN_ENTRIES 8U
 #define LOGBREW_MAX_SPAN_EVENTS 8U
 #define LOGBREW_MAX_SPAN_LINKS 8U
 #define LOGBREW_MAX_METADATA_ENTRIES 128U
@@ -326,6 +327,53 @@ typedef struct {
   const char *debug_id;
 } LogBrewIssueStackFrame;
 
+typedef enum {
+  LOGBREW_EXCEPTION_RELATIONSHIP_REPORTED = 0,
+  LOGBREW_EXCEPTION_RELATIONSHIP_CAUSE = 1,
+  LOGBREW_EXCEPTION_RELATIONSHIP_CONTEXT = 2,
+  LOGBREW_EXCEPTION_RELATIONSHIP_AGGREGATE_MEMBER = 3,
+  LOGBREW_EXCEPTION_RELATIONSHIP_SUPPRESSED = 4
+} LogBrewIssueExceptionRelationship;
+
+typedef enum {
+  LOGBREW_EXCEPTION_MESSAGE_NOT_CAPTURED = 0,
+  LOGBREW_EXCEPTION_MESSAGE_CAPTURED = 1,
+  LOGBREW_EXCEPTION_MESSAGE_TRUNCATED = 2,
+  LOGBREW_EXCEPTION_MESSAGE_REDACTED = 3
+} LogBrewIssueExceptionMessageState;
+
+typedef enum {
+  LOGBREW_EXCEPTION_STACK_NOT_CAPTURED = 0,
+  LOGBREW_EXCEPTION_STACK_CAPTURED = 1,
+  LOGBREW_EXCEPTION_STACK_TRUNCATED = 2
+} LogBrewIssueExceptionStackState;
+
+/**
+ * One bounded node in an exception graph. C cannot discover language-runtime
+ * causes portably, so callers provide this evidence explicitly. Entry zero is
+ * the reported exception and must match the legacy exception/stack fields.
+ */
+typedef struct {
+  size_t id;
+  size_t parent_id;
+  bool has_parent_id;
+  LogBrewIssueExceptionRelationship relationship;
+  const char *type;
+  const char *message;
+  LogBrewIssueExceptionMessageState message_state;
+  const char *module;
+  const LogBrewIssueMechanism *mechanism;
+  const LogBrewIssueStackFrame *stack_frames;
+  size_t stack_frame_count;
+  LogBrewIssueExceptionStackState stack_frames_state;
+} LogBrewIssueExceptionChainEntry;
+
+typedef struct {
+  const LogBrewIssueExceptionChainEntry *entries;
+  size_t entry_count;
+  bool truncated;
+} LogBrewIssueExceptionChain;
+
 typedef struct {
   const char *timestamp;
   const char *type;
@@ -342,6 +390,8 @@ typedef struct {
   const LogBrewIssueBreadcrumb *breadcrumbs;
   size_t breadcrumb_count;
   bool breadcrumbs_truncated;
+  /** Optional bounded cause/context/aggregate graph; appended for ABI growth. */
+  const LogBrewIssueExceptionChain *exception_chain;
 } LogBrewIssueDetails;
 
 typedef struct {

@@ -1,7 +1,10 @@
 "use strict";
 
 const MAX_ISSUE_BREADCRUMBS = 64;
+const MAX_ISSUE_EXCEPTIONS = 8;
 const MAX_EXCEPTION_TYPE_LENGTH = 256;
+const MAX_EXCEPTION_MESSAGE_LENGTH = 1024;
+const MAX_EXCEPTION_MODULE_LENGTH = 512;
 const MAX_MECHANISM_TYPE_LENGTH = 64;
 const MAX_BREADCRUMB_NAME_LENGTH = 64;
 const MAX_BREADCRUMB_MESSAGE_LENGTH = 512;
@@ -21,7 +24,7 @@ const BREADCRUMB_LEVEL_ALIASES = new Map([
   ["critical", "critical"]
 ]);
 
-function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp }) {
+function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssueStackFrames }) {
   function validationError(message) {
     return new SdkError("validation_error", message);
   }
@@ -75,6 +78,133 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp }) {
     });
   }
 
+  function validateIssueExceptionChain(chain, legacyException, legacyStackFrames) {
+    if (chain === undefined) {
+      return undefined;
+    }
+    requireObject("issue exceptionChain", chain);
+    rejectUnknownKeys("issue exceptionChain", chain, new Set(["entries", "truncated"]));
+    if (!Array.isArray(chain.entries)
+      || chain.entries.length < 1
+      || chain.entries.length > MAX_ISSUE_EXCEPTIONS) {
+      throw validationError(
+        `issue exceptionChain entries must contain 1-${MAX_ISSUE_EXCEPTIONS} exceptions`
+      );
+    }
+    if (typeof chain.truncated !== "boolean") {
+      throw validationError("issue exceptionChain truncated must be a boolean");
+    }
+    const entries = chain.entries.map((entry, index) => validateIssueExceptionChainEntry(entry, index));
+    const reportedException = {
+      type: entries[0].type,
+      ...(entries[0].mechanism === undefined ? {} : { mechanism: entries[0].mechanism })
+    };
+    if (legacyException === undefined
+      || JSON.stringify(reportedException) !== JSON.stringify(legacyException)) {
+      throw validationError("issue exceptionChain reported exception must match exception");
+    }
+    const reportedFrames = entries[0].stackFrames;
+    const canonicalLegacyFrames = validateIssueStackFrames(legacyStackFrames);
+    if (entries[0].stackFramesState === "not_captured") {
+      if (canonicalLegacyFrames !== undefined) {
+        throw validationError("issue exceptionChain reported stack must match stackFrames");
+      }
+    } else if (JSON.stringify(reportedFrames) !== JSON.stringify(canonicalLegacyFrames)) {
+      throw validationError("issue exceptionChain reported stack must match stackFrames");
+    }
+    return {
+      entries,
+      truncated: chain.truncated
+    };
+  }
+
+  function validateIssueExceptionChainEntry(entry, index) {
+    requireObject(`issue exceptionChain entry ${index}`, entry);
+    rejectUnknownKeys(
+      `issue exceptionChain entry ${index}`,
+      entry,
+      new Set([
+        "id",
+        "parentId",
+        "relationship",
+        "type",
+        "message",
+        "messageState",
+        "module",
+        "mechanism",
+        "stackFrames",
+        "stackFramesState"
+      ])
+    );
+    if (!Number.isInteger(entry.id) || entry.id !== index) {
+      throw validationError(`issue exceptionChain entry ${index} id must equal its array index`);
+    }
+    const relationship = entry.relationship;
+    const parentId = entry.parentId;
+    if (index === 0) {
+      if (relationship !== "reported" || parentId !== undefined) {
+        throw validationError("issue exceptionChain entry 0 must be the parentless reported exception");
+      }
+    } else if (!new Set(["cause", "context", "aggregate_member", "suppressed"]).has(relationship)
+      || !Number.isInteger(parentId)
+      || parentId < 0
+      || parentId >= index) {
+      throw validationError(`issue exceptionChain entry ${index} parent relationship is invalid`);
+    }
+    const type = boundedText(
+      `issue exceptionChain entry ${index} type`,
+      entry.type,
+      MAX_EXCEPTION_TYPE_LENGTH,
+      { rejectLocationText: true }
+    );
+    const messageState = entry.messageState;
+    if (!new Set(["captured", "truncated", "redacted", "not_captured"]).has(messageState)) {
+      throw validationError(`issue exceptionChain entry ${index} messageState is invalid`);
+    }
+    const message = entry.message === undefined
+      ? undefined
+      : boundedText(
+          `issue exceptionChain entry ${index} message`,
+          entry.message,
+          MAX_EXCEPTION_MESSAGE_LENGTH
+        );
+    if ((messageState === "captured" || messageState === "truncated") !== (message !== undefined)) {
+      throw validationError(`issue exceptionChain entry ${index} message does not match messageState`);
+    }
+    const moduleName = entry.module === undefined
+      ? undefined
+      : boundedText(
+          `issue exceptionChain entry ${index} module`,
+          entry.module,
+          MAX_EXCEPTION_MODULE_LENGTH,
+          { rejectLocationText: true }
+        );
+    const mechanism = validateIssueExceptionMechanism(entry.mechanism);
+    const stackFramesState = entry.stackFramesState;
+    if (!new Set(["captured", "truncated", "not_captured"]).has(stackFramesState)) {
+      throw validationError(`issue exceptionChain entry ${index} stackFramesState is invalid`);
+    }
+    const stackFrames = validateIssueStackFrames(entry.stackFrames);
+    if ((stackFramesState === "captured" || stackFramesState === "truncated")
+      !== (stackFrames !== undefined)) {
+      throw validationError(
+        `issue exceptionChain entry ${index} stackFrames do not match stackFramesState`
+      );
+    }
+    return {
+      id: entry.id,
+      ...(parentId === undefined ? {} : { parentId }),
+      relationship,
+      type,
+      ...(message === undefined ? {} : { message }),
+      messageState,
+      ...(moduleName === undefined ? {} : { module: moduleName }),
+      ...(mechanism === undefined ? {} : { mechanism }),
+      ...(stackFrames === undefined ? {} : { stackFrames }),
+      stackFramesState
+    };
+  }
+
   function validateIssueBreadcrumb(breadcrumb, defaultTimestamp) {
     requireObject("issue breadcrumb", breadcrumb);
     rejectUnknownKeys(
@@ -121,6 +251,11 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp }) {
 
   function validateIssueDiagnostics(attributes) {
     const exception = validateIssueException(attributes.exception);
+    const exceptionChain = validateIssueExceptionChain(
+      attributes.exceptionChain,
+      exception,
+      attributes.stackFrames
+    );
     const breadcrumbs = validateIssueBreadcrumbs(attributes.breadcrumbs);
     if (
       attributes.breadcrumbsTruncated !== undefined
@@ -130,6 +265,7 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp }) {
     }
     return {
       ...(exception === undefined ? {} : { exception }),
+      ...(exceptionChain === undefined ? {} : { exceptionChain }),
       ...(breadcrumbs === undefined ? {} : { breadcrumbs }),
       ...(attributes.breadcrumbsTruncated === true ? { breadcrumbsTruncated: true } : {})
     };
@@ -143,6 +279,20 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp }) {
         ...(attributes.exception.mechanism === undefined
           ? {}
           : { mechanism: { ...attributes.exception.mechanism } })
+      };
+    }
+    if (attributes.exceptionChain !== undefined) {
+      diagnostics.exceptionChain = {
+        entries: attributes.exceptionChain.entries.map((entry) => ({
+          ...entry,
+          ...(entry.mechanism === undefined
+            ? {}
+            : { mechanism: { ...entry.mechanism } }),
+          ...(entry.stackFrames === undefined
+            ? {}
+            : { stackFrames: entry.stackFrames.map((frame) => ({ ...frame })) })
+        })),
+        truncated: attributes.exceptionChain.truncated
       };
     }
     if (Array.isArray(attributes.breadcrumbs)) {
@@ -257,6 +407,7 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp }) {
 
   return {
     MAX_ISSUE_BREADCRUMBS,
+    MAX_ISSUE_EXCEPTIONS,
     cloneIssueDiagnostics,
     createIssueException,
     validateIssueBreadcrumb,

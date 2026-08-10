@@ -4,6 +4,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using LogBrew.Unity;
 
 namespace LogBrew.Unity.Tests
@@ -44,9 +45,11 @@ namespace LogBrew.Unity.Tests
             Run("context_validation_fails_closed", ContextValidationFailsClosed);
             Run("metadata_numbers_are_finite_and_serializable", MetadataNumbersAreFiniteAndSerializable);
             Run("exception_projection_omits_private_message_and_paths", ExceptionProjectionOmitsPrivateMessageAndPaths);
+            Run("exception_chain_preserves_inner_error_evidence", ExceptionChainPreservesInnerErrorEvidence);
+            Run("manual_exception_chain_validates_root_evidence", ManualExceptionChainValidatesRootEvidence);
             Run("breadcrumb_buffer_is_bounded_and_clearable", BreadcrumbBufferIsBoundedAndClearable);
             Run("unity_stack_trace_parser_emits_typed_frames", UnityStackTraceParserEmitsTypedFrames);
-            Console.WriteLine("unity package tests ok (34 tests)");
+            Console.WriteLine("unity package tests ok (36 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -1216,9 +1219,82 @@ namespace LogBrew.Unity.Tests
             AssertContains(body, "\"type\": \"unity.exception\"");
             AssertContains(body, "\"handled\": false");
             AssertContains(body, "\"stackFrames\"");
+            AssertContains(body, "\"exceptionChain\"");
+            AssertContains(body, "\"relationship\": \"reported\"");
+            AssertContains(body, "\"messageState\": \"redacted\"");
+            AssertContains(body, "\"stackFramesState\": \"captured\"");
             AssertContains(body, "\"function\": \"ThrowSensitiveException\"");
             AssertDoesNotContain(body, "payment details must not be captured");
             AssertDoesNotContain(body, "/" + "Users/");
+        }
+
+        private static void ExceptionChainPreservesInnerErrorEvidence()
+        {
+            var captured = CaptureNestedException();
+            var client = LogBrewUnity.CreateClient(
+                "LOGBREW_API_KEY",
+                "checkout-game",
+                includeAutomaticContext: false);
+            LogBrewUnity.CaptureException(
+                client,
+                "evt_exception_chain",
+                "2026-08-02T08:15:31Z",
+                captured,
+                handled: true);
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"type\": \"System.IO.InvalidDataException\"");
+            AssertContains(body, "\"type\": \"System.InvalidOperationException\"");
+            AssertContains(body, "\"relationship\": \"cause\"");
+            AssertContains(body, "\"parentId\": 0");
+            AssertContains(body, "\"type\": \"unity.inner_exception\"");
+            AssertEqual(2, CountOccurrences(body, "\"messageState\": \"redacted\""));
+            AssertDoesNotContain(body, "private checkout wrapper");
+            AssertDoesNotContain(body, "private payment provider response");
+        }
+
+        private static void ManualExceptionChainValidatesRootEvidence()
+        {
+            var client = NewClient();
+            var mechanism = IssueExceptionMechanism.Create("unity.manual", true);
+            var rootFrame = IssueStackFrame.Create("Checkout.cs", 42, 7)
+                .WithFunction("Checkout.Submit")
+                .WithInApp(true);
+            var chain = IssueExceptionChain.Create(new[]
+            {
+                IssueExceptionChainEntry.Create(
+                        0,
+                        IssueExceptionRelationship.Reported,
+                        "CheckoutFailure")
+                    .WithMechanism(mechanism)
+                    .WithRedactedMessage()
+                    .WithStackFrames(new[] { rootFrame }, true),
+                IssueExceptionChainEntry.Create(
+                        1,
+                        IssueExceptionRelationship.Cause,
+                        "AuthorizationFailure")
+                    .WithParentId(0)
+                    .WithMessage("provider rejected the authorization")
+            });
+            client.Issue(
+                "evt_manual_chain",
+                "2026-08-02T08:15:31Z",
+                IssueAttributes.Create("Checkout failed", "error")
+                    .WithException(IssueExceptionInfo.Create("CheckoutFailure").WithMechanism(mechanism))
+                    .WithStackFrame(rootFrame)
+                    .WithExceptionChain(chain));
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"stackFramesState\": \"truncated\"");
+            AssertContains(body, "\"message\": \"provider rejected the authorization\"");
+            AssertContains(body, "\"messageState\": \"captured\"");
+            Expect("validation_error", () => NewClient().Issue(
+                "evt_mismatched_chain",
+                "2026-08-02T08:15:31Z",
+                IssueAttributes.Create("Mismatch", "error")
+                    .WithException(IssueExceptionInfo.Create("OtherFailure").WithMechanism(mechanism))
+                    .WithStackFrame(rootFrame)
+                    .WithExceptionChain(chain)));
         }
 
         private static void BreadcrumbBufferIsBoundedAndClearable()
@@ -1267,16 +1343,56 @@ namespace LogBrew.Unity.Tests
                 "Checkout.Submit () (at /workspace/game/Assets/Scripts/Checkout.cs:42)\nUnityEngine.Debug:LogException(Exception)");
             var body = client.PreviewJson();
             AssertContains(body, "\"type\": \"CheckoutFailure\"");
+            AssertContains(body, "\"exceptionChain\"");
+            AssertContains(body, "\"messageState\": \"redacted\"");
+            AssertContains(body, "\"stackFramesState\": \"captured\"");
             AssertContains(body, "\"filename\": \"Checkout.cs\"");
             AssertContains(body, "\"line\": 42");
             AssertContains(body, "\"function\": \"Checkout.Submit\"");
             AssertDoesNotContain(body, "/workspace/game");
             AssertDoesNotContain(body, "UnityEngine.Debug:LogException");
+
+            var lines = new List<string>();
+            for (var index = 0; index < 33; index++)
+            {
+                lines.Add("Checkout.Step" + index.ToString(CultureInfo.InvariantCulture)
+                    + " () (at Assets/Scripts/Checkout.cs:"
+                    + (index + 1).ToString(CultureInfo.InvariantCulture)
+                    + ")");
+            }
+
+            var denseClient = NewClient();
+            LogBrewUnity.CaptureException(
+                denseClient,
+                "evt_unity_stack_truncated",
+                "2026-08-02T08:15:31Z",
+                "CheckoutFailure: checkout state missing",
+                string.Join("\n", lines));
+            AssertContains(denseClient.PreviewJson(), "\"stackFramesState\": \"truncated\"");
         }
 
         private static void ThrowSensitiveException()
         {
             throw new InvalidOperationException("payment details must not be captured");
+        }
+
+        private static InvalidDataException CaptureNestedException()
+        {
+            try
+            {
+                try
+                {
+                    throw new InvalidOperationException("private payment provider response");
+                }
+                catch (InvalidOperationException error)
+                {
+                    throw new InvalidDataException("private checkout wrapper", error);
+                }
+            }
+            catch (InvalidDataException error)
+            {
+                return error;
+            }
         }
 
         private static IEnumerator EmptyCoroutine()

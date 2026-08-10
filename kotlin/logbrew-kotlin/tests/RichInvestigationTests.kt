@@ -4,6 +4,13 @@ import co.logbrew.sdk.EnvironmentAttributes
 import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.IssueBreadcrumb
 import co.logbrew.sdk.IssueBreadcrumbLevel
+import co.logbrew.sdk.IssueException
+import co.logbrew.sdk.IssueExceptionChain
+import co.logbrew.sdk.IssueExceptionChainEntry
+import co.logbrew.sdk.IssueExceptionMechanism
+import co.logbrew.sdk.IssueExceptionMessageState
+import co.logbrew.sdk.IssueExceptionRelationship
+import co.logbrew.sdk.IssueExceptionStackFramesState
 import co.logbrew.sdk.IssueStackFrame
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
@@ -38,6 +45,7 @@ object RichInvestigationTests {
         run("shared_context_is_available_on_every_signal", ::sharedContextIsAvailableOnEverySignal)
         run("context_layers_merge_deterministically", ::contextLayersMergeDeterministically)
         run("throwable_capture_is_structured_and_private_by_default", ::throwableCaptureIsStructuredAndPrivateByDefault)
+        run("exception_chains_preserve_causes_suppressed_and_states", ::exceptionChainsPreserveCausesSuppressedAndStates)
         run("client_breadcrumbs_are_bounded_and_clearable", ::clientBreadcrumbsAreBoundedAndClearable)
         run("span_links_are_bounded_validated_and_serialized", ::spanLinksAreBoundedValidatedAndSerialized)
         run("android_context_promotes_investigation_fields", ::androidContextPromotesInvestigationFields)
@@ -210,6 +218,134 @@ object RichInvestigationTests {
         check("\"stackFrames\"" !in unknownFrameBody)
         check("Thread.kt" !in unknownFrameBody)
         check("restricted-description" !in unknownFrameBody)
+    }
+
+    private fun exceptionChainsPreserveCausesSuppressedAndStates() {
+        val cause = IllegalArgumentException("private cause message")
+        cause.stackTrace =
+            arrayOf(
+                StackTraceElement("checkout.PaymentClient", "charge", "PaymentClient.kt", 18),
+            )
+        val suppressed = IllegalStateException("private suppressed message")
+        suppressed.stackTrace =
+            arrayOf(
+                StackTraceElement("checkout.AuditWriter", "write", "AuditWriter.kt", 29),
+            )
+        val error = IllegalStateException("reported-message-canary", cause)
+        error.addSuppressed(suppressed)
+        error.stackTrace =
+            arrayOf(
+                StackTraceElement("checkout.CheckoutHandler", "submit", "CheckoutHandler.kt", 42),
+            )
+
+        val client = client(includeAutomaticContext = false)
+        client.issue(
+            "exception-chain",
+            "2026-08-06T00:02:03Z",
+            IssueAttributes.fromThrowable(error, mechanismType = "kotlin.exception", handled = false),
+        )
+        val body = client.previewJson()
+        check("\"exceptionChain\"" in body)
+        check("\"relationship\": \"reported\"" in body)
+        check("\"relationship\": \"cause\"" in body)
+        check("\"relationship\": \"suppressed\"" in body)
+        check("\"parentId\": 0" in body)
+        check("\"messageState\": \"redacted\"" in body)
+        check("\"stackFramesState\": \"captured\"" in body)
+        check("\"type\": \"kotlin.cause\"" in body)
+        check("\"type\": \"kotlin.suppressed\"" in body)
+        check("PaymentClient.kt" in body)
+        check("AuditWriter.kt" in body)
+        check("reported-message-canary" !in body)
+        check("private cause message" !in body)
+        check("private suppressed message" !in body)
+
+        var deep: Throwable = IllegalStateException("private depth 9")
+        for (depth in 8 downTo 0) {
+            deep = IllegalStateException("private depth $depth", deep)
+        }
+        val deepClient = client(includeAutomaticContext = false)
+        deepClient.issue(
+            "deep-exception-chain",
+            "2026-08-06T00:02:04Z",
+            IssueAttributes.fromThrowable(deep),
+        )
+        val deepBody = deepClient.previewJson()
+        check(Regex("\\\"relationship\\\": \\\"reported\\\"").findAll(deepBody).count() == 1)
+        check(Regex("\\\"relationship\\\": \\\"cause\\\"").findAll(deepBody).count() == 7)
+        check("\"truncated\": true" in deepBody)
+        check("private depth" !in deepBody)
+
+        val mechanism = IssueExceptionMechanism("kotlin.manual", handled = true)
+        val rootFrame =
+            IssueStackFrame(
+                filename = "Checkout.kt",
+                line = 42,
+                column = 3,
+                function = "submit",
+                module = "checkout.Checkout",
+            )
+        val manualChain =
+            IssueExceptionChain(
+                entries =
+                    listOf(
+                        IssueExceptionChainEntry(
+                            id = 0,
+                            relationship = IssueExceptionRelationship.REPORTED,
+                            type = "CheckoutFailure",
+                            message = "approved summary",
+                            messageState = IssueExceptionMessageState.TRUNCATED,
+                            mechanism = mechanism,
+                            stackFrames = listOf(rootFrame),
+                            stackFramesState = IssueExceptionStackFramesState.CAPTURED,
+                        ),
+                        IssueExceptionChainEntry(
+                            id = 1,
+                            parentId = 0,
+                            relationship = IssueExceptionRelationship.CONTEXT,
+                            type = "RequestContextFailure",
+                            messageState = IssueExceptionMessageState.REDACTED,
+                            mechanism = IssueExceptionMechanism("kotlin.context", handled = true),
+                        ),
+                    ),
+                truncated = true,
+            )
+        val manualClient = client(includeAutomaticContext = false)
+        manualClient.issue(
+            "manual-exception-chain",
+            "2026-08-06T00:02:05Z",
+            IssueAttributes
+                .create("Checkout failed", "error")
+                .withException(IssueException("CheckoutFailure", mechanism))
+                .withStackFrame(rootFrame)
+                .withExceptionChain(manualChain),
+        )
+        val manualBody = manualClient.previewJson()
+        check("\"message\": \"approved summary\"" in manualBody)
+        check("\"messageState\": \"truncated\"" in manualBody)
+        check("\"relationship\": \"context\"" in manualBody)
+        check("\"stackFramesState\": \"not_captured\"" in manualBody)
+
+        expectValidation {
+            client(includeAutomaticContext = false).issue(
+                "bad-exception-chain",
+                "2026-08-06T00:02:06Z",
+                IssueAttributes
+                    .create("Bad chain", "error")
+                    .withException(IssueException("CheckoutFailure"))
+                    .withExceptionChain(
+                        IssueExceptionChain(
+                            listOf(
+                                IssueExceptionChainEntry(
+                                    id = 0,
+                                    relationship = IssueExceptionRelationship.CAUSE,
+                                    type = "CheckoutFailure",
+                                ),
+                            ),
+                        ),
+                    ),
+            )
+        }
     }
 
     private fun clientBreadcrumbsAreBoundedAndClearable() {

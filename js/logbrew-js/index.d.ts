@@ -298,6 +298,40 @@ export type IssueException = {
   mechanism?: IssueExceptionMechanism;
 };
 
+export type IssueExceptionRelationship =
+  | "reported"
+  | "cause"
+  | "context"
+  | "aggregate_member"
+  | "suppressed";
+export type IssueExceptionMessageState = "captured" | "truncated" | "redacted" | "not_captured";
+export type IssueExceptionStackFramesState = "captured" | "truncated" | "not_captured";
+
+/** One parent-first runtime exception with its own message and structured stack state. */
+export type IssueExceptionChainEntry = {
+  /** Contiguous zero-based node identity. */
+  id: number;
+  /** Earlier parent node. Omitted only for the reported root exception. */
+  parentId?: number;
+  relationship: IssueExceptionRelationship;
+  type: string;
+  /** Bounded message only when messageState is captured or truncated. */
+  message?: string;
+  messageState: IssueExceptionMessageState;
+  module?: string;
+  mechanism?: IssueExceptionMechanism;
+  /** This exact exception's bounded structured frames. */
+  stackFrames?: IssueStackFrame[];
+  stackFramesState: IssueExceptionStackFramesState;
+};
+
+/** At most eight parent-first runtime exceptions. */
+export type IssueExceptionChain = {
+  entries: IssueExceptionChainEntry[];
+  /** True when a cycle or node cap omitted additional exceptions. */
+  truncated: boolean;
+};
+
 export type IssueBreadcrumbLevel = "debug" | "info" | "warning" | "error" | "critical";
 export type IssueBreadcrumbLevelInput = IssueBreadcrumbLevel | "trace" | "log" | "warn" | "fatal";
 export type IssueBreadcrumbDataValue = string | number | boolean | null;
@@ -329,6 +363,8 @@ export type IssueAttributes = {
   level: SeverityInput;
   message?: string;
   exception?: IssueException;
+  /** Parent-first runtime exception evidence; the first node agrees with legacy exception/stackFrames. */
+  exceptionChain?: IssueExceptionChain;
   /** Ordered privacy-bounded generated frames, capped at 32. */
   stackFrames?: IssueStackFrame[];
   /** Oldest-to-newest issue history, capped at the most recent 64 entries. */
@@ -845,7 +881,7 @@ export declare function createNetworkMilestoneAttributes(
 /** Build a local-only, token-free support-ticket create payload draft without calling backend routes. */
 export declare function createSupportTicketDraft(input: SupportTicketDraftInput): SupportTicketDraft;
 
-/** Convert a JavaScript Error-like value into safe issue attributes with optional source-map Debug ID metadata. */
+/** Convert an Error-like value and its cause/AggregateError tree into safe bounded issue attributes. */
 export declare function createIssueAttributesFromError(
   error: unknown,
   options?: JavaScriptErrorIssueOptions

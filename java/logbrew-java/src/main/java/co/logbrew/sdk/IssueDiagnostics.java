@@ -12,8 +12,11 @@ import java.util.regex.Pattern;
 final class IssueDiagnostics {
     static final int MAX_STACK_FRAMES = 32;
     static final int MAX_BREADCRUMBS = 64;
+    static final int MAX_EXCEPTIONS = 8;
 
     private static final int MAX_EXCEPTION_TYPE = 256;
+    private static final int MAX_EXCEPTION_MESSAGE = 1024;
+    private static final int MAX_EXCEPTION_MODULE = 512;
     private static final int MAX_MECHANISM_TYPE = 64;
     private static final int MAX_FRAME_FILENAME = 2048;
     private static final int MAX_FRAME_FUNCTION = 256;
@@ -41,6 +44,14 @@ final class IssueDiagnostics {
 
     static String requireMechanismType(String value) {
         return requireMachineName("issue exception mechanism type", value, MAX_MECHANISM_TYPE, true);
+    }
+
+    static String requireExceptionMessage(String value) {
+        return requireText("issue exceptionChain message", value, MAX_EXCEPTION_MESSAGE, false);
+    }
+
+    static String requireExceptionModule(String value) {
+        return requireText("issue exceptionChain module", value, MAX_EXCEPTION_MODULE, true);
     }
 
     static String requireBreadcrumbName(String label, String value, boolean allowColon) {
@@ -205,6 +216,10 @@ final class IssueDiagnostics {
     }
 
     static List<IssueStackFrame> stackFrames(Throwable error) {
+        return stackEvidence(error).frames();
+    }
+
+    static StackEvidence stackEvidence(Throwable error) {
         if (error == null) {
             throw validation("issue error must be provided");
         }
@@ -212,11 +227,11 @@ final class IssueDiagnostics {
         try {
             elements = error.getStackTrace();
         } catch (RuntimeException | LinkageError failure) {
-            return List.of();
+            return new StackEvidence(List.of(), false);
         }
         List<IssueStackFrame> frames = new ArrayList<>();
         if (elements == null) {
-            return frames;
+            return new StackEvidence(frames, false);
         }
         for (StackTraceElement element : elements) {
             if (element == null) {
@@ -238,7 +253,43 @@ final class IssueDiagnostics {
                 break;
             }
         }
-        return frames;
+        return new StackEvidence(frames, elements != null && elements.length > MAX_STACK_FRAMES);
+    }
+
+    static String safeExceptionModule(Throwable error) {
+        try {
+            Package exceptionPackage = error.getClass().getPackage();
+            String value = exceptionPackage == null ? null : exceptionPackage.getName();
+            return safeText(value, MAX_EXCEPTION_MODULE, true, null);
+        } catch (RuntimeException | LinkageError failure) {
+            return null;
+        }
+    }
+
+    static boolean hasExceptionMessage(Throwable error) {
+        try {
+            String message = error.getMessage();
+            return message != null && !message.trim().isEmpty();
+        } catch (RuntimeException | LinkageError failure) {
+            return false;
+        }
+    }
+
+    static Throwable safeCause(Throwable error) {
+        try {
+            return error.getCause();
+        } catch (RuntimeException | LinkageError failure) {
+            return null;
+        }
+    }
+
+    static Throwable[] safeSuppressed(Throwable error) {
+        try {
+            Throwable[] values = error.getSuppressed();
+            return values == null ? new Throwable[0] : values;
+        } catch (RuntimeException | LinkageError failure) {
+            return new Throwable[0];
+        }
     }
 
     private static String generatedFilename(String fileName, String module) {
@@ -319,7 +370,25 @@ final class IssueDiagnostics {
         return validation("issue breadcrumb data value for " + key + " must be a finite primitive");
     }
 
-    private static SdkException validation(String message) {
+    static SdkException validation(String message) {
         return new SdkException("validation_error", message);
+    }
+
+    static final class StackEvidence {
+        private final List<IssueStackFrame> frames;
+        private final boolean truncated;
+
+        StackEvidence(List<IssueStackFrame> frames, boolean truncated) {
+            this.frames = frames;
+            this.truncated = truncated;
+        }
+
+        List<IssueStackFrame> frames() {
+            return frames;
+        }
+
+        boolean truncated() {
+            return truncated;
+        }
     }
 }

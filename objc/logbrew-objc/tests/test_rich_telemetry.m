@@ -240,9 +240,22 @@ static void LBWTestIssueEvidence(void) {
     };
     LBWAssert([client addBreadcrumb:breadcrumb error:&error], @"breadcrumb failed");
   }
-  NSError *captured = [NSError errorWithDomain:@"CheckoutError"
-                                           code:42
-                                       userInfo:@{NSLocalizedDescriptionKey: @"card-number-must-never-escape"}];
+  NSError *underlying = [NSError errorWithDomain:@"GatewayError"
+                                             code:503
+                                         userInfo:@{NSLocalizedDescriptionKey: @"gateway-message-canary"}];
+  NSError *aggregateMember = [NSError errorWithDomain:@"InventoryError"
+                                                  code:409
+                                              userInfo:@{
+                                                NSLocalizedDescriptionKey: @"inventory-message-canary"
+                                              }];
+  NSMutableDictionary<NSString *, id> *capturedUserInfo = [@{
+    NSLocalizedDescriptionKey: @"card-number-must-never-escape",
+    NSUnderlyingErrorKey: underlying
+  } mutableCopy];
+  if (@available(macOS 11.3, iOS 14.5, tvOS 14.5, watchOS 7.4, *)) {
+    capturedUserInfo[NSMultipleUnderlyingErrorsKey] = @[aggregateMember];
+  }
+  NSError *captured = [NSError errorWithDomain:@"CheckoutError" code:42 userInfo:capturedUserInfo];
   NSDictionary<NSString *, id> *attributes = [LBWIssueDiagnostics attributesForError:captured
                                                                                 title:@"Payment authorization failed"
                                                                                 level:@"error"
@@ -265,6 +278,8 @@ static void LBWTestIssueEvidence(void) {
   NSDictionary<NSString *, id> *exception = issue[@"exception"];
   NSDictionary<NSString *, id> *mechanism = exception[@"mechanism"];
   NSArray<NSDictionary<NSString *, id> *> *frames = issue[@"stackFrames"];
+  NSDictionary<NSString *, id> *exceptionChain = issue[@"exceptionChain"];
+  NSArray<NSDictionary<NSString *, id> *> *chainEntries = exceptionChain[@"entries"];
   NSArray<NSDictionary<NSString *, id> *> *breadcrumbs = issue[@"breadcrumbs"];
   LBWAssert([exception[@"type"] isEqualToString:@"CheckoutError"], @"exception type missing");
   LBWAssert([mechanism[@"type"] isEqualToString:@"objc.error"], @"mechanism missing");
@@ -272,11 +287,26 @@ static void LBWTestIssueEvidence(void) {
   LBWAssert([frames count] == 1U, @"frame missing");
   LBWAssert([frames[0][@"filename"] isEqualToString:@"Checkout.m"], @"filename was not sanitized");
   LBWAssert([frames[0][@"function"] isEqualToString:@"submitPayment:"], @"function missing");
+  LBWAssert([chainEntries count] == 3U, @"NSError exception chain missing");
+  LBWAssert([chainEntries[0][@"relationship"] isEqualToString:@"reported"], @"reported relationship missing");
+  LBWAssert([chainEntries[0][@"messageState"] isEqualToString:@"redacted"], @"root message state missing");
+  LBWAssert([chainEntries[0][@"stackFrames"] isEqualToArray:frames], @"reported stack did not match");
+  LBWAssert([chainEntries[1][@"relationship"] isEqualToString:@"cause"], @"cause relationship missing");
+  LBWAssert([chainEntries[1][@"type"] isEqualToString:@"GatewayError"], @"cause type missing");
+  LBWAssert(
+      [chainEntries[1][@"stackFramesState"] isEqualToString:@"not_captured"],
+      @"cause stack state missing");
+  LBWAssert(
+      [chainEntries[2][@"relationship"] isEqualToString:@"aggregate_member"],
+      @"aggregate relationship missing");
+  LBWAssert(![exceptionChain[@"truncated"] boolValue], @"complete exception chain marked truncated");
   LBWAssert([breadcrumbs count] == 64U, @"breadcrumb bound failed");
   LBWAssert([breadcrumbs[0][@"category"] isEqualToString:@"step_2"], @"breadcrumb order failed");
   LBWAssert([[breadcrumbs lastObject][@"timestamp"] isEqualToString:@"2026-08-06T10:00:00Z"], @"breadcrumb timestamp was not normalized");
   LBWAssert([issue[@"breadcrumbsTruncated"] boolValue], @"breadcrumb truncation missing");
   LBWAssert([json rangeOfString:@"card-number-must-never-escape"].location == NSNotFound, @"NSError description leaked");
+  LBWAssert([json rangeOfString:@"gateway-message-canary"].location == NSNotFound, @"cause description leaked");
+  LBWAssert([json rangeOfString:@"inventory-message-canary"].location == NSNotFound, @"aggregate description leaked");
   LBWAssert([json rangeOfString:@"/opt/app"].location == NSNotFound, @"absolute source path leaked");
 
   [client clearBreadcrumbs];
@@ -423,6 +453,39 @@ static void LBWTestInvalidEvidenceFailsClosed(void) {
                     error:&error];
   LBWAssert(!ok, @"zero span-link trace was accepted");
   LBWAssert(client.pendingEvents == 0U, @"invalid span link entered the queue");
+
+  NSDictionary<NSString *, id> *manualFrame = @{
+    @"filename": @"Checkout.m", @"line": @42, @"column": @17, @"inApp": @YES
+  };
+  error = nil;
+  ok = [client issueWithID:@"mismatched-chain"
+                 timestamp:@"2026-08-06T10:00:03Z"
+                attributes:@{
+                  @"title": @"Mismatch",
+                  @"level": @"error",
+                  @"exception": @{
+                    @"type": @"CheckoutError",
+                    @"mechanism": @{@"type": @"objc.error", @"handled": @YES}
+                  },
+                  @"stackFrames": @[manualFrame],
+                  @"exceptionChain": @{
+                    @"entries": @[
+                      @{
+                        @"id": @0,
+                        @"relationship": @"reported",
+                        @"type": @"DifferentError",
+                        @"messageState": @"not_captured",
+                        @"mechanism": @{@"type": @"objc.error", @"handled": @YES},
+                        @"stackFrames": @[manualFrame],
+                        @"stackFramesState": @"captured"
+                      }
+                    ],
+                    @"truncated": @NO
+                  }
+                }
+                     error:&error];
+  LBWAssert(!ok, @"mismatched exception-chain root was accepted");
+  LBWAssert(client.pendingEvents == 0U, @"invalid exception chain entered the queue");
 }
 
 int main(void) {

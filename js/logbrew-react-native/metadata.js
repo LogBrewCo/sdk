@@ -66,6 +66,22 @@ export function sanitizeReactNativeIssueStackFrames(stackFrames) {
   }));
 }
 
+export function sanitizeReactNativeIssueExceptionChain(exceptionChain) {
+  if (!exceptionChain || !Array.isArray(exceptionChain.entries)) {
+    return undefined;
+  }
+  return {
+    ...exceptionChain,
+    entries: exceptionChain.entries.map((entry) => {
+      const stackFrames = sanitizeReactNativeIssueStackFrames(entry.stackFrames);
+      return {
+        ...entry,
+        ...(stackFrames ? { stackFrames } : {})
+      };
+    })
+  };
+}
+
 export function runtimeReactNativeDebugIdMap() {
   try {
     const registry = globalThis?.[REACT_NATIVE_DEBUG_ID_REGISTRY];

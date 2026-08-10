@@ -282,6 +282,19 @@ func TestMiddlewareCapturesGenericPanicIssueAndPreservesGinRecovery(t *testing.T
 	if !ok || mechanism["type"] != "gin.recovery" || mechanism["handled"] != false {
 		t.Fatalf("panic issue missing escape mechanism: %#v", exception)
 	}
+	chain, ok := issue["exceptionChain"].(map[string]any)
+	if !ok {
+		t.Fatalf("panic issue missing exception chain: %#v", issue)
+	}
+	chainEntries, ok := chain["entries"].([]any)
+	if !ok || len(chainEntries) != 1 {
+		t.Fatalf("panic issue has invalid exception chain: %#v", chain)
+	}
+	reported := chainEntries[0].(map[string]any)
+	if reported["type"] != "string" || reported["relationship"] != "reported" ||
+		reported["messageState"] != "redacted" || reported["stackFramesState"] != "captured" {
+		t.Fatalf("panic chain lost reported evidence: %#v", reported)
+	}
 	frames, ok := issue["stackFrames"].([]any)
 	if !ok || len(frames) == 0 || len(frames) > 32 {
 		t.Fatalf("panic issue missing bounded structured frames: %#v", issue)

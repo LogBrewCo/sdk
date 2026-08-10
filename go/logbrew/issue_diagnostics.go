@@ -2,6 +2,7 @@ package logbrew
 
 import (
 	"math"
+	"reflect"
 	"runtime"
 	"strings"
 	"time"
@@ -11,7 +12,10 @@ import (
 const (
 	maxIssueStackFrames          = 32
 	maxIssueBreadcrumbs          = 64
+	maxIssueExceptions           = 8
 	maxIssueExceptionTypeLength  = 256
+	maxIssueExceptionMessage     = 1024
+	maxIssueExceptionModule      = 512
 	maxIssueMechanismTypeLength  = 64
 	maxIssueStackFilenameLength  = 2048
 	maxIssueStackFunctionLength  = 256
@@ -50,6 +54,69 @@ type IssueException struct {
 	Mechanism *IssueExceptionMechanism `json:"mechanism,omitempty"`
 }
 
+// IssueExceptionRelationship describes how a runtime exception relates to an
+// earlier parent node.
+type IssueExceptionRelationship string
+
+const (
+	IssueExceptionReported        IssueExceptionRelationship = "reported"
+	IssueExceptionCause           IssueExceptionRelationship = "cause"
+	IssueExceptionContext         IssueExceptionRelationship = "context"
+	IssueExceptionAggregateMember IssueExceptionRelationship = "aggregate_member"
+	IssueExceptionSuppressed      IssueExceptionRelationship = "suppressed"
+)
+
+// IssueExceptionMessageState reports whether one exception message was
+// captured, truncated, redacted, or unavailable.
+type IssueExceptionMessageState string
+
+const (
+	IssueExceptionMessageCaptured    IssueExceptionMessageState = "captured"
+	IssueExceptionMessageTruncated   IssueExceptionMessageState = "truncated"
+	IssueExceptionMessageRedacted    IssueExceptionMessageState = "redacted"
+	IssueExceptionMessageNotCaptured IssueExceptionMessageState = "not_captured"
+)
+
+// IssueExceptionStackFramesState reports whether one exception stack was
+// captured, truncated, or unavailable.
+type IssueExceptionStackFramesState string
+
+const (
+	IssueExceptionStackFramesCaptured    IssueExceptionStackFramesState = "captured"
+	IssueExceptionStackFramesTruncated   IssueExceptionStackFramesState = "truncated"
+	IssueExceptionStackFramesNotCaptured IssueExceptionStackFramesState = "not_captured"
+)
+
+// IssueExceptionChainEntry is one parent-first runtime exception with its own
+// bounded evidence states.
+type IssueExceptionChainEntry struct {
+	ID               int                            `json:"id"`
+	ParentID         *int                           `json:"parentId,omitempty"`
+	Relationship     IssueExceptionRelationship     `json:"relationship"`
+	Type             string                         `json:"type"`
+	Message          string                         `json:"message,omitempty"`
+	MessageState     IssueExceptionMessageState     `json:"messageState"`
+	Module           string                         `json:"module,omitempty"`
+	Mechanism        *IssueExceptionMechanism       `json:"mechanism,omitempty"`
+	StackFrames      []IssueStackFrame              `json:"stackFrames,omitempty"`
+	StackFramesState IssueExceptionStackFramesState `json:"stackFramesState"`
+}
+
+// IssueExceptionChain contains at most eight parent-first runtime exceptions.
+type IssueExceptionChain struct {
+	Entries   []IssueExceptionChainEntry `json:"entries"`
+	Truncated bool                       `json:"truncated"`
+}
+
+// IssueExceptionChainInput provides a runtime value and the matching legacy
+// exception fields used to create one bounded chain.
+type IssueExceptionChainInput struct {
+	Value                any
+	Exception            *IssueException
+	StackFrames          []IssueStackFrame
+	StackFramesTruncated bool
+}
+
 // IssueStackFrame is one structured code location. CaptureIssueStackFrames
 // emits basename-only generated filenames and never includes source text,
 // locals, or raw stack strings.
@@ -80,13 +147,23 @@ type IssueBreadcrumb struct {
 // filenames and bounded function/module identities. It never captures source
 // lines, local variables, raw stack text, or panic values.
 func CaptureIssueStackFrames() []IssueStackFrame {
+	return captureIssueStackEvidence(3).frames
+}
+
+type issueStackEvidence struct {
+	frames    []IssueStackFrame
+	truncated bool
+}
+
+func captureIssueStackEvidence(skip int) issueStackEvidence {
 	pcs := make([]uintptr, maxIssueStackFrames*2)
-	count := runtime.Callers(2, pcs)
+	count := runtime.Callers(skip, pcs)
 	if count == 0 {
-		return nil
+		return issueStackEvidence{}
 	}
 	iterator := runtime.CallersFrames(pcs[:count])
 	frames := make([]IssueStackFrame, 0, maxIssueStackFrames)
+	truncated := false
 	for len(frames) < maxIssueStackFrames {
 		frame, more := iterator.Next()
 		filename := sanitizeIssueStackFilename(frame.File, true)
@@ -105,11 +182,224 @@ func CaptureIssueStackFrames() []IssueStackFrame {
 			Function: functionName,
 			Module:   moduleName,
 		})
+		if len(frames) == maxIssueStackFrames && more {
+			truncated = true
+		}
 		if !more {
 			break
 		}
 	}
-	return frames
+	return issueStackEvidence{frames: frames, truncated: truncated}
+}
+
+// IssueAttributesFromError creates error-level issue attributes from a Go
+// error. The root capture stack is bounded; unwrap nodes explicitly report
+// that Go did not provide a separate stack. Error text is redacted by default.
+func IssueAttributesFromError(err error, title string, mechanismType string, handled bool) (IssueAttributes, error) {
+	if err == nil {
+		return IssueAttributes{}, &SdkError{Code: "validation_error", Message: "issue error must be provided"}
+	}
+	if title == "" {
+		title = safeGoExceptionType(err)
+	}
+	if mechanismType == "" {
+		mechanismType = "go.error"
+	}
+	stack := captureIssueStackEvidence(3)
+	exception := &IssueException{
+		Type: safeGoExceptionType(err),
+		Mechanism: &IssueExceptionMechanism{
+			Type:    mechanismType,
+			Handled: handled,
+		},
+	}
+	chain, chainErr := CreateIssueExceptionChain(IssueExceptionChainInput{
+		Value:                err,
+		Exception:            exception,
+		StackFrames:          stack.frames,
+		StackFramesTruncated: stack.truncated,
+	})
+	if chainErr != nil {
+		return IssueAttributes{}, chainErr
+	}
+	return IssueAttributes{
+		Title:          title,
+		Level:          "error",
+		Exception:      exception,
+		ExceptionChain: chain,
+		StackFrames:    stack.frames,
+	}, nil
+}
+
+// CreateIssueExceptionChain builds a bounded parent-first chain from a Go
+// error or recovered panic value without reading or serializing its text.
+func CreateIssueExceptionChain(input IssueExceptionChainInput) (*IssueExceptionChain, error) {
+	if input.Exception == nil {
+		return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain exception must be provided"}
+	}
+	if _, err := cloneIssueException(input.Exception); err != nil {
+		return nil, err
+	}
+	if input.StackFrames != nil {
+		if _, err := cloneIssueStackFrames(input.StackFrames); err != nil {
+			return nil, err
+		}
+	}
+	builder := issueExceptionChainBuilder{seen: make([]error, 0, maxIssueExceptions)}
+	builder.addRoot(input)
+	chain := &IssueExceptionChain{Entries: builder.entries, Truncated: builder.truncated}
+	if _, err := cloneIssueExceptionChain(chain, input.Exception, input.StackFrames); err != nil {
+		return nil, err
+	}
+	return chain, nil
+}
+
+type issueExceptionChainBuilder struct {
+	entries   []IssueExceptionChainEntry
+	seen      []error
+	truncated bool
+}
+
+func (b *issueExceptionChainBuilder) addRoot(input IssueExceptionChainInput) {
+	entry := IssueExceptionChainEntry{
+		ID:               0,
+		Relationship:     IssueExceptionReported,
+		Type:             input.Exception.Type,
+		MessageState:     IssueExceptionMessageNotCaptured,
+		Mechanism:        input.Exception.Mechanism,
+		StackFrames:      input.StackFrames,
+		StackFramesState: issueStackState(input.StackFrames, input.StackFramesTruncated),
+	}
+	if input.Value != nil {
+		entry.MessageState = IssueExceptionMessageRedacted
+	}
+	if errValue, ok := input.Value.(error); ok && errValue != nil {
+		entry.Module = safeGoExceptionModule(errValue)
+		b.seen = append(b.seen, errValue)
+	}
+	b.entries = append(b.entries, entry)
+	if errValue, ok := input.Value.(error); ok && errValue != nil {
+		b.addChildren(errValue, 0)
+	}
+}
+
+func (b *issueExceptionChainBuilder) addChildren(parent error, parentID int) {
+	children, relationship := safeGoErrorChildren(parent)
+	for _, child := range children {
+		if child == nil {
+			continue
+		}
+		if seenGoError(b.seen, child) {
+			b.truncated = true
+			continue
+		}
+		if len(b.entries) >= maxIssueExceptions {
+			b.truncated = true
+			return
+		}
+		b.seen = append(b.seen, child)
+		id := len(b.entries)
+		parentCopy := parentID
+		mechanismType := "go.unwrap"
+		if relationship == IssueExceptionAggregateMember {
+			mechanismType = "go.aggregate_member"
+		}
+		b.entries = append(b.entries, IssueExceptionChainEntry{
+			ID:           id,
+			ParentID:     &parentCopy,
+			Relationship: relationship,
+			Type:         safeGoExceptionType(child),
+			MessageState: IssueExceptionMessageRedacted,
+			Module:       safeGoExceptionModule(child),
+			Mechanism: &IssueExceptionMechanism{
+				Type:    mechanismType,
+				Handled: true,
+			},
+			StackFramesState: IssueExceptionStackFramesNotCaptured,
+		})
+		b.addChildren(child, id)
+	}
+}
+
+func issueStackState(frames []IssueStackFrame, truncated bool) IssueExceptionStackFramesState {
+	if len(frames) == 0 {
+		return IssueExceptionStackFramesNotCaptured
+	}
+	if truncated {
+		return IssueExceptionStackFramesTruncated
+	}
+	return IssueExceptionStackFramesCaptured
+}
+
+func safeGoErrorChildren(err error) (children []error, relationship IssueExceptionRelationship) {
+	defer func() {
+		if recover() != nil {
+			children = nil
+			relationship = IssueExceptionCause
+		}
+	}()
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		return append([]error(nil), multi.Unwrap()...), IssueExceptionAggregateMember
+	}
+	if single, ok := err.(interface{ Unwrap() error }); ok {
+		if child := single.Unwrap(); child != nil {
+			return []error{child}, IssueExceptionCause
+		}
+	}
+	return nil, IssueExceptionCause
+}
+
+func seenGoError(seen []error, candidate error) bool {
+	candidateType := reflect.TypeOf(candidate)
+	for _, existing := range seen {
+		if reflect.TypeOf(existing) != candidateType {
+			continue
+		}
+		if candidateType != nil && candidateType.Comparable() {
+			if existing == candidate {
+				return true
+			}
+			continue
+		}
+		existingValue := reflect.ValueOf(existing)
+		candidateValue := reflect.ValueOf(candidate)
+		switch candidateValue.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Map, reflect.Ptr, reflect.Slice, reflect.UnsafePointer:
+			if existingValue.Pointer() == candidateValue.Pointer() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func safeGoExceptionType(value any) string {
+	valueType := reflect.TypeOf(value)
+	if valueType == nil {
+		return "error"
+	}
+	typeName := valueType.String()
+	if !validIssueText(typeName, maxIssueExceptionTypeLength, true) {
+		return "error"
+	}
+	return typeName
+}
+
+// IssueExceptionType returns a bounded type identity for an error or recovered
+// panic value without formatting or reading that value.
+func IssueExceptionType(value any) string {
+	return safeGoExceptionType(value)
+}
+
+func safeGoExceptionModule(err error) string {
+	valueType := reflect.TypeOf(err)
+	for valueType != nil && valueType.Kind() == reflect.Ptr {
+		valueType = valueType.Elem()
+	}
+	if valueType == nil || !validIssueText(valueType.PkgPath(), maxIssueExceptionModule, true) {
+		return ""
+	}
+	return valueType.PkgPath()
 }
 
 func cloneIssueException(exception *IssueException) (map[string]any, error) {
@@ -127,6 +417,109 @@ func cloneIssueException(exception *IssueException) (map[string]any, error) {
 		}
 	}
 	return validated, nil
+}
+
+func cloneIssueExceptionChain(
+	chain *IssueExceptionChain,
+	legacyException *IssueException,
+	legacyFrames []IssueStackFrame,
+) (map[string]any, error) {
+	if chain == nil || len(chain.Entries) < 1 || len(chain.Entries) > maxIssueExceptions {
+		return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain entries must contain 1-8 exceptions"}
+	}
+	entries := make([]map[string]any, 0, len(chain.Entries))
+	for index := range chain.Entries {
+		entry := chain.Entries[index]
+		if entry.ID != index {
+			return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain ids must be contiguous and match array order"}
+		}
+		if index == 0 {
+			if entry.Relationship != IssueExceptionReported || entry.ParentID != nil {
+				return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain entry 0 must be the parentless reported exception"}
+			}
+		} else if entry.Relationship == IssueExceptionReported || !validIssueExceptionRelationship(entry.Relationship) ||
+			entry.ParentID == nil || *entry.ParentID < 0 || *entry.ParentID >= index {
+			return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain parent relationship is invalid"}
+		}
+		if !validIssueText(entry.Type, maxIssueExceptionTypeLength, true) {
+			return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain type is invalid or exceeds 256 characters"}
+		}
+		value := map[string]any{
+			"id":               entry.ID,
+			"relationship":     string(entry.Relationship),
+			"type":             entry.Type,
+			"messageState":     string(entry.MessageState),
+			"stackFramesState": string(entry.StackFramesState),
+		}
+		if entry.ParentID != nil {
+			value["parentId"] = *entry.ParentID
+		}
+		if entry.MessageState == IssueExceptionMessageCaptured || entry.MessageState == IssueExceptionMessageTruncated {
+			if !validIssueText(entry.Message, maxIssueExceptionMessage, false) {
+				return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain message must match messageState"}
+			}
+			value["message"] = entry.Message
+		} else if (entry.MessageState != IssueExceptionMessageRedacted && entry.MessageState != IssueExceptionMessageNotCaptured) || entry.Message != "" {
+			return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain message must match messageState"}
+		}
+		if entry.Module != "" {
+			if !validIssueText(entry.Module, maxIssueExceptionModule, true) {
+				return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain module is invalid or exceeds 512 characters"}
+			}
+			value["module"] = entry.Module
+		}
+		if entry.Mechanism != nil {
+			mechanism, err := cloneIssueException(&IssueException{Type: entry.Type, Mechanism: entry.Mechanism})
+			if err != nil {
+				return nil, err
+			}
+			value["mechanism"] = mechanism["mechanism"]
+		}
+		if entry.StackFramesState == IssueExceptionStackFramesCaptured || entry.StackFramesState == IssueExceptionStackFramesTruncated {
+			frames, err := cloneIssueStackFrames(entry.StackFrames)
+			if err != nil {
+				return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain stackFrames must match stackFramesState"}
+			}
+			value["stackFrames"] = frames
+		} else if entry.StackFramesState != IssueExceptionStackFramesNotCaptured || entry.StackFrames != nil {
+			return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain stackFrames must match stackFramesState"}
+		}
+		entries = append(entries, value)
+	}
+	if legacyException == nil {
+		return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain reported exception must match exception"}
+	}
+	legacy, err := cloneIssueException(legacyException)
+	if err != nil {
+		return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain reported exception must match exception"}
+	}
+	reportedException := map[string]any{"type": entries[0]["type"]}
+	if mechanism, ok := entries[0]["mechanism"]; ok {
+		reportedException["mechanism"] = mechanism
+	}
+	if !reflect.DeepEqual(reportedException, legacy) {
+		return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain reported exception must match exception"}
+	}
+	if chain.Entries[0].StackFramesState == IssueExceptionStackFramesNotCaptured {
+		if legacyFrames != nil {
+			return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain reported stack must match stackFrames"}
+		}
+	} else {
+		legacyMapped, mapErr := cloneIssueStackFrames(legacyFrames)
+		if mapErr != nil || !reflect.DeepEqual(entries[0]["stackFrames"], legacyMapped) {
+			return nil, &SdkError{Code: "validation_error", Message: "issue exceptionChain reported stack must match stackFrames"}
+		}
+	}
+	return map[string]any{"entries": entries, "truncated": chain.Truncated}, nil
+}
+
+func validIssueExceptionRelationship(value IssueExceptionRelationship) bool {
+	switch value {
+	case IssueExceptionCause, IssueExceptionContext, IssueExceptionAggregateMember, IssueExceptionSuppressed:
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneIssueStackFrames(frames []IssueStackFrame) ([]map[string]any, error) {

@@ -106,7 +106,7 @@ fwrite(STDERR, json_encode([
 
 ## Typed Issue Diagnostics
 
-Use `IssueDiagnostics::fromThrowable(...)` when the application catches or reports a PHP failure and wants a useful issue rather than a title-only event. It builds first-class exception identity, mechanism and handled state, up to 32 newest-first frames with function/module identity, and up to 64 application-supplied breadcrumbs in oldest-first order.
+Use `IssueDiagnostics::fromThrowable(...)` when the application catches or reports a PHP failure and wants a useful issue rather than a title-only event. It builds first-class exception identity, mechanism and handled state, follows `getPrevious()` into a bounded parent-first exception chain, retains up to 32 newest-first frames with function/module identity, and keeps up to 64 application-supplied breadcrumbs in oldest-first order. Automatic node messages are redacted, missing per-node stacks are explicit, and cycles or the eight-node cap mark truncation. Symfony capture reuses the same projection. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
 
 ```php
 <?php

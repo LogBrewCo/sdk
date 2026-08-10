@@ -219,6 +219,22 @@ void rich_issue_evidence_is_bounded_and_privacy_safe() {
       logbrew::IssueMechanism{"signal", false},
   };
   details.stack_frames = {frame};
+  logbrew::IssueExceptionChainEntry reported;
+  reported.type = "PaymentDeclined";
+  reported.message_state = logbrew::IssueExceptionMessageState::redacted;
+  reported.module = "checkout.payment";
+  reported.mechanism = logbrew::IssueMechanism{"signal", false};
+  reported.stack_frames = {frame};
+  reported.stack_frames_state = logbrew::IssueExceptionStackState::captured;
+  logbrew::IssueExceptionChainEntry cause;
+  cause.id = 1U;
+  cause.parent_id = 0U;
+  cause.relationship = logbrew::IssueExceptionRelationship::cause;
+  cause.type = "GatewayRejected";
+  cause.message = "provider rejected the authorization";
+  cause.message_state = logbrew::IssueExceptionMessageState::captured;
+  cause.mechanism = logbrew::IssueMechanism{"cpp.cause", true};
+  details.exception_chain = logbrew::IssueExceptionChain{{reported, cause}, false};
   details.breadcrumbs = {
       logbrew::IssueBreadcrumb{
           "2026-08-06T10:03:01Z",
@@ -236,6 +252,12 @@ void rich_issue_evidence_is_bounded_and_privacy_safe() {
   const std::string json = client.preview_json();
   EXPECT_TRUE(json.find("\"exception\":{\"type\":\"PaymentDeclined\",\"mechanism\":{"
                         "\"type\":\"signal\",\"handled\":false}") != std::string::npos);
+  EXPECT_TRUE(json.find("\"exceptionChain\":{\"entries\":[{\"id\":0,\"relationship\":\"reported\"") !=
+              std::string::npos);
+  EXPECT_TRUE(json.find("\"relationship\":\"cause\",\"type\":\"GatewayRejected\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"messageState\":\"redacted\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"messageState\":\"captured\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"stackFramesState\":\"not_captured\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"filename\":\"payment.cpp\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"function\":\"authorize_payment\"") != std::string::npos);
   EXPECT_TRUE(json.find("\"module\":\"checkout.payment\"") != std::string::npos);
@@ -265,6 +287,20 @@ void rich_issue_evidence_is_bounded_and_privacy_safe() {
   expect_validation_error([&] {
     client.issue("evt_unsafe_frame", "2026-08-06T10:03:03Z",
                  logbrew::IssueAttributes{"unsafe frame", "error", std::nullopt}, unsafe_details);
+  });
+
+  logbrew::IssueDetails mismatched = details;
+  mismatched.exception_chain->entries.front().type = "DifferentError";
+  expect_validation_error([&] {
+    client.issue("evt_mismatched_chain", "2026-08-06T10:03:04Z",
+                 logbrew::IssueAttributes{"mismatched chain", "error", std::nullopt}, mismatched);
+  });
+
+  logbrew::IssueDetails invalid_topology = details;
+  invalid_topology.exception_chain->entries[1].parent_id = 1U;
+  expect_validation_error([&] {
+    client.issue("evt_invalid_chain_topology", "2026-08-06T10:03:05Z",
+                 logbrew::IssueAttributes{"invalid chain topology", "error", std::nullopt}, invalid_topology);
   });
 }
 

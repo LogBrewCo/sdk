@@ -138,6 +138,16 @@ logbrew_client_issue_with_details(
 
 `logbrew_issue_frame_from_location()` keeps only the basename and removes query strings and fragments, so a compiler-provided absolute `__FILE__` value does not disclose a developer path. The returned frame is safe to copy and borrows the supplied file/function/module strings only until the synchronous issue capture returns. Direct frame values may use useful relative paths but absolute paths are rejected. Frames are capped at 32. The client retains the newest 64 validated breadcrumbs and sets `breadcrumbsTruncated` whenever older evidence was discarded. Breadcrumb data is limited to eight primitive, bounded fields. Breadcrumb messages must be application-redacted summaries, never raw URLs, headers, payloads, authentication material, or direct identities. Call `logbrew_client_clear_breadcrumbs()` at a privacy or lifecycle boundary.
 
+Portable C cannot discover nested runtime failures consistently. When the
+application already knows the relationship, attach a
+`LogBrewIssueExceptionChain` through `details.exception_chain`. Its one-to-eight
+parent-first entries distinguish reported, cause, context, aggregate-member,
+and suppressed failures; message and stack states make captured, redacted,
+truncated, and missing evidence explicit. Entry zero must exactly match
+`details.exception` and `details.stack_frames`, so contradictory manual graphs
+fail before queue admission. See the shared
+[exception-chain contract](../../docs/exception-chain-evidence.md).
+
 ### Span events and links
 
 Use `logbrew_client_span_with_evidence()` for bounded milestones inside a span and links to other W3C trace/span identities:

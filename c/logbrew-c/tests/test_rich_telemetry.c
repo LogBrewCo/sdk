@@ -148,6 +148,10 @@ static void test_validation_and_privacy(void) {
     LogBrewIssueStackFrame absolute_frame = {0};
     LogBrewIssueStackFrame helper_frame = {0};
     LogBrewIssueStackFrame copied_frame = {0};
+    LogBrewIssueMechanism mismatch_mechanism = {"manual", true};
+    LogBrewIssueException mismatch_exception = {"ExpectedError", &mismatch_mechanism};
+    LogBrewIssueExceptionChainEntry mismatch_entry = {0};
+    LogBrewIssueExceptionChain mismatch_chain = {0};
     LogBrewMetadataEntry duplicates[] = {
       LOGBREW_METADATA_STRING_VALUE("duplicate", "one"),
       LOGBREW_METADATA_STRING_VALUE("duplicate", "two")
@@ -196,6 +200,19 @@ static void test_validation_and_privacy(void) {
         client, "evt_copied_frame", "2026-08-06T09:02:03Z",
         (LogBrewIssueAttributes){"copy-safe frame", "error", NULL}, details,
         LOGBREW_EVENT_OPTIONS_NONE, &error), &error);
+    mismatch_entry.type = "DifferentError";
+    mismatch_entry.mechanism = &mismatch_mechanism;
+    mismatch_entry.stack_frames = &copied_frame;
+    mismatch_entry.stack_frame_count = 1U;
+    mismatch_entry.stack_frames_state = LOGBREW_EXCEPTION_STACK_CAPTURED;
+    mismatch_chain.entries = &mismatch_entry;
+    mismatch_chain.entry_count = 1U;
+    details.exception = &mismatch_exception;
+    details.exception_chain = &mismatch_chain;
+    EXPECT_TRUE(logbrew_client_issue_with_details(
+        client, "evt_mismatched_chain", "2026-08-06T09:02:03Z",
+        (LogBrewIssueAttributes){"mismatched chain", "error", NULL}, details,
+        LOGBREW_EVENT_OPTIONS_NONE, &error) == LOGBREW_VALIDATION_ERROR);
     duplicate_options.metadata.entries = duplicates;
     duplicate_options.metadata.count = sizeof(duplicates) / sizeof(duplicates[0]);
     EXPECT_TRUE(logbrew_client_release_with_options(
@@ -389,6 +406,9 @@ int main(void) {
   LogBrewIssueMechanism mechanism = {"signal", false};
   LogBrewIssueException exception = {"PaymentDeclined", &mechanism};
   LogBrewIssueStackFrame frames[2] = {0};
+  LogBrewIssueMechanism cause_mechanism = {"c.cause", true};
+  LogBrewIssueExceptionChainEntry exception_chain_entries[2] = {0};
+  LogBrewIssueExceptionChain exception_chain = {0};
   LogBrewMetadataEntry breadcrumb_data[] = {
     LOGBREW_METADATA_STRING_VALUE("route", "/checkout/{id}"),
     LOGBREW_METADATA_NUMBER_VALUE("attempt", 2.0)
@@ -474,6 +494,25 @@ int main(void) {
   issue_details.exception = &exception;
   issue_details.stack_frames = frames;
   issue_details.stack_frame_count = sizeof(frames) / sizeof(frames[0]);
+  exception_chain_entries[0].type = "PaymentDeclined";
+  exception_chain_entries[0].mechanism = &mechanism;
+  exception_chain_entries[0].message_state = LOGBREW_EXCEPTION_MESSAGE_REDACTED;
+  exception_chain_entries[0].module = "checkout.payment";
+  exception_chain_entries[0].stack_frames = frames;
+  exception_chain_entries[0].stack_frame_count = sizeof(frames) / sizeof(frames[0]);
+  exception_chain_entries[0].stack_frames_state = LOGBREW_EXCEPTION_STACK_CAPTURED;
+  exception_chain_entries[1].id = 1U;
+  exception_chain_entries[1].parent_id = 0U;
+  exception_chain_entries[1].has_parent_id = true;
+  exception_chain_entries[1].relationship = LOGBREW_EXCEPTION_RELATIONSHIP_CAUSE;
+  exception_chain_entries[1].type = "GatewayRejected";
+  exception_chain_entries[1].message = "provider rejected the authorization";
+  exception_chain_entries[1].message_state = LOGBREW_EXCEPTION_MESSAGE_CAPTURED;
+  exception_chain_entries[1].mechanism = &cause_mechanism;
+  exception_chain_entries[1].stack_frames_state = LOGBREW_EXCEPTION_STACK_NOT_CAPTURED;
+  exception_chain.entries = exception_chain_entries;
+  exception_chain.entry_count = sizeof(exception_chain_entries) / sizeof(exception_chain_entries[0]);
+  issue_details.exception_chain = &exception_chain;
   issue_details.breadcrumbs = &explicit_breadcrumb;
   issue_details.breadcrumb_count = 1U;
 
@@ -537,6 +576,11 @@ int main(void) {
   EXPECT_TRUE(strstr(json, "\"region\":\"eu-north\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"exception\":{\"type\":\"PaymentDeclined\",\"mechanism\":{\"type\":\"signal\",\"handled\":false}}") != NULL);
+  EXPECT_TRUE(strstr(json, "\"exceptionChain\":{\"entries\":[{\"id\":0,\"relationship\":\"reported\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"relationship\":\"cause\",\"type\":\"GatewayRejected\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"messageState\":\"redacted\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"messageState\":\"captured\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"stackFramesState\":\"not_captured\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"filename\":\"checkout.c\"") != NULL);
   EXPECT_TRUE(strstr(json, "source/checkout.c") == NULL);
   EXPECT_TRUE(strstr(json, "redaction_canary=value") == NULL);

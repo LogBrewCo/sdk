@@ -12,6 +12,13 @@ FOUNDATION_EXPORT BOOL LBWValidateIssueStackFrames(
     NSArray<NSDictionary<NSString *, id> *> *_Nullable *_Nonnull output,
     NSError *_Nullable *_Nullable error);
 
+FOUNDATION_EXPORT BOOL LBWValidateIssueExceptionChain(
+    id value,
+    NSDictionary<NSString *, id> *_Nullable legacyException,
+    NSArray<NSDictionary<NSString *, id> *> *_Nullable legacyStackFrames,
+    NSDictionary<NSString *, id> *_Nullable *_Nonnull output,
+    NSError *_Nullable *_Nullable error);
+
 FOUNDATION_EXPORT BOOL LBWValidateIssueBreadcrumb(
     id value,
     NSDictionary<NSString *, id> *_Nullable *_Nonnull output,

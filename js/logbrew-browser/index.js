@@ -619,10 +619,16 @@ export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), 
     "error"
   );
   const stackFrames = sanitizeBrowserIssueStackFrames(attributes.stackFrames);
+  const exceptionChain = sanitizeBrowserIssueExceptionChain(attributes.exceptionChain);
   return {
     id: idFactory({ error, message: details.message, path, source: "error" }),
     timestamp: now(),
-    attributes: { ...attributes, ...(stackFrames ? { stackFrames } : {}), metadata: safeMetadata }
+    attributes: {
+      ...attributes,
+      ...(exceptionChain ? { exceptionChain } : {}),
+      ...(stackFrames ? { stackFrames } : {}),
+      metadata: safeMetadata
+    }
   };
 }
 
@@ -676,10 +682,16 @@ export function createUnhandledRejectionEvent(rejection, browserWindow = default
     "unhandledrejection"
   );
   const stackFrames = sanitizeBrowserIssueStackFrames(attributes.stackFrames);
+  const exceptionChain = sanitizeBrowserIssueExceptionChain(attributes.exceptionChain);
   return {
     id: idFactory({ error: rejection, message: reason.message, path, source: "unhandledrejection" }),
     timestamp: now(),
-    attributes: { ...attributes, ...(stackFrames ? { stackFrames } : {}), metadata: safeMetadata }
+    attributes: {
+      ...attributes,
+      ...(exceptionChain ? { exceptionChain } : {}),
+      ...(stackFrames ? { stackFrames } : {}),
+      metadata: safeMetadata
+    }
   };
 }
 
@@ -1086,6 +1098,22 @@ function sanitizeBrowserIssueStackFrames(stackFrames) {
     ...frame,
     filename: browserCodePath(frame.filename) ?? frame.filename
   }));
+}
+
+function sanitizeBrowserIssueExceptionChain(exceptionChain) {
+  if (!exceptionChain || !Array.isArray(exceptionChain.entries)) {
+    return undefined;
+  }
+  return {
+    ...exceptionChain,
+    entries: exceptionChain.entries.map((entry) => {
+      const stackFrames = sanitizeBrowserIssueStackFrames(entry.stackFrames);
+      return {
+        ...entry,
+        ...(stackFrames ? { stackFrames } : {})
+      };
+    })
+  };
 }
 
 function browserIssueGroupingKey(value) {

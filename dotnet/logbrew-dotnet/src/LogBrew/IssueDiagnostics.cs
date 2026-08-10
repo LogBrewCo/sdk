@@ -9,8 +9,11 @@ namespace LogBrew
     {
         internal const int MaxStackFrames = 32;
         internal const int MaxBreadcrumbs = 64;
+        internal const int MaxExceptions = 8;
 
         private const int MaxExceptionType = 256;
+        private const int MaxExceptionMessage = 1024;
+        private const int MaxExceptionModule = 512;
         private const int MaxMechanismType = 64;
         private const int MaxFrameFilename = 2048;
         private const int MaxFrameFunction = 256;
@@ -28,6 +31,16 @@ namespace LogBrew
         internal static string RequireMechanismType(string value)
         {
             return RequireMachineName("issue exception mechanism type", value, MaxMechanismType, true);
+        }
+
+        internal static string RequireExceptionMessage(string value)
+        {
+            return RequireText("issue exceptionChain message", value, MaxExceptionMessage, false);
+        }
+
+        internal static string RequireExceptionModule(string value)
+        {
+            return RequireText("issue exceptionChain module", value, MaxExceptionModule, true);
         }
 
         internal static string RequireBreadcrumbName(string label, string value, bool allowColon)
@@ -192,6 +205,11 @@ namespace LogBrew
 
         internal static IReadOnlyList<IssueStackFrame> StackFrames(Exception error)
         {
+            return StackEvidence(error).Frames;
+        }
+
+        internal static IssueStackEvidence StackEvidence(Exception error)
+        {
             if (error == null)
             {
                 throw Validation("issue error must be provided");
@@ -202,7 +220,7 @@ namespace LogBrew
             var result = new List<IssueStackFrame>();
             if (sourceFrames == null)
             {
-                return result.AsReadOnly();
+                return new IssueStackEvidence(result.AsReadOnly(), false);
             }
 
             foreach (var sourceFrame in sourceFrames)
@@ -232,7 +250,27 @@ namespace LogBrew
                 result.Add(frame);
             }
 
-            return result.AsReadOnly();
+            return new IssueStackEvidence(
+                result.AsReadOnly(),
+                sourceFrames.Length > MaxStackFrames);
+        }
+
+        internal static string? SafeExceptionModule(Exception error)
+        {
+            var type = error.GetType();
+            return SafeText(type.Namespace, MaxExceptionModule, true, null);
+        }
+
+        internal static bool HasExceptionMessage(Exception error)
+        {
+            try
+            {
+                return !string.IsNullOrWhiteSpace(error.Message);
+            }
+            catch (Exception failure) when (!DeliveryExceptionPolicy.IsFatal(failure))
+            {
+                return false;
+            }
         }
 
         internal static SdkException Validation(string message)

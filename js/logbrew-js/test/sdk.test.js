@@ -1442,6 +1442,35 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
         handled: true
       }
     },
+    exceptionChain: {
+      entries: [{
+        id: 0,
+        relationship: "reported",
+        type: "TypeError",
+        messageState: "redacted",
+        mechanism: {
+          type: "javascript.error",
+          handled: true
+        },
+        stackFrames: [
+          {
+            filename: "https://cdn.example/assets/app.js",
+            line: 12,
+            column: 34,
+            function: "checkout",
+            debugId: "11111111-2222-4333-8444-555555555555"
+          },
+          {
+            filename: "https://cdn.example/assets/vendor.js",
+            line: 1,
+            column: 2,
+            function: "ignored"
+          }
+        ],
+        stackFramesState: "captured"
+      }],
+      truncated: false
+    },
     stackFrames: [
       {
         filename: "https://cdn.example/assets/app.js",
@@ -1602,6 +1631,9 @@ test("createIssueAttributesFromError bounds and sanitizes structured stack frame
     column: 2,
     function: "frame31"
   });
+  assert.equal(attributes.exceptionChain.entries[0].stackFrames.length, 32);
+  assert.equal(attributes.exceptionChain.entries[0].stackFramesState, "truncated");
+  assert.deepEqual(attributes.exceptionChain.entries[0].stackFrames, attributes.stackFrames);
   assert.equal(attributes.metadata.errorFrameFile, "frame-0.js");
   assert.doesNotMatch(JSON.stringify(attributes), /C:\\workspace|debug=value|fragment|frame-32/u);
 });
@@ -1761,16 +1793,20 @@ test("createIssueAttributesFromError supports explicit privacy-bounded grouping 
   assert.doesNotMatch(serializedGroupingMetadata, /dev@example|12345|email=|retry|ignoredObject|nested/u);
 });
 
-test("createIssueAttributesFromError summarizes cause chains without cause messages or stacks", () => {
+test("createIssueAttributesFromError preserves bounded parent-first cause evidence", () => {
   const low = new TypeError("low wrapped detail for dynamic-user-marker");
   low.stack = "TypeError: low wrapped detail\n    at low (/tmp/local/low.js:1:2)";
   const mid = new RangeError("middle checkout numeric-marker-12345");
   mid.cause = low;
   mid.stack = "RangeError: middle checkout numeric-marker-12345\n    at mid (/tmp/local/mid.js:3:4)";
   const side = new SyntaxError("side opaque-marker-abc123");
+  side.stack = "SyntaxError: side opaque-marker-abc123\n    at side (/tmp/local/side.js:5:6)";
+  const wrapped = new URIError("wrapped callback dynamic-user-marker");
+  wrapped.stack = "URIError: wrapped callback dynamic-user-marker\n    at wrapped (/tmp/local/wrapped.js:7:8)";
   const error = new AggregateError([mid, side], "top checkout failed", {
-    cause: new URIError("wrapped callback dynamic-user-marker")
+    cause: wrapped
   });
+  error.stack = "AggregateError: top checkout failed\n    at checkout (/tmp/local/checkout.js:9:10)";
 
   const attributes = createIssueAttributesFromError(error);
 
@@ -1779,6 +1815,71 @@ test("createIssueAttributesFromError summarizes cause chains without cause messa
   assert.equal(attributes.metadata.errorCauseSources, "cause,errors[0],cause,errors[1]");
   assert.equal(attributes.metadata.errorExceptionGroup, true);
   assert.equal(attributes.metadata.errorCauseTruncated, undefined);
+  assert.equal(attributes.exceptionChain.truncated, false);
+  assert.deepEqual(
+    attributes.exceptionChain.entries.map((entry) => ({
+      id: entry.id,
+      parentId: entry.parentId,
+      relationship: entry.relationship,
+      type: entry.type,
+      message: entry.message,
+      messageState: entry.messageState,
+      stackFramesState: entry.stackFramesState,
+      file: entry.stackFrames?.[0]?.filename
+    })),
+    [
+      {
+        id: 0,
+        parentId: undefined,
+        relationship: "reported",
+        type: "AggregateError",
+        message: undefined,
+        messageState: "redacted",
+        stackFramesState: "captured",
+        file: "checkout.js"
+      },
+      {
+        id: 1,
+        parentId: 0,
+        relationship: "cause",
+        type: "URIError",
+        message: undefined,
+        messageState: "redacted",
+        stackFramesState: "captured",
+        file: "wrapped.js"
+      },
+      {
+        id: 2,
+        parentId: 0,
+        relationship: "aggregate_member",
+        type: "RangeError",
+        message: undefined,
+        messageState: "redacted",
+        stackFramesState: "captured",
+        file: "mid.js"
+      },
+      {
+        id: 3,
+        parentId: 2,
+        relationship: "cause",
+        type: "TypeError",
+        message: undefined,
+        messageState: "redacted",
+        stackFramesState: "captured",
+        file: "low.js"
+      },
+      {
+        id: 4,
+        parentId: 0,
+        relationship: "aggregate_member",
+        type: "SyntaxError",
+        message: undefined,
+        messageState: "redacted",
+        stackFramesState: "captured",
+        file: "side.js"
+      }
+    ]
+  );
 
   const serializedCauseMetadata = JSON.stringify({
     errorCauseCount: attributes.metadata.errorCauseCount,
@@ -1797,11 +1898,12 @@ test("createIssueAttributesFromError caps cause chain summaries", () => {
   class Cause4 extends Error {}
   class Cause5 extends Error {}
   class Cause6 extends Error {}
+  class Cause7 extends Error {}
 
-  const causeTypes = [Cause0, Cause1, Cause2, Cause3, Cause4, Cause5, Cause6];
+  const causeTypes = [Cause0, Cause1, Cause2, Cause3, Cause4, Cause5, Cause6, Cause7];
   const error = new Error("root");
   let cursor = error;
-  for (let index = 0; index < 7; index += 1) {
+  for (let index = 0; index < 8; index += 1) {
     const CauseType = causeTypes[index];
     const next = new CauseType(`cause ${index}`);
     cursor.cause = next;
@@ -1814,6 +1916,81 @@ test("createIssueAttributesFromError caps cause chain summaries", () => {
   assert.equal(attributes.metadata.errorCauseTypes, "Cause0,Cause1,Cause2,Cause3,Cause4");
   assert.equal(attributes.metadata.errorCauseSources, "cause,cause,cause,cause,cause");
   assert.equal(attributes.metadata.errorCauseTruncated, true);
+  assert.equal(attributes.exceptionChain.entries.length, 8);
+  assert.equal(attributes.exceptionChain.truncated, true);
+  assert.deepEqual(
+    attributes.exceptionChain.entries.map((entry) => entry.type),
+    ["Error", "Cause0", "Cause1", "Cause2", "Cause3", "Cause4", "Cause5", "Cause6"]
+  );
+});
+
+test("manual exception chains preserve redaction state and reject contradictions", () => {
+  const rootFrame = {
+    filename: "checkout.js",
+    line: 12,
+    column: 34,
+    function: "submit",
+    inApp: true
+  };
+  const attributes = {
+    title: "CheckoutError",
+    level: "error",
+    exception: {
+      type: "CheckoutError",
+      mechanism: { type: "javascript.boundary", handled: true }
+    },
+    stackFrames: [rootFrame],
+    exceptionChain: {
+      entries: [
+        {
+          id: 0,
+          relationship: "reported",
+          type: "CheckoutError",
+          message: "Checkout failed",
+          messageState: "captured",
+          mechanism: { type: "javascript.boundary", handled: true },
+          stackFrames: [rootFrame],
+          stackFramesState: "captured"
+        },
+        {
+          id: 1,
+          parentId: 0,
+          relationship: "cause",
+          type: "ProviderError",
+          messageState: "redacted",
+          mechanism: { type: "javascript.cause", handled: true },
+          stackFramesState: "not_captured"
+        }
+      ],
+      truncated: false
+    }
+  };
+  const client = sampleClient();
+  client.issue("evt_manual_chain", "2026-07-17T12:00:00Z", attributes);
+  const queued = JSON.parse(client.previewJson()).events[0].attributes;
+
+  assert.equal(queued.exceptionChain.entries[1].message, undefined);
+  assert.equal(queued.exceptionChain.entries[1].messageState, "redacted");
+  assert.equal(queued.exceptionChain.entries[1].stackFramesState, "not_captured");
+
+  for (const mutate of [
+    (value) => { value.exceptionChain.entries[1].message = "must not accompany redaction"; },
+    (value) => { value.exceptionChain.entries[1].parentId = 1; },
+    (value) => { value.exceptionChain.entries[0].type = "DifferentError"; },
+    (value) => {
+      value.exceptionChain.entries[0].stackFrames[0] = {
+        ...value.exceptionChain.entries[0].stackFrames[0],
+        line: 99
+      };
+    }
+  ]) {
+    const invalid = structuredClone(attributes);
+    mutate(invalid);
+    assert.throws(
+      () => sampleClient().issue("evt_invalid_chain", "2026-07-17T12:00:00Z", invalid),
+      (error) => error instanceof SdkError && error.code === "validation_error"
+    );
+  }
 });
 
 test("createIssueAttributesFromError avoids arbitrary non-error cause names", () => {
