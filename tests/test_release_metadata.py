@@ -2064,6 +2064,13 @@ Repository = "https://github.com/LogBrewCo/sdk"
             normalized_readme,
         )
 
+    def test_public_python_smoke_defaults_to_current_core_release(self) -> None:
+        smoke = (ROOT / "scripts/real_user_python_public_pypi_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("LOGBREW_PYPI_SDK_VERSION:-0.1.10", smoke)
+
 
 if __name__ == "__main__":
     unittest.main()
