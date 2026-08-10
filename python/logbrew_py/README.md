@@ -14,6 +14,19 @@ python3 -m pip install logbrew-sdk
 
 `logbrew-sdk` requires Python 3.10 or newer.
 
+If the service uses a supported web framework, install its integration rather
+than rebuilding request hooks around the core client:
+
+| Framework | Install | Setup |
+| --- | --- | --- |
+| Flask | `python3 -m pip install "logbrew-flask>=0.1.4,<0.2"` | [`init_logbrew(app)` and hosted trace guide](https://docs.logbrew.co/guides/flask) |
+| FastAPI | `python3 -m pip install logbrew-fastapi` | [FastAPI package guide](https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_fastapi) |
+| Django | `python3 -m pip install logbrew-django` | [Django package guide](https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_django) |
+
+Each framework integration installs a compatible `logbrew-sdk` dependency and
+owns the framework request lifecycle. Use this core package directly for
+workers, framework-neutral services, or explicit app-owned instrumentation.
+
 The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, `TelemetryContext`, and `TraceparentContext`, and copyable examples for wiring LogBrew into your Python service. Keep the real key in your app configuration and use `preview_json()` when you want to inspect queued JSON before sending.
 
 ## Example

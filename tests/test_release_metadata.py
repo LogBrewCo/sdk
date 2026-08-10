@@ -2052,6 +2052,18 @@ Repository = "https://github.com/LogBrewCo/sdk"
         self.assertIn("bash scripts/check_fastapi_package.sh", workflow)
         self.assertIn("bash scripts/check_flask_package.sh", workflow)
 
+    def test_python_core_readme_routes_framework_apps_to_released_integrations(self) -> None:
+        readme = (ROOT / "python/logbrew_py/README.md").read_text(encoding="utf-8")
+        normalized_readme = " ".join(readme.split())
+
+        for package_name in ("logbrew-flask", "logbrew-fastapi", "logbrew-django"):
+            self.assertIn(package_name, readme)
+        self.assertIn("https://docs.logbrew.co/guides/flask", readme)
+        self.assertIn(
+            "rather than rebuilding request hooks around the core client",
+            normalized_readme,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
