@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+if(@LOGBREW_BUILD_HTTP_TRANSPORT@)
+  find_dependency(CURL)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/LogBrewTargets.cmake")
+check_required_components(LogBrew)

@@ -6,7 +6,35 @@
 
 Public C++17 SDK for building, validating, previewing, and sending LogBrew event batches from native applications.
 
-The SDK is dependency-free and ships as source plus header. Add `include/logbrew.hpp` and `src/logbrew.cpp` to your application build:
+## Install With CMake
+
+The core SDK is dependency-free and exports the `LogBrew::LogBrew` target. Pin the scoped release tag with CMake `FetchContent`:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  logbrew
+  GIT_REPOSITORY https://github.com/LogBrewCo/sdk.git
+  GIT_TAG cpp/logbrew-cpp/v0.2.3
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR cpp/logbrew-cpp
+)
+FetchContent_MakeAvailable(logbrew)
+
+target_link_libraries(your_app PRIVATE LogBrew::LogBrew)
+```
+
+The release also provides a scoped `logbrew-cpp-0.2.3.tar.gz` source asset. Download and extract that archive when your build must not check out the SDK monorepo. To install a reusable CMake package:
+
+```bash
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/path/to/prefix
+cmake --build build
+cmake --install build
+```
+
+Consumers can then use `find_package(LogBrew 0.2.3 CONFIG REQUIRED)` and link `LogBrew::LogBrew`.
+
+For an existing non-CMake build, compile the source and header directly:
 
 ```bash
 c++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude src/logbrew.cpp your_app.cpp -o your_app
@@ -44,7 +72,14 @@ logbrew::HttpTransport transport(
 logbrew::TransportResponse response = client.flush(transport);
 ```
 
-The HTTP transport is optional and uses libcurl. Keep the default source build dependency-free if your app only previews payloads or supplies its own transport:
+The HTTP transport is optional and uses libcurl. Enable it before `FetchContent_MakeAvailable(logbrew)`, then link its exported target:
+
+```cmake
+set(LOGBREW_BUILD_HTTP_TRANSPORT ON CACHE BOOL "" FORCE)
+target_link_libraries(your_app PRIVATE LogBrew::HttpTransport)
+```
+
+Keep the default build dependency-free if your app only previews payloads or supplies its own transport. Existing non-CMake builds can compile the transport directly:
 
 ```bash
 c++ -std=c++17 -Wall -Wextra -Wpedantic \

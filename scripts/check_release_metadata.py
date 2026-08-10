@@ -708,10 +708,14 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     header_path = require_path(root, "cpp/logbrew-cpp/include/logbrew.hpp", failures)
     source_path = require_path(root, "cpp/logbrew-cpp/src/logbrew.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/src/logbrew_http_transport.cpp", failures)
+    require_path(root, "cpp/logbrew-cpp/CMakeLists.txt", failures)
+    require_path(root, "cpp/logbrew-cpp/cmake/LogBrewConfig.cmake.in", failures)
     require_path(root, "cpp/logbrew-cpp/Makefile", failures)
     require_path(root, "cpp/logbrew-cpp/examples/Makefile", failures)
     require_path(root, "cpp/logbrew-cpp/examples/readme_example.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/examples/real_user_smoke.cpp", failures)
+    trace_example_path = require_path(root, "cpp/logbrew-cpp/examples/trace_correlation.cpp", failures)
+    require_path(root, "cpp/logbrew-cpp/examples/http_transport.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/tests/test_logbrew.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/tests/test_rich_context.cpp", failures)
     if not header_path.exists() or not source_path.exists():
@@ -720,16 +724,31 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     readme = (root / "cpp/logbrew-cpp/README.md").read_text(encoding="utf-8")
     location = "cpp/logbrew-cpp/include/logbrew.hpp"
     for needle in (
-        'inline constexpr const char *version = "0.2.2"',
+        'inline constexpr const char *version = "0.2.3"',
         "class LogBrewClient",
+        "MetadataValue",
+        "ProductTimelineContext",
+        "capture_product_action",
+        "capture_network_milestone",
+        "TraceContext",
         "TelemetryContext",
         "TelemetryScope",
         "EventOptions",
         "IssueDetails",
+        "IssueStackFrame",
         "IssueBreadcrumb",
         "SpanEvidence",
+        "SpanEvent",
         "SpanLink",
         "issue_frame_from_location",
+        "TraceScope",
+        "trace_context_from_traceparent",
+        "OpenTelemetrySpanContext",
+        "open_telemetry_span_context",
+        "try_open_telemetry_span_context_from_span_pointer",
+        "trace_context_from_opentelemetry_span_context",
+        "trace_span_attributes_from_opentelemetry_span_context",
+        "traceparent_headers",
         "MetricAttributes",
         "metric(",
         "class HttpTransport",
@@ -741,19 +760,46 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     for needle in (
         "Public C++17 SDK",
         "LOGBREW_API_KEY",
+        "FetchContent",
+        "LogBrew::LogBrew",
+        "LogBrew::HttpTransport",
         "Metrics",
         "MetricAttributes",
         "client.metric",
         "low-cardinality",
+        "Product Timelines",
         "Sending To LogBrew",
+        "capture_product_action",
+        "capture_network_milestone",
+        "W3C Trace Correlation",
         "Rich Investigation Context",
         "Issue Evidence",
         "Span Evidence",
+        "TelemetryContext",
+        "IssueDetails",
+        "SpanEvidence",
+        "TraceScope",
+        "trace_context_from_traceparent",
+        "OpenTelemetrySpanContext",
+        "open_telemetry_span_context",
+        "try_open_telemetry_span_context_from_span_pointer",
+        "trace_context_from_opentelemetry_span_context",
+        "trace_span_attributes_from_opentelemetry_span_context",
+        "traceparent_headers",
         "HttpTransport",
+        "do not patch HTTP clients",
         "client.flush",
         "copy into your own native application",
     ):
         require(needle in readme, failures, f"cpp/logbrew-cpp/README.md: missing guidance {needle}")
+    if trace_example_path.exists():
+        trace_example = trace_example_path.read_text(encoding="utf-8")
+        for needle in (
+            "OpenTelemetrySpanContext",
+            "open_telemetry_span_context",
+            "trace_context_from_opentelemetry_span_context",
+        ):
+            require(needle in trace_example, failures, f"cpp/logbrew-cpp/examples/trace_correlation.cpp: missing {needle}")
 
 
 def validate_objc(root: Path, failures: list[str]) -> None:
@@ -1632,6 +1678,7 @@ def parse_package_versions(raw_versions: list[str], allowed_packages: set[str] |
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate release metadata across public SDK packages.")
     parser.add_argument("--root", default=Path(__file__).resolve().parents[1], type=Path)
+    parser.add_argument("--only-cpp", action="store_true", help="Validate only the C++ package subtree.")
     parser.add_argument(
         "--npm-version",
         action="append",
@@ -1654,7 +1701,12 @@ def main() -> int:
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
 
-    failures = validate(args.root.resolve(), npm_versions, nuget_versions)
+    root = args.root.resolve()
+    if args.only_cpp:
+        failures: list[str] = []
+        validate_cpp(root, failures)
+    else:
+        failures = validate(root, npm_versions, nuget_versions)
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)
