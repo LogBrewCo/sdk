@@ -71,12 +71,12 @@ write_module(
 write_module(
     "github.com/LogBrewCo/sdk/go/logbrew/gin",
     repo_root / "go/logbrew/gin",
-    "v0.1.1",
+    "v0.1.2",
 )
 PY
 
 parent_zip="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.7.zip"
-gin_zip="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/gin/@v/v0.1.1.zip"
+gin_zip="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/gin/@v/v0.1.2.zip"
 test -f "$parent_zip"
 test -f "$gin_zip"
 python3 - "$parent_zip" "$gin_zip" <<'PY'
@@ -99,10 +99,10 @@ with zipfile.ZipFile(parent_zip) as archive:
 with zipfile.ZipFile(gin_zip) as archive:
     names = set(archive.namelist())
     for expected in (
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/go.mod",
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/go.sum",
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/middleware.go",
-        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1/README.md",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2/go.mod",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2/go.sum",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2/middleware.go",
+        "github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2/README.md",
     ):
         if expected not in names:
             raise SystemExit(f"missing Gin module artifact file: {expected}")
@@ -116,22 +116,22 @@ export GOSUMDB=off
 
 go mod init logbrew-go-gin-smoke >/dev/null
 go mod edit -go=1.24.0
-go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1 >/dev/null
-grep -q 'github.com/LogBrewCo/sdk/go/logbrew/gin v0.1.1' go.mod
+go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2 >/dev/null
+grep -q 'github.com/LogBrewCo/sdk/go/logbrew/gin v0.1.2' go.mod
 if grep -q '^replace ' go.mod; then
 	echo "installed Gin module proof must not use a source replacement" >&2
 	exit 1
 fi
 go list -m all > "$tmp_dir/go-gin-modules-before-remove.txt"
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.7$' "$tmp_dir/go-gin-modules-before-remove.txt"
-grep -q '^github.com/LogBrewCo/sdk/go/logbrew/gin v0.1.1$' "$tmp_dir/go-gin-modules-before-remove.txt"
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew/gin v0.1.2$' "$tmp_dir/go-gin-modules-before-remove.txt"
 grep -q '^github.com/gin-gonic/gin v1.11.0$' "$tmp_dir/go-gin-modules-before-remove.txt"
 go get github.com/LogBrewCo/sdk/go/logbrew/gin@none >/dev/null
 if grep -q 'github.com/LogBrewCo/sdk/go/logbrew/gin' go.mod; then
 	echo "expected go get @none to remove Gin module requirement" >&2
 	exit 1
 fi
-go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.1 >/dev/null
+go get github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2 >/dev/null
 
 cat > gin_integration_test.go <<'GO'
 package integration

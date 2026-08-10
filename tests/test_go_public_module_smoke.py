@@ -14,10 +14,10 @@ class GoPublicModuleSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_GO_MODULE_VERSION",
-            'requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.6}}"',
+            'requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.7}}"',
             'export LOGBREW_GO_MODULE_VERSION="$module_version"',
             "LOGBREW_GO_GIN_MODULE_VERSION",
-            'gin_requested_version="${LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.1}"',
+            'gin_requested_version="${LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2}"',
             "GOPROXY=https://proxy.golang.org,direct",
             "go get github.com/LogBrewCo/sdk/go/logbrew@",
             "go get github.com/LogBrewCo/sdk/go/logbrew/gin@",
