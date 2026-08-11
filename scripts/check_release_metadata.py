@@ -19,7 +19,7 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_pac
 
 PUBLIC_VERSION = "0.1.0"
 RUST_VERSION = "0.1.4"
-RUBYGEMS_VERSION = "0.1.5"
+RUBYGEMS_VERSION = "0.1.6"
 PACKAGIST_VERSION = "0.1.10"
 DOTNET_VERSION = "0.1.7"
 DOTNET_ASPNETCORE_VERSION = "0.1.1"
@@ -1019,8 +1019,7 @@ def validate_ruby(root: Path, failures: list[str]) -> None:
     text = gemspec_path.read_text(encoding="utf-8")
     location = "ruby/logbrew-ruby/logbrew-sdk.gemspec"
     required_patterns = {
-        "name": r'spec\.name\s*=\s*"logbrew-sdk"',
-        "version": rf'spec\.version\s*=\s*"{re.escape(RUBYGEMS_VERSION)}"',
+        "identity": r'Gem::Specification\.new\("logbrew-sdk",\s*LogBrew::VERSION\)',
         "license": rf'spec\.license\s*=\s*"{PUBLIC_LICENSE}"',
         "author": r'spec\.authors\s*=\s*\["LogBrew"\]',
         "homepage": rf'spec\.homepage\s*=\s*"{re.escape(REPO_URL)}"',
