@@ -406,10 +406,10 @@ module LogBrew
       begin
         response = @app.call(env)
       rescue StandardError => error
+        status_code = exception_status_code(error)
         safely_capture do
-          elapsed_ms = duration_ms(started_at)
-          capture_exception_issue(env, error)
-          capture_request_span(env, 500, elapsed_ms, "error")
+          capture_exception_issue(env, error) if status_code >= 500
+          capture_request_span(env, status_code, duration_ms(started_at), status_code >= 500 ? "error" : "ok")
           flush_if_configured
         end
         raise
@@ -424,6 +424,10 @@ module LogBrew
     end
 
     private
+
+    def exception_status_code(_error)
+      500
+    end
 
     def capture_request_span(env, status_code, elapsed_ms, status)
       @client.span(

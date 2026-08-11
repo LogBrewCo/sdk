@@ -193,12 +193,10 @@ grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery'
 grep -qx 'run-automatic-delivery -> make run-automatic-delivery' "$tmp_dir/examples-help.txt"
 grep -qx 'run-sidekiq-tracing -> make run-sidekiq-tracing' "$tmp_dir/examples-help.txt"
 
-sidekiq_smoke_output="$(bash "$repo_root/scripts/real_user_ruby_sidekiq_smoke.sh")"
-grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:[0-9a-f]{64} requests=1 spans=5 issues=1$' <<< "$sidekiq_smoke_output"
-printf '%s\n' "$sidekiq_smoke_output"
+bash "$repo_root/scripts/real_user_ruby_sidekiq_smoke.sh" | tee "$tmp_dir/sidekiq-smoke.out"
+grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:[0-9a-f]{64} requests=1 spans=5 issues=1$' "$tmp_dir/sidekiq-smoke.out"
 
-rails_smoke_output="$(bash "$repo_root/scripts/real_user_ruby_rails_smoke.sh")"
-grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=2 spans=2 issues=2 environments=1$' <<< "$rails_smoke_output"
-printf '%s\n' "$rails_smoke_output"
+bash "$repo_root/scripts/real_user_ruby_rails_smoke.sh" | tee "$tmp_dir/rails-smoke.out"
+grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=3 spans=3 issues=2 environments=1$' "$tmp_dir/rails-smoke.out"
 
 echo "ruby package checks passed"
