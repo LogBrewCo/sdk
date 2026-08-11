@@ -1,6 +1,6 @@
-Gem::Specification.new do |spec|
-  spec.name = "logbrew-sdk"
-  spec.version = "0.1.5"
+require_relative "lib/logbrew/version"
+
+Gem::Specification.new("logbrew-sdk", LogBrew::VERSION) do |spec|
   spec.summary = "Public LogBrew Ruby SDK"
   spec.description = "Public LogBrew Ruby SDK with typed issue diagnostics, automatic Rails request/error capture, and standard-library delivery."
   spec.authors = ["LogBrew"]

@@ -52,11 +52,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         rust = tomllib.loads((ROOT / "rust/logbrew/Cargo.toml").read_text(encoding="utf-8"))
         self.assertEqual(rust["package"]["version"], "0.1.4")
-        ruby = (ROOT / "ruby/logbrew-ruby/logbrew-sdk.gemspec").read_text(encoding="utf-8")
-        self.assertIsNotNone(
-            re.search(r'^\s*spec\.version\s*=\s*"0\.1\.5"$', ruby, re.MULTILINE),
-            ruby,
-        )
+        ruby_version = (ROOT / "ruby/logbrew-ruby/lib/logbrew/version.rb").read_text(encoding="utf-8")
+        self.assertIn('VERSION = "0.1.6"', ruby_version)
         self.assertEqual(maven_version(ROOT / "java/logbrew-java/pom.xml"), "0.1.4")
         self.assertEqual(
             xml_value(ROOT / "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", "Version"),
@@ -276,7 +273,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
         self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.4")
-        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.5")
+        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.6")
         self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.10")
         self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.7")
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.1")

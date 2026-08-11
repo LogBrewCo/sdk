@@ -1806,7 +1806,7 @@ jobs:
             ):
                 (package_dir / relative).write_text("# fixture\n", encoding="utf-8")
             (package_dir / "lib" / "logbrew" / "version.rb").write_text(
-                'VERSION = "0.1.5"\n',
+                'VERSION = "0.1.6"\n',
                 encoding="utf-8",
             )
             (root / "scripts" / "real_user_ruby_rails_smoke.sh").write_text(
@@ -1815,9 +1815,9 @@ jobs:
             )
             (package_dir / "logbrew-sdk.gemspec").write_text(
                 """
-Gem::Specification.new do |spec|
-  spec.name = "logbrew-sdk"
-  spec.version = "0.1.5"
+require_relative "lib/logbrew/version"
+
+Gem::Specification.new("logbrew-sdk", LogBrew::VERSION) do |spec|
   spec.summary = "Public LogBrew Ruby SDK"
   spec.description = "Public LogBrew Ruby SDK for building, validating, and flushing event batches."
   spec.authors = ["LogBrew"]
