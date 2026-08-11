@@ -419,6 +419,15 @@ module LogBrew
         "rails-exception"
       end
 
+      def exception_status_code(error)
+        return super unless defined?(::ActionDispatch::ExceptionWrapper)
+
+        status = ::ActionDispatch::ExceptionWrapper.status_code_for_exception(error.class.name)
+        status.is_a?(Integer) && status.between?(400, 599) ? status : super
+      rescue StandardError
+        super
+      end
+
       def request_name(env)
         "#{request_method(env)} #{route_template(env)}"
       end
@@ -438,9 +447,7 @@ module LogBrew
         metadata.delete("action_dispatch.request_id")
         metadata.delete("HTTP_X_REQUEST_ID")
         metadata["source"] = "rails"
-        metadata["http.method"] = request_method(env)
         metadata["http.route"] = route_template(env)
-        metadata["http.status_code"] = status_code
         metadata["http.status_class"] = "#{status_code.to_i / 100}xx"
         controller, action = controller_and_action(env)
         metadata["rails.controller"] = controller unless controller.nil?
@@ -449,10 +456,8 @@ module LogBrew
       end
 
       def route_template(env)
-        route = bounded_route(env_value(env, "action_dispatch.route_uri_pattern"))
-        return route unless route.nil?
-
-        route = bounded_route(matched_route_pattern(env))
+        route = bounded_route(env_value(env, "action_dispatch.route_uri_pattern")) ||
+                bounded_route(matched_route_pattern(env))
         return route unless route.nil?
 
         controller, action = controller_and_action(env)

@@ -153,7 +153,8 @@ begin
   abort "request middleware missing" unless middleware_entries.include?(LogBrew::Rails::RequestMiddleware)
 
   incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-  response = Rack::MockRequest.new(application).get(
+  requests = Rack::MockRequest.new(application)
+  response = requests.get(
     "/tools/opaque-record-id?session_hint=opaque-query",
     "HTTP_TRACEPARENT" => incoming,
     "HTTP_AUTHORIZATION" => "Bearer opaque-auth"
@@ -161,7 +162,10 @@ begin
   abort "application response changed" unless response.status == 200
   abort "application body changed" unless JSON.parse(response.body).fetch("tool") == "opaque-record-id"
 
-  failed_response = Rack::MockRequest.new(application).get(
+  not_found_response = requests.get("/unmatched")
+  abort "not-found response changed" unless not_found_response.status == 404
+
+  failed_response = requests.get(
     "/failures/opaque-failure-id?session_hint=opaque-failure-query",
     "HTTP_TRACEPARENT" => incoming,
     "HTTP_AUTHORIZATION" => "Bearer opaque-failure-auth"
@@ -183,7 +187,7 @@ begin
   spans = preview_events.select { |event| event.fetch("type") == "span" }
   issues = preview_events.select { |event| event.fetch("type") == "issue" }
   abort "environment event count changed" unless environment_events.length == 1
-  abort "request span count changed" unless spans.length == 2
+  abort "request span count changed" unless spans.length == 3
   abort "issue count changed" unless issues.length == 2
 
   span = spans.fetch(0).fetch("attributes")
@@ -202,6 +206,10 @@ begin
   abort "route metadata changed" unless span_metadata.fetch("http.route") == "/tools/:id(.:format)"
   abort "service metadata changed" unless span_metadata.fetch("service") == "installed-rails-smoke"
   abort "environment metadata changed" unless span_metadata.fetch("environment") == "test"
+
+  not_found_span = spans.find { |event| event.dig("attributes", "metadata", "http.status_code") == 404 }
+  abort "not-found span missing" if not_found_span.nil?
+  abort "not-found span status changed" unless not_found_span.fetch("attributes").fetch("status") == "ok"
 
   handled_issue = issues.find do |event|
     event.fetch("attributes").dig("exception", "mechanism", "type") == "rails.error_reporter"
@@ -251,10 +259,10 @@ begin
   abort "intake route changed" unless route == "/v1/events"
   abort "authorization changed" unless headers.fetch("authorization") == "Bearer installed-rails-key"
   delivered = JSON.parse(body).fetch("events")
-  abort "delivered event count changed" unless delivered.length == 5
+  abort "delivered event count changed" unless delivered.length == 6
   abort "pending events remain" unless client.pending_events.zero?
 
-  puts "installed Rails consumer ok requests=2 spans=2 issues=2 environments=1"
+  puts "installed Rails consumer ok requests=3 spans=3 issues=2 environments=1"
 ensure
   intake.close
 end
@@ -265,7 +273,7 @@ LOGBREW_RAILS_SMOKE_VERSION="$rails_version" \
 RUBYOPT=-W0 \
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
   "$ruby_bin" "$consumer_path" > "$tmp_dir/consumer.out"
-grep -qx 'installed Rails consumer ok requests=2 spans=2 issues=2 environments=1' "$tmp_dir/consumer.out"
+grep -qx 'installed Rails consumer ok requests=3 spans=3 issues=2 environments=1' "$tmp_dir/consumer.out"
 
-printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=2 spans=2 issues=2 environments=1\n' \
+printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 spans=3 issues=2 environments=1\n' \
   "$package_version" "$rails_version" "$gem_digest"
