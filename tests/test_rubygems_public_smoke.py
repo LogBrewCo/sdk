@@ -13,8 +13,7 @@ class RubyGemsPublicSmokeTests(unittest.TestCase):
         body = SCRIPT.read_text(encoding="utf-8")
 
         for expected in (
-            "LOGBREW_RUBYGEMS_VERSION",
-            'version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.5}}"',
+            'version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.6}}"',
             "https://rubygems.org",
             "gem install",
             "gem list --local",
