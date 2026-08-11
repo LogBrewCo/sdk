@@ -315,7 +315,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.15",
             ),
             "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.4",),
-            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.5",),
+            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.6",),
             "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.10",),
             "scripts/real_user_maven_central_public_smoke.sh": (
                 "LOGBREW_MAVEN_JAVA_VERSION:-0.1.4",
