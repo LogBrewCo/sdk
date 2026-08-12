@@ -35,8 +35,7 @@ import {
 
 const client = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
-  sdkName: "logbrew-react",
-  sdkVersion: "0.1.0"
+  sdkName: "logbrew-react"
 });
 
 function CheckoutButton() {
@@ -99,8 +98,7 @@ import { useLogBrewBrowserInstrumentation } from "@logbrew/react/browser";
 
 const client = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
-  sdkName: "checkout-web",
-  sdkVersion: "0.1.0"
+  sdkName: "checkout-web"
 });
 
 function BrowserTimingObserver({ webVitals }) {

@@ -24,8 +24,7 @@ const {
 
 const client = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
-  sdkName: "logbrew-react",
-  sdkVersion: "0.1.0"
+  sdkName: "logbrew-react"
 });
 
 client.release("evt_release_001", "2026-06-02T10:00:00Z", {

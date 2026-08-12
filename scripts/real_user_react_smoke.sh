@@ -2,25 +2,21 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
-browser_package_version="$(
+package_version() {
   node -e '
 const version = require(process.argv[1]).version;
 if (typeof version !== "string" || version.length === 0) process.exit(1);
 process.stdout.write(version);
-' "$repo_root/js/logbrew-browser/package.json"
-)"
+' "$1"
+}
+sdk_package_version="$(package_version "$repo_root/js/logbrew-js/package.json")"
+browser_package_version="$(package_version "$repo_root/js/logbrew-browser/package.json")"
+react_package_version="$(package_version "$repo_root/js/logbrew-react/package.json")"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-core_pack_json="$tmp_dir/core-pack.json"
-browser_pack_json="$tmp_dir/browser-pack.json"
-react_pack_json="$tmp_dir/react-pack.json"
-(cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
-(cd "$repo_root/js/logbrew-browser" && npm pack --json --pack-destination "$tmp_dir") > "$browser_pack_json"
-(cd "$repo_root/js/logbrew-react" && npm pack --json --pack-destination "$tmp_dir") > "$react_pack_json"
-
-core_tgz="$(python3 - "$core_pack_json" <<'PY'
+pack_filename() {
+  python3 - "$1" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -28,28 +24,18 @@ from pathlib import Path
 payload = json.loads(Path(sys.argv[1]).read_text())
 print(payload[0]["filename"])
 PY
-)"
-react_tgz="$(python3 - "$react_pack_json" <<'PY'
-import json
-import sys
-from pathlib import Path
+}
 
-payload = json.loads(Path(sys.argv[1]).read_text())
-print(payload[0]["filename"])
-PY
-)"
-core_tgz="$tmp_dir/$core_tgz"
-browser_tgz="$(python3 - "$browser_pack_json" <<'PY'
-import json
-import sys
-from pathlib import Path
+pack_package() {
+  local package_dir="$1"
+  local pack_json="$tmp_dir/$2-pack.json"
+  (cd "$repo_root/$package_dir" && npm pack --json --pack-destination "$tmp_dir") > "$pack_json"
+  printf '%s/%s' "$tmp_dir" "$(pack_filename "$pack_json")"
+}
 
-payload = json.loads(Path(sys.argv[1]).read_text())
-print(payload[0]["filename"])
-PY
-)"
-browser_tgz="$tmp_dir/$browser_tgz"
-react_tgz="$tmp_dir/$react_tgz"
+core_tgz="$(pack_package js/logbrew-js core)"
+browser_tgz="$(pack_package js/logbrew-browser browser)"
+react_tgz="$(pack_package js/logbrew-react react)"
 test -f "$core_tgz"
 test -f "$browser_tgz"
 test -f "$react_tgz"
@@ -117,9 +103,9 @@ grep -q '"@logbrew/browser"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/browser @logbrew/react react react-dom react-test-renderer >/dev/null
 npm explain @logbrew/react > "$tmp_dir/npm-explain-react.txt"
-grep -q '@logbrew/react@0.1.0' "$tmp_dir/npm-explain-react.txt"
+grep -Fq "@logbrew/react@${react_package_version}" "$tmp_dir/npm-explain-react.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/react@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -Fq "@logbrew/react@${react_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -Fq "@logbrew/browser@${browser_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"

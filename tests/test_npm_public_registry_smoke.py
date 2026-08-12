@@ -26,6 +26,13 @@ RECEIPT_ARTIFACTS = (
         "./release-artifacts",
     ),
     (
+        "npm:@logbrew/react",
+        "@logbrew/react",
+        "0.1.1",
+        "useLogBrewBrowserInstrumentation",
+        "./browser",
+    ),
+    (
         "npm:@logbrew/react-native",
         "@logbrew/react-native",
         "0.1.1",
@@ -43,7 +50,7 @@ def _package_archive(
     *,
     leave_active_timer: bool = False,
 ) -> bytes:
-    entrypoint = "index.js" if subpath == "." else "release-artifacts.js"
+    entrypoint = "index.js" if subpath == "." else f"{subpath.removeprefix('./')}.js"
     exports = {subpath: f"./{entrypoint}"}
     sources = [(entrypoint, f"export function {exported_name}() {{ return true; }}\n")]
     if name == "@logbrew/next":
@@ -119,7 +126,6 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             "HOME": str(temp_dir / "home"),
             "LOGBREW_RELEASE_ARTIFACT_FILES_JSON": json.dumps(artifact_files, separators=(",", ":")),
             "LOGBREW_RELEASE_RECEIPT_MODE": "1",
-            "LOGBREW_NPM_SDK_VERSION": sdk_version,
             "NPM_CONFIG_REGISTRY": "http://127.0.0.1:9",
         }
         for _, name, version, _, _ in RECEIPT_ARTIFACTS:
@@ -232,6 +238,7 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             "@logbrew/browser",
             "@logbrew/node",
             "@logbrew/next",
+            "@logbrew/react",
             "@logbrew/react-native",
             "@logbrew/bullmq",
             "@logbrew/kafkajs",
@@ -245,6 +252,7 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             "LOGBREW_NPM_BROWSER_VERSION",
             "LOGBREW_NPM_NODE_VERSION",
             "LOGBREW_NPM_NEXT_VERSION",
+            "LOGBREW_NPM_REACT_VERSION",
             "LOGBREW_NPM_REACT_NATIVE_VERSION",
             "LOGBREW_NPM_BULLMQ_VERSION",
             "LOGBREW_NPM_KAFKAJS_VERSION",
@@ -263,6 +271,7 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             "RecordingTransport",
             "createLogBrewNodeClient",
             "createLogBrewNextRequestErrorHandler",
+            "@logbrew/react/browser",
             "instrumentLogBrewBullMqQueue",
             "instrumentLogBrewKafkaJsProducer",
             "amqplibPublishWithLogBrewSpan",
