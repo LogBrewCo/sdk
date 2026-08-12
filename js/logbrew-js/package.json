@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/sdk",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Public LogBrew JavaScript SDK for building, validating, and flushing event batches.",
   "type": "module",
   "main": "./index.cjs",
@@ -12,6 +12,10 @@
   "exports": {
     ".": {
       "react-native": {
+        "types": "./react-native.d.ts",
+        "default": "./react-native.js"
+      },
+      "browser": {
         "types": "./react-native.d.ts",
         "default": "./react-native.js"
       },
