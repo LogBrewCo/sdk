@@ -34,6 +34,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.8"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.5"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.4"),
+            "js/logbrew-react/package.json": ("@logbrew/react", "0.1.1"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.15"),
         }
         for relative_path, expected in npm_versions.items():
@@ -312,6 +313,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
                 "LOGBREW_NPM_NODE_VERSION:-0.1.8",
                 "LOGBREW_NPM_NEXT_VERSION:-0.1.4",
+                "LOGBREW_NPM_REACT_VERSION:-0.1.1",
                 "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.15",
             ),
             "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.4",),
@@ -338,40 +340,23 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 self.assertIn(expected, body, relative_path)
 
     def test_local_npm_smokes_bind_assertions_to_package_manifests(self) -> None:
-        smoke_contracts = {
-            "scripts/real_user_browser_smoke.sh": (
-                "js/logbrew-browser/package.json",
-                "@logbrew/browser",
-                "browser_package_version",
-                2,
-            ),
-            "scripts/real_user_react_smoke.sh": (
-                "js/logbrew-browser/package.json",
-                "@logbrew/browser",
-                "browser_package_version",
-                1,
-            ),
-            "scripts/real_user_next_smoke.sh": (
-                "js/logbrew-next/package.json",
-                "@logbrew/next",
-                "next_package_version",
-                2,
-            ),
-            "scripts/real_user_react_native_smoke.sh": (
-                "js/logbrew-react-native/package.json",
-                "@logbrew/react-native",
-                "react_native_package_version",
-                2,
-            ),
-        }
-        stale_version = re.compile(r"@logbrew/(?:browser|next|react-native)@\d")
+        smoke_contracts = (
+            ("browser", "browser", "browser_package_version", 2),
+            ("react", "browser", "browser_package_version", 1),
+            ("react", "react", "react_package_version", 2),
+            ("next", "next", "next_package_version", 2),
+            ("react_native", "react-native", "react_native_package_version", 2),
+        )
+        stale_version = re.compile(r"@logbrew/(?:browser|next|react|react-native)@\d")
 
-        for script_path, (manifest_path, package_name, variable, assertions) in smoke_contracts.items():
+        for script_slug, package_slug, variable, assertions in smoke_contracts:
+            script_path = f"scripts/real_user_{script_slug}_smoke.sh"
+            manifest_path = f"js/logbrew-{package_slug}/package.json"
             with self.subTest(script=script_path):
                 manifest = json.loads((ROOT / manifest_path).read_text(encoding="utf-8"))
                 body = (ROOT / script_path).read_text(encoding="utf-8")
 
-                self.assertEqual(manifest["name"], package_name)
+                package_name = manifest["name"]
                 self.assertIsInstance(manifest["version"], str)
                 self.assertTrue(manifest["version"])
                 self.assertIn(f'{variable}="$(', body)

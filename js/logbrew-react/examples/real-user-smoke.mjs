@@ -37,7 +37,6 @@ const {
 const client = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-react",
-  sdkVersion: "0.1.0",
   maxRetries: 1
 });
 
@@ -123,7 +122,6 @@ if (!markup.includes('data-logbrew-pending="6"')) {
 const timelineClient = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-react-timeline",
-  sdkVersion: "0.1.0",
   maxRetries: 1
 });
 const timelineMarkup = renderToStaticMarkup(
@@ -170,7 +168,6 @@ if ("ignoredNested" in networkAction.attributes.metadata) {
 const directClient = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-react-direct-actions",
-  sdkVersion: "0.1.0",
   maxRetries: 1
 });
 const directAction = createReactActionEvent({
@@ -264,7 +261,6 @@ if (propagatedRequests[2].init.headers.traceparent !== propagatedTraceparent) {
 const errorClient = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-react-errors",
-  sdkVersion: "0.1.0",
   maxRetries: 1
 });
 const componentError = new Error("Checkout component failed");

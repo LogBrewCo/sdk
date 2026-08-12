@@ -22,7 +22,6 @@ const {
 const client = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-react-router-example",
-  sdkVersion: "0.1.0",
   maxRetries: 1
 });
 

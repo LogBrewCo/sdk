@@ -8,6 +8,7 @@ sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.10}"
 browser_version="${LOGBREW_NPM_BROWSER_VERSION:-0.1.3}"
 node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.8}"
 next_version="${LOGBREW_NPM_NEXT_VERSION:-0.1.4}"
+react_version="${LOGBREW_NPM_REACT_VERSION:-0.1.1}"
 react_native_version="${LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.15}"
 bullmq_version="${LOGBREW_NPM_BULLMQ_VERSION:-0.1.1}"
 kafkajs_version="${LOGBREW_NPM_KAFKAJS_VERSION:-0.1.1}"
@@ -54,9 +55,11 @@ run_receipt_smoke() {
     || [[ -z "${LOGBREW_NPM_BROWSER_VERSION:-}" ]] \
     || [[ -z "${LOGBREW_NPM_NODE_VERSION:-}" ]] \
     || [[ -z "${LOGBREW_NPM_NEXT_VERSION:-}" ]] \
+    || [[ -z "${LOGBREW_NPM_REACT_VERSION:-}" ]] \
     || [[ -z "${LOGBREW_NPM_REACT_NATIVE_VERSION:-}" ]]; then
     fail_receipt_stage "version binding"
   fi
+  export RECEIPT_ARTIFACT_IDS="npm:@logbrew/sdk,npm:@logbrew/browser,npm:@logbrew/node,npm:@logbrew/next,npm:@logbrew/react,npm:@logbrew/react-native"
   mkdir -p \
     "$tmp_dir/artifacts" \
     "$tmp_dir/npm-public-registry-receipt-app" \
@@ -68,13 +71,7 @@ run_receipt_smoke() {
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const ids = [
-  "npm:@logbrew/sdk",
-  "npm:@logbrew/browser",
-  "npm:@logbrew/node",
-  "npm:@logbrew/next",
-  "npm:@logbrew/react-native"
-];
+const ids = process.env.RECEIPT_ARTIFACT_IDS.split(",");
 let supplied;
 try {
   supplied = JSON.parse(process.env.LOGBREW_RELEASE_ARTIFACT_FILES_JSON ?? "");
@@ -155,6 +152,7 @@ JS
     "$tmp_dir/artifacts/2.tgz" \
     "$tmp_dir/artifacts/3.tgz" \
     "$tmp_dir/artifacts/4.tgz" \
+    "$tmp_dir/artifacts/5.tgz" \
     >"$tmp_dir/npm-install.out" 2>"$tmp_dir/npm-install.err" \
     || fail_receipt_stage "artifact install"
 
@@ -163,6 +161,7 @@ JS
     "$browser_version" \
     "$node_version" \
     "$next_version" \
+    "$react_version" \
     "$react_native_version" \
     >"$tmp_dir/receipt-package-check.out" 2>"$tmp_dir/receipt-package-check.err" <<'JS'
 const fs = require("node:fs");
@@ -171,7 +170,8 @@ const expected = [
   ["@logbrew/browser", process.argv[3]],
   ["@logbrew/node", process.argv[4]],
   ["@logbrew/next", process.argv[5]],
-  ["@logbrew/react-native", process.argv[6]]
+  ["@logbrew/react", process.argv[6]],
+  ["@logbrew/react-native", process.argv[7]]
 ];
 const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
 for (const [name, version] of expected) {
@@ -206,6 +206,9 @@ for (const exportedValue of [
   if (typeof exportedValue !== "function") {
     process.exit(1);
   }
+}
+if (!import.meta.resolve("@logbrew/react/browser").endsWith("/browser.js")) {
+  process.exit(1);
 }
 JS
   then
@@ -259,13 +262,7 @@ JS
   if ! node - "$tmp_dir/receipt-artifacts.json" \
     >"$tmp_dir/receipt-attestation.json" 2>"$tmp_dir/receipt-attestation.err" <<'JS'
 const fs = require("node:fs");
-const ids = [
-  "npm:@logbrew/sdk",
-  "npm:@logbrew/browser",
-  "npm:@logbrew/node",
-  "npm:@logbrew/next",
-  "npm:@logbrew/react-native"
-];
+const ids = process.env.RECEIPT_ARTIFACT_IDS.split(",");
 const metadata = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (
   !Array.isArray(metadata.artifacts)
