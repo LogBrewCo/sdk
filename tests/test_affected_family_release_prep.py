@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_release_metadata  # noqa: E402
+from check_npm_peer_compatibility import caret_range_allows  # noqa: E402
 import check_repo_wide_release_versions  # noqa: E402
 
 
@@ -24,10 +25,14 @@ def maven_version(path: Path) -> str | None:
     return ET.parse(path).getroot().findtext("{*}version")
 
 
+def json_object(relative_path: str) -> dict[str, object]:
+    return json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
+
+
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.10"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.11"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.3"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.4"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
@@ -38,7 +43,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.15"),
         }
         for relative_path, expected in npm_versions.items():
-            manifest = json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
+            manifest = json_object(relative_path)
             self.assertEqual((manifest["name"], manifest["version"]), expected)
 
         pypi_versions = {
@@ -81,17 +86,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             'LogBrewObjectiveCVersion = @"0.2.3"',
             (ROOT / "objc/logbrew-objc/src/LogBrew.m").read_text(encoding="utf-8"),
         )
-        unity = json.loads(
-            (ROOT / "unity/logbrew-unity/package.json").read_text(encoding="utf-8")
-        )
+        unity = json_object("unity/logbrew-unity/package.json")
         self.assertEqual((unity["name"], unity["version"]), ("co.logbrew.unity", "0.2.2"))
 
     def test_react_native_release_preserves_supported_core_range_and_updates_native_identity(self) -> None:
-        manifest = json.loads(
-            (ROOT / "js/logbrew-react-native/package.json").read_text(
-                encoding="utf-8"
-            )
-        )
+        manifest = json_object("js/logbrew-react-native/package.json")
 
         self.assertEqual(
             manifest["peerDependencies"]["@logbrew/sdk"],
@@ -108,9 +107,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )
 
     def test_node_runtime_metadata_matches_the_package_release(self) -> None:
-        manifest = json.loads(
-            (ROOT / "js/logbrew-node/package.json").read_text(encoding="utf-8")
-        )
+        manifest = json_object("js/logbrew-node/package.json")
         declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
 
         for entrypoint in ("index.js", "index.cjs"):
@@ -121,9 +118,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 self.assertIn(declaration, source)
 
     def test_browser_runtime_metadata_matches_the_package_release(self) -> None:
-        manifest = json.loads(
-            (ROOT / "js/logbrew-browser/package.json").read_text(encoding="utf-8")
-        )
+        manifest = json_object("js/logbrew-browser/package.json")
         declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
 
         for entrypoint in ("index.js", "index.cjs"):
@@ -133,17 +128,15 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             with self.subTest(entrypoint=entrypoint):
                 self.assertIn(declaration, source)
 
-    def test_node_runtime_context_requires_the_current_core_release(self) -> None:
-        core_manifest = json.loads(
-            (ROOT / "js/logbrew-js/package.json").read_text(encoding="utf-8")
-        )
-        node_manifest = json.loads(
-            (ROOT / "js/logbrew-node/package.json").read_text(encoding="utf-8")
-        )
+    def test_node_runtime_context_accepts_the_current_core_release(self) -> None:
+        core_manifest = json_object("js/logbrew-js/package.json")
+        node_manifest = json_object("js/logbrew-node/package.json")
 
-        self.assertEqual(
-            node_manifest["peerDependencies"]["@logbrew/sdk"],
-            f'^{core_manifest["version"]}',
+        self.assertTrue(
+            caret_range_allows(
+                node_manifest["peerDependencies"]["@logbrew/sdk"],
+                core_manifest["version"],
+            )
         )
 
     def test_python_core_declares_and_ci_installs_tls_trust_dependencies(self) -> None:

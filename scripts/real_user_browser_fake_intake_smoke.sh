@@ -90,8 +90,12 @@ document.querySelector("#app").textContent = "LogBrew lifecycle Vite smoke";
 EOF
 (
   cd vite-app
-  ../node_modules/.bin/vite build >/dev/null
+  ../node_modules/.bin/vite build >"$tmp_dir/vite-build.txt" 2>&1
 )
+if grep -Fq 'externalized for browser compatibility' "$tmp_dir/vite-build.txt"; then
+  cat "$tmp_dir/vite-build.txt" >&2
+  exit 1
+fi
 grep -R -q 'LogBrew lifecycle Vite smoke' vite-app/dist
 
 cat > next-app/package.json <<'EOF'
