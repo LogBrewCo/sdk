@@ -70,8 +70,14 @@ const errorPayload = JSON.parse(errorTransport.lastBody());
 if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_express_error_001") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
 }
-if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
-  throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
+if (
+  errorPayload.events[0].attributes.metadata.routeTemplate !== "/fail" ||
+  errorPayload.events[0].attributes.exception?.mechanism?.type !== "express.middleware" ||
+  errorPayload.events[0].attributes.exception?.mechanism?.handled !== false ||
+  !errorPayload.events[0].attributes.stackFrames?.length ||
+  !errorPayload.events[0].attributes.breadcrumbs?.length
+) {
+  throw new Error(`error capture should retain structured evidence without query text: ${errorTransport.lastBody()}`);
 }
 if (errorPayload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`error capture should include trace id: ${errorTransport.lastBody()}`);

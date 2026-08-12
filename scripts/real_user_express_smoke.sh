@@ -244,8 +244,8 @@ app.use("/fail", logbrewMiddleware({
   spanIdFactory: () => "b7ad6b7169203332"
 }));
 
-app.get("/fail", async () => {
-  throw new Error("route exploded");
+app.get("/fail/:cartId", async () => {
+  throw new Error("route exploded", { cause: new TypeError("database timeout") });
 });
 
 app.use("/abort", logbrewMiddleware({
@@ -295,7 +295,7 @@ await waitFor(() => autoTransport.sentBodies.length === 1 && activeTraceFromAuto
 const metricOnlyResponse = await fetch(`http://127.0.0.1:${port}/metrics-only/123?token=secret`);
 await metricOnlyResponse.json();
 await waitFor(() => metricOnlyTransport.sentBodies.length === 1);
-const failResponse = await fetch(`http://127.0.0.1:${port}/fail?token=secret`, {
+const failResponse = await fetch(`http://127.0.0.1:${port}/fail/cart-123?token=secret`, {
   headers: {
     traceparent
   }
@@ -327,7 +327,7 @@ if (autoPayload.events[0].attributes.metadata.framework !== "express") {
 if (autoPayload.events[0].attributes.metadata.sampled !== true) {
   throw new Error(`missing sampled express span metadata: ${autoTransport.lastBody()}`);
 }
-if (autoPayload.events[0].attributes.metadata.path !== "/auto") {
+if (autoPayload.events[0].attributes.metadata.routeTemplate !== "/auto") {
   throw new Error(`request capture should omit query text: ${autoTransport.lastBody()}`);
 }
 if (activeTraceFromAuto?.spanId !== "b7ad6b7169203331") {
@@ -365,8 +365,23 @@ if (errorPayload.events.length !== 3) {
 if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_express_error_001") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
 }
-if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
-  throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
+if (errorPayload.events[0].attributes.metadata.routeTemplate !== "/fail/:cartId") {
+  throw new Error(`error capture should use the Express route template: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.exception?.mechanism?.type !== "express.middleware" || errorPayload.events[0].attributes.exception?.mechanism?.handled !== false) {
+  throw new Error(`error capture should retain an unhandled Express mechanism: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.exceptionChain?.entries?.length !== 2 || errorPayload.events[0].attributes.exceptionChain.entries[1]?.relationship !== "cause") {
+  throw new Error(`error capture should retain the parent-first cause chain: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.exceptionChain.entries.some((entry) => entry.messageState !== "redacted" || entry.message !== undefined)) {
+  throw new Error(`exception-chain messages should remain redacted: ${errorTransport.lastBody()}`);
+}
+if (!errorPayload.events[0].attributes.stackFrames?.length || !errorPayload.events[0].attributes.breadcrumbs?.length) {
+  throw new Error(`error capture should retain frames and a request breadcrumb: ${errorTransport.lastBody()}`);
+}
+if (errorTransport.lastBody().includes("cart-123") || errorTransport.lastBody().includes("token=secret")) {
+  throw new Error(`error capture retained a concrete route or query: ${errorTransport.lastBody()}`);
 }
 if (errorPayload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`error capture should include trace id: ${errorTransport.lastBody()}`);
@@ -379,6 +394,9 @@ if (errorPayload.events[1].type !== "span" || errorPayload.events[1].id !== "evt
 }
 if (errorPayload.events[1].attributes.status !== "error" || errorPayload.events[1].attributes.metadata.statusCode !== 500) {
   throw new Error(`error request span should retain the final 500 status: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[1].attributes.name !== "GET /fail/:cartId" || errorPayload.events[1].attributes.metadata.routeTemplate !== "/fail/:cartId") {
+  throw new Error(`error request span should use the Express route template: ${errorTransport.lastBody()}`);
 }
 if (errorPayload.events[2].type !== "metric" || errorPayload.events[2].id !== "evt_express_error_metric_001") {
   throw new Error(`error capture should retain the final request metric: ${errorTransport.lastBody()}`);
@@ -396,15 +414,15 @@ if (
 ) {
   throw new Error(`response close should flush the complete error lifecycle: ${abortedErrorTransport.lastBody()}`);
 }
-const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", originalUrl: "/manual" }, {
+const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", originalUrl: "/manual/private", route: { path: "/manual/:id" } }, {
   now: () => "2026-06-02T10:00:08Z",
   idFactory: () => "evt_express_error_preview"
 });
-if (errorPreview.attributes.title !== "POST /manual failed") {
+if (errorPreview.attributes.title !== "POST /manual/:id failed" || errorPreview.attributes.exception?.mechanism?.handled !== false) {
   throw new Error(`unexpected error preview: ${JSON.stringify(errorPreview)}`);
 }
 const metricPreview = createRequestMetricEvent(
-  { method: "POST", originalUrl: "/orders/123?token=secret" },
+  { method: "POST", originalUrl: "/orders/123?token=secret", route: { path: "/orders/:id" } },
   { statusCode: 201 },
   {
     now: () => "2026-06-02T10:00:09Z",
@@ -412,8 +430,27 @@ const metricPreview = createRequestMetricEvent(
     idFactory: () => "evt_express_metric_preview"
   }
 );
-if (metricPreview.attributes.metadata.routeTemplate !== "/orders/123") {
+if (metricPreview.attributes.metadata.routeTemplate !== "/orders/:id") {
   throw new Error(`unexpected metric preview route: ${JSON.stringify(metricPreview)}`);
+}
+const unmatchedPreview = createRequestEvent(
+  { method: "GET", originalUrl: "/private/123?token=secret" },
+  { statusCode: 404 },
+  { now: () => "2026-06-02T10:00:10Z" }
+);
+if (!unmatchedPreview.attributes.message?.includes("<unmatched>") || JSON.stringify(unmatchedPreview).includes("/private/123")) {
+  throw new Error(`unmatched requests should not retain concrete paths: ${JSON.stringify(unmatchedPreview)}`);
+}
+const mountedPreview = createRequestEvent(
+  { method: "GET", baseUrl: "/tenants/tenant-42", route: { path: "/orders/:orderId" } },
+  { statusCode: 200 }
+);
+if (mountedPreview.attributes.metadata.routeTemplate !== "/orders/:orderId" || JSON.stringify(mountedPreview).includes("tenant-42")) {
+  throw new Error(`router mount values should not enter route evidence: ${JSON.stringify(mountedPreview)}`);
+}
+const repeatedPreview = createRequestEvent({ method: "GET", route: { path: "/orders/:id" } }, { statusCode: 200 });
+if (repeatedPreview.id === createRequestEvent({ method: "GET", route: { path: "/orders/:id" } }, { statusCode: 200 }).id) {
+  throw new Error("default Express event ids must be unique");
 }
 
 console.log(okText);
@@ -475,7 +512,10 @@ async function waitFor(predicate) {
 }
 EOF
 
-node smoke.mjs > "$tmp_dir/express-smoke.stdout.json" 2> "$tmp_dir/express-smoke.stderr.json"
+if ! node smoke.mjs > "$tmp_dir/express-smoke.stdout.json" 2> "$tmp_dir/express-smoke.stderr.json"; then
+  cat "$tmp_dir/express-smoke.stderr.json" >&2
+  exit 1
+fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/express-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/express-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/express-smoke.stderr.json"
@@ -484,7 +524,7 @@ grep -q '"errorStatus":500' "$tmp_dir/express-smoke.stderr.json"
 grep -q 'GET /auto' "$tmp_dir/express-smoke.stderr.json"
 grep -q 'http.server.duration' "$tmp_dir/express-smoke.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/express-smoke.stderr.json"
-grep -q 'GET /fail failed' "$tmp_dir/express-smoke.stderr.json"
+grep -q 'GET /fail/:cartId failed' "$tmp_dir/express-smoke.stderr.json"
 
 cat > default-delivery.mjs <<'EOF'
 import express from "express";

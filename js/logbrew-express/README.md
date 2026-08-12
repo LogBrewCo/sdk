@@ -114,7 +114,7 @@ configure that fetch transport, or pass an explicit LogBrew `Transport`.
 Delivery failures call `onCaptureError`; they are never converted into a
 simulated successful response.
 
-Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
+Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request, metric, and error capture records the matched leaf `req.route.path`; it does not copy `originalUrl`, the concrete router mount value, or the query. Unmatched requests use the explicit `<unmatched>` label.
 
 `RecordingTransport` remains available from `@logbrew/sdk` when you want to
 inspect serialized events locally. It does not send data to LogBrew; use the
@@ -198,7 +198,9 @@ app.use((err, _req, res, _next) => {
 });
 ```
 
-Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler. When the failing request passed through `logbrewMiddleware()`, the issue stays on that request client until the response finishes, so the issue, final 500 request event, and optional duration metric are sent together before one shutdown. An aborted response uses its close lifecycle as a flush fallback. When the request has a valid `traceparent`, the default error event includes trace correlation metadata without echoing the raw propagation header.
+Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler. The default issue includes an unhandled `express.middleware` mechanism, a bounded parent-first `Error.cause`/`AggregateError` chain, sanitized structured frames, and one request breadcrumb. Exception-chain messages are redacted; the reported error message remains captured telemetry, so keep sensitive and user-entered text out of exception messages. Raw stack text remains absent unless you explicitly set `includeErrorStack: true`.
+
+When the failing request passed through `logbrewMiddleware()`, the issue stays on that request client until the response finishes, so the issue, final 500 request event, and optional duration metric are sent together before one shutdown. An aborted response uses its close lifecycle as a flush fallback. When the request has a valid `traceparent`, the default error event includes normalized trace correlation without echoing the raw propagation header. Matched route templates keep dynamic IDs and query values out of default issue titles, span names, metrics, and breadcrumbs.
 
 ## Example Source
 

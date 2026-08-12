@@ -86,6 +86,8 @@ export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & NodeFetch
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;
+  /** Include raw stack text only when the app has explicitly approved it. Defaults to false. */
+  includeErrorStack?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (req: Request, res: Response) => string;
@@ -129,6 +131,7 @@ export declare function createErrorEvent(
     now?: () => string;
     idFactory?: (error: unknown, req: Request) => string;
     trace?: LogBrewTraceContext;
+    includeErrorStack?: boolean;
   }
 ): LogBrewErrorEvent;
 export declare function createRequestMetricEvent(
