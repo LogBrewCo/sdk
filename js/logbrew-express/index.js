@@ -1,4 +1,5 @@
 import {
+  createIssueAttributesFromError,
   LogBrewClient,
   parseTraceparent,
   SdkError
@@ -7,7 +8,7 @@ import { createNodeFetchTransport } from "@logbrew/node";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const DEFAULT_SDK_NAME = "logbrew-express";
-const DEFAULT_SDK_VERSION = "0.1.2";
+const DEFAULT_SDK_VERSION = "0.1.4";
 const activeTraceContext = new AsyncLocalStorage();
 const requestLifecycles = new WeakMap();
 
@@ -74,6 +75,7 @@ export function logbrewErrorHandler(options = {}) {
       : createErrorEvent(error, req, { ...options, trace });
 
     try {
+      addErrorBreadcrumb(client, req);
       client.issue(event.id, event.timestamp, event.attributes);
       const lifecycle = requestLifecycles.get(req);
       if (lifecycle && !lifecycle.finalized && lifecycle.client === client && lifecycle.transport === transport) {
@@ -107,7 +109,7 @@ export function createRequestEvent(req, res, {
   trace = undefined
 } = {}) {
   const method = req.method ?? "GET";
-  const path = getRequestPath(req);
+  const routeTemplate = getRouteTemplate(req);
   const statusCode = Number(res.statusCode ?? 0);
   const id = idFactory(req, res);
   const traceContext = trace ?? getRequestTraceContext(req) ?? createRequestTraceContext(req, res, { spanIdFactory });
@@ -117,7 +119,7 @@ export function createRequestEvent(req, res, {
       id,
       method,
       now,
-      path,
+      routeTemplate,
       statusCode
     })
     : undefined;
@@ -129,12 +131,12 @@ export function createRequestEvent(req, res, {
     id,
     timestamp: now(),
     attributes: {
-      message: `${method} ${path} ${statusCode}`,
+      message: `${method} ${routeTemplate} ${statusCode}`,
       level: statusCode >= 500 ? "error" : "info",
       logger: "express",
       metadata: {
         method,
-        path,
+        routeTemplate,
         statusCode,
         durationMs
       }
@@ -143,27 +145,30 @@ export function createRequestEvent(req, res, {
 }
 
 export function createErrorEvent(error, req, {
+  includeErrorStack = false,
   now = () => new Date().toISOString(),
   idFactory = defaultErrorEventId,
   trace = undefined
 } = {}) {
   const method = req.method ?? "GET";
-  const path = getRequestPath(req);
-  const message = error instanceof Error ? error.message : String(error);
+  const routeTemplate = getRouteTemplate(req);
   const traceContext = trace ?? getRequestTraceContext(req) ?? getActiveLogBrewTrace();
   return {
     id: idFactory(error, req),
     timestamp: now(),
-    attributes: {
-      title: `${method} ${path} failed`,
-      level: "error",
-      message,
+    attributes: createIssueAttributesFromError(error, {
+      title: `${method} ${routeTemplate} failed`,
+      mechanism: "express.middleware",
+      handled: false,
+      source: "express.middleware",
+      trace: traceContext,
+      includeErrorStack,
       metadata: {
+        framework: "express",
         method,
-        path,
-        ...traceMetadata(traceContext)
+        routeTemplate
       }
-    }
+    })
   };
 }
 
@@ -342,36 +347,39 @@ async function notifyFailure(options, error, context) {
 }
 
 function defaultRequestEventId(req, res) {
-  return `evt_express_request_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${res.statusCode ?? 0}`)}`;
+  return `evt_express_request_${slugify(`${req.method ?? "GET"}_${getRouteTemplate(req)}_${res.statusCode ?? 0}`)}_${randomHex(8)}`;
 }
 
 function defaultSpanIdFactory() {
   return randomHex(8);
 }
 
-function defaultErrorEventId(error, req) {
-  const message = error instanceof Error ? error.message : String(error);
-  return `evt_express_error_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${message}`)}`;
+function defaultErrorEventId(_error, req) {
+  return `evt_express_error_${slugify(`${req.method ?? "GET"}_${getRouteTemplate(req)}`)}_${randomHex(8)}`;
 }
 
 function defaultRequestMetricEventId(req, res) {
-  return `evt_express_metric_${slugify(`${req.method ?? "GET"}_${getRouteTemplate(req)}_${res.statusCode ?? 0}`)}`;
-}
-
-function getRequestPath(req) {
-  return pathOnly(req.originalUrl ?? req.url ?? "/");
+  return `evt_express_metric_${slugify(`${req.method ?? "GET"}_${getRouteTemplate(req)}_${res.statusCode ?? 0}`)}_${randomHex(8)}`;
 }
 
 function getRouteTemplate(req) {
   const routePath = req.route?.path;
   if (typeof routePath === "string") {
-    const baseUrl = req.baseUrl ?? "";
-    if (baseUrl && routePath.startsWith(baseUrl)) {
-      return pathOnly(routePath);
-    }
-    return pathOnly(`${baseUrl}${routePath}`);
+    return pathOnly(routePath);
   }
-  return getRequestPath(req);
+  return "<unmatched>";
+}
+
+function addErrorBreadcrumb(client, req) {
+  const method = req.method ?? "GET";
+  const routeTemplate = getRouteTemplate(req);
+  client.addBreadcrumb({
+    type: "http",
+    category: "express.request",
+    level: "error",
+    message: `${method} ${routeTemplate}`,
+    data: { method, routeTemplate }
+  });
 }
 
 function pathOnly(value) {
@@ -396,7 +404,7 @@ function createTraceparentRequestSpan(traceContext, {
   id,
   method,
   now,
-  path,
+  routeTemplate,
   statusCode
 }) {
   if (!traceContext) {
@@ -408,7 +416,7 @@ function createTraceparentRequestSpan(traceContext, {
     timestamp: now(),
     type: "span",
     attributes: {
-      name: `${method} ${path}`,
+      name: `${method} ${routeTemplate}`,
       traceId: traceContext.traceId,
       spanId: traceContext.spanId,
       parentSpanId: traceContext.parentSpanId,
@@ -417,7 +425,7 @@ function createTraceparentRequestSpan(traceContext, {
       metadata: {
         framework: "express",
         method,
-        path,
+        routeTemplate,
         sampled: traceContext.sampled,
         statusCode
       }
@@ -496,18 +504,6 @@ function normalizeSpanId(value) {
     return undefined;
   }
   return spanId;
-}
-
-function traceMetadata(trace) {
-  if (!trace) {
-    return {};
-  }
-  return {
-    parentSpanId: trace.parentSpanId,
-    sampled: trace.sampled,
-    spanId: trace.spanId,
-    traceId: trace.traceId
-  };
 }
 
 function readEnvApiKey() {

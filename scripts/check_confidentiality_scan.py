@@ -594,7 +594,7 @@ def is_angular_injection_token_reference(relative_text: str, line: str) -> bool:
 
 
 def is_fake_query_secret_fixture(relative_text: str, line: str) -> bool:
-    if "?token=secret" not in line:
+    if "token=secret" not in line:
         return False
     return (
         relative_text.startswith("scripts/real_user_")

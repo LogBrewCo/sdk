@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/express",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Express middleware helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
@@ -47,7 +47,7 @@
   },
   "peerDependencies": {
     "@logbrew/node": "^0.1.2",
-    "@logbrew/sdk": "^0.1.3",
+    "@logbrew/sdk": "^0.1.10",
     "express": ">=4"
   },
   "scripts": {

@@ -20,6 +20,7 @@ CLIENT_ENTRYPOINTS = (
     ("svelte", "index"),
     ("vue", "index"),
 )
+COMMONJS_DECLARATION_REEXPORT = 'export * from "./index";\nexport { default } from "./index";\n'
 
 
 class TelemetryContextSurfaceTests(unittest.TestCase):
@@ -42,19 +43,12 @@ class TelemetryContextSurfaceTests(unittest.TestCase):
         self,
     ) -> None:
         for package, entrypoint in CLIENT_ENTRYPOINTS:
-            declarations = []
-            for suffix in ("d.ts", "d.cts"):
-                relative_path = f"js/logbrew-{package}/{entrypoint}.{suffix}"
-                source = (ROOT / relative_path).read_text(encoding="utf-8")
-                declarations.append(source)
-                with self.subTest(path=relative_path):
-                    self.assertIn("TelemetryContext", source)
-                    self.assertIn("context?: TelemetryContext;", source)
-            self.assertEqual(
-                declarations[0],
-                declarations[1],
-                f"{package}/{entrypoint} ESM and CommonJS declarations drifted",
-            )
+            declaration = (ROOT / f"js/logbrew-{package}/{entrypoint}.d.ts").read_text(encoding="utf-8")
+            commonjs = (ROOT / f"js/logbrew-{package}/{entrypoint}.d.cts").read_text(encoding="utf-8")
+            with self.subTest(path=f"js/logbrew-{package}/{entrypoint}.d.ts"):
+                self.assertIn("TelemetryContext", declaration)
+                self.assertIn("context?: TelemetryContext;", declaration)
+                self.assertIn(commonjs, (declaration, COMMONJS_DECLARATION_REEXPORT))
 
 
 if __name__ == "__main__":
