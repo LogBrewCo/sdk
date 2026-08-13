@@ -59,7 +59,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         rust = tomllib.loads((ROOT / "rust/logbrew/Cargo.toml").read_text(encoding="utf-8"))
         self.assertEqual(rust["package"]["version"], "0.1.4")
         ruby_version = (ROOT / "ruby/logbrew-ruby/lib/logbrew/version.rb").read_text(encoding="utf-8")
-        self.assertIn('VERSION = "0.1.6"', ruby_version)
+        self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
         self.assertEqual(maven_version(ROOT / "java/logbrew-java/pom.xml"), "0.1.4")
         self.assertEqual(
             xml_value(ROOT / "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", "Version"),
@@ -267,7 +267,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
         self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.4")
-        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.6")
+        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.7")
         self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.10")
         self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.7")
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.1")
@@ -310,7 +310,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.15",
             ),
             "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.4",),
-            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.6",),
+            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.7",),
             "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.10",),
             "scripts/real_user_maven_central_public_smoke.sh": (
                 "LOGBREW_MAVEN_JAVA_VERSION:-0.1.4",

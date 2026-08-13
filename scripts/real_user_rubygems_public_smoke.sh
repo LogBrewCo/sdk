@@ -4,7 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rubygems-public.XXXXXX")"
 
-version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.6}}"
+version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.7}}"
 source_url="https://rubygems.org"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
@@ -215,17 +215,10 @@ raise "expected support ticket draft proof" unless payload.fetch("support_ticket
 RUBY
 
 gem_dir="$(ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk", ENV.fetch("EXPECTED_LOGBREW_RUBYGEMS_VERSION")).gem_dir')"
-test -f "$gem_dir/README.md"
-test -f "$gem_dir/lib/logbrew.rb"
-test -f "$gem_dir/lib/logbrew/product_timeline.rb"
-test -f "$gem_dir/lib/logbrew/traceparent.rb"
-test -f "$gem_dir/lib/logbrew/trace.rb"
-test -f "$gem_dir/lib/logbrew/operation_tracing.rb"
-test -f "$gem_dir/lib/logbrew/support_ticket.rb"
-test -f "$gem_dir/examples/readme_example.rb"
-test -f "$gem_dir/examples/real_user_smoke.rb"
-test -f "$gem_dir/examples/first_useful_telemetry.rb"
-test -f "$gem_dir/examples/http_trace_correlation.rb"
+for path in README.md lib/logbrew.rb lib/logbrew/{product_timeline,traceparent,trace,operation_tracing,support_ticket}.rb \
+  examples/{readme_example,real_user_smoke,first_useful_telemetry,http_trace_correlation}.rb; do
+  test -f "$gem_dir/$path"
+done
 grep -q 'LogBrew::Traceparent' "$gem_dir/README.md"
 grep -q 'LogBrew::OperationTracing' "$gem_dir/README.md"
 grep -q 'Support Ticket Draft Diagnostics' "$gem_dir/README.md"

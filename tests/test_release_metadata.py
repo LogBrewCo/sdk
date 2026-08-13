@@ -1806,8 +1806,7 @@ jobs:
             ):
                 (package_dir / relative).write_text("# fixture\n", encoding="utf-8")
             (package_dir / "lib" / "logbrew" / "version.rb").write_text(
-                'VERSION = "0.1.6"\n',
-                encoding="utf-8",
+                f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"\n', encoding="utf-8"
             )
             (root / "scripts" / "real_user_ruby_rails_smoke.sh").write_text(
                 "#!/usr/bin/env bash\n",
