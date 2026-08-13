@@ -240,7 +240,7 @@ module LogBrew
 
     private
 
-    def capture_request_span(env, status_code, elapsed_ms, status)
+    def capture_request_span(env, status_code, elapsed_ms, status, timestamp)
       context = rack_trace_context(env)
       attributes = {
         name: request_name(env),
@@ -252,28 +252,18 @@ module LogBrew
       }
       attributes[:parentSpanId] = context.parent_span_id if context && context.parent_span_id
 
-      @client.span(next_event_id("span"), logbrew_timestamp, attributes)
+      @client.span(next_event_id("span"), timestamp, attributes)
     end
 
     def trace_id(env)
-      context = rack_trace_context(env)
-      return context.trace_id if context
-
-      super
+      rack_trace_context(env)&.trace_id || super
     end
 
     def span_id(env)
-      context = rack_trace_context(env)
-      return context.span_id if context
-
-      super
+      rack_trace_context(env)&.span_id || super
     end
 
     def request_metadata(env, status_code)
-      Trace.add_metadata(super, rack_trace_context(env))
-    end
-
-    def exception_metadata(env, error)
       Trace.add_metadata(super, rack_trace_context(env))
     end
 
