@@ -120,7 +120,6 @@ module LogBrew
         text = value.to_s.strip
         text.empty? ? nil : text
       end
-      private_class_method :optional_text
 
       def self.server_key_value(value)
         text = optional_text(value)
@@ -131,7 +130,6 @@ module LogBrew
 
         text
       end
-      private_class_method :server_key_value
 
       def self.bounded_label(value, label)
         text = optional_text(value)
@@ -142,7 +140,6 @@ module LogBrew
 
         text.freeze
       end
-      private_class_method :bounded_label
 
       def self.optional_bounded_label(value, label)
         text = optional_text(value)
@@ -150,7 +147,6 @@ module LogBrew
 
         bounded_label(text, label)
       end
-      private_class_method :optional_bounded_label
 
       def self.boolean_value(environment, name, default)
         value = optional_text(environment[name])
@@ -163,7 +159,6 @@ module LogBrew
           raise SdkError.new("configuration_error", "#{name} must be true or false")
         end
       end
-      private_class_method :boolean_value
 
       def self.integer_value(environment, name, default, minimum, maximum)
         text = optional_text(environment[name])
@@ -179,7 +174,6 @@ module LogBrew
           "#{name} must be an integer between #{minimum} and #{maximum}"
         )
       end
-      private_class_method :integer_value
 
       def self.endpoint_value(value)
         text = optional_text(value) || DEFAULT_ENDPOINT
@@ -203,7 +197,8 @@ module LogBrew
       rescue URI::InvalidURIError
         raise SdkError.new("configuration_error", "LOGBREW_ENDPOINT must be a valid HTTP URL")
       end
-      private_class_method :endpoint_value
+      private_class_method :optional_text, :server_key_value, :bounded_label,
+                           :optional_bounded_label, :boolean_value, :integer_value, :endpoint_value
 
       def initialize(
         enabled:,
@@ -249,6 +244,7 @@ module LogBrew
 
     # Owns one lazy automatic-delivery client per operating-system process.
     class Runtime
+      include CaptureHelpers
       attr_reader :configuration
 
       def initialize(
@@ -320,6 +316,16 @@ module LogBrew
         nil
       end
 
+      def metadata
+        @metadata ||= {
+          "service" => @configuration.service_name,
+          "environment" => @configuration.app_environment,
+          "framework" => "rails",
+          "framework.version" => @configuration.rails_version,
+          "release" => @configuration.release
+        }.compact.freeze
+      end
+
       private
 
       def prepare_process_state
@@ -372,7 +378,6 @@ module LogBrew
 
       def record_process_context(created)
         timestamp = logbrew_timestamp
-        metadata = base_metadata
         created.environment(
           "ruby_rails_environment_#{SecureRandom.hex(8)}",
           timestamp,
@@ -388,28 +393,83 @@ module LogBrew
           metadata: metadata
         )
       end
-
-      def base_metadata
-        {
-          "service" => @configuration.service_name,
-          "environment" => @configuration.app_environment,
-          "framework" => "rails",
-          "framework.version" => @configuration.rails_version
-        }
-      end
-
-      def logbrew_timestamp
-        timestamp = @timestamp_provider.call
-        return timestamp.iso8601 if timestamp.respond_to?(:iso8601)
-
-        timestamp.to_s
-      end
     end
+
+    # Buffers only the slowest request-local framework operations without raw
+    # SQL, cache keys, absolute paths, or exception messages.
+    module RequestOperations
+      LIMIT = 8
+      STATE_KEY = :logbrew_rails_request_operations
+      EVENTS = /\A(?:(sql)\.active_record|(cache)_(read|write|delete|exist\?|fetch_hit|generate)\.active_support|(render)_(template|partial|collection)\.action_view)\z/
+      private_constant :LIMIT, :STATE_KEY, :EVENTS
+
+      module_function
+
+      def install(notifications)
+        @mutex ||= Mutex.new
+        @mutex.synchronize { @subscription ||= notifications.subscribe(EVENTS) { |*event| record(*event) } }
+      end
+
+      def within
+        previous = Thread.current[STATE_KEY]
+        Thread.current[STATE_KEY] = [0, []]
+        yield
+      ensure
+        Thread.current[STATE_KEY] = previous
+      end
+
+      def record(name, started_at, finished_at, _id = nil, payload = {})
+        state = Thread.current[STATE_KEY]
+        match = EVENTS.match(name.to_s)
+        return if state.nil? || match.nil? || !payload.is_a?(Hash)
+        duration_ms = ((finished_at - started_at) * 1_000).round(3)
+        return unless duration_ms.finite? && !duration_ms.negative?
+        kind, operation = match[1] ? %w[database query] : [match[2] ? "cache" : "view", match[3] || match[5]]
+        metadata = { "rails.notification" => name.to_s }
+        metadata["cache.hit"] = payload[:hit] if kind == "cache" && [true, false].include?(payload[:hit])
+        template = template_path(payload[:identifier]) if kind == "view"
+        metadata["view.template"] = template unless template.nil?
+        error = payload[:exception_object]
+        state[0] += 1
+        timestamp = started_at.iso8601(6) if started_at.respond_to?(:iso8601)
+        timestamp ||= Time.now.utc.iso8601(6)
+        state[1] << [duration_ms, kind, operation, metadata, error.is_a?(Exception) ? error : nil, timestamp, started_at]
+        state[1].sort_by! { |item| [item[0], item[1], item[2]] }
+        state[1].shift if state[1].length > LIMIT
+      rescue StandardError
+        nil
+      end
+
+      def snapshot
+        Thread.current[STATE_KEY] || [0, []]
+      end
+
+      def template_path(identifier)
+        text = identifier.to_s.tr("\\", "/")
+        relative = text.split("/app/views/", 2)[1]
+        return if relative.nil? || relative.empty? || relative.bytesize > 255 || relative.match?(/[[:cntrl:]]/) || relative.split("/").include?("..")
+
+        relative
+      end
+      private_class_method :template_path
+    end
+    private_constant :RequestOperations
 
     # Internal Rack adapter that replaces concrete request paths with Rails
     # route templates while reusing the core request/error lifecycle.
     class RailsRackMiddleware < LogBrew::RackMiddleware
       private
+
+      def capture_request_span(*arguments)
+        super.tap do
+          RequestOperations.snapshot[1].sort_by(&:last).each do |duration_ms, kind, name, metadata, error, timestamp|
+            LogBrew::OperationTracing.capture_span(
+              @client, kind, name, LogBrew::OperationTracing.child_context, nil,
+              { duration_ms: duration_ms, timestamp: timestamp, source: "rails.active_support", system: kind == "database" ? "active_record" : "rails", operation: name, metadata: metadata, on_error: @on_error }, error
+            )
+          end
+        end
+      end
 
       def exception_mechanism_type
         "rails.middleware"
@@ -442,17 +502,21 @@ module LogBrew
       end
 
       def request_metadata(env, status_code)
-        metadata = super
-        metadata.delete("http.path")
-        metadata.delete("action_dispatch.request_id")
-        metadata.delete("HTTP_X_REQUEST_ID")
-        metadata["source"] = "rails"
-        metadata["http.route"] = route_template(env)
-        metadata["http.status_class"] = "#{status_code.to_i / 100}xx"
-        controller, action = controller_and_action(env)
-        metadata["rails.controller"] = controller unless controller.nil?
-        metadata["rails.action"] = action unless action.nil?
-        metadata
+        super.tap do |metadata|
+          metadata.delete("http.path")
+          metadata.delete("action_dispatch.request_id")
+          metadata.delete("HTTP_X_REQUEST_ID")
+          metadata["source"] = "rails"
+          metadata["http.route"] = route_template(env)
+          metadata["http.status_class"] = "#{status_code.to_i / 100}xx"
+          controller, action = controller_and_action(env)
+          metadata["rails.controller"] = controller unless controller.nil?
+          metadata["rails.action"] = action unless action.nil?
+          observed, operations = RequestOperations.snapshot
+          metadata["rails.operations.observed"] = observed
+          metadata["rails.operations.captured"] = operations.length
+          metadata["rails.operations.truncated"] = observed > operations.length
+        end
       end
 
       def route_template(env)
@@ -486,8 +550,7 @@ module LogBrew
         parameters = env["action_dispatch.request.path_parameters"]
         return [nil, nil] unless parameters.is_a?(Hash)
 
-        [bounded_identifier(parameters[:controller] || parameters["controller"]),
-         bounded_identifier(parameters[:action] || parameters["action"])]
+        %i[controller action].map { |key| bounded_identifier(parameters[key] || parameters[key.to_s]) }
       end
 
       def bounded_route(value)
@@ -500,12 +563,7 @@ module LogBrew
       end
 
       def bounded_identifier(value)
-        return nil if value.nil?
-
-        identifier = value.to_s
-        return nil unless identifier.match?(/\A[a-zA-Z0-9_\/.-]{1,128}\z/)
-
-        identifier
+        value.to_s[/\A[a-zA-Z0-9_\/.-]{1,128}\z/]
       end
     end
     private_constant :RailsRackMiddleware
@@ -530,7 +588,7 @@ module LogBrew
         adapter = adapter_for(active_client)
         return @app.call(environment) if adapter.nil?
 
-        adapter.call(environment)
+        RequestOperations.within { adapter.call(environment) }
       end
 
       private
@@ -543,7 +601,7 @@ module LogBrew
             @app,
             client: active_client,
             flush_on_response: false,
-            metadata: base_metadata,
+            metadata: @runtime.metadata,
             include_exception_message: @runtime.configuration.capture_exception_messages?,
             include_exception_backtrace: @runtime.configuration.include_exception_backtrace?,
             on_error: ->(error) { @runtime.report_error("request_capture", error) }
@@ -556,17 +614,6 @@ module LogBrew
         nil
       end
 
-      def base_metadata
-        configuration = @runtime.configuration
-        {
-          "service" => configuration.service_name,
-          "environment" => configuration.app_environment,
-          "framework" => "rails",
-          "framework.version" => configuration.rails_version
-        }.tap do |metadata|
-          metadata["release"] = configuration.release unless configuration.release.nil?
-        end
-      end
     end
 
     # Rails.error subscriber for handled reports. Unhandled errors stay owned
@@ -606,18 +653,12 @@ module LogBrew
         @mutex.synchronize do
           return @subscriber if @subscriber_client.equal?(active_client) && !@subscriber.nil?
 
-          configuration = @runtime.configuration
           @subscriber = LogBrew::RailsErrorSubscriber.new(
             client: active_client,
             flush_on_report: false,
-            metadata: {
-              "service" => configuration.service_name,
-              "environment" => configuration.app_environment,
-              "framework" => "rails",
-              "framework.version" => configuration.rails_version
-            },
-            include_exception_message: configuration.capture_exception_messages?,
-            include_exception_backtrace: configuration.include_exception_backtrace?,
+            metadata: @runtime.metadata,
+            include_exception_message: @runtime.configuration.capture_exception_messages?,
+            include_exception_backtrace: @runtime.configuration.include_exception_backtrace?,
             on_error: ->(error) { @runtime.report_error("handled_error_capture", error) }
           )
           @subscriber_client = active_client

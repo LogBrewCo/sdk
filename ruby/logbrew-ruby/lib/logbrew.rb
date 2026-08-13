@@ -33,6 +33,32 @@ module LogBrew
   METRIC_KINDS = METRIC_TEMPORALITIES_BY_KIND.keys.freeze
   NON_NEGATIVE_METRIC_KINDS = %w[counter histogram].freeze
 
+  module CaptureHelpers
+    module_function
+
+    def primitive_metadata_value?(value)
+      value.nil? || value == true || value == false || value.is_a?(String) || value.is_a?(Integer) ||
+        (value.is_a?(Float) && value.finite?)
+    end
+
+    def copy_metadata(metadata)
+      metadata.each_with_object({}) { |(key, value), copied| copied[key.to_s] = value if primitive_metadata_value?(value) }
+    end
+
+    def logbrew_timestamp
+      timestamp = @timestamp_provider.respond_to?(:call) ? @timestamp_provider.call : Time.now
+      timestamp.respond_to?(:iso8601) ? timestamp.iso8601 : timestamp.to_s
+    end
+
+    def capture_safely
+      yield
+    rescue StandardError => error
+      @on_error.call(error) if @on_error.respond_to?(:call)
+      raise error if @raise_errors
+    end
+  end
+  private_constant :CaptureHelpers
+
   class SdkError < StandardError
     attr_reader :code
 
@@ -202,6 +228,7 @@ module LogBrew
   end
 
   class Logger < ::Logger
+    include CaptureHelpers
     DEFAULT_LOGGER_NAME = "ruby-logger"
     SEVERITY_TO_LOGBREW_LEVEL = {
       ::Logger::DEBUG => "info",
@@ -306,13 +333,6 @@ module LogBrew
       raise error if @raise_errors
     end
 
-    def logbrew_timestamp
-      timestamp = @timestamp_provider.respond_to?(:call) ? @timestamp_provider.call : Time.now
-      return timestamp.iso8601 if timestamp.respond_to?(:iso8601)
-
-      timestamp.to_s
-    end
-
     def logbrew_message(message)
       return message.message if message.is_a?(Exception)
       return message if message.is_a?(String)
@@ -347,18 +367,6 @@ module LogBrew
       metadata["exceptionBacktrace"] = exception.backtrace.join("\n") if @include_exception_backtrace && exception.backtrace
     end
 
-    def copy_metadata(metadata)
-      metadata.each_with_object({}) do |(key, value), copied|
-        copied[key.to_s] = value if primitive_metadata_value?(value)
-      end
-    end
-
-    def primitive_metadata_value?(value)
-      return true if value.nil? || value == true || value == false
-      return true if value.is_a?(String) || value.is_a?(Integer)
-
-      value.is_a?(Float) && value.finite?
-    end
   end
   # Rack-compatible middleware for Rails, Sinatra, and other Rack-based Ruby apps.
   #
@@ -366,6 +374,7 @@ module LogBrew
   # exceptions as issue plus error-span events. It does not require the rack or
   # rails gems at runtime; any app object that responds to `call(env)` is enough.
   class RackMiddleware
+    include CaptureHelpers
     DEFAULT_EVENT_ID_PREFIX = "ruby_rack"
     DEFAULT_SPAN_LOGGER = "rack"
 
@@ -407,7 +416,7 @@ module LogBrew
         response = @app.call(env)
       rescue StandardError => error
         status_code = exception_status_code(error)
-        safely_capture do
+        capture_safely do
           capture_exception_issue(env, error) if status_code >= 500
           capture_request_span(env, status_code, duration_ms(started_at), status_code >= 500 ? "error" : "ok")
           flush_if_configured
@@ -416,7 +425,7 @@ module LogBrew
       end
 
       status_code = rack_status(response)
-      safely_capture do
+      capture_safely do
         capture_request_span(env, status_code, duration_ms(started_at), status_code >= 500 ? "error" : "ok")
         flush_if_configured
       end
@@ -458,13 +467,6 @@ module LogBrew
         @next_event_number += 1
         "#{@event_id_prefix}_#{kind}_#{@next_event_number}"
       end
-    end
-
-    def logbrew_timestamp
-      timestamp = @timestamp_provider.respond_to?(:call) ? @timestamp_provider.call : Time.now
-      return timestamp.iso8601 if timestamp.respond_to?(:iso8601)
-
-      timestamp.to_s
     end
 
     def request_name(env)
@@ -562,19 +564,6 @@ module LogBrew
       metadata[key] = value unless value.nil?
     end
 
-    def copy_metadata(metadata)
-      metadata.each_with_object({}) do |(key, value), copied|
-        copied[key.to_s] = value if primitive_metadata_value?(value)
-      end
-    end
-
-    def primitive_metadata_value?(value)
-      return true if value.nil? || value == true || value == false
-      return true if value.is_a?(String) || value.is_a?(Integer)
-
-      value.is_a?(Float) && value.finite?
-    end
-
     def monotonic_time
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
@@ -589,12 +578,6 @@ module LogBrew
       @client.flush(@transport)
     end
 
-    def safely_capture
-      yield
-    rescue StandardError => error
-      @on_error.call(error) if @on_error.respond_to?(:call)
-      raise error if @raise_errors
-    end
   end
 
   # Rails.error subscriber for handled and manually reported Rails exceptions.
@@ -603,6 +586,7 @@ module LogBrew
   # initializer. This class avoids a hard Rails dependency so the core gem stays
   # usable in plain Ruby and Rack apps.
   class RailsErrorSubscriber
+    include CaptureHelpers
     DEFAULT_EVENT_ID_PREFIX = "ruby_rails_error"
     SEVERITY_TO_ISSUE_LEVEL = {
       "info" => "info",
@@ -666,13 +650,6 @@ module LogBrew
     end
 
     private
-
-    def logbrew_timestamp
-      timestamp = @timestamp_provider.respond_to?(:call) ? @timestamp_provider.call : Time.now
-      return timestamp.iso8601 if timestamp.respond_to?(:iso8601)
-
-      timestamp.to_s
-    end
 
     def error_title(error)
       return error.class.name if error.is_a?(Exception)
@@ -743,31 +720,12 @@ module LogBrew
       "rails-exception-#{Digest::SHA256.hexdigest(material)}"
     end
 
-    def copy_metadata(metadata)
-      metadata.each_with_object({}) do |(key, value), copied|
-        copied[key.to_s] = value if primitive_metadata_value?(value)
-      end
-    end
-
-    def primitive_metadata_value?(value)
-      return true if value.nil? || value == true || value == false
-      return true if value.is_a?(String) || value.is_a?(Integer)
-
-      value.is_a?(Float) && value.finite?
-    end
-
     def flush_if_configured
       return unless @flush_on_report && !@transport.nil? && @client.pending_events.positive?
 
       @client.flush(@transport)
     end
 
-    def capture_safely
-      yield
-    rescue StandardError => error
-      @on_error.call(error) if @on_error.respond_to?(:call)
-      raise error if @raise_errors
-    end
   end
 
   module Validation

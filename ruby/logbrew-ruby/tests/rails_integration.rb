@@ -123,6 +123,14 @@ assert(opted_in_configuration.capture_exception_messages?, "expected explicit me
 assert(opted_in_configuration.include_exception_backtrace?, "expected explicit backtrace opt-in")
 tests += 1
 
+fake_notifications = Struct.new(:subscriptions).new([])
+fake_notifications.define_singleton_method(:subscribe) { |pattern, &subscriber| subscriptions << [pattern, subscriber] }
+operations = LogBrew::Rails.const_get(:RequestOperations)
+operations.install(fake_notifications)
+operations.install(fake_notifications)
+assert(fake_notifications.subscriptions.length == 1, "expected one idempotent Rails operation subscription")
+tests += 1
+
 transport = LogBrew::RecordingTransport.always_accept
 runtime = LogBrew::Rails::Runtime.new(configuration, transport_factory: ->(_config) { transport })
 application_response = [200, { "content-type" => "text/plain" }, ["ok"]]
@@ -133,6 +141,13 @@ app = lambda do |environment|
     action: "show",
     id: "opaque-record-id"
   }
+  first_operation_at = Time.utc(2026, 8, 1, 12, 0, 0)
+  operations.record("sql.active_record", first_operation_at, first_operation_at + 0.025, nil, sql: "SELECT * FROM private_accounts WHERE email = 'opaque@example.test'", exception_object: ArgumentError.new("opaque SQL failure"))
+  operations.record("cache_read.active_support", first_operation_at + 1, first_operation_at + 1.003, nil, key: "opaque-account-cache-key", hit: true)
+  operations.record("render_template.action_view", first_operation_at + 2, first_operation_at + 2.012, nil, identifier: "/srv/application/app/views/tools/show.html.erb")
+  7.times do |index|
+    operations.record("sql.active_record", first_operation_at + 3 + index, first_operation_at + 3.001 + index + (index / 10_000.0), nil, sql: "UPDATE private_rows")
+  end
   application_response
 end
 middleware = LogBrew::Rails::RequestMiddleware.new(app, runtime: runtime)
@@ -147,11 +162,24 @@ response = middleware.call(
 assert(response.equal?(application_response), "expected Rails response identity to stay unchanged")
 
 events = JSON.parse(runtime.client.preview_json).fetch("events")
-request_span = events.reverse.find { |event| event.fetch("type") == "span" }
+request_span = events.find do |event|
+  event.fetch("type") == "span" && event.dig("attributes", "metadata", "source") == "rails"
+end
 assert(!request_span.nil?, "expected one Rails request span")
 attributes = request_span.fetch("attributes")
 metadata = attributes.fetch("metadata")
 typed_context = attributes.fetch("context")
+operation_spans = events.select { |event| event.fetch("type") == "span" && event.dig("attributes", "metadata", "source") == "rails.active_support" }
+assert(operation_spans.length == 8, "expected the eight slowest bounded Rails operation spans")
+assert(metadata.fetch("rails.operations.observed") == 10, "expected exact observed Rails operation count")
+assert(metadata.fetch("rails.operations.captured") == 8, "expected exact captured Rails operation count")
+assert(metadata.fetch("rails.operations.truncated") == true, "expected explicit Rails operation truncation")
+assert(operation_spans.all? { |event| event.dig("attributes", "parentSpanId") == attributes.fetch("spanId") }, "expected exact request children")
+assert(operation_spans.all? { |event| event.dig("attributes", "context", "trace", "spanId") == event.dig("attributes", "spanId") }, "expected typed operation span identity")
+assert(operation_spans.any? { |event| event.dig("attributes", "metadata", "view.template") == "tools/show.html.erb" }, "expected relative template")
+assert(operation_spans.any? { |event| event.dig("attributes", "metadata", "cache.hit") == true }, "expected cache result evidence")
+assert(operation_spans.any? { |event| event.dig("attributes", "status") == "error" && event.dig("attributes", "metadata", "exceptionType") == "ArgumentError" }, "expected type-only operation failure")
+assert(operation_spans.any? { |event| event.fetch("timestamp") == "2026-08-01T12:00:00.000000Z" }, "expected operation start timestamp")
 assert(attributes.fetch("name") == "GET /tools/:id(.:format)", "expected Rails route-template span name")
 assert(attributes.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "expected incoming trace continuation")
 assert(attributes.fetch("parentSpanId") == "00f067aa0ba902b7", "expected incoming parent span")
@@ -169,9 +197,10 @@ assert(metadata.fetch("rails.action") == "show", "expected bounded action metada
 assert(metadata.fetch("service") == "circulate-web", "expected service metadata")
 assert(metadata.fetch("environment") == "staging", "expected environment metadata")
 serialized = JSON.generate(events)
-%w[opaque-record-id opaque-query opaque-auth installed-rails-key].each do |forbidden|
+%w[opaque-record-id opaque-query opaque-auth installed-rails-key opaque@example.test opaque-account-cache-key private_accounts opaque\ SQL\ failure].each do |forbidden|
   assert(!serialized.include?(forbidden), "expected Rails telemetry to omit #{forbidden}")
 end
+assert(!serialized.include?("/srv/application"), "expected Rails telemetry to omit absolute template paths")
 tests += 1
 
 error_transport = LogBrew::RecordingTransport.always_accept

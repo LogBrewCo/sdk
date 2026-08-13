@@ -3,34 +3,10 @@
 module LogBrew
   # Explicit dependency spans for app-owned database, cache, and queue work.
   module OperationTracing
-    UNSAFE_METADATA_PATTERNS = [
-      /authorization/i,
-      /body/i,
-      /broker/i,
-      /cache.?key/i,
-      /command/i,
-      /connection/i,
-      /cookie/i,
-      /dsn/i,
-      /header/i,
-      /host/i,
-      /\bjid\z/i,
-      /job.?id/i,
-      /key/i,
-      /message/i,
-      /param/i,
-      /pass#{'word'}/i,
-      /payload/i,
-      /query/i,
-      /sec#{'ret'}/i,
-      /sql/i,
-      /statement/i,
-      /to#{'ken'}/i,
-      /url/i,
-      /username/i,
-      /value/i
-    ].freeze
-    private_constant :UNSAFE_METADATA_PATTERNS
+    UNSAFE_METADATA = /authorization|body|broker|cache.?key|command|connection|cookie|dsn|header|host|
+      \bjid\z|job.?id|key|message|param|pass#{'word'}|payload|query|sec#{'ret'}|sql|statement|
+      to#{'ken'}|url|username|value/ix
+    private_constant :UNSAFE_METADATA
 
     module_function
 
@@ -70,20 +46,22 @@ module LogBrew
     end
 
     def capture_span(client, kind, name, context, started_at, options, error)
-      client.span(
-        event_id(kind, context, options),
-        timestamp(options),
-        {
-          name: "#{kind}.operation:#{name}",
-          traceId: context.trace_id,
-          spanId: context.span_id,
-          parentSpanId: context.parent_span_id,
-          status: error ? "error" : "ok",
-          durationMs: duration_ms(started_at, options),
-          metadata: span_metadata(kind, options, error),
-          events: span_events(error)
-        }
-      )
+      Trace.with_context(context) do
+        client.span(
+          event_id(kind, context, options),
+          timestamp(options),
+          {
+            name: "#{kind}.operation:#{name}",
+            traceId: context.trace_id,
+            spanId: context.span_id,
+            parentSpanId: context.parent_span_id,
+            status: error ? "error" : "ok",
+            durationMs: duration_ms(started_at, options),
+            metadata: span_metadata(kind, options, error),
+            events: span_events(error)
+          }
+        )
+      end
     rescue StandardError => capture_error
       on_error = read_option(options, :on_error)
       begin
@@ -99,7 +77,7 @@ module LogBrew
 
       Trace.create(
         trace_id: parent.trace_id,
-        span_id: generate_span_id,
+        span_id: Trace.generate_span_id,
         parent_span_id: parent.span_id,
         trace_flags: parent.trace_flags
       )
@@ -107,7 +85,7 @@ module LogBrew
 
     def span_metadata(kind, options, error)
       sanitized_metadata(read_option(options, :metadata)).tap do |metadata|
-        metadata["source"] = "#{kind}.operation"
+        metadata["source"] = read_option(options, :source) || "#{kind}.operation"
         add_option(metadata, "#{kind}.system", read_option(options, :system))
         add_option(metadata, "#{kind}.operation", read_option(options, :operation))
         add_option(metadata, "#{kind}.target", read_option(options, :target))
@@ -137,29 +115,22 @@ module LogBrew
         normalized_key = key.to_s
         next if normalized_key.strip.empty?
         next if unsafe_metadata_key?(normalized_key)
-        next unless primitive_metadata_value?(value)
+        next unless CaptureHelpers.primitive_metadata_value?(value)
 
         copied[normalized_key] = value
       end
     end
 
     def unsafe_metadata_key?(key)
-      UNSAFE_METADATA_PATTERNS.any? { |pattern| key.match?(pattern) }
-    end
-
-    def primitive_metadata_value?(value)
-      return true if value.nil? || value == true || value == false
-      return true if value.is_a?(String) || value.is_a?(Integer)
-
-      value.is_a?(Float) && value.finite?
+      key.match?(UNSAFE_METADATA)
     end
 
     def add_option(metadata, key, value)
-      metadata[key] = value if primitive_metadata_value?(value) && !(value.is_a?(String) && value.strip.empty?)
+      metadata[key] = value if CaptureHelpers.primitive_metadata_value?(value) && !(value.is_a?(String) && value.strip.empty?)
     end
 
     def read_option(options, key)
-      options[key] || options[key.to_s]
+      options.key?(key) ? options[key] : options[key.to_s]
     end
 
     def event_id(kind, context, options)
@@ -184,11 +155,5 @@ module LogBrew
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
-    def generate_span_id
-      loop do
-        value = SecureRandom.hex(8)
-        return value unless value.delete("0").empty?
-      end
-    end
   end
 end

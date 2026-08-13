@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request/error capture, standard-library `Net::HTTP` delivery, opt-in standard-library `Logger` support, and manual Rack helpers.
+Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request, database, cache, view, and error capture; standard-library `Net::HTTP` delivery; opt-in standard-library `Logger` support; and manual Rack helpers.
 
 The core package has no runtime gem dependencies. Its automatic integration
 activates only inside an application that has already loaded Rails.
@@ -40,8 +40,14 @@ disabled and the application behaves normally. Set `LOGBREW_ENABLED=false` to
 disable it explicitly. If the Gemfile uses `require: false`, load
 `logbrew/rails` yourself after Rails.
 
-The automatic integration records route-template request spans and typed
-exception issues. Escaped request failures include exception identity,
+The automatic integration records route-template request spans and up to eight
+slowest request-local Active Record, Rails cache, and Action View child spans.
+The request span reports exact observed and captured operation counts plus
+truncation. Operation evidence contains only the operation type, duration,
+cache-hit state, relative `app/views` template path, and exception type when
+present. It never contains SQL, cache keys or values, or absolute paths.
+
+Escaped request failures include exception identity,
 `rails.middleware` with `handled: false`, and up to 32 newest-first sanitized
 frames. Handled Rails reports use `rails.error_reporter` with `handled: true`.
 It does not record concrete request paths, query strings, request or response
