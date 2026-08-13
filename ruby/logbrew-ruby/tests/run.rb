@@ -565,7 +565,7 @@ rack_events = JSON.parse(client.preview_json).fetch("events")
 assert(rack_events.length == 1, "expected Rack middleware to queue one span")
 rack_span = rack_events[0]
 assert(rack_span.fetch("id") == "rack_test_span_1", "expected Rack span id")
-assert(rack_span.fetch("timestamp") == "2026-06-02T10:00:08Z", "expected Rack timestamp")
+assert(rack_span.fetch("timestamp") == "2026-06-02T10:00:08.000000Z", "expected Rack timestamp")
 span_attributes = rack_span.fetch("attributes")
 assert(span_attributes.fetch("name") == "POST /checkout", "expected Rack span name")
 assert(span_attributes.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "expected Rack trace id")
@@ -590,11 +590,12 @@ tests += 1
 
 client = sample_client
 error_app = lambda { |_env| raise RuntimeError, "checkout failed" }
+error_times = [Time.utc(2026, 6, 2, 10, 0, 9, 100_000), Time.utc(2026, 6, 2, 10, 0, 9, 900_000)]
 rack = LogBrew::RackMiddleware.new(
   error_app,
   client: client,
   event_id_prefix: "rack_error",
-  timestamp_provider: -> { Time.utc(2026, 6, 2, 10, 0, 9) }
+  timestamp_provider: -> { error_times.shift }
 )
 begin
   rack.call(
@@ -638,6 +639,7 @@ assert(issue_metadata.fetch("errorFrameFile") == "run.rb", "expected Rack error 
 assert(issue_metadata.fetch("exceptionMessage") == "checkout failed", "expected Rack exception message")
 assert(!issue_metadata.key?("exceptionBacktrace"), "expected Rack exception backtrace to be opt-in")
 error_span = rack_events[1].fetch("attributes")
+assert(rack_events.map { |event| event.fetch("timestamp") } == %w[2026-06-02T10:00:09.900000Z 2026-06-02T10:00:09.100000Z], "expected request start before failure")
 assert(error_span.fetch("status") == "error", "expected Rack error span")
 assert(error_span.fetch("metadata").fetch("http.status_code") == 500, "expected Rack error status metadata")
 assert(issue_metadata.fetch("traceId") == error_span.fetch("traceId"), "expected Rack issue/span trace correlation")

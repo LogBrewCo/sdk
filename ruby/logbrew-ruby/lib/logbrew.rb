@@ -45,9 +45,9 @@ module LogBrew
       metadata.each_with_object({}) { |(key, value), copied| copied[key.to_s] = value if primitive_metadata_value?(value) }
     end
 
-    def logbrew_timestamp
+    def logbrew_timestamp(precision = nil)
       timestamp = @timestamp_provider.respond_to?(:call) ? @timestamp_provider.call : Time.now
-      timestamp.respond_to?(:iso8601) ? timestamp.iso8601 : timestamp.to_s
+      timestamp.respond_to?(:iso8601) ? timestamp.iso8601(*[precision].compact) : timestamp.to_s
     end
 
     def capture_safely
@@ -412,36 +412,42 @@ module LogBrew
 
     def call(env)
       started_at = monotonic_time
-      begin
-        response = @app.call(env)
+      started_timestamp, timestamp_error = request_timestamp
+      response = begin
+        @app.call(env)
       rescue StandardError => error
-        status_code = exception_status_code(error)
-        capture_safely do
-          capture_exception_issue(env, error) if status_code >= 500
-          capture_request_span(env, status_code, duration_ms(started_at), status_code >= 500 ? "error" : "ok")
-          flush_if_configured
-        end
+        capture_request(env, exception_status_code(error), started_at, started_timestamp, timestamp_error, error)
         raise
       end
-
-      status_code = rack_status(response)
-      capture_safely do
-        capture_request_span(env, status_code, duration_ms(started_at), status_code >= 500 ? "error" : "ok")
-        flush_if_configured
-      end
+      capture_request(env, rack_status(response), started_at, started_timestamp, timestamp_error)
       response
     end
 
     private
 
+    def capture_request(env, status_code, started_at, timestamp, timestamp_error, error = nil)
+      capture_safely do
+        raise timestamp_error unless timestamp_error.nil?
+        capture_exception_issue(env, error, logbrew_timestamp(6)) if error && status_code >= 500
+        capture_request_span(env, status_code, duration_ms(started_at), status_code >= 500 ? "error" : "ok", timestamp)
+        flush_if_configured
+      end
+    end
+
+    def request_timestamp
+      [logbrew_timestamp(6), nil]
+    rescue StandardError => error
+      [nil, error]
+    end
+
     def exception_status_code(_error)
       500
     end
 
-    def capture_request_span(env, status_code, elapsed_ms, status)
+    def capture_request_span(env, status_code, elapsed_ms, status, timestamp)
       @client.span(
         next_event_id("span"),
-        logbrew_timestamp,
+        timestamp,
         name: request_name(env),
         traceId: trace_id(env),
         spanId: span_id(env),
@@ -451,7 +457,7 @@ module LogBrew
       )
     end
 
-    def capture_exception_issue(env, error)
+    def capture_exception_issue(env, error, timestamp)
       attributes = IssueDiagnostics.from_exception(
         error,
         message: @include_exception_message ? error.message : nil,
@@ -459,7 +465,7 @@ module LogBrew
         handled: false,
         metadata: exception_metadata(env, error)
       )
-      @client.issue(next_event_id("issue"), logbrew_timestamp, attributes)
+      @client.issue(next_event_id("issue"), timestamp, attributes)
     end
 
     def next_event_id(kind)

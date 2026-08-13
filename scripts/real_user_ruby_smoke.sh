@@ -667,7 +667,7 @@ rack_events = rack_payload.fetch("events")
 raise "expected Rack span event" unless rack_events.length == 1
 rack_span = rack_events[0]
 raise "expected Rack span id" unless rack_span.fetch("id") == "installed_rack_span_1"
-raise "expected Rack timestamp" unless rack_span.fetch("timestamp") == "2026-06-02T10:00:09Z"
+raise "expected Rack timestamp" unless rack_span.fetch("timestamp") == "2026-06-02T10:00:09.000000Z"
 rack_attributes = rack_span.fetch("attributes")
 raise "expected Rack span name" unless rack_attributes.fetch("name") == "POST /checkout"
 raise "expected Rack trace id" unless rack_attributes.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736"
