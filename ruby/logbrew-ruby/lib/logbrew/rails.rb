@@ -77,6 +77,9 @@ module LogBrew
   class RailsRailtie < ::Rails::Railtie
     initializer "logbrew.install", after: :load_config_initializers do |application|
       runtime = LogBrew::Rails.install(application: application)
+      if runtime.configuration.enabled?
+        LogBrew::Rails.const_get(:RequestOperations).install(::ActiveSupport::Notifications)
+      end
       middleware = application.config.middleware
       if defined?(::ActionDispatch::ShowExceptions)
         middleware.insert_after(

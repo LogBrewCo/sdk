@@ -25,28 +25,14 @@ done
 (cd "$package_dir" && ruby tests/rails_integration.rb)
 test -f "$package_dir/tests/http_client_tracing_support.rb"
 rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/issue_diagnostics.rb" "$package_dir/lib/logbrew/rails.rb" "$package_dir/lib/logbrew/rails_integration.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/telemetry.rb" "$package_dir/lib/logbrew/telemetry_context.rb" "$package_dir/lib/logbrew/telemetry_resource.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
-test -f "$tmp_dir/rdoc/LogBrew/Client.html"
-test -f "$tmp_dir/rdoc/LogBrew/Logger.html"
-test -f "$tmp_dir/rdoc/LogBrew/RackMiddleware.html"
-test -f "$tmp_dir/rdoc/LogBrew/RailsErrorSubscriber.html"
-test -f "$tmp_dir/rdoc/LogBrew/Rails/Configuration.html"
-test -f "$tmp_dir/rdoc/LogBrew/Rails/Runtime.html"
-test -f "$tmp_dir/rdoc/LogBrew/Rails/RequestMiddleware.html"
-test -f "$tmp_dir/rdoc/LogBrew/Rails/ErrorReporter.html"
-test -f "$tmp_dir/rdoc/LogBrew/RailsRailtie.html"
-test -f "$tmp_dir/rdoc/LogBrew/HttpTransport.html"
-test -f "$tmp_dir/rdoc/LogBrew/RecordingTransport.html"
-test -f "$tmp_dir/rdoc/LogBrew/SdkError.html"
-test -f "$tmp_dir/rdoc/LogBrew/SupportTicketDraft.html"
-test -f "$tmp_dir/rdoc/LogBrew/WorkerLifecycle.html"
-test -f "$tmp_dir/rdoc/LogBrew/WorkerDeliveryFailure.html"
-test -f "$tmp_dir/rdoc/LogBrew/DeliveryHealth.html"
-test -f "$tmp_dir/rdoc/LogBrew/HttpClientTracing.html"
-test -f "$tmp_dir/rdoc/LogBrew/IssueDiagnostics.html"
-test -f "$tmp_dir/rdoc/LogBrew/Telemetry.html"
-test -f "$tmp_dir/rdoc/LogBrew/TelemetryContext.html"
-test -f "$tmp_dir/rdoc/LogBrew/TelemetryResource.html"
-test -f "$tmp_dir/rdoc/LogBrew/NetHttpTracingClient.html"
+for page in Client Logger RackMiddleware RailsErrorSubscriber RailsRailtie HttpTransport RecordingTransport \
+  SdkError SupportTicketDraft WorkerLifecycle WorkerDeliveryFailure DeliveryHealth HttpClientTracing \
+  IssueDiagnostics Telemetry TelemetryContext TelemetryResource NetHttpTracingClient; do
+  test -f "$tmp_dir/rdoc/LogBrew/$page.html"
+done
+for page in Configuration Runtime RequestMiddleware ErrorReporter; do
+  test -f "$tmp_dir/rdoc/LogBrew/Rails/$page.html"
+done
 test -f "$tmp_dir/rdoc/LogBrew/Sidekiq/Instrumentation.html"
 
 (cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$tmp_dir/logbrew-sdk-${package_version}.gem" >/dev/null)
@@ -58,35 +44,11 @@ grep -q '^summary: Public LogBrew Ruby SDK$' "$tmp_dir/spec.yaml"
 
 gem unpack "$tmp_dir/logbrew-sdk-${package_version}.gem" --target "$tmp_dir/unpacked" >/dev/null
 unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-${package_version}"
-test -f "$unpacked_dir/lib/logbrew.rb"
-test -f "$unpacked_dir/lib/logbrew-sdk.rb"
-test -f "$unpacked_dir/lib/logbrew/version.rb"
-test -f "$unpacked_dir/lib/logbrew/rails.rb"
-test -f "$unpacked_dir/lib/logbrew/rails_integration.rb"
-test -f "$unpacked_dir/lib/logbrew/bounded_event_queue.rb"
-test -f "$unpacked_dir/lib/logbrew/event_batcher.rb"
-test -f "$unpacked_dir/lib/logbrew/persistent_event_store.rb"
-test -f "$unpacked_dir/lib/logbrew/trace.rb"
-test -f "$unpacked_dir/lib/logbrew/support_ticket.rb"
-test -f "$unpacked_dir/lib/logbrew/worker_lifecycle.rb"
-test -f "$unpacked_dir/lib/logbrew/automatic_delivery.rb"
-test -f "$unpacked_dir/lib/logbrew/http_client_tracing.rb"
-test -f "$unpacked_dir/lib/logbrew/issue_diagnostics.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry_context.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry_context_value.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry_resource.rb"
-test -f "$unpacked_dir/lib/logbrew/faraday_tracing.rb"
-test -f "$unpacked_dir/lib/logbrew/sidekiq.rb"
-test -f "$unpacked_dir/README.md"
-test -f "$unpacked_dir/examples/readme_example.rb"
-test -f "$unpacked_dir/examples/real_user_smoke.rb"
-test -f "$unpacked_dir/examples/http_trace_correlation.rb"
-test -f "$unpacked_dir/examples/issue_diagnostics.rb"
-test -f "$unpacked_dir/examples/persistent_worker_delivery.rb"
-test -f "$unpacked_dir/examples/automatic_delivery.rb"
-test -f "$unpacked_dir/examples/sidekiq_tracing.rb"
-test -f "$unpacked_dir/examples/Makefile"
+for path in README.md lib/logbrew{,-sdk}.rb \
+  lib/logbrew/{version,rails,rails_integration,bounded_event_queue,event_batcher,persistent_event_store,trace,support_ticket,worker_lifecycle,automatic_delivery,http_client_tracing,issue_diagnostics,telemetry,telemetry_context,telemetry_context_value,telemetry_resource,faraday_tracing,sidekiq}.rb \
+  examples/{readme_example,real_user_smoke,http_trace_correlation,issue_diagnostics,persistent_worker_delivery,automatic_delivery,sidekiq_tracing}.rb examples/Makefile; do
+  test -f "$unpacked_dir/$path"
+done
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY.*not Rails aliases' "$unpacked_dir/README.md"
 grep -q 'Rails Quick Start' "$unpacked_dir/README.md"
@@ -197,6 +159,6 @@ bash "$repo_root/scripts/real_user_ruby_sidekiq_smoke.sh" | tee "$tmp_dir/sideki
 grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:[0-9a-f]{64} requests=1 spans=5 issues=1$' "$tmp_dir/sidekiq-smoke.out"
 
 bash "$repo_root/scripts/real_user_ruby_rails_smoke.sh" | tee "$tmp_dir/rails-smoke.out"
-grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=3 spans=3 issues=2 environments=1$' "$tmp_dir/rails-smoke.out"
+grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=3 operations=3 issues=2 environments=1$' "$tmp_dir/rails-smoke.out"
 
 echo "ruby package checks passed"

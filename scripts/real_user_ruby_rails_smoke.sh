@@ -137,6 +137,9 @@ begin
   application.routes.draw do
     get "/tools/:id", to: lambda { |environment|
       parameters = environment.fetch("action_dispatch.request.path_parameters")
+      ActiveSupport::Notifications.instrument("sql.active_record", sql: "SELECT private_accounts #{parameters.fetch(:id)}") { nil }
+      ActiveSupport::Notifications.instrument("cache_read.active_support", key: "opaque-cache", hit: true) { nil }
+      ActiveSupport::Notifications.instrument("render_template.action_view", identifier: "/srv/application/app/views/tools/show.html.erb") { nil }
       body = JSON.generate("tool" => parameters.fetch(:id))
       [200, { "content-type" => "application/json", "content-length" => body.bytesize.to_s }, [body]]
     }
@@ -183,14 +186,16 @@ begin
   client = LogBrew::Rails.client
   abort "Rails client missing" if client.nil?
   preview_events = JSON.parse(client.preview_json).fetch("events")
-  environment_events = preview_events.select { |event| event.fetch("type") == "environment" }
   spans = preview_events.select { |event| event.fetch("type") == "span" }
+  request_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails" }
+  operation_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails.active_support" }
   issues = preview_events.select { |event| event.fetch("type") == "issue" }
-  abort "environment event count changed" unless environment_events.length == 1
-  abort "request span count changed" unless spans.length == 3
+  abort "environment event count changed" unless preview_events.count { |event| event.fetch("type") == "environment" } == 1
+  abort "request span count changed" unless request_spans.length == 3
+  abort "operation span count changed" unless operation_spans.length == 3
   abort "issue count changed" unless issues.length == 2
 
-  span = spans.fetch(0).fetch("attributes")
+  span = request_spans.fetch(0).fetch("attributes")
   abort "route template span changed: #{span.fetch("name").inspect}" unless span.fetch("name") == "GET /tools/:id(.:format)"
   abort "incoming trace changed" unless span.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736"
   abort "incoming parent changed" unless span.fetch("parentSpanId") == "00f067aa0ba902b7"
@@ -206,8 +211,17 @@ begin
   abort "route metadata changed" unless span_metadata.fetch("http.route") == "/tools/:id(.:format)"
   abort "service metadata changed" unless span_metadata.fetch("service") == "installed-rails-smoke"
   abort "environment metadata changed" unless span_metadata.fetch("environment") == "test"
+  abort "operation receipt changed" unless span_metadata.values_at("rails.operations.observed", "rails.operations.captured", "rails.operations.truncated") == [3, 3, false]
+  abort "operation trace changed" unless operation_spans.all? do |event|
+    attributes = event.fetch("attributes")
+    attributes.fetch("traceId") == span.fetch("traceId") && attributes.fetch("parentSpanId") == span.fetch("spanId")
+  end
+  operation_times = operation_spans.map { |event| Time.iso8601(event.fetch("timestamp")) }
+  abort "operation chronology changed" unless operation_times == operation_times.sort
+  abort "cache hit missing" unless operation_spans.any? { |event| event.dig("attributes", "metadata", "cache.hit") == true }
+  abort "relative template missing" unless operation_spans.any? { |event| event.dig("attributes", "metadata", "view.template") == "tools/show.html.erb" }
 
-  not_found_span = spans.find { |event| event.dig("attributes", "metadata", "http.status_code") == 404 }
+  not_found_span = request_spans.find { |event| event.dig("attributes", "metadata", "http.status_code") == 404 }
   abort "not-found span missing" if not_found_span.nil?
   abort "not-found span status changed" unless not_found_span.fetch("attributes").fetch("status") == "ok"
 
@@ -235,7 +249,7 @@ begin
   escaped_frames = escaped_issue.fetch("stackFrames")
   abort "escaped Rails frames changed" unless escaped_frames.length.between?(1, 32)
   abort "escaped Rails frame path changed" unless escaped_frames.fetch(0).fetch("filename") == "consumer.rb"
-  failed_span = spans.find { |event| event.fetch("attributes").fetch("status") == "error" }.fetch("attributes")
+  failed_span = request_spans.find { |event| event.fetch("attributes").fetch("status") == "error" }.fetch("attributes")
   escaped_metadata = escaped_issue.fetch("metadata")
   abort "escaped Rails trace correlation changed" unless escaped_metadata.fetch("traceId") == failed_span.fetch("traceId")
   abort "escaped Rails span correlation changed" unless escaped_metadata.fetch("spanId") == failed_span.fetch("spanId")
@@ -246,6 +260,7 @@ begin
   serialized = JSON.generate(preview_events)
   %w[
     opaque-record-id opaque-query opaque-auth installed-rails-key
+    private_accounts opaque-cache /srv/application
     opaque\ handled\ error\ detail opaque\ escaped\ error\ detail opaque-user-id
     opaque-failure-id opaque-failure-query opaque-failure-auth
   ].each do |forbidden|
@@ -259,10 +274,10 @@ begin
   abort "intake route changed" unless route == "/v1/events"
   abort "authorization changed" unless headers.fetch("authorization") == "Bearer installed-rails-key"
   delivered = JSON.parse(body).fetch("events")
-  abort "delivered event count changed" unless delivered.length == 6
+  abort "delivered event count changed" unless delivered.length == 9
   abort "pending events remain" unless client.pending_events.zero?
 
-  puts "installed Rails consumer ok requests=3 spans=3 issues=2 environments=1"
+  puts "installed Rails consumer ok requests=3 operations=3 issues=2 environments=1"
 ensure
   intake.close
 end
@@ -273,7 +288,7 @@ LOGBREW_RAILS_SMOKE_VERSION="$rails_version" \
 RUBYOPT=-W0 \
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
   "$ruby_bin" "$consumer_path" > "$tmp_dir/consumer.out"
-grep -qx 'installed Rails consumer ok requests=3 spans=3 issues=2 environments=1' "$tmp_dir/consumer.out"
+grep -qx 'installed Rails consumer ok requests=3 operations=3 issues=2 environments=1' "$tmp_dir/consumer.out"
 
-printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 spans=3 issues=2 environments=1\n' \
+printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 operations=3 issues=2 environments=1\n' \
   "$package_version" "$rails_version" "$gem_digest"
