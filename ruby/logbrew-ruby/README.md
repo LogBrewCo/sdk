@@ -23,7 +23,7 @@ needed:
 
 ```ruby
 # Gemfile
-gem "logbrew-sdk", "~> 0.1.7"
+gem "logbrew-sdk", "~> 0.1.8"
 ```
 
 ```bash
