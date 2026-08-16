@@ -7,6 +7,7 @@ const path = require("node:path");
 
 const PACKAGE_DIR = path.dirname(require.resolve("./package.json"));
 const DEFAULT_MANIFEST_NAME = "logbrew-release-artifacts.json";
+const HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts";
 const SUPPORTED_PLATFORMS = new Set(["android", "ios"]);
 const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
 
@@ -123,14 +124,8 @@ function requireUploadEndpoint(endpoint, allowHosted) {
   if (!allowHosted) {
     throw new Error("release artifact hosted upload requires explicit allowHostedUpload; use loopback endpoints for local proof");
   }
-  if (parsed.protocol !== "https:") {
-    throw new Error("hosted release artifact upload endpoints must use https");
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("hosted release artifact upload endpoints must not include embedded auth values");
-  }
-  if (parsed.search || parsed.hash) {
-    throw new Error("hosted release artifact upload endpoints must not include query strings or fragments");
+  if (endpoint !== HOSTED_UPLOAD_ENDPOINT) {
+    throw new Error(`hosted release artifact uploads must use ${HOSTED_UPLOAD_ENDPOINT}`);
   }
 }
 

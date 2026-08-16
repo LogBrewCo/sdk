@@ -26,7 +26,7 @@ class JavaPersistentDeliverySmokeTests(unittest.TestCase):
         self.assertIn('PosixFilePermissions.fromString("rwx------")', script)
         self.assertIn('PosixFilePermissions.fromString("rw-------")', script)
         self.assertIn('persistence privacy check failed', script)
-        self.assertNotIn('https://api.logbrew.com', script)
+        self.assertNotIn('https://api.logbrew.co', script)
 
 
 if __name__ == "__main__":

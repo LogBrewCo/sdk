@@ -129,7 +129,7 @@ test("Next release-artifact helper can dry-run hosted upload after the app hook"
         projectId: PROJECT_ID,
         root,
         upload: {
-          endpoint: "https://api.logbrew.com/api/release-artifacts",
+          endpoint: "https://api.logbrew.co/api/release-artifacts",
           allowHostedUpload: true,
           dryRun: true,
         },
@@ -156,7 +156,7 @@ test("Next release-artifact upload rejects a non-callable app production hook", 
         service: "checkout-next-web",
         projectId: PROJECT_ID,
         upload: {
-          endpoint: "https://api.logbrew.com/api/release-artifacts",
+          endpoint: "https://api.logbrew.co/api/release-artifacts",
           allowHostedUpload: true,
           dryRun: true,
         },

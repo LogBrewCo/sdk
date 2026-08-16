@@ -3,6 +3,7 @@
 const { spawnSync } = require("node:child_process");
 const net = require("node:net");
 
+const HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const UPLOAD_OPTION_NAMES = new Set([
   "allowHostedUpload",
@@ -116,14 +117,8 @@ function normalizeReleaseArtifactUploadOptions(upload, { integration, projectId 
   if (hosted && !allowHostedUpload) {
     throw new Error(`LogBrew ${integration} release-artifact hosted upload requires allowHostedUpload`);
   }
-  if (hosted && parsedEndpoint.protocol !== "https:") {
-    throw new Error(`LogBrew ${integration} hosted release-artifact upload endpoint must use https`);
-  }
-  if (hosted && (parsedEndpoint.username || parsedEndpoint.password)) {
-    throw new Error(`LogBrew ${integration} hosted release-artifact upload endpoint must not include embedded auth values`);
-  }
-  if (hosted && (parsedEndpoint.search || parsedEndpoint.hash)) {
-    throw new Error(`LogBrew ${integration} hosted release-artifact upload endpoint must not include query strings or fragments`);
+  if (hosted && endpoint !== HOSTED_UPLOAD_ENDPOINT) {
+    throw new Error(`LogBrew ${integration} hosted release-artifact uploads must use ${HOSTED_UPLOAD_ENDPOINT}`);
   }
   if (hosted && !projectId) {
     throw new Error(`LogBrew ${integration} release-artifact hosted upload requires projectId`);

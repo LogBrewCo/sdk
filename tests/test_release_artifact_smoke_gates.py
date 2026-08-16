@@ -158,7 +158,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn("withLogBrewMetroConfig", smoke)
         self.assertIn("getLogBrewExpoConfig", smoke)
         self.assertIn("metro-string.config.js", smoke)
-        self.assertIn("metro-mutating-string.config.js", smoke)
+        self.assertIn("LOGBREW_MUTATE_METRO_BUNDLE=1", smoke)
         self.assertIn("custom-dist/index.android.bundle", smoke)
         self.assertIn("string-returning custom serializer changed bundle code", smoke)
         self.assertIn("createReactNativeErrorEvent", smoke)

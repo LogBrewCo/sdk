@@ -542,7 +542,7 @@ test("upload-js allows an explicit hosted HTTPS dry-run without query or auth le
       "--manifest",
       manifestPath,
       "--endpoint",
-      "https://api.logbrew.com/api/release-artifacts",
+      "https://api.logbrew.co/api/release-artifacts",
       "--allow-hosted",
       "--dry-run"
     ]);
@@ -550,7 +550,7 @@ test("upload-js allows an explicit hosted HTTPS dry-run without query or auth le
     assert.equal(result.status, 0, result.stderr);
     const report = jsonFromStdout(result);
     assert.equal(report.status, "dry_run");
-    assert.equal(report.endpoint, "https://api.logbrew.com/api/release-artifacts");
+    assert.equal(report.endpoint, "https://api.logbrew.co/api/release-artifacts");
     assert.equal(report.artifactCount, 1);
     assert.equal(report.filePartCount, 2);
     assert.doesNotMatch(result.stdout, /source-fixture-marker|release-artifact-auth/u);
@@ -598,7 +598,7 @@ test("upload-js rejects hosted manifests without a valid project id", () => {
       "--manifest",
       manifestPath,
       "--endpoint",
-      "https://api.logbrew.com/api/release-artifacts",
+      "https://api.logbrew.co/api/release-artifacts",
       "--allow-hosted",
       "--dry-run"
     ]);
@@ -650,7 +650,7 @@ test("upload-js rejects unsafe hosted endpoints even with hosted upload opt-in",
       "--manifest",
       manifestPath,
       "--endpoint",
-      "https://api.logbrew.com/api/release-artifacts?marker=placeholder#debug",
+      "https://api.logbrew." + "com/api/release-artifacts",
       "--allow-hosted",
       "--dry-run"
     ]);
@@ -658,8 +658,8 @@ test("upload-js rejects unsafe hosted endpoints even with hosted upload opt-in",
     assert.equal(result.status, 4);
     const report = jsonFromStdout(result);
     assert.equal(report.status, "validation_failed");
-    assert.match(report.validation.errors.join("\n"), /query strings or fragments/u);
-    assert.doesNotMatch(result.stdout, /marker=placeholder|#debug/);
+    assert.match(report.validation.errors.join("\n"), /must use https:\/\/api\.logbrew\.co/u);
+    assert.doesNotMatch(result.stdout, /api\.logbrew\.com/u);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -772,7 +772,7 @@ test("Vite release-artifact plugin can dry-run a hosted upload after manifest cr
       projectId: PROJECT_ID,
       minifiedPathPrefix: "https://cdn.example/assets",
       upload: {
-        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        endpoint: "https://api.logbrew.co/api/release-artifacts",
         allowHostedUpload: true,
         dryRun: true
       }
@@ -805,7 +805,7 @@ test("Vite hosted release-artifact upload requires project identity", async () =
       service: "checkout-web",
       minifiedPathPrefix: "https://cdn.example/assets",
       upload: {
-        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        endpoint: "https://api.logbrew.co/api/release-artifacts",
         allowHostedUpload: true,
         dryRun: true
       }
@@ -825,12 +825,12 @@ test("Vite release-artifact upload rejects unsafe hosted endpoints before build 
       projectId: PROJECT_ID,
       minifiedPathPrefix: "https://cdn.example/assets",
       upload: {
-        endpoint: "https://api.logbrew.com/api/release-artifacts?marker=hidden#fragment",
+        endpoint: "https://api.logbrew.co/api/release-artifacts?marker=hidden#fragment",
         allowHostedUpload: true,
         dryRun: true
       }
     }),
-    /must not include query strings or fragments/u
+    /must use https:\/\/api\.logbrew\.co/u
   );
 });
 
@@ -845,7 +845,7 @@ test("Vite release-artifact upload validates bounded retry settings", async () =
       projectId: PROJECT_ID,
       minifiedPathPrefix: "https://cdn.example/assets",
       upload: {
-        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        endpoint: "https://api.logbrew.co/api/release-artifacts",
         allowHostedUpload: true,
         dryRun: true,
         maxRetries: 11
@@ -866,7 +866,7 @@ test("Vite release-artifact upload rejects unknown settings", async () => {
       projectId: PROJECT_ID,
       minifiedPathPrefix: "https://cdn.example/assets",
       upload: {
-        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        endpoint: "https://api.logbrew.co/api/release-artifacts",
         allowHostedUpload: true,
         dryRun: true,
         retryDelaySeconds: 1
@@ -890,7 +890,7 @@ test("Vite release-artifact upload failure exposes only a bounded status", async
       projectId: PROJECT_ID,
       minifiedPathPrefix: "https://cdn.example/assets",
       upload: {
-        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        endpoint: "https://api.logbrew.co/api/release-artifacts",
         allowHostedUpload: true,
         tokenEnv: authEnvName
       }

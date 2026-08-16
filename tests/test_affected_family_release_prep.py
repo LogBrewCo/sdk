@@ -32,7 +32,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.11"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.12"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.3"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.4"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
@@ -89,7 +89,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         unity = json_object("unity/logbrew-unity/package.json")
         self.assertEqual((unity["name"], unity["version"]), ("co.logbrew.unity", "0.2.2"))
 
-    def test_react_native_release_preserves_supported_core_range_and_updates_native_identity(self) -> None:
+    def test_react_native_release_requires_fixed_core_range_and_updates_native_identity(self) -> None:
         manifest = json_object("js/logbrew-react-native/package.json")
 
         self.assertEqual(
@@ -302,7 +302,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
         receipt_defaults = {
             "scripts/real_user_npm_public_registry_smoke.sh": (
-                "LOGBREW_NPM_SDK_VERSION:-0.1.10",
+                "LOGBREW_NPM_SDK_VERSION:-0.1.12",
                 "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
                 "LOGBREW_NPM_NODE_VERSION:-0.1.8",
                 "LOGBREW_NPM_NEXT_VERSION:-0.1.4",

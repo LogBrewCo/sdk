@@ -54,6 +54,21 @@ This public guide applies to the whole repository.
   unrelated packages unless they are in scope. Follow the public release docs
   and tear down only resources created by the check.
 
+## Continuous simplification gate
+
+- Every commit must reduce net maintained handwritten production and test LOC
+  in this repository. A zero or positive delta is not complete.
+- Freeze and record one reproducible measurement scope before editing. Use the
+  same command afterward and report the baseline, final count, and signed delta.
+- Offset necessary additions by removing more duplication, obsolete branches,
+  wrappers, helpers, compatibility scaffolding, or parallel implementations.
+  Prefer one canonical flow and fewer concepts.
+- Preserve required behavior, valuable tests, type safety, coverage,
+  compatibility, documentation, validation, security, observability, and error
+  handling.
+- Never manufacture a reduction through line packing, formatting, minification,
+  generated-code moves, or deletion of valuable tests or documentation.
+
 ## Code Review Rules
 
 - Flag framework code that duplicates a canonical core or shared runtime, and

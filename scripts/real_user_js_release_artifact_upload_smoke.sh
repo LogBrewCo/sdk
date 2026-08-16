@@ -158,6 +158,7 @@ if [[ ! -s "$port_file" ]]; then
 fi
 
 endpoint_base="http://127.0.0.1:$(cat "$port_file")"
+stale_hosted_endpoint="https://api.logbrew.""com/api/release-artifacts"
 export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_token"
 
 "$release_artifacts_cli" \
@@ -173,7 +174,7 @@ export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_token"
   upload-js \
   --build-dir "$dist_dir" \
   --manifest "$manifest" \
-  --endpoint "https://api.logbrew.com/api/release-artifacts" \
+  --endpoint "https://api.logbrew.co/api/release-artifacts" \
   --allow-hosted \
   --dry-run \
   > "$tmp_dir/upload-hosted-dry-run.json"
@@ -182,7 +183,7 @@ if "$release_artifacts_cli" \
   upload-js \
   --build-dir "$dist_dir" \
   --manifest "$manifest" \
-  --endpoint "https://api.logbrew.com/api/release-artifacts?marker=placeholder#fragment" \
+  --endpoint "$stale_hosted_endpoint" \
   --allow-hosted \
   --dry-run \
   > "$tmp_dir/upload-hosted-unsafe.json"; then
@@ -249,13 +250,13 @@ assert [attempt["httpStatus"] for attempt in success["attempts"]] == [503, 202]
 assert success["endpoint"].endswith("/retry-success")
 assert "ignored=query" not in json.dumps(success)
 assert hosted_dry_run["status"] == "dry_run"
-assert hosted_dry_run["endpoint"] == "https://api.logbrew.com/api/release-artifacts"
+assert hosted_dry_run["endpoint"] == "https://api.logbrew.co/api/release-artifacts"
 assert hosted_dry_run["artifactCount"] == 1
 assert hosted_dry_run["filePartCount"] == 2
 assert manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"
 assert hosted_unsafe["status"] == "validation_failed"
-assert "query strings or fragments" in json.dumps(hosted_unsafe)
-assert "marker=placeholder" not in json.dumps(hosted_unsafe)
+assert "must use https://api.logbrew.co/api/release-artifacts" in json.dumps(hosted_unsafe)
+assert "api.logbrew.com" not in json.dumps(hosted_unsafe)
 assert auth_failure["status"] == "auth_failed"
 assert len(auth_failure["attempts"]) == 1
 assert validation_failure["status"] == "validation_failed"

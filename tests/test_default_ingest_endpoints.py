@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_ENDPOINT = "https://api.logbrew.co/v1/events"
-STALE_ENDPOINT = "https://api.logbrew." + "com/v1/events"
+STALE_ORIGIN = "https://api.logbrew." + "com"
 DEFAULT_SOURCE_FILES = (
     "c/logbrew-c/include/logbrew.h",
     "cpp/logbrew-cpp/include/logbrew.hpp",
@@ -35,11 +35,11 @@ class DefaultIngestEndpointTests(unittest.TestCase):
             with self.subTest(path=relative_path):
                 content = (ROOT / relative_path).read_text(encoding="utf-8")
                 self.assertIn(EXPECTED_ENDPOINT, content)
-                self.assertNotIn(STALE_ENDPOINT, content)
+                self.assertNotIn(STALE_ORIGIN, content)
 
     def test_tracked_public_files_do_not_reference_the_stale_endpoint(self) -> None:
         result = subprocess.run(
-            ["git", "grep", "--fixed-strings", "--line-number", STALE_ENDPOINT, "--"],
+            ["git", "grep", "--fixed-strings", "--line-number", STALE_ORIGIN, "--"],
             cwd=ROOT,
             capture_output=True,
             check=False,

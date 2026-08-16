@@ -39,7 +39,7 @@ export default {
       projectId: "550e8400-e29b-41d4-a716-446655440000",
       minifiedPathPrefix: "https://cdn.example/assets",
       upload: {
-        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        endpoint: "https://api.logbrew.co/api/release-artifacts",
         allowHostedUpload: true,
         maxRetries: 2
       }
@@ -95,7 +95,7 @@ export LOGBREW_RELEASE_ARTIFACT_AUTH="<release-artifact-auth>"
 npx logbrew-release-artifacts upload-js \
   --build-dir dist \
   --manifest logbrew-release-artifacts.json \
-  --endpoint https://api.logbrew.com/api/release-artifacts \
+  --endpoint https://api.logbrew.co/api/release-artifacts \
   --token-env LOGBREW_RELEASE_ARTIFACT_AUTH \
   --allow-hosted
 ```
