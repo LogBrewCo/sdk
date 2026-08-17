@@ -33,7 +33,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
             "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.13"),
-            "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.4"),
+            "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.5"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.4"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.8"),
@@ -41,7 +41,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.5"),
             "js/logbrew-react/package.json": ("@logbrew/react", "0.1.1"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.16"),
-            "js/logbrew-svelte/package.json": ("@logbrew/svelte", "0.1.2"),
+            "js/logbrew-svelte/package.json": ("@logbrew/svelte", "0.1.3"),
         }
         for relative_path, expected in npm_versions.items():
             manifest = json_object(relative_path)

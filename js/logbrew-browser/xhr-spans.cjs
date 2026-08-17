@@ -87,7 +87,7 @@ function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
   const wrappedOpen = function logbrewXhrOpen(method, url, ...args) {
     states.set(this, {
       method: xhrMethod(method),
-      url: xhrUrl(url, browserWindow)
+      url: String(url)
     });
     return Reflect.apply(originalOpen, this, [method, url, ...args]);
   };
@@ -96,7 +96,7 @@ function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
   const wrappedSend = function logbrewXhrSend(...args) {
     const state = states.get(this) ?? {
       method: "GET",
-      url: xhrUrl("", browserWindow)
+      url: ""
     };
     const startMs = nowMs(options);
     const parentTraceContext = resolveTraceContext(context, options);
@@ -252,14 +252,6 @@ function xhrMethod(method) {
   return typeof method === "string" && method.trim() !== ""
     ? method.trim().toUpperCase()
     : "GET";
-}
-
-function xhrUrl(url, browserWindow) {
-  try {
-    return new URL(String(url), browserWindow?.location?.href ?? "https://logbrew.example").toString();
-  } catch {
-    return String(url);
-  }
 }
 
 function xhrStatus(xhr) {

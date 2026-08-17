@@ -18,7 +18,7 @@ function createLogBrewBrowserFetch(context, options = {}) {
   validateTargets(options.captureTargets, "captureTargets", { optional: true });
 
   return async function logbrewBrowserFetch(input, init) {
-    const request = fetchRequest(input, init, context.browserWindow);
+    const request = fetchRequest(input, init);
     const shouldCapture = shouldCaptureRequest(request.url, options.captureTargets);
     const startMs = nowMs(options);
     const parentTraceContext = resolveTraceContext(context, options);
@@ -213,12 +213,12 @@ function optionsWithTraceContext(options, traceContext) {
   };
 }
 
-function fetchRequest(input, init, browserWindow) {
+function fetchRequest(input, init) {
   return {
     init,
     input,
     method: fetchMethod(input, init),
-    url: fetchUrl(input, browserWindow)
+    url: fetchUrl(input)
   };
 }
 
@@ -229,17 +229,17 @@ function fetchMethod(input, init) {
     : "GET";
 }
 
-function fetchUrl(input, browserWindow) {
+function fetchUrl(input) {
   if (typeof input === "string") {
-    return absolutizeUrl(input, browserWindow);
+    return input;
   }
   if (input instanceof URL) {
     return input.toString();
   }
   if (typeof input?.url === "string") {
-    return absolutizeUrl(input.url, browserWindow);
+    return input.url;
   }
-  return absolutizeUrl(String(input), browserWindow);
+  return String(input);
 }
 
 function fetchInitWithTraceparent(input, init, traceContext) {
@@ -389,14 +389,6 @@ function browserPath(browserWindow, { includeHash = false, includeQueryString = 
     return `${url.pathname || "/"}${includeQueryString ? url.search : ""}${includeHash ? url.hash : ""}`;
   } catch {
     return "/";
-  }
-}
-
-function absolutizeUrl(url, browserWindow) {
-  try {
-    return new URL(url, browserWindow?.location?.href ?? "https://logbrew.example").toString();
-  } catch {
-    return String(url);
   }
 }
 

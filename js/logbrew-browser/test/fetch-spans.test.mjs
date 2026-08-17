@@ -70,10 +70,10 @@ test("installed browser fetch wrapper emits a sanitized child span and scoped tr
       nowMs: createNowMs([1000, 1123.456]),
       randomValues: sequenceBytes([0x88, 0x55]),
       resourcePathTemplate: "/api/orders/:id",
-      tracePropagationTargets: [/^https:\/\/api\.example\.test\/api\//u]
+      tracePropagationTargets: [/^\/api\//u]
     });
 
-    const response = await tracedFetch("https://api.example.test/api/orders/123?email=dev@example.test#fragment", {
+    const response = await tracedFetch("/api/orders/123?email=dev@example.test#fragment", {
       body: "private body",
       headers: {
         Accept: "application/json"

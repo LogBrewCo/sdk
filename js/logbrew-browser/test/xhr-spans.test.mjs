@@ -67,7 +67,7 @@ test("installed browser XHR instrumentation emits a sanitized child span and sco
       nowMs: createNowMs([1000, 1088.5]),
       randomValues: sequenceBytes([0x77, 0x55]),
       resourcePathTemplate: "/api/orders/:id",
-      tracePropagationTargets: [/^https:\/\/api\.example\.test\/api\//u],
+      tracePropagationTargets: [/^\/api\//u],
       XMLHttpRequest: FakeXMLHttpRequest
     });
 
@@ -75,7 +75,7 @@ test("installed browser XHR instrumentation emits a sanitized child span and sco
     assert.notEqual(FakeXMLHttpRequest.prototype.send, originalSend);
 
     const xhr = new browserWindow.XMLHttpRequest();
-    xhr.open("POST", "https://api.example.test/api/orders/123?email=dev@example.test#fragment");
+    xhr.open("POST", "/api/orders/123?email=dev@example.test#fragment");
     xhr.setRequestHeader("Accept", "application/json");
     xhr.send("private body");
     xhr.status = 503;
