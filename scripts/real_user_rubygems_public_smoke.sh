@@ -4,7 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rubygems-public.XXXXXX")"
 
-version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.9}}"
+version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.10}}"
 source_url="https://rubygems.org"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
@@ -204,11 +204,8 @@ payload = JSON.parse(File.read(ARGV.fetch(0)))
 raise "expected flush status 202" unless payload.fetch("flush_status") == 202
 raise "expected one flush attempt" unless payload.fetch("flush_attempts") == 1
 raise "expected one recorded body" unless payload.fetch("recorded_bodies") == 1
-raise "expected logger proof" unless payload.fetch("logger") == true
-raise "expected rack middleware proof" unless payload.fetch("rack_middleware") == true
-raise "expected rails subscriber proof" unless payload.fetch("rails_subscriber") == true
-raise "expected traceparent proof" unless payload.fetch("traceparent") == true
-raise "expected trace scope proof" unless payload.fetch("trace_scope") == true
+surface = payload.values_at("logger", "rack_middleware", "rails_subscriber", "traceparent", "trace_scope")
+raise "expected public surface proof" unless surface == [true, true, true, true, true]
 raise "expected operation tracing proof" unless payload.fetch("operation_tracing") == "ok"
 raise "expected support ticket draft proof" unless payload.fetch("support_ticket_draft") == "4bf92f3577b34da6a3ce929d0e0e4736"
 RUBY
