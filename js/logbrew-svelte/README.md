@@ -54,11 +54,14 @@ import { installLogBrewBrowser } from "@logbrew/browser";
 
 export const logbrew = installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY",
-  service: "storefront-browser"
+  service: "storefront-browser",
+  environment: "production",
+  release: "web@1.4.0"
 });
 ```
 
 Browser and server keys are separate. Never place the server key in a public Svelte bundle.
+Keep the environment and release identical on both surfaces; use stable service names to distinguish browser and server work without breaking deployment filtering.
 
 ## Component Context
 

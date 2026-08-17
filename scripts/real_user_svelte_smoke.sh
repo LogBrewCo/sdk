@@ -51,6 +51,8 @@ grep -q 'setLogBrewContext' "$tmp_dir/svelte-readme.md"
 grep -q 'useLogBrew' "$tmp_dir/svelte-readme.md"
 grep -q 'captureSvelteError' "$tmp_dir/svelte-readme.md"
 grep -q 'createLogBrewSvelteKitHooks' "$tmp_dir/svelte-readme.md"
+test "$(grep -c 'environment: "production"' "$tmp_dir/svelte-readme.md")" = "2"
+test "$(grep -c 'release: "web@1.4.0"' "$tmp_dir/svelte-readme.md")" = "2"
 
 app_dir="$tmp_dir/svelte-smoke-app"
 mkdir -p "$app_dir"
@@ -77,9 +79,9 @@ grep -q '"@logbrew/svelte"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/browser @logbrew/sdk @logbrew/svelte svelte >/dev/null
 npm explain @logbrew/svelte > "$tmp_dir/npm-explain-svelte.txt"
-grep -q '@logbrew/svelte@0.1.1' "$tmp_dir/npm-explain-svelte.txt"
+grep -q '@logbrew/svelte@0.1.2' "$tmp_dir/npm-explain-svelte.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/svelte@0.1.1' "$tmp_dir/npm-list-depth0.txt"
+grep -q '@logbrew/svelte@0.1.2' "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'

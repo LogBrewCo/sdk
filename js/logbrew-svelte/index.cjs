@@ -22,7 +22,7 @@ function createLogBrewSvelteClient({
   serverApiKey = readEnv("LOGBREW_SERVER_API_KEY"),
   context,
   sdkName = "logbrew-svelte",
-  sdkVersion = "0.1.1",
+  sdkVersion = "0.1.2",
   maxRetries = 2
 } = {}) {
   const authKey = clientKey ?? serverApiKey ?? apiKey;
@@ -141,10 +141,10 @@ async function captureSvelteError(error, context, options = {}) {
       : { ...event.attributes, breadcrumbs: options.breadcrumbs };
     context.client.issue(event.id, event.timestamp, attributes);
     const response = await context.client.flush(context.transport);
-    await notifyFlush(options, response, { context });
+    await notify(options, "onFlush", response, { context });
     return response;
   } catch (captureError) {
-    await notifyFailure(options, captureError, { context });
+    await notify(options, "onCaptureError", captureError, { context });
     throw captureError;
   }
 }
@@ -208,13 +208,8 @@ function isLogBrewSvelteContext(value) {
   return Boolean(value?.client && value?.transport && typeof value.previewJson === "function");
 }
 
-async function notifyFlush(options, response, context) {
-  return typeof options.onFlush === "function" ? options.onFlush(response, context) : undefined;
-}
-
-async function notifyFailure(options, error, context) {
-  return typeof options.onCaptureError === "function"
-    ? options.onCaptureError(error, context) : undefined;
+async function notify(options, name, value, context) {
+  return typeof options[name] === "function" ? options[name](value, context) : undefined;
 }
 
 function defaultViewEventId(name, path) {
@@ -245,7 +240,7 @@ async function captureSvelteKitRequest(context, event, status, trace, startedAt,
       await context.client.flush(context.transport);
     }
   } catch (error) {
-    await notifyFailure(options, error, { context });
+    await notify(options, "onCaptureError", error, { context });
     if (options.raiseCaptureErrors === true) {
       throw error;
     }
