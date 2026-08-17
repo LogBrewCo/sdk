@@ -1610,6 +1610,7 @@ test("createIssueAttributesFromError bounds and sanitizes structured stack frame
   const error = new Error("Bounded stack");
   error.stack = [
     "Error: Bounded stack",
+    "    at async /private/tmp/example/node_modules/framework/handle.js:140:21",
     ...Array.from(
       { length: 40 },
       (_, index) => `    at frame${index} (C:\\workspace\\app\\src\\frame-${index}.js?debug=value#fragment:${index + 1}:2)`
@@ -1620,22 +1621,21 @@ test("createIssueAttributesFromError bounds and sanitizes structured stack frame
 
   assert.equal(attributes.stackFrames.length, 32);
   assert.deepEqual(attributes.stackFrames[0], {
-    filename: "frame-0.js",
-    line: 1,
-    column: 2,
-    function: "frame0"
+    filename: "handle.js",
+    line: 140,
+    column: 21
   });
   assert.deepEqual(attributes.stackFrames[31], {
-    filename: "frame-31.js",
-    line: 32,
+    filename: "frame-30.js",
+    line: 31,
     column: 2,
-    function: "frame31"
+    function: "frame30"
   });
   assert.equal(attributes.exceptionChain.entries[0].stackFrames.length, 32);
   assert.equal(attributes.exceptionChain.entries[0].stackFramesState, "truncated");
   assert.deepEqual(attributes.exceptionChain.entries[0].stackFrames, attributes.stackFrames);
-  assert.equal(attributes.metadata.errorFrameFile, "frame-0.js");
-  assert.doesNotMatch(JSON.stringify(attributes), /C:\\workspace|debug=value|fragment|frame-32/u);
+  assert.equal(attributes.metadata.errorFrameFile, "handle.js");
+  assert.doesNotMatch(JSON.stringify(attributes), /C:\\workspace|\/private\/tmp|debug=value|fragment|frame-31/u);
 });
 
 test("createIssueAttributesFromError keeps legacy source labels separate from mechanism identity", () => {

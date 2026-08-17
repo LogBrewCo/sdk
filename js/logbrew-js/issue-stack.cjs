@@ -4,7 +4,7 @@ const MAX_ISSUE_STACK_FRAMES = 32;
 const MAX_ISSUE_STACK_FUNCTION_LENGTH = 256;
 const MAX_ISSUE_STACK_MODULE_LENGTH = 512;
 const SAFE_DEBUG_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-const LOCAL_ABSOLUTE_PATH_PATTERN = /^(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
+const LOCAL_ABSOLUTE_PATH_PATTERN = /(?:^|\s)(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
 
 function buildIssueStackHelpers({ SdkError }) {
   function javascriptStackEvidence(stack, debugIdMap) {
@@ -25,10 +25,6 @@ function buildIssueStackHelpers({ SdkError }) {
       }
     }
     return { frames, truncated };
-  }
-
-  function javascriptStackFrames(stack, debugIdMap) {
-    return javascriptStackEvidence(stack, debugIdMap).frames;
   }
 
   function validateIssueStackFrames(stackFrames) {
@@ -90,7 +86,7 @@ function buildIssueStackHelpers({ SdkError }) {
     });
   }
 
-  return { javascriptStackEvidence, javascriptStackFrames, validateIssueStackFrames };
+  return { javascriptStackEvidence, validateIssueStackFrames };
 }
 
 function parseJavaScriptStackFrame(rawLine) {
