@@ -86,35 +86,12 @@ module LogBrew
     end
 
     def request(request, body = nil, &block)
-      prepared = HttpClientTracing.prepare(
+      HttpClientTracing.capture_net_http(
+        @http,
+        request,
         client: @client,
-        source: "net_http",
         on_capture_error: @on_capture_error
-      ) do
-        [request.method, address, HttpClientTracing::NetHttpHeaderSnapshot.new(request)]
-      end
-      return @http.request(request, body, &block) unless prepared
-
-      operation, header = prepared
-      begin
-        header.inject(operation.traceparent)
-      rescue StandardError => error
-        operation.capture_error(error)
-        HttpClientTracing.reset_header(header, operation)
-        return @http.request(request, body, &block)
-      end
-
-      response = nil
-      begin
-        response = operation.around { @http.request(request, body, &block) }
-      rescue StandardError => error
-        operation.finish(error: error)
-        raise
-      ensure
-        HttpClientTracing.reset_header(header, operation)
-      end
-      operation.finish(status_code: HttpClientTracing.read_status(response, :code, operation))
-      response
+      ) { @http.request(request, body, &block) }
     end
 
     def start(*arguments)
@@ -185,6 +162,34 @@ module LogBrew
       return http if http.is_a?(NetHttpTracingClient)
 
       NetHttpTracingClient.new(http, client: client, on_capture_error: on_capture_error)
+    end
+
+    def capture_net_http(http, request, client:, on_capture_error: nil)
+      prepared = prepare(client: client, source: "net_http", on_capture_error: on_capture_error) do
+        [request.method, http.address, NetHttpHeaderSnapshot.new(request)]
+      end
+      return yield unless prepared
+
+      operation, header = prepared
+      begin
+        header.inject(operation.traceparent)
+      rescue StandardError => error
+        operation.capture_error(error)
+        reset_header(header, operation)
+        return yield
+      end
+
+      response = nil
+      begin
+        response = operation.around { yield }
+      rescue StandardError => error
+        operation.finish(error: error)
+        raise
+      ensure
+        reset_header(header, operation)
+      end
+      operation.finish(status_code: read_status(response, :code, operation))
+      response
     end
 
     def prepare(client:, source:, on_capture_error: nil)

@@ -16,6 +16,32 @@ remove_tmp_dir() {
 
 trap remove_tmp_dir EXIT
 
+package_paths=(
+  README.md lib/logbrew.rb
+  lib/logbrew/{product_timeline,traceparent,trace,span_events,operation_tracing,support_ticket,issue_diagnostics}.rb
+  lib/logbrew/{telemetry,telemetry_context,telemetry_context_value,telemetry_resource}.rb
+  examples/{readme_example,real_user_smoke,first_useful_telemetry,issue_diagnostics,http_trace_correlation}.rb
+  examples/Makefile
+)
+readme_markers=(
+  'gem install logbrew-sdk' LOGBREW_API_KEY preview_json 'First Useful Service Telemetry'
+  LogBrew::Traceparent 'W3C Trace Context' client.metric Metric LogBrew::ProductTimeline
+  'Product And Network Timelines' 'captures `Net::HTTP` automatically' LogBrew::HttpTransport
+  Net::HTTP LogBrew::Logger LogBrew::Trace.current 'HTTP Request Trace Correlation'
+  LogBrew::RackMiddleware 'Rack And Rails Middleware' LogBrew::OperationTracing
+  'Support Ticket Draft Diagnostics' LogBrew::SupportTicketDraft.create 'support-ticket routes'
+  'Typed Issue Diagnostics' LogBrew::IssueDiagnostics.from_exception 'Shared Telemetry Context'
+  LogBrew::TelemetryContext LogBrew::Telemetry.with_context 'capture_runtime_context: false'
+  'Dependency Operation Spans' exceptionEscaped LogBrew::RailsErrorSubscriber
+  'Rails Error Subscriber' Rails.error.subscribe 'copyable snippets'
+)
+
+check_package_tree() {
+  local root="$1" path marker
+  for path in "${package_paths[@]}"; do test -f "$root/$path"; done
+  for marker in "${readme_markers[@]}"; do grep -Fq "$marker" "$root/README.md"; done
+}
+
 gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
 (cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null)
 test -f "$gem_path"
@@ -28,55 +54,7 @@ grep -q '^required_ruby_version: !ruby/object:Gem::Requirement$' "$tmp_dir/spec.
 gem unpack "$gem_path" --target "$tmp_dir/unpacked" >/dev/null
 unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-${package_version}"
 test -f "$unpacked_dir/logbrew-sdk.gemspec" || true
-test -f "$unpacked_dir/lib/logbrew.rb"
-test -f "$unpacked_dir/lib/logbrew/product_timeline.rb"
-test -f "$unpacked_dir/lib/logbrew/traceparent.rb"
-test -f "$unpacked_dir/lib/logbrew/trace.rb"
-test -f "$unpacked_dir/lib/logbrew/span_events.rb"
-test -f "$unpacked_dir/lib/logbrew/operation_tracing.rb"
-test -f "$unpacked_dir/lib/logbrew/issue_diagnostics.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry_context.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry_context_value.rb"
-test -f "$unpacked_dir/lib/logbrew/telemetry_resource.rb"
-test -f "$unpacked_dir/README.md"
-test -f "$unpacked_dir/examples/readme_example.rb"
-test -f "$unpacked_dir/examples/real_user_smoke.rb"
-test -f "$unpacked_dir/examples/first_useful_telemetry.rb"
-test -f "$unpacked_dir/examples/issue_diagnostics.rb"
-test -f "$unpacked_dir/examples/http_trace_correlation.rb"
-test -f "$unpacked_dir/examples/Makefile"
-grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
-grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
-grep -q 'preview_json' "$unpacked_dir/README.md"
-grep -q 'First Useful Service Telemetry' "$unpacked_dir/README.md"
-grep -q 'LogBrew::Traceparent' "$unpacked_dir/README.md"
-grep -q 'W3C Trace Context' "$unpacked_dir/README.md"
-grep -q 'client.metric' "$unpacked_dir/README.md"
-grep -q 'Metric' "$unpacked_dir/README.md"
-grep -q 'LogBrew::ProductTimeline' "$unpacked_dir/README.md"
-grep -q 'Product And Network Timelines' "$unpacked_dir/README.md"
-grep -q 'do not patch `Net::HTTP`' "$unpacked_dir/README.md"
-grep -q 'LogBrew::HttpTransport' "$unpacked_dir/README.md"
-grep -q 'Net::HTTP' "$unpacked_dir/README.md"
-grep -q 'LogBrew::Logger' "$unpacked_dir/README.md"
-grep -q 'LogBrew::Trace.current' "$unpacked_dir/README.md"
-grep -q 'HTTP Request Trace Correlation' "$unpacked_dir/README.md"
-grep -q 'LogBrew::RackMiddleware' "$unpacked_dir/README.md"
-grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
-grep -q 'LogBrew::OperationTracing' "$unpacked_dir/README.md"
-grep -q 'Typed Issue Diagnostics' "$unpacked_dir/README.md"
-grep -q 'LogBrew::IssueDiagnostics.from_exception' "$unpacked_dir/README.md"
-grep -q 'Shared Telemetry Context' "$unpacked_dir/README.md"
-grep -q 'LogBrew::TelemetryContext' "$unpacked_dir/README.md"
-grep -q 'LogBrew::Telemetry.with_context' "$unpacked_dir/README.md"
-grep -q 'capture_runtime_context: false' "$unpacked_dir/README.md"
-grep -q 'Dependency Operation Spans' "$unpacked_dir/README.md"
-grep -q 'exceptionEscaped' "$unpacked_dir/README.md"
-grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
-grep -q 'Rails Error Subscriber' "$unpacked_dir/README.md"
-grep -q 'Rails.error.subscribe' "$unpacked_dir/README.md"
-grep -q 'copyable snippets' "$unpacked_dir/README.md"
+check_package_tree "$unpacked_dir"
 
 make -C "$unpacked_dir/examples" > "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/unpacked-examples-help.txt"
@@ -128,51 +106,7 @@ test "$(grep -c '^true$' "$tmp_dir/installed-issue-diagnostics.out")" -eq 2
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::TelemetryContext.respond_to?(:create)); puts(LogBrew::TelemetryResource.respond_to?(:create)); puts(LogBrew::Telemetry.respond_to?(:with_context))' > "$tmp_dir/installed-telemetry-context.out"
 test "$(grep -c '^true$' "$tmp_dir/installed-telemetry-context.out")" -eq 3
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
-test -f "$gem_dir/README.md"
-test -f "$gem_dir/lib/logbrew/product_timeline.rb"
-test -f "$gem_dir/lib/logbrew/traceparent.rb"
-test -f "$gem_dir/lib/logbrew/trace.rb"
-test -f "$gem_dir/lib/logbrew/span_events.rb"
-test -f "$gem_dir/lib/logbrew/operation_tracing.rb"
-test -f "$gem_dir/lib/logbrew/support_ticket.rb"
-test -f "$gem_dir/lib/logbrew/issue_diagnostics.rb"
-test -f "$gem_dir/lib/logbrew/telemetry.rb"
-test -f "$gem_dir/lib/logbrew/telemetry_context.rb"
-test -f "$gem_dir/lib/logbrew/telemetry_context_value.rb"
-test -f "$gem_dir/lib/logbrew/telemetry_resource.rb"
-test -f "$gem_dir/examples/readme_example.rb"
-test -f "$gem_dir/examples/real_user_smoke.rb"
-test -f "$gem_dir/examples/first_useful_telemetry.rb"
-test -f "$gem_dir/examples/issue_diagnostics.rb"
-test -f "$gem_dir/examples/http_trace_correlation.rb"
-test -f "$gem_dir/examples/Makefile"
-grep -q 'First Useful Service Telemetry' "$gem_dir/README.md"
-grep -q 'LogBrew::Traceparent' "$gem_dir/README.md"
-grep -q 'W3C Trace Context' "$gem_dir/README.md"
-grep -q 'LogBrew::RackMiddleware' "$gem_dir/README.md"
-grep -q 'LogBrew::Trace.current' "$gem_dir/README.md"
-grep -q 'HTTP Request Trace Correlation' "$gem_dir/README.md"
-grep -q 'client.metric' "$gem_dir/README.md"
-grep -q 'Metric' "$gem_dir/README.md"
-grep -q 'LogBrew::ProductTimeline' "$gem_dir/README.md"
-grep -q 'Product And Network Timelines' "$gem_dir/README.md"
-grep -q 'do not patch `Net::HTTP`' "$gem_dir/README.md"
-grep -q 'Rack And Rails Middleware' "$gem_dir/README.md"
-grep -q 'LogBrew::OperationTracing' "$gem_dir/README.md"
-grep -q 'Support Ticket Draft Diagnostics' "$gem_dir/README.md"
-grep -q 'LogBrew::SupportTicketDraft.create' "$gem_dir/README.md"
-grep -q 'Typed Issue Diagnostics' "$gem_dir/README.md"
-grep -q 'LogBrew::IssueDiagnostics.from_exception' "$gem_dir/README.md"
-grep -q 'Shared Telemetry Context' "$gem_dir/README.md"
-grep -q 'LogBrew::TelemetryContext' "$gem_dir/README.md"
-grep -q 'LogBrew::Telemetry.with_context' "$gem_dir/README.md"
-grep -q 'capture_runtime_context: false' "$gem_dir/README.md"
-grep -q 'support-ticket routes' "$gem_dir/README.md"
-grep -q 'Dependency Operation Spans' "$gem_dir/README.md"
-grep -q 'exceptionEscaped' "$gem_dir/README.md"
-grep -q 'LogBrew::RailsErrorSubscriber' "$gem_dir/README.md"
-grep -q 'Rails Error Subscriber' "$gem_dir/README.md"
-grep -q 'Rails.error.subscribe' "$gem_dir/README.md"
+check_package_tree "$gem_dir"
 
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/readme_example.rb" > "$tmp_dir/installed-readme.stdout.json" 2> "$tmp_dir/installed-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null

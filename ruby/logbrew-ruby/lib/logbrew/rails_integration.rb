@@ -398,6 +398,30 @@ module LogBrew
       end
     end
 
+    # Adds bounded child spans to Net::HTTP calls made inside an active Rails trace.
+    module OutboundHttp
+      module Request
+        def request(request, body = nil, &block)
+          runtime = LogBrew::Rails.runtime
+          client = LogBrew::Trace.current && runtime&.client
+          return super unless client
+
+          LogBrew::HttpClientTracing.capture_net_http(
+            self,
+            request,
+            client: client,
+            on_capture_error: ->(error) { runtime.report_error("outbound_http_capture", error) }
+          ) { super(request, body, &block) }
+        end
+      end
+
+      module_function
+
+      def install
+        Net::HTTP.prepend(Request) unless Net::HTTP.ancestors.include?(Request)
+      end
+    end
+
     # One privacy-bounded producer or worker operation for ActiveJob.
     class ActiveJobOperation
       attr_reader :context

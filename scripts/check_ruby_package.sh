@@ -159,6 +159,6 @@ bash "$repo_root/scripts/real_user_ruby_sidekiq_smoke.sh" | tee "$tmp_dir/sideki
 grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:[0-9a-f]{64} requests=1 spans=5 issues=1$' "$tmp_dir/sidekiq-smoke.out"
 
 bash "$repo_root/scripts/real_user_ruby_rails_smoke.sh" | tee "$tmp_dir/rails-smoke.out"
-grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=3 operations=3 jobs=4 issues=3 environments=1$' "$tmp_dir/rails-smoke.out"
+grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1$' "$tmp_dir/rails-smoke.out"
 
 echo "ruby package checks passed"
