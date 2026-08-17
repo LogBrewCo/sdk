@@ -1,30 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
-tmp_dir="$(mktemp -d)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
+ruby_smoke_create_tmp_dir
 gem_home="$tmp_dir/gems"
 stdout_file="$tmp_dir/proof.stdout.json"
 stderr_file="$tmp_dir/proof.stderr"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT
-
-package_version="$(
-  cd "$package_dir"
-  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "invalid gemspec"; print spec.version'
-)"
-gem_file="$tmp_dir/logbrew-sdk-${package_version}.gem"
-
-(
-  cd "$package_dir"
-  gem build logbrew-sdk.gemspec --strict --output "$gem_file" >/dev/null
-)
-gem_digest="$(shasum -a 256 "$gem_file" | awk '{print $1}')"
-gem install --local --install-dir "$gem_home" --no-document "$gem_file" >/dev/null
+ruby_smoke_prepare_package
+ruby_smoke_install_local "$gem_home"
 
 cat > "$tmp_dir/proof.rb" <<'RUBY'
 # frozen_string_literal: true
@@ -385,7 +368,7 @@ proof_counts="$(ruby -rjson -e '
 read -r proof_requests proof_accepted_events <<< "$proof_counts"
 
 test ! -s "$stderr_file"
-if grep -Eqi 'installed-proof-api-key|Bearer|authorization|private|/Users/|127\.0\.0\.1|localhost|http://' "$stdout_file"; then
+if grep -Eqi 'installed-proof-api-key|Bearer|authorization|private|/(home|Users)/[^[:space:]]+|127\.0\.0\.1|localhost|http://' "$stdout_file"; then
   echo "automatic delivery proof output leaked sensitive data" >&2
   exit 1
 fi

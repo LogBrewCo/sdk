@@ -1,39 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
-tmp_dir="$(mktemp -d)"
-ruby_bin="${LOGBREW_RUBY_BIN:-}"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-
-trap cleanup EXIT
-
-if [[ -z "$ruby_bin" ]]; then
-  if [[ -x /opt/homebrew/opt/ruby/bin/ruby ]]; then
-    ruby_bin=/opt/homebrew/opt/ruby/bin/ruby
-  else
-    ruby_bin="$(command -v ruby)"
-  fi
-fi
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
+ruby_smoke_create_tmp_dir
+ruby_smoke_prepare_package homebrew
 
 "$ruby_bin" -e 'require "rubygems"; abort "Ruby 3.2 or newer is required for the current Sidekiq smoke" if Gem::Version.new(RUBY_VERSION) < Gem::Version.new("3.2")' >/dev/null
 
-package_version="$(
-  cd "$package_dir"
-  "$ruby_bin" -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "invalid gemspec"; print spec.version'
-)"
-gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
-(cd "$package_dir" && "$ruby_bin" -S gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null)
-gem_digest="$(shasum -a 256 "$gem_path" | awk '{print $1}')"
-test -n "$gem_digest"
-
 base_home="$tmp_dir/base-gems"
-mkdir -p "$base_home"
-GEM_HOME="$base_home" GEM_PATH="$base_home" "$ruby_bin" -S gem install --local --install-dir "$base_home" --no-document "$gem_path" >/dev/null
+ruby_smoke_install_local "$base_home"
 GEM_HOME="$base_home" GEM_PATH="$base_home" "$ruby_bin" -e '
   require "logbrew"
   require "logbrew/sidekiq"
@@ -47,7 +22,7 @@ test ! -s "$tmp_dir/base-consumer.out"
 integration_home="$tmp_dir/integration-gems"
 mkdir -p "$integration_home"
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" "$ruby_bin" -S gem install --no-document --install-dir "$integration_home" sidekiq -v 8.1.6 >/dev/null
-GEM_HOME="$integration_home" GEM_PATH="$integration_home" "$ruby_bin" -S gem install --local --install-dir "$integration_home" --no-document "$gem_path" >/dev/null
+ruby_smoke_install_local "$integration_home"
 
 cat > "$tmp_dir/consumer.rb" <<'RUBY'
 # frozen_string_literal: true
@@ -128,8 +103,7 @@ begin
   instrumentation.quiet
   quiet_job = {}
   quiet_result = client_middleware.call(nil, quiet_job, nil, nil) { app_response }
-  abort "quiet result changed" unless quiet_result.equal?(app_response)
-  abort "quiet middleware changed the job" unless quiet_job.empty?
+  abort "quiet lifecycle changed" unless quiet_result.equal?(app_response) && quiet_job.empty?
 
   response = instrumentation.shutdown
   abort "shutdown status changed" unless response.status_code == 202
@@ -138,8 +112,7 @@ begin
   events = JSON.parse(record.body).fetch("events")
   spans = events.select { |event| event.fetch("type") == "span" }
   issues = events.select { |event| event.fetch("type") == "issue" }
-  abort "span count changed" unless spans.length == 5
-  abort "issue count changed" unless issues.length == 1
+  abort "signal counts changed" unless [spans.length, issues.length] == [5, 1]
   abort "trace correlation changed" unless spans.first(4).all? { |event| event.fetch("attributes").fetch("traceId") == parent.trace_id }
 
   serialized = JSON.generate(events)
@@ -147,10 +120,8 @@ begin
      opaque\ failure\ detail installed-sidekiq-key].each do |forbidden|
     abort "telemetry privacy changed" if serialized.include?(forbidden.tr("\\", ""))
   end
-  abort "pending events remain" unless client.pending_events.zero?
-  abort "client removal failed" unless instrumentation.unregister_client(config)
-  abort "server removal failed" unless instrumentation.unregister_server(config)
-  puts "installed Sidekiq consumer ok requests=1 spans=5 issues=1"
+  abort "shutdown cleanup changed" unless client.pending_events.zero? &&
+    instrumentation.unregister_client(config) && instrumentation.unregister_server(config)
 ensure
   intake.close
 end
@@ -158,8 +129,7 @@ RUBY
 
 LOGBREW_RUBY_PACKAGE_VERSION="$package_version" LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
   GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
-  "$ruby_bin" "$tmp_dir/consumer.rb" > "$tmp_dir/consumer.out"
-grep -qx 'installed Sidekiq consumer ok requests=1 spans=5 issues=1' "$tmp_dir/consumer.out"
+  "$ruby_bin" "$tmp_dir/consumer.rb"
 
 printf 'ruby Sidekiq installed smoke ok version=%s sidekiq=8.1.6 sha256:%s requests=1 spans=5 issues=1\n' \
   "$package_version" "$gem_digest"

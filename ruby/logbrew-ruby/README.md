@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request, database, cache, view, error, ActiveJob, and outbound `Net::HTTP` capture; standard-library delivery; opt-in standard-library `Logger` support; and manual Rack helpers.
+Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request, database, cache, view, error, ActiveJob, and outbound `Net::HTTP` capture; trace-correlated Rails application logs by explicit opt-in; standard-library delivery; opt-in standard-library `Logger` support; and manual Rack helpers.
 
 The core package has no runtime gem dependencies. Its automatic integration
 activates only inside an application that has already loaded Rails.
@@ -23,7 +23,7 @@ needed:
 
 ```ruby
 # Gemfile
-gem "logbrew-sdk", "~> 0.1.11"
+gem "logbrew-sdk", "~> 0.1.12"
 ```
 
 ```bash
@@ -70,6 +70,15 @@ need no initializer. They propagate one W3C child and record only method,
 normalized host, status, duration, adapter source, sampled state, and exception
 type. Calls outside an active trace remain exact pass-throughs.
 
+Set `LOGBREW_CAPTURE_RAILS_LOGS=true` to add application-owned `Rails.logger`
+messages to the active request or ActiveJob trace. The adapter keeps the app's
+configured logger, output, level, return value, and lazy block behavior intact.
+It captures only calls originating from files below `Rails.root`; framework,
+gem, startup, and out-of-trace logs remain local. Messages are limited to 2,048
+characters and include `messageState: captured` or `messageState: truncated`.
+Log messages are application-provided telemetry and can contain sensitive
+values, so enable this only after the application applies its normal filtering.
+
 The explicit Rails capture settings are:
 
 | Environment variable | Default | Purpose |
@@ -84,6 +93,7 @@ The explicit Rails capture settings are:
 | `LOGBREW_FLUSH_INTERVAL_MS` | `5000` | Automatic delivery interval from 10 to 3600000 ms |
 | `LOGBREW_FLUSH_THRESHOLD` | `100` | Queue size from 1 to 1000 that requests an earlier flush |
 | `LOGBREW_CAPTURE_EXCEPTION_MESSAGES` | `false` | Opt in to exception message capture |
+| `LOGBREW_CAPTURE_RAILS_LOGS` | `false` | Opt in to bounded application-origin logs on active request and job traces |
 | `LOGBREW_INCLUDE_EXCEPTION_BACKTRACE` | `false` | Opt in to raw exception backtrace text; sanitized structured frames are always captured |
 
 `LOGBREW_API_KEY` and `LOGBREW_INGEST_KEY` are not Rails aliases. If either is

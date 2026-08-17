@@ -1,19 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
-tmp_dir="$(mktemp -d)"
-package_version="$(
-  cd "$package_dir"
-  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "failed to load logbrew-sdk.gemspec"; print spec.version'
-)"
-
-remove_tmp_dir() {
-  rm -rf "$tmp_dir"
-}
-
-trap remove_tmp_dir EXIT
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
+ruby_smoke_create_tmp_dir
+ruby_smoke_prepare_package
 
 find "$package_dir" -name '*.rb' -not -path '*/.bundle/*' -print0 | while IFS= read -r -d '' file; do
   ruby -w -c "$file" >/dev/null
@@ -35,7 +25,6 @@ for page in Configuration Runtime RequestMiddleware ErrorReporter; do
 done
 test -f "$tmp_dir/rdoc/LogBrew/Sidekiq/Instrumentation.html"
 
-(cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$tmp_dir/logbrew-sdk-${package_version}.gem" >/dev/null)
 test -f "$tmp_dir/logbrew-sdk-${package_version}.gem"
 gem specification "$tmp_dir/logbrew-sdk-${package_version}.gem" --yaml > "$tmp_dir/spec.yaml"
 grep -q '^name: logbrew-sdk$' "$tmp_dir/spec.yaml"
@@ -53,6 +42,7 @@ grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY.*not Rails aliases' "$unpacked_dir/README.md"
 grep -q 'Rails Quick Start' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$unpacked_dir/README.md"
+grep -q 'LOGBREW_CAPTURE_RAILS_LOGS' "$unpacked_dir/README.md"
 grep -q 'logbrew projects create rails-service' "$unpacked_dir/README.md"
 grep -q 'logbrew doctor --project' "$unpacked_dir/README.md"
 grep -q 'logbrew traces --project' "$unpacked_dir/README.md"
@@ -159,6 +149,6 @@ bash "$repo_root/scripts/real_user_ruby_sidekiq_smoke.sh" | tee "$tmp_dir/sideki
 grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:[0-9a-f]{64} requests=1 spans=5 issues=1$' "$tmp_dir/sidekiq-smoke.out"
 
 bash "$repo_root/scripts/real_user_ruby_rails_smoke.sh" | tee "$tmp_dir/rails-smoke.out"
-grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1$' "$tmp_dir/rails-smoke.out"
+grep -Eq '^ruby Rails installed smoke ok version=[^ ]+ rails=8\.1\.3\.1 sha256:[0-9a-f]{64} requests=3 operations=3 jobs=4 outbound=1 app_logs=1 issues=3 environments=1$' "$tmp_dir/rails-smoke.out"
 
 echo "ruby package checks passed"

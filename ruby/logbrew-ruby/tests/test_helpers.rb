@@ -5,6 +5,10 @@ module SdkTestHelpers
     raise message unless condition
   end
 
+  def assert_values(message, actual, expected)
+    assert(actual == expected, "#{message}: #{actual.inspect}")
+  end
+
   def expect_sdk_error(code, message_fragment = nil, forbidden: nil)
     yield
     raise "expected #{code}"

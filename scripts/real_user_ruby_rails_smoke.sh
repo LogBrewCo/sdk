@@ -1,44 +1,19 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
-tmp_dir="$(mktemp -d)"
-ruby_bin="${LOGBREW_RUBY_BIN:-}"
 rails_version="${LOGBREW_RAILS_SMOKE_VERSION:-8.1.3.1}"
 
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-
-trap cleanup EXIT
-
-if [[ -z "$ruby_bin" ]]; then
-  if [[ -x /opt/homebrew/opt/ruby/bin/ruby ]]; then
-    ruby_bin=/opt/homebrew/opt/ruby/bin/ruby
-  else
-    ruby_bin="$(command -v ruby)"
-  fi
-fi
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
+ruby_smoke_create_tmp_dir
+ruby_smoke_prepare_package homebrew
 
 "$ruby_bin" -e '
   require "rubygems"
   abort "Ruby 3.2 or newer is required for the current Rails smoke" if Gem::Version.new(RUBY_VERSION) < Gem::Version.new("3.2")
 ' >/dev/null
 
-package_version="$(
-  cd "$package_dir"
-  "$ruby_bin" -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "invalid gemspec"; print spec.version'
-)"
-gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
-(cd "$package_dir" && "$ruby_bin" -S gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null)
-gem_digest="$(shasum -a 256 "$gem_path" | awk '{print $1}')"
-test -n "$gem_digest"
-
 base_home="$tmp_dir/base-gems"
-mkdir -p "$base_home"
-GEM_HOME="$base_home" GEM_PATH="$base_home" "$ruby_bin" -S gem install \
-  --local --install-dir "$base_home" --no-document "$gem_path" >/dev/null
+ruby_smoke_install_local "$base_home"
 LOGBREW_RUBY_PACKAGE_VERSION="$package_version" \
 GEM_HOME="$base_home" GEM_PATH="$base_home" "$ruby_bin" -e '
   require "logbrew-sdk"
@@ -53,8 +28,7 @@ integration_home="$tmp_dir/integration-gems"
 mkdir -p "$integration_home"
 RUBYOPT=-W0 GEM_HOME="$integration_home" GEM_PATH="$integration_home" "$ruby_bin" -S gem install \
   --no-document --install-dir "$integration_home" rails -v "$rails_version" >/dev/null
-RUBYOPT=-W0 GEM_HOME="$integration_home" GEM_PATH="$integration_home" "$ruby_bin" -S gem install \
-  --local --install-dir "$integration_home" --no-document "$gem_path" >/dev/null
+ruby_smoke_install_local "$integration_home"
 
 consumer_path="$tmp_dir/consumer.rb"
 cat > "$consumer_path" <<'RUBY'
@@ -79,6 +53,7 @@ begin
   ENV["LOGBREW_REQUEST_TIMEOUT_MS"] = "2000"
   ENV["LOGBREW_FLUSH_INTERVAL_MS"] = "60000"
   ENV["LOGBREW_FLUSH_THRESHOLD"] = "1000"
+  ENV["LOGBREW_CAPTURE_RAILS_LOGS"] = "true"
 
   require "rails"
   require "action_controller/railtie"
@@ -90,9 +65,11 @@ begin
 
   module InstalledRailsSmoke
     class Application < Rails::Application
+      config.root = __dir__
       config.secret_key_base = "installed-rails-smoke-secret-key-base"
       config.eager_load = false
       config.logger = Logger.new(File::NULL)
+      config.logger.level = Logger::WARN
       config.hosts.clear
     end
   end
@@ -105,6 +82,7 @@ begin
       ActiveSupport::Notifications.instrument("sql.active_record", sql: "SELECT private_accounts #{parameters.fetch(:id)}") { nil }
       ActiveSupport::Notifications.instrument("cache_read.active_support", key: "opaque-cache", hit: true) { nil }
       ActiveSupport::Notifications.instrument("render_template.action_view", identifier: "/srv/application/app/views/tools/show.html.erb") { nil }
+      Rails.logger.error { "checkout delayed" }
       dependency_uri = URI("#{dependency.endpoint}?marker=opaque-outbound-query")
       dependency_request = Net::HTTP::Post.new(dependency_uri)
       dependency_request.body = "opaque-outbound-body"
@@ -143,19 +121,19 @@ begin
     "HTTP_AUTHORIZATION" => "Bearer opaque-auth"
   )
   dependency_record = Timeout.timeout(3) { dependency.records.pop }
+  Rails.logger.error("outside request trace")
   abort "application or dependency response changed" unless response.status == 200 &&
     JSON.parse(response.body).fetch("tool") == "opaque-record-id" &&
     !dependency_record.headers["traceparent"].to_s.empty?
 
   not_found_response = requests.get("/unmatched")
-  abort "not-found response changed" unless not_found_response.status == 404
 
   failed_response = requests.get(
     "/failures/opaque-failure-id?session_hint=opaque-failure-query",
     "HTTP_TRACEPARENT" => incoming,
     "HTTP_AUTHORIZATION" => "Bearer opaque-failure-auth"
   )
-  abort "failed application response changed" unless failed_response.status == 500
+  abort "request classification changed" unless [not_found_response.status, failed_response.status] == [404, 500]
 
   Rails.error.report(
     RuntimeError.new("opaque handled error detail"),
@@ -192,6 +170,7 @@ begin
   operation_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails.active_support" }
   job_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails.active_job" }
   outbound_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "net_http" }
+  logs = preview_events.select { |event| event.fetch("type") == "log" }
   issues = preview_events.select { |event| event.fetch("type") == "issue" }
   counts = [preview_events.count { |event| event.fetch("type") == "environment" }, request_spans.length,
             operation_spans.length, job_spans.length, outbound_spans.length, issues.length]
@@ -228,6 +207,11 @@ begin
     "method" => "POST", "host" => "localhost", "statusCode" => 503,
     "source" => "net_http", "sampled" => true
   }]
+  log = logs.find { |event| event.dig("attributes", "message") == "checkout delayed" }&.fetch("attributes")
+  valid_log = logs.one? && log && logs.none? { |event| event.dig("attributes", "message") == "outside request trace" } &&
+    log.dig("metadata", "source") == "rails.logger" &&
+    log.dig("metadata", "messageState") == "captured" && log.dig("context", "trace", "traceId") == span.fetch("traceId")
+  abort "Rails application log changed" unless valid_log
 
   not_found_span = request_spans.find { |event| event.dig("attributes", "metadata", "http.status_code") == 404 }
   abort "not-found span changed" unless not_found_span&.dig("attributes", "status") == "ok"
@@ -272,7 +256,7 @@ begin
     opaque-job-argument opaque\ ActiveJob\ failure\ detail
     private-dependency opaque-outbound-query opaque-outbound-body
   ].each do |forbidden|
-    abort "Rails telemetry privacy changed" if serialized.include?(forbidden.tr("\\", " "))
+    abort "Rails telemetry privacy changed: #{forbidden}" if serialized.include?(forbidden.tr("\\", " "))
   end
 
   shutdown_response = LogBrew::Rails.shutdown
@@ -281,9 +265,8 @@ begin
   abort "delivery contract changed" unless shutdown_response.status_code == 202 &&
     LogBrew::Rails.shutdown.equal?(shutdown_response) && record.path == "/v1/events" &&
     record.headers.fetch("authorization") == "Bearer installed-rails-key" &&
-    delivered.length == 15 && client.pending_events.zero?
+    delivered == preview_events && client.pending_events.zero?
 
-  puts "installed Rails consumer ok requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1"
 ensure
   dependency.close
   intake.close
@@ -295,8 +278,7 @@ LOGBREW_RAILS_SMOKE_VERSION="$rails_version" \
 LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
 RUBYOPT=-W0 \
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
-  "$ruby_bin" "$consumer_path" > "$tmp_dir/consumer.out"
-grep -qx 'installed Rails consumer ok requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1' "$tmp_dir/consumer.out"
+  "$ruby_bin" "$consumer_path"
 
-printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1\n' \
+printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 operations=3 jobs=4 outbound=1 app_logs=1 issues=3 environments=1\n' \
   "$package_version" "$rails_version" "$gem_digest"

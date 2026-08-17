@@ -98,6 +98,7 @@ module LogBrew
       runtime = LogBrew::Rails.runtime
       next if runtime.nil? || !runtime.configuration.enabled?
 
+      LogBrew::Rails.const_get(:ApplicationLogCapture).install(::Rails.logger, runtime, application_root: ::Rails.root)
       reporter = LogBrew::Rails::ErrorReporter.new(runtime)
       if ::Rails.respond_to?(:error) && ::Rails.error.respond_to?(:subscribe)
         ::Rails.error.subscribe(reporter)
