@@ -4,7 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rubygems-public.XXXXXX")"
 
-version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.10}}"
+version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.11}}"
 source_url="https://rubygems.org"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
@@ -201,9 +201,7 @@ ruby "$tmp_dir/prove_public_rubygems_install.rb" | tee "$tmp_dir/proof.json"
 
 ruby -rjson - "$tmp_dir/proof.json" <<'RUBY'
 payload = JSON.parse(File.read(ARGV.fetch(0)))
-raise "expected flush status 202" unless payload.fetch("flush_status") == 202
-raise "expected one flush attempt" unless payload.fetch("flush_attempts") == 1
-raise "expected one recorded body" unless payload.fetch("recorded_bodies") == 1
+raise "expected flush receipt" unless payload.values_at("flush_status", "flush_attempts", "recorded_bodies") == [202, 1, 1]
 surface = payload.values_at("logger", "rack_middleware", "rails_subscriber", "traceparent", "trace_scope")
 raise "expected public surface proof" unless surface == [true, true, true, true, true]
 raise "expected operation tracing proof" unless payload.fetch("operation_tracing") == "ok"
