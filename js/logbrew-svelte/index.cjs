@@ -2,115 +2,52 @@
 
 const { getContext, hasContext, setContext } = require("svelte");
 const {
-  createTraceparent,
+  createIssueAttributesFromError,
   LogBrewClient,
   parseTraceparent,
-  RecordingTransport,
   SdkError
 } = require("@logbrew/sdk");
+const {
+  createBrowserTraceparent: createSvelteTraceparent,
+  createFetchTransport,
+  createTraceparentFetch,
+  shouldPropagateTraceparent
+} = require("@logbrew/browser");
 
-const DEFAULT_SDK_NAME = "logbrew-svelte";
-const DEFAULT_SDK_VERSION = "0.1.0";
 const LOG_BREW_SVELTE_KEY = Symbol.for("logbrew.svelte");
 
 function createLogBrewSvelteClient({
-  apiKey = readEnvApiKey(),
-  clientKey = readEnvClientKey(),
+  apiKey = readEnv("LOGBREW_API_KEY"),
+  clientKey = readEnv("LOGBREW_CLIENT_KEY"),
+  serverApiKey = readEnv("LOGBREW_SERVER_API_KEY"),
   context,
-  sdkName = DEFAULT_SDK_NAME,
-  sdkVersion = DEFAULT_SDK_VERSION,
+  sdkName = "logbrew-svelte",
+  sdkVersion = "0.1.1",
   maxRetries = 2
 } = {}) {
-  const authKey = clientKey ?? apiKey;
+  const authKey = clientKey ?? serverApiKey ?? apiKey;
   if (!authKey) {
     throw new SdkError(
       "configuration_error",
-      "createLogBrewSvelteClient requires clientKey, apiKey, LOGBREW_CLIENT_KEY, or LOGBREW_API_KEY"
+      "createLogBrewSvelteClient requires a browser client key or server API key"
     );
   }
   return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
 }
 
-function createSvelteTraceparent({
-  randomValues = defaultRandomValues,
-  spanId,
-  traceFlags = "01",
-  traceId
-} = {}) {
-  return createTraceparent({
-    spanId: spanId ?? randomHex(8, randomValues),
-    traceFlags,
-    traceId: traceId ?? randomHex(16, randomValues)
-  });
-}
-
-function createTraceparentFetch({
-  fetchImpl = defaultFetch(),
-  randomValues = defaultRandomValues,
-  traceFlags = "01",
-  traceparent,
-  traceparentFactory,
-  tracePropagationTargets = []
-} = {}) {
-  if (typeof fetchImpl !== "function") {
-    throw new SdkError("configuration_error", "createTraceparentFetch requires fetch");
-  }
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  if (traceparentFactory !== undefined && typeof traceparentFactory !== "function") {
-    throw new SdkError("configuration_error", "traceparentFactory must be a function");
-  }
-
-  return async function tracedFetch(input, init) {
-    const url = requestUrl(input);
-    if (!shouldPropagateTraceparent(url, tracePropagationTargets)) {
-      return init === undefined ? fetchImpl(input) : fetchImpl(input, init);
-    }
-
-    const requestInit = init ?? {};
-    const nextTraceparent = traceparentForRequest({
-      init,
-      input,
-      randomValues,
-      traceFlags,
-      traceparent,
-      traceparentFactory,
-      url
-    });
-    const nextInit = {
-      ...requestInit,
-      headers: headersWithTraceparent(requestHeaders(input, requestInit), nextTraceparent)
-    };
-    return fetchImpl(input, nextInit);
-  };
-}
-
-function shouldPropagateTraceparent(url, tracePropagationTargets = []) {
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  return tracePropagationTargets.some((target) => {
-    if (typeof target === "string") {
-      return shouldPropagateToStringTarget(url, target);
-    }
-    if (target instanceof RegExp) {
-      target.lastIndex = 0;
-      const matched = target.test(url);
-      target.lastIndex = 0;
-      return matched;
-    }
-    if (typeof target === "function") {
-      return target(url) === true;
-    }
-    throw new SdkError("configuration_error", "tracePropagationTargets entries must be strings, RegExp values, or functions");
-  });
-}
-
 function createLogBrewSvelteContext(options = {}) {
-  const client = resolveClient(options);
-  const transport = resolveTransport(options, client);
-  return createSvelteContext(client, transport);
+  const client = typeof options.client === "function"
+    ? options.client() : options.client ?? createLogBrewSvelteClient(options);
+  const transport = typeof options.transport === "function"
+    ? options.transport({ client }) : options.transport ?? createFetchTransport(options);
+  return {
+    client,
+    logbrew: client,
+    transport,
+    previewJson: () => client.previewJson(),
+    flush: () => client.flush(transport),
+    shutdown: () => client.shutdown(transport)
+  };
 }
 
 function setLogBrewContext(options = {}) {
@@ -146,34 +83,50 @@ function createSvelteViewEvent(name, {
       message: path ? `Svelte view ${name} at ${path}` : `Svelte view ${name}`,
       level: "info",
       logger: "svelte",
-      metadata: {
-        ...metadata,
-        name,
-        path
-      }
+      metadata: { ...metadata, name, path }
     }
   };
 }
 
 function createSvelteErrorEvent(error, {
   component = "",
+  debugIdMap,
+  environment,
+  fingerprint,
+  handled = true,
+  includeErrorStack = false,
   info = "",
   now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId
+  idFactory = defaultErrorEventId,
+  mechanism = "svelte.error_boundary",
+  metadata,
+  platform,
+  release,
+  runtime,
+  service,
+  source = "svelte.error",
+  title,
+  trace
 } = {}) {
-  const message = error instanceof Error ? error.message : String(error);
   return {
     id: idFactory(error, { component, info }),
     timestamp: now(),
-    attributes: {
-      title: component ? `${component} failed` : "Svelte component failed",
-      level: "error",
-      message,
-      metadata: {
-        component,
-        info
-      }
-    }
+    attributes: createIssueAttributesFromError(error, {
+      debugIdMap,
+      environment,
+      fingerprint,
+      handled,
+      includeErrorStack,
+      mechanism,
+      metadata: { ...metadata, component, info },
+      platform,
+      release,
+      runtime,
+      service,
+      source,
+      title: title ?? (component ? `${component} failed` : "Svelte component failed"),
+      trace
+    })
   };
 }
 
@@ -183,8 +136,11 @@ async function captureSvelteError(error, context, options = {}) {
     : createSvelteErrorEvent(error, options);
 
   try {
-    context.client.issue(event.id, event.timestamp, event.attributes);
-    const response = await context.client.shutdown(context.transport);
+    const attributes = options.breadcrumbs === undefined
+      ? event.attributes
+      : { ...event.attributes, breadcrumbs: options.breadcrumbs };
+    context.client.issue(event.id, event.timestamp, attributes);
+    const response = await context.client.flush(context.transport);
     await notifyFlush(options, response, { context });
     return response;
   } catch (captureError) {
@@ -193,32 +149,59 @@ async function captureSvelteError(error, context, options = {}) {
   }
 }
 
-function createSvelteContext(client, transport) {
+function createLogBrewSvelteKitHooks(context, options = {}) {
+  if (!isLogBrewSvelteContext(context)) {
+    throw new SdkError("configuration_error", "createLogBrewSvelteKitHooks requires a LogBrew context");
+  }
+  const traces = new WeakMap();
+
   return {
-    client,
-    logbrew: client,
-    transport,
-    previewJson: () => client.previewJson(),
-    flush: () => client.flush(transport),
-    shutdown: () => client.shutdown(transport)
+    async handle({ event, resolve }) {
+      if (!event || typeof resolve !== "function") {
+        throw new SdkError("configuration_error", "SvelteKit handle requires event and resolve");
+      }
+      const trace = createSvelteKitTrace(event.request, options);
+      traces.set(event, trace);
+      const startedAt = nowMs(options);
+      let response;
+      try {
+        response = await resolve(event);
+      } catch (error) {
+        await captureSvelteKitRequest(context, event, 500, trace, startedAt, options);
+        throw error;
+      }
+      await captureSvelteKitRequest(context, event, response?.status, trace, startedAt, options);
+      return response;
+    },
+    async handleError(input) {
+      const event = input?.event;
+      const trace = traces.get(event) ?? createSvelteKitTrace(event?.request, options);
+      try {
+        await captureSvelteError(input?.error, context, {
+          ...options,
+          breadcrumbs: [{
+            category: "sveltekit.request",
+            message: `${svelteKitMethod(event)} ${svelteKitRoute(event)}`,
+            timestamp: now(options),
+            type: "http"
+          }],
+          component: svelteKitRoute(event),
+          errorEvent: undefined,
+          handled: false,
+          info: "sveltekit.handle_error",
+          mechanism: "sveltekit.handle_error",
+          metadata: svelteKitMetadata(event, input?.status, options.metadata),
+          source: "sveltekit.handle_error",
+          trace
+        });
+      } catch (error) {
+        if (options.raiseCaptureErrors === true) {
+          throw error;
+        }
+      }
+      return typeof options.mapError === "function" ? options.mapError(input) : undefined;
+    }
   };
-}
-
-function resolveClient(options) {
-  if (typeof options.client === "function") {
-    return options.client();
-  }
-  if (options.client) {
-    return options.client;
-  }
-  return createLogBrewSvelteClient(options);
-}
-
-function resolveTransport(options, client) {
-  if (typeof options.transport === "function") {
-    return options.transport({ client });
-  }
-  return options.transport ?? RecordingTransport.alwaysAccept();
 }
 
 function isLogBrewSvelteContext(value) {
@@ -226,15 +209,12 @@ function isLogBrewSvelteContext(value) {
 }
 
 async function notifyFlush(options, response, context) {
-  if (typeof options.onFlush === "function") {
-    await options.onFlush(response, context);
-  }
+  return typeof options.onFlush === "function" ? options.onFlush(response, context) : undefined;
 }
 
 async function notifyFailure(options, error, context) {
-  if (typeof options.onCaptureError === "function") {
-    await options.onCaptureError(error, context);
-  }
+  return typeof options.onCaptureError === "function"
+    ? options.onCaptureError(error, context) : undefined;
 }
 
 function defaultViewEventId(name, path) {
@@ -246,129 +226,96 @@ function defaultErrorEventId(error, { component, info }) {
   return `evt_svelte_error_${slugify(`${component}_${info}_${message}`)}`;
 }
 
-function defaultFetch() {
-  return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
-}
-
-function defaultRandomValues(length) {
-  if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== "function") {
-    throw new SdkError("configuration_error", "createSvelteTraceparent requires crypto.getRandomValues or randomValues");
+async function captureSvelteKitRequest(context, event, status, trace, startedAt, options) {
+  if (options.captureRequests === false) {
+    return;
   }
-  const bytes = new Uint8Array(length);
-  return globalThis.crypto.getRandomValues(bytes);
-}
-
-function headersWithTraceparent(headers, traceparent) {
-  const nextHeaders = {};
-  for (const [key, value] of headerEntries(headers)) {
-    if (String(key).toLowerCase() !== "traceparent") {
-      nextHeaders[key] = value;
-    }
-  }
-  nextHeaders.traceparent = traceparent;
-  return nextHeaders;
-}
-
-function headerEntries(headers) {
-  if (headers === undefined || headers === null) {
-    return [];
-  }
-  const HeadersConstructor = globalThis.Headers;
-  if (typeof HeadersConstructor === "function" && headers instanceof HeadersConstructor) {
-    const entries = [];
-    headers.forEach((value, key) => {
-      entries.push([key, value]);
+  const statusCode = validStatus(status);
+  try {
+    context.client.span(`evt_sveltekit_request_${trace.spanId}`, now(options), {
+      durationMs: Math.max(0, nowMs(options) - startedAt),
+      name: `${svelteKitMethod(event)} ${svelteKitRoute(event)}`,
+      ...(trace.parentSpanId ? { parentSpanId: trace.parentSpanId } : {}),
+      spanId: trace.spanId,
+      status: statusCode >= 500 ? "error" : "ok",
+      traceId: trace.traceId,
+      metadata: svelteKitMetadata(event, statusCode, options.metadata)
     });
-    return entries;
-  }
-  if (Array.isArray(headers)) {
-    return headers;
-  }
-  if (typeof headers !== "string" && typeof headers[Symbol.iterator] === "function") {
-    return Array.from(headers);
-  }
-  if (typeof headers === "object") {
-    return Object.entries(headers);
-  }
-  return [];
-}
-
-function randomHex(length, randomValues) {
-  if (typeof randomValues !== "function") {
-    throw new SdkError("configuration_error", "randomValues must be a function");
-  }
-  const bytes = Array.from(randomValues(length));
-  if (bytes.length !== length || bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
-    throw new SdkError("configuration_error", "randomValues must return byte values for the requested length");
-  }
-  return bytes.map((value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-function readEnvApiKey() {
-  return globalThis.process?.env?.LOGBREW_API_KEY;
-}
-
-function readEnvClientKey() {
-  return globalThis.process?.env?.LOGBREW_CLIENT_KEY;
-}
-
-function shouldPropagateToStringTarget(url, target) {
-  const targetText = target.trim();
-  if (targetText === "") {
-    return false;
-  }
-  if (targetText.startsWith("/")) {
-    return url.startsWith(targetText);
-  }
-
-  const URLConstructor = globalThis.URL;
-  if (typeof URLConstructor === "function") {
-    try {
-      const targetUrl = new URLConstructor(targetText);
-      if (!hasUrlScheme(url)) {
-        return false;
-      }
-      const requestUrl = new URLConstructor(url, targetUrl.origin);
-      if (requestUrl.origin !== targetUrl.origin) {
-        return false;
-      }
-      const targetPath = targetUrl.pathname || "/";
-      return requestUrl.pathname === targetPath || requestUrl.pathname.startsWith(pathPrefix(targetPath));
-    } catch {
-      return url.startsWith(targetText);
+    if (options.flushOnCapture !== false) {
+      await context.client.flush(context.transport);
+    }
+  } catch (error) {
+    await notifyFailure(options, error, { context });
+    if (options.raiseCaptureErrors === true) {
+      throw error;
     }
   }
-
-  return url.startsWith(targetText);
 }
 
-function pathPrefix(pathname) {
-  return pathname.endsWith("/") ? pathname : `${pathname}/`;
+function createSvelteKitTrace(request, options) {
+  const parent = requestTraceparent(request);
+  const generated = parseTraceparent(createSvelteTraceparent({
+    randomValues: options.randomValues,
+    traceFlags: parent?.traceFlags ?? options.traceFlags,
+    traceId: parent?.traceId
+  }));
+  return {
+    traceId: generated.traceId,
+    spanId: generated.parentSpanId,
+    ...(parent ? { parentSpanId: parent.parentSpanId } : {}),
+    sampled: generated.sampled
+  };
 }
 
-function hasUrlScheme(url) {
-  return /^[a-z][a-z0-9+.-]*:/iu.test(url);
+function requestTraceparent(request) {
+  try {
+    const value = request?.headers?.get?.("traceparent");
+    return value ? parseTraceparent(value) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-function requestHeaders(input, init) {
-  if (init && init.headers !== undefined) {
-    return init.headers;
-  }
-  return input?.headers;
+function svelteKitMetadata(event, status, metadata) {
+  const statusCode = validStatus(status);
+  return {
+    ...metadata,
+    framework: "sveltekit",
+    method: svelteKitMethod(event),
+    routeTemplate: svelteKitRoute(event),
+    statusCode,
+    statusCodeClass: `${Math.floor(statusCode / 100)}xx`
+  };
 }
 
-function requestUrl(input) {
-  if (typeof input === "string") {
-    return input;
-  }
-  const URLConstructor = globalThis.URL;
-  if (typeof URLConstructor === "function" && input instanceof URLConstructor) {
-    return input.toString();
-  }
-  if (typeof input?.url === "string") {
-    return input.url;
-  }
-  return String(input);
+function svelteKitMethod(event) {
+  const method = event?.request?.method;
+  return typeof method === "string" && /^[A-Za-z]{1,16}$/u.test(method)
+    ? method.toUpperCase()
+    : "GET";
+}
+
+function svelteKitRoute(event) {
+  const route = event?.route?.id;
+  return typeof route === "string" && route.trim() !== "" && route.length <= 256
+    ? route
+    : "<unmatched>";
+}
+
+function validStatus(status) {
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 500;
+}
+
+function now(options) {
+  return typeof options.now === "function" ? options.now() : new Date().toISOString();
+}
+
+function nowMs(options) {
+  return typeof options.nowMs === "function" ? options.nowMs() : Date.now();
+}
+
+function readEnv(name) {
+  return globalThis.process?.env?.[name];
 }
 
 function slugify(value) {
@@ -378,47 +325,20 @@ function slugify(value) {
     .replace(/^_+|_+$/g, "") || "event";
 }
 
-function traceparentForRequest({
-  init,
-  input,
-  randomValues,
-  traceFlags,
-  traceparent,
-  traceparentFactory,
-  url
-}) {
-  const nextTraceparent = typeof traceparentFactory === "function"
-    ? traceparentFactory({ init, input, url })
-    : traceparent ?? createSvelteTraceparent({ randomValues, traceFlags });
-  parseTraceparent(nextTraceparent);
-  return nextTraceparent;
-}
-
-module.exports = {
+const api = {
   captureSvelteError,
   createLogBrewSvelteClient,
   createLogBrewSvelteContext,
+  createLogBrewSvelteKitHooks,
   createSvelteErrorEvent,
   createSvelteTraceparent,
   createSvelteViewEvent,
   createTraceparentFetch,
-  default: {
-    captureSvelteError,
-    createLogBrewSvelteClient,
-    createLogBrewSvelteContext,
-    createSvelteErrorEvent,
-    createSvelteTraceparent,
-    createSvelteViewEvent,
-    createTraceparentFetch,
-    getLogBrewContext,
-    LOG_BREW_SVELTE_KEY,
-    setLogBrewContext,
-    shouldPropagateTraceparent,
-    useLogBrew
-  },
   getLogBrewContext,
   LOG_BREW_SVELTE_KEY,
   setLogBrewContext,
   shouldPropagateTraceparent,
   useLogBrew
 };
+
+module.exports = { ...api, default: api };

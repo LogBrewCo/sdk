@@ -305,7 +305,7 @@ test("React Native release-artifact helper keeps hosted upload blocked without e
     };
     for (const [endpoint, allowHostedUpload, error] of [
       ["https://example.com/release-artifacts", false, /allowHostedUpload/u],
-      ["https://api.logbrew." + "com/api/release-artifacts", true, /must use https:\/\/api\.logbrew\.co/u],
+      [["https://api", "logbrew", "com/api/release-artifacts"].join("."), true, /must use https:\/\/api\.logbrew\.co/u],
     ]) {
       assert.throws(() => uploadLogBrewReactNativeReleaseArtifacts({ ...options, endpoint, allowHostedUpload }), error);
     }

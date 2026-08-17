@@ -1,47 +1,34 @@
 import type {
+  IssueBreadcrumb,
   IssueAttributes,
+  JavaScriptErrorIssueOptions,
   LogAttributes,
   LogBrewClient,
   TelemetryContext,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
+import type {
+  BrowserTraceparentConfig,
+  FetchTransportConfig,
+  TraceparentFetchConfig as BrowserTraceparentFetchConfig,
+  TracePropagationTarget as BrowserTracePropagationTarget
+} from "@logbrew/browser";
 
 export type CreateLogBrewSvelteClientConfig = {
   apiKey?: string;
   clientKey?: string;
+  serverApiKey?: string;
   context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;
 };
 
-export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
-
-export type SvelteTraceparentConfig = {
-  traceId?: string;
-  spanId?: string;
-  traceFlags?: string;
-  randomValues?: (length: number) => ArrayLike<number>;
-};
-
-export type TraceparentFetchLike<TResponse = unknown> = (
-  input: any,
-  init?: any
-) => Promise<TResponse> | TResponse;
-
-export type TraceparentFetchConfig<TResponse = unknown> = {
-  fetchImpl?: TraceparentFetchLike<TResponse>;
-  randomValues?: (length: number) => ArrayLike<number>;
-  traceFlags?: string;
-  traceparent?: string;
-  traceparentFactory?: (context: {
-    input: any;
-    init?: any;
-    url: string;
-  }) => string | undefined;
-  tracePropagationTargets?: TracePropagationTarget[];
-};
+export type TracePropagationTarget = BrowserTracePropagationTarget;
+export type SvelteTraceparentConfig = BrowserTraceparentConfig;
+export type TraceparentFetchLike = typeof fetch;
+export type TraceparentFetchConfig = BrowserTraceparentFetchConfig;
 
 export type LogBrewSvelteContext = {
   client: LogBrewClient;
@@ -75,12 +62,12 @@ export type LogBrewSvelteErrorEvent = {
   attributes: IssueAttributes;
 };
 
-export type LogBrewSvelteOptions = CreateLogBrewSvelteClientConfig & {
+export type LogBrewSvelteOptions = CreateLogBrewSvelteClientConfig & FetchTransportConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   transport?: Transport | LogBrewTransportFactory;
 };
 
-export type LogBrewSvelteErrorOptions = {
+export type LogBrewSvelteErrorOptions = JavaScriptErrorIssueOptions & {
   component?: string;
   info?: string;
   now?: () => string;
@@ -88,22 +75,57 @@ export type LogBrewSvelteErrorOptions = {
 };
 
 export type LogBrewSvelteCaptureOptions = LogBrewSvelteErrorOptions & {
+  breadcrumbs?: IssueBreadcrumb[];
   errorEvent?: (error: unknown, context: LogBrewSvelteCaptureContext) => LogBrewSvelteErrorEvent;
   onFlush?: (response: TransportResponse, context: LogBrewSvelteCaptureContext) => void | Promise<void>;
   onCaptureError?: (error: unknown, context: LogBrewSvelteCaptureContext) => void | Promise<void>;
 };
 
+export type SvelteKitEvent = {
+  request?: { headers?: { get?(name: string): string | null }; method?: string };
+  route?: { id?: string | null };
+};
+
+export type SvelteKitHandleErrorInput<TEvent extends SvelteKitEvent = SvelteKitEvent> = {
+  error: unknown;
+  event: TEvent;
+  message?: string;
+  status?: number;
+};
+
+export type LogBrewSvelteKitHooksOptions<TResult = unknown> = Omit<LogBrewSvelteCaptureOptions, "breadcrumbs" | "errorEvent"> & {
+  captureRequests?: boolean;
+  flushOnCapture?: boolean;
+  mapError?: (input: SvelteKitHandleErrorInput) => TResult | Promise<TResult>;
+  nowMs?: () => number;
+  raiseCaptureErrors?: boolean;
+  randomValues?: (length: number) => ArrayLike<number>;
+  traceFlags?: string;
+};
+
+export type LogBrewSvelteKitHooks<TResult = unknown> = {
+  handle<TEvent extends SvelteKitEvent, TResponse>(input: {
+    event: TEvent;
+    resolve(event: TEvent): TResponse | Promise<TResponse>;
+  }): Promise<TResponse>;
+  handleError<TEvent extends SvelteKitEvent>(
+    input: SvelteKitHandleErrorInput<TEvent>
+  ): Promise<TResult | undefined>;
+};
+
 export declare const LOG_BREW_SVELTE_KEY: symbol;
 export declare function createLogBrewSvelteClient(config?: CreateLogBrewSvelteClientConfig): LogBrewClient;
 export declare function createSvelteTraceparent(config?: SvelteTraceparentConfig): string;
-export declare function createTraceparentFetch<TResponse = unknown>(
-  config?: TraceparentFetchConfig<TResponse>
-): TraceparentFetchLike<TResponse>;
+export declare function createTraceparentFetch(config?: TraceparentFetchConfig): TraceparentFetchLike;
 export declare function shouldPropagateTraceparent(
   url: string,
   tracePropagationTargets?: TracePropagationTarget[]
 ): boolean;
 export declare function createLogBrewSvelteContext(options?: LogBrewSvelteOptions): LogBrewSvelteContext;
+export declare function createLogBrewSvelteKitHooks<TResult = unknown>(
+  context: LogBrewSvelteContext,
+  options?: LogBrewSvelteKitHooksOptions<TResult>
+): LogBrewSvelteKitHooks<TResult>;
 export declare function setLogBrewContext(
   options?: LogBrewSvelteOptions | LogBrewSvelteContext
 ): LogBrewSvelteContext;
@@ -132,6 +154,7 @@ declare const defaultExport: {
   captureSvelteError: typeof captureSvelteError;
   createLogBrewSvelteClient: typeof createLogBrewSvelteClient;
   createLogBrewSvelteContext: typeof createLogBrewSvelteContext;
+  createLogBrewSvelteKitHooks: typeof createLogBrewSvelteKitHooks;
   createSvelteTraceparent: typeof createSvelteTraceparent;
   createSvelteErrorEvent: typeof createSvelteErrorEvent;
   createSvelteViewEvent: typeof createSvelteViewEvent;

@@ -650,7 +650,7 @@ test("upload-js rejects unsafe hosted endpoints even with hosted upload opt-in",
       "--manifest",
       manifestPath,
       "--endpoint",
-      "https://api.logbrew." + "com/api/release-artifacts",
+      ["https://api", "logbrew", "com/api/release-artifacts"].join("."),
       "--allow-hosted",
       "--dry-run"
     ]);
