@@ -869,7 +869,7 @@ uploadLogBrewReactNativeReleaseArtifacts({
   environment: "production",
   service: "checkout-mobile",
   root: process.cwd(),
-  endpoint: "https://api.logbrew.com/api/release-artifacts",
+  endpoint: "https://api.logbrew.co/api/release-artifacts",
   allowHostedUpload: true,
   tokenEnv: "LOGBREW_RELEASE_ARTIFACT_AUTH"
 });

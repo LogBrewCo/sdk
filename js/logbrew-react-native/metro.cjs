@@ -275,24 +275,43 @@ function sortedModules(graph, options) {
 }
 
 function createMetroSourceMapSerializer() {
-  const sourceMapModule = requireMetroModule(
-    "metro/private/DeltaBundler/Serializers/sourceMapString",
-    "metro/src/DeltaBundler/Serializers/sourceMapString",
+  const getSourceMapInfo = moduleFunction(
+    requireMetroModule(
+      "metro/private/DeltaBundler/Serializers/helpers/getSourceMapInfo",
+      "metro/src/DeltaBundler/Serializers/helpers/getSourceMapInfo",
+    ),
+    ["default"],
+    "getSourceMapInfo",
   );
-  const sourceMapString = moduleFunction(
-    sourceMapModule,
-    ["sourceMapStringNonBlocking", "sourceMapString", "default"],
-    "sourceMapString",
+  const isJsModule = moduleFunction(
+    requireMetroModule(
+      "metro/private/DeltaBundler/Serializers/helpers/js",
+      "metro/src/DeltaBundler/Serializers/helpers/js",
+    ),
+    ["isJsModule"],
+    "isJsModule",
+  );
+  const metroRequire = createRequire(require.resolve("metro/package.json"));
+  const fromRawMappings = moduleFunction(
+    metroRequire("metro-source-map"),
+    ["fromRawMappings"],
+    "fromRawMappings",
   );
 
-  return (preModules, graph, options) =>
-    sourceMapString([...preModules, ...sortedModules(graph, options)], {
+  return (preModules, graph, options) => {
+    const sourceMapOptions = {
       excludeSource: options?.excludeSource === true,
       getSourceUrl: typeof options?.getSourceUrl === "function" ? options.getSourceUrl : null,
       processModuleFilter: typeof options?.processModuleFilter === "function" ? options.processModuleFilter : () => true,
       shouldAddToIgnoreList:
         typeof options?.shouldAddToIgnoreList === "function" ? options.shouldAddToIgnoreList : () => false,
-    });
+    };
+    const modules = [...preModules, ...sortedModules(graph, options)]
+      .filter(isJsModule)
+      .filter(sourceMapOptions.processModuleFilter)
+      .map((module) => getSourceMapInfo(module, sourceMapOptions));
+    return fromRawMappings(modules).toString(undefined, sourceMapOptions);
+  };
 }
 
 function createDefaultMetroSerializer() {

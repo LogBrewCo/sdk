@@ -18,6 +18,7 @@ import {
 } from "./release-artifacts-common.js";
 
 const DEFAULT_UPLOAD_TOKEN_ENV = "LOGBREW_RELEASE_ARTIFACT_TOKEN";
+const HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts";
 const NON_RETRYABLE_UPLOAD_STATUSES = new Set([400, 401, 403, 413]);
 const RETRYABLE_UPLOAD_STATUSES = new Set([408, 429]);
 const SCRIPT_VERSION = "0.1.0";
@@ -125,14 +126,8 @@ function requireUploadEndpoint(endpoint, allowHosted) {
   if (!allowHosted) {
     throw new Error("release artifact hosted upload requires explicit --allow-hosted; use loopback endpoints for local proof");
   }
-  if (parsed.protocol !== "https:") {
-    throw new Error("hosted release artifact upload endpoints must use https");
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("hosted release artifact upload endpoints must not include embedded auth values");
-  }
-  if (parsed.search || parsed.hash) {
-    throw new Error("hosted release artifact upload endpoints must not include query strings or fragments");
+  if (endpoint !== HOSTED_UPLOAD_ENDPOINT) {
+    throw new Error(`hosted release artifact uploads must use ${HOSTED_UPLOAD_ENDPOINT}`);
   }
   return parsed;
 }

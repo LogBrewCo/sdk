@@ -85,10 +85,10 @@ react_native_tgz="$pack_dir/$react_native_tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 cp "$react_native_tgz" "$tmp_dir/logbrew-react-native.tgz"
 
-react_native_version="$(npm view react-native version)"
-react_version="$(npm view react version)"
-react_native_cli_version="$(npm view @react-native-community/cli version)"
-react_native_metro_config_version="$react_native_version"
+react_native_version="${LOGBREW_REACT_NATIVE_VERSION:-$(npm view react-native version)}"
+react_version="${LOGBREW_REACT_VERSION:-$(npm view react version)}"
+react_native_cli_version="${LOGBREW_REACT_NATIVE_CLI_VERSION:-$(npm view @react-native-community/cli version)}"
+react_native_metro_config_version="${LOGBREW_REACT_NATIVE_METRO_CONFIG_VERSION:-$react_native_version}"
 typescript_version="$(npm view typescript version)"
 
 cat > "$app_dir/package.json" <<JSON
@@ -137,34 +137,26 @@ cat > "$app_dir/metro-string.config.js" <<'JS'
 const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
 const { withLogBrewMetroConfig } = require("@logbrew/react-native/metro");
 
-const baseModule = require("metro/private/DeltaBundler/Serializers/baseJSBundle");
-const bundleModule = require("metro/private/lib/bundleToString");
-const baseJSBundle = baseModule.baseJSBundle || baseModule.default || baseModule;
-const bundleToString = bundleModule.bundleToString || bundleModule.default || bundleModule;
-const config = mergeConfig(getDefaultConfig(__dirname), {
-  serializer: {
-    customSerializer(entryPoint, preModules, graph, options) {
-      return bundleToString(baseJSBundle(entryPoint, preModules, graph, options)).code;
-    },
-  },
-});
+function loadMetroModule(privatePath, sourcePath) {
+  try {
+    return require(privatePath);
+  } catch {
+    return require(sourcePath);
+  }
+}
 
-module.exports = withLogBrewMetroConfig(config);
-JS
-
-cat > "$app_dir/metro-mutating-string.config.js" <<'JS'
-const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
-const { withLogBrewMetroConfig } = require("@logbrew/react-native/metro");
-
-const baseModule = require("metro/private/DeltaBundler/Serializers/baseJSBundle");
-const bundleModule = require("metro/private/lib/bundleToString");
+const baseModule = loadMetroModule(
+  "metro/private/DeltaBundler/Serializers/baseJSBundle",
+  "metro/src/DeltaBundler/Serializers/baseJSBundle",
+);
+const bundleModule = loadMetroModule("metro/private/lib/bundleToString", "metro/src/lib/bundleToString");
 const baseJSBundle = baseModule.baseJSBundle || baseModule.default || baseModule;
 const bundleToString = bundleModule.bundleToString || bundleModule.default || bundleModule;
 const config = mergeConfig(getDefaultConfig(__dirname), {
   serializer: {
     customSerializer(entryPoint, preModules, graph, options) {
       const code = bundleToString(baseJSBundle(entryPoint, preModules, graph, options)).code;
-      return `/* app-owned banner */\n${code}`;
+      return process.env.LOGBREW_MUTATE_METRO_BUNDLE ? `/* app-owned banner */\n${code}` : code;
     },
   },
 });
@@ -344,7 +336,9 @@ TS
   "include": ["metro-config-consumer.ts"]
 }
 JSON
-  npx tsc --project metro-config-tsconfig.json
+  if [[ -z "${LOGBREW_REACT_NATIVE_METRO_CONFIG_VERSION:-}" ]]; then
+    npx tsc --project metro-config-tsconfig.json
+  fi
   mkdir -p dist
   node node_modules/@react-native-community/cli/build/bin.js bundle \
     --platform android \
@@ -362,8 +356,8 @@ JSON
     --bundle-output custom-dist/index.android.bundle \
     --sourcemap-output custom-dist/index.android.bundle.map \
     --assets-dest custom-dist/assets
-  if node node_modules/@react-native-community/cli/build/bin.js bundle \
-    --config metro-mutating-string.config.js \
+  if LOGBREW_MUTATE_METRO_BUNDLE=1 node node_modules/@react-native-community/cli/build/bin.js bundle \
+    --config metro-string.config.js \
     --platform android \
     --dev false \
     --entry-file index.js \
@@ -856,7 +850,7 @@ const result = uploadLogBrewReactNativeReleaseArtifacts({
   service: "checkout-react-native",
   root,
   manifestPath,
-  endpoint: "https://api.logbrew.com/api/release-artifacts",
+  endpoint: "https://api.logbrew.co/api/release-artifacts",
   allowHostedUpload: true,
   dryRun: true
 });
@@ -892,7 +886,7 @@ assert upload_report["filePartCount"] == 2
 assert "logbrew_rn_query_placeholder" not in json.dumps(upload_report)
 assert hosted_upload_report["manifestStatus"] == "ready"
 assert hosted_upload_report["uploadStatus"] == "dry_run"
-assert hosted_upload_report["endpoint"] == "https://api.logbrew.com/api/release-artifacts"
+assert hosted_upload_report["endpoint"] == "https://api.logbrew.co/api/release-artifacts"
 assert hosted_upload_report["artifactCount"] == 1
 assert hosted_upload_report["filePartCount"] == 2
 assert hosted_manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"

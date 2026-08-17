@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 SCRIPT_VERSION = "0.1.0"
 DEFAULT_TOKEN_ENV = "LOGBREW_RELEASE_ARTIFACT_TOKEN"
+HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts"
 AUTH_FAILURE_STATUSES = {401, 403}
 NON_RETRYABLE_STATUSES = {400, 401, 403, 413}
 RETRYABLE_STATUSES = {408, 429}
@@ -79,19 +80,12 @@ def require_loopback_endpoint(endpoint: str) -> None:
 def require_upload_endpoint(endpoint: str, *, allow_hosted: bool = False) -> None:
     if is_loopback_endpoint(endpoint):
         return
-    parsed = urlsplit(endpoint)
     if not allow_hosted:
         raise UploadValidationError(
             "release artifact hosted upload requires explicit --allow-hosted; use loopback endpoints for local proof"
         )
-    if parsed.scheme != "https":
-        raise UploadValidationError("hosted release artifact upload endpoints must use https")
-    if not parsed.hostname:
-        raise UploadValidationError("hosted release artifact upload endpoint must include a hostname")
-    if parsed.username or parsed.password:
-        raise UploadValidationError("hosted release artifact upload endpoints must not include embedded auth values")
-    if parsed.query or parsed.fragment:
-        raise UploadValidationError("hosted release artifact upload endpoints must not include query strings or fragments")
+    if endpoint != HOSTED_UPLOAD_ENDPOINT:
+        raise UploadValidationError(f"hosted release artifact uploads must use {HOSTED_UPLOAD_ENDPOINT}")
 
 
 def read_manifest(path: Path) -> dict[str, Any]:

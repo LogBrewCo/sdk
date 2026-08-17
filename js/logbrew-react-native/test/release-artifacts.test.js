@@ -243,13 +243,13 @@ test("React Native release-artifact helper allows explicit hosted upload dry-run
       environment: "production",
       service: "checkout-react-native",
       root: appRoot,
-      endpoint: "https://api.logbrew.com/api/release-artifacts",
+      endpoint: "https://api.logbrew.co/api/release-artifacts",
       allowHostedUpload: true,
       dryRun: true,
     });
 
     assert.equal(result.uploadReport.status, "dry_run");
-    assert.equal(result.uploadReport.endpoint, "https://api.logbrew.com/api/release-artifacts");
+    assert.equal(result.uploadReport.endpoint, "https://api.logbrew.co/api/release-artifacts");
     assert.equal(result.uploadReport.artifactCount, 1);
     assert.equal(result.uploadReport.filePartCount, 2);
     assert.equal(result.manifestReport.validation.status, "ready");
@@ -274,7 +274,7 @@ test("React Native release-artifact helper rejects hosted upload without a proje
           environment: "production",
           service: "checkout-react-native",
           root: appRoot,
-          endpoint: "https://api.logbrew.com/api/release-artifacts",
+          endpoint: "https://api.logbrew.co/api/release-artifacts",
           allowHostedUpload: true,
           dryRun: true,
         }),
@@ -293,21 +293,22 @@ test("React Native release-artifact helper keeps hosted upload blocked without e
     const originalBundleSource = fs.readFileSync(bundlePath, "utf8");
     const originalSourceMap = JSON.parse(fs.readFileSync(sourcemapPath, "utf8"));
 
-    assert.throws(
-      () =>
-        uploadLogBrewReactNativeReleaseArtifacts({
-          bundle: bundlePath,
-          sourcemap: sourcemapPath,
-          platform: "ios",
-          release: "2026.06.18-react-native-upload",
-          environment: "production",
-          service: "checkout-react-native",
-          root: appRoot,
-          endpoint: "https://example.com/release-artifacts",
-          dryRun: true,
-        }),
-      /allowHostedUpload/u,
-    );
+    const options = {
+      bundle: bundlePath,
+      sourcemap: sourcemapPath,
+      platform: "ios",
+      release: "2026.06.18-react-native-upload",
+      environment: "production",
+      service: "checkout-react-native",
+      root: appRoot,
+      dryRun: true,
+    };
+    for (const [endpoint, allowHostedUpload, error] of [
+      ["https://example.com/release-artifacts", false, /allowHostedUpload/u],
+      ["https://api.logbrew." + "com/api/release-artifacts", true, /must use https:\/\/api\.logbrew\.co/u],
+    ]) {
+      assert.throws(() => uploadLogBrewReactNativeReleaseArtifacts({ ...options, endpoint, allowHostedUpload }), error);
+    }
     assert.equal(fs.readFileSync(bundlePath, "utf8"), originalBundleSource);
     assert.deepEqual(JSON.parse(fs.readFileSync(sourcemapPath, "utf8")), originalSourceMap);
   } finally {
