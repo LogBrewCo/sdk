@@ -11,32 +11,22 @@ remove_tmp_dir() {
 
 trap remove_tmp_dir EXIT
 
+pack_filename() {
+  node -e 'const fs=require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8"))[0].filename)' "$1"
+}
+
 core_pack_json="$tmp_dir/core-pack.json"
+browser_pack_json="$tmp_dir/browser-pack.json"
 svelte_pack_json="$tmp_dir/svelte-pack.json"
 (cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
+(cd "$repo_root/js/logbrew-browser" && npm pack --json --pack-destination "$tmp_dir") > "$browser_pack_json"
 (cd "$repo_root/js/logbrew-svelte" && npm pack --json --pack-destination "$tmp_dir") > "$svelte_pack_json"
 
-core_tgz="$(python3 - "$core_pack_json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text())
-print(payload[0]["filename"])
-PY
-)"
-svelte_tgz="$(python3 - "$svelte_pack_json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text())
-print(payload[0]["filename"])
-PY
-)"
-core_tgz="$tmp_dir/$core_tgz"
-svelte_tgz="$tmp_dir/$svelte_tgz"
+core_tgz="$tmp_dir/$(pack_filename "$core_pack_json")"
+browser_tgz="$tmp_dir/$(pack_filename "$browser_pack_json")"
+svelte_tgz="$tmp_dir/$(pack_filename "$svelte_pack_json")"
 test -f "$core_tgz"
+test -f "$browser_tgz"
 test -f "$svelte_tgz"
 
 tar -tzf "$svelte_tgz" > "$tmp_dir/svelte-tarball.txt"
@@ -50,16 +40,17 @@ grep -q '^package/examples/package.json$' "$tmp_dir/svelte-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/svelte-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/svelte-tarball.txt"
 tar -xOf "$svelte_tgz" package/README.md > "$tmp_dir/svelte-readme.md"
-grep -q 'npm install @logbrew/sdk @logbrew/svelte svelte' "$tmp_dir/svelte-readme.md"
-grep -q 'pnpm add @logbrew/sdk @logbrew/svelte svelte' "$tmp_dir/svelte-readme.md"
-grep -q 'LOGBREW_API_KEY' "$tmp_dir/svelte-readme.md"
-grep -q 'LOGBREW_CLIENT_KEY' "$tmp_dir/svelte-readme.md"
+grep -q 'npm install @logbrew/sdk @logbrew/browser @logbrew/svelte svelte' "$tmp_dir/svelte-readme.md"
+grep -q 'pnpm add @logbrew/sdk @logbrew/browser @logbrew/svelte svelte' "$tmp_dir/svelte-readme.md"
+grep -q 'LOGBREW_BROWSER_KEY' "$tmp_dir/svelte-readme.md"
+grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/svelte-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/svelte-readme.md"
 grep -q 'createSvelteTraceparent' "$tmp_dir/svelte-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/svelte-readme.md"
 grep -q 'setLogBrewContext' "$tmp_dir/svelte-readme.md"
 grep -q 'useLogBrew' "$tmp_dir/svelte-readme.md"
 grep -q 'captureSvelteError' "$tmp_dir/svelte-readme.md"
+grep -q 'createLogBrewSvelteKitHooks' "$tmp_dir/svelte-readme.md"
 
 app_dir="$tmp_dir/svelte-smoke-app"
 mkdir -p "$app_dir"
@@ -70,6 +61,7 @@ svelte_version="$(npm view svelte version)"
 npm install \
   --save-exact \
   "$core_tgz" \
+  "$browser_tgz" \
   "$svelte_tgz" \
   "svelte@$svelte_version" \
   typescript \
@@ -77,15 +69,17 @@ npm install \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
+grep -q '"@logbrew/browser": "file:' package.json
 grep -q '"@logbrew/svelte": "file:' package.json
 grep -q '"svelte":' package.json
+grep -q '"@logbrew/browser"' package-lock.json
 grep -q '"@logbrew/svelte"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
-npm ls @logbrew/sdk @logbrew/svelte svelte >/dev/null
+npm ls @logbrew/browser @logbrew/sdk @logbrew/svelte svelte >/dev/null
 npm explain @logbrew/svelte > "$tmp_dir/npm-explain-svelte.txt"
-grep -q '@logbrew/svelte@0.1.0' "$tmp_dir/npm-explain-svelte.txt"
+grep -q '@logbrew/svelte@0.1.1' "$tmp_dir/npm-explain-svelte.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/svelte@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q '@logbrew/svelte@0.1.1' "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
@@ -95,7 +89,7 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text())
 deps = payload.get("dependencies", {})
-for name in ("@logbrew/svelte", "@logbrew/sdk", "svelte"):
+for name in ("@logbrew/browser", "@logbrew/svelte", "@logbrew/sdk", "svelte"):
     if name not in deps:
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
@@ -118,6 +112,8 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/smoke.stderr.json"
+grep -q '"defaultDelivery":1' "$tmp_dir/smoke.stderr.json"
+grep -q '"issueEvidence":' "$tmp_dir/smoke.stderr.json"
 grep -q '"missingContextFailed":true' "$tmp_dir/smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/smoke.stderr.json"
 grep -q '"rendered":true' "$tmp_dir/smoke.stderr.json"
@@ -138,6 +134,7 @@ import {
   captureSvelteError,
   createLogBrewSvelteClient,
   createLogBrewSvelteContext,
+  createLogBrewSvelteKitHooks,
   createSvelteErrorEvent,
   createSvelteTraceparent,
   createSvelteViewEvent,
@@ -154,7 +151,7 @@ const client = createLogBrewSvelteClient({
 });
 const traceTargets: TracePropagationTarget[] = ["https://api.example.test/", /^\/api\//u];
 const tracedFetch = createTraceparentFetch({
-  fetchImpl: async (_input: unknown, _init?: unknown): Promise<{ status: number }> => ({ status: 204 }),
+  fetchImpl: async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => new Response(null, { status: 204 }),
   traceparentFactory: () => createSvelteTraceparent({
     randomValues: (length: number) => new Uint8Array(length).fill(7)
   }),
@@ -176,6 +173,16 @@ void tracedFetch("/api/typed");
 const context: LogBrewSvelteContext = createLogBrewSvelteContext({
   client,
   transport: RecordingTransport.alwaysAccept()
+});
+const hooks = createLogBrewSvelteKitHooks(context);
+void hooks.handle({
+  event: { request: { method: "GET" }, route: { id: "/typed" } },
+  resolve: async () => ({ status: 200 })
+});
+void hooks.handleError({
+  error: new Error("typed hook failure"),
+  event: { request: { method: "GET" }, route: { id: "/typed" } },
+  status: 500
 });
 const view = createSvelteViewEvent("TypedSvelte", {
   path: "/typed"
@@ -208,6 +215,7 @@ node - <<'NODE'
 const {
   createLogBrewSvelteClient,
   createLogBrewSvelteContext,
+  createLogBrewSvelteKitHooks,
   createSvelteTraceparent,
   createSvelteViewEvent,
   createTraceparentFetch,
@@ -227,7 +235,7 @@ const event = createSvelteViewEvent("CommonJS", { path: "/cjs" });
 const traceparent = createSvelteTraceparent({
   randomValues: (length) => new Uint8Array(length).fill(1)
 });
-if (!LOG_BREW_SVELTE_KEY || event.attributes.logger !== "svelte" || context.client !== client || typeof createTraceparentFetch !== "function" || !traceparent.startsWith("00-")) {
+if (!LOG_BREW_SVELTE_KEY || event.attributes.logger !== "svelte" || context.client !== client || typeof createLogBrewSvelteKitHooks !== "function" || typeof createTraceparentFetch !== "function" || !traceparent.startsWith("00-")) {
   throw new Error("CommonJS Svelte entry failed");
 }
 NODE

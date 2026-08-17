@@ -8,6 +8,7 @@ import {
   captureSvelteError,
   createLogBrewSvelteClient,
   createLogBrewSvelteContext,
+  createLogBrewSvelteKitHooks,
   createSvelteErrorEvent,
   createSvelteTraceparent,
   createTraceparentFetch,
@@ -103,31 +104,116 @@ if (!missingContextFailed) {
   throw new Error("expected missing Svelte context to fail");
 }
 
+const deliveredRequests = [];
+const deliveryContext = createLogBrewSvelteContext({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  fetchImpl: async (endpoint, init) => {
+    deliveredRequests.push({ endpoint, init });
+    return { headers: { get: () => null }, status: 202 };
+  },
+  sdkName: "svelte-delivery-smoke",
+  sdkVersion: "0.1.1"
+});
+deliveryContext.client.log("evt_svelte_delivery_001", "2026-06-02T10:00:07Z", {
+  level: "info",
+  message: "Svelte delivery probe"
+});
+await deliveryContext.flush();
+if (deliveredRequests[0]?.endpoint !== "https://api.logbrew.co/v1/events"
+  || deliveredRequests[0]?.init?.headers?.authorization !== "Bearer LOGBREW_CLIENT_KEY") {
+  throw new Error("expected default authenticated .co delivery");
+}
+
 const errorClient = createLogBrewSvelteClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "svelte-error-smoke",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.1"
 });
 const errorContext = createLogBrewSvelteContext({
   client: errorClient,
   transport: errorTransport
 });
-await captureSvelteError(new Error("component exploded"), errorContext, {
+errorClient.addBreadcrumb({
+  category: "navigation",
+  message: "/orders/[id]",
+  type: "navigation"
+}, "2026-06-02T10:00:08Z");
+const hooks = createLogBrewSvelteKitHooks(errorContext, {
+  now: () => "2026-06-02T10:00:09Z",
+  nowMs: (() => {
+    const values = [100, 112];
+    return () => values.shift();
+  })(),
+  randomValues: deterministicBytes
+});
+const requestEvent = {
+  request: {
+    headers: {
+      get: (name) => name === "traceparent"
+        ? "00-11111111111111111111111111111111-2222222222222222-01"
+        : null
+    },
+    method: "GET"
+  },
+  route: { id: "/orders/[id]" }
+};
+const response = await hooks.handle({
+  event: requestEvent,
+  resolve: async () => ({ status: 500 })
+});
+if (response.status !== 500) {
+  throw new Error("SvelteKit handle changed the app response");
+}
+const malformedResponse = await createLogBrewSvelteKitHooks(errorContext, {
+  captureRequests: false,
+  randomValues: deterministicBytes
+}).handle({
+  event: { request: { headers: { get: () => "malformed" }, method: "GET" } },
+  resolve: async () => ({ status: 204 })
+});
+if (malformedResponse.status !== 204) {
+  throw new Error("malformed traceparent changed the app response");
+}
+await hooks.handleError({
+  error: new Error("component exploded"),
+  event: requestEvent,
+  message: "Internal Error",
+  status: 500
+});
+
+const errorEvents = errorTransport.sentBodies.flatMap((body) => JSON.parse(body).events);
+const requestSpan = errorEvents.find((event) => event.type === "span");
+const capturedIssue = errorEvents.find((event) => event.type === "issue");
+if (!requestSpan || !capturedIssue
+  || capturedIssue.attributes.exception?.mechanism?.type !== "sveltekit.handle_error"
+  || capturedIssue.attributes.exception?.mechanism?.handled !== false
+  || capturedIssue.attributes.exceptionChain?.entries?.length !== 1
+  || capturedIssue.attributes.stackFrames?.length < 1
+  || capturedIssue.attributes.breadcrumbs?.length !== 1
+  || capturedIssue.attributes.breadcrumbs[0].category !== "sveltekit.request"
+  || capturedIssue.attributes.metadata?.routeTemplate !== "/orders/[id]"
+  || capturedIssue.attributes.metadata?.errorStack !== undefined
+  || capturedIssue.attributes.metadata?.traceId !== requestSpan.attributes.traceId
+  || capturedIssue.attributes.metadata?.spanId !== requestSpan.attributes.spanId) {
+  throw new Error(`unexpected correlated SvelteKit evidence: ${JSON.stringify(errorEvents)}`);
+}
+
+await captureSvelteError(new Error("second component failure"), errorContext, {
   component: "ExplodingSvelteComponent",
-  info: "boundary",
   errorEvent(error) {
     return createSvelteErrorEvent(error, {
       component: "ExplodingSvelteComponent",
-      idFactory: () => "evt_svelte_error_001",
+      idFactory: () => "evt_svelte_error_002",
       info: "boundary",
-      now: () => "2026-06-02T10:00:07Z"
+      now: () => "2026-06-02T10:00:10Z"
     });
   }
 });
-
-const errorPayload = JSON.parse(errorTransport.lastBody());
-if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_svelte_error_001") {
-  throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
+if (JSON.parse(errorTransport.lastBody()).events[0].id !== "evt_svelte_error_002") {
+  throw new Error("captureSvelteError must keep the shared context reusable");
+}
+if (JSON.parse(errorTransport.lastBody()).events[0].attributes.breadcrumbs?.length !== 1) {
+  throw new Error("component capture must retain its client breadcrumbs");
 }
 
 const propagatedRequests = [];
@@ -172,10 +258,13 @@ console.log(payload);
 console.error(JSON.stringify({
   ok: true,
   attempts: requestTransport.sentBodies.length,
-  errorCaptured: errorPayload.events[0].attributes.title,
+  defaultDelivery: deliveredRequests.length,
+  errorCaptured: capturedIssue.attributes.title,
   events: JSON.parse(payload).events.length,
+  issueEvidence: capturedIssue.attributes.stackFrames.length,
   missingContextFailed,
   propagatedTraceparent,
+  requestTrace: requestSpan.attributes.traceId,
   rendered: true,
   viewHelper: "evt_svelte_view_001"
 }));

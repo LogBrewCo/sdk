@@ -4,30 +4,71 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Svelte context and error helpers for the public LogBrew JavaScript SDK.
+Svelte context and SvelteKit request/error helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds Svelte 5 context helpers, a `useLogBrew()` accessor, view helper events, and error capture helpers while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package stays thin over `@logbrew/sdk` and `@logbrew/browser`. It adds Svelte 5 context helpers plus correlated SvelteKit server request/error hooks while the shared packages own event validation, delivery, browser errors, page views, breadcrumbs, tracing, retry, flush, and shutdown.
 
 ## Install
 
 ```bash
-npm install @logbrew/sdk @logbrew/svelte svelte
-pnpm add @logbrew/sdk @logbrew/svelte svelte
+npm install @logbrew/sdk @logbrew/browser @logbrew/svelte svelte
+pnpm add @logbrew/sdk @logbrew/browser @logbrew/svelte svelte
 ```
+
+## SvelteKit Server Hooks
+
+Create a server-scoped key, keep it in a server-only environment variable, and export the returned hooks from `src/hooks.server.js`:
+
+```js
+import {
+  createLogBrewSvelteContext,
+  createLogBrewSvelteKitHooks
+} from "@logbrew/svelte";
+
+const logbrew = createLogBrewSvelteContext({
+  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
+  context: {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "storefront-web" },
+      deployment: { environment: "production", release: "web@1.4.0" }
+    }
+  }
+});
+
+const hooks = createLogBrewSvelteKitHooks(logbrew);
+export const handle = hooks.handle;
+export const handleError = hooks.handleError;
+```
+
+`handle` records one bounded request span using the HTTP method, SvelteKit route ID, status, duration, and W3C trace context. It never records the concrete URL, query, headers, body, cookies, or route parameters. `handleError` adds the exception type, handled state, sanitized generated frames, bounded cause chain, one request-local route breadcrumb, and the same trace/span IDs. Shared client breadcrumbs are not used by server hooks, so concurrent users cannot inherit one another's history. Invalid incoming `traceparent` values are ignored without breaking the request. Telemetry delivery failures do not replace the application response unless `raiseCaptureErrors` is explicitly enabled.
+
+Pass `mapError(input)` when the application already returns a sanitized `App.Error`; its return value remains the SvelteKit hook result.
+
+## Browser Setup
+
+Use `@logbrew/browser` once from browser-owned startup to capture page views, browser errors, unhandled rejections, lifecycle delivery, and the active browser trace. Pass that context to the root Svelte component:
+
+```js
+import { installLogBrewBrowser } from "@logbrew/browser";
+
+export const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  service: "storefront-browser"
+});
+```
+
+Browser and server keys are separate. Never place the server key in a public Svelte bundle.
 
 ## Component Context
 
 ```svelte
 <script>
-  import { RecordingTransport } from "@logbrew/sdk";
-  import { setLogBrewContext, useLogBrew } from "@logbrew/svelte";
+  import { setLogBrewContext } from "@logbrew/svelte";
 
-  setLogBrewContext({
-    clientKey: "LOGBREW_CLIENT_KEY",
-    transport: RecordingTransport.alwaysAccept()
-  });
+  export let logbrew;
+  setLogBrewContext(logbrew);
 
-  const logbrew = useLogBrew();
   logbrew.client.log("evt_log_001", new Date().toISOString(), {
     message: "dashboard rendered",
     level: "info",
@@ -38,7 +79,7 @@ pnpm add @logbrew/sdk @logbrew/svelte svelte
 <p>Pending events: {logbrew.client.pendingEvents()}</p>
 ```
 
-For Svelte browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples and server-side use.
+For direct component-only setup, `createLogBrewSvelteContext({ clientKey })` now owns authenticated fetch delivery to `https://api.logbrew.co/v1/events`; an explicit transport still overrides it. Use a browser-scoped public key through `clientKey` and a server-scoped key through `serverApiKey` or `LOGBREW_SERVER_API_KEY`.
 
 ## View And Error Helpers
 
@@ -64,11 +105,11 @@ await captureSvelteError(new Error("component failed"), logbrew, {
 });
 ```
 
-Use `captureSvelteError()` from Svelte boundary handlers, app-owned error hooks, or SvelteKit hooks. The helper captures an issue event and then shuts down through the context transport so app error handling remains in the app's control.
+Use `captureSvelteError()` from Svelte boundary handlers or other app-owned error hooks. It creates typed exception evidence through the shared JavaScript diagnostics path and flushes without closing the reusable context. Raw stack text remains excluded unless `includeErrorStack: true` is explicitly supplied; sanitized frames are still captured by default.
 
 ## Trace Propagation
 
-Use `createTraceparentFetch()` when Svelte frontend work should connect to backend traces. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
+Use `createTraceparentFetch()` when Svelte frontend work should connect to backend traces. These exports delegate to the same canonical browser tracing implementation used by `@logbrew/browser`. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
 
 ```js
 import { createSvelteTraceparent, createTraceparentFetch } from "@logbrew/svelte";
