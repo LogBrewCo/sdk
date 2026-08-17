@@ -331,7 +331,7 @@ cat > "$app_dir/main.rb" <<'RUBY'
 
 require "json"
 require "logbrew"
-require "socket"
+require ENV.fetch("LOGBREW_TEST_INTAKE")
 
 def enqueue_all(client)
   client.release("evt_release_001", "2026-06-02T10:00:00Z", version: "1.2.3", commit: "abc123def456", notes: "Public release marker")
@@ -351,70 +351,6 @@ def expect(code)
 rescue LogBrew::SdkError => error
   raise "expected #{code}, got #{error.code}" unless error.code == code
   return
-end
-
-class LocalHttpIntake
-  attr_reader :endpoint, :last_method, :last_path, :last_authorization, :last_content_type, :last_source, :last_body,
-              :bodies, :request_count
-
-  def initialize(statuses = [202])
-    @server = TCPServer.new("127.0.0.1", 0)
-    @endpoint = "http://127.0.0.1:#{@server.addr[1]}/v1/events"
-    @statuses = statuses.dup
-    @bodies = []
-    @request_count = 0
-    @closed = false
-    @thread = Thread.new { accept_loop }
-  end
-
-  def close
-    @closed = true
-    @server.close unless @server.closed?
-    @thread.join(2)
-  end
-
-  private
-
-  def accept_loop
-    until @closed
-      socket = @server.accept
-      begin
-        handle(socket)
-      ensure
-        socket.close unless socket.closed?
-      end
-    end
-  rescue IOError, Errno::EBADF
-    nil
-  end
-
-  def handle(socket)
-    request_line = socket.gets.to_s.strip
-    parts = request_line.split(" ")
-    @last_method = parts[0].to_s
-    @last_path = parts[1].to_s
-
-    headers = {}
-    while (line = socket.gets)
-      stripped = line.chomp
-      break if stripped.empty?
-
-      name, value = stripped.split(":", 2)
-      headers[name.downcase] = value.to_s.strip if name && value
-    end
-
-    body = socket.read(headers.fetch("content-length", "0").to_i).to_s
-    @last_body = body
-    @bodies << body
-    @last_authorization = headers.fetch("authorization", "")
-    @last_content_type = headers.fetch("content-type", "")
-    @last_source = headers.fetch("x-logbrew-source", "")
-    @request_count += 1
-
-    status = @statuses.empty? ? 202 : @statuses.shift
-    reason = status == 503 ? "Service Unavailable" : "Accepted"
-    socket.write("HTTP/1.1 #{status} #{reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-  end
 end
 
 happy = client
@@ -795,7 +731,8 @@ $stderr.puts JSON.generate(
   httpRequests: http_requests
 )
 RUBY
-GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$app_dir/main.rb" > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
+LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
+  GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$app_dir/main.rb" > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"

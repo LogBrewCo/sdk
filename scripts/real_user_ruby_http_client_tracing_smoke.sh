@@ -54,67 +54,18 @@ gem "faraday-net_http", "= 3.0.2"
 require "net/http"
 require "logbrew"
 require "logbrew/faraday_tracing"
-require "socket"
 require "timeout"
 require "uri"
+require ENV.fetch("LOGBREW_TEST_INTAKE")
 
 abort "unexpected Faraday version" unless Faraday::VERSION == "2.8.1"
 abort "unexpected Faraday adapter version" unless Gem.loaded_specs.fetch("faraday-net_http").version.to_s == "3.0.2"
 abort "unexpected Net::HTTP package version" unless Gem.loaded_specs.fetch("net-http").version.to_s == "0.1.1"
 
-Record = Struct.new(:path, :headers, :body, keyword_init: true)
-
-class Intake
-  attr_reader :endpoint, :records
-
-  def initialize
-    @server = TCPServer.new("127.0.0.1", 0)
-    @endpoint = "http://localhost:#{@server.addr[1]}"
-    @records = Queue.new
-    @closed = false
-    @thread = Thread.new { accept_loop }
-  end
-
-  def close
-    @closed = true
-    @server.close unless @server.closed?
-    @thread.join(2)
-  end
-
-  private
-
-  def accept_loop
-    until @closed
-      socket = @server.accept
-      handle(socket)
-    end
-  rescue IOError, Errno::EBADF
-    nil
-  end
-
-  def handle(socket)
-    request_line = socket.gets.to_s.strip.split(" ")
-    headers = {}
-    while (line = socket.gets)
-      stripped = line.chomp
-      break if stripped.empty?
-
-      name, value = stripped.split(":", 2)
-      headers[name.to_s.downcase] = value.to_s.strip
-    end
-    body = socket.read(headers.fetch("content-length", "0").to_i).to_s
-    request_target = request_line[1]
-    route = request_target.to_s.split("?", 2)[0]
-    @records << Record.new(path: request_target, headers: headers, body: body)
-    status = route == "/faraday" ? 201 : 202
-    payload = route == "/v1/events" ? "" : "app-response"
-    socket.write("HTTP/1.1 #{status} OK\r\nContent-Length: #{payload.bytesize}\r\nConnection: close\r\n\r\n#{payload}")
-  ensure
-    socket.close unless socket.closed?
-  end
+intake = LocalHttpIntake.new(host: "localhost", path: "") do |record|
+  route = record.path.split("?", 2).first
+  [route == "/faraday" ? 201 : 202, route == "/v1/events" ? "" : "app-response"]
 end
-
-intake = Intake.new
 begin
   client = LogBrew::Client.create(
     api_key: "package-smoke-key",
@@ -181,7 +132,8 @@ ensure
 end
 RUBY
 
-LOGBREW_RUBY_PACKAGE_VERSION="$package_version" GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
+LOGBREW_RUBY_PACKAGE_VERSION="$package_version" LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
+  GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
   ruby "$tmp_dir/consumer.rb" > "$tmp_dir/integration-consumer.out"
 grep -qx 'installed Ruby HTTP tracing ok requests=3 spans=2' "$tmp_dir/integration-consumer.out"
 

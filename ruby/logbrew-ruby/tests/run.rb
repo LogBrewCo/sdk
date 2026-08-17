@@ -1,21 +1,11 @@
 # frozen_string_literal: true
 
 require "json"
-require "socket"
 require "stringio"
 require_relative "../lib/logbrew"
-
-def assert(condition, message)
-  raise message unless condition
-end
-
-def expect_error(code, message_fragment)
-  yield
-rescue LogBrew::SdkError => error
-  assert(error.code == code, "expected #{code}, got #{error.code}")
-  assert(error.message.include?(message_fragment), "expected error containing #{message_fragment}")
-  return error
-end
+require_relative "local_http_intake"
+require_relative "test_helpers"
+include SdkTestHelpers
 
 def sample_client(max_retries: 2)
   LogBrew::Client.create(
@@ -33,70 +23,6 @@ def enqueue_all(client)
   client.log("evt_log_001", "2026-06-02T10:00:03Z", message: "worker started", level: "info", logger: "job-runner")
   client.span("evt_span_001", "2026-06-02T10:00:04Z", name: "GET /health", traceId: "trace_001", spanId: "span_001", status: "ok", durationMs: 12.5)
   client.action("evt_action_001", "2026-06-02T10:00:05Z", name: "deploy", status: "success")
-end
-
-class LocalHttpIntake
-  attr_reader :endpoint, :last_method, :last_path, :last_authorization, :last_content_type, :last_source, :last_body,
-              :bodies, :request_count
-
-  def initialize(statuses = [202])
-    @server = TCPServer.new("127.0.0.1", 0)
-    @endpoint = "http://127.0.0.1:#{@server.addr[1]}/v1/events"
-    @statuses = statuses.dup
-    @bodies = []
-    @request_count = 0
-    @closed = false
-    @thread = Thread.new { accept_loop }
-  end
-
-  def close
-    @closed = true
-    @server.close unless @server.closed?
-    @thread.join(2)
-  end
-
-  private
-
-  def accept_loop
-    until @closed
-      socket = @server.accept
-      begin
-        handle(socket)
-      ensure
-        socket.close unless socket.closed?
-      end
-    end
-  rescue IOError, Errno::EBADF
-    nil
-  end
-
-  def handle(socket)
-    request_line = socket.gets.to_s.strip
-    parts = request_line.split(" ")
-    @last_method = parts[0].to_s
-    @last_path = parts[1].to_s
-
-    headers = {}
-    while (line = socket.gets)
-      stripped = line.chomp
-      break if stripped.empty?
-
-      name, value = stripped.split(":", 2)
-      headers[name.downcase] = value.to_s.strip if name && value
-    end
-
-    body = socket.read(headers.fetch("content-length", "0").to_i).to_s
-    @last_body = body
-    @bodies << body
-    @last_authorization = headers.fetch("authorization", "")
-    @last_content_type = headers.fetch("content-type", "")
-    @last_source = headers.fetch("x-logbrew-source", "")
-    @request_count += 1
-
-    status = @statuses.empty? ? 202 : @statuses.shift
-    reason = status == 503 ? "Service Unavailable" : "Accepted"
-    socket.write("HTTP/1.1 #{status} #{reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-  end
 end
 
 tests = 0
@@ -196,34 +122,34 @@ assert(network_metadata.fetch("region") == "iad", "expected network metadata")
 assert(network_metadata.fetch("cached") == false, "expected boolean metadata")
 tests += 1
 
-expect_error("validation_error", "product action name must be non-empty") do
+expect_sdk_error("validation_error", "product action name must be non-empty") do
   LogBrew::ProductTimeline.product_action(name: " ")
 end
-expect_error("validation_error", "action status must be one of") do
+expect_sdk_error("validation_error", "action status must be one of") do
   LogBrew::ProductTimeline.product_action(name: "checkout.submit", status: "done")
 end
-expect_error("validation_error", "network milestone route_template must be non-empty") do
+expect_sdk_error("validation_error", "network milestone route_template must be non-empty") do
   LogBrew::ProductTimeline.network_milestone(route_template: " ")
 end
-expect_error("validation_error", "network milestone method must be a valid HTTP method") do
+expect_sdk_error("validation_error", "network milestone method must be a valid HTTP method") do
   LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", method: "bad method")
 end
-expect_error("validation_error", "network milestone status_code must be between 100 and 599") do
+expect_sdk_error("validation_error", "network milestone status_code must be between 100 and 599") do
   LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", status_code: 99)
 end
-expect_error("validation_error", "network milestone duration_ms must be a finite number") do
+expect_sdk_error("validation_error", "network milestone duration_ms must be a finite number") do
   LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", duration_ms: Float::INFINITY)
 end
-expect_error("validation_error", "network milestone duration_ms must be non-negative") do
+expect_sdk_error("validation_error", "network milestone duration_ms must be non-negative") do
   LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", duration_ms: -1)
 end
-expect_error("validation_error", "network milestone name must be non-empty") do
+expect_sdk_error("validation_error", "network milestone name must be non-empty") do
   LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", name: " ")
 end
-expect_error("validation_error", "metadata value for nested must be a string, number, boolean, or null") do
+expect_sdk_error("validation_error", "metadata value for nested must be a string, number, boolean, or null") do
   LogBrew::ProductTimeline.product_action(name: "checkout.submit", metadata: { nested: [] })
 end
-expect_error("validation_error", "metadata key must be non-empty") do
+expect_sdk_error("validation_error", "metadata key must be non-empty") do
   LogBrew::ProductTimeline.product_action(name: "checkout.submit", metadata: { "" => "bad" })
 end
 tests += 1
@@ -259,28 +185,28 @@ assert(span_attributes.fetch("durationMs") == 183.4, "expected traceparent span 
 assert(span_attributes.fetch("metadata").fetch("routeTemplate") == "/checkout/:cart_id", "expected traceparent metadata")
 tests += 1
 
-expect_error("validation_error", "traceparent must have four fields") do
+expect_sdk_error("validation_error", "traceparent must have four fields") do
   LogBrew::Traceparent.parse("bad")
 end
-expect_error("validation_error", "traceparent version must be two hex characters and not ff") do
+expect_sdk_error("validation_error", "traceparent version must be two hex characters and not ff") do
   LogBrew::Traceparent.parse("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 end
-expect_error("validation_error", "traceparent trace id must be 32 non-zero hex characters") do
+expect_sdk_error("validation_error", "traceparent trace id must be 32 non-zero hex characters") do
   LogBrew::Traceparent.parse("00-00000000000000000000000000000000-00f067aa0ba902b7-01")
 end
-expect_error("validation_error", "traceparent parent span id must be 16 non-zero hex characters") do
+expect_sdk_error("validation_error", "traceparent parent span id must be 16 non-zero hex characters") do
   LogBrew::Traceparent.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01")
 end
-expect_error("validation_error", "traceparent flags must be two hex characters") do
+expect_sdk_error("validation_error", "traceparent flags must be two hex characters") do
   LogBrew::Traceparent.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0z")
 end
-expect_error("validation_error", "span spanId must be 16 non-zero hex characters") do
+expect_sdk_error("validation_error", "span spanId must be 16 non-zero hex characters") do
   LogBrew::Traceparent.span_attributes_from_traceparent(
     trace_context,
     LogBrew::TraceparentSpanInput.new(name: "POST /checkout", span_id: "0000000000000000")
   )
 end
-expect_error("validation_error", "metadata value for nested must be a string, number, boolean, or null") do
+expect_sdk_error("validation_error", "metadata value for nested must be a string, number, boolean, or null") do
   LogBrew::Traceparent.span_attributes_from_traceparent(
     trace_context,
     LogBrew::TraceparentSpanInput.new(name: "POST /checkout", span_id: "b7ad6b7169203331", metadata: { nested: [] })
@@ -304,12 +230,12 @@ assert(empty.status_code == 204, "expected empty flush status")
 assert(empty.attempts.zero?, "expected empty flush attempts")
 tests += 1
 
-expect_error("validation_error", "timestamp must include a timezone offset") do
+expect_sdk_error("validation_error", "timestamp must include a timezone offset") do
   sample_client.log("evt_log_001", "2026-06-02T10:00:03", message: "worker started", level: "info")
 end
 tests += 1
 
-expect_error("validation_error", "issue level must be one of") do
+expect_sdk_error("validation_error", "issue level must be one of") do
   sample_client.issue("evt_issue_001", "2026-06-02T10:00:02Z", title: "Checkout timeout", level: "verbose")
 end
 client = sample_client
@@ -320,28 +246,28 @@ levels = JSON.parse(client.preview_json).fetch("events").map { |event| event.fet
 assert(levels == %w[critical info warning], "expected severity aliases to normalize")
 tests += 1
 
-expect_error("validation_error", "span durationMs must be non-negative") do
+expect_sdk_error("validation_error", "span durationMs must be non-negative") do
   sample_client.span("evt_span_001", "2026-06-02T10:00:04Z", name: "GET /health", traceId: "trace_001", spanId: "span_001", status: "ok", durationMs: -1)
 end
 tests += 1
 
-expect_error("validation_error", "metric value must be a finite number") do
+expect_sdk_error("validation_error", "metric value must be a finite number") do
   sample_client.metric("evt_metric_001", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: Float::NAN, unit: "{items}", temporality: "instant")
 end
 tests += 1
 
-expect_error("validation_error", "metric counter value must be non-negative") do
+expect_sdk_error("validation_error", "metric counter value must be non-negative") do
   sample_client.metric("evt_metric_001", "2026-06-02T10:00:06Z", name: "jobs.completed", kind: "counter", value: -1, unit: "1", temporality: "delta")
 end
 tests += 1
 
-expect_error("validation_error", "metric temporality for gauge must be one of: instant") do
+expect_sdk_error("validation_error", "metric temporality for gauge must be one of: instant") do
   sample_client.metric("evt_metric_001", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: 2, unit: "{items}", temporality: "delta")
 end
 tests += 1
 
 [nil, 42, "   ", "M" * 1025, "request\u0085count", "request\u2028count"].each do |description|
-  expect_error("validation_error", "metric description must be a non-blank string of at most 1024 non-control characters") do
+  expect_sdk_error("validation_error", "metric description must be a non-blank string of at most 1024 non-control characters") do
     sample_client.metric(
       "evt_metric_bad_description",
       "2026-06-02T10:00:06Z",
@@ -358,7 +284,7 @@ tests += 1
 
 client = sample_client
 enqueue_all(client)
-expect_error("unauthenticated", "transport rejected the API key") do
+expect_sdk_error("unauthenticated", "transport rejected the API key") do
   client.flush(LogBrew::RecordingTransport.new([401]))
 end
 assert(client.pending_events == 6, "expected unauthenticated failure to preserve queue")
@@ -378,7 +304,7 @@ retry_budget_transport = LogBrew::RecordingTransport.new([
   LogBrew::TransportError.network("temporary outage"),
   LogBrew::TransportError.network("still down")
 ])
-expect_error("network_failure", "still down") do
+expect_sdk_error("network_failure", "still down") do
   client.flush(retry_budget_transport)
 end
 assert(client.pending_events == 6, "expected retry-budget failure to preserve queue")
@@ -386,7 +312,7 @@ tests += 1
 
 client = sample_client
 enqueue_all(client)
-expect_error("transport_error", "unexpected transport status 400") do
+expect_sdk_error("transport_error", "unexpected transport status 400") do
   client.flush(LogBrew::RecordingTransport.new([400]))
 end
 assert(client.pending_events == 6, "expected non-retryable status to preserve queue")
@@ -444,13 +370,13 @@ else
 end
 tests += 1
 
-expect_error("configuration_error", "endpoint must use http or https") do
+expect_sdk_error("configuration_error", "endpoint must use http or https") do
   LogBrew::HttpTransport.new(endpoint: "/v1/events")
 end
-expect_error("configuration_error", "header name must be non-empty") do
+expect_sdk_error("configuration_error", "header name must be non-empty") do
   LogBrew::HttpTransport.new(headers: { " " => "bad" })
 end
-expect_error("configuration_error", "timeout must be positive") do
+expect_sdk_error("configuration_error", "timeout must be positive") do
   LogBrew::HttpTransport.new(timeout: 0)
 end
 tests += 1
@@ -459,7 +385,7 @@ client = sample_client
 enqueue_all(client)
 shutdown_response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 assert(shutdown_response.status_code == 202, "expected shutdown flush")
-expect_error("shutdown_error", "client is already shut down") do
+expect_sdk_error("shutdown_error", "client is already shut down") do
   client.action("evt_action_002", "2026-06-02T10:00:06Z", name: "deploy", status: "success")
 end
 tests += 1
@@ -846,7 +772,7 @@ assert(large_support_diagnostics.length == 20, "expected support diagnostic map 
 assert(!large_support_diagnostics.key?("item24"), "expected support diagnostic map tail truncation")
 tests += 1
 
-expect_error("validation_error", "support ticket source must be one of") do
+expect_sdk_error("validation_error", "support ticket source must be one of") do
   LogBrew::SupportTicketDraft.create(
     source: "daemon",
     category: "ingest_failure",
@@ -854,7 +780,7 @@ expect_error("validation_error", "support ticket source must be one of") do
     description: "Flush failed"
   )
 end
-expect_error("validation_error", "support ticket trace_id must be 32 non-zero hex characters") do
+expect_sdk_error("validation_error", "support ticket trace_id must be 32 non-zero hex characters") do
   LogBrew::SupportTicketDraft.create(
     source: "sdk",
     category: "ingest_failure",
@@ -863,7 +789,7 @@ expect_error("validation_error", "support ticket trace_id must be 32 non-zero he
     trace_id: "00000000000000000000000000000000"
   )
 end
-expect_error("validation_error", "support ticket diagnostics must be an object") do
+expect_sdk_error("validation_error", "support ticket diagnostics must be an object") do
   LogBrew::SupportTicketDraft.create(
     source: "sdk",
     category: "other",

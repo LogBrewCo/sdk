@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request, database, cache, view, and error capture; standard-library `Net::HTTP` delivery; opt-in standard-library `Logger` support; and manual Rack helpers.
+Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request, database, cache, view, error, and ActiveJob capture; standard-library `Net::HTTP` delivery; opt-in standard-library `Logger` support; and manual Rack helpers.
 
 The core package has no runtime gem dependencies. Its automatic integration
 activates only inside an application that has already loaded Rails.
@@ -23,7 +23,7 @@ needed:
 
 ```ruby
 # Gemfile
-gem "logbrew-sdk", "~> 0.1.8"
+gem "logbrew-sdk", "~> 0.1.9"
 ```
 
 ```bash
@@ -53,7 +53,19 @@ frames. Handled Rails reports use `rails.error_reporter` with `handled: true`.
 It does not record concrete request paths, query strings, request or response
 bodies, arbitrary headers, authorization values, cookies, user IDs, exception
 messages, raw backtrace text, source snippets, locals, arguments, or absolute
-paths. Exception messages and raw backtrace text are separate opt-ins:
+paths. Exception messages and raw backtrace text are separate opt-ins.
+
+ActiveJob needs no extra initializer. Each enqueue and execution emits a
+producer or worker span, including bounded adapter identity, retry count, and
+queue wait. A versioned W3C carrier keeps retries and supported queue adapters
+on one trace. A retryable failure remains span evidence; only an unexpected
+terminal `StandardError` creates an unhandled `rails.active_job` issue with
+sanitized structured frames. The adapter does not capture job IDs, queue names,
+arguments, serialized payloads, exception messages, or raw backtraces by
+default. When ActiveJob uses LogBrew's Sidekiq middleware, the inner carrier
+suppresses duplicate Sidekiq spans and issues.
+
+The explicit Rails capture settings are:
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |

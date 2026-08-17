@@ -7,6 +7,7 @@ require "thread"
 require "timeout"
 require "uri"
 require_relative "../lib/logbrew"
+require_relative "local_http_intake"
 
 require "faraday"
 require "faraday/net_http"
@@ -19,66 +20,13 @@ rescue LoadError => error
   error
 end
 
-HttpTracingRecord = Struct.new(:method, :path, :headers, :body, keyword_init: true)
-
-class HttpTracingServer
-  attr_reader :endpoint, :records
-
+class HttpTracingServer < LocalHttpIntake
   def initialize(responses = {})
-    @server = TCPServer.new("127.0.0.1", 0)
-    @endpoint = "http://127.0.0.1:#{@server.addr[1]}"
-    @responses = responses
-    @records = Queue.new
-    @workers = []
-    @closed = false
-    @accept_thread = Thread.new { accept_loop }
-  end
-
-  def close
-    @closed = true
-    @server.close unless @server.closed?
-    @accept_thread.join(2)
-    @workers.each { |worker| worker.join(2) }
-  end
-
-  private
-
-  def accept_loop
-    until @closed
-      socket = @server.accept
-      @workers << Thread.new(socket) { |accepted| handle(accepted) }
+    super(path: "", concurrent: true, split: true) do |record|
+      response = responses.fetch(record.path.split("?", 2)[0], {})
+      sleep(response.fetch(:delay, 0))
+      [response.fetch(:status, 200), response.fetch(:body, "response-body")]
     end
-  rescue IOError, Errno::EBADF
-    nil
-  end
-
-  def handle(socket)
-    request_line = socket.gets.to_s.strip.split(" ")
-    headers = {}
-    while (line = socket.gets)
-      stripped = line.chomp
-      break if stripped.empty?
-
-      name, value = stripped.split(":", 2)
-      headers[name.to_s.downcase] = value.to_s.strip
-    end
-    body = socket.read(headers.fetch("content-length", "0").to_i).to_s
-    path = request_line[1].to_s
-    @records << HttpTracingRecord.new(method: request_line[0], path: path, headers: headers, body: body)
-
-    response = @responses.fetch(path.split("?", 2)[0], {})
-    sleep(response.fetch(:delay, 0))
-    status = response.fetch(:status, 200)
-    payload = response.fetch(:body, "response-body")
-    reason = status >= 500 ? "Server Error" : "OK"
-    socket.write("HTTP/1.1 #{status} #{reason}\r\nContent-Length: #{payload.bytesize}\r\nConnection: close\r\n\r\n")
-    midpoint = payload.bytesize / 2
-    socket.write(payload.byteslice(0, midpoint))
-    socket.flush
-    sleep(0.01) if payload.bytesize > 1
-    socket.write(payload.byteslice(midpoint, payload.bytesize - midpoint))
-  ensure
-    socket.close unless socket.closed?
   end
 end
 

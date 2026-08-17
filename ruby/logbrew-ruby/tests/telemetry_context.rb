@@ -3,22 +3,8 @@
 require "json"
 require "tmpdir"
 require_relative "../lib/logbrew"
-
-def context_assert(condition, message)
-  raise message unless condition
-end
-
-def expect_context_error(message_fragment)
-  yield
-  raise "expected telemetry context validation error containing #{message_fragment}"
-rescue LogBrew::SdkError => error
-  context_assert(error.code == "validation_error", "expected validation_error, got #{error.code}")
-  context_assert(
-    error.message.include?(message_fragment),
-    "expected telemetry context error containing #{message_fragment}, got #{error.message}"
-  )
-  error
-end
+require_relative "test_helpers"
+include SdkTestHelpers
 
 def context_client(context: nil, capture_runtime_context: false, persistent_queue_path: nil)
   LogBrew::Client.create(
@@ -131,10 +117,10 @@ detached_copy = detached.to_h
 detached_copy.fetch("resource").fetch("service")["name"] = "mutated-again"
 detached_copy.fetch("tags")["journey"] = "mutated-again"
 detached_value = detached.to_h
-context_assert(detached_value.dig("resource", "service", "name") == "checkout-api", "context did not detach resource input")
-context_assert(detached_value.dig("tags", "journey") == "checkout", "context did not detach tag input")
-context_assert(detached_value.dig("trace", "traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "context did not normalize trace id")
-context_assert(detached_value.dig("trace", "spanId") == "00f067aa0ba902b7", "context did not normalize span id")
+assert(detached_value.dig("resource", "service", "name") == "checkout-api", "context did not detach resource input")
+assert(detached_value.dig("tags", "journey") == "checkout", "context did not detach tag input")
+assert(detached_value.dig("trace", "traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "context did not normalize trace id")
+assert(detached_value.dig("trace", "spanId") == "00f067aa0ba902b7", "context did not normalize span id")
 tests += 1
 
 client_resource = LogBrew::TelemetryResource.create
@@ -172,23 +158,23 @@ event_override = LogBrew::TelemetryContext.create
 client = context_client(context: client_context)
 enqueue_context_signals(client, prefix: "merged", context: event_override)
 events = context_events(client)
-context_assert(events.length == 7, "expected shared context on all seven Ruby signals")
+assert(events.length == 7, "expected shared context on all seven Ruby signals")
 events.each do |event|
   context = event_context(event)
-  context_assert(context.fetch("schemaVersion") == 1, "expected schema version 1")
-  context_assert(context.dig("resource", "service", "name") == "checkout-api", "expected client service name")
-  context_assert(context.dig("resource", "service", "version") == "1.4.1", "expected event service version")
-  context_assert(context.dig("resource", "deployment", "environment") == "production", "expected client environment")
-  context_assert(context.dig("resource", "deployment", "release") == "checkout@1.4.1", "expected event release")
-  context_assert(context.dig("resource", "framework", "version") == "8.1.4", "expected event framework")
-  context_assert(context.dig("resource", "application", "build") == "140", "expected client application")
-  context_assert(context.dig("trace", "traceId") == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected event trace replacement")
-  context_assert(context.dig("session", "id") == "session_event", "expected event session replacement")
-  context_assert(!context.fetch("session").key?("previousId"), "event session must replace client session")
-  context_assert(context.dig("subject", "id") == "subject_event", "expected event subject replacement")
-  context_assert(context.dig("tags", "journey") == "recovery", "expected event tag override")
-  context_assert(context.dig("tags", "region") == "eu", "expected retained client tag")
-  context_assert(context.dig("tags", "step") == "payment", "expected event tag addition")
+  assert(context.fetch("schemaVersion") == 1, "expected schema version 1")
+  assert(context.dig("resource", "service", "name") == "checkout-api", "expected client service name")
+  assert(context.dig("resource", "service", "version") == "1.4.1", "expected event service version")
+  assert(context.dig("resource", "deployment", "environment") == "production", "expected client environment")
+  assert(context.dig("resource", "deployment", "release") == "checkout@1.4.1", "expected event release")
+  assert(context.dig("resource", "framework", "version") == "8.1.4", "expected event framework")
+  assert(context.dig("resource", "application", "build") == "140", "expected client application")
+  assert(context.dig("trace", "traceId") == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected event trace replacement")
+  assert(context.dig("session", "id") == "session_event", "expected event session replacement")
+  assert(!context.fetch("session").key?("previousId"), "event session must replace client session")
+  assert(context.dig("subject", "id") == "subject_event", "expected event subject replacement")
+  assert(context.dig("tags", "journey") == "recovery", "expected event tag override")
+  assert(context.dig("tags", "region") == "eu", "expected retained client tag")
+  assert(context.dig("tags", "step") == "payment", "expected event tag addition")
 end
 tests += 1
 
@@ -209,7 +195,7 @@ active_trace = LogBrew::Trace.create(
 ambient_client = context_client(
   context: LogBrew::TelemetryContext.create.with_tag("client", "ruby").build
 )
-context_assert(LogBrew::Telemetry.current_context.nil?, "expected no ambient context before activation")
+assert(LogBrew::Telemetry.current_context.nil?, "expected no ambient context before activation")
 LogBrew::Telemetry.with_context(ambient_context) do
   LogBrew::Trace.with_context(active_trace) do
     enqueue_context_signals(ambient_client, prefix: "ambient")
@@ -229,21 +215,21 @@ LogBrew::Telemetry.with_context(ambient_context) do
     )
   end
 end
-context_assert(LogBrew::Telemetry.current_context.nil?, "ambient context did not unwind")
+assert(LogBrew::Telemetry.current_context.nil?, "ambient context did not unwind")
 ambient_events = context_events(ambient_client)
 ambient_events.first(7).each do |event|
   context = event_context(event)
-  context_assert(context.dig("session", "id") == "session_ambient", "expected ambient session on every signal")
-  context_assert(context.dig("trace", "traceId") == active_trace.trace_id, "expected active trace on every signal")
-  context_assert(context.dig("trace", "spanId") == active_trace.span_id, "expected active span on every signal")
-  context_assert(context.dig("tags", "client") == "ruby", "expected client tag under ambient context")
+  assert(context.dig("session", "id") == "session_ambient", "expected ambient session on every signal")
+  assert(context.dig("trace", "traceId") == active_trace.trace_id, "expected active trace on every signal")
+  assert(context.dig("trace", "spanId") == active_trace.span_id, "expected active span on every signal")
+  assert(context.dig("tags", "client") == "ruby", "expected client tag under ambient context")
 end
 nested_event = ambient_events.find { |event| event.fetch("id") == "ambient_nested" }
 after_nested_event = ambient_events.find { |event| event.fetch("id") == "ambient_after_nested" }
-context_assert(event_context(nested_event).dig("tags", "scope") == "inner", "expected nested scope override")
-context_assert(event_context(nested_event).dig("tags", "step") == "confirm", "expected nested scope tag")
-context_assert(event_context(after_nested_event).dig("tags", "scope") == "outer", "expected exact outer scope after nesting")
-context_assert(!event_context(after_nested_event).fetch("tags").key?("step"), "nested scope remained after unwind")
+assert(event_context(nested_event).dig("tags", "scope") == "inner", "expected nested scope override")
+assert(event_context(nested_event).dig("tags", "step") == "confirm", "expected nested scope tag")
+assert(event_context(after_nested_event).dig("tags", "scope") == "outer", "expected exact outer scope after nesting")
+assert(!event_context(after_nested_event).fetch("tags").key?("step"), "nested scope remained after unwind")
 application_error = RuntimeError.new("application failure")
 raised_error = nil
 begin
@@ -251,13 +237,13 @@ begin
 rescue RuntimeError => error
   raised_error = error
 end
-context_assert(raised_error.equal?(application_error), "context wrapper changed the application error")
-context_assert(LogBrew::Telemetry.current_context.nil?, "context remained after application failure")
+assert(raised_error.equal?(application_error), "context wrapper changed the application error")
+assert(LogBrew::Telemetry.current_context.nil?, "context remained after application failure")
 manual_scope = LogBrew::Telemetry.activate_context(ambient_context)
-context_assert(LogBrew::Telemetry.current_context.to_h == ambient_context.to_h, "manual activation did not expose context")
+assert(LogBrew::Telemetry.current_context.to_h == ambient_context.to_h, "manual activation did not expose context")
 manual_scope.close
 manual_scope.close
-context_assert(LogBrew::Telemetry.current_context.nil?, "idempotent manual close left context active")
+assert(LogBrew::Telemetry.current_context.nil?, "idempotent manual close left context active")
 tests += 1
 
 isolation_client = context_client
@@ -279,8 +265,8 @@ LogBrew::Telemetry.with_context(ambient_context) do
   )
 end
 isolated = context_events(isolation_client).to_h { |event| [event.fetch("id"), event] }
-context_assert(!isolated.fetch("isolated_thread").fetch("attributes").key?("context"), "ambient context leaked across threads")
-context_assert(event_context(isolated.fetch("owning_thread")).dig("session", "id") == "session_ambient", "owning thread lost ambient context")
+assert(!isolated.fetch("isolated_thread").fetch("attributes").key?("context"), "ambient context leaked across threads")
+assert(event_context(isolated.fetch("owning_thread")).dig("session", "id") == "session_ambient", "owning thread lost ambient context")
 fiber_client = context_client
 fiber_a = Fiber.new do
   LogBrew::Telemetry.with_context(
@@ -303,8 +289,8 @@ fiber_b.resume
 fiber_b.resume
 fiber_a.resume
 fiber_events = context_events(fiber_client).to_h { |event| [event.fetch("id"), event] }
-context_assert(event_context(fiber_events.fetch("fiber_a")).dig("session", "id") == "session_fiber_a", "fiber A context changed")
-context_assert(event_context(fiber_events.fetch("fiber_b")).dig("session", "id") == "session_fiber_b", "fiber B context changed")
+assert(event_context(fiber_events.fetch("fiber_a")).dig("session", "id") == "session_fiber_a", "fiber A context changed")
+assert(event_context(fiber_events.fetch("fiber_b")).dig("session", "id") == "session_fiber_b", "fiber B context changed")
 tests += 1
 
 privacy_marker = "private-runtime-marker-#{Process.pid}"
@@ -314,76 +300,76 @@ runtime_client.log("runtime_default", "2026-08-03T10:00:05Z", message: "runtime"
 runtime_event = context_events(runtime_client).fetch(0)
 runtime_context = event_context(runtime_event)
 runtime_name = defined?(RUBY_ENGINE) ? RUBY_ENGINE : "ruby"
-context_assert(runtime_context.dig("resource", "runtime", "name") == runtime_name, "expected Ruby runtime name")
-context_assert(runtime_context.dig("resource", "runtime", "version") == RUBY_VERSION, "expected Ruby runtime version")
-context_assert(!runtime_context.dig("resource", "operatingSystem", "name").to_s.empty?, "expected OS family")
-context_assert(!runtime_context.dig("resource", "device", "architecture").to_s.empty?, "expected architecture")
+assert(runtime_context.dig("resource", "runtime", "name") == runtime_name, "expected Ruby runtime name")
+assert(runtime_context.dig("resource", "runtime", "version") == RUBY_VERSION, "expected Ruby runtime version")
+assert(!runtime_context.dig("resource", "operatingSystem", "name").to_s.empty?, "expected OS family")
+assert(!runtime_context.dig("resource", "device", "architecture").to_s.empty?, "expected architecture")
 runtime_resource = runtime_context.fetch("resource")
-context_assert(runtime_resource.keys.sort == %w[device operatingSystem runtime], "runtime context captured an unexpected resource section")
-context_assert(runtime_resource.fetch("runtime").keys.sort == %w[name version], "runtime context captured unexpected runtime identity")
-context_assert((runtime_resource.fetch("operatingSystem").keys - %w[name version]).empty?, "runtime context captured unexpected OS identity")
-context_assert(runtime_resource.fetch("device").keys == ["architecture"], "runtime context captured unexpected device identity")
+assert(runtime_resource.keys.sort == %w[device operatingSystem runtime], "runtime context captured an unexpected resource section")
+assert(runtime_resource.fetch("runtime").keys.sort == %w[name version], "runtime context captured unexpected runtime identity")
+assert((runtime_resource.fetch("operatingSystem").keys - %w[name version]).empty?, "runtime context captured unexpected OS identity")
+assert(runtime_resource.fetch("device").keys == ["architecture"], "runtime context captured unexpected device identity")
 serialized_runtime = JSON.generate(runtime_context)
-context_assert(!serialized_runtime.include?(privacy_marker), "runtime context leaked environment data")
+assert(!serialized_runtime.include?(privacy_marker), "runtime context leaked environment data")
 opt_out_client = context_client(capture_runtime_context: false)
 opt_out_client.log("runtime_opt_out", "2026-08-03T10:00:06Z", message: "opted out", level: "info")
-context_assert(!context_events(opt_out_client).fetch(0).fetch("attributes").key?("context"), "runtime context opt-out was ignored")
+assert(!context_events(opt_out_client).fetch(0).fetch("attributes").key?("context"), "runtime context opt-out was ignored")
 explicit_runtime = LogBrew::TelemetryContext.create
   .with_resource(LogBrew::TelemetryResource.create.with_runtime(name: "custom-ruby", version: "9.9.9").build)
   .build
 override_client = context_client(context: explicit_runtime, capture_runtime_context: true)
 override_client.log("runtime_override", "2026-08-03T10:00:07Z", message: "override", level: "info")
 override_runtime = event_context(context_events(override_client).fetch(0)).dig("resource", "runtime")
-context_assert(override_runtime == { "name" => "custom-ruby", "version" => "9.9.9" }, "explicit runtime did not win")
+assert(override_runtime == { "name" => "custom-ruby", "version" => "9.9.9" }, "explicit runtime did not win")
 ENV.delete("LOGBREW_RUBY_RUNTIME_PRIVATE_MARKER")
 tests += 1
 
-expect_context_error("telemetry context must include") do
+expect_sdk_error("validation_error", "telemetry context must include") do
   LogBrew::TelemetryContext.from_hash(schemaVersion: 1)
 end
-expect_context_error("schemaVersion must be 1") do
+expect_sdk_error("validation_error", "schemaVersion must be 1") do
   LogBrew::TelemetryContext.from_hash(schemaVersion: 2, tags: { journey: "checkout" })
 end
-expect_context_error("unknown field") do
+expect_sdk_error("validation_error", "unknown field") do
   LogBrew::TelemetryContext.from_hash(schemaVersion: 1, extra: { value: "no" })
 end
-expect_context_error("telemetry resource must not be empty") do
+expect_sdk_error("validation_error", "telemetry resource must not be empty") do
   LogBrew::TelemetryResource.from_hash({})
 end
-expect_context_error("runtime name is required") do
+expect_sdk_error("validation_error", "runtime name is required") do
   LogBrew::TelemetryResource.from_hash(runtime: { version: "3.3.0" })
 end
-expect_context_error("traceId must be 32 non-zero hex characters") do
+expect_sdk_error("validation_error", "traceId must be 32 non-zero hex characters") do
   LogBrew::TelemetryContext.create.with_trace_ids(trace_id: "0" * 32).build
 end
-expect_context_error("session previousId must differ from id") do
+expect_sdk_error("validation_error", "session previousId must differ from id") do
   LogBrew::TelemetryContext.create.with_session(id: "same", previous_id: "same").build
 end
-expect_context_error("subject kind must be anonymous or user") do
+expect_sdk_error("validation_error", "subject kind must be anonymous or user") do
   LogBrew::TelemetryContext.create.with_subject(id: "subject", kind: "email").build
 end
-expect_context_error("tag key") do
+expect_sdk_error("validation_error", "tag key") do
   LogBrew::TelemetryContext.create.with_tag("bad key", "value").build
 end
-expect_context_error("tag key") do
+expect_sdk_error("validation_error", "tag key") do
   LogBrew::TelemetryContext.create.with_tag(" padded", "value").build
 end
-expect_context_error("at most 32 tags") do
+expect_sdk_error("validation_error", "at most 32 tags") do
   LogBrew::TelemetryContext.create.with_tags((0...33).to_h { |index| ["tag#{index}", "value"] }).build
 end
-expect_context_error("must not contain control characters") do
+expect_sdk_error("validation_error", "must not contain control characters") do
   LogBrew::TelemetryResource.create.with_service(name: "bad\nservice").build
 end
-expect_context_error("must contain at most 256 characters") do
+expect_sdk_error("validation_error", "must contain at most 256 characters") do
   LogBrew::TelemetryResource.create.with_service(name: "x" * 257).build
 end
-expect_context_error("must be valid UTF-8") do
+expect_sdk_error("validation_error", "must be valid UTF-8") do
   LogBrew::TelemetryResource.create.with_service(name: "bad\xFF".dup.force_encoding(Encoding::UTF_8)).build
 end
-expect_context_error("client context must be a LogBrew::TelemetryContext") do
+expect_sdk_error("validation_error", "client context must be a LogBrew::TelemetryContext") do
   context_client(context: { schemaVersion: 1, tags: { journey: "checkout" } })
 end
-expect_context_error("capture_runtime_context must be a boolean") do
+expect_sdk_error("validation_error", "capture_runtime_context must be a boolean") do
   LogBrew::Client.create(
     api_key: "LOGBREW_API_KEY",
     sdk_name: "logbrew-ruby",
@@ -391,7 +377,7 @@ expect_context_error("capture_runtime_context must be a boolean") do
     capture_runtime_context: "yes"
   )
 end
-expect_context_error("event context must be a LogBrew::TelemetryContext") do
+expect_sdk_error("validation_error", "event context must be a LogBrew::TelemetryContext") do
   context_client.log(
     "invalid_event_context",
     "2026-08-03T10:00:08Z",
@@ -412,12 +398,12 @@ issue_attributes = LogBrew::IssueDiagnostics.from_exception(
   context: issue_context,
   include_stack_frames: false
 )
-context_assert(issue_attributes.fetch("context").equal?(issue_context), "issue helper did not preserve typed context")
+assert(issue_attributes.fetch("context").equal?(issue_context), "issue helper did not preserve typed context")
 issue_client = context_client
 issue_client.issue("issue_context", "2026-08-03T10:00:09Z", issue_attributes)
 captured_issue_context = event_context(context_events(issue_client).fetch(0))
-context_assert(captured_issue_context.dig("session", "id") == "session_issue", "issue helper session context was lost")
-context_assert(captured_issue_context.dig("tags", "journey") == "recovery", "issue helper tags were lost")
+assert(captured_issue_context.dig("session", "id") == "session_issue", "issue helper session context was lost")
+assert(captured_issue_context.dig("tags", "journey") == "recovery", "issue helper tags were lost")
 tests += 1
 
 Dir.mktmpdir("logbrew-ruby-context") do |root|
@@ -449,14 +435,14 @@ Dir.mktmpdir("logbrew-ruby-context") do |root|
   before_restart = reader.read
   reader.close
   _waited_pid, status = Process.wait2(pid)
-  context_assert(status.success?, "context persistence child failed")
+  assert(status.success?, "context persistence child failed")
 
   reopened = context_client(capture_runtime_context: false, persistent_queue_path: queue_path)
-  context_assert(reopened.preview_json == before_restart, "restart rewrote admitted telemetry context")
+  assert(reopened.preview_json == before_restart, "restart rewrote admitted telemetry context")
   recovered = event_context(context_events(reopened).fetch(0))
-  context_assert(recovered.dig("session", "id") == "session_persisted", "restart lost session context")
-  context_assert(recovered.dig("tags", "journey") == "recovery", "restart lost tag context")
-  context_assert(!recovered.dig("resource").to_h.key?("runtime"), "restart added runtime context to admitted event")
+  assert(recovered.dig("session", "id") == "session_persisted", "restart lost session context")
+  assert(recovered.dig("tags", "journey") == "recovery", "restart lost tag context")
+  assert(!recovered.dig("resource").to_h.key?("runtime"), "restart added runtime context to admitted event")
   reopened.shutdown(LogBrew::RecordingTransport.always_accept)
 end
 tests += 1

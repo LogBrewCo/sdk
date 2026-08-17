@@ -3,10 +3,8 @@
 require "json"
 require "open3"
 require_relative "../lib/logbrew/sidekiq"
-
-def assert_sidekiq(condition, message)
-  raise message unless condition
-end
+require_relative "test_helpers"
+include SdkTestHelpers
 
 def sidekiq_client
   LogBrew::Client.create(
@@ -99,27 +97,27 @@ core_stdout, core_stderr, core_status = Open3.capture3(
   "-e",
   'require "logbrew/sidekiq"; abort "unexpected framework load" if defined?(::Sidekiq); print "ok"'
 )
-assert_sidekiq(core_status.success?, "optional integration failed without Sidekiq: #{core_stderr}")
-assert_sidekiq(core_stdout == "ok", "optional integration subprocess output changed")
+assert(core_status.success?, "optional integration failed without Sidekiq: #{core_stderr}")
+assert(core_stdout == "ok", "optional integration subprocess output changed")
 sidekiq_tests += 1
 
 client = sidekiq_client
 instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: client)
 config = SidekiqTestConfig.new
-assert_sidekiq(instrumentation.register_client(config), "first client registration must install")
-assert_sidekiq(!instrumentation.register_client(config), "duplicate client registration must be idempotent")
-assert_sidekiq(instrumentation.register_server(config), "first server registration must install")
-assert_sidekiq(!instrumentation.register_server(config), "duplicate server registration must be idempotent")
-assert_sidekiq(config.client_chain.entries.length == 1, "client middleware duplicated")
-assert_sidekiq(config.server_chain.entries.length == 1, "server middleware duplicated")
+assert(instrumentation.register_client(config), "first client registration must install")
+assert(!instrumentation.register_client(config), "duplicate client registration must be idempotent")
+assert(instrumentation.register_server(config), "first server registration must install")
+assert(!instrumentation.register_server(config), "duplicate server registration must be idempotent")
+assert(config.client_chain.entries.length == 1, "client middleware duplicated")
+assert(config.server_chain.entries.length == 1, "server middleware duplicated")
 other_instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: sidekiq_client)
-assert_sidekiq(!other_instrumentation.register_client(config), "second owner replaced client middleware")
-assert_sidekiq(!other_instrumentation.unregister_client(config), "non-owner removed client middleware")
-assert_sidekiq(config.client_chain.entries.length == 1, "non-owner changed client middleware")
-assert_sidekiq(instrumentation.unregister_client(config), "client removal did not report a change")
-assert_sidekiq(!instrumentation.unregister_client(config), "client removal must be idempotent")
-assert_sidekiq(instrumentation.unregister_server(config), "server removal did not report a change")
-assert_sidekiq(!instrumentation.unregister_server(config), "server removal must be idempotent")
+assert(!other_instrumentation.register_client(config), "second owner replaced client middleware")
+assert(!other_instrumentation.unregister_client(config), "non-owner removed client middleware")
+assert(config.client_chain.entries.length == 1, "non-owner changed client middleware")
+assert(instrumentation.unregister_client(config), "client removal did not report a change")
+assert(!instrumentation.unregister_client(config), "client removal must be idempotent")
+assert(instrumentation.unregister_server(config), "server removal did not report a change")
+assert(!instrumentation.unregister_server(config), "server removal must be idempotent")
 sidekiq_tests += 1
 
 if Process.respond_to?(:fork)
@@ -142,8 +140,8 @@ if Process.respond_to?(:fork)
   child_payload = JSON.parse(reader.read)
   reader.close
   _waited_pid, child_status = Process.wait2(child_pid)
-  assert_sidekiq(child_status.success?, "fork ownership child failed")
-  assert_sidekiq(child_payload == { "result" => "child", "carrier" => false, "errors" => 1 }, "fork ownership changed")
+  assert(child_status.success?, "fork ownership child failed")
+  assert(child_payload == { "result" => "child", "carrier" => false, "errors" => 1 }, "fork ownership changed")
   sidekiq_tests += 1
 end
 
@@ -166,37 +164,46 @@ result = LogBrew::Trace.with_context(parent) do
     application_result
   end
 end
-assert_sidekiq(result.equal?(application_result), "client middleware changed the app result")
-assert_sidekiq(LogBrew::Trace.current.nil?, "client middleware leaked trace context")
-assert_sidekiq(observed_context.trace_id == parent.trace_id, "enqueue trace did not continue the parent")
-assert_sidekiq(observed_context.parent_span_id == parent.span_id, "enqueue parent span changed")
+assert(result.equal?(application_result), "client middleware changed the app result")
+assert(LogBrew::Trace.current.nil?, "client middleware leaked trace context")
+assert(observed_context.trace_id == parent.trace_id, "enqueue trace did not continue the parent")
+assert(observed_context.parent_span_id == parent.span_id, "enqueue parent span changed")
 carrier = job.fetch("logbrew")
-assert_sidekiq(carrier.keys.sort == %w[enqueuedAtMs traceparent version], "carrier keys are not bounded")
-assert_sidekiq(carrier.fetch("version") == 1, "carrier version changed")
-assert_sidekiq(carrier.fetch("traceparent") == LogBrew::Trace.create_headers(observed_context).fetch("traceparent"), "carrier traceparent mismatch")
-assert_sidekiq(carrier.fetch("enqueuedAtMs").is_a?(Integer), "carrier enqueue time must be integral")
-original_job.each { |key, value| assert_sidekiq(job.fetch(key) == value, "client middleware changed #{key}") }
+assert(carrier.keys.sort == %w[enqueuedAtMs traceparent version], "carrier keys are not bounded")
+assert(carrier.fetch("version") == 1, "carrier version changed")
+assert(carrier.fetch("traceparent") == LogBrew::Trace.create_headers(observed_context).fetch("traceparent"), "carrier traceparent mismatch")
+assert(carrier.fetch("enqueuedAtMs").is_a?(Integer), "carrier enqueue time must be integral")
+original_job.each { |key, value| assert(job.fetch(key) == value, "client middleware changed #{key}") }
 events = sidekiq_events(client)
-assert_sidekiq(events.length == 1 && events[0].fetch("type") == "span", "enqueue span count changed")
+assert(events.length == 1 && events[0].fetch("type") == "span", "enqueue span count changed")
 enqueue_attributes = events[0].fetch("attributes")
-assert_sidekiq(enqueue_attributes.fetch("name") == "sidekiq.enqueue", "enqueue span name changed")
-assert_sidekiq(enqueue_attributes.fetch("traceId") == parent.trace_id, "enqueue span trace changed")
-assert_sidekiq(enqueue_attributes.fetch("parentSpanId") == parent.span_id, "enqueue span parent changed")
+assert(enqueue_attributes.fetch("name") == "sidekiq.enqueue", "enqueue span name changed")
+assert(enqueue_attributes.fetch("traceId") == parent.trace_id, "enqueue span trace changed")
+assert(enqueue_attributes.fetch("parentSpanId") == parent.span_id, "enqueue span parent changed")
 serialized = JSON.generate(events)
 %w[opaque-argument opaque-job-reference InvoiceWorker mailers].each do |forbidden|
-  assert_sidekiq(!serialized.include?(forbidden), "enqueue telemetry leaked job content")
+  assert(!serialized.include?(forbidden), "enqueue telemetry leaked job content")
 end
-assert_sidekiq(capture_errors.empty?, "successful enqueue reported capture failure")
+assert(capture_errors.empty?, "successful enqueue reported capture failure")
 sidekiq_tests += 1
 
 retry_carrier = Marshal.load(Marshal.dump(job.fetch("logbrew")))
 retry_result = client_middleware.call("InvoiceWorker", job, "mailers", nil) { :retried_enqueue }
-assert_sidekiq(retry_result == :retried_enqueue, "retry enqueue changed the app result")
-assert_sidekiq(job.fetch("logbrew") == retry_carrier, "retry enqueue changed the existing carrier")
-assert_sidekiq(sidekiq_events(client).length == 1, "retry enqueue emitted a duplicate span")
+assert(retry_result == :retried_enqueue, "retry enqueue changed the app result")
+assert(job.fetch("logbrew") == retry_carrier, "retry enqueue changed the existing carrier")
+assert(sidekiq_events(client).length == 1, "retry enqueue emitted a duplicate span")
 sidekiq_tests += 1
 
 server_middleware = LogBrew::Sidekiq::ServerMiddleware.new(instrumentation)
+active_job = sidekiq_job(
+  "wrapped" => "InvoiceJob",
+  "args" => [{ "job_class" => "InvoiceJob", "logbrew" => retry_carrier }]
+)
+assert(client_middleware.call(nil, active_job, nil, nil) { :client } == :client, "ActiveJob client result changed")
+assert(server_middleware.call(nil, active_job, nil) { :server } == :server, "ActiveJob server result changed")
+assert(sidekiq_events(client).length == 1, "Sidekiq duplicated ActiveJob telemetry")
+sidekiq_tests += 1
+
 outer = LogBrew::Trace.create_root
 worker_context = nil
 worker_result = Object.new
@@ -206,17 +213,17 @@ result = LogBrew::Trace.with_context(outer) do
     worker_result
   end
 end
-assert_sidekiq(result.equal?(worker_result), "server middleware changed the app result")
-assert_sidekiq(LogBrew::Trace.current.nil?, "server middleware leaked trace context")
-assert_sidekiq(worker_context.trace_id == observed_context.trace_id, "worker trace did not continue enqueue")
-assert_sidekiq(worker_context.parent_span_id == observed_context.span_id, "worker parent span changed")
+assert(result.equal?(worker_result), "server middleware changed the app result")
+assert(LogBrew::Trace.current.nil?, "server middleware leaked trace context")
+assert(worker_context.trace_id == observed_context.trace_id, "worker trace did not continue enqueue")
+assert(worker_context.parent_span_id == observed_context.span_id, "worker parent span changed")
 events = sidekiq_events(client)
-assert_sidekiq(events.count { |event| event.fetch("type") == "span" } == 2, "worker span count changed")
+assert(events.count { |event| event.fetch("type") == "span" } == 2, "worker span count changed")
 worker_span = events.reverse.find { |event| event.fetch("type") == "span" }
 worker_metadata = worker_span.fetch("attributes").fetch("metadata")
-assert_sidekiq(worker_metadata.fetch("source") == "sidekiq.server", "worker source changed")
-assert_sidekiq(worker_metadata.fetch("retryCount") == 0, "worker retry count changed")
-assert_sidekiq(worker_metadata.fetch("queueWaitMs").between?(0, 604_800_000), "queue wait is unbounded")
+assert(worker_metadata.fetch("source") == "sidekiq.server", "worker source changed")
+assert(worker_metadata.fetch("retryCount") == 0, "worker retry count changed")
+assert(worker_metadata.fetch("queueWaitMs").between?(0, 604_800_000), "queue wait is unbounded")
 sidekiq_tests += 1
 
 client = sidekiq_client
@@ -229,14 +236,14 @@ result = LogBrew::Trace.with_context(ambient_context) do
     root_context = LogBrew::Trace.current
     :malformed_fallback
   end
-  assert_sidekiq(LogBrew::Trace.current.equal?(ambient_context), "malformed carrier changed the caller trace")
+  assert(LogBrew::Trace.current.equal?(ambient_context), "malformed carrier changed the caller trace")
   worker_result
 end
-assert_sidekiq(result == :malformed_fallback, "malformed carrier changed app result")
-assert_sidekiq(root_context.parent_span_id.nil?, "malformed carrier did not fall back to a root")
-assert_sidekiq(malformed_job.fetch("logbrew").fetch("traceparent") == "invalid", "server changed malformed carrier")
+assert(result == :malformed_fallback, "malformed carrier changed app result")
+assert(root_context.parent_span_id.nil?, "malformed carrier did not fall back to a root")
+assert(malformed_job.fetch("logbrew").fetch("traceparent") == "invalid", "server changed malformed carrier")
 malformed_metadata = sidekiq_events(client).first.fetch("attributes").fetch("metadata")
-assert_sidekiq(!malformed_metadata.key?("queueWaitMs"), "malformed carrier reported a queue wait")
+assert(!malformed_metadata.key?("queueWaitMs"), "malformed carrier reported a queue wait")
 sidekiq_tests += 1
 
 client = sidekiq_client
@@ -253,9 +260,9 @@ LogBrew::Sidekiq::ServerMiddleware.new(instrumentation).call(nil, mixed_key_job,
   mixed_context = LogBrew::Trace.current
   :mixed_key
 end
-assert_sidekiq(mixed_context && mixed_context.parent_span_id.nil?, "mixed-key carrier did not use a safe root")
-assert_sidekiq(sidekiq_events(client).length == 1, "mixed-key carrier skipped the worker span")
-assert_sidekiq(mixed_key_job.fetch("logbrew").equal?(mixed_key_carrier), "mixed-key carrier was replaced")
+assert(mixed_context && mixed_context.parent_span_id.nil?, "mixed-key carrier did not use a safe root")
+assert(sidekiq_events(client).length == 1, "mixed-key carrier skipped the worker span")
+assert(mixed_key_job.fetch("logbrew").equal?(mixed_key_carrier), "mixed-key carrier was replaced")
 sidekiq_tests += 1
 
 client = sidekiq_client
@@ -273,9 +280,9 @@ retry_error = RuntimeError.new("opaque retry detail")
   rescue RuntimeError => error
     raised = error
   end
-  assert_sidekiq(raised.equal?(retry_error), "retry exception identity changed")
+  assert(raised.equal?(retry_error), "retry exception identity changed")
 end
-assert_sidekiq(sidekiq_events(client).none? { |event| event.fetch("type") == "issue" }, "retryable failure emitted an issue")
+assert(sidekiq_events(client).none? { |event| event.fetch("type") == "issue" }, "retryable failure emitted an issue")
 retry_job["retry_count"] = 1
 raised = nil
 begin
@@ -283,20 +290,20 @@ begin
 rescue RuntimeError => error
   raised = error
 end
-assert_sidekiq(raised.equal?(retry_error), "terminal exception identity changed")
+assert(raised.equal?(retry_error), "terminal exception identity changed")
 issues = sidekiq_events(client).select { |event| event.fetch("type") == "issue" }
-assert_sidekiq(issues.length == 1, "terminal failure issue count changed")
+assert(issues.length == 1, "terminal failure issue count changed")
 issue_attributes = issues[0].fetch("attributes")
-assert_sidekiq(issue_attributes.fetch("title") == "Sidekiq job failed", "terminal issue title changed")
-assert_sidekiq(issue_attributes.fetch("metadata").fetch("retryCount") == 2, "terminal retry context changed")
-assert_sidekiq(!JSON.generate(issues).include?(retry_error.message), "terminal issue leaked exception text")
+assert(issue_attributes.fetch("title") == "Sidekiq job failed", "terminal issue title changed")
+assert(issue_attributes.fetch("metadata").fetch("retryCount") == 2, "terminal retry context changed")
+assert(!JSON.generate(issues).include?(retry_error.message), "terminal issue leaked exception text")
 begin
   server_middleware.call(nil, retry_job, nil) { raise retry_error }
 rescue RuntimeError
   nil
 end
 issues = sidekiq_events(client).select { |event| event.fetch("type") == "issue" }
-assert_sidekiq(issues.length == 1, "terminal failure issue was not deduplicated")
+assert(issues.length == 1, "terminal failure issue was not deduplicated")
 sidekiq_tests += 1
 
 client = sidekiq_client
@@ -327,7 +334,7 @@ threads = jobs.each_with_index.map do |concurrent_job, index|
         releases[index].pop
         index
       end
-      assert_sidekiq(LogBrew::Trace.current.equal?(outer_context), "worker did not return its caller context")
+      assert(LogBrew::Trace.current.equal?(outer_context), "worker did not return its caller context")
       result
     end
     worker_result
@@ -336,14 +343,14 @@ end
 2.times { ready.pop }
 releases[1] << true
 releases[0] << true
-assert_sidekiq(threads.map(&:value).sort == [0, 1], "concurrent worker result changed")
-assert_sidekiq(LogBrew::Trace.current.nil?, "concurrent workers changed the caller context")
+assert(threads.map(&:value).sort == [0, 1], "concurrent worker result changed")
+assert(LogBrew::Trace.current.nil?, "concurrent workers changed the caller context")
 observations.each_with_index do |worker_trace, index|
   enqueue_trace = LogBrew::Traceparent.parse(jobs[index].fetch("logbrew").fetch("traceparent"))
-  assert_sidekiq(worker_trace.trace_id == parents[index].trace_id, "concurrent worker trace crossed requests")
-  assert_sidekiq(worker_trace.parent_span_id == enqueue_trace.parent_span_id, "concurrent worker parent crossed requests")
+  assert(worker_trace.trace_id == parents[index].trace_id, "concurrent worker trace crossed requests")
+  assert(worker_trace.parent_span_id == enqueue_trace.parent_span_id, "concurrent worker parent crossed requests")
 end
-assert_sidekiq(observations.map(&:span_id).uniq.length == 2, "concurrent workers reused a child span")
+assert(observations.map(&:span_id).uniq.length == 2, "concurrent workers reused a child span")
 sidekiq_tests += 1
 
 client = sidekiq_client
@@ -358,11 +365,11 @@ begin
 rescue SidekiqCancellation => error
   raised = error
 end
-assert_sidekiq(raised.equal?(cancellation), "cancellation identity changed")
+assert(raised.equal?(cancellation), "cancellation identity changed")
 events = sidekiq_events(client)
-assert_sidekiq(events.none? { |event| event.fetch("type") == "issue" }, "cancellation emitted a failure issue")
+assert(events.none? { |event| event.fetch("type") == "issue" }, "cancellation emitted a failure issue")
 cancelled_span = events.reverse.find { |event| event.fetch("type") == "span" }
-assert_sidekiq(cancelled_span.fetch("attributes").fetch("metadata").fetch("cancelled"), "cancellation was not classified")
+assert(cancelled_span.fetch("attributes").fetch("metadata").fetch("cancelled"), "cancellation was not classified")
 sidekiq_tests += 1
 
 client = sidekiq_client
@@ -371,16 +378,16 @@ client_middleware = LogBrew::Sidekiq::ClientMiddleware.new(instrumentation)
 instrumentation.disable
 disabled_job = sidekiq_job
 disabled_result = client_middleware.call(nil, disabled_job, nil, nil) { :disabled }
-assert_sidekiq(disabled_result == :disabled, "disabled integration changed app result")
-assert_sidekiq(!disabled_job.key?("logbrew"), "disabled integration changed the job")
-assert_sidekiq(sidekiq_events(client).empty?, "disabled integration emitted telemetry")
+assert(disabled_result == :disabled, "disabled integration changed app result")
+assert(!disabled_job.key?("logbrew"), "disabled integration changed the job")
+assert(sidekiq_events(client).empty?, "disabled integration emitted telemetry")
 instrumentation.enable
 client_middleware.call(nil, sidekiq_job, nil, nil) { :enabled }
-assert_sidekiq(sidekiq_events(client).length == 1, "re-enabled integration did not capture")
+assert(sidekiq_events(client).length == 1, "re-enabled integration did not capture")
 instrumentation.quiet
 quiet_job = sidekiq_job
 quiet_result = client_middleware.call(nil, quiet_job, nil, nil) { :quiet }
-assert_sidekiq(quiet_result == :quiet && !quiet_job.key?("logbrew"), "quiet integration was not pass-through")
+assert(quiet_result == :quiet && !quiet_job.key?("logbrew"), "quiet integration was not pass-through")
 sidekiq_tests += 1
 
 transport = LogBrew::RecordingTransport.always_accept
@@ -396,9 +403,9 @@ instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: client)
 client.log("evt_sidekiq_shutdown", Time.now.utc.iso8601, message: "worker stopped", level: "info")
 first_shutdown = instrumentation.shutdown
 second_shutdown = instrumentation.shutdown
-assert_sidekiq(first_shutdown.equal?(second_shutdown), "shutdown must be idempotent")
-assert_sidekiq(first_shutdown.status_code == 202, "shutdown did not drain through the owned transport")
-assert_sidekiq(client.pending_events.zero?, "shutdown left accepted work pending")
+assert(first_shutdown.equal?(second_shutdown), "shutdown must be idempotent")
+assert(first_shutdown.status_code == 202, "shutdown did not drain through the owned transport")
+assert(client.pending_events.zero?, "shutdown left accepted work pending")
 sidekiq_tests += 1
 
 client = sidekiq_client
@@ -407,15 +414,15 @@ instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: client, on_ca
 instrumentation.instance_variable_set(:@owner_process_id, Process.pid + 1)
 job = sidekiq_job
 result = LogBrew::Sidekiq::ClientMiddleware.new(instrumentation).call(nil, job, nil, nil) { :inherited }
-assert_sidekiq(result == :inherited, "inherited middleware changed app behavior")
-assert_sidekiq(!job.key?("logbrew"), "inherited middleware changed the job")
-assert_sidekiq(sidekiq_events(client).empty?, "inherited middleware emitted telemetry")
-assert_sidekiq(capture_errors.length == 1, "inherited middleware did not report one advisory failure")
+assert(result == :inherited, "inherited middleware changed app behavior")
+assert(!job.key?("logbrew"), "inherited middleware changed the job")
+assert(sidekiq_events(client).empty?, "inherited middleware emitted telemetry")
+assert(capture_errors.length == 1, "inherited middleware did not report one advisory failure")
 begin
   instrumentation.shutdown
   raise "expected process ownership failure"
 rescue LogBrew::SdkError => error
-  assert_sidekiq(error.code == "process_ownership_error", "shutdown ownership code changed")
+  assert(error.code == "process_ownership_error", "shutdown ownership code changed")
 end
 sidekiq_tests += 1
 
@@ -431,12 +438,12 @@ begin
     calls += 1
     :advisory
   end
-  assert_sidekiq(result == :advisory && calls == 1, "setup failure changed app execution")
+  assert(result == :advisory && calls == 1, "setup failure changed app execution")
 ensure
   trace_singleton.send(:define_method, :create_root, original_create_root)
 end
-assert_sidekiq(capture_errors.length == 1, "setup failure callback count changed")
-assert_sidekiq(sidekiq_events(client).empty?, "setup failure emitted partial telemetry")
+assert(capture_errors.length == 1, "setup failure callback count changed")
+assert(sidekiq_events(client).empty?, "setup failure emitted partial telemetry")
 sidekiq_tests += 1
 
 puts "ruby sidekiq tests ok (#{sidekiq_tests} tests)"
