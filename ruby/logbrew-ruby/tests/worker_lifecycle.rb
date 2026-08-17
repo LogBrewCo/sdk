@@ -2,18 +2,8 @@
 
 require "json"
 require_relative "../lib/logbrew"
-
-def assert_worker_lifecycle(condition, message)
-  raise message unless condition
-end
-
-def expect_worker_lifecycle_error(code)
-  yield
-  raise "expected #{code}"
-rescue LogBrew::SdkError => error
-  assert_worker_lifecycle(error.code == code, "expected #{code}, got #{error.code}")
-  error
-end
+require_relative "test_helpers"
+include SdkTestHelpers
 
 def worker_lifecycle_client(max_retries: 0)
   LogBrew::Client.create(
@@ -80,8 +70,8 @@ result = lifecycle.run do
   worker_lifecycle_log(client, "evt_worker_success")
   { "status" => "complete" }
 end
-assert_worker_lifecycle(result == { "status" => "complete" }, "run must preserve the application result")
-assert_worker_lifecycle(worker_lifecycle_ids(transport.last_body) == ["evt_worker_success"], "run must flush one work boundary")
+assert(result == { "status" => "complete" }, "run must preserve the application result")
+assert(worker_lifecycle_ids(transport.last_body) == ["evt_worker_success"], "run must flush one work boundary")
 tests += 1
 
 client = worker_lifecycle_client
@@ -97,8 +87,8 @@ begin
 rescue RuntimeError => error
   caught_error = error
 end
-assert_worker_lifecycle(caught_error.equal?(application_error), "run must re-raise the exact application error")
-assert_worker_lifecycle(worker_lifecycle_ids(transport.last_body) == ["evt_worker_error"], "run must flush after application failure")
+assert(caught_error.equal?(application_error), "run must re-raise the exact application error")
+assert(worker_lifecycle_ids(transport.last_body) == ["evt_worker_error"], "run must flush after application failure")
 tests += 1
 
 client = worker_lifecycle_client
@@ -116,17 +106,17 @@ result = lifecycle.run do
   worker_lifecycle_log(client, "evt_worker_retry_original", "private original event")
   :first_result
 end
-assert_worker_lifecycle(result == :first_result, "delivery failure must not replace the application result")
-assert_worker_lifecycle(client.pending_events == 1, "failed work delivery must retain telemetry")
-assert_worker_lifecycle(notices.length == 1, "failed work delivery must report once")
+assert(result == :first_result, "delivery failure must not replace the application result")
+assert(client.pending_events == 1, "failed work delivery must retain telemetry")
+assert(notices.length == 1, "failed work delivery must report once")
 notice = notices.fetch(0)
-assert_worker_lifecycle(notice.frozen?, "delivery notice must be immutable")
-assert_worker_lifecycle(notice.stage == "work_boundary", "notice must expose a stable stage")
-assert_worker_lifecycle(notice.code == "transport_error", "notice must expose an allowlisted code")
-assert_worker_lifecycle(notice.pending_events == 1, "notice must expose only retained count")
-assert_worker_lifecycle(notice.pending_event_bytes.positive?, "notice must expose retained bytes")
-assert_worker_lifecycle(notice.dropped_events.zero?, "notice must expose dropped count")
-assert_worker_lifecycle(
+assert(notice.frozen?, "delivery notice must be immutable")
+assert(notice.stage == "work_boundary", "notice must expose a stable stage")
+assert(notice.code == "transport_error", "notice must expose an allowlisted code")
+assert(notice.pending_events == 1, "notice must expose only retained count")
+assert(notice.pending_event_bytes.positive?, "notice must expose retained bytes")
+assert(notice.dropped_events.zero?, "notice must expose dropped count")
+assert(
   notice.instance_variables.sort == %i[@code @dropped_events @pending_event_bytes @pending_events @stage],
   "delivery notice must not retain exceptions, bodies, or transport state"
 )
@@ -135,9 +125,9 @@ lifecycle.run do
   worker_lifecycle_log(client, "evt_worker_retry_later", "private later event")
   :second_result
 end
-assert_worker_lifecycle(transport.sent_bodies.length == 3, "later work must retry retained telemetry before new capture")
-assert_worker_lifecycle(transport.sent_bodies[0] == transport.sent_bodies[1], "retained retry body must stay byte-identical")
-assert_worker_lifecycle(
+assert(transport.sent_bodies.length == 3, "later work must retry retained telemetry before new capture")
+assert(transport.sent_bodies[0] == transport.sent_bodies[1], "retained retry body must stay byte-identical")
+assert(
   transport.sent_bodies.map { |body| worker_lifecycle_ids(body) } == [
     ["evt_worker_retry_original"],
     ["evt_worker_retry_original"],
@@ -160,9 +150,9 @@ lifecycle.run do
   end
   worker_lifecycle_log(client, "evt_worker_outer")
 end
-assert_worker_lifecycle(nested_error&.code == "worker_lifecycle_error", "nested run must fail with a stable code")
-assert_worker_lifecycle(!inner_ran, "nested run must fail before inner application work")
-assert_worker_lifecycle(worker_lifecycle_ids(transport.last_body) == ["evt_worker_outer"], "outer work must remain deliverable")
+assert(nested_error&.code == "worker_lifecycle_error", "nested run must fail with a stable code")
+assert(!inner_ran, "nested run must fail before inner application work")
+assert(worker_lifecycle_ids(transport.last_body) == ["evt_worker_outer"], "outer work must remain deliverable")
 tests += 1
 
 client = worker_lifecycle_client
@@ -179,13 +169,13 @@ first_thread = Thread.new do
 end
 entered.pop
 second_ran = false
-thread_error = expect_worker_lifecycle_error("worker_lifecycle_error") do
+thread_error = expect_sdk_error("worker_lifecycle_error") do
   lifecycle.run { second_ran = true }
 end
 release << true
 first_thread.join
-assert_worker_lifecycle(thread_error.message.include?("already in progress"), "competing work must explain the boundary")
-assert_worker_lifecycle(!second_ran, "competing work must fail before its callback")
+assert(thread_error.message.include?("already in progress"), "competing work must explain the boundary")
+assert(!second_ran, "competing work must fail before its callback")
 tests += 1
 
 client = worker_lifecycle_client
@@ -208,18 +198,18 @@ shutdown_response = lifecycle.shutdown
 state_mutex.release
 late_thread.join
 late_error = late_result.pop
-assert_worker_lifecycle(late_error.is_a?(LogBrew::SdkError), "a delayed run must reject after shutdown wins")
-assert_worker_lifecycle(late_error.code == "shutdown_error", "a delayed run must observe terminal shutdown atomically")
-assert_worker_lifecycle(!late_callback_ran, "a delayed run must not execute application work after shutdown")
-assert_worker_lifecycle(lifecycle.shutdown.equal?(shutdown_response), "shutdown success must remain cached after the race")
+assert(late_error.is_a?(LogBrew::SdkError), "a delayed run must reject after shutdown wins")
+assert(late_error.code == "shutdown_error", "a delayed run must observe terminal shutdown atomically")
+assert(!late_callback_ran, "a delayed run must not execute application work after shutdown")
+assert(lifecycle.shutdown.equal?(shutdown_response), "shutdown success must remain cached after the race")
 tests += 1
 
 client = worker_lifecycle_client
 transport = LogBrew::RecordingTransport.always_accept
 lifecycle = LogBrew::WorkerLifecycle.create(client: client, transport: transport)
 return_result = worker_lifecycle_nonlocal_return(lifecycle, client)
-assert_worker_lifecycle(return_result == :returned_from_application, "run must preserve a nonlocal return")
-assert_worker_lifecycle(
+assert(return_result == :returned_from_application, "run must preserve a nonlocal return")
+assert(
   worker_lifecycle_ids(transport.last_body) == ["evt_worker_nonlocal_return"],
   "nonlocal return must still flush its work boundary"
 )
@@ -231,8 +221,8 @@ break_result = lifecycle.run do
   worker_lifecycle_log(client, "evt_worker_nonlocal_break")
   break :broken_from_application
 end
-assert_worker_lifecycle(break_result == :broken_from_application, "run must preserve a nonlocal break")
-assert_worker_lifecycle(
+assert(break_result == :broken_from_application, "run must preserve a nonlocal break")
+assert(
   worker_lifecycle_ids(transport.last_body) == ["evt_worker_nonlocal_break"],
   "nonlocal break must still flush its work boundary"
 )
@@ -246,8 +236,8 @@ throw_result = catch(:worker_complete) do
     throw :worker_complete, :thrown_from_application
   end
 end
-assert_worker_lifecycle(throw_result == :thrown_from_application, "run must preserve a nonlocal throw")
-assert_worker_lifecycle(
+assert(throw_result == :thrown_from_application, "run must preserve a nonlocal throw")
+assert(
   worker_lifecycle_ids(transport.last_body) == ["evt_worker_nonlocal_throw"],
   "nonlocal throw must still flush its work boundary"
 )
@@ -258,26 +248,26 @@ transport = LogBrew::RecordingTransport.always_accept
 lifecycle = LogBrew::WorkerLifecycle.create(client: client, transport: transport)
 lifecycle.instance_variable_set(:@owner_process_id, Process.pid + 1)
 precheck_ran = false
-expect_worker_lifecycle_error("process_ownership_error") do
+expect_sdk_error("process_ownership_error") do
   lifecycle.run { precheck_ran = true }
 end
-expect_worker_lifecycle_error("process_ownership_error") { lifecycle.shutdown }
-assert_worker_lifecycle(!precheck_ran, "inherited lifecycle must reject before application work")
-assert_worker_lifecycle(transport.sent_bodies.empty?, "inherited lifecycle must not touch its transport")
+expect_sdk_error("process_ownership_error") { lifecycle.shutdown }
+assert(!precheck_ran, "inherited lifecycle must reject before application work")
+assert(transport.sent_bodies.empty?, "inherited lifecycle must not touch its transport")
 tests += 1
 
 client = worker_lifecycle_client
 transport = LogBrew::RecordingTransport.always_accept
 lifecycle = LogBrew::WorkerLifecycle.create(client: client, transport: transport)
-postcheck_error = expect_worker_lifecycle_error("process_ownership_error") do
+postcheck_error = expect_sdk_error("process_ownership_error") do
   lifecycle.run do
     worker_lifecycle_log(client, "evt_worker_changed_process")
     lifecycle.instance_variable_set(:@owner_process_id, Process.pid + 1)
   end
 end
-assert_worker_lifecycle(postcheck_error.message.include?("current process"), "post-work ownership must use a stable safe message")
-assert_worker_lifecycle(transport.sent_bodies.empty?, "post-work ownership failure must not flush copied state")
-assert_worker_lifecycle(client.pending_events == 1, "post-work ownership failure must retain copied state untouched")
+assert(postcheck_error.message.include?("current process"), "post-work ownership must use a stable safe message")
+assert(transport.sent_bodies.empty?, "post-work ownership failure must not flush copied state")
+assert(client.pending_events == 1, "post-work ownership failure must retain copied state untouched")
 tests += 1
 
 client = worker_lifecycle_client
@@ -293,8 +283,8 @@ begin
 rescue RuntimeError => error
   caught_error = error
 end
-assert_worker_lifecycle(caught_error.equal?(application_error), "application error must win over post-work ownership failure")
-assert_worker_lifecycle(transport.sent_bodies.empty?, "combined failure must not touch transport")
+assert(caught_error.equal?(application_error), "application error must win over post-work ownership failure")
+assert(transport.sent_bodies.empty?, "combined failure must not touch transport")
 tests += 1
 
 client = worker_lifecycle_client
@@ -303,13 +293,13 @@ transport = LogBrew::RecordingTransport.always_accept
 lifecycle = LogBrew::WorkerLifecycle.create(client: client, transport: transport)
 first_shutdown = lifecycle.shutdown
 second_shutdown = lifecycle.shutdown
-assert_worker_lifecycle(first_shutdown.equal?(second_shutdown), "successful shutdown must be terminal-idempotent")
-assert_worker_lifecycle(transport.sent_bodies.length == 1, "repeated shutdown must not send twice")
+assert(first_shutdown.equal?(second_shutdown), "successful shutdown must be terminal-idempotent")
+assert(transport.sent_bodies.length == 1, "repeated shutdown must not send twice")
 after_shutdown_ran = false
-expect_worker_lifecycle_error("shutdown_error") do
+expect_sdk_error("shutdown_error") do
   lifecycle.run { after_shutdown_ran = true }
 end
-assert_worker_lifecycle(!after_shutdown_ran, "work after shutdown must fail before its callback")
+assert(!after_shutdown_ran, "work after shutdown must fail before its callback")
 tests += 1
 
 client = worker_lifecycle_client
@@ -321,13 +311,13 @@ lifecycle = LogBrew::WorkerLifecycle.create(
   transport: transport,
   on_delivery_failure: ->(notice) { notices << notice }
 )
-shutdown_error = expect_worker_lifecycle_error("transport_error") { lifecycle.shutdown }
-assert_worker_lifecycle(shutdown_error.message.include?("unexpected transport status"), "shutdown must preserve delivery failure")
-assert_worker_lifecycle(notices.map(&:stage) == ["shutdown"], "failed shutdown must report the shutdown stage")
+shutdown_error = expect_sdk_error("transport_error") { lifecycle.shutdown }
+assert(shutdown_error.message.include?("unexpected transport status"), "shutdown must preserve delivery failure")
+assert(notices.map(&:stage) == ["shutdown"], "failed shutdown must report the shutdown stage")
 retried_shutdown = lifecycle.shutdown
 cached_shutdown = lifecycle.shutdown
-assert_worker_lifecycle(retried_shutdown.equal?(cached_shutdown), "successful shutdown retry must be cached")
-assert_worker_lifecycle(transport.sent_bodies[0] == transport.sent_bodies[1], "shutdown retry body must stay byte-identical")
+assert(retried_shutdown.equal?(cached_shutdown), "successful shutdown retry must be cached")
+assert(transport.sent_bodies[0] == transport.sent_bodies[1], "shutdown retry body must stay byte-identical")
 tests += 1
 
 unsafe_error = Class.new(StandardError).new("sentinel value must stay local")
@@ -343,11 +333,11 @@ lifecycle = LogBrew::WorkerLifecycle.create(
   on_delivery_failure: ->(notice) { notices << notice }
 )
 lifecycle.run { :safe_result }
-assert_worker_lifecycle(notices.fetch(0).code == "delivery_error", "unknown delivery errors must use a generic code")
-assert_worker_lifecycle(!notices.fetch(0).inspect.include?(unsafe_error.message), "notice inspection must omit exception content")
+assert(notices.fetch(0).code == "delivery_error", "unknown delivery errors must use a generic code")
+assert(!notices.fetch(0).inspect.include?(unsafe_error.message), "notice inspection must omit exception content")
 tests += 1
 
-expect_worker_lifecycle_error("validation_error") do
+expect_sdk_error("validation_error") do
   LogBrew::WorkerLifecycle.create(
     client: worker_lifecycle_client,
     transport: LogBrew::RecordingTransport.always_accept,

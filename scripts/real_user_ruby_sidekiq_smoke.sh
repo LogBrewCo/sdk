@@ -56,50 +56,12 @@ require "json"
 require "logbrew"
 require "logbrew/sidekiq"
 require "sidekiq"
-require "socket"
 require "timeout"
+require ENV.fetch("LOGBREW_TEST_INTAKE")
 
 abort "unexpected Sidekiq version" unless Sidekiq::VERSION == "8.1.6"
 
-class Intake
-  attr_reader :endpoint, :records
-
-  def initialize
-    @server = TCPServer.new("127.0.0.1", 0)
-    @endpoint = "http://localhost:#{@server.addr[1]}/v1/events"
-    @records = Queue.new
-    @thread = Thread.new { serve }
-  end
-
-  def close
-    @server.close unless @server.closed?
-    @thread.join(2)
-  end
-
-  private
-
-  def serve
-    socket = @server.accept
-    request_line = socket.gets.to_s.split(" ")
-    headers = {}
-    while (line = socket.gets)
-      value = line.chomp
-      break if value.empty?
-
-      name, content = value.split(":", 2)
-      headers[name.to_s.downcase] = content.to_s.strip
-    end
-    body = socket.read(headers.fetch("content-length", "0").to_i)
-    @records << [request_line[1], body]
-    socket.write("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-  rescue IOError, Errno::EBADF
-    nil
-  ensure
-    socket&.close unless socket&.closed?
-  end
-end
-
-intake = Intake.new
+intake = LocalHttpIntake.new
 begin
   client = LogBrew::Client.create(
     api_key: "installed-sidekiq-key",
@@ -171,9 +133,9 @@ begin
 
   response = instrumentation.shutdown
   abort "shutdown status changed" unless response.status_code == 202
-  route, body = Timeout.timeout(3) { intake.records.pop }
-  abort "intake route changed" unless route == "/v1/events"
-  events = JSON.parse(body).fetch("events")
+  record = Timeout.timeout(3) { intake.records.pop }
+  abort "intake route changed" unless record.path == "/v1/events"
+  events = JSON.parse(record.body).fetch("events")
   spans = events.select { |event| event.fetch("type") == "span" }
   issues = events.select { |event| event.fetch("type") == "issue" }
   abort "span count changed" unless spans.length == 5
@@ -194,7 +156,8 @@ ensure
 end
 RUBY
 
-LOGBREW_RUBY_PACKAGE_VERSION="$package_version" GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
+LOGBREW_RUBY_PACKAGE_VERSION="$package_version" LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
+  GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
   "$ruby_bin" "$tmp_dir/consumer.rb" > "$tmp_dir/consumer.out"
 grep -qx 'installed Sidekiq consumer ok requests=1 spans=5 issues=1' "$tmp_dir/consumer.out"
 

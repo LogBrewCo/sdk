@@ -8,8 +8,6 @@ module LogBrew
   # Process-safe Rails integration installed by RailsRailtie.
   module Rails
     class << self
-      attr_reader :runtime
-
       def install(application:, environment: ENV)
         @installation_mutex ||= Mutex.new
         @installation_mutex.synchronize do
@@ -79,6 +77,9 @@ module LogBrew
       runtime = LogBrew::Rails.install(application: application)
       if runtime.configuration.enabled?
         LogBrew::Rails.const_get(:RequestOperations).install(::ActiveSupport::Notifications)
+      end
+      ::ActiveSupport.on_load(:active_job) do
+        prepend LogBrew::Rails::ActiveJobExtension unless ancestors.include?(LogBrew::Rails::ActiveJobExtension)
       end
       middleware = application.config.middleware
       if defined?(::ActionDispatch::ShowExceptions)

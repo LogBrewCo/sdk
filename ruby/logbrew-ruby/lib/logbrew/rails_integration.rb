@@ -1,10 +1,13 @@
 # frozen_string_literal: true
 
 require_relative "../logbrew" unless defined?(LogBrew::Client)
+require_relative "queue_carrier"
 require "uri"
 
 module LogBrew
   module Rails
+    singleton_class.attr_reader :runtime
+
     # Immutable, environment-derived settings for the automatic Rails adapter.
     class Configuration
       DEFAULT_ENDPOINT = LogBrew::HttpTransport::DEFAULT_ENDPOINT
@@ -392,6 +395,173 @@ module LogBrew
           version: @configuration.release,
           metadata: metadata
         )
+      end
+    end
+
+    # One privacy-bounded producer or worker operation for ActiveJob.
+    class ActiveJobOperation
+      attr_reader :context
+
+      def self.create(runtime, job, kind, carrier: nil)
+        client = runtime&.client
+        return if client.nil?
+
+        new(runtime, client, job, kind, carrier)
+      rescue StandardError => error
+        runtime&.report_error("active_job_capture", error)
+        nil
+      end
+
+      def initialize(runtime, client, job, kind, carrier)
+        @runtime = runtime
+        @client = client
+        @kind = kind
+        @context = kind == :enqueue ? OperationTracing.child_context : QueueCarrier.child_context(QueueCarrier.read(carrier))
+        @job_class = bounded_identifier(job.class.name, "ActiveJob")
+        @adapter = bounded_identifier(job.class.respond_to?(:queue_adapter_name) ? job.class.queue_adapter_name : nil, "active_job")
+        @retry_count = normalized_retry_count(job.respond_to?(:executions) ? job.executions : nil)
+        @queue_wait_ms = kind == :perform ? QueueCarrier.queue_wait_ms(QueueCarrier.read(carrier)) : nil
+        @started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @timestamp = Time.now.utc.iso8601(6)
+        @finished = false
+      end
+
+      def around
+        result = Trace.with_context(@context) { yield }
+        finish
+        result
+      rescue Exception => error # rubocop:disable Lint/RescueException
+        finish(error)
+        raise
+      end
+
+      def finish(error = nil)
+        return if @finished
+
+        @finished = true
+        options = {
+          timestamp: @timestamp,
+          source: "rails.active_job",
+          system: @adapter,
+          operation: @kind.to_s,
+          metadata: operation_metadata
+        }
+        OperationTracing.capture_span(@client, "queue", "active_job.#{@kind}", @context, @started_at, options, error)
+      rescue StandardError => capture_error
+        @runtime.report_error("active_job_capture", capture_error)
+      end
+
+      def capture_terminal_issue(error)
+        return unless error.is_a?(StandardError)
+
+        metadata = operation_metadata.merge(
+          "source" => "rails.active_job",
+          "handled" => false,
+          "mechanism" => "rails.active_job",
+          "issueGroupingKey" => grouping_key(error),
+          "issueGroupingSource" => "exception_type_job_file"
+        )
+        attributes = IssueDiagnostics.from_exception(
+          error,
+          title: IssueDiagnostics.safe_exception_type(error),
+          message: @runtime.configuration.capture_exception_messages? ? error.message : nil,
+          mechanism_type: "rails.active_job",
+          handled: false,
+          metadata: metadata
+        )
+        Trace.with_context(@context) do
+          @client.issue("ruby_active_job_issue_#{@context.span_id}", Time.now.utc.iso8601, attributes)
+        end
+      rescue StandardError => capture_error
+        @runtime.report_error("active_job_capture", capture_error)
+      end
+
+      private
+
+      def operation_metadata
+        @runtime.metadata.merge("activeJob.class" => @job_class).tap do |metadata|
+          metadata["retryCount"] = @retry_count unless @retry_count.nil?
+          metadata["queueWaitMs"] = @queue_wait_ms unless @queue_wait_ms.nil?
+        end
+      end
+
+      def grouping_key(error)
+        frame = IssueDiagnostics.stack_frames_from_exception(error).first
+        file = frame.nil? ? "" : frame.fetch("filename")
+        values = [IssueDiagnostics.safe_exception_type(error), @job_class, file]
+        "rails-active-job-#{Digest::SHA256.hexdigest(values.join("\n"))}"
+      end
+
+      def bounded_identifier(value, fallback)
+        text = value.to_s
+        text.match?(/\A[A-Za-z_][A-Za-z0-9_:.-]{0,254}\z/) ? text : fallback
+      end
+
+      def normalized_retry_count(value)
+        [[value, 0].max, 1_000].min if value.is_a?(Integer)
+      end
+    end
+    private_constant :ActiveJobOperation
+
+    # Adapter-neutral ActiveJob tracing installed through the Rails lazy-load hook.
+    module ActiveJobExtension
+      def enqueue(options = {})
+        operation = ActiveJobOperation.create(LogBrew::Rails.runtime, self, :enqueue)
+        return super if operation.nil?
+
+        previous = @logbrew_enqueue_operation
+        @logbrew_enqueue_operation = operation
+        operation.around { super }
+      ensure
+        @logbrew_enqueue_operation = previous unless operation.nil?
+      end
+
+      def serialize
+        payload = super
+        operation = @logbrew_enqueue_operation
+        return payload if operation.nil?
+
+        begin
+          payload[QueueCarrier::KEY] = QueueCarrier.create(operation.context)
+        rescue StandardError => error
+          LogBrew::Rails.runtime&.report_error("active_job_capture", error)
+        end
+        payload
+      end
+
+      def deserialize(payload)
+        result = super
+        begin
+          @logbrew_queue_carrier = QueueCarrier.read(payload[QueueCarrier::KEY]) if payload.is_a?(Hash)
+        rescue StandardError => error
+          LogBrew::Rails.runtime&.report_error("active_job_capture", error)
+        end
+        result
+      end
+
+      def perform_now
+        operation = ActiveJobOperation.create(LogBrew::Rails.runtime, self, :perform, carrier: @logbrew_queue_carrier)
+        return super if operation.nil?
+
+        previous = @logbrew_perform_operation
+        @logbrew_perform_operation = operation
+        begin
+          Trace.with_context(operation.context) { super }
+        rescue Exception => error # rubocop:disable Lint/RescueException
+          operation.finish(error)
+          operation.capture_terminal_issue(error)
+          raise
+        ensure
+          unless operation.nil?
+            operation.finish
+            @logbrew_perform_operation = previous
+          end
+        end
+      end
+
+      def _perform_job
+        operation = @logbrew_perform_operation
+        operation.nil? ? super : operation.around { super }
       end
     end
 

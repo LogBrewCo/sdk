@@ -3,27 +3,17 @@
 require "json"
 require_relative "../lib/logbrew"
 require_relative "../lib/logbrew/rails_integration"
+require_relative "test_helpers"
+include SdkTestHelpers
 
-def assert(condition, message)
-  raise message unless condition
-end
-
-def expect_sdk_error(code, message_fragment)
-  yield
-rescue LogBrew::SdkError => error
-  assert(error.code == code, "expected #{code}, got #{error.code}")
-  assert(error.message.include?(message_fragment), "expected error containing #{message_fragment}")
-  return error
-end
-
-def rails_configuration(overrides = {})
-  environment = {
+def rails_configuration(overrides = {}, keyed: true)
+  defaults = {
     "LOGBREW_SERVER_API_KEY" => "installed-rails-key",
     "LOGBREW_FLUSH_INTERVAL_MS" => "60000",
     "LOGBREW_FLUSH_THRESHOLD" => "1000"
-  }.merge(overrides)
+  }
   LogBrew::Rails::Configuration.from_environment(
-    environment,
+    keyed ? defaults.merge(overrides) : overrides,
     application_name: "circulate",
     rails_environment: "test",
     rails_version: "8.1.3.1"
@@ -32,76 +22,51 @@ end
 
 tests = 0
 
-disabled = LogBrew::Rails::Configuration.from_environment(
-  {},
-  application_name: "circulate",
-  rails_environment: "test",
-  rails_version: "8.1.3.1"
-)
+disabled = rails_configuration({}, keyed: false)
 assert(!disabled.enabled?, "expected Rails integration to stay disabled without a key")
 tests += 1
 
-explicitly_disabled = LogBrew::Rails::Configuration.from_environment(
-  { "LOGBREW_ENABLED" => "false", "LOGBREW_API_KEY" => "legacy-hidden" },
-  application_name: "circulate",
-  rails_environment: "test",
-  rails_version: "8.1.3.1"
+explicitly_disabled = rails_configuration(
+  { "LOGBREW_ENABLED" => "false", "LOGBREW_API_KEY" => "legacy-hidden" }, keyed: false
 )
 assert(!explicitly_disabled.enabled?, "expected explicit disable to ignore legacy configuration")
 tests += 1
 
 legacy_error = expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY") do
-  LogBrew::Rails::Configuration.from_environment(
-    { "LOGBREW_API_KEY" => "legacy-hidden" },
-    application_name: "circulate",
-    rails_environment: "test",
-    rails_version: "8.1.3.1"
-  )
+  rails_configuration({ "LOGBREW_API_KEY" => "legacy-hidden" }, keyed: false)
 end
 assert(!legacy_error.message.include?("legacy-hidden"), "expected legacy-key error to omit the key value")
 tests += 1
 
 missing_key_error = expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY") do
-  LogBrew::Rails::Configuration.from_environment(
-    { "LOGBREW_ENABLED" => "true" },
-    application_name: "circulate",
-    rails_environment: "test",
-    rails_version: "8.1.3.1"
-  )
+  rails_configuration({ "LOGBREW_ENABLED" => "true" }, keyed: false)
 end
 assert(!missing_key_error.message.include?("nil"), "expected missing-key error to omit raw state")
 tests += 1
 
 expect_sdk_error("configuration_error", "LOGBREW_ENABLED") do
-  LogBrew::Rails::Configuration.from_environment(
-    { "LOGBREW_ENABLED" => "sometimes" },
-    application_name: "circulate",
-    rails_environment: "test",
-    rails_version: "8.1.3.1"
-  )
+  rails_configuration({ "LOGBREW_ENABLED" => "sometimes" }, keyed: false)
 end
 tests += 1
 
-expect_sdk_error("configuration_error", "LOGBREW_ENDPOINT") do
-  rails_configuration("LOGBREW_ENDPOINT" => "http://example.test/v1/events")
-end
-expect_sdk_error("configuration_error", "LOGBREW_REQUEST_TIMEOUT_MS") do
-  rails_configuration("LOGBREW_REQUEST_TIMEOUT_MS" => "unbounded")
-end
-expect_sdk_error("configuration_error", "LOGBREW_FLUSH_THRESHOLD") do
-  rails_configuration("LOGBREW_FLUSH_THRESHOLD" => "1001")
-end
-expect_sdk_error("configuration_error", "LOGBREW_SERVICE_NAME") do
-  rails_configuration("LOGBREW_SERVICE_NAME" => "line-one\nline-two")
+{
+  "LOGBREW_ENDPOINT" => "http://example.test/v1/events",
+  "LOGBREW_REQUEST_TIMEOUT_MS" => "unbounded",
+  "LOGBREW_FLUSH_THRESHOLD" => "1001",
+  "LOGBREW_SERVICE_NAME" => "line-one\nline-two"
+}.each do |name, value|
+  expect_sdk_error("configuration_error", name) { rails_configuration({ name => value }) }
 end
 tests += 1
 
 configuration = rails_configuration(
-  "LOGBREW_SERVICE_NAME" => "circulate-web",
-  "LOGBREW_ENVIRONMENT" => "staging",
-  "LOGBREW_RELEASE" => "circulate@2026.08.01",
-  "LOGBREW_REQUEST_TIMEOUT_MS" => "2500",
-  "LOGBREW_FLUSH_THRESHOLD" => "50"
+  {
+    "LOGBREW_SERVICE_NAME" => "circulate-web",
+    "LOGBREW_ENVIRONMENT" => "staging",
+    "LOGBREW_RELEASE" => "circulate@2026.08.01",
+    "LOGBREW_REQUEST_TIMEOUT_MS" => "2500",
+    "LOGBREW_FLUSH_THRESHOLD" => "50"
+  }
 )
 assert(configuration.enabled?, "expected canonical key to enable Rails integration")
 assert(configuration.service_name == "circulate-web", "expected configured service name")
@@ -114,9 +79,11 @@ assert(!configuration.capture_exception_messages?, "expected privacy-safe except
 tests += 1
 
 opted_in_configuration = rails_configuration(
-  "LOGBREW_ENDPOINT" => "http://127.0.0.1:4000/v1/events",
-  "LOGBREW_CAPTURE_EXCEPTION_MESSAGES" => "true",
-  "LOGBREW_INCLUDE_EXCEPTION_BACKTRACE" => "true"
+  {
+    "LOGBREW_ENDPOINT" => "http://127.0.0.1:4000/v1/events",
+    "LOGBREW_CAPTURE_EXCEPTION_MESSAGES" => "true",
+    "LOGBREW_INCLUDE_EXCEPTION_BACKTRACE" => "true"
+  }
 )
 assert(opted_in_configuration.endpoint == "http://127.0.0.1:4000/v1/events", "expected loopback HTTP")
 assert(opted_in_configuration.capture_exception_messages?, "expected explicit message opt-in")
@@ -338,27 +305,22 @@ assert(broken_calls == 1, "expected capture initialization failure to call the a
 assert(capture_failures == [["client_initialization", "RuntimeError"]], "expected bounded capture failure")
 tests += 1
 
-class FakeRailsClient
-  attr_reader :environment_events, :release_events, :shutdown_calls
-
+FakeRailsClient = Struct.new(:environment_events, :release_events, :shutdown_calls, :shutdown_response) do
   def initialize
-    @environment_events = []
-    @release_events = []
-    @shutdown_calls = 0
-    @shutdown_response = Object.new
+    super([], [], 0, Object.new)
   end
 
   def environment(*arguments)
-    @environment_events << arguments
+    environment_events << arguments
   end
 
   def release(*arguments)
-    @release_events << arguments
+    release_events << arguments
   end
 
   def shutdown
-    @shutdown_calls += 1
-    @shutdown_response
+    self.shutdown_calls += 1
+    shutdown_response
   end
 end
 
@@ -381,6 +343,121 @@ assert(first_process_client.shutdown_calls.zero?, "expected inherited client sta
 fork_shutdown = fork_runtime.shutdown
 assert(fork_runtime.shutdown.equal?(fork_shutdown), "expected process-local shutdown idempotency")
 assert(second_process_client.shutdown_calls == 1, "expected one shutdown in the active process")
+tests += 1
+
+class ActiveJobProbe
+  attr_reader :serialized, :last_error, :executions
+
+  def initialize(failing_attempts: 0)
+    @executions = 0
+    @failing_attempts = failing_attempts
+  end
+
+  def enqueue(_options = {})
+    @serialized = serialize
+    self
+  end
+
+  def serialize
+    {
+      "job_class" => self.class.name,
+      "job_id" => "opaque-job-id",
+      "queue_name" => "opaque-queue-name",
+      "arguments" => ["opaque-job-argument"],
+      "executions" => @executions,
+      "failing_attempts" => @failing_attempts
+    }
+  end
+
+  def deserialize(payload)
+    @executions = payload.fetch("executions")
+    @failing_attempts = payload.fetch("failing_attempts")
+    self
+  end
+
+  def perform_now
+    @executions += 1
+    _perform_job
+  rescue RuntimeError
+    raise unless @executions < @failing_attempts
+
+    enqueue
+    :retried
+  end
+
+  def _perform_job
+    return :performed if @executions > @failing_attempts
+
+    @last_error = RuntimeError.new("opaque ActiveJob failure detail")
+    raise @last_error
+  end
+end
+
+ActiveJobProbe.prepend(LogBrew::Rails.const_get(:ActiveJobExtension))
+active_job_runtime = LogBrew::Rails::Runtime.new(
+  rails_configuration,
+  transport_factory: ->(_config) { LogBrew::RecordingTransport.always_accept }
+)
+previous_runtime = LogBrew::Rails.instance_variable_get(:@runtime)
+LogBrew::Rails.instance_variable_set(:@runtime, active_job_runtime)
+begin
+  parent = LogBrew::Trace.create(
+    trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
+    span_id: "00f067aa0ba902b7",
+    trace_flags: "01"
+  )
+  producer = ActiveJobProbe.new(failing_attempts: 2)
+  enqueue_result = LogBrew::Trace.with_context(parent) { producer.enqueue }
+  assert(enqueue_result.equal?(producer), "expected ActiveJob enqueue result identity")
+  carrier = producer.serialized.fetch("logbrew")
+  assert(carrier.keys.sort == %w[enqueuedAtMs traceparent version], "expected bounded ActiveJob carrier")
+
+  first_worker = ActiveJobProbe.new.deserialize(producer.serialized)
+  assert(first_worker.perform_now == :retried, "expected first ActiveJob failure to schedule a retry")
+  retry_payload = first_worker.serialized
+  first_events = JSON.parse(active_job_runtime.client.preview_json).fetch("events")
+  assert(first_events.count { |event| event.fetch("type") == "span" } == 3, "expected enqueue, failed worker, and retry spans")
+  assert(first_events.none? { |event| event.fetch("type") == "issue" }, "expected retryable ActiveJob failure to remain span-only")
+
+  second_worker = ActiveJobProbe.new.deserialize(retry_payload)
+  raised = nil
+  begin
+    second_worker.perform_now
+  rescue RuntimeError => error
+    raised = error
+  end
+  assert(raised.equal?(second_worker.last_error), "expected terminal ActiveJob exception identity")
+  active_job_events = JSON.parse(active_job_runtime.client.preview_json).fetch("events")
+  spans = active_job_events.select { |event| event.fetch("type") == "span" }
+  issues = active_job_events.select { |event| event.fetch("type") == "issue" }
+  span_attributes = spans.map { |event| event.fetch("attributes") }
+  assert(spans.length == 4, "expected two ActiveJob producer and two worker spans")
+  assert(spans.all? { |event| event.dig("attributes", "traceId") == parent.trace_id }, "expected one ActiveJob trace")
+  assert(span_attributes.fetch(0).fetch("parentSpanId") == parent.span_id, "expected enqueue under caller span")
+  assert(span_attributes.fetch(1).fetch("parentSpanId") == span_attributes.fetch(0).fetch("spanId"), "expected first worker under enqueue")
+  assert(span_attributes.fetch(2).fetch("parentSpanId") == span_attributes.fetch(1).fetch("spanId"), "expected retry enqueue under worker")
+  assert(span_attributes.fetch(3).fetch("parentSpanId") == span_attributes.fetch(2).fetch("spanId"), "expected retry worker under enqueue")
+  assert(spans.count { |event| event.dig("attributes", "status") == "error" } == 2, "expected failed attempt spans")
+  assert(spans.map { |event| event.dig("attributes", "metadata", "retryCount") } == [0, 0, 1, 1], "expected retry sequence")
+  assert(issues.length == 1, "expected one terminal ActiveJob issue")
+  issue = issues.fetch(0).fetch("attributes")
+  assert(issue.fetch("title") == "RuntimeError", "expected typed ActiveJob issue title")
+  assert(issue.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rails.active_job", "handled" => false }
+  }, "expected unhandled ActiveJob mechanism")
+  assert(issue.fetch("stackFrames").length.between?(1, 32), "expected bounded ActiveJob frames")
+  assert(issue.dig("metadata", "activeJob.class") == "ActiveJobProbe", "expected bounded job class")
+  assert(issue.dig("metadata", "traceId") == parent.trace_id, "expected ActiveJob issue trace correlation")
+  assert(issue.dig("metadata", "spanId") == span_attributes.fetch(3).fetch("spanId"), "expected ActiveJob issue span correlation")
+  serialized = JSON.generate(active_job_events)
+  %w[opaque-job-id opaque-queue-name opaque-job-argument opaque\ ActiveJob\ failure\ detail installed-rails-key].each do |forbidden|
+    assert(!serialized.include?(forbidden.tr("\\", " ")), "expected ActiveJob telemetry to omit private job data")
+  end
+ensure
+  LogBrew::Rails.instance_variable_set(:@runtime, previous_runtime)
+  active_job_runtime.shutdown
+end
 tests += 1
 
 puts "ruby Rails integration tests passed: #{tests}"

@@ -1,16 +1,14 @@
 # frozen_string_literal: true
 
 require_relative "../logbrew"
+require_relative "queue_carrier"
 
 module LogBrew
   # Explicit Sidekiq middleware for app-owned client and server chains.
   module Sidekiq
-    CARRIER_KEY = "logbrew".freeze
-    CARRIER_VERSION = 1
-    MAX_QUEUE_WAIT_MS = 604_800_000
     MAX_RETRY_COUNT = 1_000
     MAX_REPORTED_FAILURES = 1_024
-    private_constant :CARRIER_KEY, :CARRIER_VERSION, :MAX_QUEUE_WAIT_MS, :MAX_RETRY_COUNT, :MAX_REPORTED_FAILURES
+    private_constant :MAX_RETRY_COUNT, :MAX_REPORTED_FAILURES
 
     class TraceOperation
       attr_reader :context, :traceparent
@@ -197,17 +195,13 @@ module LogBrew
       def around_client(job)
         return yield unless capture_enabled?
         return yield unless job.is_a?(Hash)
-        return yield if job.key?(CARRIER_KEY)
+        return yield if active_job_wrapper?(job) || job.key?(QueueCarrier::KEY)
 
         operation = prepare_operation(name: "sidekiq.enqueue", source: "sidekiq.client", continue_current: true)
         return yield if operation.nil?
 
         begin
-          job[CARRIER_KEY] = {
-            "version" => CARRIER_VERSION,
-            "traceparent" => operation.traceparent,
-            "enqueuedAtMs" => wall_time_ms
-          }
+          job[QueueCarrier::KEY] = QueueCarrier.create(operation.context)
         rescue StandardError => error
           report_capture_error(error)
           return yield
@@ -218,16 +212,17 @@ module LogBrew
       def around_server(job)
         return yield unless capture_enabled?
         return yield unless job.is_a?(Hash)
+        return yield if active_job_wrapper?(job)
 
         begin
-          carrier = read_carrier(job[CARRIER_KEY])
+          carrier = QueueCarrier.read(job[QueueCarrier::KEY])
           retry_count = normalized_retry_count(job["retry_count"], job.key?("retry_count"))
           operation = prepare_operation(
             name: "sidekiq.perform",
             source: "sidekiq.server",
             carrier: carrier,
             retry_count: retry_count,
-            queue_wait_ms: queue_wait_ms(carrier)
+            queue_wait_ms: QueueCarrier.queue_wait_ms(carrier)
           )
         rescue StandardError => error
           report_capture_error(error)
@@ -328,15 +323,9 @@ module LogBrew
       end
 
       def prepare_operation(name:, source:, carrier: nil, retry_count: nil, queue_wait_ms: nil, continue_current: false)
-        parsed = carrier && Traceparent.parse(carrier.fetch("traceparent"))
-        parent = parsed.nil? && continue_current ? Trace.current : parsed
-        context = if parsed
-                    Trace.create(
-                      trace_id: parsed.trace_id,
-                      span_id: Trace.generate_span_id,
-                      parent_span_id: parsed.parent_span_id,
-                      trace_flags: parsed.trace_flags
-                    )
+        parent = continue_current ? Trace.current : nil
+        context = if carrier
+                    QueueCarrier.child_context(carrier)
                   elsif parent
                     Trace.create(
                       trace_id: parent.trace_id,
@@ -360,18 +349,12 @@ module LogBrew
         nil
       end
 
-      def read_carrier(value)
-        return nil unless value.is_a?(Hash)
-        keys = %w[enqueuedAtMs traceparent version]
-        return nil unless value.size == keys.length && keys.all? { |key| value.key?(key) }
-        return nil unless value["version"] == CARRIER_VERSION
-        return nil unless value["traceparent"].is_a?(String) && value["traceparent"].bytesize <= 55
-        return nil unless value["enqueuedAtMs"].is_a?(Integer) && value["enqueuedAtMs"].between?(0, 9_007_199_254_740_991)
-
-        Traceparent.parse(value["traceparent"])
-        value
-      rescue SdkError
-        nil
+      def active_job_wrapper?(job)
+        wrapped = job["wrapped"]
+        arguments = job["args"]
+        payload = arguments.first if arguments.is_a?(Array)
+        wrapped.is_a?(String) && payload.is_a?(Hash) && payload["job_class"] == wrapped &&
+          !QueueCarrier.read(payload[QueueCarrier::KEY]).nil?
       end
 
       def normalized_retry_count(value, present)
@@ -390,17 +373,6 @@ module LogBrew
         return false if limit.negative?
 
         retry_count >= [limit - 1, 0].max
-      end
-
-      def queue_wait_ms(carrier)
-        return nil if carrier.nil?
-
-        elapsed = wall_time_ms - carrier.fetch("enqueuedAtMs")
-        [[elapsed, 0].max, MAX_QUEUE_WAIT_MS].min
-      end
-
-      def wall_time_ms
-        (Time.now.to_f * 1000.0).floor
       end
 
       def capture_span(operation, error)

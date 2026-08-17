@@ -63,48 +63,10 @@ cat > "$consumer_path" <<'RUBY'
 require "json"
 require "logger"
 require "rack/mock"
-require "socket"
 require "timeout"
+require ENV.fetch("LOGBREW_TEST_INTAKE")
 
-class Intake
-  attr_reader :endpoint, :records
-
-  def initialize
-    @server = TCPServer.new("127.0.0.1", 0)
-    @endpoint = "http://127.0.0.1:#{@server.addr[1]}/v1/events"
-    @records = Queue.new
-    @thread = Thread.new { serve }
-  end
-
-  def close
-    @server.close unless @server.closed?
-    @thread.join(2)
-  end
-
-  private
-
-  def serve
-    socket = @server.accept
-    request_line = socket.gets.to_s.split(" ")
-    headers = {}
-    while (line = socket.gets)
-      value = line.chomp
-      break if value.empty?
-
-      name, content = value.split(":", 2)
-      headers[name.to_s.downcase] = content.to_s.strip
-    end
-    body = socket.read(headers.fetch("content-length", "0").to_i)
-    @records << [request_line[1], headers, body]
-    socket.write("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-  rescue IOError, Errno::EBADF
-    nil
-  ensure
-    socket&.close unless socket&.closed?
-  end
-end
-
-intake = Intake.new
+intake = LocalHttpIntake.new
 begin
   ENV["RAILS_ENV"] = "test"
   ENV["LOGBREW_SERVER_API_KEY"] = "installed-rails-key"
@@ -117,6 +79,7 @@ begin
 
   require "rails"
   require "action_controller/railtie"
+  require "active_job/railtie"
   require "logbrew-sdk"
 
   expected_rails = ENV.fetch("LOGBREW_RAILS_SMOKE_VERSION")
@@ -146,6 +109,15 @@ begin
     get "/failures/:id", to: lambda { |_environment|
       raise RuntimeError, "opaque escaped error detail"
     }
+  end
+
+  class InstalledFailureJob < ActiveJob::Base
+    self.queue_adapter = :test
+    retry_on RuntimeError, wait: 0, attempts: 2
+
+    def perform(_private_argument)
+      raise RuntimeError, "opaque ActiveJob failure detail"
+    end
   end
 
   runtime = LogBrew::Rails.runtime
@@ -183,17 +155,38 @@ begin
     source: "application"
   )
 
+  abort "ActiveJob adapter missing" unless ActiveJob::Base.ancestors.include?(LogBrew::Rails::ActiveJobExtension)
+  job_parent = LogBrew::Trace.create(
+    trace_id: "5bf92f3577b34da6a3ce929d0e0e4736",
+    span_id: "10f067aa0ba902b7",
+    trace_flags: "01"
+  )
+  LogBrew::Trace.with_context(job_parent) { InstalledFailureJob.perform_later("opaque-job-argument") }
+  adapter = InstalledFailureJob.queue_adapter
+  abort "ActiveJob producer did not enqueue" unless adapter.enqueued_jobs.length == 1
+  ActiveJob::Base.execute(adapter.enqueued_jobs.shift)
+  abort "ActiveJob retry did not enqueue" unless adapter.enqueued_jobs.length == 1
+  terminal_error = begin
+    ActiveJob::Base.execute(adapter.enqueued_jobs.shift)
+    nil
+  rescue RuntimeError => error
+    error
+  end
+  abort "ActiveJob terminal error changed" unless terminal_error&.message == "opaque ActiveJob failure detail"
+
   client = LogBrew::Rails.client
   abort "Rails client missing" if client.nil?
   preview_events = JSON.parse(client.preview_json).fetch("events")
   spans = preview_events.select { |event| event.fetch("type") == "span" }
   request_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails" }
   operation_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails.active_support" }
+  job_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails.active_job" }
   issues = preview_events.select { |event| event.fetch("type") == "issue" }
   abort "environment event count changed" unless preview_events.count { |event| event.fetch("type") == "environment" } == 1
   abort "request span count changed" unless request_spans.length == 3
   abort "operation span count changed" unless operation_spans.length == 3
-  abort "issue count changed" unless issues.length == 2
+  abort "ActiveJob span count changed" unless job_spans.length == 4
+  abort "issue count changed" unless issues.length == 3
 
   span = request_spans.fetch(0).fetch("attributes")
   abort "route template span changed: #{span.fetch("name").inspect}" unless span.fetch("name") == "GET /tools/:id(.:format)"
@@ -257,12 +250,26 @@ begin
     /\Arails-exception-[0-9a-f]{64}\z/
   )
 
+  job_issue = issues.find do |event|
+    event.fetch("attributes").dig("exception", "mechanism", "type") == "rails.active_job"
+  end&.fetch("attributes")
+  abort "ActiveJob terminal issue missing" if job_issue.nil?
+  abort "ActiveJob trace changed" unless job_spans.all? { |event| event.dig("attributes", "traceId") == job_parent.trace_id }
+  abort "ActiveJob retry evidence changed" unless job_spans.count { |event| event.dig("attributes", "status") == "error" } == 2
+  abort "ActiveJob retry sequence changed" unless job_spans.map { |event| event.dig("attributes", "metadata", "retryCount") } == [0, 0, 1, 1]
+  abort "ActiveJob class missing" unless job_issue.dig("metadata", "activeJob.class") == "InstalledFailureJob"
+  abort "ActiveJob mechanism changed" unless job_issue.fetch("exception") == {
+    "type" => "RuntimeError",
+    "mechanism" => { "type" => "rails.active_job", "handled" => false }
+  }
+
   serialized = JSON.generate(preview_events)
   %w[
     opaque-record-id opaque-query opaque-auth installed-rails-key
     private_accounts opaque-cache /srv/application
     opaque\ handled\ error\ detail opaque\ escaped\ error\ detail opaque-user-id
     opaque-failure-id opaque-failure-query opaque-failure-auth
+    opaque-job-argument opaque\ ActiveJob\ failure\ detail
   ].each do |forbidden|
     abort "Rails telemetry privacy changed" if serialized.include?(forbidden.tr("\\", " "))
   end
@@ -270,14 +277,14 @@ begin
   shutdown_response = LogBrew::Rails.shutdown
   abort "shutdown status changed" unless shutdown_response.status_code == 202
   abort "shutdown idempotency changed" unless LogBrew::Rails.shutdown.equal?(shutdown_response)
-  route, headers, body = Timeout.timeout(3) { intake.records.pop }
-  abort "intake route changed" unless route == "/v1/events"
-  abort "authorization changed" unless headers.fetch("authorization") == "Bearer installed-rails-key"
-  delivered = JSON.parse(body).fetch("events")
-  abort "delivered event count changed" unless delivered.length == 9
+  record = Timeout.timeout(3) { intake.records.pop }
+  abort "intake route changed" unless record.path == "/v1/events"
+  abort "authorization changed" unless record.headers.fetch("authorization") == "Bearer installed-rails-key"
+  delivered = JSON.parse(record.body).fetch("events")
+  abort "delivered event count changed" unless delivered.length == 14
   abort "pending events remain" unless client.pending_events.zero?
 
-  puts "installed Rails consumer ok requests=3 operations=3 issues=2 environments=1"
+  puts "installed Rails consumer ok requests=3 operations=3 jobs=4 issues=3 environments=1"
 ensure
   intake.close
 end
@@ -285,10 +292,11 @@ RUBY
 
 LOGBREW_RUBY_PACKAGE_VERSION="$package_version" \
 LOGBREW_RAILS_SMOKE_VERSION="$rails_version" \
+LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
 RUBYOPT=-W0 \
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
   "$ruby_bin" "$consumer_path" > "$tmp_dir/consumer.out"
-grep -qx 'installed Rails consumer ok requests=3 operations=3 issues=2 environments=1' "$tmp_dir/consumer.out"
+grep -qx 'installed Rails consumer ok requests=3 operations=3 jobs=4 issues=3 environments=1' "$tmp_dir/consumer.out"
 
-printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 operations=3 issues=2 environments=1\n' \
+printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 operations=3 jobs=4 issues=3 environments=1\n' \
   "$package_version" "$rails_version" "$gem_digest"
