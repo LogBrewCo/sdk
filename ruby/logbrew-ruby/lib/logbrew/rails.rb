@@ -77,6 +77,7 @@ module LogBrew
       runtime = LogBrew::Rails.install(application: application)
       if runtime.configuration.enabled?
         LogBrew::Rails.const_get(:RequestOperations).install(::ActiveSupport::Notifications)
+        LogBrew::Rails.const_get(:OutboundHttp).install
       end
       ::ActiveSupport.on_load(:active_job) do
         prepend LogBrew::Rails::ActiveJobExtension unless ancestors.include?(LogBrew::Rails::ActiveJobExtension)

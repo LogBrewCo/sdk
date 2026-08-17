@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
 require "json"
+require "net/http"
+require "timeout"
+require "uri"
 require_relative "../lib/logbrew"
 require_relative "../lib/logbrew/rails_integration"
+require_relative "local_http_intake"
 require_relative "test_helpers"
 include SdkTestHelpers
 
@@ -20,34 +24,31 @@ def rails_configuration(overrides = {}, keyed: true)
   )
 end
 
-tests = 0
+def rails_runtime(configuration = rails_configuration, transport = LogBrew::RecordingTransport.always_accept)
+  LogBrew::Rails::Runtime.new(configuration, transport_factory: ->(_config) { transport })
+end
 
 disabled = rails_configuration({}, keyed: false)
 assert(!disabled.enabled?, "expected Rails integration to stay disabled without a key")
-tests += 1
 
 explicitly_disabled = rails_configuration(
   { "LOGBREW_ENABLED" => "false", "LOGBREW_API_KEY" => "legacy-hidden" }, keyed: false
 )
 assert(!explicitly_disabled.enabled?, "expected explicit disable to ignore legacy configuration")
-tests += 1
 
 legacy_error = expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY") do
   rails_configuration({ "LOGBREW_API_KEY" => "legacy-hidden" }, keyed: false)
 end
 assert(!legacy_error.message.include?("legacy-hidden"), "expected legacy-key error to omit the key value")
-tests += 1
 
 missing_key_error = expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY") do
   rails_configuration({ "LOGBREW_ENABLED" => "true" }, keyed: false)
 end
 assert(!missing_key_error.message.include?("nil"), "expected missing-key error to omit raw state")
-tests += 1
 
 expect_sdk_error("configuration_error", "LOGBREW_ENABLED") do
   rails_configuration({ "LOGBREW_ENABLED" => "sometimes" }, keyed: false)
 end
-tests += 1
 
 {
   "LOGBREW_ENDPOINT" => "http://example.test/v1/events",
@@ -57,7 +58,6 @@ tests += 1
 }.each do |name, value|
   expect_sdk_error("configuration_error", name) { rails_configuration({ name => value }) }
 end
-tests += 1
 
 configuration = rails_configuration(
   {
@@ -68,15 +68,15 @@ configuration = rails_configuration(
     "LOGBREW_FLUSH_THRESHOLD" => "50"
   }
 )
-assert(configuration.enabled?, "expected canonical key to enable Rails integration")
-assert(configuration.service_name == "circulate-web", "expected configured service name")
-assert(configuration.app_environment == "staging", "expected configured environment")
-assert(configuration.release == "circulate@2026.08.01", "expected configured release")
-assert(configuration.request_timeout == 2.5, "expected millisecond timeout conversion")
-assert(configuration.flush_interval == 60.0, "expected millisecond flush conversion")
-assert(configuration.flush_threshold == 50, "expected configured flush threshold")
-assert(!configuration.capture_exception_messages?, "expected privacy-safe exception-message default")
-tests += 1
+configuration_values = [
+  configuration.enabled?, configuration.service_name, configuration.app_environment,
+  configuration.release, configuration.request_timeout, configuration.flush_interval,
+  configuration.flush_threshold, configuration.capture_exception_messages?
+]
+assert(
+  configuration_values == [true, "circulate-web", "staging", "circulate@2026.08.01", 2.5, 60.0, 50, false],
+  "expected normalized Rails configuration"
+)
 
 opted_in_configuration = rails_configuration(
   {
@@ -85,10 +85,11 @@ opted_in_configuration = rails_configuration(
     "LOGBREW_INCLUDE_EXCEPTION_BACKTRACE" => "true"
   }
 )
-assert(opted_in_configuration.endpoint == "http://127.0.0.1:4000/v1/events", "expected loopback HTTP")
-assert(opted_in_configuration.capture_exception_messages?, "expected explicit message opt-in")
-assert(opted_in_configuration.include_exception_backtrace?, "expected explicit backtrace opt-in")
-tests += 1
+assert(
+  [opted_in_configuration.endpoint, opted_in_configuration.capture_exception_messages?, opted_in_configuration.include_exception_backtrace?] ==
+    ["http://127.0.0.1:4000/v1/events", true, true],
+  "expected explicit Rails capture opt-ins"
+)
 
 fake_notifications = Struct.new(:subscriptions).new([])
 fake_notifications.define_singleton_method(:subscribe) { |pattern, &subscriber| subscriptions << [pattern, subscriber] }
@@ -96,10 +97,9 @@ operations = LogBrew::Rails.const_get(:RequestOperations)
 operations.install(fake_notifications)
 operations.install(fake_notifications)
 assert(fake_notifications.subscriptions.length == 1, "expected one idempotent Rails operation subscription")
-tests += 1
 
 transport = LogBrew::RecordingTransport.always_accept
-runtime = LogBrew::Rails::Runtime.new(configuration, transport_factory: ->(_config) { transport })
+runtime = rails_runtime(configuration, transport)
 application_response = [200, { "content-type" => "text/plain" }, ["ok"]]
 app = lambda do |environment|
   environment["action_dispatch.route_uri_pattern"] = "/tools/:id(.:format)"
@@ -138,43 +138,38 @@ metadata = attributes.fetch("metadata")
 typed_context = attributes.fetch("context")
 operation_spans = events.select { |event| event.fetch("type") == "span" && event.dig("attributes", "metadata", "source") == "rails.active_support" }
 assert(operation_spans.length == 8, "expected the eight slowest bounded Rails operation spans")
-assert(metadata.fetch("rails.operations.observed") == 10, "expected exact observed Rails operation count")
-assert(metadata.fetch("rails.operations.captured") == 8, "expected exact captured Rails operation count")
-assert(metadata.fetch("rails.operations.truncated") == true, "expected explicit Rails operation truncation")
+assert(
+  metadata.values_at("rails.operations.observed", "rails.operations.captured", "rails.operations.truncated") == [10, 8, true],
+  "expected exact bounded Rails operation receipt"
+)
 assert(operation_spans.all? { |event| event.dig("attributes", "parentSpanId") == attributes.fetch("spanId") }, "expected exact request children")
 assert(operation_spans.all? { |event| event.dig("attributes", "context", "trace", "spanId") == event.dig("attributes", "spanId") }, "expected typed operation span identity")
 assert(operation_spans.any? { |event| event.dig("attributes", "metadata", "view.template") == "tools/show.html.erb" }, "expected relative template")
 assert(operation_spans.any? { |event| event.dig("attributes", "metadata", "cache.hit") == true }, "expected cache result evidence")
 assert(operation_spans.any? { |event| event.dig("attributes", "status") == "error" && event.dig("attributes", "metadata", "exceptionType") == "ArgumentError" }, "expected type-only operation failure")
 assert(operation_spans.any? { |event| event.fetch("timestamp") == "2026-08-01T12:00:00.000000Z" }, "expected operation start timestamp")
-assert(attributes.fetch("name") == "GET /tools/:id(.:format)", "expected Rails route-template span name")
-assert(attributes.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "expected incoming trace continuation")
-assert(attributes.fetch("parentSpanId") == "00f067aa0ba902b7", "expected incoming parent span")
 assert(
-  typed_context.dig("trace", "traceId") == attributes.fetch("traceId"),
-  "expected typed Rails request trace correlation"
+  attributes.values_at("name", "traceId", "parentSpanId") ==
+    ["GET /tools/:id(.:format)", "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7"],
+  "expected Rails request identity and incoming trace"
 )
 assert(
-  typed_context.dig("trace", "spanId") == attributes.fetch("spanId"),
-  "expected typed Rails request span correlation"
+  typed_context.fetch("trace").values_at("traceId", "spanId") == attributes.values_at("traceId", "spanId"),
+  "expected typed Rails request correlation"
 )
-assert(metadata.fetch("http.route") == "/tools/:id(.:format)", "expected route template metadata")
-assert(metadata.fetch("rails.controller") == "tools", "expected bounded controller metadata")
-assert(metadata.fetch("rails.action") == "show", "expected bounded action metadata")
-assert(metadata.fetch("service") == "circulate-web", "expected service metadata")
-assert(metadata.fetch("environment") == "staging", "expected environment metadata")
+assert(
+  metadata.values_at("http.route", "rails.controller", "rails.action", "service", "environment") ==
+    ["/tools/:id(.:format)", "tools", "show", "circulate-web", "staging"],
+  "expected bounded Rails request metadata"
+)
 serialized = JSON.generate(events)
 %w[opaque-record-id opaque-query opaque-auth installed-rails-key opaque@example.test opaque-account-cache-key private_accounts opaque\ SQL\ failure].each do |forbidden|
   assert(!serialized.include?(forbidden), "expected Rails telemetry to omit #{forbidden}")
 end
 assert(!serialized.include?("/srv/application"), "expected Rails telemetry to omit absolute template paths")
-tests += 1
 
 error_transport = LogBrew::RecordingTransport.always_accept
-error_runtime = LogBrew::Rails::Runtime.new(
-  rails_configuration,
-  transport_factory: ->(_config) { error_transport }
-)
+error_runtime = rails_runtime(rails_configuration, error_transport)
 application_error = RuntimeError.new("opaque application error detail")
 error_app = lambda do |environment|
   environment["action_dispatch.route_uri_pattern"] = "/failures/:id(.:format)"
@@ -219,7 +214,6 @@ assert(issue_metadata.fetch("traceId") == failed_span.fetch("traceId"), "expecte
 assert(issue_metadata.fetch("spanId") == failed_span.fetch("spanId"), "expected Rails issue/span span correlation")
 assert(!JSON.generate(error_events).include?("opaque application error detail"), "expected private exception detail to stay local")
 assert(!JSON.generate(error_events).include?(File.expand_path("..", __dir__)), "expected absolute Rails source paths to stay local")
-tests += 1
 
 reporter = LogBrew::Rails::ErrorReporter.new(error_runtime)
 reporter.report(
@@ -248,12 +242,8 @@ assert(handled_metadata.fetch("handled") == true, "expected handled Rails mechan
 assert(handled_metadata.fetch("mechanism") == "rails.error_reporter", "expected Rails error-reporter mechanism")
 assert(!JSON.generate(reporter_events).include?("opaque handled error detail"), "expected handled error message to stay local")
 assert(!JSON.generate(reporter_events).include?("opaque-user-id"), "expected user context to stay local")
-tests += 1
 
-concurrent_runtime = LogBrew::Rails::Runtime.new(
-  rails_configuration,
-  transport_factory: ->(_config) { LogBrew::RecordingTransport.always_accept }
-)
+concurrent_runtime = rails_runtime
 concurrent_app = lambda do |environment|
   environment["action_dispatch.route_uri_pattern"] = "/health(.:format)"
   [204, {}, []]
@@ -267,14 +257,12 @@ concurrent_events = JSON.parse(concurrent_runtime.client.preview_json).fetch("ev
 span_ids = concurrent_events.select { |event| event.fetch("type") == "span" }.map { |event| event.fetch("id") }
 assert(span_ids.length == 100, "expected every concurrent Rails request span")
 assert(span_ids.uniq.length == 100, "expected unique concurrent Rails event ids")
-tests += 1
 
 response = runtime.shutdown
 assert(response.status_code == 202, "expected Rails runtime shutdown flush")
 assert(runtime.shutdown.equal?(response), "expected repeated Rails shutdown to be idempotent")
 error_runtime.shutdown
 concurrent_runtime.shutdown
-tests += 1
 
 disabled_runtime = LogBrew::Rails::Runtime.new(disabled)
 disabled_response = Object.new
@@ -284,7 +272,6 @@ assert(
   "expected disabled Rails middleware to remain transparent"
 )
 assert(disabled_runtime.client.nil?, "expected disabled Rails runtime to create no client")
-tests += 1
 
 capture_failures = []
 broken_runtime = LogBrew::Rails::Runtime.new(
@@ -303,7 +290,6 @@ actual_response = LogBrew::Rails::RequestMiddleware.new(broken_app, runtime: bro
 assert(actual_response.equal?(broken_response), "expected capture initialization failure to preserve response")
 assert(broken_calls == 1, "expected capture initialization failure to call the application once")
 assert(capture_failures == [["client_initialization", "RuntimeError"]], "expected bounded capture failure")
-tests += 1
 
 FakeRailsClient = Struct.new(:environment_events, :release_events, :shutdown_calls, :shutdown_response) do
   def initialize
@@ -343,7 +329,6 @@ assert(first_process_client.shutdown_calls.zero?, "expected inherited client sta
 fork_shutdown = fork_runtime.shutdown
 assert(fork_runtime.shutdown.equal?(fork_shutdown), "expected process-local shutdown idempotency")
 assert(second_process_client.shutdown_calls == 1, "expected one shutdown in the active process")
-tests += 1
 
 class ActiveJobProbe
   attr_reader :serialized, :last_error, :executions
@@ -394,10 +379,7 @@ class ActiveJobProbe
 end
 
 ActiveJobProbe.prepend(LogBrew::Rails.const_get(:ActiveJobExtension))
-active_job_runtime = LogBrew::Rails::Runtime.new(
-  rails_configuration,
-  transport_factory: ->(_config) { LogBrew::RecordingTransport.always_accept }
-)
+active_job_runtime = rails_runtime
 previous_runtime = LogBrew::Rails.instance_variable_get(:@runtime)
 LogBrew::Rails.instance_variable_set(:@runtime, active_job_runtime)
 begin
@@ -458,6 +440,50 @@ ensure
   LogBrew::Rails.instance_variable_set(:@runtime, previous_runtime)
   active_job_runtime.shutdown
 end
-tests += 1
 
-puts "ruby Rails integration tests passed: #{tests}"
+outbound_runtime = rails_runtime
+outbound_server = LocalHttpIntake.new([204, 204], host: "localhost", path: "/private")
+previous_runtime = LogBrew::Rails.instance_variable_get(:@runtime)
+LogBrew::Rails.instance_variable_set(:@runtime, outbound_runtime)
+begin
+  LogBrew::Rails.const_get(:OutboundHttp).install
+  uri = URI("#{outbound_server.endpoint}?marker=opaque-query")
+  request = Net::HTTP::Get.new(uri)
+  parent = LogBrew::Trace.create(
+    trace_id: "33333333333333333333333333333333",
+    span_id: "4444444444444444",
+    trace_flags: "01"
+  )
+  response = LogBrew::Trace.with_context(parent) { Net::HTTP.start(uri.host, uri.port) { |http| http.request(request) } }
+  assert(response.code == "204", "expected automatic Rails outbound response")
+  record = Timeout.timeout(2) { outbound_server.records.pop }
+  events = JSON.parse(outbound_runtime.client.preview_json).fetch("events")
+  spans = events.select { |event| event.fetch("type") == "span" }
+  span = spans.fetch(0).fetch("attributes")
+  assert(spans.length == 1, "expected one automatic Rails outbound span")
+  assert(span.fetch("traceId") == parent.trace_id, "expected outbound parent trace")
+  assert(span.fetch("parentSpanId") == parent.span_id, "expected outbound parent span")
+  assert(span.fetch("metadata") == {
+    "method" => "GET",
+    "host" => "localhost",
+    "statusCode" => 204,
+    "source" => "net_http",
+    "sampled" => true
+  }, "expected bounded automatic outbound evidence")
+  assert(record.headers.fetch("traceparent").include?(span.fetch("spanId")), "expected outbound propagation")
+  serialized = JSON.generate(events)
+  %w[private opaque-query].each do |forbidden|
+    assert(!serialized.include?(forbidden), "expected automatic outbound telemetry to omit #{forbidden}")
+  end
+
+  pending_events = outbound_runtime.client.pending_events
+  Net::HTTP.get_response(uri)
+  assert(outbound_runtime.client.pending_events == pending_events, "expected no automatic span without a parent trace")
+  Timeout.timeout(2) { outbound_server.records.pop }
+ensure
+  LogBrew::Rails.instance_variable_set(:@runtime, previous_runtime)
+  outbound_server.close
+  outbound_runtime.shutdown
+end
+
+puts "ruby Rails integration tests passed"

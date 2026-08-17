@@ -62,11 +62,14 @@ cat > "$consumer_path" <<'RUBY'
 
 require "json"
 require "logger"
+require "net/http"
 require "rack/mock"
 require "timeout"
+require "uri"
 require ENV.fetch("LOGBREW_TEST_INTAKE")
 
 intake = LocalHttpIntake.new
+dependency = LocalHttpIntake.new([503], host: "localhost", path: "/private-dependency")
 begin
   ENV["RAILS_ENV"] = "test"
   ENV["LOGBREW_SERVER_API_KEY"] = "installed-rails-key"
@@ -83,8 +86,7 @@ begin
   require "logbrew-sdk"
 
   expected_rails = ENV.fetch("LOGBREW_RAILS_SMOKE_VERSION")
-  abort "unexpected Rails version" unless Rails.version == expected_rails
-  abort "automatic Railtie missing" unless defined?(LogBrew::RailsRailtie)
+  abort "Rails integration contract changed" unless Rails.version == expected_rails && defined?(LogBrew::RailsRailtie)
 
   module InstalledRailsSmoke
     class Application < Rails::Application
@@ -103,6 +105,13 @@ begin
       ActiveSupport::Notifications.instrument("sql.active_record", sql: "SELECT private_accounts #{parameters.fetch(:id)}") { nil }
       ActiveSupport::Notifications.instrument("cache_read.active_support", key: "opaque-cache", hit: true) { nil }
       ActiveSupport::Notifications.instrument("render_template.action_view", identifier: "/srv/application/app/views/tools/show.html.erb") { nil }
+      dependency_uri = URI("#{dependency.endpoint}?marker=opaque-outbound-query")
+      dependency_request = Net::HTTP::Post.new(dependency_uri)
+      dependency_request.body = "opaque-outbound-body"
+      dependency_response = Net::HTTP.start(dependency_uri.host, dependency_uri.port) do |http|
+        http.request(dependency_request)
+      end
+      abort "dependency response changed" unless dependency_response.code == "503"
       body = JSON.generate("tool" => parameters.fetch(:id))
       [200, { "content-type" => "application/json", "content-length" => body.bytesize.to_s }, [body]]
     }
@@ -121,11 +130,10 @@ begin
   end
 
   runtime = LogBrew::Rails.runtime
-  abort "runtime was not installed" if runtime.nil?
-  abort "runtime was not enabled" unless runtime.configuration.enabled?
-  abort "service configuration changed" unless runtime.configuration.service_name == "installed-rails-smoke"
   middleware_entries = application.middleware.map { |entry| entry.klass }
-  abort "request middleware missing" unless middleware_entries.include?(LogBrew::Rails::RequestMiddleware)
+  abort "runtime contract changed" unless runtime && runtime.configuration.enabled? &&
+    runtime.configuration.service_name == "installed-rails-smoke" &&
+    middleware_entries.include?(LogBrew::Rails::RequestMiddleware)
 
   incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
   requests = Rack::MockRequest.new(application)
@@ -134,8 +142,10 @@ begin
     "HTTP_TRACEPARENT" => incoming,
     "HTTP_AUTHORIZATION" => "Bearer opaque-auth"
   )
-  abort "application response changed" unless response.status == 200
-  abort "application body changed" unless JSON.parse(response.body).fetch("tool") == "opaque-record-id"
+  dependency_record = Timeout.timeout(3) { dependency.records.pop }
+  abort "application or dependency response changed" unless response.status == 200 &&
+    JSON.parse(response.body).fetch("tool") == "opaque-record-id" &&
+    !dependency_record.headers["traceparent"].to_s.empty?
 
   not_found_response = requests.get("/unmatched")
   abort "not-found response changed" unless not_found_response.status == 404
@@ -181,87 +191,77 @@ begin
   request_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails" }
   operation_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails.active_support" }
   job_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "rails.active_job" }
+  outbound_spans = spans.select { |event| event.dig("attributes", "metadata", "source") == "net_http" }
   issues = preview_events.select { |event| event.fetch("type") == "issue" }
-  abort "environment event count changed" unless preview_events.count { |event| event.fetch("type") == "environment" } == 1
-  abort "request span count changed" unless request_spans.length == 3
-  abort "operation span count changed" unless operation_spans.length == 3
-  abort "ActiveJob span count changed" unless job_spans.length == 4
-  abort "issue count changed" unless issues.length == 3
+  counts = [preview_events.count { |event| event.fetch("type") == "environment" }, request_spans.length,
+            operation_spans.length, job_spans.length, outbound_spans.length, issues.length]
+  abort "Rails event counts changed" unless counts == [1, 3, 3, 4, 1, 3]
 
   span = request_spans.fetch(0).fetch("attributes")
-  abort "route template span changed: #{span.fetch("name").inspect}" unless span.fetch("name") == "GET /tools/:id(.:format)"
-  abort "incoming trace changed" unless span.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736"
-  abort "incoming parent changed" unless span.fetch("parentSpanId") == "00f067aa0ba902b7"
+  abort "request span identity changed" unless span.values_at("name", "traceId", "parentSpanId") ==
+    ["GET /tools/:id(.:format)", "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7"]
   span_context = span.fetch("context")
   span_resource = span_context.fetch("resource")
-  abort "typed service context changed" unless span_resource.fetch("service") == { "name" => "installed-rails-smoke" }
-  abort "typed deployment context changed" unless span_resource.fetch("deployment") == { "environment" => "test" }
-  abort "typed framework context changed" unless span_resource.fetch("framework") == { "name" => "rails", "version" => expected_rails }
+  abort "typed resource context changed" unless span_resource.values_at("service", "deployment", "framework") == [
+    { "name" => "installed-rails-smoke" }, { "environment" => "test" },
+    { "name" => "rails", "version" => expected_rails }
+  ]
   abort "typed runtime context missing" if span_resource.dig("runtime", "name").to_s.empty?
-  abort "typed request trace changed" unless span_context.dig("trace", "traceId") == span.fetch("traceId")
-  abort "typed request span changed" unless span_context.dig("trace", "spanId") == span.fetch("spanId")
+  abort "typed request correlation changed" unless span_context.fetch("trace").values_at("traceId", "spanId") ==
+    span.values_at("traceId", "spanId")
   span_metadata = span.fetch("metadata")
-  abort "route metadata changed" unless span_metadata.fetch("http.route") == "/tools/:id(.:format)"
-  abort "service metadata changed" unless span_metadata.fetch("service") == "installed-rails-smoke"
-  abort "environment metadata changed" unless span_metadata.fetch("environment") == "test"
-  abort "operation receipt changed" unless span_metadata.values_at("rails.operations.observed", "rails.operations.captured", "rails.operations.truncated") == [3, 3, false]
+  abort "request metadata changed" unless span_metadata.values_at(
+    "http.route", "service", "environment", "rails.operations.observed",
+    "rails.operations.captured", "rails.operations.truncated"
+  ) == ["/tools/:id(.:format)", "installed-rails-smoke", "test", 3, 3, false]
   abort "operation trace changed" unless operation_spans.all? do |event|
     attributes = event.fetch("attributes")
     attributes.fetch("traceId") == span.fetch("traceId") && attributes.fetch("parentSpanId") == span.fetch("spanId")
   end
   operation_times = operation_spans.map { |event| Time.iso8601(event.fetch("timestamp")) }
-  abort "operation chronology changed" unless operation_times == operation_times.sort
-  abort "cache hit missing" unless operation_spans.any? { |event| event.dig("attributes", "metadata", "cache.hit") == true }
-  abort "relative template missing" unless operation_spans.any? { |event| event.dig("attributes", "metadata", "view.template") == "tools/show.html.erb" }
+  abort "operation evidence changed" unless operation_times == operation_times.sort &&
+    operation_spans.any? { |event| event.dig("attributes", "metadata", "cache.hit") == true } &&
+    operation_spans.any? { |event| event.dig("attributes", "metadata", "view.template") == "tools/show.html.erb" }
+  outbound_span = outbound_spans.fetch(0).fetch("attributes")
+  abort "outbound evidence changed" unless outbound_span.values_at("traceId", "parentSpanId", "status", "metadata") == [
+    span.fetch("traceId"), span.fetch("spanId"), "error", {
+    "method" => "POST", "host" => "localhost", "statusCode" => 503,
+    "source" => "net_http", "sampled" => true
+  }]
 
   not_found_span = request_spans.find { |event| event.dig("attributes", "metadata", "http.status_code") == 404 }
-  abort "not-found span missing" if not_found_span.nil?
-  abort "not-found span status changed" unless not_found_span.fetch("attributes").fetch("status") == "ok"
+  abort "not-found span changed" unless not_found_span&.dig("attributes", "status") == "ok"
 
   handled_issue = issues.find do |event|
     event.fetch("attributes").dig("exception", "mechanism", "type") == "rails.error_reporter"
   end&.fetch("attributes")
-  abort "handled Rails issue missing" if handled_issue.nil?
-  abort "handled issue title changed" unless handled_issue.fetch("title") == "RuntimeError"
-  abort "handled issue message became enabled" if handled_issue.key?("message")
-  abort "handled marker changed" unless handled_issue.fetch("metadata").fetch("rails.handled") == true
-  abort "handled typed mechanism changed" unless handled_issue.fetch("exception") == {
-    "type" => "RuntimeError",
-    "mechanism" => { "type" => "rails.error_reporter", "handled" => true }
-  }
+  abort "handled Rails issue changed" unless handled_issue && !handled_issue.key?("message") &&
+    handled_issue.fetch("title") == "RuntimeError" && handled_issue.dig("metadata", "rails.handled") == true &&
+    handled_issue.fetch("exception") == { "type" => "RuntimeError", "mechanism" => { "type" => "rails.error_reporter", "handled" => true } }
 
   escaped_issue = issues.find do |event|
     event.fetch("attributes").dig("exception", "mechanism", "type") == "rails.middleware"
   end&.fetch("attributes")
-  abort "escaped Rails issue missing" if escaped_issue.nil?
-  abort "escaped issue message became enabled" if escaped_issue.key?("message")
-  abort "escaped typed mechanism changed" unless escaped_issue.fetch("exception") == {
-    "type" => "RuntimeError",
-    "mechanism" => { "type" => "rails.middleware", "handled" => false }
-  }
+  abort "escaped Rails issue changed" unless escaped_issue && !escaped_issue.key?("message") &&
+    escaped_issue.fetch("exception") == { "type" => "RuntimeError", "mechanism" => { "type" => "rails.middleware", "handled" => false } }
   escaped_frames = escaped_issue.fetch("stackFrames")
-  abort "escaped Rails frames changed" unless escaped_frames.length.between?(1, 32)
-  abort "escaped Rails frame path changed" unless escaped_frames.fetch(0).fetch("filename") == "consumer.rb"
+  abort "escaped Rails frames changed" unless escaped_frames.length.between?(1, 32) &&
+    escaped_frames.fetch(0).fetch("filename") == "consumer.rb"
   failed_span = request_spans.find { |event| event.fetch("attributes").fetch("status") == "error" }.fetch("attributes")
   escaped_metadata = escaped_issue.fetch("metadata")
-  abort "escaped Rails trace correlation changed" unless escaped_metadata.fetch("traceId") == failed_span.fetch("traceId")
-  abort "escaped Rails span correlation changed" unless escaped_metadata.fetch("spanId") == failed_span.fetch("spanId")
-  abort "escaped Rails grouping changed" unless escaped_metadata.fetch("issueGroupingKey").match?(
-    /\Arails-exception-[0-9a-f]{64}\z/
-  )
+  abort "escaped Rails correlation changed" unless escaped_metadata.values_at("traceId", "spanId") ==
+    failed_span.values_at("traceId", "spanId") &&
+    escaped_metadata.fetch("issueGroupingKey").match?(/\Arails-exception-[0-9a-f]{64}\z/)
 
   job_issue = issues.find do |event|
     event.fetch("attributes").dig("exception", "mechanism", "type") == "rails.active_job"
   end&.fetch("attributes")
-  abort "ActiveJob terminal issue missing" if job_issue.nil?
-  abort "ActiveJob trace changed" unless job_spans.all? { |event| event.dig("attributes", "traceId") == job_parent.trace_id }
-  abort "ActiveJob retry evidence changed" unless job_spans.count { |event| event.dig("attributes", "status") == "error" } == 2
-  abort "ActiveJob retry sequence changed" unless job_spans.map { |event| event.dig("attributes", "metadata", "retryCount") } == [0, 0, 1, 1]
-  abort "ActiveJob class missing" unless job_issue.dig("metadata", "activeJob.class") == "InstalledFailureJob"
-  abort "ActiveJob mechanism changed" unless job_issue.fetch("exception") == {
-    "type" => "RuntimeError",
-    "mechanism" => { "type" => "rails.active_job", "handled" => false }
-  }
+  abort "ActiveJob evidence changed" unless job_issue &&
+    job_spans.all? { |event| event.dig("attributes", "traceId") == job_parent.trace_id } &&
+    job_spans.count { |event| event.dig("attributes", "status") == "error" } == 2 &&
+    job_spans.map { |event| event.dig("attributes", "metadata", "retryCount") } == [0, 0, 1, 1] &&
+    job_issue.dig("metadata", "activeJob.class") == "InstalledFailureJob" &&
+    job_issue.fetch("exception") == { "type" => "RuntimeError", "mechanism" => { "type" => "rails.active_job", "handled" => false } }
 
   serialized = JSON.generate(preview_events)
   %w[
@@ -270,22 +270,22 @@ begin
     opaque\ handled\ error\ detail opaque\ escaped\ error\ detail opaque-user-id
     opaque-failure-id opaque-failure-query opaque-failure-auth
     opaque-job-argument opaque\ ActiveJob\ failure\ detail
+    private-dependency opaque-outbound-query opaque-outbound-body
   ].each do |forbidden|
     abort "Rails telemetry privacy changed" if serialized.include?(forbidden.tr("\\", " "))
   end
 
   shutdown_response = LogBrew::Rails.shutdown
-  abort "shutdown status changed" unless shutdown_response.status_code == 202
-  abort "shutdown idempotency changed" unless LogBrew::Rails.shutdown.equal?(shutdown_response)
   record = Timeout.timeout(3) { intake.records.pop }
-  abort "intake route changed" unless record.path == "/v1/events"
-  abort "authorization changed" unless record.headers.fetch("authorization") == "Bearer installed-rails-key"
   delivered = JSON.parse(record.body).fetch("events")
-  abort "delivered event count changed" unless delivered.length == 14
-  abort "pending events remain" unless client.pending_events.zero?
+  abort "delivery contract changed" unless shutdown_response.status_code == 202 &&
+    LogBrew::Rails.shutdown.equal?(shutdown_response) && record.path == "/v1/events" &&
+    record.headers.fetch("authorization") == "Bearer installed-rails-key" &&
+    delivered.length == 15 && client.pending_events.zero?
 
-  puts "installed Rails consumer ok requests=3 operations=3 jobs=4 issues=3 environments=1"
+  puts "installed Rails consumer ok requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1"
 ensure
+  dependency.close
   intake.close
 end
 RUBY
@@ -296,7 +296,7 @@ LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
 RUBYOPT=-W0 \
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
   "$ruby_bin" "$consumer_path" > "$tmp_dir/consumer.out"
-grep -qx 'installed Rails consumer ok requests=3 operations=3 jobs=4 issues=3 environments=1' "$tmp_dir/consumer.out"
+grep -qx 'installed Rails consumer ok requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1' "$tmp_dir/consumer.out"
 
-printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 operations=3 jobs=4 issues=3 environments=1\n' \
+printf 'ruby Rails installed smoke ok version=%s rails=%s sha256:%s requests=3 operations=3 jobs=4 outbound=1 issues=3 environments=1\n' \
   "$package_version" "$rails_version" "$gem_digest"

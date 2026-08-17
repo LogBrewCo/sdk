@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request, database, cache, view, error, and ActiveJob capture; standard-library `Net::HTTP` delivery; opt-in standard-library `Logger` support; and manual Rack helpers.
+Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with automatic Rails request, database, cache, view, error, ActiveJob, and outbound `Net::HTTP` capture; standard-library delivery; opt-in standard-library `Logger` support; and manual Rack helpers.
 
 The core package has no runtime gem dependencies. Its automatic integration
 activates only inside an application that has already loaded Rails.
@@ -64,6 +64,11 @@ sanitized structured frames. The adapter does not capture job IDs, queue names,
 arguments, serialized payloads, exception messages, or raw backtraces by
 default. When ActiveJob uses LogBrew's Sidekiq middleware, the inner carrier
 suppresses duplicate Sidekiq spans and issues.
+
+Outbound `Net::HTTP` calls made inside an active Rails request or job trace also
+need no initializer. They propagate one W3C child and record only method,
+normalized host, status, duration, adapter source, sampled state, and exception
+type. Calls outside an active trace remain exact pass-throughs.
 
 The explicit Rails capture settings are:
 
@@ -427,7 +432,9 @@ end
 
 ## Outbound HTTP Tracing
 
-Wrap an app-owned `Net::HTTP` connection explicitly when outbound work should become a child of the active LogBrew trace:
+The enabled Rails integration captures `Net::HTTP` automatically while a
+LogBrew trace is active. Outside Rails, wrap an app-owned connection explicitly
+when outbound work should become a child of the active trace:
 
 ```ruby
 uri = URI("https://service.example/health")
@@ -452,7 +459,15 @@ connection = Faraday.new("https://service.example") do |builder|
 end
 ```
 
-Both adapters are literal pass-throughs when `LogBrew::Trace.current` is absent. With an active parent, they propagate one W3C `traceparent`, return the caller-visible header and trace scope to their prior values, and capture one completion span per actual execution. Duplicate wrappers, nested LogBrew HTTP middleware, and SDK delivery are suppressed without process-wide hooks. Net::HTTP start blocks, response streaming, Faraday middleware ordering, responses, and exceptions retain their normal behavior; telemetry capture failures are advisory.
+Both explicit adapters are literal pass-throughs when `LogBrew::Trace.current`
+is absent. With an active parent, explicit adapters and automatic Rails
+`Net::HTTP` capture propagate one W3C `traceparent`, return caller-visible
+header and trace state, and capture one completion span per actual execution.
+Duplicate wrappers, nested LogBrew HTTP middleware, and SDK delivery are
+suppressed. Outside an enabled Rails process, the SDK does not patch
+`Net::HTTP`. Start blocks, response streaming, Faraday middleware ordering,
+responses, and exceptions retain normal behavior; capture failures are
+advisory.
 
 Outbound HTTP spans allow only method, normalized host, status code, duration, adapter source, sampled state, and exception type. They never record scheme, port, path, query, fragment, full URL, request or response headers, bodies or sizes, exception messages or stacks, authentication material, cookies, baggage, tracestate, resolved addresses, or arbitrary request options.
 
