@@ -22,7 +22,7 @@ function createLogBrewSvelteClient({
   serverApiKey = readEnv("LOGBREW_SERVER_API_KEY"),
   context,
   sdkName = "logbrew-svelte",
-  sdkVersion = "0.1.2",
+  sdkVersion = "0.1.3",
   maxRetries = 2
 } = {}) {
   const authKey = clientKey ?? serverApiKey ?? apiKey;
