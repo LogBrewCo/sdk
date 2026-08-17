@@ -354,10 +354,6 @@ function createLogBrewMetroSerializer(customSerializer) {
     serializerSource ??= createDefaultMetroSerializer();
     return serializerSource;
   };
-  const resolveFallbackSerializer = () => {
-    fallbackSerializer ??= createDefaultMetroSerializer();
-    return fallbackSerializer;
-  };
 
   const serializer = async (entryPoint, preModules, graph, options) => {
     const source = resolveSerializer();
@@ -367,7 +363,8 @@ function createLogBrewMetroSerializer(customSerializer) {
     const releaseModules = prependDebugIdModule(preModules);
     const result = await source(entryPoint, releaseModules, graph, options);
     if (typeof result === "string") {
-      const fallbackResult = await resolveFallbackSerializer()(entryPoint, releaseModules, graph, options);
+      fallbackSerializer ??= createDefaultMetroSerializer();
+      const fallbackResult = await fallbackSerializer(entryPoint, releaseModules, graph, options);
       if (typeof fallbackResult === "string" || fallbackResult.code !== result) {
         throw configurationError(
           "LogBrew Metro string-returning custom serializer changed bundle code; return { code, map } to preserve source-map accuracy",

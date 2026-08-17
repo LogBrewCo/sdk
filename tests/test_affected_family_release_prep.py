@@ -38,9 +38,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.8"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.5"),
-            "js/logbrew-next/package.json": ("@logbrew/next", "0.1.4"),
+            "js/logbrew-next/package.json": ("@logbrew/next", "0.1.5"),
             "js/logbrew-react/package.json": ("@logbrew/react", "0.1.1"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.15"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.16"),
         }
         for relative_path, expected in npm_versions.items():
             manifest = json_object(relative_path)
@@ -94,7 +94,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             manifest["peerDependencies"]["@logbrew/sdk"],
-            "^0.1.7",
+            "^0.1.12",
         )
 
         native_source = (
@@ -305,9 +305,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_NPM_SDK_VERSION:-0.1.12",
                 "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
                 "LOGBREW_NPM_NODE_VERSION:-0.1.8",
-                "LOGBREW_NPM_NEXT_VERSION:-0.1.4",
+                "LOGBREW_NPM_NEXT_VERSION:-0.1.5",
                 "LOGBREW_NPM_REACT_VERSION:-0.1.1",
-                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.15",
+                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.16",
             ),
             "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.4",),
             "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.8",),
