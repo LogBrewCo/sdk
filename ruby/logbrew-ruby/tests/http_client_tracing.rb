@@ -112,17 +112,15 @@ http_tracing_test("Net::HTTP propagates one child and returns the request header
     result
   end
   propagated = http_traceparent_parts(delegate.seen_traceparents.fetch(0))
-  span = http_span(client)
-  metadata = span.fetch("metadata")
+  event = http_events(client).fetch(0)
+  span = event.fetch("attributes")
 
-  http_assert(response.code == "202", "expected response")
-  http_assert(propagated == ["00", parent.trace_id, span.fetch("spanId"), parent.trace_flags], "expected exact child traceparent")
+  http_assert(response.code == "202" && propagated == ["00", parent.trace_id, span.fetch("spanId"), parent.trace_flags], "expected response and exact child propagation")
+  http_assert(event.fetch("timestamp").match?(/\.\d{6}Z\z/), "expected precise dependency start timestamp")
   http_assert(request["traceparent"] == "caller-value", "expected caller header restoration")
   http_assert(caller_parent.equal?(parent), "expected caller trace state")
-  http_assert(span.fetch("traceId") == parent.trace_id, "expected parent trace")
-  http_assert(span.fetch("parentSpanId") == parent.span_id, "expected parent span")
-  http_assert(span.fetch("status") == "ok", "expected success span")
-  http_assert(metadata == {
+  http_assert(span.values_at("traceId", "parentSpanId", "status") == [parent.trace_id, parent.span_id, "ok"], "expected correlated success span")
+  http_assert(span.fetch("metadata") == {
     "method" => "POST",
     "host" => "api.example.test",
     "statusCode" => 202,

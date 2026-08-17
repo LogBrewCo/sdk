@@ -19,6 +19,7 @@ module LogBrew
       @method = HttpClientTracing.normalize_method(method)
       @host = HttpClientTracing.normalize_host(host)
       @on_capture_error = on_capture_error
+      @timestamp = Time.now.utc.iso8601(6)
       @started_at = HttpClientTracing.monotonic_time
       @mutex = Mutex.new
       @finished = false
@@ -60,7 +61,7 @@ module LogBrew
 
       @client.span(
         "ruby_http_span_#{@context.span_id}",
-        Time.now.utc.iso8601,
+        @timestamp,
         {
           name: "http.client:#{@method}",
           traceId: @context.trace_id,
