@@ -1,5 +1,6 @@
 import { SdkError } from "@logbrew/sdk";
 import {
+  createAutomaticBrowserEventId,
   createBrowserTraceContext,
   optionalBrowserTraceContext
 } from "./trace-context.js";
@@ -314,7 +315,7 @@ function stringOrUndefined(value) {
 }
 
 function defaultResourceTimingEventId({ message, path }) {
-  return `evt_browser_resource_${slugify(`${path}_${message}`)}`;
+  return createAutomaticBrowserEventId("evt_browser_resource", `${path}_${message}`);
 }
 
 function resourceEntries(entryList) {
@@ -324,11 +325,4 @@ function resourceEntries(entryList) {
 
 function defaultWindow() {
   return typeof globalThis.window === "object" ? globalThis.window : undefined;
-}
-
-function slugify(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
 }

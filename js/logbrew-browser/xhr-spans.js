@@ -1,6 +1,7 @@
 import { SdkError } from "@logbrew/sdk";
 import { createBrowserFetchSpanEvent } from "./fetch-spans.js";
 import {
+  createAutomaticBrowserEventId,
   createBrowserTraceContext,
   optionalBrowserTraceContext,
   shouldPropagateTraceparent
@@ -321,12 +322,5 @@ function defaultWindow() {
 }
 
 function defaultXhrSpanEventId({ message, path }) {
-  return `evt_browser_xhr_${slugify(`${path}_${message}`)}`;
-}
-
-function slugify(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
+  return createAutomaticBrowserEventId("evt_browser_xhr", `${path}_${message}`);
 }

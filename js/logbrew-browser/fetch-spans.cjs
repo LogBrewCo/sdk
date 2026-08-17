@@ -2,6 +2,7 @@
 
 const { SdkError } = require("@logbrew/sdk");
 const {
+  createAutomaticBrowserEventId,
   createBrowserTraceContext,
   optionalBrowserTraceContext,
   shouldPropagateTraceparent
@@ -481,14 +482,7 @@ function defaultWindow() {
 }
 
 function defaultFetchSpanEventId({ message, path }) {
-  return `evt_browser_fetch_${slugify(`${path}_${message}`)}`;
-}
-
-function slugify(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
+  return createAutomaticBrowserEventId("evt_browser_fetch", `${path}_${message}`);
 }
 
 module.exports = {
