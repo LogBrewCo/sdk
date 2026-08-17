@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
 load_events="${LOGBREW_RUBY_LOAD_EVENTS:-10000}"
 retained_events=1000
 batch_size=100
@@ -14,36 +13,17 @@ if [[ ! "$load_events" =~ ^[0-9]+$ ]] || ((load_events < 1010 || load_events > 1
   exit 1
 fi
 
-tmp_dir="$(mktemp -d)"
+ruby_smoke_create_tmp_dir
 gem_home="$tmp_dir/gems"
 intake_dir="$tmp_dir/intake"
 server_pid=""
 
-cleanup() {
-  if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
-    kill "$server_pid" 2>/dev/null || true
-    wait "$server_pid" 2>/dev/null || true
-  fi
-  rm -rf "$tmp_dir"
-}
-
-trap cleanup EXIT
+trap 'ruby_smoke_cleanup_server "$server_pid"' EXIT
 mkdir -p "$gem_home" "$intake_dir"
-
-package_version="$(
-  cd "$package_dir"
-  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "invalid gemspec"; print spec.version'
-)"
-gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
-(
-  cd "$package_dir"
-  gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null
-)
-test -f "$gem_path"
+ruby_smoke_prepare_package
 
 install_gem() {
-  GEM_HOME="$gem_home" GEM_PATH="$gem_home" \
-    gem install --local --install-dir "$gem_home" --no-document "$gem_path" >/dev/null
+  ruby_smoke_install_local "$gem_home"
 }
 
 installed_ruby() {

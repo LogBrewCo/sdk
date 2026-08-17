@@ -1,43 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
 attempted_events=1500
 worker_count=10
-tmp_dir="$(mktemp -d)"
+ruby_smoke_create_tmp_dir
 gem_home="$tmp_dir/gems"
 store_path="$tmp_dir/persistent-queue"
 server_pid=""
 
-cleanup() {
-  if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
-    kill "$server_pid" 2>/dev/null || true
-    wait "$server_pid" 2>/dev/null || true
-  fi
-  rm -rf "$tmp_dir"
-}
-
-trap cleanup EXIT
+trap 'ruby_smoke_cleanup_server "$server_pid"' EXIT
 mkdir -p "$gem_home"
 chmod 700 "$tmp_dir" "$gem_home"
-
-package_version="$(
-  cd "$package_dir"
-  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "invalid gemspec"; print spec.version'
-)"
-gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
-(
-  cd "$package_dir"
-  gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null
-)
-test -f "$gem_path"
-gem_sha256="$(ruby -rdigest -e 'print Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$gem_path")"
-[[ "$gem_sha256" =~ ^[0-9a-f]{64}$ ]]
+ruby_smoke_prepare_package
+gem_sha256="$gem_digest"
 
 install_gem() {
-  GEM_HOME="$gem_home" GEM_PATH="$gem_home" \
-    gem install --local --install-dir "$gem_home" --no-document "$gem_path" >/dev/null
+  ruby_smoke_install_local "$gem_home"
 }
 
 installed_ruby() {

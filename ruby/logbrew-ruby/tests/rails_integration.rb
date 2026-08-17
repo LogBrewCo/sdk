@@ -2,6 +2,7 @@
 
 require "json"
 require "net/http"
+require "stringio"
 require "timeout"
 require "uri"
 require_relative "../lib/logbrew"
@@ -31,26 +32,22 @@ end
 disabled = rails_configuration({}, keyed: false)
 assert(!disabled.enabled?, "expected Rails integration to stay disabled without a key")
 
-explicitly_disabled = rails_configuration(
-  { "LOGBREW_ENABLED" => "false", "LOGBREW_API_KEY" => "legacy-hidden" }, keyed: false
+assert(
+  !rails_configuration({ "LOGBREW_ENABLED" => "false", "LOGBREW_API_KEY" => "legacy-hidden" }, keyed: false).enabled?,
+  "expected explicit disable to ignore legacy configuration"
 )
-assert(!explicitly_disabled.enabled?, "expected explicit disable to ignore legacy configuration")
 
-legacy_error = expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY") do
+expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY", forbidden: "legacy-hidden") do
   rails_configuration({ "LOGBREW_API_KEY" => "legacy-hidden" }, keyed: false)
 end
-assert(!legacy_error.message.include?("legacy-hidden"), "expected legacy-key error to omit the key value")
 
-missing_key_error = expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY") do
+expect_sdk_error("configuration_error", "LOGBREW_SERVER_API_KEY", forbidden: "nil") do
   rails_configuration({ "LOGBREW_ENABLED" => "true" }, keyed: false)
-end
-assert(!missing_key_error.message.include?("nil"), "expected missing-key error to omit raw state")
-
-expect_sdk_error("configuration_error", "LOGBREW_ENABLED") do
-  rails_configuration({ "LOGBREW_ENABLED" => "sometimes" }, keyed: false)
 end
 
 {
+  "LOGBREW_ENABLED" => "sometimes",
+  "LOGBREW_CAPTURE_RAILS_LOGS" => "sometimes",
   "LOGBREW_ENDPOINT" => "http://example.test/v1/events",
   "LOGBREW_REQUEST_TIMEOUT_MS" => "unbounded",
   "LOGBREW_FLUSH_THRESHOLD" => "1001",
@@ -71,10 +68,10 @@ configuration = rails_configuration(
 configuration_values = [
   configuration.enabled?, configuration.service_name, configuration.app_environment,
   configuration.release, configuration.request_timeout, configuration.flush_interval,
-  configuration.flush_threshold, configuration.capture_exception_messages?
+  configuration.flush_threshold, configuration.capture_exception_messages?, configuration.capture_rails_logs?
 ]
 assert(
-  configuration_values == [true, "circulate-web", "staging", "circulate@2026.08.01", 2.5, 60.0, 50, false],
+  configuration_values == [true, "circulate-web", "staging", "circulate@2026.08.01", 2.5, 60.0, 50, false, false],
   "expected normalized Rails configuration"
 )
 
@@ -82,12 +79,13 @@ opted_in_configuration = rails_configuration(
   {
     "LOGBREW_ENDPOINT" => "http://127.0.0.1:4000/v1/events",
     "LOGBREW_CAPTURE_EXCEPTION_MESSAGES" => "true",
+    "LOGBREW_CAPTURE_RAILS_LOGS" => "true",
     "LOGBREW_INCLUDE_EXCEPTION_BACKTRACE" => "true"
   }
 )
 assert(
-  [opted_in_configuration.endpoint, opted_in_configuration.capture_exception_messages?, opted_in_configuration.include_exception_backtrace?] ==
-    ["http://127.0.0.1:4000/v1/events", true, true],
+  [opted_in_configuration.endpoint, opted_in_configuration.capture_exception_messages?, opted_in_configuration.capture_rails_logs?, opted_in_configuration.include_exception_backtrace?] ==
+    ["http://127.0.0.1:4000/v1/events", true, true, true],
   "expected explicit Rails capture opt-ins"
 )
 
@@ -98,8 +96,26 @@ operations.install(fake_notifications)
 operations.install(fake_notifications)
 assert(fake_notifications.subscriptions.length == 1, "expected one idempotent Rails operation subscription")
 
-transport = LogBrew::RecordingTransport.always_accept
-runtime = rails_runtime(configuration, transport)
+runtime = rails_runtime(configuration)
+log_runtime = rails_runtime(opted_in_configuration)
+log_output = StringIO.new
+application_logger = Logger.new(log_output)
+log_capture = LogBrew::Rails.const_get(:ApplicationLogCapture)
+2.times { log_capture.install(application_logger, log_runtime, application_root: __dir__) }
+log_parent = LogBrew::Trace.create(trace_id: "6bf92f3577b34da6a3ce929d0e0e4736", span_id: "20f067aa0ba902b7")
+block_calls = 0
+log_result = LogBrew::Trace.with_context(log_parent) do
+  application_logger.warn { block_calls += 1; "checkout delayed" }.tap do
+    application_logger.info("x" * 2_049)
+  end
+  application_logger.add(Logger::WARN, false)
+  eval('application_logger.warn("framework noise")', binding, "/vendor/gems/framework.rb", 1)
+end
+log_events = JSON.parse(log_runtime.client.preview_json).fetch("events").select { |event| event.fetch("type") == "log" }
+assert(log_result == true && block_calls == 1 && log_output.string.include?("checkout delayed"), "expected transparent lazy Rails logging")
+assert(log_events.map { |event| event.dig("attributes", "message").length } == [16, 2_048, 5], "expected bounded application-only Rails log messages")
+assert(log_events.map { |event| event.dig("attributes", "metadata", "messageState") } == %w[captured truncated captured], "expected explicit Rails log message states")
+assert(log_events.fetch(0).dig("attributes", "context", "trace", "traceId") == log_parent.trace_id, "expected Rails log trace correlation")
 application_response = [200, { "content-type" => "text/plain" }, ["ok"]]
 app = lambda do |environment|
   environment["action_dispatch.route_uri_pattern"] = "/tools/:id(.:format)"
@@ -163,13 +179,11 @@ assert(
   "expected bounded Rails request metadata"
 )
 serialized = JSON.generate(events)
-%w[opaque-record-id opaque-query opaque-auth installed-rails-key opaque@example.test opaque-account-cache-key private_accounts opaque\ SQL\ failure].each do |forbidden|
+%w[opaque-record-id opaque-query opaque-auth installed-rails-key opaque@example.test opaque-account-cache-key private_accounts opaque\ SQL\ failure /srv/application].each do |forbidden|
   assert(!serialized.include?(forbidden), "expected Rails telemetry to omit #{forbidden}")
 end
-assert(!serialized.include?("/srv/application"), "expected Rails telemetry to omit absolute template paths")
 
-error_transport = LogBrew::RecordingTransport.always_accept
-error_runtime = rails_runtime(rails_configuration, error_transport)
+error_runtime = rails_runtime
 application_error = RuntimeError.new("opaque application error detail")
 error_app = lambda do |environment|
   environment["action_dispatch.route_uri_pattern"] = "/failures/:id(.:format)"
@@ -187,33 +201,23 @@ error_events = JSON.parse(error_runtime.client.preview_json).fetch("events")
 issue = error_events.find { |event| event.fetch("type") == "issue" }
 assert(!issue.nil?, "expected unhandled Rails issue")
 issue_attributes = issue.fetch("attributes")
-assert(issue_attributes.fetch("title") == "RuntimeError", "expected type-only issue title")
-assert(!issue_attributes.key?("message"), "expected exception message to be omitted by default")
-assert(
-  issue_attributes.fetch("exception") == {
-    "type" => "RuntimeError",
-    "mechanism" => { "type" => "rails.middleware", "handled" => false }
-  },
-  "expected first-class unhandled Rails exception mechanism"
-)
 issue_frames = issue_attributes.fetch("stackFrames")
-assert(issue_frames.length.between?(1, 32), "expected bounded Rails exception frames")
-assert(issue_frames.fetch(0).fetch("filename") == "rails_integration.rb", "expected newest-first Rails throw frame")
-assert(!issue_frames.fetch(0).fetch("filename").include?(File::SEPARATOR), "expected basename-only Rails frames")
 issue_metadata = issue_attributes.fetch("metadata")
-assert(issue_metadata.fetch("errorName") == "RuntimeError", "expected backend-native Rails exception type")
-assert(issue_metadata.fetch("handled") == false, "expected Rails exception to be unhandled")
-assert(issue_metadata.fetch("mechanism") == "rails.middleware", "expected Rails middleware mechanism")
-assert(
-  issue_metadata.fetch("issueGroupingKey").match?(/\Arails-exception-[0-9a-f]{64}\z/),
-  "expected stable Rails issue grouping key"
-)
-assert(issue_metadata.fetch("errorFrameFile") == "rails_integration.rb", "expected Rails frame basename metadata")
 failed_span = error_events.find { |event| event.fetch("type") == "span" }.fetch("attributes")
-assert(issue_metadata.fetch("traceId") == failed_span.fetch("traceId"), "expected Rails issue/span trace correlation")
-assert(issue_metadata.fetch("spanId") == failed_span.fetch("spanId"), "expected Rails issue/span span correlation")
-assert(!JSON.generate(error_events).include?("opaque application error detail"), "expected private exception detail to stay local")
-assert(!JSON.generate(error_events).include?(File.expand_path("..", __dir__)), "expected absolute Rails source paths to stay local")
+assert_values("expected bounded privacy-safe unhandled Rails issue", [
+  issue_attributes.fetch("title"), issue_attributes.key?("message"), issue_attributes.fetch("exception"),
+  issue_frames.length.between?(1, 32), issue_frames.fetch(0).fetch("filename"),
+  issue_metadata.values_at("errorName", "handled", "mechanism", "errorFrameFile"),
+  issue_metadata.fetch("issueGroupingKey").match?(/\Arails-exception-[0-9a-f]{64}\z/),
+  issue_metadata.values_at("traceId", "spanId"),
+  JSON.generate(error_events).include?("opaque application error detail"),
+  JSON.generate(error_events).include?(File.expand_path("..", __dir__))
+], [
+  "RuntimeError", false,
+  { "type" => "RuntimeError", "mechanism" => { "type" => "rails.middleware", "handled" => false } },
+  true, "rails_integration.rb", ["RuntimeError", false, "rails.middleware", "rails_integration.rb"], true,
+  failed_span.values_at("traceId", "spanId"), false, false
+])
 
 reporter = LogBrew::Rails::ErrorReporter.new(error_runtime)
 reporter.report(
@@ -230,18 +234,14 @@ reporter_events = JSON.parse(error_runtime.client.preview_json).fetch("events")
 handled_issue = reporter_events.reverse.find { |event| event.fetch("type") == "issue" }
 handled_attributes = handled_issue.fetch("attributes")
 handled_metadata = handled_attributes.fetch("metadata")
-assert(
-  handled_attributes.fetch("exception") == {
-    "type" => "RuntimeError",
-    "mechanism" => { "type" => "rails.error_reporter", "handled" => true }
-  },
-  "expected first-class handled Rails reporter mechanism"
-)
-assert(handled_metadata.fetch("rails.handled") == true, "expected handled Rails issue metadata")
-assert(handled_metadata.fetch("handled") == true, "expected handled Rails mechanism state")
-assert(handled_metadata.fetch("mechanism") == "rails.error_reporter", "expected Rails error-reporter mechanism")
-assert(!JSON.generate(reporter_events).include?("opaque handled error detail"), "expected handled error message to stay local")
-assert(!JSON.generate(reporter_events).include?("opaque-user-id"), "expected user context to stay local")
+reporter_json = JSON.generate(reporter_events)
+assert_values("expected bounded privacy-safe handled Rails issue", [
+  handled_attributes.fetch("exception"), handled_metadata.values_at("rails.handled", "handled", "mechanism"),
+  reporter_json.include?("opaque handled error detail"), reporter_json.include?("opaque-user-id")
+], [
+  { "type" => "RuntimeError", "mechanism" => { "type" => "rails.error_reporter", "handled" => true } },
+  [true, true, "rails.error_reporter"], false, false
+])
 
 concurrent_runtime = rails_runtime
 concurrent_app = lambda do |environment|
@@ -255,12 +255,11 @@ end
 threads.each(&:join)
 concurrent_events = JSON.parse(concurrent_runtime.client.preview_json).fetch("events")
 span_ids = concurrent_events.select { |event| event.fetch("type") == "span" }.map { |event| event.fetch("id") }
-assert(span_ids.length == 100, "expected every concurrent Rails request span")
-assert(span_ids.uniq.length == 100, "expected unique concurrent Rails event ids")
+assert(span_ids.length == 100 && span_ids.uniq.length == 100, "expected every concurrent Rails span id to be unique")
 
 response = runtime.shutdown
-assert(response.status_code == 202, "expected Rails runtime shutdown flush")
-assert(runtime.shutdown.equal?(response), "expected repeated Rails shutdown to be idempotent")
+assert(response.status_code == 202 && runtime.shutdown.equal?(response), "expected idempotent Rails shutdown flush")
+log_runtime.shutdown
 error_runtime.shutdown
 concurrent_runtime.shutdown
 
@@ -268,10 +267,10 @@ disabled_runtime = LogBrew::Rails::Runtime.new(disabled)
 disabled_response = Object.new
 disabled_app = ->(_environment) { disabled_response }
 assert(
-  LogBrew::Rails::RequestMiddleware.new(disabled_app, runtime: disabled_runtime).call({}).equal?(disabled_response),
-  "expected disabled Rails middleware to remain transparent"
+  LogBrew::Rails::RequestMiddleware.new(disabled_app, runtime: disabled_runtime).call({}).equal?(disabled_response) &&
+    disabled_runtime.client.nil?,
+  "expected disabled Rails runtime to remain transparent"
 )
-assert(disabled_runtime.client.nil?, "expected disabled Rails runtime to create no client")
 
 capture_failures = []
 broken_runtime = LogBrew::Rails::Runtime.new(
@@ -296,12 +295,8 @@ FakeRailsClient = Struct.new(:environment_events, :release_events, :shutdown_cal
     super([], [], 0, Object.new)
   end
 
-  def environment(*arguments)
-    environment_events << arguments
-  end
-
-  def release(*arguments)
-    release_events << arguments
+  %i[environment release].each do |kind|
+    define_method(kind) { |*arguments| public_send("#{kind}_events") << arguments }
   end
 
   def shutdown
@@ -311,14 +306,11 @@ FakeRailsClient = Struct.new(:environment_events, :release_events, :shutdown_cal
 end
 
 fake_process_id = 100
-fake_clients = []
 fork_runtime = LogBrew::Rails::Runtime.new(
   rails_configuration,
   process_id_provider: -> { fake_process_id },
   transport_factory: ->(_config) { Object.new },
-  client_factory: lambda do |_config, _transport|
-    FakeRailsClient.new.tap { |client| fake_clients << client }
-  end
+  client_factory: ->(_config, _transport) { FakeRailsClient.new }
 )
 first_process_client = fork_runtime.client
 assert(first_process_client.environment_events.length == 1, "expected first process environment marker")
@@ -326,8 +318,7 @@ fake_process_id = 101
 second_process_client = fork_runtime.client
 assert(!second_process_client.equal?(first_process_client), "expected a fresh client after process change")
 assert(first_process_client.shutdown_calls.zero?, "expected inherited client state to remain untouched")
-fork_shutdown = fork_runtime.shutdown
-assert(fork_runtime.shutdown.equal?(fork_shutdown), "expected process-local shutdown idempotency")
+assert(fork_runtime.shutdown.equal?(fork_runtime.shutdown), "expected process-local shutdown idempotency")
 assert(second_process_client.shutdown_calls == 1, "expected one shutdown in the active process")
 
 class ActiveJobProbe
@@ -385,8 +376,7 @@ LogBrew::Rails.instance_variable_set(:@runtime, active_job_runtime)
 begin
   parent = LogBrew::Trace.create(
     trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
-    span_id: "00f067aa0ba902b7",
-    trace_flags: "01"
+    span_id: "00f067aa0ba902b7"
   )
   producer = ActiveJobProbe.new(failing_attempts: 2)
   enqueue_result = LogBrew::Trace.with_context(parent) { producer.enqueue }
@@ -451,8 +441,7 @@ begin
   request = Net::HTTP::Get.new(uri)
   parent = LogBrew::Trace.create(
     trace_id: "33333333333333333333333333333333",
-    span_id: "4444444444444444",
-    trace_flags: "01"
+    span_id: "4444444444444444"
   )
   response = LogBrew::Trace.with_context(parent) { Net::HTTP.start(uri.host, uri.port) { |http| http.request(request) } }
   assert(response.code == "204", "expected automatic Rails outbound response")
@@ -461,8 +450,7 @@ begin
   spans = events.select { |event| event.fetch("type") == "span" }
   span = spans.fetch(0).fetch("attributes")
   assert(spans.length == 1, "expected one automatic Rails outbound span")
-  assert(span.fetch("traceId") == parent.trace_id, "expected outbound parent trace")
-  assert(span.fetch("parentSpanId") == parent.span_id, "expected outbound parent span")
+  assert(span.values_at("traceId", "parentSpanId") == [parent.trace_id, parent.span_id], "expected outbound parent trace")
   assert(span.fetch("metadata") == {
     "method" => "GET",
     "host" => "localhost",

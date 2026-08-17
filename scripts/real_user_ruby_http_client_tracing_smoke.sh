@@ -1,28 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
-tmp_dir="$(mktemp -d)"
-package_version="$(
-  cd "$package_dir"
-  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "invalid gemspec"; print spec.version'
-)"
-
-remove_tmp_dir() {
-  rm -rf "$tmp_dir"
-}
-
-trap remove_tmp_dir EXIT
-
-gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
-(cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null)
-gem_digest="$(shasum -a 256 "$gem_path" | awk '{print $1}')"
-test -n "$gem_digest"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
+ruby_smoke_create_tmp_dir
+ruby_smoke_prepare_package
 
 base_home="$tmp_dir/base-gems"
-mkdir -p "$base_home"
-GEM_HOME="$base_home" GEM_PATH="$base_home" gem install --local --install-dir "$base_home" --no-document "$gem_path" >/dev/null
+ruby_smoke_install_local "$base_home"
 GEM_HOME="$base_home" GEM_PATH="$base_home" ruby -e '
   require "logbrew"
   abort "core API missing" unless LogBrew::Client.respond_to?(:create)
@@ -111,22 +95,20 @@ begin
 
   app_records = 2.times.map { Timeout.timeout(3) { intake.records.pop } }
   app_headers = app_records.map { |record| record.headers.fetch("traceparent") }
-  abort "propagation mismatch" unless app_headers.map { |value| value.split("-")[1] }.uniq == [parent.trace_id]
-  abort "child propagation mismatch" unless app_headers.map { |value| value.split("-")[2] }.sort == spans.map { |span| span.fetch("spanId") }.sort
+  abort "propagation mismatch" unless app_headers.map { |value| value.split("-")[1] }.uniq == [parent.trace_id] &&
+    app_headers.map { |value| value.split("-")[2] }.sort == spans.map { |span| span.fetch("spanId") }.sort
 
   transport = LogBrew::HttpTransport.new(endpoint: "#{intake.endpoint}/v1/events", http_client: net_http)
   LogBrew::Trace.with_context(parent) { client.flush(transport) }
   intake_record = Timeout.timeout(3) { intake.records.pop }
-  abort "intake route mismatch" unless intake_record.path == "/v1/events"
-  abort "SDK request was traced" if intake_record.headers.key?("traceparent")
-  abort "intake event mismatch" unless JSON.parse(intake_record.body).fetch("events").length == 2
+  abort "intake request mismatch" unless intake_record.path == "/v1/events" &&
+    !intake_record.headers.key?("traceparent") && JSON.parse(intake_record.body).fetch("events").length == 2
   abort "pending events remain" unless client.pending_events.zero?
 
   serialized = JSON.generate(spans)
   %w[/net /faraday debug omitted caller-net caller-faraday package-smoke-key app-response].each do |value|
     abort "span privacy mismatch" if serialized.include?(value)
   end
-  puts "installed Ruby HTTP tracing ok requests=3 spans=2"
 ensure
   intake.close
 end
@@ -134,7 +116,6 @@ RUBY
 
 LOGBREW_RUBY_PACKAGE_VERSION="$package_version" LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
   GEM_HOME="$integration_home" GEM_PATH="$integration_home" \
-  ruby "$tmp_dir/consumer.rb" > "$tmp_dir/integration-consumer.out"
-grep -qx 'installed Ruby HTTP tracing ok requests=3 spans=2' "$tmp_dir/integration-consumer.out"
+  ruby "$tmp_dir/consumer.rb"
 
 printf 'ruby HTTP client tracing installed smoke ok version=%s sha256:%s\n' "$package_version" "$gem_digest"

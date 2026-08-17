@@ -18,17 +18,13 @@ module LogBrew
       MAX_ENDPOINT_BYTES = 2_048
       LOOPBACK_HOSTS = %w[localhost 127.0.0.1 ::1 [::1]].freeze
 
-      attr_reader(
-        :api_key,
-        :service_name,
-        :app_environment,
-        :rails_version,
-        :release,
-        :endpoint,
-        :request_timeout,
-        :flush_interval,
-        :flush_threshold
-      )
+      ATTRIBUTES = %i[
+        enabled api_key service_name app_environment rails_version release endpoint
+        request_timeout flush_interval flush_threshold capture_exception_messages
+        capture_rails_logs include_exception_backtrace
+      ].freeze
+      private_constant :ATTRIBUTES
+      attr_reader(*ATTRIBUTES.drop(1).reject { |name| name.to_s.start_with?("capture_", "include_") })
 
       def self.from_environment(environment, application_name:, rails_environment:, rails_version:)
         unless environment.respond_to?(:[]) && environment.respond_to?(:key?)
@@ -92,6 +88,7 @@ module LogBrew
             "LOGBREW_CAPTURE_EXCEPTION_MESSAGES",
             false
           ),
+          capture_rails_logs: boolean_value(environment, "LOGBREW_CAPTURE_RAILS_LOGS", false),
           include_exception_backtrace: boolean_value(
             environment,
             "LOGBREW_INCLUDE_EXCEPTION_BACKTRACE",
@@ -113,6 +110,7 @@ module LogBrew
           flush_interval: DEFAULT_FLUSH_INTERVAL_MS / 1_000.0,
           flush_threshold: DEFAULT_FLUSH_THRESHOLD,
           capture_exception_messages: false,
+          capture_rails_logs: false,
           include_exception_backtrace: false
         )
       end
@@ -203,32 +201,11 @@ module LogBrew
       private_class_method :optional_text, :server_key_value, :bounded_label,
                            :optional_bounded_label, :boolean_value, :integer_value, :endpoint_value
 
-      def initialize(
-        enabled:,
-        api_key:,
-        service_name:,
-        app_environment:,
-        rails_version:,
-        release:,
-        endpoint:,
-        request_timeout:,
-        flush_interval:,
-        flush_threshold:,
-        capture_exception_messages:,
-        include_exception_backtrace:
-      )
-        @enabled = enabled
-        @api_key = api_key&.dup&.freeze
-        @service_name = service_name
-        @app_environment = app_environment
-        @rails_version = rails_version
-        @release = release
-        @endpoint = endpoint
-        @request_timeout = request_timeout
-        @flush_interval = flush_interval
-        @flush_threshold = flush_threshold
-        @capture_exception_messages = capture_exception_messages
-        @include_exception_backtrace = include_exception_backtrace
+      def initialize(**attributes)
+        raise ArgumentError, "Rails configuration attributes do not match" unless attributes.keys.sort == ATTRIBUTES.sort
+
+        ATTRIBUTES.each { |name| instance_variable_set("@#{name}", attributes.fetch(name)) }
+        @api_key = @api_key&.dup&.freeze
         freeze
       end
 
@@ -238,6 +215,10 @@ module LogBrew
 
       def capture_exception_messages?
         @capture_exception_messages
+      end
+
+      def capture_rails_logs?
+        @capture_rails_logs
       end
 
       def include_exception_backtrace?
@@ -397,6 +378,145 @@ module LogBrew
         )
       end
     end
+
+    # Adds one bounded, trace-aware LogBrew sink without replacing the app logger.
+    module ApplicationLogCapture
+      MAX_MESSAGE_CHARACTERS = 2_048
+      SINK_IVAR = :@logbrew_rails_log_sink
+      ROOT_IVAR = :@logbrew_rails_application_root
+      GUARD_KEY = :logbrew_rails_log_capture
+      ORIGIN_KEY = :logbrew_rails_log_origin
+      LIBRARY_ROOT = File.expand_path("..", __dir__)
+      LOGGER_PATH = ::Logger.instance_method(:add).source_location&.first
+      LOGGER_WRAPPER_PATH = %r{/active_support/(?:broadcast_logger|tagged_logging|logger(?:_silence|_thread_safe_level)?)\.rb\z}
+      GEM_ROOTS = (defined?(::Gem) ? ::Gem.path : []).map { |root| "#{File.expand_path(root)}#{File::SEPARATOR}" }.freeze
+      LEVELS = LogBrew::Logger::SEVERITY_TO_LOGBREW_LEVEL
+      private_constant :MAX_MESSAGE_CHARACTERS, :SINK_IVAR, :ROOT_IVAR, :GUARD_KEY, :ORIGIN_KEY,
+                       :LIBRARY_ROOT, :LOGGER_PATH, :LOGGER_WRAPPER_PATH, :GEM_ROOTS, :LEVELS
+
+      class Sink < ::Logger
+        def initialize(runtime, application_root, level)
+          @runtime = runtime
+          @application_root = File.expand_path(application_root.to_s)
+          super(File::NULL)
+          self.level = level
+        end
+
+        def add(severity, message = nil, progname = nil)
+          severity ||= ::Logger::UNKNOWN
+          return true if severity < level
+
+          resolved = message.nil? ? (block_given? ? yield : progname) : message
+          ApplicationLogCapture.capture(@runtime, @application_root, severity, resolved)
+          true
+        end
+      end
+      private_constant :Sink
+
+      module LoggerTap
+        def add(severity, message = nil, progname = nil, &block)
+          severity ||= ::Logger::UNKNOWN
+          configured_progname = respond_to?(:progname) ? self.progname : nil
+          captured = message.nil? && block.nil? ? (progname || configured_progname) : message
+          wrapped = block && proc { captured = block.call }
+          result = super(severity, message, progname, &wrapped)
+          sink = instance_variable_get(SINK_IVAR)
+          if sink && severity >= level
+            sink.level = level
+            sink.add(severity, captured)
+          end
+          result
+        end
+      end
+      private_constant :LoggerTap
+
+      module BroadcastOrigin
+        def dispatch(...)
+          previous = Thread.current[ORIGIN_KEY]
+          origin = ApplicationLogCapture.application_caller?(instance_variable_get(ROOT_IVAR))
+          Thread.current[ORIGIN_KEY] = origin
+          super
+        ensure
+          Thread.current[ORIGIN_KEY] = previous
+        end
+        private :dispatch
+      end
+      private_constant :BroadcastOrigin
+
+      module_function
+
+      def install(logger, runtime, application_root: nil)
+        return logger unless runtime.configuration.capture_rails_logs?
+        return logger if application_root.nil?
+        return logger unless logger.respond_to?(:add) || logger.respond_to?(:broadcast_to)
+        return logger unless logger.instance_variable_get(SINK_IVAR).nil?
+
+        level = logger.respond_to?(:level) ? logger.level : ::Logger::DEBUG
+        root = File.expand_path(application_root.to_s)
+        sink = Sink.new(runtime, root, level)
+        if logger.respond_to?(:broadcast_to)
+          logger.instance_variable_set(ROOT_IVAR, root)
+          logger.singleton_class.prepend(BroadcastOrigin)
+          logger.broadcast_to(sink)
+        else
+          logger.singleton_class.prepend(LoggerTap)
+        end
+        logger.instance_variable_set(SINK_IVAR, sink)
+        logger
+      rescue StandardError => error
+        runtime.report_error("application_log_installation", error)
+        logger
+      end
+
+      def capture(runtime, application_root, severity, message)
+        return if LogBrew::Trace.current.nil? || Thread.current[GUARD_KEY]
+        origin = Thread.current[ORIGIN_KEY]
+        origin = application_caller?(application_root) if origin.nil?
+        return unless origin
+
+        Thread.current[GUARD_KEY] = true
+        begin
+          client = runtime.client
+          return if client.nil?
+
+          text = message.is_a?(String) ? message : message.inspect
+          truncated = text.length > MAX_MESSAGE_CHARACTERS
+          metadata = runtime.metadata.merge(
+            "source" => "rails.logger",
+            "rubySeverity" => ::Logger::SEV_LABEL[severity.to_i] || "ANY",
+            "messageState" => truncated ? "truncated" : "captured"
+          )
+          client.log(
+            "ruby_rails_log_#{SecureRandom.hex(8)}",
+            Time.now.utc.iso8601(6),
+            message: text[0, MAX_MESSAGE_CHARACTERS],
+            level: LEVELS.fetch(severity.to_i, severity.to_i >= ::Logger::FATAL ? "critical" : "info"),
+            logger: "rails",
+            metadata: metadata
+          )
+        rescue StandardError => error
+          runtime.report_error("application_log_capture", error)
+        ensure
+          Thread.current[GUARD_KEY] = false
+        end
+      end
+
+      def application_caller?(application_root)
+        location = caller_locations(2, 24).find do |caller|
+          path = caller.absolute_path || caller.path
+          path && !path.start_with?(LIBRARY_ROOT) && path != LOGGER_PATH && !path.match?(LOGGER_WRAPPER_PATH)
+        end
+        return false if location.nil?
+
+        path = File.expand_path(location.absolute_path || location.path)
+        return false if GEM_ROOTS.any? { |root| path.start_with?(root) }
+
+        path == application_root || path.start_with?("#{application_root}#{File::SEPARATOR}")
+      rescue StandardError
+        false
+      end
+    end
+    private_constant :ApplicationLogCapture
 
     # Adds bounded child spans to Net::HTTP calls made inside an active Rails trace.
     module OutboundHttp

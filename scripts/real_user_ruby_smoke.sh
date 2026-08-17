@@ -1,20 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_root/ruby/logbrew-ruby"
-tmp_dir="$(mktemp -d)"
-package_version="$(
-  cd "$package_dir"
-  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "failed to load logbrew-sdk.gemspec"; print spec.version'
-)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
+ruby_smoke_create_tmp_dir
+ruby_smoke_prepare_package
 export LOGBREW_RUBY_PACKAGE_VERSION="$package_version"
-
-remove_tmp_dir() {
-  rm -rf "$tmp_dir"
-}
-
-trap remove_tmp_dir EXIT
 
 package_paths=(
   README.md lib/logbrew.rb
@@ -42,8 +32,6 @@ check_package_tree() {
   for marker in "${readme_markers[@]}"; do grep -Fq "$marker" "$root/README.md"; done
 }
 
-gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
-(cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null)
 test -f "$gem_path"
 
 gem specification "$gem_path" --yaml > "$tmp_dir/spec.yaml"
