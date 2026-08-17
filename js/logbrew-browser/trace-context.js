@@ -4,6 +4,16 @@ import {
   SdkError
 } from "@logbrew/sdk";
 
+const AUTOMATIC_EVENT_ID_SUFFIX_BYTES = 16;
+const MAX_AUTOMATIC_EVENT_ID_LENGTH = 200;
+
+export function createAutomaticBrowserEventId(prefix, semanticValue) {
+  const suffix = randomHex(AUTOMATIC_EVENT_ID_SUFFIX_BYTES, defaultRandomValues);
+  const maxSemanticLength = MAX_AUTOMATIC_EVENT_ID_LENGTH - prefix.length - suffix.length - 2;
+  const semantic = slugify(semanticValue).slice(0, maxSemanticLength) || "event";
+  return `${prefix}_${semantic}_${suffix}`;
+}
+
 export function createBrowserTraceparent({
   randomValues = defaultRandomValues,
   spanId,
@@ -250,6 +260,13 @@ function randomHex(length, randomValues) {
   return bytes.map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+function slugify(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "event";
+}
+
 function shouldPropagateToStringTarget(url, target) {
   const targetText = target.trim();
   if (targetText === "") {
@@ -294,7 +311,7 @@ function defaultFetch() {
 
 function defaultRandomValues(length) {
   if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== "function") {
-    throw new SdkError("configuration_error", "createBrowserTraceparent requires crypto.getRandomValues or randomValues");
+    throw new SdkError("configuration_error", "browser identifiers require crypto.getRandomValues or an explicit randomValues/idFactory");
   }
   const bytes = new Uint8Array(length);
   return globalThis.crypto.getRandomValues(bytes);

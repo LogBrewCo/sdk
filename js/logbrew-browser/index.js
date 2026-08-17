@@ -36,6 +36,7 @@ import {
 } from "./resource-timing.js";
 import {
   browserTraceMetadata,
+  createAutomaticBrowserEventId,
   createBrowserTraceContext,
   createBrowserTraceparent,
   createTraceparentFetch,
@@ -83,7 +84,7 @@ export {
 };
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
-const DEFAULT_SDK_VERSION = "0.1.3";
+const DEFAULT_SDK_VERSION = "0.1.4";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -1320,19 +1321,19 @@ function boundedProductAnalyticsSurface(surface) {
 }
 
 function defaultPageViewEventId({ path }) {
-  return `evt_browser_page_${slugify(path)}`;
+  return createAutomaticBrowserEventId("evt_browser_page", path);
 }
 
 function defaultErrorEventId({ message, path, source }) {
-  return `evt_browser_${source}_${slugify(`${path}_${message}`)}`;
+  return createAutomaticBrowserEventId(`evt_browser_${source}`, `${path}_${message}`);
 }
 
 function defaultActionEventId({ message, path }) {
-  return `evt_browser_action_${slugify(`${path}_${message}`)}`;
+  return createAutomaticBrowserEventId("evt_browser_action", `${path}_${message}`);
 }
 
 function defaultNetworkEventId({ message, path }) {
-  return `evt_browser_network_${slugify(`${path}_${message}`)}`;
+  return createAutomaticBrowserEventId("evt_browser_network", `${path}_${message}`);
 }
 
 function defaultFetch() {

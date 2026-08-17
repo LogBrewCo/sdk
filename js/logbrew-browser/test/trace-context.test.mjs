@@ -39,6 +39,7 @@ test("installed browser capture uses one explicit W3C trace context across page 
     captureBrowserAction,
     captureBrowserError,
     captureBrowserNetwork,
+    createPageViewEvent,
     createBrowserTraceContext,
     createTraceparentFetch,
     installLogBrewBrowser
@@ -69,6 +70,8 @@ test("installed browser capture uses one explicit W3C trace context across page 
         }
       }
     });
+    const repeatedPageView = createPageViewEvent(browserWindow, { now: () => "2026-07-03T10:00:00Z", traceContext });
+    const customPageView = createPageViewEvent(browserWindow, { idFactory: () => "evt_browser_custom_page", traceContext });
 
     await captureBrowserAction({
       name: "checkout.clicked",
@@ -104,6 +107,12 @@ test("installed browser capture uses one explicit W3C trace context across page 
     const network = payload.events.find((event) => event.type === "action" && event.attributes.metadata.source === "browser.network");
     const issue = payload.events.find((event) => event.type === "issue");
 
+    assert.match(pageView.id, /^evt_browser_page_checkout_[a-f0-9]{32}$/u);
+    assert.notEqual(pageView.id, repeatedPageView.id);
+    assert.equal(customPageView.id, "evt_browser_custom_page");
+    for (const event of payload.events) {
+      assert.match(event.id, /_[a-f0-9]{32}$/u);
+    }
     assert.equal(context.traceContext.traceId, TRACE_ID);
     assert.equal(context.traceContext.spanId, SPAN_ID);
     assert.equal(pageView.attributes.traceId, TRACE_ID);
