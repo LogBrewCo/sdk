@@ -6,7 +6,6 @@ package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
 spring_boot_version="${LOGBREW_APP_SPRING_BOOT_VERSION:-3.2.5}"
 spring_kafka_version="${LOGBREW_APP_SPRING_KAFKA_VERSION:-3.1.4}"
-failure_diagnostics_printed=false
 
 # shellcheck source=scripts/java_logback_deps.sh
 source "$repo_root/scripts/java_logback_deps.sh"
@@ -32,7 +31,6 @@ print_failure_diagnostics() {
   fi
 
   echo "spring boot real-user smoke failed with exit $status" >&2
-  failure_diagnostics_printed=true
   for file in \
     "$tmp_dir/spring-boot.stderr.json" \
     "$tmp_dir/spring-boot.stdout.json" \
@@ -46,9 +44,7 @@ print_failure_diagnostics() {
 
 cleanup() {
   local status=$?
-  if [ "$failure_diagnostics_printed" != "true" ]; then
-    print_failure_diagnostics "$status"
-  fi
+  print_failure_diagnostics "$status"
   rm -rf "$tmp_dir"
   exit "$status"
 }

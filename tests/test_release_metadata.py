@@ -676,7 +676,7 @@ keywords = ["logbrew"]
 
     def test_maven_metadata_matches_each_release_family(self) -> None:
         self.assertIn(
-            "<version>0.1.4</version>",
+            "<version>0.1.5</version>",
             (ROOT / "java" / "logbrew-java" / "pom.xml").read_text(encoding="utf-8"),
         )
         for pom_path in (
