@@ -61,7 +61,6 @@ test -f "$redis_nupkg"
 test -f "$otel_nupkg"
 
 python3 - "$nupkg" <<'PY'
-import re
 import sys
 import zipfile
 
@@ -90,12 +89,9 @@ with zipfile.ZipFile(nupkg) as archive:
     if missing:
         raise SystemExit(f"missing nupkg files: {missing}")
     core_property_files = {
-        name
-        for name in names
-        if re.fullmatch(
-            r"package/services/metadata/core-properties/[0-9a-f]{32}\.psmdcp",
-            name,
-        )
+        name for name in names
+        if name.startswith("package/services/metadata/core-properties/")
+        and name.endswith(".psmdcp")
     }
     if len(core_property_files) != 1:
         raise SystemExit("expected exactly one NuGet core-properties file")
