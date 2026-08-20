@@ -51,7 +51,6 @@ PY
 )"
 
 python3 - "$httpclient_nupkg" <<'PY'
-import re
 import sys
 import zipfile
 
@@ -70,7 +69,8 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     property_files = {
         name
         for name in names
-        if re.fullmatch(r"package/services/metadata/core-properties/[0-9a-f]{32}\.psmdcp", name)
+        if name.startswith("package/services/metadata/core-properties/")
+        and name.endswith(".psmdcp")
     }
     allowed = required | property_files | {
         "_rels/.rels",

@@ -99,7 +99,7 @@ class NugetReleasePlanTests(unittest.TestCase):
                             "dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/"
                             "LogBrew.AspNetCore.csproj"
                         ),
-                        "version": "0.1.1",
+                        "version": "0.1.2",
                         "versionOutput": "aspnetcore_version",
                     },
                 ],
