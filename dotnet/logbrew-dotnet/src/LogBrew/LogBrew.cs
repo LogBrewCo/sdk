@@ -150,10 +150,7 @@ namespace LogBrew
 
         public Uri Endpoint { get; }
 
-        public IReadOnlyDictionary<string, string> Headers
-        {
-            get { return headers; }
-        }
+        public IReadOnlyDictionary<string, string> Headers => headers;
 
         public HttpClient HttpClient { get; }
 

@@ -257,7 +257,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin-okhttp/pom.xml"), "0.2.2")
 
         expected = {
-            "LogBrew.AspNetCore": "0.1.1",
+            "LogBrew.AspNetCore": "0.1.2",
             "LogBrew.EntityFrameworkCore": "0.1.0",
             "LogBrew.StackExchangeRedis": "0.1.0",
             "LogBrew.OpenTelemetry": "0.1.1",
@@ -271,7 +271,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.12")
         self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.10")
         self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.7")
-        self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.1")
+        self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.2")
         self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.2")
         self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.5")
         self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.2")

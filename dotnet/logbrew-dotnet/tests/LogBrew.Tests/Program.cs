@@ -76,11 +76,8 @@ static LogBrewClient SampleClient(int maxRetries = 2)
     return LogBrewClient.Create("LOGBREW_API_KEY", "logbrew-dotnet", "0.1.0", maxRetries);
 }
 
-static void CreateAndDisposeHttpTransport(HttpTransportOptions options)
-{
-    using var transport = new HttpTransport(options);
-    AssertTrue(transport.Endpoint != null, "expected HTTP transport endpoint");
-}
+static void CreateAndDisposeHttpTransport(HttpTransportOptions options) =>
+    new HttpTransport(options).Dispose();
 
 static void EnqueueAll(LogBrewClient client)
 {
@@ -126,6 +123,10 @@ if (args.Length == 1 && string.Equals(args[0], "--telemetry-text-search-contract
 }
 
 var tests = 0;
+
+using var defaultTransport = new HttpTransport();
+AssertTrue(defaultTransport.Endpoint == new Uri("https://api.logbrew.co/v1/events"), "expected production HTTP transport endpoint");
+tests++;
 
 ExpectArgumentNullContract("client", () => LogBrewActivitySourceListener.Start(null!));
 ExpectArgumentNullContract("client", () => LogBrewActivitySpanTelemetry.Capture(null!, null));
