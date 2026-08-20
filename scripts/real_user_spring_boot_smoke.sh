@@ -4,7 +4,8 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
-spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.1.0}"
+spring_boot_version="${LOGBREW_APP_SPRING_BOOT_VERSION:-3.2.5}"
+spring_kafka_version="${LOGBREW_APP_SPRING_KAFKA_VERSION:-3.1.4}"
 failure_diagnostics_printed=false
 
 # shellcheck source=scripts/java_logback_deps.sh
@@ -109,6 +110,7 @@ dependencies {
     implementation 'co.logbrew:logbrew-sdk:$java_version'
     implementation 'org.springframework.boot:spring-boot-starter:$spring_boot_version'
     implementation 'org.springframework.boot:spring-boot-starter-web:$spring_boot_version'
+    implementation 'org.springframework.kafka:spring-kafka:$spring_kafka_version'
 }
 
 application {
@@ -198,6 +200,7 @@ public class Main implements CommandLineRunner {
             context.containsBean("logBrewSpringExceptionResolver"),
             "Spring Boot exception auto-configuration registers resolver"
         );
+        require(context.containsBean("logBrewSpringKafkaBeanPostProcessor"), "Spring Kafka processor starts");
         require(
             context.getBean(LogBrewSpringExceptionResolver.class) != null,
             "Spring Boot exception resolver bean has public integration type"
@@ -339,6 +342,7 @@ public class Main implements CommandLineRunner {
         values.put("logbrew.jdbc.db-system", "postgresql");
         values.put("logbrew.jdbc.db-name", "orders");
         values.put("logbrew.cache.system", "spring-cache");
+        values.put("logbrew.kafka.enabled", "true");
         return values;
     }
 
@@ -556,6 +560,7 @@ run_gradle dependencies --configuration runtimeClasspath > "$tmp_dir/gradle-deps
 grep -q "co.logbrew:logbrew-sdk:$java_version" "$tmp_dir/gradle-deps.txt"
 grep -q "org.springframework.boot:spring-boot-starter:$spring_boot_version" "$tmp_dir/gradle-deps.txt"
 grep -q "org.springframework.boot:spring-boot-starter-web:$spring_boot_version" "$tmp_dir/gradle-deps.txt"
+grep -q "org.springframework.kafka:spring-kafka:$spring_kafka_version" "$tmp_dir/gradle-deps.txt"
 grep -q 'ch.qos.logback:logback-classic' "$tmp_dir/gradle-deps.txt"
 
 run_gradle compileJava
