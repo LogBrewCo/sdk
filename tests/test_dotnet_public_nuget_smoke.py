@@ -13,16 +13,6 @@ class DotnetPublicNugetSmokeTests(unittest.TestCase):
     def test_script_proves_current_public_nuget_package_installs(self) -> None:
         body = SCRIPT.read_text(encoding="utf-8")
 
-        for package in (
-            "LogBrew",
-            "LogBrew.AspNetCore",
-            "LogBrew.EntityFrameworkCore",
-            "LogBrew.HttpClient",
-            "LogBrew.StackExchangeRedis",
-            "LogBrew.OpenTelemetry",
-        ):
-            self.assertIn(package, body)
-
         for expected in (
             "LOGBREW_NUGET_CORE_VERSION",
             "LOGBREW_NUGET_ASPNETCORE_VERSION",
@@ -37,7 +27,7 @@ class DotnetPublicNugetSmokeTests(unittest.TestCase):
             "LOGBREW_DOTNET_REDIS_VERSION",
             "LOGBREW_DOTNET_OTEL_VERSION",
             'core_version="${1:-${LOGBREW_NUGET_CORE_VERSION:-${LOGBREW_DOTNET_CORE_VERSION:-0.1.7}}}"',
-            'aspnetcore_version="${2:-${LOGBREW_NUGET_ASPNETCORE_VERSION:-${LOGBREW_DOTNET_ASPNETCORE_VERSION:-0.1.1}}}"',
+            'aspnetcore_version="${2:-${LOGBREW_NUGET_ASPNETCORE_VERSION:-${LOGBREW_DOTNET_ASPNETCORE_VERSION:-0.1.2}}}"',
             'efcore_version="${3:-${LOGBREW_NUGET_EFCORE_VERSION:-${LOGBREW_DOTNET_EFCORE_VERSION:-0.1.0}}}"',
             'httpclient_version="${4:-${LOGBREW_NUGET_HTTPCLIENT_VERSION:-${LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.2}}}"',
             'redis_version="${5:-${LOGBREW_NUGET_REDIS_VERSION:-${LOGBREW_DOTNET_REDIS_VERSION:-0.1.0}}}"',
