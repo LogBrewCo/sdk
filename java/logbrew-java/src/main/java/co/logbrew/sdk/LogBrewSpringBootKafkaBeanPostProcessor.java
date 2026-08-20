@@ -1,5 +1,6 @@
 package co.logbrew.sdk;
 
+import java.lang.reflect.Field;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,10 +23,6 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
     private final ObjectProvider<LogBrewClient> clientProvider;
     private final Environment environment;
 
-    LogBrewSpringBootKafkaBeanPostProcessor(LogBrewClient client, Environment environment) {
-        this(new SingleLogBrewClientProvider(client), environment);
-    }
-
     LogBrewSpringBootKafkaBeanPostProcessor(
         ObjectProvider<LogBrewClient> clientProvider,
         Environment environment
@@ -39,14 +36,19 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
         if (!enabled() || isScopedTarget(beanName)) {
             return bean;
         }
+        boolean producerFactory = producerEnabled() && bean instanceof ProducerFactory;
+        boolean listenerFactory = consumerEnabled() && bean instanceof AbstractKafkaListenerContainerFactory;
+        if (!producerFactory && !listenerFactory) {
+            return bean;
+        }
         LogBrewClient client = clientProvider.getIfAvailable();
         if (client == null) {
             return bean;
         }
-        if (producerEnabled() && bean instanceof ProducerFactory) {
+        if (producerFactory) {
             instrumentProducerFactory((ProducerFactory<?, ?>) bean, client);
         }
-        if (consumerEnabled() && bean instanceof AbstractKafkaListenerContainerFactory) {
+        if (listenerFactory) {
             instrumentListenerFactory((AbstractKafkaListenerContainerFactory<?, ?, ?>) bean, client);
         }
         return bean;
@@ -73,7 +75,7 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
         AbstractKafkaListenerContainerFactory<?, ?, ?> factory,
         LogBrewClient client
     ) {
-        RecordInterceptor existing = factory.getRecordInterceptor();
+        RecordInterceptor existing = recordInterceptor(factory);
         if (LogBrewSpringKafkaTracing.isInstrumentedRecordInterceptor(existing)) {
             return;
         }
@@ -87,6 +89,16 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
             config.delegate(existing);
         }
         factory.setRecordInterceptor(LogBrewSpringKafkaTracing.recordInterceptor(client, config));
+    }
+
+    private static RecordInterceptor<?, ?> recordInterceptor(AbstractKafkaListenerContainerFactory<?, ?, ?> factory) {
+        try {
+            Field field = AbstractKafkaListenerContainerFactory.class.getDeclaredField("recordInterceptor");
+            field.setAccessible(true);
+            return (RecordInterceptor<?, ?>) field.get(factory);
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            throw new IllegalStateException("spring kafka record interceptor cannot be inspected", error);
+        }
     }
 
     private boolean enabled() {
@@ -155,31 +167,4 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
         }
     }
 
-    private static final class SingleLogBrewClientProvider implements ObjectProvider<LogBrewClient> {
-        private final LogBrewClient client;
-
-        private SingleLogBrewClientProvider(LogBrewClient client) {
-            this.client = Objects.requireNonNull(client, "client");
-        }
-
-        @Override
-        public LogBrewClient getObject(Object... args) {
-            return client;
-        }
-
-        @Override
-        public LogBrewClient getIfAvailable() {
-            return client;
-        }
-
-        @Override
-        public LogBrewClient getIfUnique() {
-            return client;
-        }
-
-        @Override
-        public LogBrewClient getObject() {
-            return client;
-        }
-    }
 }

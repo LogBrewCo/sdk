@@ -322,7 +322,6 @@ grep -q '^co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor\$SingleLog
 grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaAutoConfiguration.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor\$LogBrewKafkaProducerPostProcessor.class$' "$tmp_dir/jar-contents.txt"
-grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor\$SingleLogBrewClientProvider.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringHttpTracing.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringHttpTracing\$Options.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringWebClientTracing.class$' "$tmp_dir/jar-contents.txt"

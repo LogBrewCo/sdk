@@ -62,7 +62,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
 
     private void testPostProcessorRequiresExplicitEnablement() throws Exception {
         LogBrewClient client = sampleClient();
-        BeanPostProcessor processor = kafkaBeanPostProcessor(client, environment(Map.of()));
+        BeanPostProcessor processor = postProcessor(client, environment(Map.of()));
         DefaultKafkaProducerFactory<String, String> producerFactory = kafkaProducerFactory();
         ConcurrentKafkaListenerContainerFactory<String, String> listenerFactory =
             new ConcurrentKafkaListenerContainerFactory<>();
@@ -80,7 +80,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
     @SuppressWarnings("unchecked")
     private void testPostProcessorAddsProducerPostProcessorWithoutLeakingKafkaConfig() throws Exception {
         LogBrewClient client = sampleClient();
-        BeanPostProcessor processor = kafkaBeanPostProcessor(
+        BeanPostProcessor processor = postProcessor(
             client,
             environment(Map.of(
                 "logbrew.kafka.enabled", "true",
@@ -128,7 +128,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
 
     private void testPostProcessorComposesExistingRecordInterceptor() throws Exception {
         LogBrewClient client = sampleClient();
-        BeanPostProcessor processor = kafkaBeanPostProcessor(
+        BeanPostProcessor processor = postProcessor(
             client,
             environment(Map.of(
                 "logbrew.kafka.enabled", "true",
@@ -175,7 +175,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
 
     private void testPostProcessorDoesNotTreatClassNameMatchesAsLogBrewInterceptors() throws Exception {
         LogBrewClient client = sampleClient();
-        BeanPostProcessor processor = kafkaBeanPostProcessor(
+        BeanPostProcessor processor = postProcessor(
             client,
             environment(Map.of("logbrew.kafka.enabled", "true"))
         );
@@ -201,7 +201,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
 
     private void testProducerAndConsumerCanBeDisabledIndependently() throws Exception {
         LogBrewClient client = sampleClient();
-        BeanPostProcessor producerDisabledProcessor = kafkaBeanPostProcessor(
+        BeanPostProcessor producerDisabledProcessor = postProcessor(
             client,
             environment(Map.of(
                 "logbrew.kafka.enabled", "true",
@@ -218,7 +218,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
         assertEquals(0, producerDisabledFactory.getPostProcessors().size(), "producer switch disables producer");
         assertTrue(producerDisabledListenerFactory.getRecordInterceptor() != null, "consumer stays enabled");
 
-        BeanPostProcessor consumerDisabledProcessor = kafkaBeanPostProcessor(
+        BeanPostProcessor consumerDisabledProcessor = postProcessor(
             client,
             environment(Map.of(
                 "logbrew.kafka.enabled", "true",
@@ -239,7 +239,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
 
     private void testPostProcessorCanBeDisabled() throws Exception {
         LogBrewClient client = sampleClient();
-        BeanPostProcessor processor = kafkaBeanPostProcessor(
+        BeanPostProcessor processor = postProcessor(
             client,
             environment(Map.of("logbrew.kafka.enabled", "false"))
         );
@@ -257,15 +257,11 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
         testsRun++;
     }
 
-    private static BeanPostProcessor kafkaBeanPostProcessor(LogBrewClient client, StandardEnvironment environment)
-        throws Exception {
-        Class<?> configClass = Class.forName("co.logbrew.sdk.LogBrewSpringBootKafkaAutoConfiguration");
-        Method factoryMethod = configClass.getDeclaredMethod(
-            "logBrewSpringKafkaBeanPostProcessor",
-            ObjectProvider.class,
-            org.springframework.core.env.Environment.class
+    private static BeanPostProcessor postProcessor(LogBrewClient client, StandardEnvironment environment) {
+        return LogBrewSpringBootKafkaAutoConfiguration.logBrewSpringKafkaBeanPostProcessor(
+            new SingleLogBrewClientProvider(client),
+            environment
         );
-        return (BeanPostProcessor) factoryMethod.invoke(null, new SingleLogBrewClientProvider(client), environment);
     }
 
     private static StandardEnvironment environment(Map<String, Object> values) {

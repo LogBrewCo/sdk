@@ -105,7 +105,6 @@ done < <(printf '%s\n' \
   'co/logbrew/sdk/LogBrewSpringBootKafkaAutoConfiguration.class' \
   'co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor.class' \
   'co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor$LogBrewKafkaProducerPostProcessor.class' \
-  'co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor$SingleLogBrewClientProvider.class' \
   'co/logbrew/sdk/LogBrewSpringKafkaTracing.class' \
   'co/logbrew/sdk/LogBrewSpringKafkaTracing$ConsumerConfig.class' \
   'co/logbrew/sdk/LogBrewSpringKafkaTracing$ProducerConfig.class')
