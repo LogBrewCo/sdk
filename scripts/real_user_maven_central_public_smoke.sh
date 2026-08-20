@@ -57,10 +57,7 @@ PY
 }
 
 artifact_selected() {
-    if [[ -z "$release_plan_path" ]]; then
-        return 0
-    fi
-    [[ -n "$(plan_version "$1")" ]]
+    [[ -z "$release_plan_path" || -n "$(plan_version "$1")" ]]
 }
 
 if [[ "$receipt_mode" == "1" ]]; then
@@ -72,7 +69,7 @@ elif [[ -n "$release_plan_path" ]]; then
     kotlin_version="$(plan_version "logbrew-kotlin")"
     okhttp_version="$(plan_version "logbrew-kotlin-okhttp")"
 else
-    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.4}}"
+    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.5}}"
     kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.2}}"
     okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"
 fi
