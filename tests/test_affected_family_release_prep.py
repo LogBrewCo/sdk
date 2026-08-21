@@ -314,7 +314,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.12",),
             "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.10",),
             "scripts/real_user_maven_central_public_smoke.sh": (
-                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.5",
+                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.6",
                 "LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.2",
             ),
             "scripts/real_user_dotnet_public_nuget_smoke.sh": (
