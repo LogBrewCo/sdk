@@ -18,7 +18,7 @@ public final class TelemetryResource {
 
     /** Returns an immutable schema-shaped map. */
     public Map<String, Object> asMap() {
-        return value;
+        return TelemetryValues.immutableMap(value);
     }
 
     Map<String, Object> value() {

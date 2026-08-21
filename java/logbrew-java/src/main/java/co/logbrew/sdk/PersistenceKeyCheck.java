@@ -11,6 +11,7 @@ import java.util.Arrays;
 final class PersistenceKeyCheck {
     private static final int STORE_ID_BYTES = 16;
     private static final int MAX_METADATA_BYTES = 8192;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private PersistenceKeyCheck() { }
 
@@ -19,7 +20,7 @@ final class PersistenceKeyCheck {
         if (files.exists(keyCheck)) {
             if (!files.exists(files.path(PersistenceFiles.HIGH_WATER_NAME))
                 && !files.exists(files.path(PersistenceFiles.PURGE_INTENT_NAME))) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             PersistenceFiles.FileData data = files.read(keyCheck, MAX_METADATA_BYTES);
             byte[] storeId = crypto.decrypt(
@@ -31,7 +32,7 @@ final class PersistenceKeyCheck {
             Arrays.fill(data.bytes, (byte) 0);
             if (storeId.length != STORE_ID_BYTES) {
                 Arrays.fill(storeId, (byte) 0);
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             return storeId;
         }
@@ -60,11 +61,11 @@ final class PersistenceKeyCheck {
             || layout.intentFile != null
             || layout.purgeIntentFile != null
             || !layout.temporaryFiles.isEmpty()) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
 
         byte[] storeId = new byte[STORE_ID_BYTES];
-        new SecureRandom().nextBytes(storeId);
+        RANDOM.nextBytes(storeId);
         byte[] encoded = crypto.encrypt(PersistenceCrypto.KEY_CHECK, 0L, storeId, new byte[0]);
         PersistenceFiles.OwnedFile temporary = null;
         try {
@@ -80,7 +81,7 @@ final class PersistenceKeyCheck {
                 identity.fileKey
             );
             if (!identity.fileKey.equals(committed.fileKey)) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             return storeId;
         } catch (IOException error) {
@@ -101,7 +102,7 @@ final class PersistenceKeyCheck {
             return false;
         }
         for (Path path : layout.temporaryFiles) {
-            if (!path.getFileName().toString().startsWith(".key-pending-")) {
+            if (!PersistenceFiles.name(path).startsWith(".key-pending-")) {
                 return false;
             }
         }
@@ -131,7 +132,7 @@ final class PersistenceKeyCheck {
                 identity.fileKey
             );
             if (!identity.fileKey.equals(committed.fileKey)) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
         } finally {
             PersistenceFiles.closeQuietly(temporary);

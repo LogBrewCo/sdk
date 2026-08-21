@@ -592,7 +592,7 @@ public final class LogBrewClient {
         Map<String, Object> eventValue = Collections.unmodifiableMap(event.toMap());
         String eventJson = Json.write(eventValue);
         long eventBytes = utf8Bytes(eventJson);
-        QueuedEvent queuedEvent = new QueuedEvent(id, eventJson, eventBytes, null);
+        QueuedEvent queuedEvent = new QueuedEvent(eventJson, eventBytes, null);
         EventDrop drop = null;
         boolean queued = false;
 
@@ -613,7 +613,7 @@ public final class LogBrewClient {
                         deliveryOptions.maxQueueEvents(),
                         deliveryOptions.maxQueueBytes()
                     );
-                    queuedEvent = new QueuedEvent(id, eventJson, eventBytes, record);
+                    queuedEvent = new QueuedEvent(eventJson, eventBytes, record);
                 }
                 events.addLast(queuedEvent);
                 pendingEventBytes += eventBytes;
@@ -674,7 +674,6 @@ public final class LogBrewClient {
                 );
                 for (EncryptedEventStore.Record record : snapshot.records()) {
                     QueuedEvent event = new QueuedEvent(
-                        record.eventId(),
                         record.eventJson(),
                         record.eventBytes(),
                         record
@@ -713,7 +712,7 @@ public final class LogBrewClient {
     }
 
     private TransportResponse deliver(Transport transport, boolean shutdown) {
-        return deliver(transport, shutdown, null, DeliveryObserver.NONE);
+        return deliver(transport, shutdown, null, DeliveryObserver.NONE, deliveryOptions.maxRetries() + 1);
     }
 
     DeliverySession beginAutomaticDelivery() {
@@ -734,7 +733,8 @@ public final class LogBrewClient {
             Objects.requireNonNull(transport, "transport"),
             shutdown,
             session,
-            Objects.requireNonNull(observer, "observer")
+            Objects.requireNonNull(observer, "observer"),
+            shutdown ? 1 : deliveryOptions.maxRetries() + 1
         );
     }
 
@@ -742,7 +742,8 @@ public final class LogBrewClient {
         Transport transport,
         boolean shutdown,
         DeliverySession session,
-        DeliveryObserver observer
+        DeliveryObserver observer,
+        int maxAttempts
     ) {
         synchronized (deliveryLock) {
             if (deliveryOwner == Thread.currentThread()) {
@@ -769,7 +770,7 @@ public final class LogBrewClient {
 
                 boolean shutdownCompleted = false;
                 try {
-                    TransportResponse response = flushSnapshot(transport, snapshot, observer);
+                    TransportResponse response = flushSnapshot(transport, snapshot, observer, maxAttempts);
                     if (shutdown) {
                         synchronized (stateLock) {
                             closing = false;
@@ -794,7 +795,8 @@ public final class LogBrewClient {
     private TransportResponse flushSnapshot(
         Transport transport,
         List<QueuedEvent> snapshot,
-        DeliveryObserver observer
+        DeliveryObserver observer,
+        int maxAttempts
     ) {
         if (snapshot.isEmpty()) {
             return new TransportResponse(204, 0, 0, 0);
@@ -807,7 +809,7 @@ public final class LogBrewClient {
         int statusCode = 204;
         while (offset < snapshot.size()) {
             FrozenBatch batch = freezeNextBatch(snapshot, offset);
-            SendResult result = sendBatch(transport, batch.body);
+            SendResult result = sendBatch(transport, batch.body, maxAttempts);
             acknowledgePrefix(batch.events);
             observer.onBatchAccepted(batch.events.size(), result.attempts);
             offset += batch.events.size();
@@ -873,8 +875,7 @@ public final class LogBrewClient {
         return new FrozenBatch(Collections.unmodifiableList(new ArrayList<>(batchEvents)), body);
     }
 
-    private SendResult sendBatch(Transport transport, String body) {
-        int maxAttempts = deliveryOptions.maxRetries() + 1;
+    private SendResult sendBatch(Transport transport, String body, int maxAttempts) {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 TransportResponse response = transport.send(apiKey, body);
@@ -899,7 +900,7 @@ public final class LogBrewClient {
                 }
                 throw new SdkException("transport_error", "unexpected transport status " + response.statusCode());
             } catch (TransportException error) {
-                if (error.retryable() && attempt < maxAttempts) {
+                if (error.retryable() && attempt < maxAttempts && !Thread.currentThread().isInterrupted()) {
                     continue;
                 }
                 throw new SdkException(error.code(), error.getMessage());
@@ -1058,18 +1059,15 @@ public final class LogBrewClient {
     }
 
     private static final class QueuedEvent {
-        private final String eventId;
         private final String eventJson;
         private final long serializedBytes;
         private final EncryptedEventStore.Record persistedRecord;
 
         private QueuedEvent(
-            String eventId,
             String eventJson,
             long serializedBytes,
             EncryptedEventStore.Record persistedRecord
         ) {
-            this.eventId = eventId;
             this.eventJson = eventJson;
             this.serializedBytes = serializedBytes;
             this.persistedRecord = persistedRecord;

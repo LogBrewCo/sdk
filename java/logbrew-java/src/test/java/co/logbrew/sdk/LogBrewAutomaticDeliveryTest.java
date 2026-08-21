@@ -537,23 +537,18 @@ public final class LogBrewAutomaticDeliveryTest {
     }
 
     private void testConcurrentAutomaticDeliveryAndShutdownSerialize() throws Exception {
-        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
         BlockingTransport transport = new BlockingTransport();
-        LogBrewClient client = automaticClient(
+        LogBrewClient client = LogBrewClient.createAutomatic(
+            API_KEY,
+            "logbrew-java",
+            "0.1.0",
             transport,
-            DeliveryOptions.builder().maxRetries(0).build(),
-            automaticOptions(1),
-            schedulers,
-            () -> true
+            DeliveryOptions.builder().maxRetries(2).build(),
+            automaticOptions(1)
         );
         enqueueLog(client, "evt_java_shutdown_initial", "initial");
-        AtomicReference<Throwable> workerFailure = new AtomicReference<>();
-        Thread worker = new Thread(
-            () -> schedulers.scheduler().runNext(workerFailure),
-            "automatic-shutdown-worker"
-        );
-        worker.start();
         assertTrue(transport.entered.await(5, TimeUnit.SECONDS), "shutdown worker entered");
+        enqueueLog(client, "evt_java_shutdown_later", "later");
 
         AtomicReference<Throwable> shutdownFailure = new AtomicReference<>();
         Thread shutdown = new Thread(() -> {
@@ -564,17 +559,15 @@ public final class LogBrewAutomaticDeliveryTest {
             }
         }, "automatic-shutdown-caller");
         shutdown.start();
-        awaitTrue(() -> client.deliveryHealth().activity() == DeliveryHealth.Activity.IN_FLIGHT);
-        enqueueLog(client, "evt_java_shutdown_later", "later");
+        shutdown.join(2_000L);
+        boolean bounded = !shutdown.isAlive();
         transport.release.countDown();
-        worker.join(5_000L);
         shutdown.join(5_000L);
 
-        assertEquals(null, workerFailure.get(), "shutdown worker failure");
         assertEquals(null, shutdownFailure.get(), "shutdown caller failure");
-        assertTrue(!worker.isAlive() && !shutdown.isAlive(), "shutdown threads complete");
+        assertTrue(bounded && !shutdown.isAlive(), "shutdown interrupts obsolete delivery");
         assertEquals(1, transport.maxActive.get(), "shutdown remains serialized");
-        assertEquals(2, transport.bodies.size(), "shutdown drains later capture once");
+        assertEquals(2, transport.bodies.size(), "shutdown sends one final drain");
         assertNotContains(transport.bodies.get(0), "evt_java_shutdown_later");
         assertContains(transport.bodies.get(1), "evt_java_shutdown_later");
         assertEquals(DeliveryHealth.Lifecycle.CLOSED, client.deliveryHealth().lifecycle(), "shutdown lifecycle");
@@ -1117,12 +1110,14 @@ public final class LogBrewAutomaticDeliveryTest {
         public TransportResponse send(String apiKey, String body) throws TransportException {
             int current = active.incrementAndGet();
             maxActive.accumulateAndGet(current, Math::max);
+            int call;
             synchronized (bodies) {
                 bodies.add(body);
+                call = bodies.size();
             }
             entered.countDown();
             try {
-                if (!release.await(5, TimeUnit.SECONDS)) {
+                if (call == 1 && !release.await(5, TimeUnit.SECONDS)) {
                     throw new TransportException("transport_timeout", "timed out", true);
                 }
                 return new TransportResponse(202, 1);

@@ -161,7 +161,7 @@ final class PersistenceFiles implements AutoCloseable {
         Path purgeIntent = null;
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
             for (Path path : stream) {
-                String name = path.getFileName().toString();
+                String name = name(path);
                 if (LOCK_NAME.equals(name) || KEY_CHECK_NAME.equals(name)) {
                     verifyRegularFile(path);
                 } else if (CHECKPOINT_NAME.equals(name)) {
@@ -211,7 +211,7 @@ final class PersistenceFiles implements AutoCloseable {
 
     synchronized Path recordPath(long sequence) {
         if (sequence <= 0L) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         return path(String.format(Locale.ROOT, "%020d.lbe", Long.valueOf(sequence)));
     }
@@ -249,7 +249,7 @@ final class PersistenceFiles implements AutoCloseable {
         Object beforeKey = fileKey(before, false);
         long size = before.size();
         if (size <= 0L || size > maxBytes) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
 
         byte[] bytes = new byte[(int) size];
@@ -259,13 +259,13 @@ final class PersistenceFiles implements AutoCloseable {
             LinkOption.NOFOLLOW_LINKS
         )) {
             if (channel.size() != size) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             ByteBuffer target = ByteBuffer.wrap(bytes);
             while (target.hasRemaining()) {
                 int read = readOperation.read(channel, target);
                 if (read < 0) {
-                    PersistenceCrypto.integrityFailure();
+                    throw PersistenceCrypto.integrityFailure();
                 }
                 if (read == 0) {
                     throw new SdkException(
@@ -275,7 +275,7 @@ final class PersistenceFiles implements AutoCloseable {
                 }
             }
             if (readOperation.read(channel, ByteBuffer.allocate(1)) != -1) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
         } catch (IOException error) {
             Arrays.fill(bytes, (byte) 0);
@@ -287,7 +287,7 @@ final class PersistenceFiles implements AutoCloseable {
         Object afterKey = fileKey(after, false);
         if (!beforeKey.equals(afterKey) || after.size() != size) {
             Arrays.fill(bytes, (byte) 0);
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         return new FileData(bytes, new FileIdentity(
             beforeKey,
@@ -307,7 +307,7 @@ final class PersistenceFiles implements AutoCloseable {
             if (data.identity.size != expectedSize
                 || !java.security.MessageDigest.isEqual(data.identity.digest, expectedDigest)
                 || (expectedFileKey != null && !expectedFileKey.equals(data.identity.fileKey))) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             return data.identity;
         } finally {
@@ -399,19 +399,18 @@ final class PersistenceFiles implements AutoCloseable {
     }
 
     static long recordSequence(Path path) {
-        Matcher matcher = RECORD_NAME.matcher(path.getFileName().toString());
+        Matcher matcher = RECORD_NAME.matcher(name(path));
         if (!matcher.matches()) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         try {
             long value = Long.parseLong(matcher.group(1));
             if (value <= 0L) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             return value;
         } catch (NumberFormatException error) {
-            PersistenceCrypto.integrityFailure();
-            throw new AssertionError("unreachable");
+            throw PersistenceCrypto.integrityFailure();
         }
     }
 
@@ -437,7 +436,7 @@ final class PersistenceFiles implements AutoCloseable {
     private static void createAtomicOwnerDirectory(Path path) throws IOException {
         try {
             PosixFileAttributeView view = Files.getFileAttributeView(
-                path.getParent(),
+                parent(path),
                 PosixFileAttributeView.class,
                 LinkOption.NOFOLLOW_LINKS
             );
@@ -466,7 +465,7 @@ final class PersistenceFiles implements AutoCloseable {
 
     private static OwnedFile createAtomicOwnerFile(Path path) throws IOException {
         PosixFileAttributeView view = Files.getFileAttributeView(
-            path.getParent(),
+            parent(path),
             PosixFileAttributeView.class,
             LinkOption.NOFOLLOW_LINKS
         );
@@ -495,7 +494,7 @@ final class PersistenceFiles implements AutoCloseable {
             } catch (IOException closeError) {
                 error.addSuppressed(closeError);
             }
-            throw error;
+            throw failure(error, "persistence file could not be created safely");
         }
     }
 
@@ -509,7 +508,7 @@ final class PersistenceFiles implements AutoCloseable {
     private static void verifyRegularFile(Path path) {
         BasicFileAttributes attributes = readAttributes(path);
         if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         fileKey(attributes, false);
         verifyOwnerOnly(path, false);
@@ -520,7 +519,7 @@ final class PersistenceFiles implements AutoCloseable {
         try {
             Object value = Files.getAttribute(path, "unix:nlink", LinkOption.NOFOLLOW_LINKS);
             if (value instanceof Number && ((Number) value).longValue() != 1L) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
         } catch (UnsupportedOperationException | IllegalArgumentException error) {
             // Link counts are not exposed by every Java filesystem provider.
@@ -547,9 +546,25 @@ final class PersistenceFiles implements AutoCloseable {
         }
     }
 
+    static String name(Path path) {
+        Path name = path.getFileName();
+        if (name == null) {
+            throw PersistenceCrypto.integrityFailure();
+        }
+        return name.toString();
+    }
+
+    private static Path parent(Path path) {
+        Path parent = path.getParent();
+        if (parent == null) {
+            throw PersistenceCrypto.integrityFailure();
+        }
+        return parent;
+    }
+
     private static Object fileKey(BasicFileAttributes attributes, boolean directory) {
         if (directory ? !attributes.isDirectory() : !attributes.isRegularFile()) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         Object value = attributes.fileKey();
         if (value == null) {
@@ -559,6 +574,12 @@ final class PersistenceFiles implements AutoCloseable {
             );
         }
         return value;
+    }
+
+    static SdkException failure(RuntimeException error, String message) {
+        return error instanceof SdkException
+            ? (SdkException) error
+            : new SdkException("persistence_error", message);
     }
 
     private static void verifyOwnerOnly(Path path, boolean directory) {

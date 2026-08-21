@@ -86,7 +86,7 @@ final class PersistenceCrypto implements AutoCloseable {
         ensureOpen();
         Header header = parseHeader(encoded);
         if (header.kind != expectedKind || header.sequence != expectedSequence) {
-            integrityFailure();
+            throw integrityFailure();
         }
         byte[] headerBytes = Arrays.copyOf(encoded, HEADER_BYTES);
         try {
@@ -100,8 +100,7 @@ final class PersistenceCrypto implements AutoCloseable {
             cipher.updateAAD(context);
             return cipher.doFinal(encoded, HEADER_BYTES, header.ciphertextLength);
         } catch (AEADBadTagException error) {
-            integrityFailure();
-            throw new AssertionError("unreachable");
+            throw integrityFailure();
         } catch (GeneralSecurityException error) {
             throw new SdkException(
                 "persistence_error",
@@ -125,8 +124,8 @@ final class PersistenceCrypto implements AutoCloseable {
         }
     }
 
-    static void integrityFailure() {
-        throw new SdkException(
+    static SdkException integrityFailure() {
+        return new SdkException(
             "persistence_integrity_error",
             "persistence authentication or ownership failed"
         );
@@ -142,7 +141,7 @@ final class PersistenceCrypto implements AutoCloseable {
 
     private static Header parseHeader(byte[] encoded) {
         if (encoded.length < HEADER_BYTES + TAG_BYTES) {
-            integrityFailure();
+            throw integrityFailure();
         }
         ByteBuffer buffer = ByteBuffer.wrap(encoded, 0, HEADER_BYTES).order(ByteOrder.BIG_ENDIAN);
         int magic = buffer.getInt();
@@ -158,7 +157,7 @@ final class PersistenceCrypto implements AutoCloseable {
             || cipherLength < TAG_BYTES
             || cipherLength != encoded.length - HEADER_BYTES) {
             Arrays.fill(nonce, (byte) 0);
-            integrityFailure();
+            throw integrityFailure();
         }
         return new Header(kind, sequence, nonce, cipherLength);
     }

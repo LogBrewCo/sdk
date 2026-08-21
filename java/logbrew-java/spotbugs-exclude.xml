@@ -1,0 +1,7 @@
+<FindBugsFilter>
+  <!-- Public telemetry schema value; it is intentionally not a Throwable. -->
+  <Match>
+    <Class name="co.logbrew.sdk.IssueException" />
+    <Bug pattern="NM_CLASS_NOT_EXCEPTION" />
+  </Match>
+</FindBugsFilter>

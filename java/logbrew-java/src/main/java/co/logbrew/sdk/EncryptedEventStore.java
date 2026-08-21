@@ -103,7 +103,7 @@ public final class EncryptedEventStore implements AutoCloseable {
             if (files != null) {
                 files.close();
             }
-            throw error;
+            throw PersistenceFiles.failure(error, "persistence store could not be opened safely");
         }
     }
 
@@ -227,13 +227,13 @@ public final class EncryptedEventStore implements AutoCloseable {
             return;
         }
         if (records.size() > activeRecords.size()) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         for (int index = 0; index < records.size(); index++) {
             Record expected = activeRecords.get(index);
             Record actual = records.get(index);
             if (expected != actual) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             recordCodec.verifyUnchanged(actual);
         }
@@ -318,11 +318,11 @@ public final class EncryptedEventStore implements AutoCloseable {
     private Snapshot inspect(PersistenceFiles.Layout layout, int maxEvents, long maxBytes) {
         long checkpoint = recordCodec.readCheckpoint(layout.checkpointFile);
         if (layout.highWaterFile == null) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         long highWater = recordCodec.readHighWater(layout.highWaterFile);
         if (highWater < checkpoint) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         List<Record> records = new ArrayList<>();
         long eventBytes = 0L;
@@ -333,7 +333,7 @@ public final class EncryptedEventStore implements AutoCloseable {
                 continue;
             }
             if (sequence != expectedSequence || sequence > highWater) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             Record record = recordCodec.readRecord(path, sequence, maxBytes);
             if (records.size() >= maxEvents || record.eventBytes > maxBytes - eventBytes) {
@@ -348,7 +348,7 @@ public final class EncryptedEventStore implements AutoCloseable {
         }
         long expectedAfterHighWater = highWater == Long.MAX_VALUE ? Long.MAX_VALUE : highWater + 1L;
         if (expectedSequence != expectedAfterHighWater) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         long next = expectedAfterHighWater;
         return new Snapshot(

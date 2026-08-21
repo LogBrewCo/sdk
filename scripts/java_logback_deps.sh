@@ -5,56 +5,30 @@ fetch_java_logback_deps() {
   local slf4j_version="${LOGBREW_SLF4J_VERSION:-2.0.18}"
   local logback_version="${LOGBREW_LOGBACK_VERSION:-1.5.34}"
 
-  mkdir -p "$deps_dir"
-  fetch_maven_jar "org/slf4j/slf4j-api/$slf4j_version/slf4j-api-$slf4j_version" "$deps_dir"
-  fetch_maven_jar "ch/qos/logback/logback-core/$logback_version/logback-core-$logback_version" "$deps_dir"
-  fetch_maven_jar "ch/qos/logback/logback-classic/$logback_version/logback-classic-$logback_version" "$deps_dir"
-
-  printf '%s:%s:%s\n' \
-    "$deps_dir/slf4j-api-$slf4j_version.jar" \
-    "$deps_dir/logback-core-$logback_version.jar" \
-    "$deps_dir/logback-classic-$logback_version.jar"
+  fetch_maven_jars "$deps_dir" \
+    "org/slf4j/slf4j-api/$slf4j_version/slf4j-api-$slf4j_version" \
+    "ch/qos/logback/logback-core/$logback_version/logback-core-$logback_version" \
+    "ch/qos/logback/logback-classic/$logback_version/logback-classic-$logback_version"
 }
 
 fetch_java_opentelemetry_deps() {
   local deps_dir="$1"
   local opentelemetry_version="${LOGBREW_OPENTELEMETRY_VERSION:-1.63.0}"
 
-  mkdir -p "$deps_dir"
-  fetch_maven_jar \
+  fetch_maven_jars "$deps_dir" \
     "io/opentelemetry/opentelemetry-api/$opentelemetry_version/opentelemetry-api-$opentelemetry_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "io/opentelemetry/opentelemetry-context/$opentelemetry_version/opentelemetry-context-$opentelemetry_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "io/opentelemetry/opentelemetry-common/$opentelemetry_version/opentelemetry-common-$opentelemetry_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "io/opentelemetry/opentelemetry-sdk-common/$opentelemetry_version/opentelemetry-sdk-common-$opentelemetry_version" \
-    "$deps_dir"
-  fetch_maven_jar \
-    "io/opentelemetry/opentelemetry-sdk-trace/$opentelemetry_version/opentelemetry-sdk-trace-$opentelemetry_version" \
-    "$deps_dir"
-
-  printf '%s:%s:%s:%s:%s\n' \
-    "$deps_dir/opentelemetry-api-$opentelemetry_version.jar" \
-    "$deps_dir/opentelemetry-context-$opentelemetry_version.jar" \
-    "$deps_dir/opentelemetry-common-$opentelemetry_version.jar" \
-    "$deps_dir/opentelemetry-sdk-common-$opentelemetry_version.jar" \
-    "$deps_dir/opentelemetry-sdk-trace-$opentelemetry_version.jar"
+    "io/opentelemetry/opentelemetry-sdk-trace/$opentelemetry_version/opentelemetry-sdk-trace-$opentelemetry_version"
 }
 
 fetch_java_servlet_deps() {
   local deps_dir="$1"
   local servlet_version="${LOGBREW_SERVLET_VERSION:-6.1.0}"
 
-  mkdir -p "$deps_dir"
-  fetch_maven_jar \
-    "jakarta/servlet/jakarta.servlet-api/$servlet_version/jakarta.servlet-api-$servlet_version" \
-    "$deps_dir"
-
-  printf '%s\n' "$deps_dir/jakarta.servlet-api-$servlet_version.jar"
+  fetch_maven_jars "$deps_dir" \
+    "jakarta/servlet/jakarta.servlet-api/$servlet_version/jakarta.servlet-api-$servlet_version"
 }
 
 fetch_java_spring_boot_deps() {
@@ -62,37 +36,14 @@ fetch_java_spring_boot_deps() {
   local spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.1.0}"
   local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
 
-  mkdir -p "$deps_dir"
-  fetch_maven_jar \
+  fetch_maven_jars "$deps_dir" \
     "org/springframework/boot/spring-boot/$spring_boot_version/spring-boot-$spring_boot_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/boot/spring-boot-autoconfigure/$spring_boot_version/spring-boot-autoconfigure-$spring_boot_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-core/$spring_framework_version/spring-core-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-context/$spring_framework_version/spring-context-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-beans/$spring_framework_version/spring-beans-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "commons-logging/commons-logging/1.3.5/commons-logging-1.3.5" \
-    "$deps_dir"
-  fetch_maven_jar \
-    "org/jspecify/jspecify/1.0.0/jspecify-1.0.0" \
-    "$deps_dir"
-
-  printf '%s:%s:%s:%s:%s:%s:%s\n' \
-    "$deps_dir/spring-boot-$spring_boot_version.jar" \
-    "$deps_dir/spring-boot-autoconfigure-$spring_boot_version.jar" \
-    "$deps_dir/spring-core-$spring_framework_version.jar" \
-    "$deps_dir/spring-context-$spring_framework_version.jar" \
-    "$deps_dir/spring-beans-$spring_framework_version.jar" \
-    "$deps_dir/commons-logging-1.3.5.jar" \
-    "$deps_dir/jspecify-1.0.0.jar"
+    "org/jspecify/jspecify/1.0.0/jspecify-1.0.0"
 }
 
 fetch_java_spring_kafka_deps() {
@@ -102,29 +53,12 @@ fetch_java_spring_kafka_deps() {
   local kafka_clients_version="${LOGBREW_KAFKA_CLIENTS_VERSION:-4.2.1}"
   local micrometer_observation_version="${LOGBREW_MICROMETER_OBSERVATION_VERSION:-1.17.0}"
 
-  mkdir -p "$deps_dir"
-  fetch_maven_jar \
+  fetch_maven_jars "$deps_dir" \
     "org/springframework/kafka/spring-kafka/$spring_kafka_version/spring-kafka-$spring_kafka_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/apache/kafka/kafka-clients/$kafka_clients_version/kafka-clients-$kafka_clients_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-messaging/$spring_framework_version/spring-messaging-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-tx/$spring_framework_version/spring-tx-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
-    "io/micrometer/micrometer-observation/$micrometer_observation_version/micrometer-observation-$micrometer_observation_version" \
-    "$deps_dir"
-
-  printf '%s:%s:%s:%s:%s\n' \
-    "$deps_dir/spring-kafka-$spring_kafka_version.jar" \
-    "$deps_dir/kafka-clients-$kafka_clients_version.jar" \
-    "$deps_dir/spring-messaging-$spring_framework_version.jar" \
-    "$deps_dir/spring-tx-$spring_framework_version.jar" \
-    "$deps_dir/micrometer-observation-$micrometer_observation_version.jar"
+    "io/micrometer/micrometer-observation/$micrometer_observation_version/micrometer-observation-$micrometer_observation_version"
 }
 
 fetch_java_spring_web_deps() {
@@ -134,37 +68,35 @@ fetch_java_spring_web_deps() {
   local reactive_streams_version="${LOGBREW_REACTIVE_STREAMS_VERSION:-1.0.4}"
   local micrometer_version="${LOGBREW_MICROMETER_OBSERVATION_VERSION:-1.17.0}"
 
-  mkdir -p "$deps_dir"
-  fetch_maven_jar \
+  fetch_maven_jars "$deps_dir" \
     "org/springframework/spring-web/$spring_framework_version/spring-web-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-webmvc/$spring_framework_version/spring-webmvc-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-webflux/$spring_framework_version/spring-webflux-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/springframework/spring-test/$spring_framework_version/spring-test-$spring_framework_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "io/projectreactor/reactor-core/$reactor_version/reactor-core-$reactor_version" \
-    "$deps_dir"
-  fetch_maven_jar \
     "org/reactivestreams/reactive-streams/$reactive_streams_version/reactive-streams-$reactive_streams_version" \
-    "$deps_dir"
-  fetch_maven_jar \
-    "io/micrometer/micrometer-commons/$micrometer_version/micrometer-commons-$micrometer_version" \
-    "$deps_dir"
+    "io/micrometer/micrometer-commons/$micrometer_version/micrometer-commons-$micrometer_version"
+}
 
-  printf '%s:%s:%s:%s:%s:%s:%s\n' \
-    "$deps_dir/spring-web-$spring_framework_version.jar" \
-    "$deps_dir/spring-webmvc-$spring_framework_version.jar" \
-    "$deps_dir/spring-webflux-$spring_framework_version.jar" \
-    "$deps_dir/spring-test-$spring_framework_version.jar" \
-    "$deps_dir/reactor-core-$reactor_version.jar" \
-    "$deps_dir/reactive-streams-$reactive_streams_version.jar" \
-    "$deps_dir/micrometer-commons-$micrometer_version.jar"
+fetch_maven_jars() {
+  local deps_dir="$1"
+  shift
+  local artifact_path classpath="" result=0 pid
+  local -a artifacts=("$@") pids=()
+
+  mkdir -p "$deps_dir"
+  for artifact_path in "${artifacts[@]}"; do
+    fetch_maven_jar "$artifact_path" "$deps_dir" &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || result=1
+  done
+  (( result == 0 )) || return 1
+  for artifact_path in "${artifacts[@]}"; do
+    classpath="${classpath:+$classpath:}$deps_dir/$(basename "$artifact_path").jar"
+  done
+  printf '%s\n' "$classpath"
 }
 
 fetch_maven_jar() {
@@ -175,54 +107,47 @@ fetch_maven_jar() {
   artifact_name="$(basename "$artifact_path")"
   local jar_path="$deps_dir/$artifact_name.jar"
   local checksum_path="$jar_path.sha256"
+  local cached_path="${LOGBREW_MAVEN_REPO:-$HOME/.m2/repository}/$artifact_path.jar"
+  local -a curl_args=(
+    --fail --silent --show-error --location --retry 1 --retry-all-errors
+    --connect-timeout 2 --max-time 5
+  )
+  local -a checksum_args=(--fail --silent --location --connect-timeout 2 --max-time 5)
 
-  if ! curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
-    --output "$jar_path" "$base_url.jar"; then
+  if [[ -f "$cached_path" && -f "$cached_path.sha256" ]]; then
+    cp "$cached_path" "$jar_path"
+    cp "$cached_path.sha256" "$checksum_path"
+    verify_java_checksum 256 "$jar_path" "$checksum_path"
+    return
+  fi
+  if [[ -f "$cached_path" && -f "$cached_path.sha1" ]]; then
+    cp "$cached_path" "$jar_path"
+    checksum_path="$jar_path.sha1"
+    cp "$cached_path.sha1" "$checksum_path"
+    verify_java_checksum 1 "$jar_path" "$checksum_path"
+    return
+  fi
+  if ! curl "${curl_args[@]}" --output "$jar_path" "$base_url.jar"; then
     return 1
   fi
-  if curl --fail --silent --location --retry 3 --retry-all-errors \
-    --output "$checksum_path" "$base_url.jar.sha256"; then
-    verify_java_logback_sha256 "$jar_path" "$checksum_path"
+  if curl "${checksum_args[@]}" --output "$checksum_path" "$base_url.jar.sha256"; then
+    verify_java_checksum 256 "$jar_path" "$checksum_path"
   else
     checksum_path="$jar_path.sha1"
-    if ! curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
-      --output "$checksum_path" "$base_url.jar.sha1"; then
+    if ! curl "${checksum_args[@]}" --output "$checksum_path" "$base_url.jar.sha1"; then
       return 1
     fi
-    verify_java_logback_sha1 "$jar_path" "$checksum_path"
+    verify_java_checksum 1 "$jar_path" "$checksum_path"
   fi
 }
 
-verify_java_logback_sha256() {
-  local artifact="$1"
-  local checksum_file="$2"
-  python3 - "$artifact" "$checksum_file" <<'PY'
-import hashlib
-import sys
-from pathlib import Path
-
-artifact = Path(sys.argv[1])
-checksum_file = Path(sys.argv[2])
-expected = checksum_file.read_text(encoding="utf-8").strip().split()[0]
-actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
-if actual != expected:
-    raise SystemExit(f"checksum mismatch for {artifact.name}: expected {expected}, got {actual}")
-PY
-}
-
-verify_java_logback_sha1() {
-  local artifact="$1"
-  local checksum_file="$2"
-  python3 - "$artifact" "$checksum_file" <<'PY'
-import hashlib
-import sys
-from pathlib import Path
-
-artifact = Path(sys.argv[1])
-checksum_file = Path(sys.argv[2])
-expected = checksum_file.read_text(encoding="utf-8").strip().split()[0]
-actual = hashlib.sha1(artifact.read_bytes()).hexdigest()
-if actual != expected:
-    raise SystemExit(f"checksum mismatch for {artifact.name}: expected {expected}, got {actual}")
-PY
+verify_java_checksum() {
+  local algorithm="$1" artifact="$2" checksum_file="$3" expected actual
+  expected="$(awk 'NR == 1 { print $1 }' "$checksum_file")"
+  actual="$(shasum -a "$algorithm" "$artifact" | awk '{ print $1 }')"
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'checksum mismatch for %s: expected %s, got %s\n' \
+      "$(basename "$artifact")" "$expected" "$actual" >&2
+    return 1
+  fi
 }

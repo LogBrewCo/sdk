@@ -204,7 +204,7 @@ final class PersistenceTransaction {
             }
             PersistenceFiles.FileIdentity identity = files.writeAndForce(temporary, input.encoded);
             Target target = input.withTemporary(
-                temporary.path.getFileName().toString(),
+                PersistenceFiles.name(temporary.path),
                 identity.size,
                 identity.digest
             );
@@ -225,7 +225,7 @@ final class PersistenceTransaction {
                 pending.fileKey
             );
             if (!pending.fileKey.equals(committed.fileKey)) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
         }
         removeIntentDurably();
@@ -295,7 +295,7 @@ final class PersistenceTransaction {
                 identity.fileKey
             );
             if (!identity.fileKey.equals(committed.fileKey)) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
         } finally {
             PersistenceFiles.closeQuietly(temporary);
@@ -320,7 +320,7 @@ final class PersistenceTransaction {
                 identity.fileKey
             );
             if (!identity.fileKey.equals(committed.fileKey)) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
         } finally {
             PersistenceFiles.closeQuietly(temporary);
@@ -419,19 +419,19 @@ final class PersistenceTransaction {
         ByteBuffer buffer = ByteBuffer.wrap(plaintext).order(ByteOrder.BIG_ENDIAN);
         int headerBytes = 1 + Long.BYTES + Integer.BYTES;
         if (buffer.remaining() < headerBytes || buffer.get() != INTENT_VERSION) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         long sequence = buffer.getLong();
         int targetCount = buffer.getInt();
         if (sequence <= 0L || sequence != headerSequence || targetCount < 1 || targetCount > 2) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         List<Target> targets = new ArrayList<>();
         for (int index = 0; index < targetCount; index++) {
             targets.add(decodeTarget(buffer, sequence));
         }
         if (buffer.hasRemaining()) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         validateIntentShape(targets);
         return new Intent(sequence, targets);
@@ -440,7 +440,7 @@ final class PersistenceTransaction {
     private static Target decodeTarget(ByteBuffer buffer, long intentSequence) {
         int fixed = 1 + 1 + Long.BYTES * 2 + Integer.BYTES * 3 + DIGEST_BYTES;
         if (buffer.remaining() < fixed) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         byte kind = buffer.get();
         byte replaceValue = buffer.get();
@@ -457,7 +457,7 @@ final class PersistenceTransaction {
             || temporaryLength <= 0
             || digestLength != DIGEST_BYTES
             || variable > buffer.remaining()) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
         byte[] target = new byte[targetLength];
         byte[] temporary = new byte[temporaryLength];
@@ -487,7 +487,7 @@ final class PersistenceTransaction {
         if (targets.size() == 1) {
             Target checkpoint = targets.get(0);
             if (checkpoint.kind != PersistenceCrypto.CHECKPOINT || !checkpoint.replace) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             return;
         }
@@ -498,7 +498,7 @@ final class PersistenceTransaction {
             || highWater.kind != PersistenceCrypto.HIGH_WATER
             || !highWater.replace
             || record.sequence != highWater.sequence) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
     }
 
@@ -516,12 +516,11 @@ final class PersistenceTransaction {
         } else if (kind == PersistenceCrypto.RECORD) {
             expectedTarget = String.format(java.util.Locale.ROOT, "%020d.lbe", Long.valueOf(sequence));
         } else {
-            PersistenceCrypto.integrityFailure();
-            throw new AssertionError("unreachable");
+            throw PersistenceCrypto.integrityFailure();
         }
         if (!expectedTarget.equals(target)
             || !temporary.matches("\\.pending-[0-9a-f]{32}\\.tmp")) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
     }
 
@@ -533,8 +532,7 @@ final class PersistenceTransaction {
                 .decode(ByteBuffer.wrap(value))
                 .toString();
         } catch (CharacterCodingException error) {
-            PersistenceCrypto.integrityFailure();
-            throw new AssertionError("unreachable");
+            throw PersistenceCrypto.integrityFailure();
         }
     }
 
@@ -568,7 +566,7 @@ final class PersistenceTransaction {
                 kind,
                 sequence,
                 replace,
-                target.getFileName().toString(),
+                PersistenceFiles.name(target),
                 null,
                 0L,
                 null,
