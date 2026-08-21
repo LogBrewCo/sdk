@@ -69,7 +69,7 @@ elif [[ -n "$release_plan_path" ]]; then
     kotlin_version="$(plan_version "logbrew-kotlin")"
     okhttp_version="$(plan_version "logbrew-kotlin-okhttp")"
 else
-    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.5}}"
+    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.6}}"
     kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.2}}"
     okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"
 fi
@@ -125,10 +125,6 @@ fi
 
 on_error() {
     local status=$?
-    if [[ "$receipt_mode" == "1" ]]; then
-        echo "Maven release receipt failed" >&2
-        exit "$status"
-    fi
     echo "real_user_maven_central_public_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
     for diagnostic in \
         "$tmp_dir/logbrew-sdk-metadata.xml" \
