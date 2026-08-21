@@ -71,13 +71,13 @@ final class PersistenceRecordCodec {
         );
         try {
             if (plaintext.length != Long.BYTES) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             long value = ByteBuffer.wrap(plaintext).order(ByteOrder.BIG_ENDIAN).getLong();
             if ((kind == PersistenceCrypto.CHECKPOINT && value <= 0L)
                 || (kind == PersistenceCrypto.HIGH_WATER && value < 0L)
                 || value != header.sequence) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             return value;
         } finally {
@@ -97,11 +97,11 @@ final class PersistenceRecordCodec {
         );
         try {
             if (header.sequence != expectedSequence) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             ByteBuffer payload = ByteBuffer.wrap(plaintext).order(ByteOrder.BIG_ENDIAN);
             if (payload.remaining() < Integer.BYTES * 2) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             int idLength = payload.getInt();
             int eventLength = payload.getInt();
@@ -110,7 +110,7 @@ final class PersistenceRecordCodec {
                 || eventLength > maxEventBytes
                 || idLength > payload.remaining()
                 || eventLength != payload.remaining() - idLength) {
-                PersistenceCrypto.integrityFailure();
+                throw PersistenceCrypto.integrityFailure();
             }
             byte[] idBytes = new byte[idLength];
             byte[] eventBytes = new byte[eventLength];
@@ -142,7 +142,7 @@ final class PersistenceRecordCodec {
             record.fileIdentity.fileKey
         );
         if (!record.fileIdentity.fileKey.equals(identity.fileKey)) {
-            PersistenceCrypto.integrityFailure();
+            throw PersistenceCrypto.integrityFailure();
         }
     }
 
@@ -154,8 +154,7 @@ final class PersistenceRecordCodec {
                 .decode(ByteBuffer.wrap(value))
                 .toString();
         } catch (CharacterCodingException error) {
-            PersistenceCrypto.integrityFailure();
-            throw new AssertionError("unreachable");
+            throw PersistenceCrypto.integrityFailure();
         }
     }
 

@@ -255,6 +255,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             current = scheduler;
             automaticAttempts = saturatedAdd(automaticAttempts, 1L);
         }
+        stopSchedulerNow(current);
         boolean completed = false;
         try {
             TransportResponse response = client.deliverAutomatically(observed, true, null, this);
@@ -277,6 +278,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
                 endOperationLocked();
                 if (!completed) {
                     stopping = false;
+                    scheduler = null;
                 }
             }
             if (completed) {

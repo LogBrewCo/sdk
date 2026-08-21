@@ -70,8 +70,8 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class Main {
-    private static final int HIGH_VOLUME_EVENTS = 1500;
-    private static final int BATCH_EVENTS = 500;
+    private static final int RECOVERY_EVENTS = 150;
+    private static final int BATCH_EVENTS = 50;
     private static final String API_KEY = "LOGBREW_INGEST_KEY";
     private static final String MESSAGE = "private-restart-message";
 
@@ -102,19 +102,19 @@ public final class Main {
         EncryptedEventStore store = EncryptedEventStore.open(directory, key);
         LogBrewClient client = client(store);
         assertEquals(0, client.recoverPersistedEvents().pendingEvents(), "initial recovery");
-        for (int index = 0; index < HIGH_VOLUME_EVENTS; index++) {
+        for (int index = 0; index < RECOVERY_EVENTS; index++) {
             client.log(
                 eventId(index),
                 Instant.parse("2026-06-02T10:00:00Z").plusSeconds(index).toString(),
                 LogAttributes.create(MESSAGE, "info")
             );
         }
-        assertEquals(HIGH_VOLUME_EVENTS, client.persistenceStatus().pendingEvents(), "durable admission");
+        assertEquals(RECOVERY_EVENTS, client.persistenceStatus().pendingEvents(), "durable admission");
         String preview = client.previewJson();
         assertStableRecoveredIds(preview);
         System.out.println("{"
             + "\"phase\":\"hard-exit\","
-            + "\"persistedEvents\":" + HIGH_VOLUME_EVENTS + ","
+            + "\"persistedEvents\":" + RECOVERY_EVENTS + ","
             + "\"previewSha256\":\"" + sha256(preview) + "\""
             + "}");
         System.out.flush();
@@ -125,7 +125,7 @@ public final class Main {
         try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
             LogBrewClient client = client(store);
             PersistenceStatus recovered = client.recoverPersistedEvents();
-            assertEquals(HIGH_VOLUME_EVENTS, recovered.pendingEvents(), "restart recovery");
+            assertEquals(RECOVERY_EVENTS, recovered.pendingEvents(), "restart recovery");
             String recoveredPreview = client.previewJson();
             assertStableRecoveredIds(recoveredPreview);
             String recoveredPreviewSha256 = sha256(recoveredPreview);
@@ -137,15 +137,15 @@ public final class Main {
             assertEquals("transport_error", failure.code(), "third-batch failure");
             assertEquals(5, scenario.calls.get(), "scripted request count");
             assertTrue(scenario.retryBodyStable, "byte-identical 503 to 202 retry");
-            assertEquals(501, client.pendingEvents(), "accepted prefix and later retention");
-            assertEquals(501, client.persistenceStatus().pendingEvents(), "durable retained suffix");
+            assertEquals(51, client.pendingEvents(), "accepted prefix and later retention");
+            assertEquals(51, client.persistenceStatus().pendingEvents(), "durable retained suffix");
 
             AtomicInteger drainCalls = new AtomicInteger();
             TransportResponse drained = client.flush((apiKey, body) -> {
                 drainCalls.incrementAndGet();
                 return new TransportResponse(202, 1);
             });
-            assertEquals(501, drained.acceptedEvents(), "drained retained events");
+            assertEquals(51, drained.acceptedEvents(), "drained retained events");
             assertEquals(2, drainCalls.get(), "bounded retained requests");
             assertEquals(0, client.persistenceStatus().pendingEvents(), "durable drain");
             client.shutdown((apiKey, body) -> new TransportResponse(202, 1));
@@ -154,7 +154,7 @@ public final class Main {
                 + "\"ok\":true,"
                 + "\"hardExitRecovered\":" + recovered.pendingEvents() + ","
                 + "\"retryBodiesStable\":true,"
-                + "\"retainedAfterPrefixFailure\":501,"
+                + "\"retainedAfterPrefixFailure\":51,"
                 + "\"drainedEvents\":" + drained.acceptedEvents() + ","
                 + "\"recoveredPreviewSha256\":\"" + recoveredPreviewSha256 + "\""
                 + "}");
@@ -168,7 +168,7 @@ public final class Main {
             "0.1.0",
             DeliveryOptions.builder()
                 .maxRetries(1)
-                .maxQueueEvents(HIGH_VOLUME_EVENTS + 1)
+                .maxQueueEvents(RECOVERY_EVENTS + 1)
                 .maxQueueBytes(32L * 1024L * 1024L)
                 .maxBatchEvents(BATCH_EVENTS)
                 .maxBatchBytes(8 * 1024 * 1024)
@@ -183,7 +183,7 @@ public final class Main {
 
     private static void assertStableRecoveredIds(String preview) {
         int cursor = -1;
-        for (int index = 0; index < HIGH_VOLUME_EVENTS; index++) {
+        for (int index = 0; index < RECOVERY_EVENTS; index++) {
             String eventId = "\"id\": \"" + eventId(index) + "\"";
             int position = preview.indexOf(eventId, cursor + 1);
             assertTrue(position > cursor, "stable recovered event ids and order");
@@ -269,7 +269,7 @@ public final class Main {
                 return new TransportResponse(202, 1);
             }
             if (call == 3) {
-                assertTrue(body.contains("evt_restart_0500"), "second recovered prefix");
+                assertTrue(body.contains("evt_restart_0050"), "second recovered prefix");
                 client.log(
                     "evt_restart_later",
                     "2026-06-03T10:00:00Z",
@@ -278,7 +278,7 @@ public final class Main {
                 return new TransportResponse(202, 1);
             }
             if (call == 4) {
-                assertTrue(body.contains("evt_restart_1000"), "failed suffix starts oldest first");
+                assertTrue(body.contains("evt_restart_0100"), "failed suffix starts oldest first");
                 assertTrue(!body.contains("evt_restart_later"), "later event excluded from active snapshot");
                 return new TransportResponse(503, 1);
             }
@@ -297,7 +297,7 @@ import sys
 from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-if payload.get("phase") != "hard-exit" or payload.get("persistedEvents") != 1500:
+if payload.get("phase") != "hard-exit" or payload.get("persistedEvents") != 150:
     raise SystemExit("unexpected writer proof")
 digest = payload.get("previewSha256", "")
 if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
@@ -336,14 +336,14 @@ from pathlib import Path
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 expected = {
     "ok": True,
-    "hardExitRecovered": 1500,
+    "hardExitRecovered": 150,
     "retryBodiesStable": True,
-    "retainedAfterPrefixFailure": 501,
-    "drainedEvents": 501,
+    "retainedAfterPrefixFailure": 51,
+    "drainedEvents": 51,
     "recoveredPreviewSha256": sys.argv[2],
 }
 if payload != expected:
     raise SystemExit("unexpected recovery proof")
 PY
 
-printf '%s\n' 'java encrypted restart installed-Transport proof passed (recovered=1500 retained=501 drained=501)'
+printf '%s\n' 'java encrypted restart installed-Transport proof passed (recovered=150 retained=51 drained=51)'

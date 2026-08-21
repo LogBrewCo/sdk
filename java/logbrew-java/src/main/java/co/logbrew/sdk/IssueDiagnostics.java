@@ -206,7 +206,7 @@ final class IssueDiagnostics {
         String candidate;
         try {
             candidate = error.getClass().getSimpleName();
-            if (candidate == null || candidate.trim().isEmpty()) {
+            if (candidate.trim().isEmpty()) {
                 candidate = basename(error.getClass().getName().replace('.', '/'));
             }
         } catch (RuntimeException | LinkageError failure) {
@@ -230,9 +230,6 @@ final class IssueDiagnostics {
             return new StackEvidence(List.of(), false);
         }
         List<IssueStackFrame> frames = new ArrayList<>();
-        if (elements == null) {
-            return new StackEvidence(frames, false);
-        }
         for (StackTraceElement element : elements) {
             if (element == null) {
                 continue;
@@ -253,7 +250,7 @@ final class IssueDiagnostics {
                 break;
             }
         }
-        return new StackEvidence(frames, elements != null && elements.length > MAX_STACK_FRAMES);
+        return new StackEvidence(frames, elements.length > MAX_STACK_FRAMES);
     }
 
     static String safeExceptionModule(Throwable error) {

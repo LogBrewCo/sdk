@@ -42,18 +42,36 @@ find "$package_dir/src/test/java" -name '*.java' | sort > "$test_sources"
 find "$package_dir/examples" -name '*.java' | sort > "$example_sources"
 
 mkdir -p "$tmp_dir/classes" "$tmp_dir/test-classes" "$tmp_dir/example-classes" "$tmp_dir/javadoc" "$tmp_dir/jar-stage"
-java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
-java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
-java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
-java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
-java_spring_kafka_classpath="$(fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps")"
-java_spring_web_classpath="$(fetch_java_spring_web_deps "$tmp_dir/java-spring-web-deps")"
+dependency_jobs=()
+fetch_java_logback_deps "$tmp_dir/java-logback-deps" > "$tmp_dir/logback.classpath" &
+dependency_jobs+=("$!")
+fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps" > "$tmp_dir/opentelemetry.classpath" &
+dependency_jobs+=("$!")
+fetch_java_servlet_deps "$tmp_dir/java-servlet-deps" > "$tmp_dir/servlet.classpath" &
+dependency_jobs+=("$!")
+fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps" > "$tmp_dir/spring-boot.classpath" &
+dependency_jobs+=("$!")
+fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps" > "$tmp_dir/spring-kafka.classpath" &
+dependency_jobs+=("$!")
+fetch_java_spring_web_deps "$tmp_dir/java-spring-web-deps" > "$tmp_dir/spring-web.classpath" &
+dependency_jobs+=("$!")
+for dependency_job in "${dependency_jobs[@]}"; do
+  wait "$dependency_job"
+done
+java_logback_classpath="$(< "$tmp_dir/logback.classpath")"
+java_opentelemetry_classpath="$(< "$tmp_dir/opentelemetry.classpath")"
+java_servlet_classpath="$(< "$tmp_dir/servlet.classpath")"
+java_spring_boot_classpath="$(< "$tmp_dir/spring-boot.classpath")"
+java_spring_kafka_classpath="$(< "$tmp_dir/spring-kafka.classpath")"
+java_spring_web_classpath="$(< "$tmp_dir/spring-web.classpath")"
 java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath:$java_spring_web_classpath"
 
 javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 if [ -d "$package_dir/src/main/resources" ]; then
   cp -R "$package_dir/src/main/resources/." "$tmp_dir/classes/"
 fi
+javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_optional_classpath" -d "$tmp_dir/javadoc" @"$main_sources" &
+javadoc_job="$!"
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_optional_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewClientTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewDeliveryTest
@@ -87,7 +105,7 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
   --artifact-id logbrew-sdk \
   --version "$package_version"
 
-javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_optional_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
+wait "$javadoc_job"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClientOptions.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/TelemetryContext.html"

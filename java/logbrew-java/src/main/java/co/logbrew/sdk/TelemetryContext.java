@@ -60,7 +60,7 @@ public final class TelemetryContext {
 
     /** Returns the immutable schema-shaped map used for JSON serialization. */
     public Map<String, Object> asMap() {
-        return value;
+        return TelemetryValues.immutableMap(value);
     }
 
     static TelemetryContext withTrace(TelemetryContext base, LogBrewTraceContext trace) {

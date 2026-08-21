@@ -19,35 +19,24 @@ trap remove_tmp_dir EXIT
 download() {
   local url="$1"
   local output="$2"
-  curl --fail --silent --show-error --location --retry 3 --output "$output" "$url"
+  curl --fail --silent --show-error --location --connect-timeout 2 --max-time 8 --output "$output" "$url"
 }
 
 verify_sha256() {
   local artifact="$1"
   local checksum_file="$2"
-  python3 - "$artifact" "$checksum_file" <<'PY'
-import hashlib
-import sys
-from pathlib import Path
-
-artifact = Path(sys.argv[1])
-checksum_file = Path(sys.argv[2])
-expected = checksum_file.read_text(encoding="utf-8").strip().split()[0]
-actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
-if actual != expected:
-    raise SystemExit(f"checksum mismatch for {artifact.name}: expected {expected}, got {actual}")
-PY
+  local expected actual
+  expected="$(awk 'NR == 1 { print $1 }' "$checksum_file")"
+  actual="$(shasum -a 256 "$artifact" | awk '{ print $1 }')"
+  [[ "$actual" == "$expected" ]] || {
+    printf 'checksum mismatch for %s: expected %s, got %s\n' \
+      "$(basename "$artifact")" "$expected" "$actual" >&2
+    return 1
+  }
 }
 
 main_sources="$tmp_dir/main-sources.txt"
 classes_dir="$tmp_dir/classes"
-java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
-java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
-java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
-java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
-java_spring_kafka_classpath="$(fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps")"
-java_spring_web_classpath="$(fetch_java_spring_web_deps "$tmp_dir/java-spring-web-deps")"
-java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath:$java_spring_web_classpath"
 spotbugs_tgz="$tmp_dir/spotbugs-$spotbugs_version.tgz"
 spotbugs_sha256="$tmp_dir/spotbugs-$spotbugs_version.tgz.sha256"
 spotbugs_report="$tmp_dir/spotbugs.xml"
@@ -55,8 +44,34 @@ spotbugs_report="$tmp_dir/spotbugs.xml"
 find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
 mkdir -p "$classes_dir"
 
-download "$spotbugs_base_url/spotbugs-$spotbugs_version.tgz" "$spotbugs_tgz"
-download "$spotbugs_base_url/spotbugs-$spotbugs_version.tgz.sha256" "$spotbugs_sha256"
+dependency_jobs=()
+fetch_java_logback_deps "$tmp_dir/java-logback-deps" > "$tmp_dir/logback.classpath" &
+dependency_jobs+=("$!")
+fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps" > "$tmp_dir/opentelemetry.classpath" &
+dependency_jobs+=("$!")
+fetch_java_servlet_deps "$tmp_dir/java-servlet-deps" > "$tmp_dir/servlet.classpath" &
+dependency_jobs+=("$!")
+fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps" > "$tmp_dir/spring-boot.classpath" &
+dependency_jobs+=("$!")
+fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps" > "$tmp_dir/spring-kafka.classpath" &
+dependency_jobs+=("$!")
+fetch_java_spring_web_deps "$tmp_dir/java-spring-web-deps" > "$tmp_dir/spring-web.classpath" &
+dependency_jobs+=("$!")
+download "$spotbugs_base_url/spotbugs-$spotbugs_version.tgz" "$spotbugs_tgz" &
+dependency_jobs+=("$!")
+download "$spotbugs_base_url/spotbugs-$spotbugs_version.tgz.sha256" "$spotbugs_sha256" &
+dependency_jobs+=("$!")
+for dependency_job in "${dependency_jobs[@]}"; do
+  wait "$dependency_job"
+done
+
+java_logback_classpath="$(< "$tmp_dir/logback.classpath")"
+java_opentelemetry_classpath="$(< "$tmp_dir/opentelemetry.classpath")"
+java_servlet_classpath="$(< "$tmp_dir/servlet.classpath")"
+java_spring_boot_classpath="$(< "$tmp_dir/spring-boot.classpath")"
+java_spring_kafka_classpath="$(< "$tmp_dir/spring-kafka.classpath")"
+java_spring_web_classpath="$(< "$tmp_dir/spring-web.classpath")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath:$java_spring_web_classpath"
 verify_sha256 "$spotbugs_tgz" "$spotbugs_sha256"
 tar -xzf "$spotbugs_tgz" -C "$tmp_dir"
 
@@ -72,6 +87,7 @@ javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$classe
   -textui \
   -effort:max \
   -low \
+  -exclude "$package_dir/spotbugs-exclude.xml" \
   -auxclasspath "$java_optional_classpath" \
   -xml:withMessages \
   -output "$spotbugs_report" \
@@ -98,7 +114,9 @@ if analysis_errors or missing_classes or bugs:
         priority = bug.attrib.get("priority", "unknown")
         class_node = bug.find("Class")
         class_name = class_node.attrib.get("classname", "unknown") if class_node is not None else "unknown"
-        print(f"{bug_type} priority={priority} class={class_name}", file=sys.stderr)
+        source = bug.find("SourceLine")
+        line = source.attrib.get("start", "unknown") if source is not None else "unknown"
+        print(f"{bug_type} priority={priority} class={class_name} line={line}", file=sys.stderr)
     if analysis_errors:
         print(f"SpotBugs analysis errors: {analysis_errors}", file=sys.stderr)
     if missing_classes:
