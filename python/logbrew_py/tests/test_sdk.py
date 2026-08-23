@@ -16,6 +16,7 @@ from logbrew_sdk import (
     IssueAttributes,
     IssueBreadcrumb,
     IssueBreadcrumbDataValue,
+    IssueDiagnosticEvidence,
     IssueException,
     IssueStackFrame,
     LogBrewClient,
@@ -336,6 +337,44 @@ class LogBrewSdkTests(unittest.TestCase):
         )
         self.assertIs(attributes["breadcrumbsTruncated"], True)
 
+    def test_issue_diagnostic_evidence_survives_the_client_boundary(self) -> None:
+        client = sample_client()
+        evidence: IssueDiagnosticEvidence = {
+            "likelyRootCause": "The payment provider exhausted its retry budget.",
+            "likelyFixArea": {
+                "component": "checkout-api",
+                "module": "payments.gateway",
+                "function": "charge_order",
+                "file": "src/payments/gateway.py",
+                "line": 42,
+                "column": 7,
+                "inApp": True,
+            },
+            "impact": {
+                "affectedUserSegment": "checkout-users",
+                "failedAction": "checkout.submit",
+                "userVisibleOutcome": "The order was not confirmed.",
+            },
+            "capturedFields": ["provider.status", "retry.count"],
+            "missingFields": ["provider.request_id"],
+            "redactedFields": ["provider.message"],
+            "truncatedFields": ["breadcrumbs"],
+        }
+        client.issue(
+            "evt_issue_evidence",
+            "2026-07-17T12:00:00Z",
+            cast(
+                IssueAttributes,
+                {"title": "Checkout failed", "level": "error", "evidence": evidence},
+            ),
+        )
+        evidence["likelyFixArea"]["file"] = "mutated.py"
+        evidence["capturedFields"].append("mutated")
+
+        attributes = json.loads(client.preview_json())["events"][0]["attributes"]
+        self.assertEqual(attributes["evidence"]["likelyFixArea"]["file"], "src/payments/gateway.py")
+        self.assertEqual(attributes["evidence"]["capturedFields"], ["provider.status", "retry.count"])
+
     def test_issue_diagnostics_reject_unsafe_shapes(self) -> None:
         invalid_diagnostics: list[dict[str, Any]] = [
             {"exception": {"type": "CheckoutError", "mechanism": {"type": "python.exception"}}},
@@ -376,6 +415,17 @@ class LogBrewSdkTests(unittest.TestCase):
                 ]
             },
             {"breadcrumbsTruncated": "yes"},
+            {"evidence": {}},
+            {"evidence": {"likelyFixArea": {"inApp": True}}},
+            {"evidence": {"likelyFixArea": {"file": "/srv/example/app.py"}}},
+            {"evidence": {"likelyFixArea": {"file": " /srv/example/app.py"}}},
+            {
+                "evidence": {
+                    "capturedFields": ["provider.status"],
+                    "missingFields": ["provider.status"],
+                }
+            },
+            {"evidence": {"capturedFields": ["bad field"]}},
         ]
 
         for diagnostics in invalid_diagnostics:
@@ -396,6 +446,11 @@ class LogBrewSdkTests(unittest.TestCase):
                     )
 
     def test_create_issue_attributes_from_exception_sanitizes_traceback(self) -> None:
+        evidence: IssueDiagnosticEvidence = {
+            "likelyFixArea": {"file": "src/payments/gateway.py", "line": 42},
+            "missingFields": ["provider.request_id"],
+        }
+
         def fail_checkout() -> None:
             raise LookupError("payment method is unavailable")
 
@@ -407,6 +462,7 @@ class LogBrewSdkTests(unittest.TestCase):
                 title="Checkout failed",
                 mechanism="python.framework",
                 handled=False,
+                evidence=evidence,
                 metadata={"framework": "example"},
             )
 
@@ -441,6 +497,7 @@ class LogBrewSdkTests(unittest.TestCase):
             },
         )
         self.assertNotIn("workspace", json.dumps(attributes))
+        self.assertEqual(attributes["evidence"], evidence)
 
         UnsafeError = type("Unsafe/Error", (Exception,), {})
         unsafe_attributes = create_issue_attributes_from_exception(

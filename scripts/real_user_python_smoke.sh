@@ -78,6 +78,7 @@ projection_path.write_text(
 )
 PY
     python3 "$repo_root/scripts/check_sdk_parity.py" \
+        --allow-additive-investigation-evidence \
         "$repo_root/fixtures/valid-batch.json" \
         "$projection_path" \
         >/dev/null
@@ -1249,6 +1250,7 @@ from logbrew_sdk import (
     EnvironmentAttributes,
     HttpTransport,
     IssueAttributes,
+    IssueDiagnosticEvidence,
     LogAttributes,
     LogBrewAiohttpClientSessionInstrumentation,
     LogBrewClient,
@@ -1307,10 +1309,16 @@ environment: EnvironmentAttributes = {
     "name": "production",
     "region": "global",
 }
+issue_evidence: IssueDiagnosticEvidence = {
+    "likelyRootCause": "The provider exhausted its retry budget.",
+    "likelyFixArea": {"file": "src/payments/gateway.py", "line": 42},
+    "redactedFields": ["provider.message"],
+}
 issue: IssueAttributes = {
     "title": "Checkout timeout",
     "level": "error",
     "message": "Request timed out after retry budget",
+    "evidence": issue_evidence,
 }
 log: LogAttributes = {
     "message": "worker started",
@@ -3397,10 +3405,16 @@ issue_context: TelemetryContext = {
 issue_attributes = create_issue_attributes_from_exception(
     RuntimeError("inventory unavailable"),
     context=issue_context,
+    evidence={
+        "likelyFixArea": {"file": "src/inventory/reader.py", "line": 42},
+        "missingFields": ["inventory.snapshot_id"],
+    },
     include_stack_frames=False,
 )
 if issue_attributes.get("context") != issue_context:
     raise SystemExit("exception helper did not preserve context")
+if issue_attributes.get("evidence", {}).get("likelyFixArea", {}).get("file") != "src/inventory/reader.py":
+    raise SystemExit("exception helper did not preserve diagnostic evidence")
 
 validation_checks = 0
 try:
