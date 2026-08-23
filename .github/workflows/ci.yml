@@ -680,6 +680,90 @@ jobs:
       - name: Run Swift real-user smoke test
         run: bash scripts/real_user_swift_smoke.sh
 
+  swift-linux-checks:
+    name: Swift Linux ${{ matrix.swift }} consumer
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.swift == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - swift: "6.1.2"
+            image: swift:6.1.2-jammy@sha256:1122c18e938491180820e9b4902c489dadd5a89f7e6bd99ff9b64e7f1b18f41f
+          - swift: "6.2"
+            image: swift:6.2-jammy@sha256:9cb110feda69fca69d50fb7dd4657b7504a1d92f8a5b3a221308228e4a488f8e
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Run installed durable-delivery consumer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          consumer="$RUNNER_TEMP/logbrew-swift-linux-consumer"
+          mkdir -p "$consumer/Sources/Consumer"
+          cat > "$consumer/Package.swift" <<EOF
+          // swift-tools-version: 6.1
+
+          import PackageDescription
+
+          let package = Package(
+              name: "Consumer",
+              dependencies: [
+                  .package(path: "$GITHUB_WORKSPACE/swift/logbrew-swift")
+              ],
+              targets: [
+                  .executableTarget(
+                      name: "Consumer",
+                      dependencies: [
+                          .product(name: "LogBrew", package: "logbrew-swift")
+                      ]
+                  )
+              ]
+          )
+          EOF
+          cat > "$consumer/Sources/Consumer/main.swift" <<'EOF'
+          import Foundation
+          import LogBrew
+
+          let parent = FileManager.default.temporaryDirectory
+              .appendingPathComponent("logbrew-linux-consumer", isDirectory: true)
+          try? FileManager.default.removeItem(at: parent)
+          try FileManager.default.createDirectory(
+              at: parent,
+              withIntermediateDirectories: false,
+              attributes: [.posixPermissions: 0o700]
+          )
+          defer { try? FileManager.default.removeItem(at: parent) }
+
+          let client = try LogBrewClient.create(
+              apiKey: "public-receipt-key",
+              sdkName: "swift-linux-consumer",
+              sdkVersion: "receipt",
+              includeAutomaticContext: false
+          )
+          try client.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
+          try client.log(
+              "evt_linux_consumer_001",
+              timestamp: "2026-08-23T00:00:00Z",
+              attributes: LogAttributes(message: "linux durable delivery", level: .info)
+          )
+          guard client.pendingEvents() == 1 else { fatalError("durable event was not queued") }
+          let response = try client.flush(transport: RecordingTransport.alwaysAccept())
+          guard response.statusCode == 202, client.pendingEvents() == 0 else {
+              fatalError("durable event was not acknowledged")
+          }
+          print("logbrew-swift-linux-ok")
+          EOF
+          swift run --package-path "$consumer" Consumer | grep -Fx 'logbrew-swift-linux-ok'
+
   react-native-native-checks:
     name: React Native native durability checks
     needs: changed-areas
