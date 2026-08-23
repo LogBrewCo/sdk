@@ -818,6 +818,10 @@ class ValidateFixturesTests(unittest.TestCase):
             },
         )
         self.assertEqual(issue_properties["breadcrumbsTruncated"], {"type": "boolean"})
+        self.assertEqual(
+            issue_properties["evidence"],
+            {"$ref": "#/$defs/issueDiagnosticEvidence"},
+        )
 
         exception = definitions["issueException"]
         self.assertFalse(exception["additionalProperties"])
@@ -838,6 +842,49 @@ class ValidateFixturesTests(unittest.TestCase):
             {"$ref": "#/$defs/issueBreadcrumbData"},
         )
         self.assertEqual(definitions["issueBreadcrumbData"]["maxProperties"], 8)
+        evidence = definitions["issueDiagnosticEvidence"]
+        self.assertFalse(evidence["additionalProperties"])
+        self.assertEqual(evidence["properties"]["likelyFixArea"], {
+            "$ref": "#/$defs/issueLikelyFixArea"
+        })
+        self.assertEqual(definitions["issueEvidenceFields"]["maxItems"], 32)
+
+    def test_issue_diagnostic_evidence_is_bounded_and_state_consistent(self) -> None:
+        payload = self.load_valid_payload()
+        evidence = {
+            "likelyRootCause": "The payment provider exhausted its retry budget.",
+            "likelyFixArea": {
+                "component": "checkout-api",
+                "file": "src/payments/gateway.py",
+                "line": 42,
+                "inApp": True,
+            },
+            "impact": {
+                "failedAction": "checkout.submit",
+                "userVisibleOutcome": "The order was not confirmed.",
+            },
+            "capturedFields": ["provider.status"],
+            "redactedFields": ["provider.message"],
+        }
+        self.issue_attributes(payload)["evidence"] = evidence
+        validate_payload(payload)
+
+        cases = (
+            ({}, "must be a non-empty object"),
+            ({"likelyFixArea": {"inApp": True}}, "must identify a code location"),
+            ({"likelyFixArea": {"file": "/srv/example/app.py"}}, "safe relative path"),
+            ({"likelyFixArea": {"file": " /srv/example/app.py"}}, "safe relative path"),
+            (
+                {"capturedFields": ["provider.status"], "missingFields": ["provider.status"]},
+                "has conflicting states",
+            ),
+            ({"capturedFields": ["bad field"]}, "unique bounded fields"),
+        )
+        for invalid, expected in cases:
+            with self.subTest(invalid=invalid):
+                self.issue_attributes(payload)["evidence"] = invalid
+                with self.assertRaisesRegex(ValidationError, expected):
+                    validate_payload(payload)
 
     def test_schema_issue_stack_frame_bounds_match_validator(self) -> None:
         schema = self.load_schema()

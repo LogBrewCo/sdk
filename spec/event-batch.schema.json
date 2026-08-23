@@ -52,6 +52,12 @@
       "maxLength": 200,
       "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f]+$"
     },
+    "issueDiagnosticIdentity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?=.*\\S)[^?#\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
     "telemetryNamedVersion": {
       "type": "object",
       "additionalProperties": false,
@@ -413,6 +419,77 @@
         "data": { "$ref": "#/$defs/issueBreadcrumbData" }
       }
     },
+    "issueLikelyFixArea": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "component": { "$ref": "#/$defs/issueDiagnosticIdentity" },
+        "module": { "$ref": "#/$defs/issueDiagnosticIdentity" },
+        "function": { "$ref": "#/$defs/issueDiagnosticIdentity" },
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?=\\S)(?!.*\\s$)(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.{1,2}(?:[\\\\/]|$))(?!.*://)[^?#\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "line": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "column": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "inApp": { "type": "boolean" }
+      },
+      "anyOf": [
+        { "required": ["component"] },
+        { "required": ["module"] },
+        { "required": ["function"] },
+        { "required": ["file"] },
+        { "required": ["line"] },
+        { "required": ["column"] }
+      ]
+    },
+    "issueImpactEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "affectedUserSegment": { "$ref": "#/$defs/issueDiagnosticIdentity" },
+        "failedAction": { "$ref": "#/$defs/issueDiagnosticIdentity" },
+        "userVisibleOutcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        }
+      }
+    },
+    "issueEvidenceFields": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+      }
+    },
+    "issueDiagnosticEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "likelyRootCause": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "likelyFixArea": { "$ref": "#/$defs/issueLikelyFixArea" },
+        "impact": { "$ref": "#/$defs/issueImpactEvidence" },
+        "capturedFields": { "$ref": "#/$defs/issueEvidenceFields" },
+        "missingFields": { "$ref": "#/$defs/issueEvidenceFields" },
+        "redactedFields": { "$ref": "#/$defs/issueEvidenceFields" },
+        "truncatedFields": { "$ref": "#/$defs/issueEvidenceFields" }
+      }
+    },
     "eventBase": {
       "type": "object",
       "additionalProperties": false,
@@ -510,6 +587,7 @@
                   "items": { "$ref": "#/$defs/issueBreadcrumb" }
                 },
                 "breadcrumbsTruncated": { "type": "boolean" },
+                "evidence": { "$ref": "#/$defs/issueDiagnosticEvidence" },
                 "metadata": { "$ref": "#/$defs/metadata" },
                 "context": { "$ref": "#/$defs/telemetryContext" }
               }

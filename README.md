@@ -11,7 +11,7 @@ This repository contains the public SDK packages, framework integrations, event 
 ## What You Can Capture
 
 - Releases and environments for deployment context.
-- Issues and handled errors with a bounded parent-first exception graph, typed mechanism and handled state, explicit message/stack evidence states, structured frames, and breadcrumbs without raw stack text by default.
+- Issues and handled errors with a bounded parent-first exception graph, typed mechanism and handled state, explicit message/stack evidence states, structured frames, breadcrumbs, and optional [application-reported diagnostic evidence](docs/issue-diagnostic-evidence.md) without raw stack text by default.
 - Logs from direct calls or app-owned logger integrations.
 - Spans and W3C `traceparent` context for request tracing.
 - Actions for important user or system events.

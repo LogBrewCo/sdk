@@ -357,6 +357,38 @@ export type IssueBreadcrumbInput = Omit<IssueBreadcrumb, "timestamp" | "level"> 
   level?: IssueBreadcrumbLevelInput;
 };
 
+/** App-reported code location that narrows the smallest likely fix area. */
+export type IssueLikelyFixArea = {
+  component?: string;
+  module?: string;
+  function?: string;
+  /** Safe repository-relative source path. */
+  file?: string;
+  line?: number;
+  column?: number;
+  inApp?: boolean;
+};
+
+/** App-reported user impact without user identities or raw request data. */
+export type IssueImpactEvidence = {
+  affectedUserSegment?: string;
+  failedAction?: string;
+  userVisibleOutcome?: string;
+};
+
+/** Explicit diagnostic evidence for cause, fix area, impact, and capture limitations. */
+export type IssueDiagnosticEvidence = {
+  /** App-owned hypothesis. LogBrew presents it as reported, never proven. */
+  likelyRootCause?: string;
+  likelyFixArea?: IssueLikelyFixArea;
+  impact?: IssueImpactEvidence;
+  /** Unique bounded field names whose values were captured. */
+  capturedFields?: string[];
+  missingFields?: string[];
+  redactedFields?: string[];
+  truncatedFields?: string[];
+};
+
 /** Public issue event attributes. */
 export type IssueAttributes = {
   title: string;
@@ -371,6 +403,8 @@ export type IssueAttributes = {
   breadcrumbs?: IssueBreadcrumb[];
   /** True when older or invalid history was omitted before capture. */
   breadcrumbsTruncated?: boolean;
+  /** App-reported diagnostic evidence, validated and labeled separately from observed facts. */
+  evidence?: IssueDiagnosticEvidence;
   metadata?: Metadata;
   context?: TelemetryContext;
 };
@@ -403,6 +437,8 @@ export type JavaScriptErrorIssueOptions = {
   debugIdMap?: Record<string, string>;
   /** Optional stable app-owned grouping fingerprint. Keep it safe and low-cardinality. */
   fingerprint?: string;
+  /** App-reported cause, fix-area, impact, and explicit evidence-state receipt. */
+  evidence?: IssueDiagnosticEvidence;
   /** Include raw stack text only when the app has explicitly approved it. Defaults to false. */
   includeErrorStack?: boolean;
 };

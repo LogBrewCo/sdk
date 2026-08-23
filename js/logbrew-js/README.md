@@ -125,6 +125,13 @@ try {
       service: "checkout-web",
       runtime: "browser",
       fingerprint: "checkout-runtime-error",
+      evidence: {
+        likelyRootCause: "The payment provider exhausted its retry budget.",
+        likelyFixArea: { file: "src/payments/gateway.js", function: "chargeOrder", line: 42 },
+        impact: { failedAction: "checkout.submit", userVisibleOutcome: "The order was not confirmed." },
+        capturedFields: ["provider.status", "retry.count"],
+        redactedFields: ["provider.message"]
+      },
       debugIdMap: {
         "https://cdn.example/assets/app.js": "11111111-2222-4333-8444-555555555555"
       },
@@ -135,6 +142,8 @@ try {
 ```
 
 The helper records the error name/message, a typed exception with capture mechanism and handled state, and up to 32 ordered generated `stackFrames`, with query strings, hashes, and local absolute prefixes removed. Each frame carries filename, positive line/column, a conservatively parsed function name when the runtime provides one, and an optional matched Debug ID. Applications that create frames directly may also provide bounded `function`, `module`, and `inApp` identity. Existing first-frame metadata remains available for compatible grouping and tooling. The helper also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Nested `Error.cause` chains and `AggregateError.errors` are summarized as bounded cause counts, types, and sources without copying nested messages or stacks. Raw stack text is included only with `includeErrorStack: true`.
+
+`evidence` is explicit application knowledge, not an SDK inference. LogBrew labels `likelyRootCause` as a reported hypothesis and keeps `likelyFixArea` separate from observed frames. Field-state arrays make missing, redacted, and truncated evidence visible to API, CLI, dashboard, and agent consumers. Keep identities low-cardinality, use repository-relative file paths, and never put credentials, request bodies, personal data, or raw user input in these fields.
 
 Use `addBreadcrumb()` for explicit navigation, state, action, or network steps that should appear on later issues. The client keeps only the most recent 64 entries and marks an issue with `breadcrumbsTruncated: true` after older entries are evicted. `clearBreadcrumbs()` removes the current history.
 

@@ -10,8 +10,13 @@ const MAX_BREADCRUMB_NAME_LENGTH = 64;
 const MAX_BREADCRUMB_MESSAGE_LENGTH = 512;
 const MAX_BREADCRUMB_DATA_FIELDS = 8;
 const MAX_BREADCRUMB_DATA_STRING_LENGTH = 256;
+const MAX_DIAGNOSTIC_IDENTITY_LENGTH = 256;
+const MAX_DIAGNOSTIC_CAUSE_LENGTH = 1024;
+const MAX_DIAGNOSTIC_OUTCOME_LENGTH = 512;
+const MAX_DIAGNOSTIC_FIELDS = 32;
 const MACHINE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/u;
 const DATA_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u;
+const EVIDENCE_FIELD_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u;
 const BREADCRUMB_LEVEL_ALIASES = new Map([
   ["trace", "debug"],
   ["debug", "debug"],
@@ -257,6 +262,7 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssu
       attributes.stackFrames
     );
     const breadcrumbs = validateIssueBreadcrumbs(attributes.breadcrumbs);
+    const evidence = validateIssueEvidence(attributes.evidence);
     if (
       attributes.breadcrumbsTruncated !== undefined
       && typeof attributes.breadcrumbsTruncated !== "boolean"
@@ -267,7 +273,8 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssu
       ...(exception === undefined ? {} : { exception }),
       ...(exceptionChain === undefined ? {} : { exceptionChain }),
       ...(breadcrumbs === undefined ? {} : { breadcrumbs }),
-      ...(attributes.breadcrumbsTruncated === true ? { breadcrumbsTruncated: true } : {})
+      ...(attributes.breadcrumbsTruncated === true ? { breadcrumbsTruncated: true } : {}),
+      ...(evidence === undefined ? {} : { evidence })
     };
   }
 
@@ -304,7 +311,173 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssu
     if (attributes.breadcrumbsTruncated === true) {
       diagnostics.breadcrumbsTruncated = true;
     }
+    if (attributes.evidence !== undefined) {
+      diagnostics.evidence = cloneIssueEvidence(attributes.evidence);
+    }
     return diagnostics;
+  }
+
+  function validateIssueEvidence(evidence) {
+    if (evidence === undefined) {
+      return undefined;
+    }
+    requireObject("issue evidence", evidence);
+    const fieldKeys = ["capturedFields", "missingFields", "redactedFields", "truncatedFields"];
+    rejectUnknownKeys(
+      "issue evidence",
+      evidence,
+      new Set(["likelyRootCause", "likelyFixArea", "impact", ...fieldKeys])
+    );
+    const likelyRootCause = evidence.likelyRootCause === undefined
+      ? undefined
+      : boundedText(
+          "issue evidence likelyRootCause",
+          evidence.likelyRootCause,
+          MAX_DIAGNOSTIC_CAUSE_LENGTH
+        ).trim();
+    const likelyFixArea = validateLikelyFixArea(evidence.likelyFixArea);
+    const impact = validateImpactEvidence(evidence.impact);
+    const fieldLists = Object.fromEntries(
+      fieldKeys.map((key) => [key, validateEvidenceFields(key, evidence[key])])
+    );
+    const present = new Set();
+    for (const key of fieldKeys) {
+      for (const field of fieldLists[key] ?? []) {
+        if (present.has(field)) {
+          throw validationError(`issue evidence field ${field} has conflicting states`);
+        }
+        present.add(field);
+      }
+    }
+    const validated = {
+      ...(likelyRootCause === undefined ? {} : { likelyRootCause }),
+      ...(likelyFixArea === undefined ? {} : { likelyFixArea }),
+      ...(impact === undefined ? {} : { impact }),
+      ...Object.fromEntries(fieldKeys.flatMap((key) => fieldLists[key] === undefined ? [] : [[key, fieldLists[key]]]))
+    };
+    if (Object.keys(validated).length === 0) {
+      throw validationError("issue evidence must contain at least one field");
+    }
+    return validated;
+  }
+
+  function validateLikelyFixArea(area) {
+    if (area === undefined) {
+      return undefined;
+    }
+    requireObject("issue evidence likelyFixArea", area);
+    rejectUnknownKeys(
+      "issue evidence likelyFixArea",
+      area,
+      new Set(["component", "module", "function", "file", "line", "column", "inApp"])
+    );
+    const validated = {};
+    for (const key of ["component", "module", "function"]) {
+      if (area[key] !== undefined) {
+        validated[key] = boundedText(
+          `issue evidence likelyFixArea ${key}`,
+          area[key],
+          MAX_DIAGNOSTIC_IDENTITY_LENGTH,
+          { rejectLocationText: true }
+        ).trim();
+      }
+    }
+    if (area.file !== undefined) {
+      validated.file = safeRelativeSourcePath(area.file);
+    }
+    for (const key of ["line", "column"]) {
+      if (area[key] !== undefined) {
+        if (!Number.isInteger(area[key]) || area[key] < 1 || area[key] > 2147483647) {
+          throw validationError(`issue evidence likelyFixArea ${key} must be a positive integer`);
+        }
+        validated[key] = area[key];
+      }
+    }
+    if (area.inApp !== undefined) {
+      if (typeof area.inApp !== "boolean") {
+        throw validationError("issue evidence likelyFixArea inApp must be a boolean");
+      }
+      validated.inApp = area.inApp;
+    }
+    if (!Object.keys(validated).some((key) => key !== "inApp")) {
+      throw validationError("issue evidence likelyFixArea must identify a code location");
+    }
+    return validated;
+  }
+
+  function validateImpactEvidence(impact) {
+    if (impact === undefined) {
+      return undefined;
+    }
+    requireObject("issue evidence impact", impact);
+    rejectUnknownKeys(
+      "issue evidence impact",
+      impact,
+      new Set(["affectedUserSegment", "failedAction", "userVisibleOutcome"])
+    );
+    const validated = {};
+    for (const key of ["affectedUserSegment", "failedAction"]) {
+      if (impact[key] !== undefined) {
+        validated[key] = boundedText(
+          `issue evidence impact ${key}`,
+          impact[key],
+          MAX_DIAGNOSTIC_IDENTITY_LENGTH,
+          { rejectLocationText: true }
+        ).trim();
+      }
+    }
+    if (impact.userVisibleOutcome !== undefined) {
+      validated.userVisibleOutcome = boundedText(
+        "issue evidence impact userVisibleOutcome",
+        impact.userVisibleOutcome,
+        MAX_DIAGNOSTIC_OUTCOME_LENGTH
+      ).trim();
+    }
+    if (Object.keys(validated).length === 0) {
+      throw validationError("issue evidence impact must contain at least one field");
+    }
+    return validated;
+  }
+
+  function validateEvidenceFields(key, fields) {
+    if (fields === undefined) {
+      return undefined;
+    }
+    if (!Array.isArray(fields) || fields.length < 1 || fields.length > MAX_DIAGNOSTIC_FIELDS) {
+      throw validationError(`issue evidence ${key} must contain 1-${MAX_DIAGNOSTIC_FIELDS} fields`);
+    }
+    const unique = new Set(fields);
+    if (unique.size !== fields.length || fields.some((field) => typeof field !== "string" || !EVIDENCE_FIELD_PATTERN.test(field))) {
+      throw validationError(`issue evidence ${key} fields must be unique bounded identifiers`);
+    }
+    return [...fields];
+  }
+
+  function safeRelativeSourcePath(value) {
+    const path = boundedText(
+      "issue evidence likelyFixArea file",
+      value,
+      MAX_DIAGNOSTIC_IDENTITY_LENGTH,
+      { rejectLocationText: true }
+    ).trim().replaceAll("\\", "/");
+    const parts = path.split("/");
+    if (path.startsWith("/") || /^[A-Za-z]:\//u.test(path) || path.includes("://")
+      || parts.some((part) => part === "" || part === "." || part === "..")) {
+      throw validationError("issue evidence likelyFixArea file must be a safe relative path");
+    }
+    return path;
+  }
+
+  function cloneIssueEvidence(evidence) {
+    return {
+      ...evidence,
+      ...(evidence.likelyFixArea === undefined ? {} : { likelyFixArea: { ...evidence.likelyFixArea } }),
+      ...(evidence.impact === undefined ? {} : { impact: { ...evidence.impact } }),
+      ...Object.fromEntries(
+        ["capturedFields", "missingFields", "redactedFields", "truncatedFields"]
+          .flatMap((key) => evidence[key] === undefined ? [] : [[key, [...evidence[key]]]])
+      )
+    };
   }
 
   function validateBreadcrumbData(data) {
@@ -411,7 +584,8 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssu
     cloneIssueDiagnostics,
     createIssueException,
     validateIssueBreadcrumb,
-    validateIssueDiagnostics
+    validateIssueDiagnostics,
+    validateIssueEvidence
   };
 }
 

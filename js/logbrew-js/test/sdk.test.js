@@ -1397,6 +1397,98 @@ test("invalid issue level fails validation", () => {
   );
 });
 
+test("issue diagnostic evidence survives the public client boundary", () => {
+  const client = sampleClient();
+  const evidence = {
+    likelyRootCause: "The payment provider exhausted its retry budget.",
+    likelyFixArea: {
+      component: "checkout-api",
+      module: "payments.gateway",
+      function: "chargeOrder",
+      file: "src/payments/gateway.js",
+      line: 42,
+      column: 7,
+      inApp: true
+    },
+    impact: {
+      affectedUserSegment: "checkout-users",
+      failedAction: "checkout.submit",
+      userVisibleOutcome: "The order was not confirmed."
+    },
+    capturedFields: ["provider.status", "retry.count"],
+    missingFields: ["provider.request_id"],
+    redactedFields: ["provider.message"],
+    truncatedFields: ["breadcrumbs"]
+  };
+
+  client.issue("evt_issue_evidence", "2026-06-02T10:00:02Z", {
+    title: "Checkout failed",
+    level: "error",
+    evidence
+  });
+  evidence.likelyFixArea.file = "mutated.js";
+  evidence.capturedFields.push("mutated");
+
+  assert.deepEqual(JSON.parse(client.previewJson()).events[0].attributes.evidence, {
+    likelyRootCause: "The payment provider exhausted its retry budget.",
+    likelyFixArea: {
+      component: "checkout-api",
+      module: "payments.gateway",
+      function: "chargeOrder",
+      file: "src/payments/gateway.js",
+      line: 42,
+      column: 7,
+      inApp: true
+    },
+    impact: {
+      affectedUserSegment: "checkout-users",
+      failedAction: "checkout.submit",
+      userVisibleOutcome: "The order was not confirmed."
+    },
+    capturedFields: ["provider.status", "retry.count"],
+    missingFields: ["provider.request_id"],
+    redactedFields: ["provider.message"],
+    truncatedFields: ["breadcrumbs"]
+  });
+});
+
+test("issue diagnostic evidence rejects unsafe or contradictory states", () => {
+  const client = sampleClient();
+  for (const evidence of [
+    {},
+    { likelyFixArea: { inApp: true } },
+    { likelyFixArea: { file: "/srv/example/app.js" } },
+    { likelyFixArea: { file: " /srv/example/app.js" } },
+    { capturedFields: ["provider.status"], missingFields: ["provider.status"] },
+    { capturedFields: ["bad field"] }
+  ]) {
+    assert.throws(
+      () => client.issue("evt_invalid_evidence", "2026-06-02T10:00:02Z", {
+        title: "Checkout failed",
+        level: "error",
+        evidence
+      }),
+      /issue evidence/
+    );
+  }
+});
+
+test("createIssueAttributesFromError preserves validated app-reported evidence", () => {
+  const evidence = {
+    likelyRootCause: "The provider returned a terminal response.",
+    likelyFixArea: { file: "src/payments/gateway.js", line: 42 },
+    missingFields: ["provider.request_id"]
+  };
+  const attributes = createIssueAttributesFromError(new Error("Checkout failed"), { evidence });
+  evidence.likelyFixArea.file = "mutated.js";
+
+  assert.deepEqual(attributes.evidence, {
+    likelyRootCause: "The provider returned a terminal response.",
+    likelyFixArea: { file: "src/payments/gateway.js", line: 42 },
+    missingFields: ["provider.request_id"]
+  });
+});
+
 test("severity aliases normalize before preview", () => {
   const client = sampleClient();
 

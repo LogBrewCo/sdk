@@ -23,12 +23,20 @@ CLIENT_ENTRYPOINTS = (
 COMMONJS_DECLARATION_REEXPORT = 'export * from "./index";\nexport { default } from "./index";\n'
 
 
+def client_source(path: Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    delegate = re.search(r'import\s+\w+\s+from\s+"(\./[^\"]+\.cjs)";', source)
+    return source if delegate is None else source + (
+        path.parent / delegate.group(1)
+    ).read_text(encoding="utf-8")
+
+
 class TelemetryContextSurfaceTests(unittest.TestCase):
     def test_every_javascript_client_forwards_shared_context_to_core(self) -> None:
         for package, entrypoint in CLIENT_ENTRYPOINTS:
             for suffix in ("js", "cjs"):
                 relative_path = f"js/logbrew-{package}/{entrypoint}.{suffix}"
-                source = (ROOT / relative_path).read_text(encoding="utf-8")
+                source = client_source(ROOT / relative_path)
                 with self.subTest(path=relative_path):
                     self.assertRegex(source, re.compile(r"\bcontext,\s*\n"))
                     self.assertRegex(

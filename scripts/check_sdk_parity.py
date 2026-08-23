@@ -61,6 +61,7 @@ def _remove_additive_investigation_evidence(
             "stackFrames": list,
             "breadcrumbs": list,
             "breadcrumbsTruncated": bool,
+            "evidence": dict,
         },
         "span": {
             "events": list,
