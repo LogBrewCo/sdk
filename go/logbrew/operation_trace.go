@@ -104,7 +104,7 @@ func DatabaseOperationWithLogBrewSpan[T any](
 		spanIDFactory: config.SpanIDFactory,
 		now:           config.Now,
 		onError:       config.OnError,
-	})
+	}, nil)
 }
 
 // SQLTransactionWithLogBrewSpan runs an app-owned database/sql transaction
@@ -168,10 +168,11 @@ func SQLTransactionWithLogBrewSpan[T any](
 		outcome = "commit"
 		return result, nil
 	}
-	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, transaction, config, func(_ T, _ error, enriched *DatabaseOperationConfig) {
+	return operationWithLogBrewSpan(ctx, client, operationName, transaction, databaseOperationSpanConfig(operationName, config), func(_ T, _ error) map[string]any {
 		if outcome != "" {
-			enriched.Metadata = mergeMetadata(enriched.Metadata, map[string]any{"dbTransactionOutcome": outcome})
+			return map[string]any{"dbTransactionOutcome": outcome}
 		}
+		return nil
 	})
 }
 
@@ -196,7 +197,7 @@ func SQLQueryContextWithLogBrewSpan(
 	if strings.TrimSpace(config.OperationKind) == "" {
 		config.OperationKind = "query"
 	}
-	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, operation, config, nil)
+	return operationWithLogBrewSpan(ctx, client, operationName, operation, databaseOperationSpanConfig(operationName, config), nil)
 }
 
 // SQLExecContextWithLogBrewSpan runs an app-owned database/sql ExecContext
@@ -220,21 +221,22 @@ func SQLExecContextWithLogBrewSpan(
 	if strings.TrimSpace(config.OperationKind) == "" {
 		config.OperationKind = "exec"
 	}
-	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, operation, config, func(result sql.Result, operationErr error, enriched *DatabaseOperationConfig) {
-		if operationErr != nil || result == nil || enriched.RowCount != nil {
-			return
+	return operationWithLogBrewSpan(ctx, client, operationName, operation, databaseOperationSpanConfig(operationName, config), func(result sql.Result, operationErr error) map[string]any {
+		if operationErr != nil || result == nil || config.RowCount != nil {
+			return nil
 		}
 		rows, err := result.RowsAffected()
 		if err != nil {
-			reportOperationSpanError(enriched.OnError, &SdkError{
+			reportOperationSpanError(config.OnError, &SdkError{
 				Code:    "capture_error",
 				Message: "database sql rows affected unavailable",
 			})
-			return
+			return nil
 		}
 		if rowCount, ok := nonNegativeInt64ToInt(rows); ok {
-			enriched.RowCount = &rowCount
+			return map[string]any{"rowCount": rowCount}
 		}
+		return nil
 	})
 }
 
@@ -255,7 +257,7 @@ func CacheOperationWithLogBrewSpan[T any](
 		spanIDFactory: config.SpanIDFactory,
 		now:           config.Now,
 		onError:       config.OnError,
-	})
+	}, nil)
 }
 
 // QueueOperationWithLogBrewSpan runs operation under a child trace context and
@@ -267,60 +269,23 @@ func QueueOperationWithLogBrewSpan[T any](
 	operation func(context.Context) (T, error),
 	config QueueOperationConfig,
 ) (T, error) {
-	var zero T
-	if client == nil {
-		return zero, &SdkError{Code: "configuration_error", Message: "operation span client must be non-nil"}
-	}
-	if operation == nil {
-		return zero, &SdkError{Code: "configuration_error", Message: "operation span callback must be non-nil"}
-	}
-	if err := requireNonEmpty("operation name", operationName); err != nil {
-		return zero, err
-	}
-	now := config.Now
-	if now == nil {
-		now = time.Now
-	}
-	trace, traceErr := queueOperationTrace(ctx, config)
-	if traceErr != nil {
-		reportOperationSpanError(config.OnError, traceErr)
-	}
-	if trace.TraceID == "" {
-		return operation(ctx)
-	}
-	setQueueTraceparent(config.TraceparentSetter, trace, config.OnError)
-
-	start := now()
-	operationCtx := ContextWithLogBrewTrace(ctxWithDefault(ctx), trace)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			finished := now()
-			captureOperationPanicSpan(client, operationName, trace, recovered, finished.Sub(start), finished, operationSpanConfig{
-				source:        "queue.operation",
-				namePrefix:    "queue",
-				eventIDPrefix: eventIDPrefix(config.EventIDPrefix, "go_queue"),
-				metadata:      queueOperationMetadata(operationName, config),
-				links:         queueTraceLinks(config),
-				spanIDFactory: config.SpanIDFactory,
-				now:           config.Now,
-				onError:       config.OnError,
-			})
-			panic(recovered)
-		}
-	}()
-	result, operationErr := operation(operationCtx)
-	finished := now()
-	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, operationSpanConfig{
+	spanConfig := operationSpanConfig{
 		source:        "queue.operation",
 		namePrefix:    "queue",
 		eventIDPrefix: eventIDPrefix(config.EventIDPrefix, "go_queue"),
 		metadata:      queueOperationMetadata(operationName, config),
-		links:         queueTraceLinks(config),
 		spanIDFactory: config.SpanIDFactory,
 		now:           config.Now,
 		onError:       config.OnError,
-	})
-	return result, operationErr
+		traceFactory: func(ctx context.Context) (TraceContext, error) {
+			return queueOperationTrace(ctx, config)
+		},
+		onTrace: func(trace TraceContext) {
+			setQueueTraceparent(config.TraceparentSetter, trace, config.OnError)
+		},
+		linksFactory: func() []SpanLinkSummary { return queueTraceLinks(config) },
+	}
+	return operationWithLogBrewSpan(ctx, client, operationName, operation, spanConfig, nil)
 }
 
 type operationSpanConfig struct {
@@ -332,6 +297,9 @@ type operationSpanConfig struct {
 	spanIDFactory func() string
 	now           func() time.Time
 	onError       func(error)
+	traceFactory  func(context.Context) (TraceContext, error)
+	onTrace       func(TraceContext)
+	linksFactory  func() []SpanLinkSummary
 }
 
 func operationWithLogBrewSpan[T any](
@@ -340,6 +308,7 @@ func operationWithLogBrewSpan[T any](
 	operationName string,
 	operation func(context.Context) (T, error),
 	config operationSpanConfig,
+	enrich func(T, error) map[string]any,
 ) (T, error) {
 	var zero T
 	if client == nil {
@@ -355,13 +324,24 @@ func operationWithLogBrewSpan[T any](
 	if now == nil {
 		now = time.Now
 	}
-	trace, traceErr := operationChildTrace(ctx, config.spanIDFactory)
+	traceFactory := config.traceFactory
+	if traceFactory == nil {
+		traceFactory = func(ctx context.Context) (TraceContext, error) {
+			return operationChildTrace(ctx, config.spanIDFactory)
+		}
+	}
+	trace, traceErr := traceFactory(ctx)
 	if traceErr != nil {
 		reportOperationSpanError(config.onError, traceErr)
 	}
 	if trace.TraceID == "" {
-		result, err := operation(ctx)
-		return result, err
+		return operation(ctx)
+	}
+	if config.onTrace != nil {
+		config.onTrace(trace)
+	}
+	if config.linksFactory != nil {
+		config.links = config.linksFactory()
 	}
 
 	start := now()
@@ -369,82 +349,32 @@ func operationWithLogBrewSpan[T any](
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			finished := now()
+			if enrich != nil {
+				config.metadata = mergeMetadata(config.metadata, enrich(zero, nil))
+			}
 			captureOperationPanicSpan(client, operationName, trace, recovered, finished.Sub(start), finished, config)
 			panic(recovered)
 		}
 	}()
 	result, operationErr := operation(operationCtx)
 	finished := now()
+	if enrich != nil {
+		config.metadata = mergeMetadata(config.metadata, enrich(result, operationErr))
+	}
 	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, config)
 	return result, operationErr
 }
 
-func sqlDatabaseOperationWithLogBrewSpan[T any](
-	ctx context.Context,
-	client *Client,
-	operationName string,
-	operation func(context.Context) (T, error),
-	config DatabaseOperationConfig,
-	enrich func(T, error, *DatabaseOperationConfig),
-) (T, error) {
-	var zero T
-	if client == nil {
-		return zero, &SdkError{Code: "configuration_error", Message: "operation span client must be non-nil"}
-	}
-	if operation == nil {
-		return zero, &SdkError{Code: "configuration_error", Message: "operation span callback must be non-nil"}
-	}
-	if err := requireNonEmpty("operation name", operationName); err != nil {
-		return zero, err
-	}
-	now := config.Now
-	if now == nil {
-		now = time.Now
-	}
-	trace, traceErr := operationChildTrace(ctx, config.SpanIDFactory)
-	if traceErr != nil {
-		reportOperationSpanError(config.OnError, traceErr)
-	}
-	if trace.TraceID == "" {
-		return operation(ctx)
-	}
-
-	start := now()
-	operationCtx := ContextWithLogBrewTrace(ctxWithDefault(ctx), trace)
-	enriched := config
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			finished := now()
-			if enrich != nil {
-				enrich(zero, nil, &enriched)
-			}
-			captureOperationPanicSpan(client, operationName, trace, recovered, finished.Sub(start), finished, operationSpanConfig{
-				source:        "database.operation",
-				namePrefix:    "database",
-				eventIDPrefix: eventIDPrefix(enriched.EventIDPrefix, "go_database"),
-				metadata:      databaseOperationMetadata(operationName, enriched),
-				spanIDFactory: enriched.SpanIDFactory,
-				now:           enriched.Now,
-				onError:       enriched.OnError,
-			})
-			panic(recovered)
-		}
-	}()
-	result, operationErr := operation(operationCtx)
-	finished := now()
-	if enrich != nil {
-		enrich(result, operationErr, &enriched)
-	}
-	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, operationSpanConfig{
+func databaseOperationSpanConfig(operationName string, config DatabaseOperationConfig) operationSpanConfig {
+	return operationSpanConfig{
 		source:        "database.operation",
 		namePrefix:    "database",
-		eventIDPrefix: eventIDPrefix(enriched.EventIDPrefix, "go_database"),
-		metadata:      databaseOperationMetadata(operationName, enriched),
-		spanIDFactory: enriched.SpanIDFactory,
-		now:           enriched.Now,
-		onError:       enriched.OnError,
-	})
-	return result, operationErr
+		eventIDPrefix: eventIDPrefix(config.EventIDPrefix, "go_database"),
+		metadata:      databaseOperationMetadata(operationName, config),
+		spanIDFactory: config.SpanIDFactory,
+		now:           config.Now,
+		onError:       config.OnError,
+	}
 }
 
 func sqlQueryOperation(queryer any, query string, args []any) (func(context.Context) (*sql.Rows, error), error) {
@@ -734,13 +664,7 @@ func queueOperationMetadata(operationName string, config QueueOperationConfig) m
 }
 
 func safeQueueLinkMetadata(input map[string]any) map[string]any {
-	metadata := map[string]any{}
-	for key, value := range compactMetadata(input) {
-		if blockedOperationMetadataKey(key) {
-			continue
-		}
-		metadata[key] = value
-	}
+	metadata := safeOperationMetadata(input)
 	if len(metadata) == 0 {
 		return nil
 	}

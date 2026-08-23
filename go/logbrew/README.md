@@ -308,6 +308,18 @@ must(client.Issue("evt_checkout_failure", "2026-08-02T08:15:31Z", logbrew.IssueA
     Message:   "Inventory request completed",
     Data:      map[string]any{"status_code": 503, "attempt": 2},
   }},
+  Evidence: &logbrew.IssueDiagnosticEvidence{
+    LikelyRootCause: "The inventory provider exhausted its retry budget.",
+    LikelyFixArea: &logbrew.IssueLikelyFixArea{
+      File: "internal/inventory/reservation.go",
+      Line: 84,
+    },
+    Impact: &logbrew.IssueImpactEvidence{
+      FailedAction:       "checkout.submit",
+      UserVisibleOutcome: "The order was not confirmed.",
+    },
+    RedactedFields: []string{"provider.message"},
+  },
 }))
 ```
 
@@ -316,6 +328,14 @@ process-global breadcrumb ring that could mix concurrent users or requests.
 Attach oldest-to-newest history and set `BreadcrumbsTruncated` when older
 entries were intentionally omitted. Data is limited to eight flat finite
 primitive fields, and caller-owned slices/maps are detached before queueing.
+
+`Evidence` carries only explicit application knowledge; the SDK does not infer
+a root cause from errors or stack frames. LogBrew keeps the reported hypothesis
+and likely fix area separate from observed runtime facts, while field-state
+lists preserve missing, redacted, and truncated evidence for API, CLI,
+dashboard, and agent consumers. Use repository-relative paths and do not place
+authentication material, request bodies, personal data, or raw user input in
+these fields. See the shared [issue evidence contract](../../docs/issue-diagnostic-evidence.md).
 
 `CaptureIssueStackFrames()` snapshots the current goroutine in newest-first
 order with basename-only filenames and bounded function/module identities. Call

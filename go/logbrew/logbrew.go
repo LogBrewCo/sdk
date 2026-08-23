@@ -445,16 +445,17 @@ type EnvironmentAttributes struct {
 
 // IssueAttributes describes the public payload fields for an issue event.
 type IssueAttributes struct {
-	Title                string               `json:"title"`
-	Level                string               `json:"level"`
-	Message              string               `json:"message,omitempty"`
-	Exception            *IssueException      `json:"exception,omitempty"`
-	ExceptionChain       *IssueExceptionChain `json:"exceptionChain,omitempty"`
-	StackFrames          []IssueStackFrame    `json:"stackFrames,omitempty"`
-	Breadcrumbs          []IssueBreadcrumb    `json:"breadcrumbs,omitempty"`
-	BreadcrumbsTruncated bool                 `json:"breadcrumbsTruncated,omitempty"`
-	Metadata             map[string]any       `json:"metadata,omitempty"`
-	Context              *TelemetryContext    `json:"context,omitempty"`
+	Title                string                   `json:"title"`
+	Level                string                   `json:"level"`
+	Message              string                   `json:"message,omitempty"`
+	Exception            *IssueException          `json:"exception,omitempty"`
+	ExceptionChain       *IssueExceptionChain     `json:"exceptionChain,omitempty"`
+	StackFrames          []IssueStackFrame        `json:"stackFrames,omitempty"`
+	Breadcrumbs          []IssueBreadcrumb        `json:"breadcrumbs,omitempty"`
+	BreadcrumbsTruncated bool                     `json:"breadcrumbsTruncated,omitempty"`
+	Evidence             *IssueDiagnosticEvidence `json:"evidence,omitempty"`
+	Metadata             map[string]any           `json:"metadata,omitempty"`
+	Context              *TelemetryContext        `json:"context,omitempty"`
 }
 
 // LogAttributes describes the public payload fields for a log event.
@@ -1037,6 +1038,13 @@ func validateIssue(attributes IssueAttributes) (map[string]any, error) {
 	}
 	if attributes.BreadcrumbsTruncated {
 		result["breadcrumbsTruncated"] = true
+	}
+	if attributes.Evidence != nil {
+		evidence, err := cloneIssueDiagnosticEvidence(attributes.Evidence)
+		if err != nil {
+			return nil, err
+		}
+		result["evidence"] = evidence
 	}
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
