@@ -328,6 +328,68 @@ func TestIssueDiagnosticsAreValidatedDetachedAndNormalized(t *testing.T) {
 	}
 }
 
+func TestIssueDiagnosticEvidenceIsValidatedAndDetached(t *testing.T) {
+	inApp := true
+	evidence := &IssueDiagnosticEvidence{
+		LikelyRootCause: "The payment provider exhausted its retry budget.",
+		LikelyFixArea: &IssueLikelyFixArea{
+			Component: "checkout-api",
+			Module:    "payments.gateway",
+			Function:  "chargeOrder",
+			File:      "internal/payments/gateway.go",
+			Line:      42,
+			Column:    7,
+			InApp:     &inApp,
+		},
+		Impact: &IssueImpactEvidence{
+			AffectedUserSegment: "checkout-users",
+			FailedAction:        "checkout.submit",
+			UserVisibleOutcome:  "The order was not confirmed.",
+		},
+		CapturedFields:  []string{"provider.status", "retry.count"},
+		MissingFields:   []string{"provider.request_id"},
+		RedactedFields:  []string{"provider.message"},
+		TruncatedFields: []string{"breadcrumbs"},
+	}
+	client := sampleClient(t)
+	if err := client.Issue("evt_issue_evidence", "2026-08-02T08:15:31Z", IssueAttributes{
+		Title: "Checkout failed", Level: "error", Evidence: evidence,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence.LikelyFixArea.File = "mutated.go"
+	evidence.CapturedFields = append(evidence.CapturedFields, "mutated")
+
+	preview, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Events []struct {
+			Attributes map[string]any `json:"attributes"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(preview), &payload); err != nil {
+		t.Fatal(err)
+	}
+	queued := payload.Events[0].Attributes["evidence"].(map[string]any)
+	fixArea := queued["likelyFixArea"].(map[string]any)
+	impact := queued["impact"].(map[string]any)
+	captured := queued["capturedFields"].([]any)
+	if queued["likelyRootCause"] != "The payment provider exhausted its retry budget." ||
+		fixArea["component"] != "checkout-api" || fixArea["module"] != "payments.gateway" ||
+		fixArea["function"] != "chargeOrder" || fixArea["file"] != "internal/payments/gateway.go" ||
+		fixArea["line"] != float64(42) || fixArea["column"] != float64(7) || fixArea["inApp"] != true ||
+		impact["affectedUserSegment"] != "checkout-users" || impact["failedAction"] != "checkout.submit" ||
+		impact["userVisibleOutcome"] != "The order was not confirmed." ||
+		len(captured) != 2 || captured[1] != "retry.count" ||
+		!reflect.DeepEqual(queued["missingFields"], []any{"provider.request_id"}) ||
+		!reflect.DeepEqual(queued["redactedFields"], []any{"provider.message"}) ||
+		!reflect.DeepEqual(queued["truncatedFields"], []any{"breadcrumbs"}) {
+		t.Fatalf("unexpected diagnostic evidence: %#v", queued)
+	}
+}
+
 func TestIssueAttributesFromErrorPreservesUnwrapEvidenceWithoutErrorText(t *testing.T) {
 	cause := errors.New("private cause message")
 	wrapped := fmt.Errorf("private wrapper message: %w", cause)
@@ -553,6 +615,75 @@ func TestIssueDiagnosticsRejectInvalidBoundsAndValues(t *testing.T) {
 				Data:      map[string]any{"request": map[string]any{"drop": true}},
 			}}},
 			want: "issue breadcrumb data value for request must be a finite primitive",
+		},
+		{
+			name:       "empty evidence",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{}},
+			want:       "issue evidence must contain at least one field",
+		},
+		{
+			name: "fix area without a location",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				LikelyFixArea: &IssueLikelyFixArea{InApp: boolPtr(true)},
+			}},
+			want: "issue evidence likelyFixArea must identify a code location",
+		},
+		{
+			name: "absolute fix path",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				LikelyFixArea: &IssueLikelyFixArea{File: "/srv/example/app.go"},
+			}},
+			want: "issue evidence likelyFixArea file must be a safe relative path",
+		},
+		{
+			name: "traversing fix path",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				LikelyFixArea: &IssueLikelyFixArea{File: "internal/../app.go"},
+			}},
+			want: "issue evidence likelyFixArea file must be a safe relative path",
+		},
+		{
+			name: "URL fix path",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				LikelyFixArea: &IssueLikelyFixArea{File: "https://example.invalid/app.go"},
+			}},
+			want: "issue evidence likelyFixArea file must be a safe relative path",
+		},
+		{
+			name: "query fix path",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				LikelyFixArea: &IssueLikelyFixArea{File: "internal/app.go?line=42"},
+			}},
+			want: "issue evidence likelyFixArea file must be a safe relative path",
+		},
+		{
+			name: "empty evidence field list",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				CapturedFields: []string{},
+			}},
+			want: "issue evidence capturedFields must contain 1-32 fields",
+		},
+		{
+			name: "invalid evidence field",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				CapturedFields: []string{"bad field"},
+			}},
+			want: "issue evidence capturedFields fields must be unique bounded identifiers",
+		},
+		{
+			name: "duplicate evidence field",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				CapturedFields: []string{"provider.status", "provider.status"},
+			}},
+			want: "issue evidence capturedFields fields must be unique bounded identifiers",
+		},
+		{
+			name: "conflicting evidence field states",
+			attributes: IssueAttributes{Title: "failure", Level: "error", Evidence: &IssueDiagnosticEvidence{
+				CapturedFields: []string{"provider.status"},
+				MissingFields:  []string{"provider.status"},
+			}},
+			want: "issue evidence field provider.status has conflicting states",
 		},
 	}
 

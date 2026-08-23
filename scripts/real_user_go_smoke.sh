@@ -318,7 +318,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-example.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example.stdout.json" >/dev/null
 grep -q '"events":' "$tmp_dir/packaged-example.stderr.json"
 grep -q '"ok":' "$tmp_dir/packaged-example.stderr.json"
 (cd "$module_dir/examples" && make run-real-user-smoke) > "$tmp_dir/packaged-examples-make.stdout.json" 2> "$tmp_dir/packaged-examples-make.stderr.json"
@@ -329,7 +329,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-examples-make.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-examples-make.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-examples-make.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-examples-make.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-examples-make.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-examples-make.stdout.json" >/dev/null
 grep -q '"events":' "$tmp_dir/packaged-examples-make.stderr.json"
 grep -q '"ok":' "$tmp_dir/packaged-examples-make.stderr.json"
 (cd "$module_dir/examples" && make run) > "$tmp_dir/packaged-examples-make-alias.stdout.json" 2> "$tmp_dir/packaged-examples-make-alias.stderr.json"
@@ -340,7 +340,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-examples-make-alias.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-examples-make-alias.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-examples-make-alias.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-examples-make-alias.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-examples-make-alias.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-examples-make-alias.stdout.json" >/dev/null
 grep -q '"events":' "$tmp_dir/packaged-examples-make-alias.stderr.json"
 grep -q '"ok":' "$tmp_dir/packaged-examples-make-alias.stderr.json"
 (cd "$module_dir/examples/real_user_smoke" && make) > "$tmp_dir/packaged-example-make-help.txt"
@@ -355,7 +355,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-example-make.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example-make.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example-make.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
 grep -q '"events":' "$tmp_dir/packaged-example-make.stderr.json"
 grep -q '"ok":' "$tmp_dir/packaged-example-make.stderr.json"
 (cd "$module_dir/examples/real_user_smoke" && make run) > "$tmp_dir/packaged-example-make-alias.stdout.json" 2> "$tmp_dir/packaged-example-make-alias.stderr.json"
@@ -366,7 +366,7 @@ grep -q '"type": "log"' "$tmp_dir/packaged-example-make-alias.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example-make-alias.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example-make-alias.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example-make-alias.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make-alias.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make-alias.stdout.json" >/dev/null
 grep -q '"events":' "$tmp_dir/packaged-example-make-alias.stderr.json"
 grep -q '"ok":' "$tmp_dir/packaged-example-make-alias.stderr.json"
 
@@ -2081,7 +2081,7 @@ grep -q '"type": "log"' smoke.stdout.json
 grep -q '"type": "span"' smoke.stdout.json
 grep -q '"type": "action"' smoke.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" smoke.stdout.json >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
 grep -q '"events":6' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json
 

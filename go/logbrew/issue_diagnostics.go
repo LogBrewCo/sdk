@@ -24,6 +24,10 @@ const (
 	maxIssueBreadcrumbMessage    = 512
 	maxIssueBreadcrumbDataFields = 8
 	maxIssueBreadcrumbDataString = 256
+	maxIssueDiagnosticIdentity   = 256
+	maxIssueDiagnosticCause      = 1_024
+	maxIssueDiagnosticOutcome    = 512
+	maxIssueDiagnosticFields     = 32
 	maxIssueStackCoordinate      = 2_147_483_647
 )
 
@@ -140,6 +144,38 @@ type IssueBreadcrumb struct {
 	Level     string         `json:"level,omitempty"`
 	Message   string         `json:"message,omitempty"`
 	Data      map[string]any `json:"data,omitempty"`
+}
+
+// IssueLikelyFixArea is an application-reported code location that may contain
+// the fix. File paths are repository-relative.
+type IssueLikelyFixArea struct {
+	Component string `json:"component,omitempty"`
+	Module    string `json:"module,omitempty"`
+	Function  string `json:"function,omitempty"`
+	File      string `json:"file,omitempty"`
+	Line      int    `json:"line,omitempty"`
+	Column    int    `json:"column,omitempty"`
+	InApp     *bool  `json:"inApp,omitempty"`
+}
+
+// IssueImpactEvidence describes application-reported user-visible impact
+// without carrying user identities.
+type IssueImpactEvidence struct {
+	AffectedUserSegment string `json:"affectedUserSegment,omitempty"`
+	FailedAction        string `json:"failedAction,omitempty"`
+	UserVisibleOutcome  string `json:"userVisibleOutcome,omitempty"`
+}
+
+// IssueDiagnosticEvidence contains bounded application-reported cause, fix
+// area, impact, and explicit field-state receipts.
+type IssueDiagnosticEvidence struct {
+	LikelyRootCause string               `json:"likelyRootCause,omitempty"`
+	LikelyFixArea   *IssueLikelyFixArea  `json:"likelyFixArea,omitempty"`
+	Impact          *IssueImpactEvidence `json:"impact,omitempty"`
+	CapturedFields  []string             `json:"capturedFields,omitempty"`
+	MissingFields   []string             `json:"missingFields,omitempty"`
+	RedactedFields  []string             `json:"redactedFields,omitempty"`
+	TruncatedFields []string             `json:"truncatedFields,omitempty"`
 }
 
 // CaptureIssueStackFrames snapshots the current goroutine's call frames in
@@ -615,6 +651,168 @@ func cloneIssueBreadcrumbs(breadcrumbs []IssueBreadcrumb) ([]map[string]any, err
 		validated = append(validated, value)
 	}
 	return validated, nil
+}
+
+func cloneIssueDiagnosticEvidence(evidence *IssueDiagnosticEvidence) (map[string]any, error) {
+	validated := map[string]any{}
+	if evidence.LikelyRootCause != "" {
+		if !validIssueText(evidence.LikelyRootCause, maxIssueDiagnosticCause, false) {
+			return nil, &SdkError{Code: "validation_error", Message: "issue evidence likelyRootCause is invalid or exceeds 1024 characters"}
+		}
+		validated["likelyRootCause"] = strings.TrimSpace(evidence.LikelyRootCause)
+	}
+	if evidence.LikelyFixArea != nil {
+		area, err := cloneIssueLikelyFixArea(evidence.LikelyFixArea)
+		if err != nil {
+			return nil, err
+		}
+		validated["likelyFixArea"] = area
+	}
+	if evidence.Impact != nil {
+		impact, err := cloneIssueImpactEvidence(evidence.Impact)
+		if err != nil {
+			return nil, err
+		}
+		validated["impact"] = impact
+	}
+	seen := map[string]struct{}{}
+	for _, fields := range []struct {
+		name  string
+		value []string
+	}{
+		{"capturedFields", evidence.CapturedFields},
+		{"missingFields", evidence.MissingFields},
+		{"redactedFields", evidence.RedactedFields},
+		{"truncatedFields", evidence.TruncatedFields},
+	} {
+		if fields.value == nil {
+			continue
+		}
+		cloned, err := cloneIssueEvidenceFields(fields.name, fields.value, seen)
+		if err != nil {
+			return nil, err
+		}
+		validated[fields.name] = cloned
+	}
+	if len(validated) == 0 {
+		return nil, &SdkError{Code: "validation_error", Message: "issue evidence must contain at least one field"}
+	}
+	return validated, nil
+}
+
+func cloneIssueLikelyFixArea(area *IssueLikelyFixArea) (map[string]any, error) {
+	validated := map[string]any{}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{{"component", area.Component}, {"module", area.Module}, {"function", area.Function}} {
+		if field.value == "" {
+			continue
+		}
+		if !validIssueText(field.value, maxIssueDiagnosticIdentity, true) {
+			return nil, &SdkError{Code: "validation_error", Message: "issue evidence likelyFixArea " + field.name + " is invalid or exceeds 256 characters"}
+		}
+		validated[field.name] = strings.TrimSpace(field.value)
+	}
+	if area.File != "" {
+		file, ok := safeIssueRelativePath(area.File)
+		if !ok {
+			return nil, &SdkError{Code: "validation_error", Message: "issue evidence likelyFixArea file must be a safe relative path"}
+		}
+		validated["file"] = file
+	}
+	for _, coordinate := range []struct {
+		name  string
+		value int
+	}{{"line", area.Line}, {"column", area.Column}} {
+		if coordinate.value == 0 {
+			continue
+		}
+		if coordinate.value < 1 || coordinate.value > maxIssueStackCoordinate {
+			return nil, &SdkError{Code: "validation_error", Message: "issue evidence likelyFixArea " + coordinate.name + " must be a positive integer"}
+		}
+		validated[coordinate.name] = coordinate.value
+	}
+	if area.InApp != nil {
+		validated["inApp"] = *area.InApp
+	}
+	if len(validated) == 0 || len(validated) == 1 && area.InApp != nil {
+		return nil, &SdkError{Code: "validation_error", Message: "issue evidence likelyFixArea must identify a code location"}
+	}
+	return validated, nil
+}
+
+func cloneIssueImpactEvidence(impact *IssueImpactEvidence) (map[string]any, error) {
+	validated := map[string]any{}
+	for _, field := range []struct {
+		name           string
+		value          string
+		maximum        int
+		rejectLocation bool
+	}{
+		{"affectedUserSegment", impact.AffectedUserSegment, maxIssueDiagnosticIdentity, true},
+		{"failedAction", impact.FailedAction, maxIssueDiagnosticIdentity, true},
+		{"userVisibleOutcome", impact.UserVisibleOutcome, maxIssueDiagnosticOutcome, false},
+	} {
+		if field.value == "" {
+			continue
+		}
+		if !validIssueText(field.value, field.maximum, field.rejectLocation) {
+			return nil, &SdkError{Code: "validation_error", Message: "issue evidence impact " + field.name + " is invalid or exceeds its bound"}
+		}
+		validated[field.name] = strings.TrimSpace(field.value)
+	}
+	if len(validated) == 0 {
+		return nil, &SdkError{Code: "validation_error", Message: "issue evidence impact must contain at least one field"}
+	}
+	return validated, nil
+}
+
+func cloneIssueEvidenceFields(name string, fields []string, seen map[string]struct{}) ([]string, error) {
+	if len(fields) < 1 || len(fields) > maxIssueDiagnosticFields {
+		return nil, &SdkError{Code: "validation_error", Message: "issue evidence " + name + " must contain 1-32 fields"}
+	}
+	cloned := make([]string, len(fields))
+	unique := map[string]struct{}{}
+	for index, field := range fields {
+		if _, duplicate := unique[field]; !validIssueEvidenceField(field) || duplicate {
+			return nil, &SdkError{Code: "validation_error", Message: "issue evidence " + name + " fields must be unique bounded identifiers"}
+		}
+		unique[field] = struct{}{}
+		if _, exists := seen[field]; exists {
+			return nil, &SdkError{Code: "validation_error", Message: "issue evidence field " + field + " has conflicting states"}
+		}
+		seen[field] = struct{}{}
+		cloned[index] = field
+	}
+	return cloned, nil
+}
+
+func validIssueEvidenceField(value string) bool {
+	if len(value) < 1 || len(value) > 64 || !isASCIIAlpha(value[0]) && !isASCIIDigit(value[0]) {
+		return false
+	}
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		if !isASCIIAlpha(character) && !isASCIIDigit(character) && character != '_' && character != '.' && character != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func safeIssueRelativePath(value string) (string, bool) {
+	path := strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")
+	if !validIssueText(path, maxIssueDiagnosticIdentity, true) || strings.HasPrefix(path, "/") ||
+		(len(path) >= 3 && isASCIIAlpha(path[0]) && path[1] == ':' && path[2] == '/') || strings.Contains(path, "://") {
+		return "", false
+	}
+	for _, part := range strings.Split(path, "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", false
+		}
+	}
+	return path, true
 }
 
 func cloneIssueBreadcrumbData(data map[string]any) (map[string]any, error) {

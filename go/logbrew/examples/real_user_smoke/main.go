@@ -32,6 +32,14 @@ func main() {
 		Title:   "Checkout timeout",
 		Level:   "error",
 		Message: "Request timed out after retry budget",
+		Evidence: &logbrew.IssueDiagnosticEvidence{
+			LikelyRootCause: "The payment provider exhausted its retry budget.",
+			LikelyFixArea: &logbrew.IssueLikelyFixArea{
+				File: "internal/payments/gateway.go",
+				Line: 42,
+			},
+			RedactedFields: []string{"provider.message"},
+		},
 	}))
 	must(client.Log("evt_log_001", "2026-06-02T10:00:03Z", logbrew.LogAttributes{
 		Message: "worker started",
