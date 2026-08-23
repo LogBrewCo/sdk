@@ -185,6 +185,38 @@ class IssueBreadcrumb(TypedDict):
     data: NotRequired[dict[str, IssueBreadcrumbDataValue]]
 
 
+class IssueLikelyFixArea(TypedDict, total=False):
+    """App-reported code location that may contain the fix."""
+
+    component: str
+    module: str
+    function: str
+    file: str
+    line: int
+    column: int
+    inApp: bool
+
+
+class IssueImpactEvidence(TypedDict, total=False):
+    """App-reported user-visible impact."""
+
+    affectedUserSegment: str
+    failedAction: str
+    userVisibleOutcome: str
+
+
+class IssueDiagnosticEvidence(TypedDict, total=False):
+    """Bounded app-reported cause, fix area, impact, and field states."""
+
+    likelyRootCause: str
+    likelyFixArea: IssueLikelyFixArea
+    impact: IssueImpactEvidence
+    capturedFields: list[str]
+    missingFields: list[str]
+    redactedFields: list[str]
+    truncatedFields: list[str]
+
+
 class IssueAttributes(TypedDict, total=False):
     """Public issue event attributes."""
     title: str
@@ -195,6 +227,7 @@ class IssueAttributes(TypedDict, total=False):
     stackFrames: list[IssueStackFrame]
     breadcrumbs: list[IssueBreadcrumb]
     breadcrumbsTruncated: bool
+    evidence: IssueDiagnosticEvidence
     metadata: Metadata
     context: TelemetryContext
 
@@ -1499,6 +1532,7 @@ def create_issue_attributes_from_exception(
     context: TelemetryContext | None = None,
     breadcrumbs: list[IssueBreadcrumb] | None = None,
     breadcrumbs_truncated: bool = False,
+    evidence: IssueDiagnosticEvidence | None = None,
     include_stack_frames: bool = True,
 ) -> IssueAttributes:
     """Build an issue with structured identity and a privacy-bounded traceback projection."""
@@ -1534,6 +1568,7 @@ def create_issue_attributes_from_exception(
         **({"stackFrames": stack_frames} if stack_frames else {}),
         **({"breadcrumbs": breadcrumbs} if breadcrumbs is not None else {}),
         **({"breadcrumbsTruncated": True} if breadcrumbs_truncated else {}),
+        **({"evidence": evidence} if evidence is not None else {}),
         **({"metadata": dict(metadata)} if metadata is not None else {}),
         **({"context": context} if context is not None else {}),
     }
@@ -1717,6 +1752,7 @@ __all__ = [
     "IssueBreadcrumbDataValue",
     "IssueBreadcrumbLevel",
     "IssueBreadcrumbLevelInput",
+    "IssueDiagnosticEvidence",
     "IssueException",
     "IssueExceptionChain",
     "IssueExceptionChainEntry",
@@ -1724,6 +1760,8 @@ __all__ = [
     "IssueExceptionMessageState",
     "IssueExceptionRelationship",
     "IssueExceptionStackFramesState",
+    "IssueImpactEvidence",
+    "IssueLikelyFixArea",
     "IssueStackFrame",
     "LogAttributes",
     "LogBrewAiohttpClientSessionInstrumentation",

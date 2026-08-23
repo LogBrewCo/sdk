@@ -25,10 +25,15 @@ MAX_BREADCRUMB_NAME_LENGTH = 64
 MAX_BREADCRUMB_MESSAGE_LENGTH = 512
 MAX_BREADCRUMB_DATA_FIELDS = 8
 MAX_BREADCRUMB_DATA_STRING_LENGTH = 256
+MAX_DIAGNOSTIC_IDENTITY_LENGTH = 256
+MAX_DIAGNOSTIC_CAUSE_LENGTH = 1_024
+MAX_DIAGNOSTIC_OUTCOME_LENGTH = 512
+MAX_DIAGNOSTIC_FIELDS = 32
 MAX_STACK_COORDINATE = 2_147_483_647
 
 _MACHINE_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
 _DATA_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+_EVIDENCE_FIELD_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _DEBUG_ID_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -57,6 +62,7 @@ _EXCEPTION_RELATIONSHIPS = {
 }
 _EXCEPTION_MESSAGE_STATES = {"captured", "truncated", "redacted", "not_captured"}
 _EXCEPTION_STACK_STATES = {"captured", "truncated", "not_captured"}
+_EVIDENCE_FIELD_KEYS = ("capturedFields", "missingFields", "redactedFields", "truncatedFields")
 
 
 def validate_issue_diagnostics(attributes: Mapping[str, Any]) -> dict[str, Any]:
@@ -81,6 +87,8 @@ def validate_issue_diagnostics(attributes: Mapping[str, Any]) -> dict[str, Any]:
             raise SdkError("validation_error", "issue breadcrumbsTruncated must be a boolean")
         if truncated:
             diagnostics["breadcrumbsTruncated"] = True
+    if "evidence" in attributes:
+        diagnostics["evidence"] = _validate_issue_evidence(attributes["evidence"])
     return diagnostics
 
 
@@ -499,6 +507,144 @@ def _validate_breadcrumbs(value: Any) -> list[dict[str, Any]]:
             f"issue breadcrumbs must contain 1-{MAX_ISSUE_BREADCRUMBS} entries",
         )
     return [_validate_breadcrumb(breadcrumb) for breadcrumb in value]
+
+
+def _validate_issue_evidence(value: Any) -> dict[str, Any]:
+    evidence = _require_object("issue evidence", value)
+    _reject_unknown_keys(
+        "issue evidence",
+        evidence,
+        {"likelyRootCause", "likelyFixArea", "impact", *_EVIDENCE_FIELD_KEYS},
+    )
+    validated: dict[str, Any] = {}
+    if "likelyRootCause" in evidence:
+        validated["likelyRootCause"] = _bounded_text(
+            "issue evidence likelyRootCause",
+            evidence["likelyRootCause"],
+            MAX_DIAGNOSTIC_CAUSE_LENGTH,
+        ).strip()
+    if "likelyFixArea" in evidence:
+        validated["likelyFixArea"] = _validate_likely_fix_area(evidence["likelyFixArea"])
+    if "impact" in evidence:
+        validated["impact"] = _validate_impact_evidence(evidence["impact"])
+
+    seen: set[str] = set()
+    for key in _EVIDENCE_FIELD_KEYS:
+        if key not in evidence:
+            continue
+        fields = _validate_evidence_fields(key, evidence[key])
+        overlap = seen.intersection(fields)
+        if overlap:
+            raise SdkError(
+                "validation_error",
+                f"issue evidence field {sorted(overlap)[0]} has conflicting states",
+            )
+        seen.update(fields)
+        validated[key] = fields
+    if not validated:
+        raise SdkError("validation_error", "issue evidence must contain at least one field")
+    return validated
+
+
+def _validate_likely_fix_area(value: Any) -> dict[str, Any]:
+    label = "issue evidence likelyFixArea"
+    area = _require_object(label, value)
+    _reject_unknown_keys(
+        label,
+        area,
+        {"component", "module", "function", "file", "line", "column", "inApp"},
+    )
+    validated: dict[str, Any] = {}
+    for key in ("component", "module", "function"):
+        if key in area:
+            validated[key] = _bounded_text(
+                f"{label} {key}",
+                area[key],
+                MAX_DIAGNOSTIC_IDENTITY_LENGTH,
+                reject_location_text=True,
+            ).strip()
+    if "file" in area:
+        validated["file"] = _safe_relative_source_path(area["file"])
+    for key in ("line", "column"):
+        if key in area:
+            coordinate = area[key]
+            if (
+                isinstance(coordinate, bool)
+                or not isinstance(coordinate, int)
+                or not 1 <= coordinate <= MAX_STACK_COORDINATE
+            ):
+                raise SdkError(
+                    "validation_error",
+                    f"{label} {key} must be a positive integer",
+                )
+            validated[key] = coordinate
+    if "inApp" in area:
+        if not isinstance(area["inApp"], bool):
+            raise SdkError("validation_error", f"{label} inApp must be a boolean")
+        validated["inApp"] = area["inApp"]
+    if not set(validated).difference({"inApp"}):
+        raise SdkError("validation_error", f"{label} must identify a code location")
+    return validated
+
+
+def _validate_impact_evidence(value: Any) -> dict[str, str]:
+    label = "issue evidence impact"
+    impact = _require_object(label, value)
+    limits = {
+        "affectedUserSegment": MAX_DIAGNOSTIC_IDENTITY_LENGTH,
+        "failedAction": MAX_DIAGNOSTIC_IDENTITY_LENGTH,
+        "userVisibleOutcome": MAX_DIAGNOSTIC_OUTCOME_LENGTH,
+    }
+    _reject_unknown_keys(label, impact, set(limits))
+    validated = {
+        key: _bounded_text(
+            f"{label} {key}",
+            impact[key],
+            limit,
+            reject_location_text=key != "userVisibleOutcome",
+        ).strip()
+        for key, limit in limits.items()
+        if key in impact
+    }
+    if not validated:
+        raise SdkError("validation_error", f"{label} must contain at least one field")
+    return validated
+
+
+def _validate_evidence_fields(key: str, value: Any) -> list[str]:
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_DIAGNOSTIC_FIELDS:
+        raise SdkError(
+            "validation_error",
+            f"issue evidence {key} must contain 1-{MAX_DIAGNOSTIC_FIELDS} fields",
+        )
+    if (
+        any(not isinstance(field, str) or _EVIDENCE_FIELD_PATTERN.fullmatch(field) is None for field in value)
+        or len(set(value)) != len(value)
+    ):
+        raise SdkError(
+            "validation_error",
+            f"issue evidence {key} fields must be unique bounded identifiers",
+        )
+    return list(value)
+
+
+def _safe_relative_source_path(value: Any) -> str:
+    label = "issue evidence likelyFixArea file"
+    path = _bounded_text(
+        label,
+        value,
+        MAX_DIAGNOSTIC_IDENTITY_LENGTH,
+        reject_location_text=True,
+    ).strip().replace("\\", "/")
+    parts = path.split("/")
+    if (
+        path.startswith("/")
+        or _WINDOWS_ABSOLUTE_PATH_PATTERN.match(path)
+        or "://" in path
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        raise SdkError("validation_error", f"{label} must be a safe relative path")
+    return path
 
 
 def _validate_breadcrumb(value: Any) -> dict[str, Any]:

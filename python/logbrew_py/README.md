@@ -176,7 +176,17 @@ For span events, the span's required top-level `traceId`, `spanId`, and optional
 Use `create_issue_attributes_from_exception()` to attach structured exception identity and privacy-bounded traceback frames. The frame projection never sends traceback text, source code, local variables, or absolute paths:
 
 ```python
-from logbrew_sdk import create_issue_attributes_from_exception
+from logbrew_sdk import IssueDiagnosticEvidence, create_issue_attributes_from_exception
+
+evidence: IssueDiagnosticEvidence = {
+    "likelyRootCause": "The payment provider exhausted its retry budget.",
+    "likelyFixArea": {"file": "src/payments/gateway.py", "function": "charge_order", "line": 42},
+    "impact": {
+        "failedAction": "checkout.submit",
+        "userVisibleOutcome": "The order was not confirmed.",
+    },
+    "redactedFields": ["provider.message"],
+}
 
 try:
     submit_checkout()
@@ -189,6 +199,7 @@ except CheckoutError as error:
             title="Checkout failed",
             mechanism="checkout.handler",
             handled=False,
+            evidence=evidence,
             breadcrumbs=[
                 {
                     "timestamp": "2026-07-17T11:59:58Z",
@@ -203,6 +214,8 @@ except CheckoutError as error:
 ```
 
 Structured frames are newest-first, capped at 32, and retain only a basename, line, column, and bounded function/module identity. The helper follows `__cause__`, unsuppressed `__context__`, and exception-group members into a bounded parent-first chain. Automatic node messages are redacted, per-node frame availability is explicit, and cycles, unreadable accessors, or the eight-node cap set `truncated`. Set `include_stack_frames=False` when even that code identity is not appropriate. The default top-level issue message remains `str(error)` for compatibility and troubleshooting; pass an explicitly redacted `message=` when exception text may contain paths, identifiers, or personal data. Explicit breadcrumbs are oldest-to-newest, capped at 64, and accept at most eight flat primitive data fields per entry. The core Python client deliberately has no process-global breadcrumb ring: one client is commonly shared across concurrent requests and users, so each issue receives only the caller's explicit request-, task-, or context-local snapshot. FastAPI, Flask, Django, and Celery integrations reuse this same graph. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
+
+`evidence` is explicit application knowledge, not an SDK inference. LogBrew labels `likelyRootCause` as a reported hypothesis and keeps `likelyFixArea` separate from observed frames. Field-state arrays preserve missing, redacted, and truncated evidence for API, CLI, dashboard, and agent consumers. Use repository-relative file paths and never put authentication material, request bodies, personal data, or raw user input in these fields. See the shared [issue evidence contract](../../docs/issue-diagnostic-evidence.md).
 
 ## Queue Pressure
 
