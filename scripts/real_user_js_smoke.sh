@@ -1726,6 +1726,7 @@ import {
   type EnvironmentAttributes,
   type EventFilter,
   type IssueAttributes,
+  type IssueDiagnosticEvidence,
   type JavaScriptErrorIssueOptions,
   type LogCorrelationTraceContext,
   type LogAttributes,
@@ -1758,6 +1759,11 @@ const environment: EnvironmentAttributes = {
   name: "production",
   region: "global"
 };
+const issueEvidence: IssueDiagnosticEvidence = {
+  likelyRootCause: "The provider exhausted its retry budget.",
+  likelyFixArea: { file: "src/payments/gateway.ts", line: 42 },
+  redactedFields: ["provider.message"]
+};
 const issue: IssueAttributes = {
   title: "Checkout timeout",
   level: "error",
@@ -1769,7 +1775,8 @@ const issue: IssueAttributes = {
     function: "checkout",
     module: "@example/checkout",
     inApp: true
-  }]
+  }],
+  evidence: issueEvidence
 };
 const log: LogAttributes = {
   message: "worker started",
@@ -2054,6 +2061,10 @@ const errorIssueOptions: sdk.JavaScriptErrorIssueOptions = {
   environment: "production",
   service: "checkout-web",
   runtime: "browser",
+  evidence: {
+    likelyFixArea: { file: "src/checkout.ts", function: "checkout", line: 42 },
+    missingFields: ["provider.request_id"]
+  },
   trace: {
     traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
     spanId: "b7ad6b7169203331",
@@ -2081,6 +2092,9 @@ if (supportTicketDraft.diagnostics?.authHeader !== "[redacted]") {
 }
 if (errorIssue.metadata?.releaseArtifactDebugId !== "11111111-2222-4333-8444-555555555555") {
   throw new Error("unexpected error issue release-artifact metadata");
+}
+if (errorIssue.evidence?.likelyFixArea?.file !== "src/checkout.ts") {
+  throw new Error("unexpected error issue diagnostic evidence");
 }
 const metric: sdk.MetricAttributes = {
   name: "checkout.requests",
@@ -2734,7 +2748,12 @@ client.environment("evt_environment_001", "2026-06-02T10:00:01Z", {
 client.issue("evt_issue_001", "2026-06-02T10:00:02Z", {
   title: "Checkout timeout",
   level: "error",
-  message: "Request timed out after retry budget"
+  message: "Request timed out after retry budget",
+  evidence: {
+    likelyRootCause: "The provider exhausted its retry budget.",
+    likelyFixArea: { file: "src/payments/gateway.js", line: 42 },
+    redactedFields: ["provider.message"]
+  }
 });
 client.log("evt_log_001", "2026-06-02T10:00:03Z", {
   message: "worker started",
@@ -2768,7 +2787,7 @@ grep -q '"type": "log"' smoke.stdout.json
 grep -q '"type": "span"' smoke.stdout.json
 grep -q '"type": "action"' smoke.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" smoke.stdout.json >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
 grep -q '"events":6' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json
 
@@ -2793,7 +2812,12 @@ client.environment("evt_environment_001", "2026-06-02T10:00:01Z", {
 client.issue("evt_issue_001", "2026-06-02T10:00:02Z", {
   title: "Checkout timeout",
   level: "error",
-  message: "Request timed out after retry budget"
+  message: "Request timed out after retry budget",
+  evidence: {
+    likelyRootCause: "The provider exhausted its retry budget.",
+    likelyFixArea: { file: "src/payments/gateway.js", line: 42 },
+    redactedFields: ["provider.message"]
+  }
 });
 client.log("evt_log_001", "2026-06-02T10:00:03Z", {
   message: "worker started",
@@ -2831,7 +2855,7 @@ grep -q '"type": "log"' smoke-require.stdout.json
 grep -q '"type": "span"' smoke-require.stdout.json
 grep -q '"type": "action"' smoke-require.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" smoke-require.stdout.json >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" smoke-require.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" smoke-require.stdout.json >/dev/null
 grep -q '"events":6' smoke-require.stderr.json
 grep -q '"ok":true' smoke-require.stderr.json
 

@@ -138,7 +138,8 @@ const {
   cloneIssueDiagnostics,
   createIssueException,
   validateIssueBreadcrumb,
-  validateIssueDiagnostics
+  validateIssueDiagnostics,
+  validateIssueEvidence
 } = buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssueStackFrames });
 const {
   cloneTelemetryContext,
@@ -1410,6 +1411,7 @@ function createIssueAttributesFromError(error, options = {}) {
     exception,
     exceptionChain,
     ...(stackFrames.length > 0 ? { stackFrames } : {}),
+    ...(options.evidence === undefined ? {} : { evidence: validateIssueEvidence(options.evidence) }),
     metadata: compactMetadata(metadata)
   };
 }

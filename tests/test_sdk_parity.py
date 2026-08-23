@@ -159,6 +159,11 @@ class SdkParityTests(unittest.TestCase):
                 "stackFrames": [{"filename": "Checkout.swift", "line": 42, "column": 17}],
                 "breadcrumbs": [{"timestamp": "2026-08-03T10:00:00Z", "category": "checkout"}],
                 "breadcrumbsTruncated": False,
+                "evidence": {
+                    "likelyRootCause": "The provider exhausted its retry budget.",
+                    "likelyFixArea": {"file": "src/payments/gateway.py", "line": 42},
+                    "redactedFields": ["provider.message"],
+                },
             }
         )
         actual["events"][1]["attributes"].update(

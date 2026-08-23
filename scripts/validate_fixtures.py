@@ -47,6 +47,7 @@ OPTIONAL_ATTRIBUTES = {
         "exceptionChain",
         "breadcrumbs",
         "breadcrumbsTruncated",
+        "evidence",
         "context",
     },
     "log": {"logger", "metadata", "context"},
@@ -86,6 +87,7 @@ RESOURCE_FIELDS = {
 CONTEXT_TAG_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 ISSUE_DIAGNOSTIC_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
 ISSUE_BREADCRUMB_DATA_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+ISSUE_EVIDENCE_FIELD_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 ISSUE_EXCEPTION_RELATIONSHIPS = {
     "reported",
     "cause",
@@ -595,6 +597,105 @@ def _validate_issue_breadcrumbs(index: int, attributes: dict[str, Any]) -> None:
         raise ValidationError(f"event {index} issue breadcrumbsTruncated must be a boolean")
 
 
+def _validate_issue_evidence(index: int, attributes: dict[str, Any]) -> None:
+    evidence = attributes.get("evidence")
+    if evidence is None:
+        return
+    label = f"event {index} issue evidence"
+    field_keys = ("capturedFields", "missingFields", "redactedFields", "truncatedFields")
+    if not isinstance(evidence, dict) or not evidence:
+        raise ValidationError(f"{label} must be a non-empty object")
+    _reject_unknown_keys(
+        evidence,
+        {"likelyRootCause", "likelyFixArea", "impact", *field_keys},
+        label,
+    )
+    if "likelyRootCause" in evidence and not _valid_diagnostic_text(
+        evidence["likelyRootCause"], 1_024
+    ):
+        raise ValidationError(f"{label} likelyRootCause is invalid")
+    if "likelyFixArea" in evidence:
+        _validate_issue_fix_area(label, evidence["likelyFixArea"])
+    if "impact" in evidence:
+        _validate_issue_impact(label, evidence["impact"])
+    seen: set[str] = set()
+    for key in field_keys:
+        fields = evidence.get(key)
+        if fields is None:
+            continue
+        if (
+            not isinstance(fields, list)
+            or not 1 <= len(fields) <= 32
+            or any(
+                not isinstance(field, str)
+                or ISSUE_EVIDENCE_FIELD_PATTERN.fullmatch(field) is None
+                for field in fields
+            )
+            or len(set(fields)) != len(fields)
+        ):
+            raise ValidationError(f"{label} {key} must contain 1-32 unique bounded fields")
+        overlap = seen.intersection(fields)
+        if overlap:
+            raise ValidationError(f"{label} field {sorted(overlap)[0]} has conflicting states")
+        seen.update(fields)
+
+
+def _validate_issue_fix_area(label: str, area: Any) -> None:
+    label = f"{label} likelyFixArea"
+    if not isinstance(area, dict):
+        raise ValidationError(f"{label} must be an object")
+    _reject_unknown_keys(
+        area,
+        {"component", "module", "function", "file", "line", "column", "inApp"},
+        label,
+    )
+    location_fields = {"component", "module", "function", "file", "line", "column"}
+    if not location_fields.intersection(area):
+        raise ValidationError(f"{label} must identify a code location")
+    for key in ("component", "module", "function"):
+        if key in area and not _valid_diagnostic_text(area[key], 256, reject_location=True):
+            raise ValidationError(f"{label} {key} is invalid")
+    if "file" in area:
+        path = area["file"]
+        normalized = path.strip().replace("\\", "/") if isinstance(path, str) else ""
+        if (
+            not _valid_diagnostic_text(path, 256, reject_location=True)
+            or normalized.startswith("/")
+            or re.match(r"^[A-Za-z]:/", normalized)
+            or "://" in normalized
+            or any(part in {"", ".", ".."} for part in normalized.split("/"))
+        ):
+            raise ValidationError(f"{label} file must be a safe relative path")
+    for key in ("line", "column"):
+        value = area.get(key)
+        if key in area and (
+            isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 2_147_483_647
+        ):
+            raise ValidationError(f"{label} {key} must be a positive integer")
+    if "inApp" in area and not isinstance(area["inApp"], bool):
+        raise ValidationError(f"{label} inApp must be a boolean")
+
+
+def _validate_issue_impact(label: str, impact: Any) -> None:
+    label = f"{label} impact"
+    if not isinstance(impact, dict) or not impact:
+        raise ValidationError(f"{label} must be a non-empty object")
+    _reject_unknown_keys(
+        impact,
+        {"affectedUserSegment", "failedAction", "userVisibleOutcome"},
+        label,
+    )
+    for key, limit in (
+        ("affectedUserSegment", 256),
+        ("failedAction", 256),
+        ("userVisibleOutcome", 512),
+    ):
+        if key in impact and not _valid_diagnostic_text(
+            impact[key], limit, reject_location=key != "userVisibleOutcome"
+        ):
+            raise ValidationError(f"{label} {key} is invalid")
+
+
 def _validate_optional_attributes(index: int, event_type: str, attributes: dict[str, Any]) -> None:
     for (expected_type, key), require_non_empty in OPTIONAL_STRING_ATTRIBUTES.items():
         if expected_type != event_type or key not in attributes:
@@ -710,6 +811,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
             _validate_issue_exception(index, attributes)
             _validate_issue_exception_chain(index, attributes)
             _validate_issue_breadcrumbs(index, attributes)
+            _validate_issue_evidence(index, attributes)
 
         if event_type == "metric":
             _validate_metric_attributes(index, attributes)
