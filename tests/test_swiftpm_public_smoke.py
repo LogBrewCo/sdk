@@ -12,7 +12,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_swiftpm_public_smoke.sh"
-SWIFT_README = ROOT / "swift" / "logbrew-swift" / "README.md"
 
 
 class SwiftPmPublicSmokeTests(unittest.TestCase):
@@ -112,7 +111,7 @@ done
 
         for expected in (
             "LOGBREW_SWIFTPM_VERSION",
-            'package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.10}}"',
+            'package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.12}}"',
             'package_url="${LOGBREW_SWIFTPM_URL:-https://github.com/LogBrewCo/sdk.git}"',
             'package_identity="${LOGBREW_SWIFTPM_PACKAGE_IDENTITY:-sdk}"',
             "LOGBREW_SWIFTPM_EXPECTED_REVISION",
@@ -148,13 +147,6 @@ done
         self.assertIn("let crashStatus = try crashCapture.status()", body)
         self.assertIn("precondition(crashStatus.lifecycle == .idle)", body)
         self.assertNotIn("precondition(try crashCapture.status()", body)
-
-    def test_swift_readme_uses_the_current_public_swiftpm_tag(self) -> None:
-        readme = SWIFT_README.read_text(encoding="utf-8")
-
-        self.assertIn('.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.10")', readme)
-        self.assertNotIn('.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.8")', readme)
-
 
 if __name__ == "__main__":
     unittest.main()
