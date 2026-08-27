@@ -60,12 +60,14 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertFalse(areas["maven"])
         self.assertFalse(areas["rust"])
 
-    def test_react_native_native_paths_enable_native_durability_checks(self) -> None:
+    def test_react_native_native_sources_enable_native_durability_checks(self) -> None:
         for path in (
             "js/logbrew-react-native/ios/LBRNEventRecordStore.m",
             "js/logbrew-react-native/android/src/main/java/co/logbrew/reactnative/EventRecordStore.java",
             "js/logbrew-react-native/src/NativeLogBrewFatalStore.ts",
             "js/logbrew-react-native/persistent-delivery.native.js",
+            "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStore.swift",
+            "swift/logbrew-swift/Sources/LogBrewCrash/CrashEngine.swift",
         ):
             with self.subTest(path=path):
                 areas = ci_changed_areas.classify([path])

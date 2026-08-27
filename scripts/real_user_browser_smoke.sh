@@ -346,6 +346,14 @@ browserWindow.dispatchEvent(syncEvent);
 await waitFor(() => transport.sentBodies.length === 4);
 const syncPayload = JSON.parse(transport.sentBodies[3]);
 assertPathOnly(syncPayload, "/dashboard");
+if (
+  syncPayload.events[0].attributes.title !== "Browser error: Error" ||
+  syncPayload.events[0].attributes.message !== "Unhandled browser error" ||
+  syncPayload.events[0].attributes.metadata.errorMessage !== undefined ||
+  JSON.stringify(syncPayload).includes("Checkout exploded")
+) {
+  throw new Error("automatic browser issue did not redact its exception message");
+}
 if (syncPayload.events[0].attributes.metadata.sourcePath !== "/assets/app.js") {
   throw new Error(`source path should be sanitized: ${transport.sentBodies[3]}`);
 }
@@ -393,8 +401,13 @@ browserWindow.dispatchEvent(rejectionEvent);
 await waitFor(() => transport.sentBodies.length === 5);
 const rejectionPayload = JSON.parse(transport.sentBodies[4]);
 assertPathOnly(rejectionPayload, "/dashboard");
-if (!rejectionPayload.events[0].attributes.title.includes("Unhandled promise rejection")) {
-  throw new Error(`unexpected rejection title: ${transport.sentBodies[4]}`);
+if (
+  rejectionPayload.events[0].attributes.title !== "Unhandled promise rejection: Error" ||
+  rejectionPayload.events[0].attributes.message !== "Unhandled promise rejection" ||
+  rejectionPayload.events[0].attributes.metadata.errorMessage !== undefined ||
+  JSON.stringify(rejectionPayload).includes("Async checkout failed")
+) {
+  throw new Error("automatic rejection issue did not redact its exception message");
 }
 if (rejectionEvent.defaultPrevented) {
   throw new Error("unhandled rejection default handling should remain enabled by default");
@@ -412,6 +425,7 @@ const suppressedResult = await captureBrowserError(noisyResizeObserverError, log
   errorSuppressionRules: [{
     errorName: "ResizeObserverError",
     frameFile: /\/assets\/ads\.js$/u,
+    message: /^ResizeObserver loop failed/u,
     reason: "third_party_resize_observer"
   }],
   flushOnCapture: true,
