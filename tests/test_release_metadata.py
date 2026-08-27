@@ -71,28 +71,19 @@ def minimal_publish_packages_workflow(package_dirs: list[str]) -> str:
     return (
         """
 name: Publish Packages
-on:
-  workflow_dispatch:
-    inputs:
-      allow_initial_npm_publish:
-        description: "Allow authenticated first publish for new npm package pages"
-        required: true
-        type: boolean
-        default: false
 jobs:
   npm:
-    env:
-      ALLOW_INITIAL_NPM_PUBLISH: ${{ inputs.allow_initial_npm_publish }}
+    permissions:
+      id-token: write
     steps:
       - name: Publish npm packages
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm --version
+          echo "npm:registry.npmjs.org"
+          echo "/-/npm/v1/oidc/token/exchange/package/"
           missing_npm_packages=()
           echo "npm trusted publishing requires existing package pages"
-          echo "Use allow_initial_npm_publish only for one-time authenticated package creation"
-          echo "allow_initial_npm_publish=true requires the release environment npm publish value"
+          echo "Bun publication requires an explicit npm_packages selection"
+          publish_grants+=("$publish_grant")
           package_dirs=(
 """
         + package_dir_lines
@@ -735,11 +726,6 @@ jobs:
             (workflow_dir / "publish-packages.yml").write_text(
                 """
 name: Publish Packages
-on:
-  workflow_dispatch:
-    inputs:
-      allow_initial_npm_publish:
-        default: false
 jobs:
   crates:
     steps:
@@ -1302,23 +1288,23 @@ jobs:
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
-        self.assertTrue(any("npm first-publish guard" in failure for failure in failures))
+        self.assertTrue(any("npm package-page guard" in failure for failure in failures))
 
-    def test_publish_packages_workflow_requires_npm_initial_publish_value_failure(self) -> None:
+    def test_publish_packages_workflow_requires_npm_oidc_exchange(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             workflow_dir = write_release_workflow_fixture(root)
             workflow = minimal_publish_packages_workflow(list(check_release_metadata.JS_PACKAGES))
             workflow = workflow.replace(
-                'echo "allow_initial_npm_publish=true requires the release environment npm publish value"',
-                'echo "missing explicit initial publish value failure"',
+                'echo "/-/npm/v1/oidc/token/exchange/package/"',
+                'echo "missing OIDC exchange"',
             )
             (workflow_dir / "publish-packages.yml").write_text(workflow, encoding="utf-8")
 
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
-        self.assertTrue(any("npm first-publish initial value failure" in failure for failure in failures))
+        self.assertTrue(any("npm OIDC exchange" in failure for failure in failures))
 
     def test_publish_release_workflow_requires_scoped_release_skip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

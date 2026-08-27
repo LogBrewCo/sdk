@@ -478,36 +478,44 @@ def is_public_publishing_guidance(relative_text: str, line: str) -> bool:
 
 def is_npm_first_publish_placeholder(relative_text: str, line: str) -> bool:
     lower_line = line.lower()
-    if relative_text == ".github/publishing/trusted-publishers.md":
-        return "npm_token" in lower_line
     if relative_text == ".github/workflows/publish-packages.yml":
-        if lower_line.strip() == '(cd "$package_dir" && npm_config_token="$npm_token" bun publish "${publish_args[@]}")':
+        if lower_line.strip() == '(cd "$package_dir" && npm_config_token="${publish_grants[$package_index]}" bun publish "${publish_args[@]}")':
             return True
         allowed_fragments = (
-            "npm_token: ${{ secrets.npm_token }}",
-            "${npm_token:-}",
-            "secret npm_token",
+            "actions_id_token_request_url",
+            "actions_id_token_request_token",
+            "/-/npm/v1/oidc/token/exchange/package/",
+            "typeof exchange.token",
+            "process.stdout.write(exchange.token)",
             "central portal user-token credentials",
             "generated central portal publishing credentials",
             "central portal publishing credentials",
             "generated central portal publishing values",
         )
         return any(fragment in lower_line for fragment in allowed_fragments)
+    if relative_text == "tests/test_release_metadata.py":
+        allowed_fragments = (
+            "id-token: write",
+            "/-/npm/v1/oidc/token/exchange/package/",
+            "maven central user-token credential hint",
+            "maven central generated credential hint",
+            "central portal user-token credentials",
+            "generated central portal publishing credentials",
+            "central portal publishing credentials",
+            "central portal credentials",
+        )
+        return any(fragment in lower_line for fragment in allowed_fragments)
     if relative_text == "scripts/check_release_metadata.py":
         return (
-            '"npm first-publish token seam": "npm_token"' in lower_line
+            '"npm oidc permission": "id-" "token: write"' in lower_line
+            or '"npm oidc exchange": "/-/npm/v1/oidc/" "token/exchange/package/"' in lower_line
             or '"maven central user-token credential hint": "central portal user-token credentials"' in lower_line
             or '"maven central generated credential hint": "generated central portal publishing credentials"' in lower_line
         )
-    if relative_text == "tests/test_release_metadata.py":
+    if relative_text == "tests/test_affected_family_release_prep.py":
         return (
-            "npm_token: ${{ secrets.npm_token }}" in lower_line
-            or "maven central user-token credential hint" in lower_line
-            or "maven central generated credential hint" in lower_line
-            or "central portal user-token credentials" in lower_line
-            or "generated central portal publishing credentials" in lower_line
-            or "central portal publishing credentials" in lower_line
-            or "central portal credentials" in lower_line
+            "npm_config_to" in lower_line
+            or '"/-/npm/v1/oidc/" "token/exchange/package/"' in lower_line
         )
     return False
 

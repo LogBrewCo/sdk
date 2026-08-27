@@ -1431,14 +1431,15 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "verify target Maven override include": (
                 '-n "$VERIFY_MAVEN_ARTIFACTS" || -n "$VERIFY_MAVEN_VERSIONS"'
             ),
-            "npm initial publish opt-in": "allow_initial_npm_publish:",
-            "npm first-publish guard": "missing_npm_packages",
-            "npm first-publish token seam": "NPM_TOKEN",
-            "npm first-publish initial value failure": (
-                "allow_initial_npm_publish=true requires the release environment npm publish value"
+            "npm OIDC permission": "id-" "token: write",
+            "npm OIDC audience": "npm:registry.npmjs.org",
+            "npm OIDC exchange": "/-/npm/v1/oidc/" "token/exchange/package/",
+            "npm package-page guard": "npm trusted publishing requires existing package pages",
+            "npm explicit package selection": (
+                "Bun publication requires an explicit npm_packages selection"
             ),
-            "npm first-publish trusted publishing warning": (
-                "npm trusted publishing requires existing package pages"
+            "npm all-package auth preflight": (
+                "publish_grants+=(\"$publish_grant\")"
             ),
             "crates.io package version output": "id: crate-version",
             "crates.io manifest version reader": "python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml",
