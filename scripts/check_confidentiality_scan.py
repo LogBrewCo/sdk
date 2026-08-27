@@ -63,13 +63,23 @@ FORBIDDEN_PUBLIC_PLANNING_PATHS = (
 
 
 def iter_scanned_files(root: Path) -> list[Path]:
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode == 0:
+        candidates = (root / os.fsdecode(value) for value in result.stdout.split(b"\0") if value)
+        return sorted(
+            path
+            for path in candidates
+            if path.is_file() and is_scanned_path(path.relative_to(root))
+        )
+
     files: list[Path] = []
     for current_root, dirnames, filenames in os.walk(root):
         current_path = Path(current_root)
-        current_relative = current_path.relative_to(root)
-        if current_relative != Path(".") and is_git_ignored(root, current_relative):
-            dirnames[:] = []
-            continue
         dirnames[:] = [
             dirname
             for dirname in dirnames
@@ -77,17 +87,18 @@ def iter_scanned_files(root: Path) -> list[Path]:
         ]
         for filename in filenames:
             path = current_path / filename
-            relative = path.relative_to(root)
-            if is_git_ignored(root, relative):
-                continue
-            if relative == SELF_PATH:
-                continue
-            if filename in SKIPPED_FILES:
-                continue
-            if path.suffix.lower() in SKIPPED_EXTENSIONS:
-                continue
-            files.append(path)
+            if is_scanned_path(path.relative_to(root)):
+                files.append(path)
     return sorted(files)
+
+
+def is_scanned_path(relative: Path) -> bool:
+    return (
+        relative != SELF_PATH
+        and relative.name not in SKIPPED_FILES
+        and relative.suffix.lower() not in SKIPPED_EXTENSIONS
+        and not any(part in SKIPPED_DIRS or part.endswith(".egg-info") for part in relative.parts)
+    )
 
 
 def is_git_ignored(root: Path, relative: Path) -> bool:
@@ -126,7 +137,7 @@ def validate(root: Path) -> list[str]:
             if is_allowed_match(relative, line):
                 continue
             failures.append(f"./{relative.as_posix()}:{line_number}:{line}")
-    failures.extend(validate_public_readme_language(root))
+    failures.extend(validate_public_readme_language(root, scanned_files))
     return failures
 
 
@@ -145,14 +156,10 @@ def validate_forbidden_public_planning_paths(root: Path) -> list[str]:
     return failures
 
 
-def validate_public_readme_language(root: Path) -> list[str]:
+def validate_public_readme_language(root: Path, scanned_files: list[Path]) -> list[str]:
     failures: list[str] = []
-    for path in sorted(root.rglob("README.md")):
+    for path in (candidate for candidate in scanned_files if candidate.name == "README.md"):
         relative = path.relative_to(root)
-        if any(part in SKIPPED_DIRS for part in relative.parts):
-            continue
-        if is_git_ignored(root, relative):
-            continue
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if not PUBLIC_README_FORBIDDEN_RE.search(line):
                 continue
