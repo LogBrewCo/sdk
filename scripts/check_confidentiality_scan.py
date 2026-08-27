@@ -481,12 +481,12 @@ def is_npm_first_publish_placeholder(relative_text: str, line: str) -> bool:
     if relative_text == ".github/publishing/trusted-publishers.md":
         return "npm_token" in lower_line
     if relative_text == ".github/workflows/publish-packages.yml":
+        if lower_line.strip() == '(cd "$package_dir" && npm_config_token="$npm_token" bun publish "${publish_args[@]}")':
+            return True
         allowed_fragments = (
             "npm_token: ${{ secrets.npm_token }}",
-            "unset node_auth_token",
             "${npm_token:-}",
             "secret npm_token",
-            "_authtoken=%s",
             "central portal user-token credentials",
             "generated central portal publishing credentials",
             "central portal publishing credentials",
