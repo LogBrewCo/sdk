@@ -57,7 +57,7 @@ const {
 } = require("./xhr-spans.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
-const DEFAULT_SDK_VERSION = "0.1.6";
+const DEFAULT_SDK_VERSION = "0.1.7";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -78,14 +78,17 @@ function createLogBrewBrowserClient({
   captureRuntimeContext = true,
   clientKey,
   context,
+  environment,
   maxBatchBytes = DEFAULT_MAX_KEEPALIVE_BODY_BYTES,
   maxBatchEvents,
   maxQueueBytes,
   maxQueueSize,
-  sdkName = DEFAULT_SDK_NAME,
-  sdkVersion = DEFAULT_SDK_VERSION,
   maxRetries = 2,
-  onEventDropped
+  onEventDropped,
+  release,
+  service,
+  sdkName = DEFAULT_SDK_NAME,
+  sdkVersion = DEFAULT_SDK_VERSION
 } = {}) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
@@ -94,9 +97,11 @@ function createLogBrewBrowserClient({
   if (typeof captureRuntimeContext !== "boolean") {
     throw new SdkError("configuration_error", "captureRuntimeContext must be a boolean");
   }
-  const clientContext = captureRuntimeContext
-    ? addBrowserRuntimeContext(context, browserNavigator)
-    : context;
+  const resource = {
+    ...(environment === undefined && release === undefined ? {} : { deployment: { environment, release } }),
+    ...(service === undefined ? {} : { service: { name: service } })
+  };
+  const clientContext = addBrowserRuntimeContext(context, captureRuntimeContext ? browserNavigator : false, resource);
   return LogBrewClient.create({
     apiKey: authKey,
     context: clientContext,
@@ -335,37 +340,35 @@ async function capturePageView(context, options = {}) {
   return flushAfterCapture(context, options);
 }
 
-async function captureBrowserError(error, context, options = {}) {
-  const eventOptions = eventOptionsWithContext(context, options);
-  const details = errorDetails(error);
-  const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, eventCallbackContext(context))
-    : createBrowserIssueEvent(error, context.browserWindow, eventOptions, details, BROWSER_ERROR_SUMMARY);
-  const suppression = await suppressBrowserIssue(event, context, eventOptions, details.message);
-  if (suppression) {
-    maybePreventDefault(error, options);
-    return suppression;
-  }
-
-  context.client.issue(event.id, event.timestamp, event.attributes);
-  maybePreventDefault(error, options);
-  return flushAfterCapture(context, options);
+function captureBrowserError(error, context, options = {}) {
+  return captureBrowserIssue(error, context, options, "errorEvent", errorDetails, BROWSER_ERROR_SUMMARY);
 }
 
-async function captureUnhandledRejection(rejection, context, options = {}) {
+function captureUnhandledRejection(rejection, context, options = {}) {
+  return captureBrowserIssue(
+    rejection,
+    context,
+    options,
+    "rejectionEvent",
+    rejectionReason,
+    BROWSER_REJECTION_SUMMARY
+  );
+}
+
+async function captureBrowserIssue(input, context, options, callback, inspect, summary) {
   const eventOptions = eventOptionsWithContext(context, options);
-  const details = rejectionReason(rejection);
-  const event = typeof options.rejectionEvent === "function"
-    ? options.rejectionEvent(rejection, eventCallbackContext(context))
-    : createBrowserIssueEvent(rejection, context.browserWindow, eventOptions, details, BROWSER_REJECTION_SUMMARY);
+  const details = inspect(input);
+  const event = typeof options[callback] === "function"
+    ? options[callback](input, eventCallbackContext(context))
+    : createBrowserIssueEvent(input, context.browserWindow, eventOptions, details, summary);
   const suppression = await suppressBrowserIssue(event, context, eventOptions, details.message);
   if (suppression) {
-    maybePreventDefault(rejection, options);
+    maybePreventDefault(input, options);
     return suppression;
   }
 
   context.client.issue(event.id, event.timestamp, event.attributes);
-  maybePreventDefault(rejection, options);
+  maybePreventDefault(input, options);
   return flushAfterCapture(context, options);
 }
 

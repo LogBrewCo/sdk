@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'printf "browser smoke failed at line %s\n" "$LINENO" >&2' ERR
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
@@ -11,12 +12,7 @@ process.stdout.write(version);
 ' "$repo_root/js/logbrew-browser/package.json"
 )"
 tmp_dir="$(mktemp -d)"
-
-remove_tmp_dir() {
-  rm -rf "$tmp_dir"
-}
-
-trap remove_tmp_dir EXIT
+trap 'rm -rf "$tmp_dir"' EXIT
 
 core_pack_json="$tmp_dir/core-pack.json"
 browser_pack_json="$tmp_dir/browser-pack.json"
@@ -114,6 +110,8 @@ const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
 const context = {
   schemaVersion: 1,
   resource: {
+    deployment: { environment: "production", release: "web@2026.07.04" },
+    service: { name: "checkout-web" },
     runtime: { name: "Google Chrome", version: "126" },
     operatingSystem: { name: "macOS" },
     device: { family: "desktop" }
@@ -165,6 +163,7 @@ for name in ("@logbrew/browser", "@logbrew/sdk", "happy-dom"):
 PY
 
 cat > smoke.mjs <<'EOF'
+import { deepStrictEqual } from "node:assert";
 import { Window } from "happy-dom";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
@@ -254,14 +253,14 @@ if (pagePayload.events[0].attributes.metadata.userAgent !== undefined) {
 const expectedBrowserRuntimeContext = {
   schemaVersion: 1,
   resource: {
+    deployment: { environment: "production", release: "web@2026.07.04" },
+    service: { name: "checkout-web" },
     runtime: { name: "Google Chrome", version: "126" },
     operatingSystem: { name: "macOS" },
     device: { family: "desktop" }
   }
 };
-if (JSON.stringify(pagePayload.events[0].attributes.context) !== JSON.stringify(expectedBrowserRuntimeContext)) {
-  throw new Error(`expected low-entropy browser runtime context: ${transport.sentBodies[0]}`);
-}
+deepStrictEqual(pagePayload.events[0].attributes.context, expectedBrowserRuntimeContext);
 if (pagePayload.events[0].attributes.traceId !== traceContext.traceId || pagePayload.events[0].attributes.spanId !== traceContext.spanId) {
   throw new Error(`expected shared page trace context: ${transport.sentBodies[0]}`);
 }
@@ -1346,8 +1345,11 @@ if (navigationTraceparent !== "00-11111111111111111111111111111111-2222222222222
 const fullClient = createLogBrewBrowserClient({
   browserNavigator: browserWindow.navigator,
   clientKey: "LOGBREW_BROWSER_KEY",
+  environment: "production",
+  release: "web@2026.07.04",
   sdkName: "browser-smoke-app",
   sdkVersion: "0.1.0",
+  service: "checkout-web",
   maxRetries: 1
 });
 addFullBatch(fullClient);
@@ -1791,7 +1793,10 @@ function delay(ms) {
 }
 EOF
 
-node smoke.mjs > "$tmp_dir/browser-smoke.stdout.json" 2> "$tmp_dir/browser-smoke.stderr.json"
+if ! node smoke.mjs > "$tmp_dir/browser-smoke.stdout.json" 2> "$tmp_dir/browser-smoke.stderr.json"; then
+  tail -c 4096 "$tmp_dir/browser-smoke.stderr.json" >&2
+  exit 1
+fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/browser-valid-batch.json" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/browser-smoke.stderr.json"

@@ -57,13 +57,14 @@ function lowEntropyNavigator() {
   };
 }
 
-function expectedContext() {
+function expectedContext(resource = {}) {
   return {
     schemaVersion: 1,
     resource: {
       runtime: { name: "Google Chrome", version: "126" },
       operatingSystem: { name: "macOS" },
-      device: { family: "desktop" }
+      device: { family: "desktop" },
+      ...resource
     }
   };
 }
@@ -86,59 +87,41 @@ async function capturedAttributes(createClient, config = {}) {
 test("browser client adds low-entropy runtime context by default", async () => {
   const attributes = await capturedAttributes(createLogBrewBrowserClient);
   assert.deepEqual(attributes.context, expectedContext());
-  assert.deepEqual(Object.keys(attributes.context.resource).sort(), [
-    "device",
-    "operatingSystem",
-    "runtime"
-  ]);
 });
 
-test("browser client applies default runtime context to every signal type", async () => {
+test("browser client applies configured scope and runtime context to every signal type", async () => {
   const client = createLogBrewBrowserClient({
     browserNavigator: lowEntropyNavigator(),
-    clientKey: "TEST_BROWSER_KEY"
+    clientKey: "TEST_BROWSER_KEY",
+    environment: "staging",
+    release: "checkout@1.4.0",
+    service: "checkout-web"
   });
-  client.release("browser-release", FIXED_TIMESTAMP, { version: "1.0.0" });
-  client.environment("browser-environment", FIXED_TIMESTAMP, { name: "test" });
-  client.issue("browser-issue", FIXED_TIMESTAMP, {
-    title: "Browser runtime context issue",
-    level: "error",
-    message: "runtime context"
-  });
-  client.log("browser-log", FIXED_TIMESTAMP, {
-    level: "info",
-    message: "runtime context"
-  });
-  client.span("browser-span", FIXED_TIMESTAMP, {
-    name: "runtime context",
-    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-    spanId: "00f067aa0ba902b7",
-    status: "ok"
-  });
-  client.action("browser-action", FIXED_TIMESTAMP, {
-    name: "runtime context",
-    status: "success"
-  });
-  client.metric("browser-metric", FIXED_TIMESTAMP, {
-    name: "runtime.context",
-    kind: "gauge",
-    value: 1,
-    unit: "1",
-    temporality: "instant"
-  });
+  const signals = {
+    release: { version: "1.0.0" },
+    environment: { name: "test" },
+    issue: { title: "Browser runtime context issue", level: "error", message: "runtime context" },
+    log: { level: "info", message: "runtime context" },
+    span: {
+      name: "runtime context",
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "00f067aa0ba902b7",
+      status: "ok"
+    },
+    action: { name: "runtime context", status: "success" },
+    metric: { name: "runtime.context", kind: "gauge", value: 1, unit: "1", temporality: "instant" }
+  };
+  for (const [type, attributes] of Object.entries(signals)) {
+    client[type](`browser-${type}`, FIXED_TIMESTAMP, attributes);
+  }
 
   const preview = JSON.parse(client.previewJson());
-  assert.deepEqual(preview.events.map((event) => event.type), [
-    "release",
-    "environment",
-    "issue",
-    "log",
-    "span",
-    "action",
-    "metric"
-  ]);
+  assert.deepEqual(preview.events.map((event) => event.type), Object.keys(signals));
   for (const event of preview.events) {
-    assert.deepEqual(event.attributes.context, expectedContext());
+    assert.deepEqual(event.attributes.context, expectedContext({
+      deployment: { environment: "staging", release: "checkout@1.4.0" },
+      service: { name: "checkout-web" }
+    }));
   }
   await client.shutdown(acceptingTransport);
 });
