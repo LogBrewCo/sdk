@@ -25,8 +25,12 @@ def maven_version(path: Path) -> str | None:
     return ET.parse(path).getroot().findtext("{*}version")
 
 
+def source_text(relative_path: str | Path) -> str:
+    return (ROOT / relative_path).read_text(encoding="utf-8")
+
+
 def json_object(relative_path: str) -> dict[str, object]:
-    return json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
+    return json.loads(source_text(relative_path))
 
 
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
@@ -54,12 +58,12 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.6"),
         }
         for relative_path, expected in pypi_versions.items():
-            project = tomllib.loads((ROOT / relative_path).read_text(encoding="utf-8"))["project"]
+            project = tomllib.loads(source_text(relative_path))["project"]
             self.assertEqual((project["name"], project["version"]), expected)
 
-        rust = tomllib.loads((ROOT / "rust/logbrew/Cargo.toml").read_text(encoding="utf-8"))
+        rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
         self.assertEqual(rust["package"]["version"], "0.1.4")
-        ruby_version = (ROOT / "ruby/logbrew-ruby/lib/logbrew/version.rb").read_text(encoding="utf-8")
+        ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
         self.assertEqual(maven_version(ROOT / "java/logbrew-java/pom.xml"), "0.1.6")
         self.assertEqual(
@@ -77,15 +81,15 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_native_family_versions_advance(self) -> None:
         self.assertIn(
             '#define LOGBREW_C_VERSION "0.2.2"',
-            (ROOT / "c/logbrew-c/include/logbrew.h").read_text(encoding="utf-8"),
+            source_text("c/logbrew-c/include/logbrew.h"),
         )
         self.assertIn(
             'inline constexpr const char *version = "0.2.3"',
-            (ROOT / "cpp/logbrew-cpp/include/logbrew.hpp").read_text(encoding="utf-8"),
+            source_text("cpp/logbrew-cpp/include/logbrew.hpp"),
         )
         self.assertIn(
             'LogBrewObjectiveCVersion = @"0.2.3"',
-            (ROOT / "objc/logbrew-objc/src/LogBrew.m").read_text(encoding="utf-8"),
+            source_text("objc/logbrew-objc/src/LogBrew.m"),
         )
         unity = json_object("unity/logbrew-unity/package.json")
         self.assertEqual((unity["name"], unity["version"]), ("co.logbrew.unity", "0.2.2"))
@@ -98,10 +102,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "^0.1.12",
         )
 
-        native_source = (
-            ROOT
-            / "js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift"
-        ).read_text(encoding="utf-8")
+        native_source = source_text(
+            "js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift"
+        )
         self.assertIn(
             f'private static let sdkVersion = "{manifest["version"]}"',
             native_source,
@@ -112,9 +115,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
 
         for entrypoint in ("index.js", "index.cjs"):
-            source = (ROOT / "js/logbrew-node" / entrypoint).read_text(
-                encoding="utf-8"
-            )
+            source = source_text(Path("js/logbrew-node") / entrypoint)
             with self.subTest(entrypoint=entrypoint):
                 self.assertIn(declaration, source)
 
@@ -123,9 +124,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
 
         for entrypoint in ("index.js", "index.cjs"):
-            source = (ROOT / "js/logbrew-browser" / entrypoint).read_text(
-                encoding="utf-8"
-            )
+            source = source_text(Path("js/logbrew-browser") / entrypoint)
             with self.subTest(entrypoint=entrypoint):
                 self.assertIn(declaration, source)
 
@@ -141,9 +140,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )
 
     def test_python_core_declares_and_ci_installs_tls_trust_dependencies(self) -> None:
-        project = tomllib.loads(
-            (ROOT / "python/logbrew_py/pyproject.toml").read_text(encoding="utf-8")
-        )["project"]
+        project = tomllib.loads(source_text("python/logbrew_py/pyproject.toml"))["project"]
         self.assertEqual(
             set(project["dependencies"]),
             {
@@ -153,7 +150,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             },
         )
 
-        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        workflow = source_text(".github/workflows/ci.yml")
         install = "python3 -m pip install certifi==2026.7.22 truststore==0.10.4"
         source_tests = (
             "PYTHONPATH=python/logbrew_py/src python3 -m unittest discover "
@@ -163,18 +160,14 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn(source_tests, workflow)
         self.assertLess(workflow.index(install), workflow.index(source_tests))
 
-        readiness = (
-            ROOT / ".github/workflows/release-readiness.yml"
-        ).read_text(encoding="utf-8")
+        readiness = source_text(".github/workflows/release-readiness.yml")
         metadata_install = "python3 -m pip install ./python/logbrew_py"
         self.assertIn(metadata_install, readiness)
         self.assertIn(source_tests, readiness)
         self.assertLess(readiness.index(metadata_install), readiness.index(source_tests))
 
     def test_python_integrations_require_the_description_core_without_bloating_fastapi(self) -> None:
-        project = tomllib.loads(
-            (ROOT / "python/logbrew_fastapi/pyproject.toml").read_text(encoding="utf-8")
-        )["project"]
+        project = tomllib.loads(source_text("python/logbrew_fastapi/pyproject.toml"))["project"]
 
         self.assertEqual(
             project["optional-dependencies"]["celery"],
@@ -187,9 +180,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "python/logbrew_flask/pyproject.toml",
             "python/logbrew_django/pyproject.toml",
         ):
-            integration = tomllib.loads(
-                (ROOT / relative_path).read_text(encoding="utf-8")
-            )["project"]
+            integration = tomllib.loads(source_text(relative_path))["project"]
             with self.subTest(relative_path=relative_path):
                 self.assertIn(
                     "logbrew-sdk>=0.1.12,<0.2.0",
@@ -197,9 +188,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 )
 
     def test_react_native_bundle_smoke_reads_package_versions(self) -> None:
-        smoke = (
-            ROOT / "scripts/real_user_react_native_bundle_smoke.sh"
-        ).read_text(encoding="utf-8")
+        smoke = source_text("scripts/real_user_react_native_bundle_smoke.sh")
         self.assertIn(
             "expected_sdk_version=\"$(node -p \"require('${repo_root}/js/logbrew-js/package.json').version\")\"",
             smoke,
@@ -211,11 +200,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_react_native_minimum_public_peer_is_checked_before_publish(self) -> None:
         smoke_name = "scripts/real_user_react_native_minimum_peer_smoke.sh"
-        smoke = (ROOT / smoke_name).read_text(encoding="utf-8")
-        workflow = (
-            ROOT / ".github/workflows/publish-packages.yml"
-        ).read_text(encoding="utf-8")
-        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        smoke = source_text(smoke_name)
+        workflow = source_text(".github/workflows/publish-packages.yml")
+        ci = source_text(".github/workflows/ci.yml")
 
         self.assertIn('"@logbrew/sdk@$minimum_sdk_version"', smoke)
         self.assertIn('await import("@logbrew/react-native")', smoke)
@@ -226,12 +213,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertLess(workflow.index(invocation), workflow.index(publish))
         self.assertIn(invocation, ci)
 
-    def test_react_native_release_selector_accepts_name_and_package_directory(
-        self,
-    ) -> None:
-        workflow = (
-            ROOT / ".github/workflows/publish-packages.yml"
-        ).read_text(encoding="utf-8")
+    def test_npm_release_selector_and_bun_commands(self) -> None:
+        workflow = source_text(".github/workflows/publish-packages.yml")
+        npm_job = workflow.split("\n  npm:\n", 1)[1].split("\n  pypi:\n", 1)[0]
         package_dirs = workflow.split("package_dirs=(", 1)[1].split("\n          )", 1)[0]
         selector = workflow.split("select_npm_package_dirs() {", 1)[1].split(
             "\n          mapfile -t package_dirs",
@@ -239,18 +223,24 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )[0]
 
         self.assertRegex(package_dirs, r"(?m)^\s+js/logbrew-react-native$")
-        self.assertIn(
-            'package_name="$(node -p "require(\'./${package_dir}/package.json\').name")"',
-            selector,
-        )
-        self.assertIn(
+        for needle in (
+            'package_name="$(package_field "$package_dir" name)"',
             '"$requested_package" != "$package_dir"',
-            selector,
-        )
-        self.assertIn(
             '"$requested_package" != "$package_name"',
-            selector,
-        )
+        ):
+            self.assertIn(needle, selector)
+        for needle in (
+            "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+            'bun-version: "1.3.14"',
+            "bun pm pack --dry-run --ignore-scripts",
+            'bun publish "${publish_args[@]}"',
+            'export NPM_CONFIG_USERCONFIG="$npm_userconfig"',
+        ):
+            self.assertIn(needle, npm_job)
+        for forbidden in ("actions/setup-node", "corepack"):
+            self.assertNotIn(forbidden, npm_job)
+        self.assertNotRegex(npm_job, r"(?m)^\s*node\s+-")
+        self.assertNotRegex(npm_job, r"(?m)^\s*(?:\([^)]*&&\s*)?npm\s+(?:pack|publish)\b")
 
     def test_maven_and_nuget_package_versions_match_the_release_matrix(self) -> None:
         self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin/pom.xml"), "0.2.2")
@@ -289,10 +279,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )
 
     def test_tag_distributed_receipts_match_published_release(self) -> None:
-        go_smoke = (ROOT / "scripts/real_user_go_public_module_smoke.sh").read_text(encoding="utf-8")
-        go_gin_smoke = (ROOT / "scripts/real_user_go_gin_smoke.sh").read_text(encoding="utf-8")
-        swift_smoke = (ROOT / "scripts/real_user_swiftpm_public_smoke.sh").read_text(encoding="utf-8")
-        swift_readme = (ROOT / "swift/logbrew-swift/README.md").read_text(encoding="utf-8")
+        go_smoke = source_text("scripts/real_user_go_public_module_smoke.sh")
+        go_gin_smoke = source_text("scripts/real_user_go_gin_smoke.sh")
+        swift_smoke = source_text("scripts/real_user_swiftpm_public_smoke.sh")
+        swift_readme = source_text("swift/logbrew-swift/README.md")
 
         self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.7', go_smoke)
         self.assertIn('LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2', go_smoke)
@@ -329,7 +319,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             ),
         }
         for relative_path, expected_values in receipt_defaults.items():
-            body = (ROOT / relative_path).read_text(encoding="utf-8")
+            body = source_text(relative_path)
             for expected in expected_values:
                 self.assertIn(expected, body, relative_path)
 
@@ -347,8 +337,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             script_path = f"scripts/real_user_{script_slug}_smoke.sh"
             manifest_path = f"js/logbrew-{package_slug}/package.json"
             with self.subTest(script=script_path):
-                manifest = json.loads((ROOT / manifest_path).read_text(encoding="utf-8"))
-                body = (ROOT / script_path).read_text(encoding="utf-8")
+                manifest = json.loads(source_text(manifest_path))
+                body = source_text(script_path)
 
                 package_name = manifest["name"]
                 self.assertIsInstance(manifest["version"], str)
@@ -363,7 +353,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 self.assertIsNone(stale_version.search(body), script_path)
 
     def test_next_instrumentation_type_smoke_installs_framework_types(self) -> None:
-        smoke = (ROOT / "scripts/real_user_next_smoke.sh").read_text(encoding="utf-8")
+        smoke = source_text("scripts/real_user_next_smoke.sh")
 
         self.assertIn("@types/react", smoke)
         self.assertIn("@types/react-dom", smoke)
