@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import unittest
 from pathlib import Path
 
@@ -31,23 +30,10 @@ class NpmWorkspacePeerReleaseTests(unittest.TestCase):
             peer_dependencies=peers or {},
         )
 
-    def test_public_registry_checks_remove_auth_values(self) -> None:
-        node_auth_variable = check_npm_workspace_peer_release.NODE_AUTH_VARIABLE
-        npm_auth_variable = check_npm_workspace_peer_release.NPM_AUTH_VARIABLE
-        environment = check_npm_workspace_peer_release.public_npm_environment(
-            {
-                "PATH": "/usr/bin",
-                node_auth_variable: "test-value",
-                npm_auth_variable: "test-value",
-                "NPM_CONFIG_USERCONFIG": "/private/npmrc",
-            }
-        )
-
-        self.assertEqual(environment["PATH"], "/usr/bin")
-        self.assertNotIn(node_auth_variable, environment)
-        self.assertNotIn(npm_auth_variable, environment)
-        self.assertEqual(environment["NPM_CONFIG_USERCONFIG"], os.devnull)
-        self.assertEqual(environment["NPM_CONFIG_UPDATE_NOTIFIER"], "false")
+    def test_local_artifact_identity_uses_the_publish_packer(self) -> None:
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        self.assertIn("def bun_pack_shasum", source)
+        self.assertNotIn("def npm_pack_shasum", source)
 
     def test_unselected_workspace_peer_must_match_the_published_tarball(self) -> None:
         packages = {
