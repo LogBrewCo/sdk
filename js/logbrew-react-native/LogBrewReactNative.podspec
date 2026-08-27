@@ -33,7 +33,7 @@ Pod::Spec.new do |spec|
       "ios/GeneratedAppleDiagnostics/**/*.swift"
     ]
     diagnostics.dependency "#{spec.name}/Core"
-    diagnostics.dependency "KSCrash/Recording", "2.5.1"
+    diagnostics.dependency "KSCrash/Recording", "2.6.0"
     diagnostics.pod_target_xcconfig = {
       "DEFINES_MODULE" => "YES",
       "SWIFT_VERSION" => "5.0"

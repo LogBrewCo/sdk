@@ -89,32 +89,16 @@ extension NativeCrashDeliveryTests {
         #expect(store.deletedIDs == [9, 7])
     }
 
-    @Test("malformed hang identity is discarded without blocking valid crash replay")
-    func malformedHangIdentityIsDiscardedWithoutBlockingCrashReplay() throws {
+    @Test(
+        "malformed hang data is discarded without blocking valid crash replay",
+        arguments: StoredHangCorruption.allCases,
+    )
+    func malformedHangIsDiscardedWithoutBlockingCrashReplay(
+        _ corruption: StoredHangCorruption,
+    ) throws {
         let fixture = try MixedReplayFixture()
         defer { fixture.removeStorage() }
-        try fixture.invalidateStoredHangIdentity()
-
-        var accepted: [String] = []
-        let result = try fixture.capture.replayPendingReports { record in
-            accepted.append(record.eventID)
-            return true
-        }
-
-        #expect(accepted == [fixture.crashID])
-        #expect(result.attempted == 1)
-        #expect(result.acknowledged == 1)
-        #expect(result.discarded == 1)
-        #expect(result.pending == 0)
-        #expect(fixture.crashStore.deletedIDs == [7])
-        #expect(try fixture.hangStore.read() == nil)
-    }
-
-    @Test("malformed hang duration is discarded without blocking valid crash replay")
-    func malformedHangDurationIsDiscardedWithoutBlockingCrashReplay() throws {
-        let fixture = try MixedReplayFixture()
-        defer { fixture.removeStorage() }
-        try fixture.invalidateStoredHangDuration()
+        try fixture.invalidateStoredHang(corruption)
 
         var accepted: [String] = []
         let result = try fixture.capture.replayPendingReports { record in

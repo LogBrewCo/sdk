@@ -44,7 +44,14 @@ func rawReport(
             "error": ["type": mechanism, "reason": privateMarker],
             "threads": [["name": privateMarker, "backtrace": ["contents": []]]],
         ],
-        "system": ["process_name": privateMarker, "executable_path": "/private/\(privateMarker)"],
+        "system": [
+            "process_name": privateMarker,
+            "executable_path": "/private/\(privateMarker)",
+            "system_name": "/private/\(privateMarker)",
+            "machine": "\\private\\\(privateMarker)",
+            "CFBundleName": "\(privateMarker)\u{0000}",
+            "CFBundleVersion": String(repeating: "x", count: 257),
+        ],
         "user": ["opaque_value": privateMarker],
     ]
 }

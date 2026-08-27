@@ -335,7 +335,8 @@ the configured project does not replay an earlier project's records with the
 new project's key. The raw local KSCrash report can still contain sensitive
 process details, so apply the app's consent and retention policy to it. Hosted
 replay uploads only the bounded crash or hang issue described by the Swift
-`LogBrewCrash` contract. Status and error results expose fixed codes and bounded
+`LogBrewCrash` contract, including its capture-time service, deployment, OS,
+device-class, and application-version context. Status and error results expose fixed codes and bounded
 counters, not keys, paths, raw reports, or native error text. A custom endpoint
 must be a plain HTTPS path without embedded authentication, a query, or a fragment.
 

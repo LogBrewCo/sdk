@@ -44,7 +44,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.5"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.5"),
             "js/logbrew-react/package.json": ("@logbrew/react", "0.1.1"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.17"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.18"),
             "js/logbrew-svelte/package.json": ("@logbrew/svelte", "0.1.3"),
         }
         for relative_path, expected in npm_versions.items():
@@ -275,8 +275,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.7', go_smoke)
         self.assertIn('LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2', go_smoke)
         self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2', go_gin_smoke)
-        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.12', swift_smoke)
-        self.assertIn('from: "0.1.12"', swift_readme)
+        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.13', swift_smoke)
+        self.assertIn('from: "0.1.13"', swift_readme)
 
     def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
         receipt_defaults = {
@@ -286,7 +286,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_NPM_NODE_VERSION:-0.1.8",
                 "LOGBREW_NPM_NEXT_VERSION:-0.1.5",
                 "LOGBREW_NPM_REACT_VERSION:-0.1.1",
-                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.17",
+                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.18",
             ),
             "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.4",),
             "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.12",),

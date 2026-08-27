@@ -86,7 +86,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     dependencies: [
         .package(name: "logbrew-swift", path: "$package_path"),
-        .package(url: "https://github.com/kstenerud/KSCrash.git", exact: "2.5.1"),
+        .package(url: "https://github.com/kstenerud/KSCrash.git", exact: "2.6.0"),
     ],
     targets: [
         .executableTarget(
@@ -321,9 +321,26 @@ expected_frames = [
         "instructionOffset": "000000000000002f",
     },
 ]
+expected_exception = {
+    "mechanism": {"handled": False, "type": "signal"},
+    "type": "AppleNativeCrash",
+}
+expected_chain = {
+    "entries": [{
+        "id": 0,
+        "mechanism": expected_exception["mechanism"],
+        "messageState": "not_captured",
+        "relationship": "reported",
+        "stackFramesState": "not_captured",
+        "type": "AppleNativeCrash",
+    }],
+    "truncated": False,
+}
 synthetic = [event for event in events if event["attributes"].get("nativeStackFrames") == expected_frames]
 assert len(synthetic) == 1
 assert synthetic[0]["attributes"] == {
+    "exception": expected_exception,
+    "exceptionChain": expected_chain,
     "level": "critical",
     "metadata": {"crash.mechanism": "signal", "crash.replayed": True},
     "nativeStackFrames": expected_frames,
@@ -336,7 +353,25 @@ actual_attributes = actual[0]["attributes"]
 assert actual_attributes["level"] == "critical"
 assert actual_attributes["metadata"] == {"crash.mechanism": "signal", "crash.replayed": True}
 assert actual_attributes["title"] == "Native application crash"
-assert set(actual_attributes).issubset({"level", "metadata", "nativeStackFrames", "title"})
+assert actual_attributes["exception"] == expected_exception
+assert actual_attributes["exceptionChain"] == expected_chain
+assert set(actual_attributes) == {
+    "context", "exception", "exceptionChain", "level", "metadata", "nativeStackFrames", "title",
+}
+context = actual_attributes["context"]
+assert set(context) == {"resource", "schemaVersion"} and context["schemaVersion"] == 1
+resource = context["resource"]
+assert set(resource).issubset({"application", "device", "operatingSystem"})
+operating_system = resource["operatingSystem"]
+assert operating_system["name"] == "macOS"
+assert isinstance(operating_system.get("version"), str) and operating_system["version"]
+assert set(operating_system).issubset({"build", "name", "version"})
+device = resource["device"]
+assert device["architecture"] in {"arm64", "arm64e", "x86_64"}
+assert set(device).issubset({"architecture", "family", "model"})
+if application := resource.get("application"):
+    assert set(application).issubset({"build", "name", "version"})
+    assert all(isinstance(value, str) and value for value in application.values())
 actual_frames = actual_attributes.get("nativeStackFrames")
 assert isinstance(actual_frames, list) and 1 <= len(actual_frames) <= 32
 for frame in actual_frames:
@@ -359,6 +394,7 @@ receipt = {
     "requests": len(requests),
     "events": len(events),
     "syntheticFrames": len(expected_frames),
+    "capturedResource": True,
     "bodySha256": [hashlib.sha256(requests[index]["body"]).hexdigest() for index in (0, 2)],
 }
 with open(receipt_file, "w", encoding="utf-8") as handle:
@@ -416,6 +452,7 @@ assert reader["pending"] == 0
 assert intake["requests"] == 4
 assert intake["events"] == 2
 assert intake["syntheticFrames"] == 2
+assert intake["capturedResource"] is True
 assert len(binary_digest) == 64
 assert len(package_digest) == 64
 print(json.dumps({
@@ -432,6 +469,7 @@ print(json.dumps({
     "requests": 4,
     "events": 2,
     "syntheticFrames": 2,
+    "capturedResource": True,
     "acknowledged": 2,
     "discarded": 0,
     "pending": 0,

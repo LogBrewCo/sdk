@@ -93,6 +93,7 @@ struct NativeHangIncident: Codable, Equatable {
             mechanism: .deadlock,
             nativeStackFrames: nativeStackFrames,
             artifactIdentity: artifactIdentity.validatedIdentity(),
+            context: nil,
             hangState: state,
             hangDurationMs: durationMs,
             source: .hang(eventID: eventID),

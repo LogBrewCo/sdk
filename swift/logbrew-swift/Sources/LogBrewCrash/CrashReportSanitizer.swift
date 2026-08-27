@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+@_spi(CrashReplay) import LogBrew
 
 struct CrashReportSanitizer {
     let maxReplayBytes: Int
@@ -26,6 +27,10 @@ struct CrashReportSanitizer {
             mechanism: mechanism(error?["type"] as? String),
             nativeStackFrames: nativeStackFrames,
             artifactIdentity: artifactIdentity,
+            context: nativeCrashContext(
+                system: rawReport["system"] as? [String: Any],
+                artifactIdentity: artifactIdentity,
+            ),
             hangState: nil,
             hangDurationMs: nil,
             source: .engine(reportID: reportID),
@@ -66,6 +71,55 @@ struct CrashReportSanitizer {
         default: .unknown
         }
     }
+}
+
+func nativeCrashContext(
+    system: [String: Any]?,
+    artifactIdentity: NativeArtifactIdentity?,
+) -> TelemetryContext? {
+    let value = { (key: String) in crashContextValue(system?[key]) }
+    let operatingSystem = value("system_name").map {
+        TelemetryOperatingSystem(name: $0, version: value("system_version"), build: value("os_version"))
+    }
+    let family = value("model")
+    let model = value("machine")
+    let architecture = value("cpu_arch")
+    let device = family == nil && model == nil && architecture == nil
+        ? nil
+        : TelemetryDevice(family: family, model: model, architecture: architecture)
+    let applicationName = value("CFBundleName")
+    let applicationVersion = value("CFBundleShortVersionString")
+    let applicationBuild = value("CFBundleVersion")
+    let application = applicationName == nil && applicationVersion == nil && applicationBuild == nil
+        ? nil
+        : TelemetryApplication(name: applicationName, version: applicationVersion, build: applicationBuild)
+    guard artifactIdentity != nil || operatingSystem != nil || device != nil || application != nil else {
+        return nil
+    }
+    return TelemetryContext(resource: TelemetryResource(
+        service: artifactIdentity.map { TelemetryNamedVersion(name: $0.service) },
+        deployment: artifactIdentity.map {
+            TelemetryDeployment(environment: $0.environment, release: $0.release)
+        },
+        operatingSystem: operatingSystem,
+        device: device,
+        application: application,
+    ))
+}
+
+private func crashContextValue(_ rawValue: Any?) -> String? {
+    guard let value = rawValue as? String else {
+        return nil
+    }
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard (1 ... 256).contains(normalized.utf8.count),
+          !normalized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+          !normalized.contains("/"),
+          !normalized.contains("\\")
+    else {
+        return nil
+    }
+    return normalized
 }
 
 struct NativeCrashTimestamp: Comparable {

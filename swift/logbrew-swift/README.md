@@ -11,7 +11,7 @@ For Apple app setup flows, choose the Swift path first. Use this SDK for iOS, ma
 ## Install
 
 ```swift
-.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.12")
+.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.13")
 ```
 
 Use the `LogBrew` product from the repository root SwiftPM package. Add the separate `LogBrewCrash` product only when your Apple app explicitly opts into native fatal-crash capture. Local contributors can also open the Swift package directly from `swift/logbrew-swift`.
@@ -467,7 +467,7 @@ Enable durable delivery on the client before replay when a failed request must s
 
 Capture is process-wide and intentionally single-owner because fatal signal and Mach exception handlers cannot be safely stacked. Installation is idempotent for the owning object, but ownership cannot be transferred or the KSCrash handler uninstalled until process restart, and an inherited post-fork object fails closed. `stopReplay()` prevents further replay through that adapter and retains pending reports; it does not claim to remove the process-lifetime engine handler. Use a dedicated directory whose parent already exists. LogBrew normalizes it, rejects a symlink or non-directory target, pins its inode for the integration lifetime, and tightens it to owner-only access before engine installation. The engine keeps at most five raw reports by default; replay discards a raw report larger than 4 MiB by default. KSCrash's raw app-local report can still contain stack, binary, system, and application details even though memory introspection, queue names, user context, and console capture are disabled. Treat that directory as app-controlled sensitive data and apply your own cloud-synchronization, data-protection, consent, and retention policy.
 
-Only fixed title, severity, replay marker, typed `AppleNativeCrash` or `AppleNativeHang` exception identity, allowlisted mechanism and handled state, and privacy-bounded native frame identities and offsets are added to the LogBrew issue. Raw reports, exception reasons, messages, stack memory, thread names, console logs, paths, process data, user data, headers, authentication data, and device identity are not uploaded by this integration. This capture feature does not upload debug objects itself. Use the released `logbrew debug-artifacts upload` and `logbrew debug-artifacts lookup` commands with the exact project, release, environment, service, Mach-O UUID, and architecture to enable hosted native symbolication.
+Only fixed title, severity, replay marker, typed `AppleNativeCrash` or `AppleNativeHang` exception identity, allowlisted mechanism and handled state, privacy-bounded native frame identities and offsets, and capture-time resource context are added to the LogBrew issue. Resource context is limited to the configured service, environment, and release plus nonunique OS name/version/build, device family/model/architecture, and application name/version/build recorded by KSCrash. Raw reports, exception reasons, messages, stack memory, thread names, console logs, paths, process data, user data, headers, authentication data, bundle identifiers, device hashes, and unique device identity are not uploaded by this integration. This capture feature does not upload debug objects itself. Use the released `logbrew debug-artifacts upload` and `logbrew debug-artifacts lookup` commands with the exact project, release, environment, service, Mach-O UUID, and architecture to enable hosted native symbolication.
 
 To bind native frames to an uploaded Apple debug object, configure the exact
 project, release, environment, and active project service name used by the
@@ -477,6 +477,9 @@ architecture (`arm64`, `arm64e`, or `x86_64`) alongside that identity.
 Fatal reports persist that exact capture-time identity in one SDK-owned,
 validated report field. Reports created by older LogBrew versions replay
 without artifact identity rather than borrowing identity from a newer launch.
+Replay also reads only the documented capture-time resource fields from the
+KSCrash system record. Missing, malformed, path-like, controlled, or oversized
+values are omitted instead of substituted from the relaunching application.
 
 App-hang capture is a separate, explicit opt-in on the same capture owner:
 
