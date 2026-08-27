@@ -26,57 +26,19 @@ extension NativeCrashDeliveryTests {
         #expect(transport.sentBodies[0].contains(sampleCrashEventID.lowercased()))
     }
 
-    @Test("transport failure retains the native record and exact client event")
-    func transportFailureRetainsNativeRecord() throws {
+    @Test(
+        "rejected delivery retains the native record and exact client event",
+        arguments: RejectedCrashDelivery.allCases,
+    )
+    func rejectedDeliveryRetainsNativeRecord(_ rejection: RejectedCrashDelivery) throws {
         let store = FakeCrashReportStore(reports: [1: sampleRawReport()])
         let capture = try makeCapture(driver: FakeCrashEngineDriver(store: store))
         try capture.install()
-        let client = try makeClient(name: "transport-failure", maxRetries: 0)
-        let transport = RecordingTransport(scriptedResponses: [
-            .failure(.network("temporary delivery failure")),
-        ])
+        let client = try makeClient(name: "rejected-delivery", maxRetries: 0)
 
         let result = try capture.replayPendingReports(
             in: client,
-            transport: transport,
-        )
-
-        #expect(result.acknowledged == 0)
-        #expect(result.pending == 1)
-        #expect(store.reportIDs == [1])
-        #expect(client.pendingEvents() == 1)
-    }
-
-    @Test("non-success status retains the native record and exact client event")
-    func nonSuccessStatusRetainsNativeRecord() throws {
-        let store = FakeCrashReportStore(reports: [1: sampleRawReport()])
-        let capture = try makeCapture(driver: FakeCrashEngineDriver(store: store))
-        try capture.install()
-        let client = try makeClient(name: "status-failure", maxRetries: 0)
-        let transport = RecordingTransport(scriptedResponses: [.status(422)])
-
-        let result = try capture.replayPendingReports(
-            in: client,
-            transport: transport,
-        )
-
-        #expect(result.acknowledged == 0)
-        #expect(result.pending == 1)
-        #expect(store.reportIDs == [1])
-        #expect(client.pendingEvents() == 1)
-    }
-
-    @Test("malformed success retains the native record")
-    func malformedSuccessRetainsNativeRecord() throws {
-        let store = FakeCrashReportStore(reports: [1: sampleRawReport()])
-        let capture = try makeCapture(driver: FakeCrashEngineDriver(store: store))
-        try capture.install()
-        let client = try makeClient(name: "malformed-success", maxRetries: 0)
-        let transport = CrashInvalidAttemptCountTransport()
-
-        let result = try capture.replayPendingReports(
-            in: client,
-            transport: transport,
+            transport: rejection.transport,
         )
 
         #expect(result.acknowledged == 0)
@@ -166,6 +128,23 @@ extension NativeCrashDeliveryTests {
 }
 
 private let sampleCrashEventID = "8F12B746-0C79-4CC6-A077-98ED62F094B2"
+
+enum RejectedCrashDelivery: CaseIterable {
+    case networkFailure
+    case statusFailure
+    case malformedSuccess
+
+    var transport: any Transport {
+        switch self {
+        case .networkFailure:
+            RecordingTransport(scriptedResponses: [.failure(.network("temporary delivery failure"))])
+        case .statusFailure:
+            RecordingTransport(scriptedResponses: [.status(422)])
+        case .malformedSuccess:
+            CrashInvalidAttemptCountTransport()
+        }
+    }
+}
 
 private final class CrashInvalidAttemptCountTransport: Transport {
     func send(apiKey _: String, body _: Data) throws -> TransportResponse {

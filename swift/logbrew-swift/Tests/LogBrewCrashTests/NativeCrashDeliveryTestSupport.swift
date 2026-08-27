@@ -7,6 +7,7 @@ extension NativeCrashDeliveryTests {
     func makeArtifactIdentityCapture(
         persistedIdentity: [String: Any]?,
         replayIdentity: NativeArtifactIdentity,
+        capturedSystem: [String: Any]? = nil,
     ) throws -> NativeCrashCapture {
         var report = makeKSCrashReport(
             threads: [crashedThread(addresses: [0x1010, 0x2010, 0x3010])],
@@ -38,6 +39,9 @@ extension NativeCrashDeliveryTests {
             report["user"] = [
                 "logbrew_native_artifact_identity": persistedIdentity,
             ]
+        }
+        if let capturedSystem {
+            report["system"] = capturedSystem
         }
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -125,7 +129,7 @@ final class MixedReplayFixture {
         hangStore = installedHangStore
     }
 
-    func invalidateStoredHangIdentity() throws {
+    func invalidateStoredHang(_ corruption: StoredHangCorruption) throws {
         let recordURL = directory
             .appendingPathComponent("mixed-hang", isDirectory: true)
             .appendingPathComponent(NativeHangIncidentFileStore.recordName)
@@ -133,22 +137,14 @@ final class MixedReplayFixture {
         var record = try #require(
             JSONSerialization.jsonObject(with: data) as? [String: Any],
         )
-        var identity = try #require(record["artifactIdentity"] as? [String: Any])
-        identity["projectId"] = "not-a-uuid"
-        record["artifactIdentity"] = identity
-        try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
-            .write(to: recordURL)
-    }
-
-    func invalidateStoredHangDuration() throws {
-        let recordURL = directory
-            .appendingPathComponent("mixed-hang", isDirectory: true)
-            .appendingPathComponent(NativeHangIncidentFileStore.recordName)
-        let data = try Data(contentsOf: recordURL)
-        var record = try #require(
-            JSONSerialization.jsonObject(with: data) as? [String: Any],
-        )
-        record["durationMs"] = "invalid"
+        switch corruption {
+        case .identity:
+            var identity = try #require(record["artifactIdentity"] as? [String: Any])
+            identity["projectId"] = "not-a-uuid"
+            record["artifactIdentity"] = identity
+        case .duration:
+            record["durationMs"] = "invalid"
+        }
         try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
             .write(to: recordURL)
     }
@@ -156,4 +152,9 @@ final class MixedReplayFixture {
     func removeStorage() {
         try? FileManager.default.removeItem(at: directory)
     }
+}
+
+enum StoredHangCorruption: CaseIterable {
+    case identity
+    case duration
 }

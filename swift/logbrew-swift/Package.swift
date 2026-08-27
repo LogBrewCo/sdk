@@ -18,7 +18,7 @@ let package = Package(
         .executable(name: "TraceCorrelationExample", targets: ["TraceCorrelationExample"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/kstenerud/KSCrash.git", from: "2.5.1"),
+        .package(url: "https://github.com/kstenerud/KSCrash.git", from: "2.6.0"),
     ],
     targets: [
         .target(name: "LogBrew"),

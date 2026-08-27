@@ -4,8 +4,8 @@ import Foundation
 import Testing
 
 extension NativeCrashDeliveryTests {
-    @Test("capture-time artifact identity survives replay after an app update")
-    func captureTimeArtifactIdentitySurvivesUpdate() throws {
+    @Test("capture-time resource and artifact identity survive replay after an app update")
+    func captureTimeResourceAndArtifactIdentitySurviveUpdate() throws {
         let replayIdentity = try NativeArtifactIdentity(
             projectId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             release: "com.example.app@2.0.0+60",
@@ -21,6 +21,7 @@ extension NativeCrashDeliveryTests {
                 "service": "ios-app",
             ],
             replayIdentity: replayIdentity,
+            capturedSystem: capturedResourceSystem(),
         )
         let record = try #require(capture.pendingReports().first)
         let client = try makeClient(name: "artifact-identity-test")
@@ -46,6 +47,7 @@ extension NativeCrashDeliveryTests {
         #expect(exceptionMechanism["handled"] as? Bool == false)
         #expect(frames.map { $0["architecture"] as? String } == ["arm64", "arm64e", "x86_64"])
         #expect(frames.allSatisfy { Set($0.keys) == ["architecture", "imageUuid", "instructionOffset"] })
+        try expectCapturedResource(in: attributes, payload: client.previewJSON())
     }
 
     @Test("legacy crash reports replay without borrowing the current app identity")
@@ -250,5 +252,47 @@ extension NativeCrashDeliveryTests {
         let json = try client.previewJSON()
         #expect(!json.contains("hunter2"))
         #expect(!json.contains("never-upload-this-value"))
+    }
+}
+
+private func capturedResourceSystem() -> [String: Any] {
+    [
+        "system_name": "iOS",
+        "system_version": "26.5",
+        "os_version": "23F79",
+        "model": "iPhone",
+        "machine": "iPhone17,3",
+        "cpu_arch": "arm64",
+        "CFBundleName": "Example",
+        "CFBundleShortVersionString": "1.2.3",
+        "CFBundleVersion": "45",
+        "process_name": "never-upload-process",
+        "CFBundleExecutablePath": "/private/never-upload-path",
+        "CFBundleIdentifier": "never-upload-identifier",
+        "device_app_hash": "never-upload-hash",
+        "time_zone": "never-upload-timezone",
+    ]
+}
+
+private func expectCapturedResource(in attributes: [String: Any], payload: String) throws {
+    let context = try #require(attributes["context"] as? [String: Any])
+    #expect(context as NSDictionary == [
+        "schemaVersion": 1,
+        "resource": [
+            "service": ["name": "ios-app"],
+            "deployment": ["environment": "production", "release": "com.example.app@1.2.3+45"],
+            "operatingSystem": ["name": "iOS", "version": "26.5", "build": "23F79"],
+            "device": ["family": "iPhone", "model": "iPhone17,3", "architecture": "arm64"],
+            "application": ["name": "Example", "version": "1.2.3", "build": "45"],
+        ],
+    ])
+    for forbidden in [
+        "never-upload-process",
+        "never-upload-path",
+        "never-upload-identifier",
+        "never-upload-hash",
+        "never-upload-timezone",
+    ] {
+        #expect(!payload.contains(forbidden))
     }
 }

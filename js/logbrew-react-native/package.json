@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/react-native",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "React Native offline delivery, Apple native diagnostics, screen, error, trace, action, and network timeline helpers for LogBrew.",
   "type": "module",
   "main": "./index.cjs",

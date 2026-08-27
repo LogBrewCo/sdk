@@ -163,6 +163,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
 
     private let nativeStackFrames: [NativeStackFrame]?
     private let artifactIdentity: NativeArtifactIdentity?
+    private let context: TelemetryContext?
     private let hangState: NativeHangIncidentState?
     private let hangDurationMs: Double?
     let source: NativeCrashRecordSource
@@ -175,6 +176,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         mechanism: NativeCrashMechanism,
         nativeStackFrames: [NativeStackFrame]?,
         artifactIdentity: NativeArtifactIdentity?,
+        context: TelemetryContext?,
         hangState: NativeHangIncidentState?,
         hangDurationMs: Double? = nil,
         source: NativeCrashRecordSource,
@@ -186,6 +188,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         self.mechanism = mechanism
         self.nativeStackFrames = nativeStackFrames
         self.artifactIdentity = artifactIdentity
+        self.context = context
         self.hangState = hangState
         self.hangDurationMs = hangDurationMs
         self.source = source
@@ -237,6 +240,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
             exception: issueException,
             exceptionChain: nativeCrashExceptionChain(for: issueException),
             metadata: metadata,
+            context: context,
             nativeStackFrames: nativeStackFrames,
         )
     }
@@ -254,55 +258,11 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         guard event["type"] as? String == "issue",
               event["timestamp"] as? String == timestamp,
               let attributes = event["attributes"] as? [String: Any],
-              attributes["title"] as? String == issueAttributes.title,
-              attributes["level"] as? String == issueAttributes.level.canonicalValue,
-              attributes["message"] == nil,
-              exceptionMatches(attributes["exception"]),
-              nativeCrashExceptionChainMatches(
-                  attributes["exceptionChain"],
-                  expected: issueException,
-              ),
-              attributes["stackFrames"] == nil,
-              attributes["breadcrumbs"] == nil,
-              attributes["breadcrumbsTruncated"] == nil,
-              attributes["context"] == nil,
-              let metadata = attributes["metadata"] as? [String: Any],
-              metadata as NSDictionary == expectedMetadata,
-              nativeStackFramesMatch(attributes["nativeStackFrames"])
+              attributesMatch(attributes)
         else {
             return .collision
         }
         return .matching
-    }
-
-    private var expectedMetadata: NSDictionary {
-        var metadata: [String: Any] = [
-            "crash.mechanism": mechanism.name,
-            "crash.replayed": true,
-        ]
-        if let artifactIdentity {
-            metadata["projectId"] = artifactIdentity.projectId
-            metadata["release"] = artifactIdentity.release
-            metadata["environment"] = artifactIdentity.environment
-            metadata["service"] = artifactIdentity.service
-        }
-        if let hangState {
-            metadata["crash.handled"] = hangState == .recovered
-        }
-        if let hangDurationMs {
-            metadata["durationMs"] = hangDurationMs
-        }
-        return metadata as NSDictionary
-    }
-
-    private var expectedException: NSDictionary {
-        [
-            "type": hangState == nil ? "AppleNativeCrash" : "AppleNativeHang",
-            "mechanism": [
-                "type": mechanism.name,
-                "handled": hangState == .recovered,
-            ],
-        ] as NSDictionary
     }
 
     private var issueException: IssueException {
@@ -315,31 +275,16 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         )
     }
 
-    private func exceptionMatches(_ value: Any?) -> Bool {
-        guard let value else {
-            // Preserve exact retry identity for an event queued by an older SDK before typed exceptions existed.
-            return true
-        }
-        guard let exception = value as? [String: Any] else {
+    private func attributesMatch(_ actual: [String: Any]) -> Bool {
+        guard let encoded = try? JSONEncoder().encode(issueAttributes),
+              var expected = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        else {
             return false
         }
-        return exception as NSDictionary == expectedException
-    }
-
-    private func nativeStackFramesMatch(_ value: Any?) -> Bool {
-        guard let nativeStackFrames else {
-            return value == nil
+        for legacyField in ["exception", "exceptionChain", "context"] where actual[legacyField] == nil {
+            expected.removeValue(forKey: legacyField)
         }
-        guard let frames = value as? [[String: Any]], frames.count == nativeStackFrames.count else {
-            return false
-        }
-        return zip(frames, nativeStackFrames).allSatisfy { frame, expected in
-            frame as NSDictionary == [
-                "imageUuid": expected.imageUuid,
-                "architecture": expected.architecture.rawValue,
-                "instructionOffset": expected.instructionOffset,
-            ] as NSDictionary
-        }
+        return actual as NSDictionary == expected as NSDictionary
     }
 }
 
