@@ -84,10 +84,20 @@ export {
 };
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
-const DEFAULT_SDK_VERSION = "0.1.5";
+const DEFAULT_SDK_VERSION = "0.1.6";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
+const BROWSER_ERROR_SUMMARY = Object.freeze({
+  kind: "error",
+  message: "Unhandled browser error",
+  title: "Browser error"
+});
+const BROWSER_REJECTION_SUMMARY = Object.freeze({
+  kind: "unhandledrejection",
+  message: "Unhandled promise rejection",
+  title: "Unhandled promise rejection"
+});
 export function createLogBrewBrowserClient({
   apiKey,
   browserNavigator,
@@ -353,10 +363,11 @@ export async function capturePageView(context, options = {}) {
 
 export async function captureBrowserError(error, context, options = {}) {
   const eventOptions = eventOptionsWithContext(context, options);
+  const details = errorDetails(error);
   const event = typeof options.errorEvent === "function"
     ? options.errorEvent(error, eventCallbackContext(context))
-    : createBrowserErrorEvent(error, context.browserWindow, eventOptions);
-  const suppression = await suppressBrowserIssue(event, context, eventOptions);
+    : createBrowserIssueEvent(error, context.browserWindow, eventOptions, details, BROWSER_ERROR_SUMMARY);
+  const suppression = await suppressBrowserIssue(event, context, eventOptions, details.message);
   if (suppression) {
     maybePreventDefault(error, options);
     return suppression;
@@ -369,10 +380,11 @@ export async function captureBrowserError(error, context, options = {}) {
 
 export async function captureUnhandledRejection(rejection, context, options = {}) {
   const eventOptions = eventOptionsWithContext(context, options);
+  const details = rejectionReason(rejection);
   const event = typeof options.rejectionEvent === "function"
     ? options.rejectionEvent(rejection, eventCallbackContext(context))
-    : createUnhandledRejectionEvent(rejection, context.browserWindow, eventOptions);
-  const suppression = await suppressBrowserIssue(event, context, eventOptions);
+    : createBrowserIssueEvent(rejection, context.browserWindow, eventOptions, details, BROWSER_REJECTION_SUMMARY);
+  const suppression = await suppressBrowserIssue(event, context, eventOptions, details.message);
   if (suppression) {
     maybePreventDefault(rejection, options);
     return suppression;
@@ -567,7 +579,15 @@ export function createBrowserNetworkEvent(request, browserWindow = defaultWindow
   };
 }
 
-export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
+export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), options = {}) {
+  return createBrowserIssueEvent(error, browserWindow, options, errorDetails(error), BROWSER_ERROR_SUMMARY);
+}
+
+export function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(), options = {}) {
+  return createBrowserIssueEvent(rejection, browserWindow, options, rejectionReason(rejection), BROWSER_REJECTION_SUMMARY);
+}
+
+function createBrowserIssueEvent(input, browserWindow, {
   debugIdMap,
   environment,
   fingerprint,
@@ -585,10 +605,10 @@ export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), 
   runtime,
   service,
   traceContext
-} = {}) {
-  const details = errorDetails(error);
+}, details, summary) {
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
   const browserTraceContext = optionalBrowserTraceContext(traceContext);
+  const source = `browser.${summary.kind}`;
   const baseMetadata = browserMetadata(browserWindow, {
     columnNumber: details.columnNumber,
     errorName: details.name,
@@ -596,10 +616,10 @@ export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), 
     includeUserAgent,
     lineNumber: details.lineNumber,
     path,
-    source: "browser.error",
+    source,
     sourcePath: sanitizeSourcePath(details.source)
   });
-  const attributes = browserIssueAttributes(details.candidate, details.message, {
+  const attributes = browserIssueAttributes(details.candidate, summary.message, {
     debugIdMap,
     environment,
     fingerprint,
@@ -609,86 +629,23 @@ export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), 
     release,
     runtime,
     service,
-    source: "browser.error",
+    source,
     handled: false,
-    mechanism: "browser.error",
-    title: `Browser error: ${details.message}`,
+    mechanism: source,
     traceContext: browserTraceContext
   });
   const safeMetadata = sanitizeMetadata(
     sanitizeBrowserIssueMetadata(attributes.metadata),
-    "error"
+    summary.kind
   );
   const stackFrames = sanitizeBrowserIssueStackFrames(attributes.stackFrames);
   const exceptionChain = sanitizeBrowserIssueExceptionChain(attributes.exceptionChain);
   return {
-    id: idFactory({ error, message: details.message, path, source: "error" }),
+    id: idFactory({ error: input, message: details.message, path, source: summary.kind }),
     timestamp: now(),
     attributes: {
       ...attributes,
-      ...(exceptionChain ? { exceptionChain } : {}),
-      ...(stackFrames ? { stackFrames } : {}),
-      metadata: safeMetadata
-    }
-  };
-}
-
-export function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(), {
-  debugIdMap,
-  environment,
-  fingerprint,
-  idFactory = defaultErrorEventId,
-  includeErrorStack = false,
-  includeDocumentTitle = false,
-  includeHash = false,
-  includeQueryString = false,
-  includeUserAgent = false,
-  metadata,
-  now = () => new Date().toISOString(),
-  platform,
-  release,
-  sanitizeMetadata = defaultSanitizeMetadata,
-  runtime,
-  service,
-  traceContext
-} = {}) {
-  const reason = rejectionReason(rejection);
-  const path = browserPath(browserWindow, { includeHash, includeQueryString });
-  const browserTraceContext = optionalBrowserTraceContext(traceContext);
-  const baseMetadata = browserMetadata(browserWindow, {
-    errorName: reason.name,
-    includeDocumentTitle,
-    includeUserAgent,
-    path,
-    source: "browser.unhandledrejection"
-  });
-  const attributes = browserIssueAttributes(reason.candidate, reason.message, {
-    debugIdMap,
-    environment,
-    fingerprint,
-    includeErrorStack,
-    metadata: mergeMetadata(baseMetadata, metadata),
-    platform,
-    release,
-    runtime,
-    service,
-    source: "browser.unhandledrejection",
-    handled: false,
-    mechanism: "browser.unhandledrejection",
-    title: `Unhandled promise rejection: ${reason.message}`,
-    traceContext: browserTraceContext
-  });
-  const safeMetadata = sanitizeMetadata(
-    sanitizeBrowserIssueMetadata(attributes.metadata),
-    "unhandledrejection"
-  );
-  const stackFrames = sanitizeBrowserIssueStackFrames(attributes.stackFrames);
-  const exceptionChain = sanitizeBrowserIssueExceptionChain(attributes.exceptionChain);
-  return {
-    id: idFactory({ error: rejection, message: reason.message, path, source: "unhandledrejection" }),
-    timestamp: now(),
-    attributes: {
-      ...attributes,
+      title: `${summary.title}: ${attributes.exception.type}`,
       ...(exceptionChain ? { exceptionChain } : {}),
       ...(stackFrames ? { stackFrames } : {}),
       metadata: safeMetadata
@@ -799,9 +756,9 @@ function eventCallbackContext(context) {
   };
 }
 
-async function suppressBrowserIssue(event, context, options) {
+async function suppressBrowserIssue(event, context, options, localMessage) {
   const summary = browserIssueSuppressionSummary(event);
-  const ruleReason = matchedSuppressionRuleReason(options.errorSuppressionRules, event, summary);
+  const ruleReason = matchedSuppressionRuleReason(options.errorSuppressionRules, summary, localMessage);
   if (ruleReason) {
     return notifyBrowserIssueSuppressed(summary, context, options, ruleReason);
   }
@@ -853,7 +810,7 @@ function browserIssueSuppressionSummary(event) {
   });
 }
 
-function matchedSuppressionRuleReason(rules, event, summary) {
+function matchedSuppressionRuleReason(rules, summary, localMessage) {
   if (rules === undefined) {
     return undefined;
   }
@@ -861,14 +818,14 @@ function matchedSuppressionRuleReason(rules, event, summary) {
     throw new SdkError("configuration_error", "errorSuppressionRules must be an array");
   }
   for (const rule of rules) {
-    if (matchesSuppressionRule(rule, event, summary)) {
+    if (matchesSuppressionRule(rule, summary, localMessage)) {
       return typeof rule.reason === "string" && rule.reason.trim() !== "" ? rule.reason : "matched_rule";
     }
   }
   return undefined;
 }
 
-function matchesSuppressionRule(rule, event, summary) {
+function matchesSuppressionRule(rule, summary, localMessage) {
   if (!rule || Array.isArray(rule) || typeof rule !== "object") {
     return false;
   }
@@ -892,7 +849,7 @@ function matchesSuppressionRule(rule, event, summary) {
   }
   if (rule.message !== undefined) {
     hasMatcher = true;
-    if (!matchesSuppressionMatcher(event?.attributes?.message, rule.message)) {
+    if (!matchesSuppressionMatcher(localMessage, rule.message)) {
       return false;
     }
   }
@@ -1047,7 +1004,6 @@ function browserIssueAttributes(candidate, message, {
   runtime,
   service,
   source,
-  title,
   traceContext
 }) {
   return createIssueAttributesFromError(candidate, {
@@ -1065,7 +1021,6 @@ function browserIssueAttributes(candidate, message, {
     runtime,
     service,
     source,
-    title,
     trace: traceContext ? {
       sampled: traceContext.sampled,
       spanId: traceContext.spanId,
@@ -1076,6 +1031,7 @@ function browserIssueAttributes(candidate, message, {
 
 function sanitizeBrowserIssueMetadata(metadata) {
   const sanitized = { ...safeMetadata(metadata) };
+  delete sanitized.errorMessage;
   const frameFile = browserCodePath(sanitized.errorFrameFile);
   if (frameFile) {
     sanitized.errorFrameFile = frameFile;

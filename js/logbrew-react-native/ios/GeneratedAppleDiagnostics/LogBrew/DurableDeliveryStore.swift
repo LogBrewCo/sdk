@@ -76,7 +76,7 @@ final class DurableDeliveryStore: @unchecked Sendable {
             recoveredEvents = recovery.events
             recoveredPrefix = recovery.prefix
             if let last = recovery.events.last {
-                let lastSequence = try Self.sequence(from: last)
+                let lastSequence = try Self.sequence(from: last.recordName)
                 guard lastSequence < UInt64.max else {
                     throw DurableStoreFailure.corrupt
                 }
@@ -109,7 +109,7 @@ final class DurableDeliveryStore: @unchecked Sendable {
             throw DurableStoreFailure.corrupt
         }
         let name = Self.eventName(sequence: nextSequence)
-        let eventData = try Self.encodeEvent(event)
+        let eventData = try Self.encode(event)
         guard eventData.count == encodedBytes else {
             throw DurableStoreFailure.corrupt
         }

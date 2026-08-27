@@ -165,6 +165,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
             path.startswith("js/logbrew-react-native/android/")
             or path.startswith("js/logbrew-react-native/ios/")
             or path.startswith("js/logbrew-react-native/src/")
+            or path.startswith("swift/logbrew-swift/Sources/LogBrew")
             or path
             in {
                 "js/logbrew-react-native/index.native.js",
@@ -173,7 +174,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
                 "js/logbrew-react-native/test/run-native-store-tests.sh",
             }
         ):
-            enabled.add("react_native_native")
+            enabled.update({"javascript", "react_native_native"})
         if path.startswith("python/"):
             enabled.add("python")
         if path.startswith("go/"):

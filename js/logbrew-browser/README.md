@@ -99,7 +99,7 @@ const logbrew = installLogBrewBrowser({
 });
 ```
 
-Browser issues record a typed exception, an explicit unhandled capture mechanism, prior bounded breadcrumbs, the error type/message, path-only frames, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. Raw stack text and nested cause messages stay out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files, grouping keys, and automatic breadcrumbs use sanitized event fields, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
+Browser issues record a typed exception, an explicit unhandled capture mechanism, prior bounded breadcrumbs, a fixed error summary, path-only frames, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. Automatic capture does not send exception messages. Every exception-chain message reports `redacted`, and `errorMessage` is absent from metadata. Raw stack text also stays out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files, grouping keys, and automatic breadcrumbs use sanitized event fields, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
 
 ## Browser Error Suppression
 
@@ -119,9 +119,9 @@ const logbrew = installLogBrewBrowser({
 });
 ```
 
-Rules can match `source`, `errorName`, `path`, `frameFile`, `groupingKey`, `fingerprint`, or `message` with strings, regular expressions, or arrays of either. When a rule matches, the returned value is `{ suppressed: true, reason }`; LogBrew does not enqueue the issue and does not flush the transport. Suppression summaries include only source, error type, current path, path-only frame file, grouping key, optional fingerprint, and reason. They do not include the raw message, stack text, full URL, host, query string, hash, headers, payloads, cookies, replay data, baggage, or tracestate.
+Rules can match `source`, `errorName`, `path`, `frameFile`, `groupingKey`, `fingerprint`, or `message` with strings, regular expressions, or arrays of either. Message matching happens inside the app before the SDK discards the raw message. When a rule matches, the returned value is `{ suppressed: true, reason }`; LogBrew does not enqueue the issue and does not flush the transport. Suppression summaries include only source, error type, current path, path-only frame file, grouping key, optional fingerprint, and reason. They do not include the raw message, stack text, full URL, host, query string, hash, headers, payloads, cookies, replay data, baggage, or tracestate.
 
-For app-owned logic, pass `shouldCaptureError(event, summary)` and return `false` to suppress. The callback receives the full local issue event plus the safe summary, so keep the callback inside your own app boundary and do not forward raw events to logs or diagnostics.
+For app-owned logic, pass `shouldCaptureError(event, summary)` and return `false` to suppress. The callback receives the same sanitized issue event that LogBrew would enqueue plus the smaller suppression summary.
 
 ## Structured Actions
 

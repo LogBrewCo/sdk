@@ -216,8 +216,8 @@ test("installed browser errors attach release artifact Debug ID metadata without
     const payload = JSON.parse(context.previewJson());
     const issue = payload.events.find((event) => event.type === "issue");
 
-    assert.equal(issue.attributes.title, "Browser error: Checkout exploded");
-    assert.equal(issue.attributes.message, "Checkout exploded");
+    assert.equal(issue.attributes.title, "Browser error: TypeError");
+    assert.equal(issue.attributes.message, "Unhandled browser error");
     assert.deepEqual(issue.attributes.exception, {
       type: "TypeError",
       mechanism: { type: "browser.error", handled: false }
@@ -261,11 +261,12 @@ test("installed browser errors attach release artifact Debug ID metadata without
       issue.attributes.exceptionChain.entries[0].stackFrames,
       issue.attributes.stackFrames
     );
+    assert.equal(issue.attributes.exceptionChain.entries[0].messageState, "redacted");
     assert.equal(issue.attributes.exceptionChain.entries[1].relationship, "cause");
     assert.equal(issue.attributes.exceptionChain.entries[1].messageState, "redacted");
 
     const serialized = JSON.stringify(issue);
-    assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|errorStack|nestedDropped|dynamic-user-marker/u);
+    assert.doesNotMatch(serialized, /Checkout exploded|cdn\.example|debug=true|errorMessage|section|errorStack|nestedDropped|dynamic-user-marker/u);
   } finally {
     await removeTempDir();
   }
@@ -327,6 +328,7 @@ test("installed browser error suppression rules drop noisy issues with safe summ
       errorSuppressionRules: [{
         errorName: "ResizeObserverError",
         frameFile: /\/assets\/ads\.js$/u,
+        message: /^ResizeObserver loop failed/u,
         reason: "third_party_resize_observer"
       }],
       flushOnCapture: true,
@@ -358,6 +360,7 @@ test("installed browser error suppression rules drop noisy issues with safe summ
       errorSuppressionRules: [{
         errorName: "ResizeObserverError",
         frameFile: /\/assets\/ads\.js$/u,
+        message: /^ResizeObserver loop failed/u,
         reason: "third_party_resize_observer"
       }],
       flushOnCapture: true,
@@ -436,8 +439,10 @@ test("installed browser shouldCaptureError callback can suppress sanitized issue
     assert.equal(seen[0].summary.source, "browser.unhandledrejection");
     assert.equal(seen[0].summary.errorName, "TypeError");
     assert.equal(seen[0].summary.errorFrameFile, "/assets/vendor.js");
-    assert.equal(seen[0].event.attributes.metadata.errorMessage, "vendor failed for hidden@example.test");
-    assert.doesNotMatch(JSON.stringify(seen[0].summary), /hidden@example|cdn\.example|email=|widget/u);
+    assert.equal(seen[0].event.attributes.title, "Unhandled promise rejection: TypeError");
+    assert.equal(seen[0].event.attributes.message, "Unhandled promise rejection");
+    assert.equal(seen[0].event.attributes.metadata.errorMessage, undefined);
+    assert.doesNotMatch(JSON.stringify(seen[0]), /vendor failed|hidden@example|cdn\.example|email=|widget/u);
   } finally {
     await removeTempDir();
   }
