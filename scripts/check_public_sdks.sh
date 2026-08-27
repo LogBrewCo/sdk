@@ -422,7 +422,7 @@ begin_next_step() {
 }
 
 begin_next_step "Root contract tests"
-run_shell_step "python3 -m unittest discover -s tests -p 'test_*.py'"
+run_shell_step "python3 scripts/run_python_contract_tests.py"
 mark_step_complete
 
 begin_next_step "Rust tests"

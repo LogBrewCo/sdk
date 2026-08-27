@@ -2068,7 +2068,7 @@ Repository = "https://github.com/LogBrewCo/sdk"
             encoding="utf-8"
         )
 
-        self.assertIn("LOGBREW_PYPI_SDK_VERSION:-0.1.11", smoke)
+        self.assertIn("LOGBREW_PYPI_SDK_VERSION:-0.1.12", smoke)
 
 
 if __name__ == "__main__":

@@ -141,7 +141,7 @@ jobs:
 
       - name: Run full unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all == 'true' }}
-        run: python3 -m unittest discover -s tests -p 'test_*.py'
+        run: python3 scripts/run_python_contract_tests.py
 
       - name: Install canonical brand renderer
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends librsvg2-bin

@@ -48,10 +48,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((manifest["name"], manifest["version"]), expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.11"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.9"),
-            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.4"),
-            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.5"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.12"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.10"),
+            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.5"),
+            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.6"),
         }
         for relative_path, expected in pypi_versions.items():
             project = tomllib.loads((ROOT / relative_path).read_text(encoding="utf-8"))["project"]
@@ -178,10 +178,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             project["optional-dependencies"]["celery"],
-            ["logbrew-sdk[celery]>=0.1.9,<0.2.0"],
+            ["logbrew-sdk[celery]>=0.1.12,<0.2.0"],
         )
         self.assertNotIn("celery>=5,<6", project["dependencies"])
-        self.assertIn("logbrew-sdk>=0.1.9,<0.2.0", project["dependencies"])
+        self.assertIn("logbrew-sdk>=0.1.12,<0.2.0", project["dependencies"])
 
         for relative_path in (
             "python/logbrew_flask/pyproject.toml",
@@ -192,7 +192,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             )["project"]
             with self.subTest(relative_path=relative_path):
                 self.assertIn(
-                    "logbrew-sdk>=0.1.9,<0.2.0",
+                    "logbrew-sdk>=0.1.12,<0.2.0",
                     integration["dependencies"],
                 )
 
@@ -281,10 +281,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.11",
-                "logbrew-fastapi": "0.1.9",
-                "logbrew-flask": "0.1.4",
-                "logbrew-django": "0.1.5",
+                "logbrew-sdk": "0.1.12",
+                "logbrew-fastapi": "0.1.10",
+                "logbrew-flask": "0.1.5",
+                "logbrew-django": "0.1.6",
             },
         )
 
@@ -322,10 +322,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.2",
             ),
             "scripts/real_user_python_public_pypi_smoke.sh": (
-                "LOGBREW_PYPI_SDK_VERSION:-0.1.11",
-                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.9",
-                "LOGBREW_PYPI_FLASK_VERSION:-0.1.4",
-                "LOGBREW_PYPI_DJANGO_VERSION:-0.1.5",
+                "LOGBREW_PYPI_SDK_VERSION:-0.1.12",
+                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.10",
+                "LOGBREW_PYPI_FLASK_VERSION:-0.1.5",
+                "LOGBREW_PYPI_DJANGO_VERSION:-0.1.6",
             ),
         }
         for relative_path, expected_values in receipt_defaults.items():

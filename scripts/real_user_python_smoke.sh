@@ -478,7 +478,6 @@ run_dbapi_span_smoke() {
 run_sqlalchemy_span_smoke() {
     local output_prefix="$1"
 
-    python -m pip install "SQLAlchemy>=2,<3" >/dev/null
     python "$repo_root/scripts/python_sqlalchemy_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
@@ -513,7 +512,6 @@ run_cache_span_smoke() {
 run_django_cache_span_smoke() {
     local output_prefix="$1"
 
-    python -m pip install "Django>=5,<7" >/dev/null
     python "$repo_root/scripts/python_django_cache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
@@ -533,7 +531,6 @@ run_django_cache_span_smoke() {
 run_flask_cache_span_smoke() {
     local output_prefix="$1"
 
-    python -m pip install "Flask-Caching>=2,<3" >/dev/null
     python "$repo_root/scripts/python_flask_cache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
@@ -554,7 +551,6 @@ run_flask_cache_span_smoke() {
 run_pymemcache_span_smoke() {
     local output_prefix="$1"
 
-    python -m pip install "pymemcache>=4,<5" >/dev/null
     python "$repo_root/scripts/python_pymemcache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
@@ -579,7 +575,6 @@ run_pymemcache_span_smoke() {
 run_redis_span_smoke() {
     local output_prefix="$1"
 
-    python -m pip install "redis>=5,<7" >/dev/null
     python "$repo_root/scripts/python_redis_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
@@ -629,152 +624,120 @@ run_queue_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
-run_reinstall_from_freeze() {
+run_requirement_reinstalls() {
     local freeze_file="$1"
-    local expected_suffix="$2"
-    local output_prefix="$3"
-    local venv_path="$tmp_dir/$output_prefix-freeze-venv"
-    local report_path="$tmp_dir/$output_prefix-freeze-pip-install-report.json"
-    local inspect_path="$tmp_dir/$output_prefix-freeze-pip-inspect.json"
-    local pip_show_path="$tmp_dir/$output_prefix-freeze-pip-show.txt"
-    local pip_show_files_path="$tmp_dir/$output_prefix-freeze-pip-show-files.txt"
-    local pip_list_path="$tmp_dir/$output_prefix-freeze-pip-list.json"
+    local direct_requirements="$2"
+    local expected_suffix="$3"
+    local output_prefix="$4"
+    local venv_path="$tmp_dir/$output_prefix-requirements-venv"
+    local direct_report="$tmp_dir/$output_prefix-direct-pip-install-report.json"
+    local freeze_report="$tmp_dir/$output_prefix-freeze-pip-install-report.json"
 
     python3 -m venv "$venv_path"
     source "$venv_path/bin/activate"
 
-    python -m pip install --upgrade pip >/dev/null
-    python -m pip install mypy >/dev/null
-    python -m pip install aiohttp >/dev/null
-    python -m pip install --report "$report_path" -r "$freeze_file" >/dev/null
-    python -m pip check >/dev/null
-    python -m pip show logbrew-sdk > "$pip_show_path"
-    python -m pip show -f logbrew-sdk > "$pip_show_files_path"
-    python -m pip list --format=json > "$pip_list_path"
-    python -m pip inspect > "$inspect_path"
-
-    python "$tmp_dir/module_doc.py"
-    check_makefile_help "$output_prefix-freeze-make-help"
-    run_make smoke-types >/dev/null
-    python "$tmp_dir/metadata.py" "$expected_suffix" "$report_path" "$inspect_path" "$pip_show_path" "$pip_show_files_path" "$pip_list_path"
-    run_readme_example "smoke-readme" "$output_prefix-freeze-readme-example"
-    run_packaged_example_module "smoke-packaged-example" "$output_prefix-freeze-packaged-example"
-    run_packaged_real_user_module "smoke-packaged-smoke" "$output_prefix-freeze-packaged-smoke"
-    run_packaged_example_module "smoke-packaged-examples-readme" "$output_prefix-freeze-packaged-examples-readme"
-    run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "$output_prefix-freeze-packaged-examples-agent-timeline"
-    run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "$output_prefix-freeze-packaged-examples-first-useful-telemetry"
-    check_packaged_examples_listing "smoke-packaged-examples-list" "$output_prefix-freeze-packaged-examples-list"
-    check_packaged_examples_help "smoke-packaged-examples-help" "$output_prefix-freeze-packaged-examples-help"
-    run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-freeze-packaged-examples"
-    run_smoke_script "smoke-run" "$output_prefix-freeze-smoke"
-    run_logging_smoke "$output_prefix-freeze-logging"
-    run_runtime_context_smoke "$output_prefix-freeze-runtime-context"
-    run_http_transport_smoke "$output_prefix-freeze-http-transport"
-    run_urlopen_span_smoke "$output_prefix-freeze-urlopen-span"
-    run_requests_span_smoke "$output_prefix-freeze-requests-span"
-    run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
-    run_aiohttp_span_smoke "$output_prefix-freeze-aiohttp-span"
-    run_database_span_smoke "$output_prefix-freeze-database-span"
-    run_dbapi_span_smoke "$output_prefix-freeze-dbapi-span"
-    run_sqlalchemy_span_smoke "$output_prefix-freeze-sqlalchemy-span"
-    run_cache_span_smoke "$output_prefix-freeze-cache-span"
-    run_django_cache_span_smoke "$output_prefix-freeze-django-cache-span"
-    run_flask_cache_span_smoke "$output_prefix-freeze-flask-cache-span"
-    run_pymemcache_span_smoke "$output_prefix-freeze-pymemcache-span"
-    run_redis_span_smoke "$output_prefix-freeze-redis-span"
-    run_queue_span_smoke "$output_prefix-freeze-queue-span"
-
-    deactivate
-}
-
-run_reinstall_from_direct_requirement() {
-    local requirements_file="$1"
-    local expected_suffix="$2"
-    local output_prefix="$3"
-    local venv_path="$tmp_dir/$output_prefix-direct-venv"
-    local report_path="$tmp_dir/$output_prefix-direct-pip-install-report.json"
-    local inspect_path="$tmp_dir/$output_prefix-direct-pip-inspect.json"
-    local pip_show_path="$tmp_dir/$output_prefix-direct-pip-show.txt"
-    local pip_show_files_path="$tmp_dir/$output_prefix-direct-pip-show-files.txt"
-    local pip_list_path="$tmp_dir/$output_prefix-direct-pip-list.json"
-
-    python3 -m venv "$venv_path"
-    source "$venv_path/bin/activate"
-
-    python -m pip install --upgrade pip >/dev/null
-    python -m pip install mypy >/dev/null
-    python -m pip install aiohttp >/dev/null
     python -m pip install certifi==2026.7.22 truststore==0.10.4 >/dev/null
-    python -m pip install --no-deps --require-hashes --report "$report_path" -r "$requirements_file" >/dev/null
+    python -m pip install --no-deps --require-hashes --report "$direct_report" -r "$direct_requirements" >/dev/null
     python -m pip check >/dev/null
-    python -m pip show logbrew-sdk > "$pip_show_path"
-    python -m pip show -f logbrew-sdk > "$pip_show_files_path"
-    python -m pip list --format=json > "$pip_list_path"
     python -m pip freeze > "$tmp_dir/$output_prefix-direct-pip-freeze.txt"
     grep -q "^logbrew-sdk @ file://.*${expected_suffix}#sha256=" "$tmp_dir/$output_prefix-direct-pip-freeze.txt"
-    python -m pip inspect > "$inspect_path"
+    verify_direct_install "$expected_suffix" "$direct_report"
 
-    python "$tmp_dir/module_doc.py"
-    check_makefile_help "$output_prefix-direct-make-help"
-    run_make smoke-types >/dev/null
-    run_make smoke-test >/dev/null
-    python "$tmp_dir/metadata.py" "$expected_suffix" "$report_path" "$inspect_path" "$pip_show_path" "$pip_show_files_path" "$pip_list_path"
-    run_readme_example "smoke-readme" "$output_prefix-direct-readme-example"
-    run_packaged_example_module "smoke-packaged-example" "$output_prefix-direct-packaged-example"
-    run_packaged_real_user_module "smoke-packaged-smoke" "$output_prefix-direct-packaged-smoke"
-    run_packaged_example_module "smoke-packaged-examples-readme" "$output_prefix-direct-packaged-examples-readme"
-    run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "$output_prefix-direct-packaged-examples-agent-timeline"
-    run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "$output_prefix-direct-packaged-examples-first-useful-telemetry"
-    check_packaged_examples_listing "smoke-packaged-examples-list" "$output_prefix-direct-packaged-examples-list"
-    check_packaged_examples_help "smoke-packaged-examples-help" "$output_prefix-direct-packaged-examples-help"
-    run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-direct-packaged-examples"
-    run_smoke_script "smoke-run" "$output_prefix-direct-smoke"
-    run_logging_smoke "$output_prefix-direct-logging"
-    run_runtime_context_smoke "$output_prefix-direct-runtime-context"
-    run_http_transport_smoke "$output_prefix-direct-http-transport"
-    run_urlopen_span_smoke "$output_prefix-direct-urlopen-span"
-    run_requests_span_smoke "$output_prefix-direct-requests-span"
-    run_httpx_span_smoke "$output_prefix-direct-httpx-span"
-    run_aiohttp_span_smoke "$output_prefix-direct-aiohttp-span"
-    run_database_span_smoke "$output_prefix-direct-database-span"
-    run_dbapi_span_smoke "$output_prefix-direct-dbapi-span"
-    run_sqlalchemy_span_smoke "$output_prefix-direct-sqlalchemy-span"
-    run_cache_span_smoke "$output_prefix-direct-cache-span"
-    run_django_cache_span_smoke "$output_prefix-direct-django-cache-span"
-    run_flask_cache_span_smoke "$output_prefix-direct-flask-cache-span"
-    run_pymemcache_span_smoke "$output_prefix-direct-pymemcache-span"
-    run_redis_span_smoke "$output_prefix-direct-redis-span"
-    run_queue_span_smoke "$output_prefix-direct-queue-span"
+    python -m pip uninstall -y logbrew-sdk >/dev/null
+    assert_python_package_removed
+    python -m pip install --report "$freeze_report" -r "$freeze_file" >/dev/null
+    python -m pip check >/dev/null
+    verify_direct_install "$expected_suffix" "$freeze_report"
 
     deactivate
 }
 
 assert_python_package_removed() {
-    local pip_list_path="$1"
-
-    if python -m pip show logbrew-sdk >/dev/null 2>&1; then
-        echo "expected logbrew-sdk to be removed by pip uninstall" >&2
-        exit 1
-    fi
-    python -m pip list --format=json > "$pip_list_path"
-    python - "$pip_list_path" <<'EOF'
+    python - <<'EOF'
 import importlib.util
-import json
-from pathlib import Path
-import sys
+from importlib.metadata import PackageNotFoundError, version
 
 if importlib.util.find_spec("logbrew_sdk") is not None:
     raise SystemExit("expected logbrew_sdk module to be absent after uninstall")
-
-packages = json.loads(Path(sys.argv[1]).read_text())
-if any(item.get("name") == "logbrew-sdk" for item in packages):
-    raise SystemExit("expected logbrew-sdk to be absent from pip list after uninstall")
+try:
+    version("logbrew-sdk")
+except PackageNotFoundError:
+    pass
+else:
+    raise SystemExit("expected logbrew-sdk distribution to be absent after uninstall")
 EOF
 }
 
-python3 -m venv "$tmp_dir/build-venv"
-"$tmp_dir/build-venv/bin/python" -m pip install --upgrade pip build >/dev/null
-"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" > "$tmp_dir/build.log" 2>&1
+verify_direct_install() {
+    local expected_suffix="$1"
+    local report_path="$2"
+
+    python - "$expected_suffix" "$report_path" <<'PY'
+import json
+from importlib.metadata import distribution, version
+import os
+from pathlib import Path
+import sys
+
+import logbrew_sdk
+
+expected_suffix, report_path = sys.argv[1:]
+package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
+if version("logbrew-sdk") != package_version:
+    raise SystemExit("installed package version does not match release metadata")
+if not Path(logbrew_sdk.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()):
+    raise SystemExit("logbrew_sdk was not imported from the isolated environment")
+
+direct_url = json.loads(
+    Path(distribution("logbrew-sdk").locate_file(
+        f"logbrew_sdk-{package_version}.dist-info/direct_url.json"
+    )).read_text()
+)
+report = json.loads(Path(report_path).read_text())
+entry = next(
+    item for item in report.get("install", [])
+    if item.get("metadata", {}).get("name") == "logbrew-sdk"
+)
+for label, source in (("direct_url", direct_url), ("pip report", entry.get("download_info", {}))):
+    url = source.get("url", "")
+    sha256 = source.get("archive_info", {}).get("hashes", {}).get("sha256", "")
+    if not url.startswith("file://") or not url.endswith(expected_suffix):
+        raise SystemExit(f"unexpected {label} target: {url!r}")
+    if len(sha256) != 64:
+        raise SystemExit(f"unexpected {label} sha256: {sha256!r}")
+PY
+}
+
+run_sdist_install_checks() {
+    python3 -m venv "$tmp_dir/sdist-venv"
+    source "$tmp_dir/sdist-venv/bin/activate"
+
+    python -m pip install --report "$tmp_dir/sdist-pip-install-report.json" "$sdist_path" >/dev/null
+    python -m pip check >/dev/null
+    python -m pip freeze > "$tmp_dir/sdist-pip-freeze.txt"
+    grep -q "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt"
+    grep "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt" > "$tmp_dir/sdist-direct-requirements.txt"
+    test "$(wc -l < "$tmp_dir/sdist-direct-requirements.txt" | tr -d ' ')" = "1"
+    python "$tmp_dir/module_doc.py"
+    run_make smoke-test >/dev/null
+    verify_direct_install "$sdist_artifact" "$tmp_dir/sdist-pip-install-report.json"
+    deactivate
+}
+
+python3 -m venv "$tmp_dir/venv"
+source "$tmp_dir/venv/bin/activate"
+python -m pip install \
+    build \
+    "setuptools>=80" \
+    mypy \
+    aiohttp \
+    "SQLAlchemy>=2,<3" \
+    "Django>=5,<7" \
+    "Flask-Caching>=2,<3" \
+    "pymemcache>=4,<5" \
+    "redis>=5,<7" \
+    >/dev/null
+python -m build --no-isolation --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" > "$tmp_dir/build.log" 2>&1
 wheel_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.whl' | head -n 1)"
 export LOGBREW_WHEEL_PATH="$wheel_path"
 export LOGBREW_PYTHON_DIST_INFO_DIR="$dist_info_dir"
@@ -988,12 +951,6 @@ for needle in (
         raise SystemExit(f"missing sdist pyproject metadata: {needle}")
 PY
 
-python3 -m venv "$tmp_dir/venv"
-source "$tmp_dir/venv/bin/activate"
-
-python -m pip install --upgrade pip >/dev/null
-python -m pip install mypy >/dev/null
-python -m pip install aiohttp >/dev/null
 python -m pip install --report "$tmp_dir/pip-install-report.json" "$wheel_path" >/dev/null
 python -m pip check >/dev/null
 python -m pip show logbrew-sdk > "$tmp_dir/pip-show.txt"
@@ -3521,6 +3478,11 @@ grep -q '^smoke-packaged-examples-help:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples:$' "$tmp_dir/Makefile"
 grep -q '^smoke-run:$' "$tmp_dir/Makefile"
 
+run_requirement_reinstalls "$tmp_dir/pip-freeze.txt" "$tmp_dir/pip-direct-requirements.txt" "$wheel_artifact" "wheel" &
+requirements_pid=$!
+run_sdist_install_checks &
+sdist_checks_pid=$!
+
 check_makefile_help "wheel-make-help"
 run_make smoke-types >/dev/null
 run_make smoke-test >/dev/null
@@ -3550,143 +3512,6 @@ run_flask_cache_span_smoke "wheel-flask-cache-span"
 run_pymemcache_span_smoke "wheel-pymemcache-span"
 run_redis_span_smoke "wheel-redis-span"
 run_queue_span_smoke "wheel-queue-span"
-
-python -m pip uninstall -y logbrew-sdk >/dev/null
-assert_python_package_removed "$tmp_dir/pip-uninstall-list.json"
-
-python -m pip install --report "$tmp_dir/pip-reinstall-report.json" "$wheel_path" >/dev/null
-python -m pip check >/dev/null
-python -m pip show logbrew-sdk > "$tmp_dir/pip-reinstall-show.txt"
-python -m pip show -f logbrew-sdk > "$tmp_dir/pip-reinstall-show-files.txt"
-python -m pip list --format=json > "$tmp_dir/pip-reinstall-list.json"
-python -m pip inspect > "$tmp_dir/pip-reinstall-inspect.json"
-
-python "$tmp_dir/module_doc.py"
-check_makefile_help "wheel-reinstall-make-help"
-run_make smoke-types >/dev/null
-run_make smoke-test >/dev/null
-python "$tmp_dir/metadata.py" "$wheel_artifact" "$tmp_dir/pip-reinstall-report.json" "$tmp_dir/pip-reinstall-inspect.json" "$tmp_dir/pip-reinstall-show.txt" "$tmp_dir/pip-reinstall-show-files.txt" "$tmp_dir/pip-reinstall-list.json"
-run_readme_example "smoke-readme" "wheel-reinstall-readme-example"
-run_packaged_example_module "smoke-packaged-example" "wheel-reinstall-packaged-example"
-run_packaged_real_user_module "smoke-packaged-smoke" "wheel-reinstall-packaged-smoke"
-run_packaged_example_module "smoke-packaged-examples-readme" "wheel-reinstall-packaged-examples-readme"
-run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "wheel-reinstall-packaged-examples-agent-timeline"
-run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "wheel-reinstall-packaged-examples-first-useful-telemetry"
-check_packaged_examples_listing "smoke-packaged-examples-list" "wheel-reinstall-packaged-examples-list"
-check_packaged_examples_help "smoke-packaged-examples-help" "wheel-reinstall-packaged-examples-help"
-run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-reinstall-packaged-examples"
-run_smoke_script "smoke-run" "smoke-reinstall"
-run_logging_smoke "wheel-reinstall-logging"
-run_runtime_context_smoke "wheel-reinstall-runtime-context"
-run_http_transport_smoke "wheel-reinstall-http-transport"
-run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
-run_requests_span_smoke "wheel-reinstall-requests-span"
-run_httpx_span_smoke "wheel-reinstall-httpx-span"
-run_aiohttp_span_smoke "wheel-reinstall-aiohttp-span"
-run_database_span_smoke "wheel-reinstall-database-span"
-run_dbapi_span_smoke "wheel-reinstall-dbapi-span"
-run_sqlalchemy_span_smoke "wheel-reinstall-sqlalchemy-span"
-run_cache_span_smoke "wheel-reinstall-cache-span"
-run_django_cache_span_smoke "wheel-reinstall-django-cache-span"
-run_flask_cache_span_smoke "wheel-reinstall-flask-cache-span"
-run_pymemcache_span_smoke "wheel-reinstall-pymemcache-span"
-run_redis_span_smoke "wheel-reinstall-redis-span"
-run_queue_span_smoke "wheel-reinstall-queue-span"
-
-deactivate
-run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
-run_reinstall_from_direct_requirement "$tmp_dir/pip-direct-requirements.txt" "$wheel_artifact" "wheel"
-
-python3 -m venv "$tmp_dir/sdist-venv"
-source "$tmp_dir/sdist-venv/bin/activate"
-
-python -m pip install --upgrade pip >/dev/null
-python -m pip install mypy >/dev/null
-python -m pip install aiohttp >/dev/null
-python -m pip install --report "$tmp_dir/sdist-pip-install-report.json" "$sdist_path" >/dev/null
-python -m pip check >/dev/null
-python -m pip show logbrew-sdk > "$tmp_dir/sdist-pip-show.txt"
-python -m pip show -f logbrew-sdk > "$tmp_dir/sdist-pip-show-files.txt"
-python -m pip list --format=json > "$tmp_dir/sdist-pip-list.json"
-python -m pip freeze > "$tmp_dir/sdist-pip-freeze.txt"
-grep -q "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt"
-grep "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt" > "$tmp_dir/sdist-direct-requirements.txt"
-test "$(wc -l < "$tmp_dir/sdist-direct-requirements.txt" | tr -d ' ')" = "1"
-python -m pip inspect > "$tmp_dir/sdist-pip-inspect.json"
-
-python "$tmp_dir/module_doc.py"
-check_makefile_help "sdist-make-help"
-run_make smoke-types >/dev/null
-run_make smoke-test >/dev/null
-python "$tmp_dir/metadata.py" "$sdist_artifact" "$tmp_dir/sdist-pip-install-report.json" "$tmp_dir/sdist-pip-inspect.json" "$tmp_dir/sdist-pip-show.txt" "$tmp_dir/sdist-pip-show-files.txt" "$tmp_dir/sdist-pip-list.json"
-run_readme_example "smoke-readme" "sdist-readme-example"
-run_packaged_example_module "smoke-packaged-example" "sdist-packaged-example"
-run_packaged_real_user_module "smoke-packaged-smoke" "sdist-packaged-smoke"
-run_packaged_example_module "smoke-packaged-examples-readme" "sdist-packaged-examples-readme"
-run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "sdist-packaged-examples-agent-timeline"
-run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "sdist-packaged-examples-first-useful-telemetry"
-check_packaged_examples_listing "smoke-packaged-examples-list" "sdist-packaged-examples-list"
-check_packaged_examples_help "smoke-packaged-examples-help" "sdist-packaged-examples-help"
-run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-packaged-examples"
-run_smoke_script "smoke-run" "sdist-smoke"
-run_logging_smoke "sdist-logging"
-run_runtime_context_smoke "sdist-runtime-context"
-run_http_transport_smoke "sdist-http-transport"
-run_urlopen_span_smoke "sdist-urlopen-span"
-run_requests_span_smoke "sdist-requests-span"
-run_httpx_span_smoke "sdist-httpx-span"
-run_aiohttp_span_smoke "sdist-aiohttp-span"
-run_database_span_smoke "sdist-database-span"
-run_dbapi_span_smoke "sdist-dbapi-span"
-run_sqlalchemy_span_smoke "sdist-sqlalchemy-span"
-run_cache_span_smoke "sdist-cache-span"
-run_django_cache_span_smoke "sdist-django-cache-span"
-run_flask_cache_span_smoke "sdist-flask-cache-span"
-run_pymemcache_span_smoke "sdist-pymemcache-span"
-run_redis_span_smoke "sdist-redis-span"
-run_queue_span_smoke "sdist-queue-span"
-
-python -m pip uninstall -y logbrew-sdk >/dev/null
-assert_python_package_removed "$tmp_dir/sdist-pip-uninstall-list.json"
-
-python -m pip install --report "$tmp_dir/sdist-pip-reinstall-report.json" "$sdist_path" >/dev/null
-python -m pip check >/dev/null
-python -m pip show logbrew-sdk > "$tmp_dir/sdist-pip-reinstall-show.txt"
-python -m pip show -f logbrew-sdk > "$tmp_dir/sdist-pip-reinstall-show-files.txt"
-python -m pip list --format=json > "$tmp_dir/sdist-pip-reinstall-list.json"
-python -m pip inspect > "$tmp_dir/sdist-pip-reinstall-inspect.json"
-
-python "$tmp_dir/module_doc.py"
-check_makefile_help "sdist-reinstall-make-help"
-run_make smoke-types >/dev/null
-run_make smoke-test >/dev/null
-python "$tmp_dir/metadata.py" "$sdist_artifact" "$tmp_dir/sdist-pip-reinstall-report.json" "$tmp_dir/sdist-pip-reinstall-inspect.json" "$tmp_dir/sdist-pip-reinstall-show.txt" "$tmp_dir/sdist-pip-reinstall-show-files.txt" "$tmp_dir/sdist-pip-reinstall-list.json"
-run_readme_example "smoke-readme" "sdist-reinstall-readme-example"
-run_packaged_example_module "smoke-packaged-example" "sdist-reinstall-packaged-example"
-run_packaged_real_user_module "smoke-packaged-smoke" "sdist-reinstall-packaged-smoke"
-run_packaged_example_module "smoke-packaged-examples-readme" "sdist-reinstall-packaged-examples-readme"
-run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "sdist-reinstall-packaged-examples-agent-timeline"
-run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "sdist-reinstall-packaged-examples-first-useful-telemetry"
-check_packaged_examples_listing "smoke-packaged-examples-list" "sdist-reinstall-packaged-examples-list"
-check_packaged_examples_help "smoke-packaged-examples-help" "sdist-reinstall-packaged-examples-help"
-run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-reinstall-packaged-examples"
-run_smoke_script "smoke-run" "sdist-smoke-reinstall"
-run_logging_smoke "sdist-reinstall-logging"
-run_runtime_context_smoke "sdist-reinstall-runtime-context"
-run_http_transport_smoke "sdist-reinstall-http-transport"
-run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
-run_requests_span_smoke "sdist-reinstall-requests-span"
-run_httpx_span_smoke "sdist-reinstall-httpx-span"
-run_aiohttp_span_smoke "sdist-reinstall-aiohttp-span"
-run_database_span_smoke "sdist-reinstall-database-span"
-run_dbapi_span_smoke "sdist-reinstall-dbapi-span"
-run_sqlalchemy_span_smoke "sdist-reinstall-sqlalchemy-span"
-run_cache_span_smoke "sdist-reinstall-cache-span"
-run_django_cache_span_smoke "sdist-reinstall-django-cache-span"
-run_flask_cache_span_smoke "sdist-reinstall-flask-cache-span"
-run_pymemcache_span_smoke "sdist-reinstall-pymemcache-span"
-run_redis_span_smoke "sdist-reinstall-redis-span"
-run_queue_span_smoke "sdist-reinstall-queue-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json
@@ -3936,6 +3761,6 @@ grep -q '"code": "transport_error"' "$tmp_dir/transport_status.stdout.json"
 grep -q '"message": "unexpected transport status 400"' "$tmp_dir/transport_status.stdout.json"
 grep -q '"pending": 1' "$tmp_dir/transport_status.stdout.json"
 
+wait "$requirements_pid"
+wait "$sdist_checks_pid"
 deactivate
-run_reinstall_from_freeze "$tmp_dir/sdist-pip-freeze.txt" "$sdist_artifact" "sdist"
-run_reinstall_from_direct_requirement "$tmp_dir/sdist-direct-requirements.txt" "$sdist_artifact" "sdist"
