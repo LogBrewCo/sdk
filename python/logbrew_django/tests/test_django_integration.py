@@ -239,7 +239,7 @@ class DjangoIntegrationTests(unittest.TestCase):
         issue = payload["events"][0]["attributes"]
         span = payload["events"][1]["attributes"]
         self.assertEqual(issue["title"], "GET /boom/ failed")
-        self.assertEqual(issue["message"], "broken handler")
+        self.assertEqual(issue["message"], "Unhandled exception")
         self.assertEqual(
             issue["exception"],
             {
@@ -249,11 +249,12 @@ class DjangoIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(issue["stackFrames"][0]["filename"], "test_django_integration.py")
         self.assertEqual(issue["stackFrames"][0]["function"], "boom")
-        self.assertEqual(issue["metadata"]["exception_type"], "RuntimeError")
+        self.assertEqual(issue["exceptionChain"]["entries"][0]["messageState"], "redacted")
         self.assertEqual(span["status"], "error")
         self.assertEqual(span["metadata"]["status_code"], 500)
         self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
         self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
+        self.assertNotIn("broken handler", json.dumps(payload))
 
         sdk_client = make_client()
         transport = RecordingTransport.always_accept()

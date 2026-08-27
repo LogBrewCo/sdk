@@ -122,7 +122,8 @@ class LogBrewFastAPIRuntime:
         try:
             response = self.client.shutdown()
         except Exception as error:
-            self._shutdown_error_code = _delivery_error_code(error)
+            code = getattr(error, "code", None)
+            self._shutdown_error_code = code if isinstance(code, str) and code else "delivery_error"
             raise
         self._shutdown_error_code = None
         self._shutdown_response = response
@@ -172,6 +173,7 @@ def init_logbrew(
     *,
     api_key: str,
     service_name: str = "fastapi",
+    environment: str = "production",
     transport: Transport | None = None,
     automatic_delivery: bool = True,
     delivery_interval_seconds: float = 1.0,
@@ -194,10 +196,15 @@ def init_logbrew(
         raise SdkError("configuration_error", "raise_shutdown_errors must be a boolean")
 
     selected_transport = transport if transport is not None else HttpTransport()
+    try:
+        sdk_version = distribution_version("logbrew-fastapi")
+    except PackageNotFoundError:
+        sdk_version = "0+unknown"
     client = LogBrewClient.create(
         api_key=api_key,
         sdk_name="logbrew-fastapi",
-        sdk_version=_package_version(),
+        sdk_version=sdk_version,
+        context={"schemaVersion": 1, "resource": {"deployment": {"environment": environment}}},
         transport=selected_transport,
         automatic_delivery=automatic_delivery,
         delivery_interval_seconds=delivery_interval_seconds,
@@ -228,18 +235,6 @@ def init_logbrew(
         raise
     setattr(app.state, _RUNTIME_STATE_ATTRIBUTE, runtime)
     return runtime
-
-
-def _package_version() -> str:
-    try:
-        return distribution_version("logbrew-fastapi")
-    except PackageNotFoundError:
-        return "0+unknown"
-
-
-def _delivery_error_code(error: Exception) -> str:
-    code = getattr(error, "code", None)
-    return code if isinstance(code, str) and code else "delivery_error"
 
 
 def utc_timestamp() -> str:
@@ -418,18 +413,17 @@ def capture_exception(
 
     issue_event_id = event_id or f"evt_fastapi_issue_{uuid.uuid4().hex}"
     trace_context = trace or request_logbrew_trace(request) or get_active_logbrew_trace()
-    captured_at = timestamp or utc_timestamp()
     client.issue(
         issue_event_id,
-        captured_at,
+        timestamp or utc_timestamp(),
         create_issue_attributes_from_exception(
             exc,
             title=f"{request_name(request)} failed",
+            message="Unhandled exception",
             mechanism="fastapi.middleware",
             handled=False,
             metadata={
                 **request_metadata(request, status_code=500, service_name=service_name),
-                "exception_type": exc.__class__.__name__,
                 **trace_metadata(trace_context),
             },
         ),

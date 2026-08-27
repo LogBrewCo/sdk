@@ -1548,18 +1548,16 @@ def create_issue_attributes_from_exception(
         mechanism=mechanism,
         handled=handled,
         include_stack_frames=include_stack_frames,
+        capture_messages=message is None,
     )
     reported_exception = exception_chain["entries"][0]
-    error_message = (
-        cast(str, reported_exception.get("message", exception_type))
-        if message is None
-        else message
-    )
+    if message is None:
+        message = cast(str, reported_exception.get("message", exception_type))
     stack_frames = cast(list[IssueStackFrame], reported_exception.get("stackFrames", []))
     attributes: IssueAttributes = {
         "title": title if title is not None else exception_type,
         "level": level,
-        "message": error_message,
+        "message": message,
         "exception": {
             "type": exception_type,
             "mechanism": {"type": mechanism, "handled": handled},

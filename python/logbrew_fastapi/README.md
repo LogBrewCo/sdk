@@ -30,6 +30,7 @@ logbrew = init_logbrew(
     app,
     api_key=os.environ["LOGBREW_API_KEY"],
     service_name="checkout-api",
+    environment=os.environ.get("LOGBREW_ENVIRONMENT", "production"),
 )
 client = logbrew.client
 logger = logging.getLogger("checkout-api")
@@ -42,7 +43,7 @@ def health() -> dict[str, bool]:
     return {"ok": True}
 ```
 
-`init_logbrew()` records successful requests as spans and unhandled handler exceptions as issues plus error spans. Exception issues include first-class exception type, `fastapi.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Exception messages keep the integration's existing `str(error)` behavior, so applications should avoid sensitive values in exception text. It owns a real `HttpTransport`, uses the core SDK's bounded background delivery, and performs a final exact flush after the app's own default or custom FastAPI lifespan teardown. Network delivery never blocks the request path.
+`init_logbrew()` records successful requests as spans and unhandled handler exceptions as issues plus error spans. Exception issues include first-class exception type, `fastapi.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Automatic capture never reads or sends exception messages: the issue uses the fixed summary `Unhandled exception`, and every exception-chain node is marked `redacted`. It owns a real `HttpTransport`, uses the core SDK's bounded background delivery, and performs a final exact flush after the app's own default or custom FastAPI lifespan teardown. Network delivery never blocks the request path.
 
 The returned runtime exposes content-free delivery diagnostics:
 
