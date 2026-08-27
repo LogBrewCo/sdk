@@ -36,7 +36,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.13"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.14"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.6"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.4"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
@@ -110,23 +110,14 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             native_source,
         )
 
-    def test_node_runtime_metadata_matches_the_package_release(self) -> None:
-        manifest = json_object("js/logbrew-node/package.json")
-        declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
-
-        for entrypoint in ("index.js", "index.cjs"):
-            source = source_text(Path("js/logbrew-node") / entrypoint)
-            with self.subTest(entrypoint=entrypoint):
-                self.assertIn(declaration, source)
-
-    def test_browser_runtime_metadata_matches_the_package_release(self) -> None:
-        manifest = json_object("js/logbrew-browser/package.json")
-        declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
-
-        for entrypoint in ("index.js", "index.cjs"):
-            source = source_text(Path("js/logbrew-browser") / entrypoint)
-            with self.subTest(entrypoint=entrypoint):
-                self.assertIn(declaration, source)
+    def test_javascript_runtime_metadata_matches_package_releases(self) -> None:
+        for package in ("logbrew-node", "logbrew-browser"):
+            manifest = json_object(f"js/{package}/package.json")
+            declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
+            for entrypoint in ("index.js", "index.cjs"):
+                source = source_text(Path("js") / package / entrypoint)
+                with self.subTest(package=package, entrypoint=entrypoint):
+                    self.assertIn(declaration, source)
 
     def test_node_runtime_context_accepts_the_current_core_release(self) -> None:
         core_manifest = json_object("js/logbrew-js/package.json")
@@ -189,14 +180,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_react_native_bundle_smoke_reads_package_versions(self) -> None:
         smoke = source_text("scripts/real_user_react_native_bundle_smoke.sh")
-        self.assertIn(
+        for expected in (
             "expected_sdk_version=\"$(node -p \"require('${repo_root}/js/logbrew-js/package.json').version\")\"",
-            smoke,
-        )
-        self.assertIn(
             "expected_react_native_package_version=\"$(node -p \"require('${repo_root}/js/logbrew-react-native/package.json').version\")\"",
-            smoke,
-        )
+        ):
+            self.assertIn(expected, smoke)
 
     def test_react_native_minimum_public_peer_is_checked_before_publish(self) -> None:
         smoke_name = "scripts/real_user_react_native_minimum_peer_smoke.sh"

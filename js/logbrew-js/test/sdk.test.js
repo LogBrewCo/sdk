@@ -295,9 +295,15 @@ function deferred() {
   return { promise, resolve };
 }
 
+function replaceMethod(t, owner, name, replacement) {
+  const original = owner[name];
+  t.after(() => { owner[name] = original; });
+  owner[name] = replacement;
+}
+
 function fakeDeliveryTimers(t) {
   const timers = [];
-  t.mock.method(globalThis, "setTimeout", (callback, delay) => {
+  replaceMethod(t, globalThis, "setTimeout", (callback, delay) => {
     const timer = {
       callback,
       cleared: false,
@@ -311,7 +317,7 @@ function fakeDeliveryTimers(t) {
     timers.push(timer);
     return timer;
   });
-  t.mock.method(globalThis, "clearTimeout", (timer) => {
+  replaceMethod(t, globalThis, "clearTimeout", (timer) => {
     if (timer) {
       timer.cleared = true;
     }
@@ -651,7 +657,7 @@ test("delivery health snapshot reports bounded queue drops by stable reason", ()
 
 test("delivery health timestamps do not move backward when the wall clock regresses", async (t) => {
   let now = 2000;
-  t.mock.method(Date, "now", () => now);
+  replaceMethod(t, Date, "now", () => now);
   const client = LogBrewClient.create({
     apiKey: "LOGBREW_API_KEY",
     automaticDelivery: false,
@@ -800,7 +806,7 @@ test("automatic threshold coalesces capture during I/O into one trailing cohort"
 
 test("automatic transient failures back off without changing failed bytes or admitting a bypass", async (t) => {
   const timers = fakeDeliveryTimers(t);
-  t.mock.method(Math, "random", () => 0);
+  replaceMethod(t, Math, "random", () => 0);
   const bodies = [];
   const transport = {
     async send(_apiKey, body) {

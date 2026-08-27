@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/sdk",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Public LogBrew JavaScript SDK for building, validating, and flushing event batches.",
   "type": "module",
   "main": "./index.cjs",
@@ -86,7 +86,7 @@
     "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "scripts": {
-    "test": "node --test",
-    "smoke": "node ./smoke.js"
+    "test": "bun test",
+    "smoke": "bun ./smoke.js"
   }
 }
