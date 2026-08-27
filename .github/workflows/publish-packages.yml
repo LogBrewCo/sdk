@@ -49,7 +49,7 @@ on:
         type: boolean
         default: false
       use_scoped_npm_fallback:
-        description: "Use the release environment npm publish value for scoped existing-package publishes when trusted publishing is not configured"
+        description: "Authorize selected Bun publishes with the release environment npm publish value"
         required: true
         type: boolean
         default: false
@@ -139,7 +139,6 @@ jobs:
     environment: release
     permissions:
       contents: read
-      id-token: write
     env:
       DRY_RUN: ${{ inputs.dry_run }}
       INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
@@ -153,12 +152,10 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
+          bun-version: "1.3.14"
 
       - name: Publish npm packages
         id: npm-packages
@@ -189,6 +186,10 @@ jobs:
           )
           workspace_package_dirs=("${package_dirs[@]}")
 
+          package_field() {
+            bun -e 'const manifest = require(process.argv[1]); console.log(manifest[process.argv[2]])' "./$1/package.json" "$2"
+          }
+
           select_npm_package_dirs() {
             local selectors="$1"
             shift
@@ -210,7 +211,7 @@ jobs:
               local matched="false"
               local package_name
               for package_dir in "${all_package_dirs[@]}"; do
-                package_name="$(node -p "require('./${package_dir}/package.json').name")"
+                package_name="$(package_field "$package_dir" name)"
                 if [[ "$requested_package" != "$package_dir" && "$requested_package" != "$package_name" ]]; then
                   continue
                 fi
@@ -257,8 +258,8 @@ jobs:
           selected_package_names=()
           selected_package_versions=()
           for package_dir in "${package_dirs[@]}"; do
-            package_name="$(node -p "require('./${package_dir}/package.json').name")"
-            package_version="$(node -p "require('./${package_dir}/package.json').version")"
+            package_name="$(package_field "$package_dir" name)"
+            package_version="$(package_field "$package_dir" version)"
             selected_package_names+=("$package_name")
             selected_package_versions+=("$package_name=$package_version")
             if [[ -n "$NPM_PACKAGES" && "$package_dir" == js/logbrew-* ]]; then
@@ -267,22 +268,6 @@ jobs:
           done
 
           python3 scripts/check_release_metadata.py "${metadata_args[@]}"
-
-          npm_version="$(npm --version)"
-          node_version="$(node --version)"
-          echo "npm ${npm_version} on ${node_version}"
-          node -e '
-            const version = process.argv[1].split(/[.-]/).map(Number);
-            const minimum = [11, 5, 1];
-            for (let index = 0; index < minimum.length; index += 1) {
-              const actual = version[index] || 0;
-              if (actual > minimum[index]) process.exit(0);
-              if (actual < minimum[index]) {
-                console.error("npm trusted publishing requires npm >= " + minimum.join(".") + "; found " + process.argv[1]);
-                process.exit(1);
-              }
-            }
-          ' "$npm_version"
 
           npm_publication_plan="$(mktemp)"
           publication_plan_args=(--registry "https://registry.npmjs.org")
@@ -297,7 +282,7 @@ jobs:
             python3 scripts/plan_npm_publication.py \
               "${publication_plan_args[@]}" > "$npm_publication_plan"
             missing_npm_packages_file="$(mktemp)"
-            node -e '
+            bun -e '
               const fs = require("node:fs");
               const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
               const stringArray = (value) =>
@@ -308,14 +293,14 @@ jobs:
               }
               if (plan.existingVersions.length > 0) {
                 console.error("Selected npm versions already exist and are immutable:");
-                for (const identity of plan.existingVersions) console.error(`- ${identity}`);
+                for (const identity of plan.existingVersions) console.error("- " + identity);
                 console.error(
                   "Advance every colliding package version before retrying the selected release."
                 );
                 process.exit(1);
               }
               const missing = plan.missingPackagePages;
-              fs.writeFileSync(process.argv[2], missing.length > 0 ? `${missing.join("\n")}\n` : "");
+              fs.writeFileSync(process.argv[2], missing.length > 0 ? missing.join("\n") + "\n" : "");
             ' "$npm_publication_plan" "$missing_npm_packages_file"
             mapfile -t missing_npm_packages < "$missing_npm_packages_file"
             rm -f "$npm_publication_plan" "$missing_npm_packages_file"
@@ -325,7 +310,23 @@ jobs:
           trap 'rm -f "$npm_userconfig"' EXIT
           printf 'registry=https://registry.npmjs.org/\n' > "$npm_userconfig"
           export NPM_CONFIG_USERCONFIG="$npm_userconfig"
-          unset NODE_AUTH_TOKEN
+
+          if [[ "$DRY_RUN" != "true" && "${#missing_npm_packages[@]}" -gt 0 ]]; then
+            printf 'Missing npm package pages before publish:\n' >&2
+            printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
+            if [[ "$ALLOW_INITIAL_NPM_PUBLISH" != "true" ]]; then
+              echo "npm trusted publishing requires existing package pages for these names." >&2
+              echo "Run a one-time authenticated first publish, or rerun with allow_initial_npm_publish=true after adding the release environment npm publish value, then configure trusted publishers for repeat OIDC publishes." >&2
+              exit 1
+            fi
+            if [[ -z "${NPM_TOKEN:-}" ]]; then
+              echo "allow_initial_npm_publish=true requires the release environment npm publish value for one-time authenticated package creation." >&2
+              exit 1
+            fi
+          elif [[ "$ALLOW_INITIAL_NPM_PUBLISH" == "true" ]]; then
+            echo "allow_initial_npm_publish=true is only for brand-new npm package pages; all selected packages already exist." >&2
+            exit 1
+          fi
 
           if [[ "$USE_SCOPED_NPM_FALLBACK" == "true" ]]; then
             if [[ "$DRY_RUN" == "true" ]]; then
@@ -341,29 +342,16 @@ jobs:
               exit 1
             fi
             printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NPM_TOKEN" > "$npm_userconfig"
-          elif [[ "$DRY_RUN" != "true" && "${#missing_npm_packages[@]}" -gt 0 ]]; then
-            printf 'Missing npm package pages before publish:\n' >&2
-            printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
-            if [[ "$ALLOW_INITIAL_NPM_PUBLISH" != "true" ]]; then
-              echo "npm trusted publishing requires existing package pages for these names." >&2
-              echo "Run a one-time authenticated first publish, or rerun with allow_initial_npm_publish=true after adding the release environment npm publish value, then configure trusted publishers for repeat OIDC publishes." >&2
-              exit 1
-            fi
-            if [[ -z "${NPM_TOKEN:-}" ]]; then
-              echo "allow_initial_npm_publish=true requires the release environment npm publish value for one-time authenticated package creation." >&2
-              exit 1
-            fi
-            printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NPM_TOKEN" > "$npm_userconfig"
-          elif [[ "$ALLOW_INITIAL_NPM_PUBLISH" == "true" ]]; then
-            echo "allow_initial_npm_publish=true is only for brand-new npm package pages; all selected packages already exist." >&2
+          elif [[ "$DRY_RUN" != "true" ]]; then
+            echo "Bun publication requires use_scoped_npm_fallback=true and an explicit npm_packages selection." >&2
             exit 1
           fi
 
           for package_dir in "${package_dirs[@]}"; do
-            package_name="$(node -p "require('./${package_dir}/package.json').name")"
+            package_name="$(package_field "$package_dir" name)"
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Packing ${package_name} from ${package_dir}"
-              (cd "$package_dir" && npm pack --dry-run)
+              (cd "$package_dir" && bun pm pack --dry-run --ignore-scripts)
               continue
             fi
             publish_args=()
@@ -372,7 +360,7 @@ jobs:
             fi
 
             echo "Publishing ${package_name} from ${package_dir}"
-            (cd "$package_dir" && npm publish "${publish_args[@]}")
+            (cd "$package_dir" && bun publish "${publish_args[@]}")
           done
 
           {
