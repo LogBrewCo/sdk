@@ -1223,7 +1223,7 @@ grep -q '"resourceSpan":"POST /api/checkout"' "$tmp_dir/navigation-resource-span
 
 cat > consumer.ts <<'EOF'
 import React from "react";
-import type { AppStateStatus } from "react-native";
+import { Platform, type AppStateStatus } from "react-native";
 import { RecordingTransport, type EventStore } from "@logbrew/sdk";
 import LogBrewReactNative, {
   LogBrewNativeProvider,
@@ -1293,12 +1293,7 @@ import {
   createReactNativeResourceFetch
 } from "@logbrew/react-native/resource-fetch";
 
-const platform: ReactNativePlatformLike = {
-  OS: "android",
-  Version: 35,
-  isPad: false,
-  constants: { isTesting: true }
-};
+const platform: ReactNativePlatformLike = Platform;
 const state: AppStateStatus = "active";
 const appState: ReactNativeAppStateLike = {
   currentState: state,

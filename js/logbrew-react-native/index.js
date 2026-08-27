@@ -16,7 +16,7 @@ import {
 } from "./metadata.js";
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
-const DEFAULT_SDK_VERSION = "0.1.16";
+const DEFAULT_SDK_VERSION = "0.1.17";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const MAX_ACTION_NAME_LENGTH = 64;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -584,6 +584,7 @@ export function createReactNavigationSpanListener(client, navigationContainer, {
 
 export function createReactNativeErrorEvent(error, {
   debugIdMap,
+  evidence,
   environment,
   fingerprint,
   handled = true,
@@ -607,6 +608,7 @@ export function createReactNativeErrorEvent(error, {
   const traceContext = resolveTraceContext(trace ?? getActiveLogBrewTrace());
   const attributes = createIssueAttributesFromError(error?.reason ?? error?.error ?? error, {
     debugIdMap: debugIdMap === undefined ? runtimeReactNativeDebugIdMap() : debugIdMap,
+    evidence,
     environment,
     fingerprint,
     handled,
