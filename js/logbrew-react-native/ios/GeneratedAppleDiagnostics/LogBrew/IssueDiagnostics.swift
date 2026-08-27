@@ -101,6 +101,7 @@ public extension IssueAttributes {
         handled: Bool = true,
         breadcrumbs: [IssueBreadcrumb]? = nil,
         breadcrumbsTruncated: Bool? = nil,
+        evidence: IssueDiagnosticEvidence? = nil,
         metadata: Metadata? = nil,
         context: TelemetryContext? = nil,
         fileID: String = #fileID,
@@ -136,6 +137,7 @@ public extension IssueAttributes {
             stackFrames: [rootFrame],
             breadcrumbs: breadcrumbs,
             breadcrumbsTruncated: breadcrumbsTruncated,
+            evidence: evidence,
             metadata: metadata,
             context: context,
         )
@@ -186,6 +188,7 @@ func normalizeIssueAttributes(_ value: IssueAttributes) throws -> IssueAttribute
     }
     let breadcrumbs = try normalizeIssueBreadcrumbs(value.breadcrumbs)
     let breadcrumbsWereCapped = (value.breadcrumbs?.count ?? 0) > maximumIssueBreadcrumbs
+    let evidence = try value.evidence.map(validateIssueDiagnosticEvidence)
     let context = try value.context.map { try validateTelemetryContext($0) }
     try validateMetadata(value.metadata, label: "issue metadata")
     return IssueAttributes(
@@ -197,6 +200,7 @@ func normalizeIssueAttributes(_ value: IssueAttributes) throws -> IssueAttribute
         stackFrames: stackFrames,
         breadcrumbs: breadcrumbs,
         breadcrumbsTruncated: breadcrumbsWereCapped ? true : value.breadcrumbsTruncated,
+        evidence: evidence,
         metadata: value.metadata,
         context: context,
         nativeStackFrames: value.nativeStackFrames,
@@ -224,6 +228,7 @@ func issueAttributes(
         breadcrumbsTruncated: value.breadcrumbsTruncated == true
             || snapshot.truncated
             || combined.count > maximumIssueBreadcrumbs,
+        evidence: value.evidence,
         metadata: value.metadata,
         context: value.context,
         nativeStackFrames: value.nativeStackFrames,
@@ -377,7 +382,7 @@ func issueText(
     disallowLocationDelimiters: Bool = false,
 ) throws -> String {
     let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !normalized.isEmpty, normalized.count <= maximum, !containsForbiddenControl(normalized),
+    guard !normalized.isEmpty, normalized.unicodeScalars.count <= maximum, !containsForbiddenControl(normalized),
           !disallowLocationDelimiters || (!normalized.contains("?") && !normalized.contains("#"))
     else {
         throw issueValidationError("\(label) is invalid")

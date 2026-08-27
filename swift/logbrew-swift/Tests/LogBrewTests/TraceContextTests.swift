@@ -27,14 +27,12 @@ struct TraceContextTests {
 
     @Test("strict traceparent parsing rejects malformed propagation")
     func strictTraceparentParsingRejectsMalformedPropagation() throws {
-        #expect(throws: SdkError.self) {
-            _ = try LogBrewTrace.parseTraceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01")
-        }
-        #expect(throws: SdkError.self) {
-            _ = try LogBrewTrace.parseTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01")
-        }
-        #expect(throws: SdkError.self) {
-            _ = try LogBrewTrace.parseTraceparent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+        for value in [
+            "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+            "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        ] {
+            #expect(throws: SdkError.self) { _ = try LogBrewTrace.parseTraceparent(value) }
         }
     }
 
@@ -90,15 +88,6 @@ struct TraceContextTests {
         #expect(headers == ["traceparent": "00-\(context.traceId)-\(context.spanId)-\(context.traceFlags)"])
         #expect(headers["authorization"] == nil)
         #expect(headers["baggage"] == nil)
-    }
-
-    private func fixedTraceContext() throws -> LogBrewTraceContext {
-        try LogBrewTraceContext(
-            traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-            spanId: "aaaaaaaaaaaaaaaa",
-            parentSpanId: "00f067aa0ba902b7",
-            traceFlags: "01",
-        )
     }
 
     private func makeLogger(_ client: LogBrewClient) throws -> LogBrewLogger {

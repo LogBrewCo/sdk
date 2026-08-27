@@ -62,7 +62,6 @@ public final class LogBrewClient: @unchecked Sendable {
         let context = try resolvedContext(event: attributes.context)
         let attributes = issueAttributes(attributes, adding: breadcrumbStore.snapshot())
             .withContext(context)
-            .withCorrelationMetadata()
         try pushEvent(.issue(validateIssue(attributes)), id: id, timestamp: timestamp)
     }
 
@@ -74,7 +73,7 @@ public final class LogBrewClient: @unchecked Sendable {
     public func log(_ id: String, timestamp: String, attributes: LogAttributes) throws {
         let context = try resolvedContext(event: attributes.context)
         try pushEvent(
-            .log(validateLog(attributes.withContext(context).withCorrelationMetadata())),
+            .log(validateLog(attributes.withContext(context))),
             id: id,
             timestamp: timestamp,
         )
@@ -101,7 +100,7 @@ public final class LogBrewClient: @unchecked Sendable {
     public func action(_ id: String, timestamp: String, attributes: ActionAttributes) throws {
         let context = try resolvedContext(event: attributes.context)
         try pushEvent(
-            .action(validateAction(attributes.withContext(context).withCorrelationMetadata())),
+            .action(validateAction(attributes.withContext(context))),
             id: id,
             timestamp: timestamp,
         )
@@ -110,7 +109,7 @@ public final class LogBrewClient: @unchecked Sendable {
     public func metric(_ id: String, timestamp: String, attributes: MetricAttributes) throws {
         let context = try resolvedContext(event: attributes.context)
         try pushEvent(
-            .metric(validateMetric(attributes.withContext(context).withCorrelationMetadata())),
+            .metric(validateMetric(attributes.withContext(context))),
             id: id,
             timestamp: timestamp,
         )
@@ -207,22 +206,7 @@ private extension IssueAttributes {
             stackFrames: stackFrames,
             breadcrumbs: breadcrumbs,
             breadcrumbsTruncated: breadcrumbsTruncated,
-            metadata: metadata,
-            context: context,
-            nativeStackFrames: nativeStackFrames,
-        )
-    }
-
-    func withCorrelationMetadata() -> IssueAttributes {
-        IssueAttributes(
-            title: title,
-            level: level,
-            message: message,
-            exception: exception,
-            exceptionChain: exceptionChain,
-            stackFrames: stackFrames,
-            breadcrumbs: breadcrumbs,
-            breadcrumbsTruncated: breadcrumbsTruncated,
+            evidence: evidence,
             metadata: correlationMetadata(metadata, context: context),
             context: context,
             nativeStackFrames: nativeStackFrames,
@@ -236,16 +220,6 @@ private extension LogAttributes {
             message: message,
             level: level,
             logger: logger,
-            metadata: metadata,
-            context: context,
-        )
-    }
-
-    func withCorrelationMetadata() -> LogAttributes {
-        LogAttributes(
-            message: message,
-            level: level,
-            logger: logger,
             metadata: correlationMetadata(metadata, context: context),
             context: context,
         )
@@ -254,10 +228,6 @@ private extension LogAttributes {
 
 private extension ActionAttributes {
     func withContext(_ context: TelemetryContext?) -> ActionAttributes {
-        ActionAttributes(name: name, status: status, metadata: metadata, context: context)
-    }
-
-    func withCorrelationMetadata() -> ActionAttributes {
         ActionAttributes(
             name: name,
             status: status,
@@ -269,19 +239,6 @@ private extension ActionAttributes {
 
 private extension MetricAttributes {
     func withContext(_ context: TelemetryContext?) -> MetricAttributes {
-        MetricAttributes(
-            name: name,
-            kind: kind,
-            value: value,
-            unit: unit,
-            temporality: temporality,
-            metadata: metadata,
-            context: context,
-            description: description,
-        )
-    }
-
-    func withCorrelationMetadata() -> MetricAttributes {
         MetricAttributes(
             name: name,
             kind: kind,

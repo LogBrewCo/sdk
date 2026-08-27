@@ -94,25 +94,17 @@ struct OpenTelemetryTraceContextTests {
     @Test("OpenTelemetry span context rejects malformed ids and flags")
     func openTelemetrySpanContextRejectsMalformedValues() throws {
         let parent = try makeOpenTelemetryParent()
-
-        #expect(throws: SdkError.self) {
-            _ = try LogBrewTrace.openTelemetrySpanContext(
-                traceId: "00000000000000000000000000000000",
-                spanId: parent.spanId,
-            )
-        }
-        #expect(throws: SdkError.self) {
-            _ = try LogBrewTrace.openTelemetrySpanContext(
-                traceId: parent.traceId,
-                spanId: "0000000000000000",
-            )
-        }
-        #expect(throws: SdkError.self) {
-            _ = try LogBrewTrace.openTelemetrySpanContext(
-                traceId: parent.traceId,
-                spanId: parent.spanId,
-                traceFlags: "zz",
-            )
+        let malformed = [
+            ("00000000000000000000000000000000", parent.spanId, "01"),
+            (parent.traceId, "0000000000000000", "01"),
+            (parent.traceId, parent.spanId, "zz"),
+        ]
+        for (traceId, spanId, traceFlags) in malformed {
+            #expect(throws: SdkError.self) {
+                _ = try LogBrewTrace.openTelemetrySpanContext(
+                    traceId: traceId, spanId: spanId, traceFlags: traceFlags,
+                )
+            }
         }
     }
 

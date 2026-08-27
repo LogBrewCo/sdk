@@ -46,24 +46,22 @@ struct LogBrewTests {
     func invalidTimestampFailsValidation() throws {
         let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
 
-        do {
+        let error = expectSdkError {
             try client.log(
                 "evt_log_001",
                 timestamp: "2026-06-02T10:00:03",
                 attributes: LogAttributes(message: "worker started", level: .info),
             )
-            Issue.record("expected invalid timestamp to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "validation_error")
-            #expect(error.message.contains("timezone offset"))
         }
+        #expect(error.code == "validation_error")
+        #expect(error.message.contains("timezone offset"))
     }
 
     @Test("negative span duration fails validation")
     func negativeSpanDurationFailsValidation() throws {
         let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
 
-        do {
+        let error = expectSdkError {
             try client.span(
                 "evt_span_001",
                 timestamp: "2026-06-02T10:00:04Z",
@@ -75,11 +73,9 @@ struct LogBrewTests {
                     durationMs: -1,
                 ),
             )
-            Issue.record("expected negative duration to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "validation_error")
-            #expect(error.message == "span durationMs must be non-negative")
         }
+        #expect(error.code == "validation_error")
+        #expect(error.message == "span durationMs must be non-negative")
     }
 
     @Test("unauthenticated response surfaces clean error")
@@ -87,13 +83,11 @@ struct LogBrewTests {
         let client = try makeFullClient()
         let transport = RecordingTransport(scriptedResponses: [.status(401)])
 
-        do {
+        let error = expectSdkError {
             _ = try client.flush(transport: transport)
-            Issue.record("expected unauthenticated flush to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "unauthenticated")
-            #expect(error.message == "transport rejected the API key")
         }
+        #expect(error.code == "unauthenticated")
+        #expect(error.message == "transport rejected the API key")
     }
 
     @Test("network failure retries before succeeding")
@@ -189,14 +183,12 @@ struct LogBrewTests {
             .failure(.network("still down")),
         ])
 
-        do {
+        let error = expectSdkError {
             _ = try client.flush(transport: transport)
-            Issue.record("expected retry budget exhaustion to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "network_failure")
-            #expect(error.message == "still down")
-            #expect(client.pendingEvents() == 1)
         }
+        #expect(error.code == "network_failure")
+        #expect(error.message == "still down")
+        #expect(client.pendingEvents() == 1)
     }
 
     @Test("non-retryable transport status fails without clearing queue")
@@ -204,14 +196,12 @@ struct LogBrewTests {
         let client = try makeFullClient()
         let transport = RecordingTransport(scriptedResponses: [.status(400)])
 
-        do {
+        let error = expectSdkError {
             _ = try client.flush(transport: transport)
-            Issue.record("expected non-retryable status to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "transport_error")
-            #expect(error.message == "unexpected transport status 400")
-            #expect(client.pendingEvents() == 6)
         }
+        #expect(error.code == "transport_error")
+        #expect(error.message == "unexpected transport status 400")
+        #expect(client.pendingEvents() == 6)
     }
 
     @Test("shutdown flushes and prevents future events")
@@ -222,16 +212,14 @@ struct LogBrewTests {
         #expect(response == TransportResponse(statusCode: 202, attempts: 1))
         #expect(client.pendingEvents() == 0)
 
-        do {
+        let error = expectSdkError {
             try client.log(
                 "evt_after_shutdown",
                 timestamp: "2026-06-02T10:00:06Z",
                 attributes: LogAttributes(message: "too late", level: .info),
             )
-            Issue.record("expected post-shutdown event to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "shutdown_error")
         }
+        #expect(error.code == "shutdown_error")
     }
 
     @Test("Swift logger captures Apple-style level metadata")

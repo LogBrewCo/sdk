@@ -173,6 +173,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
     public let stackFrames: [IssueStackFrame]?
     public let breadcrumbs: [IssueBreadcrumb]?
     public let breadcrumbsTruncated: Bool?
+    public let evidence: IssueDiagnosticEvidence?
     public let metadata: Metadata?
     public let context: TelemetryContext?
     @_spi(CrashReplay) public let nativeStackFrames: [NativeStackFrame]?
@@ -186,6 +187,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         stackFrames: [IssueStackFrame]? = nil,
         breadcrumbs: [IssueBreadcrumb]? = nil,
         breadcrumbsTruncated: Bool? = nil,
+        evidence: IssueDiagnosticEvidence? = nil,
         metadata: Metadata? = nil,
         context: TelemetryContext? = nil,
     ) {
@@ -197,6 +199,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         self.stackFrames = stackFrames
         self.breadcrumbs = breadcrumbs
         self.breadcrumbsTruncated = breadcrumbsTruncated
+        self.evidence = evidence
         self.metadata = metadata
         self.context = context
         nativeStackFrames = nil
@@ -212,6 +215,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         stackFrames: [IssueStackFrame]? = nil,
         breadcrumbs: [IssueBreadcrumb]? = nil,
         breadcrumbsTruncated: Bool? = nil,
+        evidence: IssueDiagnosticEvidence? = nil,
         metadata: Metadata? = nil,
         context: TelemetryContext? = nil,
         nativeStackFrames: [NativeStackFrame]?,
@@ -224,6 +228,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         self.stackFrames = stackFrames
         self.breadcrumbs = breadcrumbs
         self.breadcrumbsTruncated = breadcrumbsTruncated
+        self.evidence = evidence
         self.metadata = metadata
         self.context = context
         self.nativeStackFrames = nativeStackFrames

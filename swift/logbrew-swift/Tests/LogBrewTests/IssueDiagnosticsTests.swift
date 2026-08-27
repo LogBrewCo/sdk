@@ -12,6 +12,7 @@ struct IssueDiagnosticsTests {
             CheckoutError.declined(restrictedValue: "card-number-must-never-escape"),
             title: "Payment authorization failed",
             mechanism: "swift.task",
+            evidence: sampleDiagnosticEvidence(),
             fileID: "/opt/app/Shop/Checkout.swift?query=value",
             line: 42,
             column: 17,
@@ -31,6 +32,34 @@ struct IssueDiagnosticsTests {
         let cleared = try #require(events.last?["attributes"] as? [String: Any])
         #expect(cleared["breadcrumbs"] == nil)
         #expect(cleared["breadcrumbsTruncated"] == nil)
+    }
+
+    @Test("invalid application evidence fails before queue admission")
+    func invalidApplicationEvidence() throws {
+        let invalid = [
+            IssueDiagnosticEvidence(),
+            IssueDiagnosticEvidence(likelyFixArea: IssueLikelyFixArea(inApp: true)),
+            IssueDiagnosticEvidence(likelyFixArea: IssueLikelyFixArea(file: "/private/source.swift")),
+            IssueDiagnosticEvidence(likelyFixArea: IssueLikelyFixArea(file: "Sources/../source.swift")),
+            IssueDiagnosticEvidence(likelyFixArea: IssueLikelyFixArea(file: "https://example.test/source.swift")),
+            IssueDiagnosticEvidence(likelyFixArea: IssueLikelyFixArea(file: "Sources/source.swift?line=42")),
+            IssueDiagnosticEvidence(impact: IssueImpactEvidence()),
+            IssueDiagnosticEvidence(capturedFields: []),
+            IssueDiagnosticEvidence(capturedFields: ["bad field"]),
+            IssueDiagnosticEvidence(capturedFields: ["status", "status"]),
+            IssueDiagnosticEvidence(capturedFields: ["status"], missingFields: ["status"]),
+        ]
+        for evidence in invalid {
+            let client = try richClient()
+            #expect(throws: SdkError.self) {
+                try client.issue(
+                    "invalid-evidence",
+                    timestamp: "2026-08-06T10:00:01Z",
+                    attributes: IssueAttributes(title: "Failure", level: .error, evidence: evidence),
+                )
+            }
+            #expect(client.pendingEvents() == 0)
+        }
     }
 
     @Test("invalid breadcrumb evidence fails before queue admission")
@@ -103,6 +132,25 @@ struct IssueDiagnosticsTests {
         try assertManualChain(client)
         assertManualMismatch(client, mechanism: mechanism, evidence: evidence)
     }
+}
+
+private func sampleDiagnosticEvidence() -> IssueDiagnosticEvidence {
+    IssueDiagnosticEvidence(
+        likelyRootCause: "The retry budget was exhausted.",
+        likelyFixArea: IssueLikelyFixArea(
+            component: "checkout-app", module: "Payments", function: "authorize()",
+            file: "Sources/Checkout/PaymentService.swift", line: 42, column: 17, inApp: true,
+        ),
+        impact: IssueImpactEvidence(
+            affectedUserSegment: "checkout-users",
+            failedAction: "checkout.submit",
+            userVisibleOutcome: "The order was not confirmed.",
+        ),
+        capturedFields: ["provider.status", "retry.count"],
+        missingFields: ["provider.request_id"],
+        redactedFields: ["provider.message"],
+        truncatedFields: ["breadcrumbs"],
+    )
 }
 
 private func manualExceptionEvidence(
@@ -220,6 +268,9 @@ private func assertHandledIssue(_ client: LogBrewClient) throws {
     let entries = try #require(chain["entries"] as? [[String: Any]])
     let frames = try #require(attributes["stackFrames"] as? [[String: Any]])
     let breadcrumbs = try #require(attributes["breadcrumbs"] as? [[String: Any]])
+    let evidence = try #require(attributes["evidence"] as? [String: Any])
+    let fix = try #require(evidence["likelyFixArea"] as? [String: Any])
+    let impact = try #require(evidence["impact"] as? [String: Any])
 
     #expect((exception["type"] as? String)?.contains("CheckoutError") == true)
     #expect(mechanism["type"] as? String == "swift.task")
@@ -239,6 +290,10 @@ private func assertHandledIssue(_ client: LogBrewClient) throws {
     #expect(breadcrumbs.first?["category"] as? String == "step_2")
     #expect(breadcrumbs.last?["category"] as? String == "step_65")
     #expect(attributes["breadcrumbsTruncated"] as? Bool == true)
+    #expect(evidence["likelyRootCause"] as? String == "The retry budget was exhausted.")
+    #expect(fix["file"] as? String == "Sources/Checkout/PaymentService.swift")
+    #expect(impact["failedAction"] as? String == "checkout.submit")
+    #expect(evidence["capturedFields"] as? [String] == ["provider.status", "retry.count"])
     #expect(!json.contains("card-number-must-never-escape"))
     #expect(!json.contains("/opt/app"))
 }

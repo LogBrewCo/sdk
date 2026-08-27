@@ -8,18 +8,13 @@ struct AutomaticDeliveryLifecycleTests {
     func automaticDeliveryRejectsUnboundedDelays() throws {
         let client = try makeClient()
         let transport = RecordingTransport.alwaysAccept()
-
-        #expect(throws: SdkError.self) {
-            try client.startAutomaticDelivery(
-                transport: transport,
-                options: AutomaticDeliveryOptions(interval: 86401),
-            )
-        }
-        #expect(throws: SdkError.self) {
-            try client.startAutomaticDelivery(
-                transport: transport,
-                options: AutomaticDeliveryOptions(maxRetryDelay: 86401),
-            )
+        for options in [
+            AutomaticDeliveryOptions(interval: 86401),
+            AutomaticDeliveryOptions(maxRetryDelay: 86401),
+        ] {
+            #expect(throws: SdkError.self) {
+                try client.startAutomaticDelivery(transport: transport, options: options)
+            }
         }
         #expect(client.deliveryHealth().state == .manual)
     }
@@ -102,12 +97,10 @@ struct AutomaticDeliveryLifecycleTests {
 
         _ = try client.shutdown(transport: transport)
 
-        do {
+        let error = expectSdkError {
             _ = try client.shutdown(transport: transport)
-            Issue.record("expected repeated shutdown to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "shutdown_error")
         }
+        #expect(error.code == "shutdown_error")
     }
 
     @Test("terminal owned flush pauses automatic delivery")
