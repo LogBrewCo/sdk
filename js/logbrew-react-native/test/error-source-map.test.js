@@ -42,6 +42,7 @@ test("React Native error events attach privacy-bounded release artifact metadata
     const event = createReactNativeErrorEvent(error, {
       appState: { currentState: "active" },
       debugIdMap: { "https://static.example.test/react-native/index.android.bundle?email=hidden@example.test#pay": debugId },
+      evidence: { likelyRootCause: "The authorization retry budget was exhausted." },
       environment: "production",
       platform: { OS: "ios" },
       release: "2026.07.06-rn",
@@ -73,6 +74,7 @@ test("React Native error events attach privacy-bounded release artifact metadata
     assert.equal(metadata.parentSpanId, trace.parentSpanId);
     assert.equal(metadata.errorName, "TypeError");
     assert.equal(metadata.errorValueType, "object");
+    assert.equal(event.attributes.evidence.likelyRootCause, "The authorization retry budget was exhausted.");
     assert.equal(serialized.includes("static.example.test"), false);
     assert.equal(serialized.includes("email=hidden"), false);
     assert.equal(serialized.includes("#pay"), false);

@@ -20,9 +20,7 @@ export type ReactNativePlatformLike = {
   OS?: string;
   Version?: string | number;
   isPad?: boolean;
-  constants?: {
-    isTesting?: boolean;
-  };
+  constants?: { isTesting?: boolean; [key: string]: unknown };
 };
 
 export type ReactNativeAppStateLike = {
@@ -287,6 +285,7 @@ export type ReactNativeErrorIdFactoryContext = {
 
 export type CaptureReactNativeErrorOptions = ReactNativeContextOptions & {
   debugIdMap?: Record<string, string>;
+  evidence?: IssueAttributes["evidence"];
   environment?: string;
   fingerprint?: string;
   handled?: boolean;
