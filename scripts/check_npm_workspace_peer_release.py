@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import quote
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -26,18 +28,6 @@ class WorkspacePackage(NamedTuple):
 
 
 ArtifactIdentity = Callable[[WorkspacePackage], tuple[str, str | None]]
-AUTH_SUFFIX = "TO" + "KEN"
-NODE_AUTH_VARIABLE = "_".join(("NODE", "AUTH", AUTH_SUFFIX))
-NPM_AUTH_VARIABLE = "_".join(("NPM", AUTH_SUFFIX))
-
-
-def public_npm_environment(source: Mapping[str, str]) -> dict[str, str]:
-    environment = dict(source)
-    environment.pop(NODE_AUTH_VARIABLE, None)
-    environment.pop(NPM_AUTH_VARIABLE, None)
-    environment["NPM_CONFIG_USERCONFIG"] = os.devnull
-    environment["NPM_CONFIG_UPDATE_NOTIFIER"] = "false"
-    return environment
 
 
 def load_workspace_package(directory: Path) -> WorkspacePackage:
@@ -125,65 +115,66 @@ def validate_release_plan(
     return failures
 
 
-def npm_pack_shasum(package: WorkspacePackage) -> str:
-    try:
-        result = subprocess.run(
-            ["npm", "pack", "--dry-run", "--json"],
-            cwd=package.directory,
-            check=False,
-            capture_output=True,
-            env=public_npm_environment(os.environ),
-            text=True,
-            timeout=60,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError(f"cannot pack {package.name}@{package.version}: {error}") from error
-    if result.returncode != 0:
-        raise RuntimeError(f"cannot pack {package.name}@{package.version}")
-    try:
-        payload = json.loads(result.stdout)
-        shasum = payload[0]["shasum"]
-    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
-        raise RuntimeError(
-            f"npm pack returned invalid metadata for {package.name}@{package.version}"
-        ) from error
-    if not isinstance(shasum, str) or len(shasum) != 40:
-        raise RuntimeError(f"npm pack returned an invalid shasum for {package.name}@{package.version}")
-    return shasum
+def bun_pack_shasum(package: WorkspacePackage) -> str:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        artifact = Path(temp_dir) / "package.tgz"
+        try:
+            result = subprocess.run(
+                [
+                    "bun",
+                    "pm",
+                    "pack",
+                    "--filename",
+                    str(artifact),
+                    "--ignore-scripts",
+                    "--quiet",
+                ],
+                cwd=package.directory,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"cannot pack {package.name}@{package.version}: {error}") from error
+        if result.returncode != 0 or not artifact.is_file():
+            raise RuntimeError(f"cannot pack {package.name}@{package.version}")
+        return hashlib.sha1(artifact.read_bytes(), usedforsecurity=False).hexdigest()
 
 
 def npm_registry_shasum(package: WorkspacePackage, registry: str) -> str | None:
+    package_url = (
+        f"{registry.rstrip('/')}/{quote(package.name, safe='@')}/"
+        f"{quote(package.version, safe='')}"
+    )
     try:
         result = subprocess.run(
             [
-                "npm",
-                "view",
-                f"{package.name}@{package.version}",
-                "dist.shasum",
-                "--json",
-                "--registry",
-                registry,
-                "--fetch-retries=2",
-                "--fetch-timeout=20000",
+                "bun",
+                "-e",
+                """
+const response = await fetch(process.argv[1]);
+if (response.status === 404) process.exit(44);
+if (!response.ok) process.exit(1);
+const metadata = await response.json();
+process.stdout.write(metadata?.dist?.shasum ?? "");
+""",
+                package_url,
             ],
             check=False,
             capture_output=True,
-            env=public_npm_environment(os.environ),
             text=True,
             timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RuntimeError(
-            f"cannot verify {package.name}@{package.version} on {registry}: {error}"
+            f"cannot verify {package.name}@{package.version}: {error}"
         ) from error
-    if result.returncode != 0:
+    if result.returncode == 44:
         return None
-    try:
-        shasum = json.loads(result.stdout)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(
-            f"npm view returned invalid metadata for {package.name}@{package.version}"
-        ) from error
+    if result.returncode != 0:
+        raise RuntimeError(f"cannot verify {package.name}@{package.version}")
+    shasum = result.stdout
     if not isinstance(shasum, str) or len(shasum) != 40:
         raise RuntimeError(
             f"npm view returned an invalid shasum for {package.name}@{package.version}"
@@ -217,7 +208,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         def artifact_identity(package: WorkspacePackage) -> tuple[str, str | None]:
             return (
-                npm_pack_shasum(package),
+                bun_pack_shasum(package),
                 npm_registry_shasum(package, args.registry),
             )
 
