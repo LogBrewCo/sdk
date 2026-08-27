@@ -30,6 +30,7 @@ logbrew = init_logbrew(
     app,
     api_key=os.environ["LOGBREW_API_KEY"],
     service_name="checkout-api",
+    environment=os.environ.get("LOGBREW_ENVIRONMENT", "production"),
 )
 client = logbrew.client
 logger = logging.getLogger("checkout-api")

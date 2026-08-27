@@ -31,6 +31,14 @@ def make_client() -> LogBrewClient:
     )
 
 
+def isolated_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.handlers = []
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    return logger
+
+
 class FastAPIIntegrationTests(unittest.TestCase):
     def test_init_logbrew_owns_capture_logging_and_shutdown_delivery(self) -> None:
         api_key = "project-key-must-not-appear"
@@ -40,14 +48,12 @@ class FastAPIIntegrationTests(unittest.TestCase):
             app,
             api_key=api_key,
             service_name="checkout-api",
+            environment="development",
             transport=transport,
             automatic_delivery=False,
             span_id_factory=lambda: "b7ad6b7169203331",
         )
-        logger = logging.getLogger("fastapi.bootstrap")
-        logger.handlers = []
-        logger.propagate = False
-        logger.setLevel(logging.INFO)
+        logger = isolated_logger("fastapi.bootstrap")
         logger.addHandler(runtime.logging_handler)
 
         @app.get("/health")
@@ -71,14 +77,12 @@ class FastAPIIntegrationTests(unittest.TestCase):
         self.assertEqual([event["type"] for event in payload["events"]], ["log", "span"])
         for event in payload["events"]:
             self.assertEqual(event["attributes"]["metadata"]["service"], "checkout-api")
+            self.assertEqual(event["attributes"]["context"]["resource"]["deployment"]["environment"], "development")
         self.assertNotIn(api_key, repr(runtime))
         self.assertNotIn(api_key, json.dumps(payload))
 
     def test_init_logbrew_flushes_after_custom_lifespan_teardown(self) -> None:
-        logger = logging.getLogger("fastapi.custom-lifespan")
-        logger.handlers = []
-        logger.propagate = False
-        logger.setLevel(logging.INFO)
+        logger = isolated_logger("fastapi.custom-lifespan")
 
         @asynccontextmanager
         async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -313,10 +317,7 @@ class FastAPIIntegrationTests(unittest.TestCase):
         sdk_client = make_client()
         transport = RecordingTransport.always_accept()
         handler = LogBrewLoggingHandler(sdk_client, metadata={"service": "checkout"})
-        logger = logging.getLogger("fastapi.checkout")
-        logger.handlers = []
-        logger.propagate = False
-        logger.setLevel(logging.INFO)
+        logger = isolated_logger("fastapi.checkout")
         logger.addHandler(handler)
         app = FastAPI()
         add_logbrew_middleware(
