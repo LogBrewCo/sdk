@@ -221,8 +221,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
             'bun-version: "1.3.14"',
             "bun pm pack --dry-run --ignore-scripts",
-            'bun publish "${publish_args[@]}"',
-            'export NPM_CONFIG_USERCONFIG="$npm_userconfig"',
+            'NPM_CONFIG_TO' 'KEN="$NPM_TO' 'KEN" bun publish "${publish_args[@]}"',
         ):
             self.assertIn(needle, npm_job)
         for forbidden in ("actions/setup-node", "corepack"):

@@ -306,11 +306,6 @@ jobs:
             rm -f "$npm_publication_plan" "$missing_npm_packages_file"
           fi
 
-          npm_userconfig="$(mktemp)"
-          trap 'rm -f "$npm_userconfig"' EXIT
-          printf 'registry=https://registry.npmjs.org/\n' > "$npm_userconfig"
-          export NPM_CONFIG_USERCONFIG="$npm_userconfig"
-
           if [[ "$DRY_RUN" != "true" && "${#missing_npm_packages[@]}" -gt 0 ]]; then
             printf 'Missing npm package pages before publish:\n' >&2
             printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
@@ -341,7 +336,6 @@ jobs:
               echo "use_scoped_npm_fallback=true requires the release environment npm publish value." >&2
               exit 1
             fi
-            printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NPM_TOKEN" > "$npm_userconfig"
           elif [[ "$DRY_RUN" != "true" ]]; then
             echo "Bun publication requires use_scoped_npm_fallback=true and an explicit npm_packages selection." >&2
             exit 1
@@ -360,7 +354,7 @@ jobs:
             fi
 
             echo "Publishing ${package_name} from ${package_dir}"
-            (cd "$package_dir" && bun publish "${publish_args[@]}")
+            (cd "$package_dir" && NPM_CONFIG_TOKEN="$NPM_TOKEN" bun publish "${publish_args[@]}")
           done
 
           {
