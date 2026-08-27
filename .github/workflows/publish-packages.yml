@@ -43,16 +43,6 @@ on:
         required: false
         type: string
         default: ""
-      allow_initial_npm_publish:
-        description: "Allow one-time authenticated first publish for npm package names whose package pages do not exist yet"
-        required: true
-        type: boolean
-        default: false
-      use_scoped_npm_fallback:
-        description: "Authorize selected Bun publishes with the release environment npm publish value"
-        required: true
-        type: boolean
-        default: false
       include_pypi_extras:
         description: "Publish FastAPI, Flask, and Django PyPI packages after their publishers are configured"
         required: true
@@ -139,12 +129,11 @@ jobs:
     environment: release
     permissions:
       contents: read
+      id-token: write
     env:
       DRY_RUN: ${{ inputs.dry_run }}
       INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
       NPM_PACKAGES: ${{ inputs.npm_packages }}
-      ALLOW_INITIAL_NPM_PUBLISH: ${{ inputs.allow_initial_npm_publish }}
-      USE_SCOPED_NPM_FALLBACK: ${{ inputs.use_scoped_npm_fallback }}
     steps:
       - name: Check out release ref
         uses: actions/checkout@v6
@@ -160,8 +149,6 @@ jobs:
       - name: Publish npm packages
         id: npm-packages
         shell: bash
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -Eeuo pipefail
 
@@ -188,6 +175,35 @@ jobs:
 
           package_field() {
             bun -e 'const manifest = require(process.argv[1]); console.log(manifest[process.argv[2]])' "./$1/package.json" "$2"
+          }
+
+          exchange_npm_oidc_grant() {
+            NPM_PACKAGE="$1" bun -e '
+              const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+              const requestGrant = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+              const packageName = process.env.NPM_PACKAGE;
+              const fail = (message) => { console.error(message); process.exit(1); };
+              if (!requestUrl || !requestGrant || !packageName) fail("npm OIDC environment is incomplete");
+
+              const identityUrl = new URL(requestUrl);
+              identityUrl.searchParams.set("audience", "npm:registry.npmjs.org");
+              const identityResponse = await fetch(identityUrl, {
+                headers: { Accept: "application/json", Authorization: "Bearer " + requestGrant }
+              });
+              if (!identityResponse.ok) fail("GitHub OIDC request failed with " + identityResponse.status);
+              const identity = await identityResponse.json();
+              if (typeof identity.value !== "string" || !identity.value) fail("GitHub OIDC response omitted its identity");
+
+              const escapedName = packageName.replace("/", "%2f");
+              const exchangeResponse = await fetch(
+                "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/" + escapedName,
+                { method: "POST", headers: { Authorization: "Bearer " + identity.value } }
+              );
+              if (!exchangeResponse.ok) fail("npm OIDC exchange failed for " + packageName + " with " + exchangeResponse.status);
+              const exchange = await exchangeResponse.json();
+              if (typeof exchange.token !== "string" || !exchange.token) fail("npm OIDC exchange omitted its grant for " + packageName);
+              process.stdout.write(exchange.token);
+            '
           }
 
           select_npm_package_dirs() {
@@ -306,42 +322,26 @@ jobs:
             rm -f "$npm_publication_plan" "$missing_npm_packages_file"
           fi
 
-          if [[ "$DRY_RUN" != "true" && "${#missing_npm_packages[@]}" -gt 0 ]]; then
-            printf 'Missing npm package pages before publish:\n' >&2
-            printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
-            if [[ "$ALLOW_INITIAL_NPM_PUBLISH" != "true" ]]; then
-              echo "npm trusted publishing requires existing package pages for these names." >&2
-              echo "Run a one-time authenticated first publish, or rerun with allow_initial_npm_publish=true after adding the release environment npm publish value, then configure trusted publishers for repeat OIDC publishes." >&2
-              exit 1
-            fi
-            if [[ -z "${NPM_TOKEN:-}" ]]; then
-              echo "allow_initial_npm_publish=true requires the release environment npm publish value for one-time authenticated package creation." >&2
-              exit 1
-            fi
-          elif [[ "$ALLOW_INITIAL_NPM_PUBLISH" == "true" ]]; then
-            echo "allow_initial_npm_publish=true is only for brand-new npm package pages; all selected packages already exist." >&2
-            exit 1
-          fi
-
-          if [[ "$USE_SCOPED_NPM_FALLBACK" == "true" ]]; then
-            if [[ "$DRY_RUN" == "true" ]]; then
-              echo "use_scoped_npm_fallback=true is only valid for real npm publishes." >&2
-              exit 1
-            fi
+          publish_grants=()
+          if [[ "$DRY_RUN" != "true" ]]; then
             if [[ -z "$NPM_PACKAGES" ]]; then
-              echo "use_scoped_npm_fallback=true requires a scoped npm_packages selection." >&2
+              echo "Bun publication requires an explicit npm_packages selection." >&2
               exit 1
             fi
-            if [[ -z "${NPM_TOKEN:-}" ]]; then
-              echo "use_scoped_npm_fallback=true requires the release environment npm publish value." >&2
+            if [[ "${#missing_npm_packages[@]}" -gt 0 ]]; then
+              printf 'npm trusted publishing requires existing package pages:\n' >&2
+              printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
               exit 1
             fi
-          elif [[ "$DRY_RUN" != "true" ]]; then
-            echo "Bun publication requires use_scoped_npm_fallback=true and an explicit npm_packages selection." >&2
-            exit 1
+            for package_name in "${selected_package_names[@]}"; do
+              publish_grant="$(exchange_npm_oidc_grant "$package_name")"
+              printf '::add-mask::%s\n' "$publish_grant"
+              publish_grants+=("$publish_grant")
+            done
           fi
 
-          for package_dir in "${package_dirs[@]}"; do
+          for package_index in "${!package_dirs[@]}"; do
+            package_dir="${package_dirs[$package_index]}"
             package_name="$(package_field "$package_dir" name)"
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Packing ${package_name} from ${package_dir}"
@@ -354,8 +354,9 @@ jobs:
             fi
 
             echo "Publishing ${package_name} from ${package_dir}"
-            (cd "$package_dir" && NPM_CONFIG_TOKEN="$NPM_TOKEN" bun publish "${publish_args[@]}")
+            (cd "$package_dir" && NPM_CONFIG_TOKEN="${publish_grants[$package_index]}" bun publish "${publish_args[@]}")
           done
+          publish_grants=()
 
           {
             echo "selected_packages<<EOF"
