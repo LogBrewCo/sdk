@@ -336,6 +336,7 @@ class FlaskIntegrationTests(unittest.TestCase):
         issue = payload["events"][0]["attributes"]
         span = payload["events"][1]["attributes"]
         self.assertEqual(issue["title"], "GET /orders/<int:order_id>/boom failed")
+        self.assertEqual(issue["message"], "Unhandled exception")
         self.assertEqual(
             issue["exception"],
             {
@@ -345,15 +346,15 @@ class FlaskIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(issue["stackFrames"][0]["filename"], "test_flask_integration.py")
         self.assertEqual(issue["stackFrames"][0]["function"], "dynamic_order_boom")
-        self.assertEqual(issue["metadata"]["exception_type"], "RuntimeError")
+        self.assertEqual(issue["exceptionChain"]["entries"][0]["messageState"], "redacted")
         self.assertEqual(span["name"], "GET /orders/<int:order_id>/boom")
         self.assertEqual(span["status"], "error")
         self.assertEqual(span["metadata"]["status_code"], 500)
         self.assertEqual(span["metadata"]["routeTemplate"], "/orders/<int:order_id>/boom")
         self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
         self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
-        self.assertNotIn("/orders/42", json.dumps(payload))
-        self.assertNotIn("debug", json.dumps(payload))
+        for private_value in ("/orders/42", "broken order 42", "debug"):
+            self.assertNotIn(private_value, json.dumps(payload))
 
     def test_flush_errors_do_not_break_application_by_default(self) -> None:
         sdk_client = make_client()

@@ -331,18 +331,17 @@ def capture_exception(
 
     issue_event_id = event_id or f"evt_flask_issue_{uuid.uuid4().hex}"
     trace_context = trace or request_logbrew_trace() or get_active_logbrew_trace()
-    captured_at = timestamp or utc_timestamp()
     client.issue(
         issue_event_id,
-        captured_at,
+        timestamp or utc_timestamp(),
         create_issue_attributes_from_exception(
             exc,
             title=f"{request_name()} failed",
+            message="Unhandled exception",
             mechanism="flask.middleware",
             handled=False,
             metadata={
                 **request_metadata(status_code=500),
-                "exception_type": exc.__class__.__name__,
                 **trace_metadata(trace_context),
             },
         ),

@@ -460,6 +460,7 @@ class LogBrewSdkTests(unittest.TestCase):
             attributes = create_issue_attributes_from_exception(
                 error,
                 title="Checkout failed",
+                message="Checkout unavailable",
                 mechanism="python.framework",
                 handled=False,
                 evidence=evidence,
@@ -467,7 +468,7 @@ class LogBrewSdkTests(unittest.TestCase):
             )
 
         self.assertEqual(attributes["title"], "Checkout failed")
-        self.assertEqual(attributes["message"], "payment method is unavailable")
+        self.assertEqual(attributes["message"], "Checkout unavailable")
         self.assertEqual(
             attributes["exception"],
             {
@@ -486,8 +487,7 @@ class LogBrewSdkTests(unittest.TestCase):
                         "id": 0,
                         "relationship": "reported",
                         "type": "LookupError",
-                        "message": "payment method is unavailable",
-                        "messageState": "captured",
+                        "messageState": "redacted",
                         "mechanism": {"type": "python.framework", "handled": False},
                         "stackFrames": attributes["stackFrames"],
                         "stackFramesState": "captured",
@@ -496,6 +496,7 @@ class LogBrewSdkTests(unittest.TestCase):
                 "truncated": False,
             },
         )
+        self.assertNotIn("payment method is unavailable", json.dumps(attributes))
         self.assertNotIn("workspace", json.dumps(attributes))
         self.assertEqual(attributes["evidence"], evidence)
 

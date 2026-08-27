@@ -418,18 +418,17 @@ def capture_exception(
 
     issue_event_id = event_id or f"evt_fastapi_issue_{uuid.uuid4().hex}"
     trace_context = trace or request_logbrew_trace(request) or get_active_logbrew_trace()
-    captured_at = timestamp or utc_timestamp()
     client.issue(
         issue_event_id,
-        captured_at,
+        timestamp or utc_timestamp(),
         create_issue_attributes_from_exception(
             exc,
             title=f"{request_name(request)} failed",
+            message="Unhandled exception",
             mechanism="fastapi.middleware",
             handled=False,
             metadata={
                 **request_metadata(request, status_code=500, service_name=service_name),
-                "exception_type": exc.__class__.__name__,
                 **trace_metadata(trace_context),
             },
         ),

@@ -115,13 +115,9 @@ def issue_exception_chain_from_exception(
     mechanism: str,
     handled: bool,
     include_stack_frames: bool = True,
+    capture_messages: bool = True,
 ) -> dict[str, Any]:
     """Project one bounded parent-first exception tree without locals or source text."""
-
-    if not isinstance(error, BaseException):
-        raise SdkError("validation_error", "issue error must be an exception")
-    if not isinstance(include_stack_frames, bool):
-        raise SdkError("validation_error", "include_stack_frames must be a boolean")
 
     entries: list[dict[str, Any]] = []
     seen: set[int] = set()
@@ -143,7 +139,9 @@ def issue_exception_chain_from_exception(
         seen.add(identity)
 
         entry_id = len(entries)
-        message, message_state = _exception_message(current)
+        message, message_state = (
+            _exception_message(current) if capture_messages else (None, "redacted")
+        )
         stack_frames, stack_state = _issue_stack_projection(
             current,
             include_stack_frames=include_stack_frames,
