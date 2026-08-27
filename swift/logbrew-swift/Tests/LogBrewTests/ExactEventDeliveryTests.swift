@@ -43,15 +43,13 @@ struct ExactEventDeliveryTests {
         try captureLog(client, id: "native-target")
         let transport = InvalidAttemptCountTransport()
 
-        do {
+        let error = expectSdkError {
             _ = try client.flushEvent(
                 "native-target",
                 transport: transport,
             )
-            Issue.record("expected malformed transport response to fail")
-        } catch let error as SdkError {
-            #expect(error.code == "transport_error")
         }
+        #expect(error.code == "transport_error")
 
         #expect(client.pendingEvents() == 1)
         #expect(transport.requestBodies.count == 1)

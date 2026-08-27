@@ -117,32 +117,17 @@ struct LifecycleTraceTests {
     @Test("lifecycle span helper validates state and duration")
     func lifecycleSpanHelperValidatesStateAndDuration() throws {
         let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
-
-        #expect(throws: SdkError.self) {
-            try client.captureLifecycleSpan(
-                "evt_lifecycle_bad_state",
-                timestamp: "2026-06-02T10:00:08Z",
-                previousState: " ",
-                currentState: "background",
-            )
+        let invalid: [(String, Double?)] = [
+            (" ", nil),
+            ("active", -1),
+        ]
+        for (previousState, duration) in invalid {
+            #expect(throws: SdkError.self) {
+                try client.captureLifecycleSpan(
+                    "evt_lifecycle_invalid", timestamp: "2026-06-02T10:00:08Z",
+                    previousState: previousState, currentState: "background", durationMs: duration,
+                )
+            }
         }
-        #expect(throws: SdkError.self) {
-            try client.captureLifecycleSpan(
-                "evt_lifecycle_bad_duration",
-                timestamp: "2026-06-02T10:00:08Z",
-                previousState: "active",
-                currentState: "background",
-                durationMs: -1,
-            )
-        }
-    }
-
-    private func fixedTraceContext() throws -> LogBrewTraceContext {
-        try LogBrewTraceContext(
-            traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-            spanId: "aaaaaaaaaaaaaaaa",
-            parentSpanId: "00f067aa0ba902b7",
-            traceFlags: "01",
-        )
     }
 }

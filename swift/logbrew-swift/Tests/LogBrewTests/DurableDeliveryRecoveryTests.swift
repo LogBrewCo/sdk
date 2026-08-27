@@ -13,12 +13,10 @@ struct DurableDeliveryRecoveryTests {
         do {
             let owner = try makeClient()
             try owner.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
-            do {
+            let error = expectSdkError {
                 try waitingClient.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
-                Issue.record("second process owner was accepted")
-            } catch let error as SdkError {
-                #expect(error.code == "storage_error")
             }
+            #expect(error.code == "storage_error")
             #expect(waitingClient.deliveryHealth().state == .manual)
         }
 
@@ -47,12 +45,10 @@ struct DurableDeliveryRecoveryTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: record.path)
 
         let recovered = try makeClient()
-        do {
+        let error = expectSdkError {
             try recovered.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
-            Issue.record("malformed durable record was accepted")
-        } catch let error as SdkError {
-            #expect(error.code == "storage_corrupt")
         }
+        #expect(error.code == "storage_corrupt")
         #expect(recovered.deliveryHealth().pauseReason == .storage)
         #expect(FileManager.default.fileExists(atPath: record.path))
         try recovered.purgeDurableDelivery()
@@ -72,12 +68,10 @@ struct DurableDeliveryRecoveryTests {
             for index in 0 ..< 101 {
                 try captureLog(client, id: "durable-batch-\(index)")
             }
-            do {
+            let error = expectSdkError {
                 _ = try client.flush(transport: failedTransport)
-                Issue.record("retryable durable prefix was accepted")
-            } catch let error as SdkError {
-                #expect(error.code == "transport_error")
             }
+            #expect(error.code == "transport_error")
             failedBody = try #require(failedTransport.requestBodies.first)
             #expect(try eventCount(in: failedBody) == 100)
             #expect(!failedBody.contains("durable-batch-100"))
@@ -107,12 +101,10 @@ struct DurableDeliveryRecoveryTests {
             for index in 0 ..< 1000 {
                 try captureLog(client, id: "durable-capacity-\(index)")
             }
-            do {
+            let error = expectSdkError {
                 try captureLog(client, id: "durable-capacity-overflow")
-                Issue.record("durable queue accepted more than its event bound")
-            } catch let error as SdkError {
-                #expect(error.code == "queue_full")
             }
+            #expect(error.code == "queue_full")
             #expect(client.pendingEvents() == 1000)
             #expect(client.deliveryHealth().droppedEvents == 1)
         }

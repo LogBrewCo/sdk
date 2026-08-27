@@ -20,23 +20,16 @@ struct DurableDeliveryFailureTests {
         try Data("unknown".utf8).write(to: unknown)
         let client = try makeClient()
 
-        do {
+        let error = expectSdkError {
             try client.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
-            Issue.record("unknown durable record was accepted")
-        } catch let error as SdkError {
-            #expect(error.code == "storage_corrupt")
         }
+        #expect(error.code == "storage_corrupt")
         #expect(client.deliveryHealth().state == .paused)
         #expect(client.deliveryHealth().pauseReason == .storage)
         #expect(FileManager.default.fileExists(atPath: unknown.path))
 
         for operation in blockedStorageOperations(client: client) {
-            do {
-                try operation()
-                Issue.record("storage pause allowed delivery work")
-            } catch let error as SdkError {
-                #expect(error.code == "storage_corrupt")
-            }
+            #expect(expectSdkError(operation).code == "storage_corrupt")
         }
         #expect(client.pendingEvents() == 0)
 
@@ -73,12 +66,10 @@ struct DurableDeliveryFailureTests {
         try FileManager.default.removeItem(at: original)
 
         let recovered = try makeClient()
-        do {
+        let error = expectSdkError {
             try recovered.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
-            Issue.record("exhausted durable sequence was accepted")
-        } catch let error as SdkError {
-            #expect(error.code == "storage_corrupt")
         }
+        #expect(error.code == "storage_corrupt")
         #expect(recovered.deliveryHealth().pauseReason == .storage)
         #expect(FileManager.default.fileExists(atPath: exhausted.path))
     }
@@ -94,12 +85,10 @@ struct DurableDeliveryFailureTests {
             options: AutomaticDeliveryOptions(interval: 30, threshold: 100),
         )
 
-        do {
+        let error = expectSdkError {
             try client.purgeDurableDelivery()
-            Issue.record("purge accepted active automatic ownership")
-        } catch let error as SdkError {
-            #expect(error.code == "configuration_error")
         }
+        #expect(error.code == "configuration_error")
         client.stopAutomaticDelivery()
         try client.purgeDurableDelivery()
     }
@@ -158,12 +147,10 @@ struct DurableDeliveryFailureTests {
             try? FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: owned.path)
         }
 
-        do {
+        let error = expectSdkError {
             _ = try client.shutdown(transport: transport)
-            Issue.record("shutdown accepted an uncommitted durable acknowledgement")
-        } catch let error as SdkError {
-            #expect(error.code == "storage_error")
         }
+        #expect(error.code == "storage_error")
         #expect(client.deliveryHealth().state == .paused)
         #expect(client.deliveryHealth().pauseReason == .storage)
         #expect(client.pendingEvents() == 1)

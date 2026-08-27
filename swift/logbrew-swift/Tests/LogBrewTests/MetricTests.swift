@@ -42,6 +42,7 @@ struct MetricTests {
 
     @Test("metric helper rejects unsafe descriptions")
     func metricHelperRejectsUnsafeDescriptions() throws {
+        let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
         let descriptions = [
             "   ",
             String(repeating: "M", count: 1025),
@@ -49,7 +50,6 @@ struct MetricTests {
             "request\u{2028}count",
         ]
         for description in descriptions {
-            let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
             #expect(throws: SdkError.self) {
                 try client.metric(
                     "evt_metric_bad_description",
@@ -70,45 +70,19 @@ struct MetricTests {
     @Test("metric helper rejects invalid values and temporalities")
     func metricHelperRejectsInvalidValuesAndTemporalities() throws {
         let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
-
-        #expect(throws: SdkError.self) {
-            try client.metric(
-                "evt_metric_nan",
-                timestamp: "2026-06-02T10:00:06Z",
-                attributes: MetricAttributes(
-                    name: "queue.depth",
-                    kind: .gauge,
-                    value: Double.nan,
-                    unit: "items",
-                    temporality: .instant,
-                ),
-            )
-        }
-        #expect(throws: SdkError.self) {
-            try client.metric(
-                "evt_metric_negative_counter",
-                timestamp: "2026-06-02T10:00:06Z",
-                attributes: MetricAttributes(
-                    name: "jobs.processed",
-                    kind: .counter,
-                    value: -1,
-                    unit: "jobs",
-                    temporality: .delta,
-                ),
-            )
-        }
-        #expect(throws: SdkError.self) {
-            try client.metric(
-                "evt_metric_bad_temporality",
-                timestamp: "2026-06-02T10:00:06Z",
-                attributes: MetricAttributes(
-                    name: "queue.depth",
-                    kind: .gauge,
-                    value: 5,
-                    unit: "items",
-                    temporality: .delta,
-                ),
-            )
+        let invalid = [
+            MetricAttributes(name: "queue.depth", kind: .gauge, value: .nan, unit: "items", temporality: .instant),
+            MetricAttributes(name: "jobs.processed", kind: .counter, value: -1, unit: "jobs", temporality: .delta),
+            MetricAttributes(name: "queue.depth", kind: .gauge, value: 5, unit: "items", temporality: .delta),
+        ]
+        for (index, attributes) in invalid.enumerated() {
+            #expect(throws: SdkError.self) {
+                try client.metric(
+                    "evt_metric_invalid_\(index)",
+                    timestamp: "2026-06-02T10:00:06Z",
+                    attributes: attributes,
+                )
+            }
         }
     }
 }

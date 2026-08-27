@@ -50,6 +50,16 @@ try client.issue(
         level: .error,
         message: "Request timed out after retry budget",
         mechanism: "swift.task",
+        evidence: IssueDiagnosticEvidence(
+            likelyRootCause: "The retry budget was exhausted.",
+            likelyFixArea: IssueLikelyFixArea(
+                component: "checkout-app", function: "authorize",
+                file: "Sources/Checkout/PaymentService.swift", line: 42, inApp: true,
+            ),
+            impact: IssueImpactEvidence(failedAction: "checkout.submit"),
+            capturedFields: ["retry.count"],
+            missingFields: ["provider.request_id"],
+        ),
         fileID: "Checkout/PaymentService.swift",
         line: 42,
         column: 17,
@@ -100,6 +110,8 @@ precondition(preview.contains(#""exception" : {"#))
 precondition(preview.contains(#""handled" : true"#))
 precondition(preview.contains(#""breadcrumbs" : ["#))
 precondition(preview.contains(#""stackFrames" : ["#))
+precondition(preview.contains(#""likelyRootCause" : "The retry budget was exhausted.""#))
+precondition(preview.contains(#""file" : "Sources\/Checkout\/PaymentService.swift""#))
 precondition(preview.contains(#""events" : ["#))
 precondition(preview.contains(#""links" : ["#))
 precondition(!preview.contains("must-not-escape"))

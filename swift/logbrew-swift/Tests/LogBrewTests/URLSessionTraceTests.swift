@@ -246,15 +246,6 @@ struct URLSessionTraceTests {
         let events = try #require(payload["events"] as? [[String: Any]])
         return try #require(events.first { $0["id"] as? String == id })
     }
-
-    private func fixedTraceContext() throws -> LogBrewTraceContext {
-        try LogBrewTraceContext(
-            traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-            spanId: "aaaaaaaaaaaaaaaa",
-            parentSpanId: "00f067aa0ba902b7",
-            traceFlags: "01",
-        )
-    }
 }
 
 private actor URLSessionTraceRecorder {

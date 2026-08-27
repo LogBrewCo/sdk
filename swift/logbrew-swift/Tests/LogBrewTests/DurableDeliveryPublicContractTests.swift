@@ -84,14 +84,12 @@ struct DurableDeliveryPublicContractTests {
         let client = try makeClient()
         try captureLog(client, id: "retained-after-enable-failure")
 
-        do {
+        let error = expectSdkError {
             try client.enableDurableDelivery(
                 options: DurableDeliveryOptions(directory: symlink),
             )
-            Issue.record("symlink storage parent was accepted")
-        } catch let error as SdkError {
-            #expect(error.code == "storage_error")
         }
+        #expect(error.code == "storage_error")
         #expect(client.deliveryHealth().state == .manual)
         #expect(client.pendingEvents() == 1)
         #expect(try client.previewJSON().contains("retained-after-enable-failure"))

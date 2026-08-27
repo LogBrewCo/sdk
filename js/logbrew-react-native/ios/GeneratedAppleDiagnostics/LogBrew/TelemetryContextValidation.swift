@@ -81,9 +81,14 @@ func validateTelemetryTraceContext(
     )
 }
 
-func validMachineKey(_ value: String, maximum: Int, separators: Set<Character>) -> Bool {
+func validMachineKey(
+    _ value: String,
+    maximum: Int,
+    separators: Set<Character>,
+    allowNumericStart: Bool = false,
+) -> Bool {
     guard !value.isEmpty, value.count <= maximum, value.first?.isASCII == true,
-          value.first?.isLetter == true
+          value.first?.isLetter == true || allowNumericStart && value.first?.isNumber == true
     else {
         return false
     }

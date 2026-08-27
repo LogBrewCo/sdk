@@ -1,0 +1,182 @@
+import Foundation
+
+/// App-reported code location that narrows the smallest likely fix area.
+public struct IssueLikelyFixArea: Codable, Equatable, Sendable {
+    public let component: String?
+    public let module: String?
+    public let function: String?
+    public let file: String?
+    public let line: Int?
+    public let column: Int?
+    public let inApp: Bool?
+
+    public init(
+        component: String? = nil,
+        module: String? = nil,
+        function: String? = nil,
+        file: String? = nil,
+        line: Int? = nil,
+        column: Int? = nil,
+        inApp: Bool? = nil,
+    ) {
+        self.component = component
+        self.module = module
+        self.function = function
+        self.file = file
+        self.line = line
+        self.column = column
+        self.inApp = inApp
+    }
+}
+
+/// App-reported impact without user identities or raw request data.
+public struct IssueImpactEvidence: Codable, Equatable, Sendable {
+    public let affectedUserSegment: String?
+    public let failedAction: String?
+    public let userVisibleOutcome: String?
+
+    public init(
+        affectedUserSegment: String? = nil,
+        failedAction: String? = nil,
+        userVisibleOutcome: String? = nil,
+    ) {
+        self.affectedUserSegment = affectedUserSegment
+        self.failedAction = failedAction
+        self.userVisibleOutcome = userVisibleOutcome
+    }
+}
+
+/// Explicit app-reported cause, fix, impact, and capture-state evidence.
+public struct IssueDiagnosticEvidence: Codable, Equatable, Sendable {
+    public let likelyRootCause: String?
+    public let likelyFixArea: IssueLikelyFixArea?
+    public let impact: IssueImpactEvidence?
+    public let capturedFields: [String]?
+    public let missingFields: [String]?
+    public let redactedFields: [String]?
+    public let truncatedFields: [String]?
+
+    public init(
+        likelyRootCause: String? = nil,
+        likelyFixArea: IssueLikelyFixArea? = nil,
+        impact: IssueImpactEvidence? = nil,
+        capturedFields: [String]? = nil,
+        missingFields: [String]? = nil,
+        redactedFields: [String]? = nil,
+        truncatedFields: [String]? = nil,
+    ) {
+        self.likelyRootCause = likelyRootCause
+        self.likelyFixArea = likelyFixArea
+        self.impact = impact
+        self.capturedFields = capturedFields
+        self.missingFields = missingFields
+        self.redactedFields = redactedFields
+        self.truncatedFields = truncatedFields
+    }
+}
+
+func validateIssueDiagnosticEvidence(_ value: IssueDiagnosticEvidence) throws -> IssueDiagnosticEvidence {
+    let cause = try value.likelyRootCause.map {
+        try issueText($0, label: "issue evidence likelyRootCause", maximum: 1024)
+    }
+    let fixArea = try value.likelyFixArea.map(validateIssueLikelyFixArea)
+    let impact = try value.impact.map(validateIssueImpactEvidence)
+    var seen = Set<String>()
+    let fieldLists = try [
+        ("capturedFields", value.capturedFields),
+        ("missingFields", value.missingFields),
+        ("redactedFields", value.redactedFields),
+        ("truncatedFields", value.truncatedFields),
+    ].map { name, fields in
+        try fields.map { try validateIssueEvidenceFields($0, name: name, seen: &seen) }
+    }
+    guard cause != nil || fixArea != nil || impact != nil || fieldLists.contains(where: { $0 != nil }) else {
+        throw issueValidationError("issue evidence must contain at least one field")
+    }
+    return IssueDiagnosticEvidence(
+        likelyRootCause: cause,
+        likelyFixArea: fixArea,
+        impact: impact,
+        capturedFields: fieldLists[0],
+        missingFields: fieldLists[1],
+        redactedFields: fieldLists[2],
+        truncatedFields: fieldLists[3],
+    )
+}
+
+private func validateIssueLikelyFixArea(_ value: IssueLikelyFixArea) throws -> IssueLikelyFixArea {
+    let identities = try [value.component, value.module, value.function].map { identity in
+        try identity.map {
+            try issueText($0, label: "issue evidence likelyFixArea identity", maximum: 256,
+                          disallowLocationDelimiters: true)
+        }
+    }
+    let file = try value.file.map(validateIssueRelativePath)
+    let coordinates = try [value.line, value.column].map { coordinate in
+        try coordinate.map {
+            guard (1 ... Int(Int32.max)).contains($0) else {
+                throw issueValidationError("issue evidence likelyFixArea coordinate must be a positive integer")
+            }
+            return $0
+        }
+    }
+    guard identities.contains(where: { $0 != nil }) || file != nil || coordinates.contains(where: { $0 != nil }) else {
+        throw issueValidationError("issue evidence likelyFixArea must identify a code location")
+    }
+    return IssueLikelyFixArea(
+        component: identities[0], module: identities[1], function: identities[2], file: file,
+        line: coordinates[0], column: coordinates[1], inApp: value.inApp,
+    )
+}
+
+private func validateIssueImpactEvidence(_ value: IssueImpactEvidence) throws -> IssueImpactEvidence {
+    let values = try [
+        (value.affectedUserSegment, 256, true),
+        (value.failedAction, 256, true),
+        (value.userVisibleOutcome, 512, false),
+    ].map { text, maximum, rejectLocation in
+        try text.map {
+            try issueText($0, label: "issue evidence impact", maximum: maximum,
+                          disallowLocationDelimiters: rejectLocation)
+        }
+    }
+    guard values.contains(where: { $0 != nil }) else {
+        throw issueValidationError("issue evidence impact must contain at least one field")
+    }
+    return IssueImpactEvidence(
+        affectedUserSegment: values[0], failedAction: values[1], userVisibleOutcome: values[2],
+    )
+}
+
+private func validateIssueEvidenceFields(
+    _ fields: [String],
+    name: String,
+    seen: inout Set<String>,
+) throws -> [String] {
+    guard (1 ... 32).contains(fields.count), Set(fields).count == fields.count,
+          fields.allSatisfy({ validMachineKey($0, maximum: 64, separators: ["_", ".", "-"], allowNumericStart: true) })
+    else {
+        throw issueValidationError("issue evidence \(name) must contain 1-32 unique bounded fields")
+    }
+    for field in fields where !seen.insert(field).inserted {
+        throw issueValidationError("issue evidence field \(field) has conflicting states")
+    }
+    return fields
+}
+
+private func validateIssueRelativePath(_ value: String) throws -> String {
+    let path = try issueText(
+        value.replacingOccurrences(of: "\\", with: "/"),
+        label: "issue evidence likelyFixArea file",
+        maximum: 256,
+        disallowLocationDelimiters: true,
+    )
+    let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+    let drivePath = path.count >= 3 && path[path.index(after: path.startIndex)] == ":"
+    guard !path.hasPrefix("/"), !drivePath, !path.contains("://"),
+          parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+    else {
+        throw issueValidationError("issue evidence likelyFixArea file must be a safe relative path")
+    }
+    return path
+}

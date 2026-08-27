@@ -32,26 +32,21 @@ struct SpanEvidenceTests {
     @Test("oversized or zero-id span evidence fails before queue admission")
     func invalidSpanEvidenceFailsClosed() throws {
         let client = try richClient()
-        #expect(throws: SdkError.self) {
-            try client.span(
-                "too-many-events",
-                timestamp: "2026-08-06T10:00:00Z",
-                attributes: invalidSpan(events: (0 ..< 9).map { SpanEventSummary(name: "event_\($0)") }),
-            )
-        }
-        #expect(throws: SdkError.self) {
-            try client.span(
-                "zero-link",
-                timestamp: "2026-08-06T10:00:00Z",
-                attributes: invalidSpan(
-                    links: [
-                        SpanLinkSummary(
-                            traceId: String(repeating: "0", count: 32),
-                            spanId: "2222222222222222",
-                        ),
-                    ],
+        let invalid = [
+            invalidSpan(events: (0 ..< 9).map { SpanEventSummary(name: "event_\($0)") }),
+            invalidSpan(links: [
+                SpanLinkSummary(
+                    traceId: String(repeating: "0", count: 32),
+                    spanId: "2222222222222222",
                 ),
-            )
+            ]),
+        ]
+        for (index, attributes) in invalid.enumerated() {
+            #expect(throws: SdkError.self) {
+                try client.span(
+                    "invalid-span-\(index)", timestamp: "2026-08-06T10:00:00Z", attributes: attributes,
+                )
+            }
         }
         #expect(client.pendingEvents() == 0)
     }

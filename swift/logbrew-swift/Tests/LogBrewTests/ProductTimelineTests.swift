@@ -81,40 +81,20 @@ struct ProductTimelineTests {
     @Test("Swift product timeline helpers reject unsafe network fields")
     func rejectUnsafeNetworkFields() throws {
         let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
-
-        #expect(throws: SdkError.self) {
+        func capture(_ route: String = "/api/checkout", status: Int? = nil, duration: Double? = nil) throws {
             try client.captureNetworkMilestone(
-                "evt_network_bad_duration",
-                timestamp: "2026-06-02T10:00:08Z",
-                method: "GET",
-                routeTemplate: "/api/checkout",
-                durationMs: -1,
+                "evt_network_invalid", timestamp: "2026-06-02T10:00:08Z", method: "GET",
+                routeTemplate: route, statusCode: status, durationMs: duration,
             )
         }
-        #expect(throws: SdkError.self) {
-            try client.captureNetworkMilestone(
-                "evt_network_bad_status",
-                timestamp: "2026-06-02T10:00:08Z",
-                method: "GET",
-                routeTemplate: "/api/checkout",
-                statusCode: 99,
-            )
-        }
-        #expect(throws: SdkError.self) {
-            try client.captureNetworkMilestone(
-                "evt_network_bad_route",
-                timestamp: "2026-06-02T10:00:08Z",
-                method: "GET",
-                routeTemplate: "ftp://example.test/private",
-            )
-        }
-        #expect(throws: SdkError.self) {
-            try client.captureNetworkMilestone(
-                "evt_network_query_only_route",
-                timestamp: "2026-06-02T10:00:08Z",
-                method: "GET",
-                routeTemplate: "?private=value",
-            )
+        let invalid: [() throws -> Void] = [
+            { try capture(duration: -1) },
+            { try capture(status: 99) },
+            { try capture("ftp://example.test/private") },
+            { try capture("?private=value") },
+        ]
+        for operation in invalid {
+            #expect(throws: SdkError.self) { try operation() }
         }
         #expect(throws: SdkError.self) {
             try client.captureProductAction(

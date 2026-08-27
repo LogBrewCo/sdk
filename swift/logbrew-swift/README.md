@@ -11,7 +11,7 @@ For Apple app setup flows, choose the Swift path first. Use this SDK for iOS, ma
 ## Install
 
 ```swift
-.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.10")
+.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.12")
 ```
 
 Use the `LogBrew` product from the repository root SwiftPM package. Add the separate `LogBrewCrash` product only when your Apple app explicitly opts into native fatal-crash capture. Local contributors can also open the Swift package directly from `swift/logbrew-swift`.
@@ -150,13 +150,28 @@ do {
             error,
             title: "Payment authorization failed",
             mechanism: "swift.task",
-            handled: true
+            handled: true,
+            evidence: IssueDiagnosticEvidence(
+                likelyRootCause: "The retry budget was exhausted.",
+                likelyFixArea: IssueLikelyFixArea(
+                    component: "checkout-app",
+                    function: "authorize",
+                    file: "Sources/Checkout/PaymentService.swift",
+                    line: 42,
+                    inApp: true
+                ),
+                impact: IssueImpactEvidence(failedAction: "checkout.submit"),
+                capturedFields: ["retry.count"],
+                missingFields: ["provider.request_id"]
+            )
         )
     )
 }
 ```
 
 The client retains the newest 64 validated breadcrumbs, attaches a detached oldest-to-newest snapshot to each later issue, and sets `breadcrumbsTruncated` when older history was evicted. `clearBreadcrumbs()` affects only future issues. Breadcrumbs accept stable machine categories, an optional bounded message, and at most eight flat finite primitive data fields. Explicit issue frames are capped at 32 and keep only bounded filename, positive coordinates, optional function/module ownership, and an optional Debug ID. Absolute file prefixes and query or fragment data are removed before queue admission.
+
+`evidence` is explicit application knowledge, not an SDK diagnosis. LogBrew keeps the reported cause separate from observed frames and trace evidence, requires repository-relative fix paths, and preserves disjoint captured, missing, redacted, and truncated field states. Do not put authorization values, request bodies, user identities, raw input, full URLs, headers, absolute paths, or raw stack text in this object. See the shared [issue evidence contract](../../docs/issue-diagnostic-evidence.md).
 
 ## Automatic Delivery (Opt-In)
 

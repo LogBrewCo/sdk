@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/swift/logbrew-swift"
+[[ ! -e "$repo_root/Package.resolved" && ! -e "$package_dir/Package.resolved" ]] || { echo "Swift smoke requires a clean package-resolution boundary" >&2; exit 1; }
 tmp_dir="$(mktemp -d)"
 intake_pid=""
 
@@ -11,111 +12,15 @@ cleanup() {
     kill "$intake_pid" 2>/dev/null || true
     wait "$intake_pid" 2>/dev/null || true
   fi
+  rm -f "$repo_root/Package.resolved" "$package_dir/Package.resolved"
   rm -rf "$tmp_dir"
 }
 
 trap cleanup EXIT
 trap 'echo "swift real-user smoke failed near line $LINENO" >&2' ERR
 
-echo "swift real-user smoke: package build/test" >&2
-swift build --package-path "$package_dir" --scratch-path "$tmp_dir/package-build" >/dev/null
-swift test --package-path "$package_dir" --scratch-path "$tmp_dir/package-test" >/dev/null
-
-echo "swift real-user smoke: archive source" >&2
-archive_path="$tmp_dir/logbrew-swift-source.zip"
-swift package --package-path "$package_dir" --scratch-path "$tmp_dir/package-archive" archive-source --output "$archive_path" >/dev/null
-test -f "$archive_path"
-unzip -Z1 "$archive_path" > "$tmp_dir/archive-contents.txt"
-grep -q '/Package.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/README.md$' "$tmp_dir/archive-contents.txt"
-grep -q '/.swiftformat$' "$tmp_dir/archive-contents.txt"
-grep -q '/.swiftlint.yml$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/EventEncoding.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/AutomaticTelemetryContext.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/DurableDeliveryStore.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/DurableDeliveryStoreRecovery.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/DeliveryEngine.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/DeliveryEngineDurable.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/DeliveryEngineAutomatic.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/DeliveryEngineQueue.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/DeliveryLifecycle.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/LifecycleTrace.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/IssueDiagnostics.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/LogBrewClient.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/LogBrewLogger.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/LogBrewTrace.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/Metadata.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/ProductTimeline.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/PublicTypes.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/TelemetryContext.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/TelemetryContextValidation.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/TraceEvidence.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/Transport.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/URLSessionTrace.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/URLSessionTracer.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/LogBrew/Validation.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/ReadmeExample/main.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Sources/TraceCorrelationExample/main.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/LogBrewTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/AutomaticDeliveryTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/DurableDeliveryFailureTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/DurableDeliveryRecoveryTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/LifecycleTraceTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/OpenTelemetryTraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/ProductTimelineTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/IssueDiagnosticsTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/RichTelemetryTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/RichTelemetryTestSupport.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/SpanEvidenceTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/TraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/Tests/LogBrewTests/URLSessionTraceTests.swift$' "$tmp_dir/archive-contents.txt"
-grep -q '/examples/Makefile$' "$tmp_dir/archive-contents.txt"
-unzip -p "$archive_path" '*/README.md' > "$tmp_dir/archive-readme.md"
-grep -q 'captureProductAction' "$tmp_dir/archive-readme.md"
-grep -q 'captureNetworkMilestone' "$tmp_dir/archive-readme.md"
-grep -q 'ProductTimelineContext' "$tmp_dir/archive-readme.md"
-grep -q 'LogBrewTrace' "$tmp_dir/archive-readme.md"
-grep -q 'OpenTelemetry' "$tmp_dir/archive-readme.md"
-grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-readme.md"
-grep -q 'captureLifecycleSpan' "$tmp_dir/archive-readme.md"
-grep -q 'startURLSessionSpan' "$tmp_dir/archive-readme.md"
-grep -q 'LogBrewURLSessionTracer' "$tmp_dir/archive-readme.md"
-grep -q 'LogBrewURLSessionTimings' "$tmp_dir/archive-readme.md"
-grep -q 'startAutomaticDelivery' "$tmp_dir/archive-readme.md"
-grep -q 'Durable Delivery (Opt-In)' "$tmp_dir/archive-readme.md"
-grep -q 'enableDurableDelivery' "$tmp_dir/archive-readme.md"
-grep -q 'purgeDurableDelivery' "$tmp_dir/archive-readme.md"
-grep -q 'deliveryHealth' "$tmp_dir/archive-readme.md"
-unzip -p "$archive_path" '*/Sources/LogBrew/LifecycleTrace.swift' > "$tmp_dir/archive-lifecycle.swift"
-grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-lifecycle.swift"
-grep -q 'captureTransition' "$tmp_dir/archive-lifecycle.swift"
-unzip -p "$archive_path" '*/Sources/LogBrew/LogBrewTrace.swift' > "$tmp_dir/archive-trace.swift"
-grep -q 'LogBrewOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
-grep -q 'LogBrewOpenTelemetrySpanContextCarrier' "$tmp_dir/archive-trace.swift"
-grep -q 'openTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
-grep -q 'context(fromOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
-grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
-unzip -p "$archive_path" '*/Sources/LogBrew/URLSessionTrace.swift' > "$tmp_dir/archive-urlsession.swift"
-grep -q 'LogBrewURLSessionTimings' "$tmp_dir/archive-urlsession.swift"
-grep -q 'init(taskMetrics: URLSessionTaskMetrics)' "$tmp_dir/archive-urlsession.swift"
-unzip -p "$archive_path" '*/Sources/LogBrew/URLSessionTracer.swift' > "$tmp_dir/archive-urlsession-tracer.swift"
-grep -q 'LogBrewURLSessionTracer' "$tmp_dir/archive-urlsession-tracer.swift"
-grep -q 'func data(' "$tmp_dir/archive-urlsession-tracer.swift"
-unzip -p "$archive_path" '*/Sources/TraceCorrelationExample/main.swift' > "$tmp_dir/archive-trace-example.swift"
-grep -q 'AppOwnedOpenTelemetrySpanContext' "$tmp_dir/archive-trace-example.swift"
-grep -q 'openTelemetrySpanContext(' "$tmp_dir/archive-trace-example.swift"
-grep -q 'from: AppOwnedOpenTelemetrySpanContext' "$tmp_dir/archive-trace-example.swift"
-grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-trace-example.swift"
-unzip -p "$archive_path" '*/README.md' > "$tmp_dir/archive-readme.md"
-grep -q 'Rich Investigation Context' "$tmp_dir/archive-readme.md"
-grep -q 'Issue Diagnostics and Breadcrumbs' "$tmp_dir/archive-readme.md"
-grep -q 'IssueAttributes.fromError' "$tmp_dir/archive-readme.md"
-grep -q 'SpanEventSummary' "$tmp_dir/archive-readme.md"
-grep -q 'SpanLinkSummary' "$tmp_dir/archive-readme.md"
+echo "swift real-user smoke: package contract" >&2
+bash "$repo_root/scripts/check_swift_package.sh" >/dev/null
 
 echo "swift real-user smoke: packaged README example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/readme-run-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
@@ -246,6 +151,16 @@ try client.issue(
         title: "Checkout timeout",
         message: "Request timed out after retry budget",
         mechanism: "swift.task",
+        evidence: IssueDiagnosticEvidence(
+            likelyRootCause: "The retry budget was exhausted.",
+            likelyFixArea: IssueLikelyFixArea(
+                component: "checkout-app", function: "authorize",
+                file: "Sources/Checkout/PaymentService.swift", line: 42, inApp: true
+            ),
+            impact: IssueImpactEvidence(failedAction: "checkout.submit"),
+            capturedFields: ["retry.count"],
+            missingFields: ["provider.request_id"]
+        ),
         fileID: "Checkout/PaymentService.swift",
         line: 42,
         column: 17,
@@ -296,6 +211,8 @@ precondition(preview.contains(#""exception" : {"#))
 precondition(preview.contains(#""handled" : true"#))
 precondition(preview.contains(#""breadcrumbs" : ["#))
 precondition(preview.contains(#""stackFrames" : ["#))
+precondition(preview.contains(#""likelyRootCause" : "The retry budget was exhausted.""#))
+precondition(preview.contains(#""file" : "Sources\/Checkout\/PaymentService.swift""#))
 precondition(preview.contains(#""events" : ["#))
 precondition(preview.contains(#""links" : ["#))
 precondition(!preview.contains("must-not-escape"))
@@ -350,60 +267,6 @@ precondition(metricPreview.contains(#""unit" : "items""#))
 precondition(metricPreview.contains(#""temporality" : "instant""#))
 precondition(metricPreview.contains(#""queue" : "checkout""#))
 
-var rejectedInfiniteMetric = false
-do {
-    try metricClient.metric(
-        "evt_metric_infinite",
-        timestamp: "2026-06-02T10:00:06Z",
-        attributes: MetricAttributes(
-            name: "queue.depth",
-            kind: .gauge,
-            value: Double.infinity,
-            unit: "items",
-            temporality: .instant
-        )
-    )
-} catch let error as SdkError {
-    rejectedInfiniteMetric = error.code == "validation_error" && error.message.contains("finite")
-}
-precondition(rejectedInfiniteMetric)
-
-var rejectedNegativeCounter = false
-do {
-    try metricClient.metric(
-        "evt_metric_negative_counter",
-        timestamp: "2026-06-02T10:00:06Z",
-        attributes: MetricAttributes(
-            name: "jobs.processed",
-            kind: .counter,
-            value: -1,
-            unit: "jobs",
-            temporality: .delta
-        )
-    )
-} catch let error as SdkError {
-    rejectedNegativeCounter = error.code == "validation_error" && error.message.contains("non-negative")
-}
-precondition(rejectedNegativeCounter)
-
-var rejectedGaugeTemporality = false
-do {
-    try metricClient.metric(
-        "evt_metric_gauge_delta",
-        timestamp: "2026-06-02T10:00:06Z",
-        attributes: MetricAttributes(
-            name: "queue.depth",
-            kind: .gauge,
-            value: 42,
-            unit: "items",
-            temporality: .delta
-        )
-    )
-} catch let error as SdkError {
-    rejectedGaugeTemporality = error.code == "validation_error" && error.message.contains("instant")
-}
-precondition(rejectedGaugeTemporality)
-
 let timelineClient = try LogBrewClient.create(
     apiKey: "LOGBREW_API_KEY",
     sdkName: "swift-consumer-timeline",
@@ -444,34 +307,6 @@ precondition(timelinePreview.contains(#""durationMs" : 184.5"#))
 precondition(timelinePreview.contains(#""status" : "failure""#))
 precondition(!timelinePreview.contains("itemId"))
 precondition(!timelinePreview.contains("#pay"))
-
-var rejectedNegativeDuration = false
-do {
-    try timelineClient.captureNetworkMilestone(
-        "evt_network_bad_duration",
-        timestamp: "2026-06-02T10:00:08Z",
-        method: "GET",
-        routeTemplate: "/api/checkout",
-        durationMs: -1
-    )
-} catch let error as SdkError {
-    rejectedNegativeDuration = error.code == "validation_error" && error.message.contains("durationMs")
-}
-precondition(rejectedNegativeDuration)
-
-var rejectedBadStatusCode = false
-do {
-    try timelineClient.captureNetworkMilestone(
-        "evt_network_bad_status",
-        timestamp: "2026-06-02T10:00:08Z",
-        method: "GET",
-        routeTemplate: "/api/checkout",
-        statusCode: 99
-    )
-} catch let error as SdkError {
-    rejectedBadStatusCode = error.code == "validation_error" && error.message.contains("statusCode")
-}
-precondition(rejectedBadStatusCode)
 
 let traceClient = try LogBrewClient.create(
     apiKey: "LOGBREW_API_KEY",
