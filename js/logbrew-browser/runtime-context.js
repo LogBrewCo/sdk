@@ -1,10 +1,13 @@
 const MAX_CONTEXT_STRING_LENGTH = 256;
 const CONTEXT_SECTIONS = new Set(["resource", "trace", "session", "subject", "tags"]);
 
-export function addBrowserRuntimeContext(context, browserNavigator = defaultNavigator()) {
-  const defaultContext = createBrowserRuntimeContext(browserNavigator);
+export function addBrowserRuntimeContext(context, browserNavigator = defaultNavigator(), scopeResource = {}) {
+  const defaultContext = {
+    schemaVersion: 1,
+    resource: { ...(browserNavigator === false ? {} : createBrowserRuntimeContext(browserNavigator).resource), ...scopeResource }
+  };
   if (context === undefined) {
-    return defaultContext;
+    return Object.keys(defaultContext.resource).length === 0 ? undefined : defaultContext;
   }
   if (!isRecord(context)
     || context.schemaVersion !== 1
@@ -12,7 +15,7 @@ export function addBrowserRuntimeContext(context, browserNavigator = defaultNavi
     return context;
   }
   if (context.resource === undefined) {
-    return { ...context, resource: defaultContext.resource };
+    return Object.keys(defaultContext.resource).length === 0 ? context : { ...context, resource: defaultContext.resource };
   }
   if (!isRecord(context.resource) || Object.keys(context.resource).length === 0) {
     return context;
