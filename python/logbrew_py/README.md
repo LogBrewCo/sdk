@@ -19,7 +19,7 @@ than rebuilding request hooks around the core client:
 
 | Framework | Install | Setup |
 | --- | --- | --- |
-| Flask | `python3 -m pip install "logbrew-flask>=0.1.4,<0.2"` | [`init_logbrew(app)` and hosted trace guide](https://docs.logbrew.co/guides/flask) |
+| Flask | `python3 -m pip install "logbrew-flask>=0.1.5,<0.2"` | [`init_logbrew(app)` and hosted trace guide](https://docs.logbrew.co/guides/flask) |
 | FastAPI | `python3 -m pip install logbrew-fastapi` | [FastAPI package guide](https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_fastapi) |
 | Django | `python3 -m pip install logbrew-django` | [Django package guide](https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_django) |
 

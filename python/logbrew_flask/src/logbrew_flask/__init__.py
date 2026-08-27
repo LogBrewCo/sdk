@@ -33,7 +33,7 @@ from logbrew_sdk import (
 )
 
 LOGBREW_FLASK_EXTENSION_KEY = "logbrew"
-LOGBREW_FLASK_SDK_VERSION = "0.1.4"
+LOGBREW_FLASK_SDK_VERSION = "0.1.5"
 
 
 @dataclass(slots=True)

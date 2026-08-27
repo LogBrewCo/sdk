@@ -472,8 +472,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
-            should_capture_exception = self.config.capture_exceptions
-            if should_capture_exception:
+            if self.config.capture_exceptions:
                 capture_exception(
                     self.config.client,
                     request,
@@ -499,7 +498,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
                     metric_name=self.config.request_metric_name,
                     service_name=self.config.service_name,
                 )
-            if should_capture_exception or self.config.capture_request_metrics:
+            if self.config.capture_exceptions or self.config.capture_request_metrics:
                 self._flush_if_configured()
             raise
 
