@@ -16,8 +16,9 @@ const {
 } = require("./metadata.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
-const DEFAULT_SDK_VERSION = "0.1.22";
+const DEFAULT_SDK_VERSION = "0.1.23";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
+const NATIVE_RANDOM_HEX = Symbol.for("co.logbrew.react-native.secure-random-hex");
 const MAX_ACTION_NAME_LENGTH = 64;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 const SCREEN_ACTION_PREFIX = "screen:";
@@ -913,11 +914,32 @@ function boundedBreadcrumbMessage(value) {
 }
 
 function defaultRandomValues(length) {
-  if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== "function") {
-    throw new SdkError("configuration_error", "createReactNativeTraceparent requires crypto.getRandomValues or randomValues");
-  }
   const bytes = new Uint8Array(length);
-  return globalThis.crypto.getRandomValues(bytes);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    return globalThis.crypto.getRandomValues(bytes);
+  }
+  if (typeof globalThis.expo?.modules?.ExpoCrypto?.getRandomValues === "function") {
+    globalThis.expo.modules.ExpoCrypto.getRandomValues(bytes);
+    return bytes;
+  }
+  const nativeRandom = globalThis[NATIVE_RANDOM_HEX];
+  if (typeof nativeRandom !== "function") {
+    throw secureRandomError();
+  }
+  let nativeHex;
+  try {
+    nativeHex = nativeRandom(length);
+  } catch {
+    throw secureRandomError();
+  }
+  if (typeof nativeHex !== "string" || nativeHex.length !== length * 2 || !/^[0-9a-f]+$/iu.test(nativeHex)) {
+    throw secureRandomError();
+  }
+  return Uint8Array.from({ length }, (_, index) => Number.parseInt(nativeHex.slice(index * 2, index * 2 + 2), 16));
+}
+
+function secureRandomError() {
+  return new SdkError("configuration_error", "createReactNativeTraceparent requires secure random values");
 }
 
 function headersWithTraceparent(headers, traceparent) {

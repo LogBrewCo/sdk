@@ -12,6 +12,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -22,6 +23,7 @@ import java.util.Set;
 
 final class FatalStoreModuleImpl {
   static final String NAME = "LogBrewFatalStore";
+  private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
   private static final Set<String> RECORD_KEYS =
       new HashSet<>(
@@ -49,6 +51,20 @@ final class FatalStoreModuleImpl {
             : new FatalRecordStore(
                 new File(root, "logbrew-fatal-js"),
                 new AndroidParentDirectorySync());
+  }
+
+  String secureRandomHex(double length) {
+    Integer byteCount = integer(length);
+    if (byteCount == null || byteCount < 1 || byteCount > 64) {
+      return "";
+    }
+    byte[] bytes = new byte[byteCount];
+    SECURE_RANDOM.nextBytes(bytes);
+    StringBuilder output = new StringBuilder(byteCount * 2);
+    for (byte value : bytes) {
+      output.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+    }
+    return output.toString();
   }
 
   WritableMap loadEventRecords(String queueKey) {

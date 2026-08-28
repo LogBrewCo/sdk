@@ -16,6 +16,7 @@ Pod::Spec.new do |spec|
   }
   spec.default_subspecs = "Core"
   spec.swift_versions = ["5.0"]
+  spec.frameworks = "Security"
   spec.dependency "React-Core"
 
   spec.subspec "Core" do |core|
