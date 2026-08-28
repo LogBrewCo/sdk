@@ -192,6 +192,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         workflow = source_text(".github/workflows/publish-packages.yml")
         ci = source_text(".github/workflows/ci.yml")
 
+        self.assertIn('sdk_tarball="$(cd "$core_package"', smoke)
+        self.assertIn('tar -xzf "$sdk_tarball"', smoke)
         self.assertIn('"@logbrew/sdk@$minimum_sdk_version"', smoke)
         self.assertIn('await import("@logbrew/react-native")', smoke)
         self.assertIn('require("@logbrew/react-native")', smoke)
