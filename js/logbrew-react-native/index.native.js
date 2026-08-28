@@ -1,4 +1,4 @@
-import { AppState, Platform } from "react-native";
+import { AppState, NativeModules, Platform, TurboModuleRegistry } from "react-native";
 import {
   captureAppStateChange,
   captureReactNativeAction,
@@ -33,6 +33,13 @@ export {
 };
 
 export * from "./index.js";
+
+const nativeRuntime = TurboModuleRegistry?.get?.("LogBrewFatalStore")
+  ?? NativeModules?.LogBrewFatalStore;
+if (typeof nativeRuntime?.secureRandomHex === "function") {
+  globalThis[Symbol.for("co.logbrew.react-native.secure-random-hex")] =
+    nativeRuntime.secureRandomHex.bind(nativeRuntime);
+}
 
 export function createLogBrewReactNativeClient(config = {}) {
   const input = config !== null && typeof config === "object" ? config : {};

@@ -18,6 +18,11 @@ final class FatalStoreModule extends NativeLogBrewFatalStoreSpec {
   }
 
   @Override
+  public String secureRandomHex(double length) {
+    return implementation.secureRandomHex(length);
+  }
+
+  @Override
   public WritableMap writeFatalRecord(ReadableMap record) {
     return implementation.writeFatalRecord(record);
   }

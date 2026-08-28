@@ -588,11 +588,17 @@ export function App({ client }) {
 
 Screen views carry the versioned `screen_view` analytics classification, and explicit product actions carry `interaction`. The SDK uses the app-owned screen name as a bounded surface and does not inspect view hierarchies, selectors, or input values. Caller metadata cannot replace the reserved classification. See the repository [product analytics capture contract](../../docs/product-analytics-contract.md).
 
-The package ships a `react-native` entry that imports `AppState` and `Platform` for Metro, while the default Node entry accepts those dependencies explicitly. That keeps mobile setup explicit instead of pretending a Node process is a native runtime.
+The package ships a `react-native` entry that binds platform state and linked native services for Metro, while the default server entry accepts runtime dependencies explicitly. That keeps mobile setup explicit without treating a server process as a native runtime.
 
 ## Trace Propagation
 
-Use an active trace when one product operation should connect screen views, logs, handled errors, actions, network milestones, explicit spans, and outbound request headers. `createReactNativeTraceContext()` continues a valid W3C `traceparent` with a fresh local span ID and falls back to a local root when the incoming value is missing or malformed:
+Use an active trace when one product operation should connect screen views, logs, handled errors, actions, network milestones, explicit spans, and outbound request headers. `createReactNativeTraceContext()` continues a valid W3C `traceparent` with a fresh local span ID and falls back to a local root when the incoming value is missing or malformed.
+
+The React Native entry creates trace and span IDs with the linked platform's
+cryptographic random source, or Expo Crypto in a managed runtime. It fails
+closed when neither source exists and never falls back to `Math.random` or
+predictable bytes. Callers may still inject `randomValues` when deterministic
+input control is required.
 
 ```js
 import {

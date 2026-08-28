@@ -20,6 +20,11 @@ final class FatalStoreModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod(isBlockingSynchronousMethod = true)
+  public String secureRandomHex(double length) {
+    return implementation.secureRandomHex(length);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
   public WritableMap writeFatalRecord(ReadableMap record) {
     return implementation.writeFatalRecord(record);
   }

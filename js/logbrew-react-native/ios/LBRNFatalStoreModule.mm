@@ -5,7 +5,9 @@
 #import "LBRNPrivateStorage.h"
 
 #import <CommonCrypto/CommonDigest.h>
+#import <Security/SecRandom.h>
 #import <TargetConditionals.h>
+#import <math.h>
 
 #ifdef RCT_NEW_ARCH_ENABLED
 #import <LogBrewReactNativeSpec/LogBrewReactNativeSpec.h>
@@ -128,6 +130,23 @@ RCT_EXPORT_MODULE(LogBrewFatalStore)
         }
     }
     return self;
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(secureRandomHex:(double)length)
+{
+    if (!isfinite(length) || length < 1 || length > 64 || floor(length) != length) {
+        return @"";
+    }
+    uint8_t bytes[64];
+    NSUInteger byteCount = (NSUInteger)length;
+    if (SecRandomCopyBytes(kSecRandomDefault, byteCount, bytes) != errSecSuccess) {
+        return @"";
+    }
+    NSMutableString *output = [NSMutableString stringWithCapacity:byteCount * 2];
+    for (NSUInteger index = 0; index < byteCount; index += 1) {
+        [output appendFormat:@"%02x", bytes[index]];
+    }
+    return output;
 }
 
 - (nullable LBRNEventRecordStore *)eventStoreForQueueKey:(NSString *)queueKey

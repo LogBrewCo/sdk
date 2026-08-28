@@ -8,6 +8,49 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sdkRoot = path.resolve(packageRoot, "../logbrew-js");
 
+test("native entry creates secure trace identifiers without Web Crypto", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+    await withoutWebCrypto(async () => {
+      const trace = (await importRuntime("secure-random", true)).createReactNativeTraceContext();
+      assert.match(trace.traceId, /^[0-9a-f]{32}$/u);
+      assert.match(trace.spanId, /^[0-9a-f]{16}$/u);
+      assert.deepEqual(nativeStore.randomLengths, [16, 8]);
+    });
+  });
+});
+
+test("managed and unlinked runtimes use Expo Crypto or fail closed", async () => {
+  await withNativeRuntimes(async ({ importRuntime }) => {
+    await withoutWebCrypto(async () => {
+      const lengths = [];
+      globalThis.expo = { modules: { ExpoCrypto: { getRandomValues(bytes) {
+        lengths.push(bytes.length);
+        bytes.fill(0xcd);
+      } } } };
+      const managed = await importRuntime("expo-random", false);
+      assert.match(managed.createReactNativeTraceContext().traceId, /^(?:cd){16}$/u);
+      assert.deepEqual(lengths, [16, 8]);
+      delete globalThis.expo;
+      assert.throws(() => managed.createReactNativeTraceContext(), /requires secure random values/u);
+    });
+  });
+});
+
+async function withoutWebCrypto(callback) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+  try {
+    return await callback();
+  } finally {
+    delete globalThis.expo;
+    if (descriptor) {
+      Object.defineProperty(globalThis, "crypto", descriptor);
+    } else {
+      delete globalThis.crypto;
+    }
+  }
+}
+
 test("linked native queue replays an exact event after a JavaScript runtime restart", async () => {
   await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
     const firstRuntime = await importRuntime("first", true);
@@ -285,6 +328,8 @@ test("public documentation distinguishes durable, fallback, recovery, and duplic
   assert.match(readme, /client key is\s+not written to disk/iu);
   assert.match(readme, /purgeLogBrewReactNativePersistentQueue/u);
   assert.match(readme, /does not provide mathematically exactly-once\s+delivery/u);
+  assert.match(readme, /platform's\s+cryptographic random source/iu);
+  assert.match(readme, /never falls back to `Math\.random`/u);
 });
 
 function addOfflineLog(client) {
@@ -329,6 +374,7 @@ async function withNativeRuntimes(callback) {
       }
     });
   } finally {
+    delete globalThis[Symbol.for("co.logbrew.react-native.secure-random-hex")];
     delete globalThis.__LOGBREW_REACT_NATIVE_TEST_STORE__;
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -396,6 +442,7 @@ function installRuntime(root, name, linked) {
 function createNativeStore() {
   const queues = new Map();
   const calls = [];
+  const randomLengths = [];
   const queue = (key) => {
     if (!queues.has(key)) {
       queues.set(key, []);
@@ -404,11 +451,16 @@ function createNativeStore() {
   };
   return {
     calls,
+    randomLengths,
     records(key) {
       return queue(key);
     },
     seed(key, record) {
       queue(key).push({ ...record });
+    },
+    secureRandomHex(length) {
+      randomLengths.push(length);
+      return "ab".repeat(length);
     },
     loadEventRecords(key) {
       calls.push(["load", key]);

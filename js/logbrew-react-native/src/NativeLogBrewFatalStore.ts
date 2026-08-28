@@ -2,6 +2,7 @@ import type { CodegenTypes, TurboModule } from "react-native";
 import { TurboModuleRegistry } from "react-native";
 
 export interface Spec extends TurboModule {
+  secureRandomHex(length: number): string;
   writeFatalRecord(record: CodegenTypes.UnsafeObject): CodegenTypes.UnsafeObject;
   readFatalRecord(): CodegenTypes.UnsafeObject;
   acknowledgeFatalRecord(recordId: string): CodegenTypes.UnsafeObject;
