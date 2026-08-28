@@ -144,7 +144,11 @@ function normalizeConfiguration(configuration) {
 }
 
 function normalizeCorrelationContext(context) {
-  const source = exactObject(context, ["schemaVersion", "session", "subject", "trace"], "context");
+  const source = exactObject(
+    context,
+    ["impact", "schemaVersion", "session", "subject", "trace"],
+    "context"
+  );
   if (source.schemaVersion !== 1) {
     throw configurationError("context schemaVersion must be 1");
   }
@@ -185,8 +189,26 @@ function normalizeCorrelationContext(context) {
     }
     output.subject = { id: opaqueCorrelationId(subject.id, "subject id"), kind: subject.kind };
   }
+  if (source.impact !== undefined) {
+    const impact = exactObject(
+      source.impact,
+      ["failedAction", "userVisibleOutcome"],
+      "context impact"
+    );
+    output.impact = {
+      failedAction: diagnosticText(impact.failedAction, 256, true, "failedAction")
+    };
+    if (impact.userVisibleOutcome !== undefined) {
+      output.impact.userVisibleOutcome = diagnosticText(
+        impact.userVisibleOutcome,
+        512,
+        false,
+        "userVisibleOutcome"
+      );
+    }
+  }
   if (Object.keys(output).length === 1) {
-    throw configurationError("context must include trace, session, or subject");
+    throw configurationError("context must include trace, session, subject, or impact");
   }
   return output;
 }
@@ -216,6 +238,17 @@ function opaqueCorrelationId(value, name) {
     throw configurationError(`context ${name} must be an opaque app-owned identifier`);
   }
   return value;
+}
+
+function diagnosticText(value, maximum, rejectLocationText, name) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (normalized.length === 0
+    || Array.from(normalized).length > maximum
+    || hasControlCharacter(normalized)
+    || (rejectLocationText && /[?#]/u.test(normalized))) {
+    throw configurationError(`context impact ${name} is invalid`);
+  }
+  return normalized;
 }
 
 function requireApplePlatform() {
@@ -366,7 +399,7 @@ function exactDeliveryEndpoint(value) {
 function hasControlCharacter(value) {
   for (const scalar of value) {
     const codePoint = scalar.codePointAt(0);
-    if (codePoint <= 0x1f || codePoint === 0x7f) {
+    if (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)) {
       return true;
     }
   }

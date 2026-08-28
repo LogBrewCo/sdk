@@ -22,6 +22,9 @@ struct CrashReportSanitizer {
         let nativeStackFrames = NativeStackFrameSanitizer().frames(from: rawReport)
         let artifactIdentity = try NativeArtifactIdentityValue.persistedIdentity(in: rawReport)
         let correlation = NativeCrashCorrelation.captured(in: rawReport)
+        let correlationState = correlation.0?.correlationContext == nil && correlation.1 == .captured
+            ? NativeCrashContextState.notCaptured
+            : correlation.1
         let breadcrumbs = NativeCrashBreadcrumbs.captured(in: rawReport)
         return NativeCrashRecord(
             eventID: uuid.uuidString.lowercased(),
@@ -32,9 +35,10 @@ struct CrashReportSanitizer {
             context: nativeCrashContext(
                 system: rawReport["system"] as? [String: Any],
                 artifactIdentity: artifactIdentity,
-                correlation: correlation.0,
+                correlation: correlation.0?.correlationContext,
             ),
-            correlationState: correlation.1,
+            correlationState: correlationState,
+            impact: correlation.0?.impact,
             breadcrumbs: breadcrumbs.0?.breadcrumbs,
             breadcrumbsTruncated: breadcrumbs.0?.truncated,
             breadcrumbState: breadcrumbs.1,

@@ -36,11 +36,23 @@ async function withInstalledPackage(callback) {
     );
 
     const native = await import(pathToFileURL(path.join(packageDir, "index.js")));
-    return await callback(native);
+    return await callback(native, packageDir);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
+
+test("ESM lifecycle and native bridge entries reuse their CommonJS implementations", async () => {
+  await withInstalledPackage(async (_native, packageDir) => {
+    for (const entry of ["lifecycle", "native-bridge"]) {
+      const esm = await import(pathToFileURL(path.join(packageDir, `${entry}.js`)));
+      const cjs = (await import(pathToFileURL(path.join(packageDir, `${entry}.cjs`)))).default;
+      for (const name of Object.keys(cjs).filter((key) => key !== "default")) {
+        assert.equal(esm[name], cjs[name]);
+      }
+    }
+  });
+});
 
 function addSetupLog(client, id = "evt_react_native_setup") {
   client.log(id, "2026-07-30T12:00:00Z", {

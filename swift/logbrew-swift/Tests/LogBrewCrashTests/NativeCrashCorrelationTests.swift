@@ -52,18 +52,39 @@ extension NativeCrashDeliveryTests {
         #expect(driver.userInfoUpdates.isEmpty)
     }
 
-    @Test("captured correlation survives restart and joins the native issue")
-    func persistedCorrelationJoinsNativeIssue() throws {
+    @Test("captured context and app-reported failure survive restart and join the native issue")
+    func persistedInvestigationContextJoinsNativeIssue() throws {
         let client = try makeClient(name: "native-correlation-test")
-        let record = try #require(correlationCapture(value: correlationJSONString()).pendingReports().first)
+        let record = try #require(correlationCapture(value: diagnosticJSONString()).pendingReports().first)
 
         try record.enqueue(in: client)
 
         let attributes = try #require(try firstEvent(in: client)["attributes"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
         let context = try #require(attributes["context"] as? [String: Any])
+        let evidence = try #require(attributes["evidence"] as? [String: Any])
+        let impact = try #require(evidence["impact"] as? [String: Any])
         #expect(metadata["crash.correlation"] as? String == "captured")
         #expect(context as NSDictionary == correlationJSONObject() as NSDictionary)
+        #expect(impact as NSDictionary == [
+            "failedAction": "checkout.submit",
+            "userVisibleOutcome": "The order was not confirmed.",
+        ] as NSDictionary)
+    }
+
+    @Test("impact-only capture preserves evidence without claiming correlation")
+    func impactOnlyCaptureDoesNotClaimCorrelation() throws {
+        let client = try makeClient(name: "native-impact-test")
+        let json = "{\"impact\":{\"failedAction\":\"checkout.submit\"},\"schemaVersion\":1}"
+        let record = try #require(correlationCapture(value: json).pendingReports().first)
+        try record.enqueue(in: client)
+
+        let attributes = try #require(try firstEvent(in: client)["attributes"] as? [String: Any])
+        let metadata = try #require(attributes["metadata"] as? [String: Any])
+        let evidence = try #require(attributes["evidence"] as? [String: Any])
+        #expect(metadata["crash.correlation"] as? String == "not_captured")
+        #expect(attributes["context"] == nil)
+        #expect((evidence["impact"] as? [String: Any])?["failedAction"] as? String == "checkout.submit")
     }
 
     @Test("corrupt optional correlation keeps the crash and exposes no raw value")
@@ -284,5 +305,15 @@ private func correlationJSONObject() -> [String: Any] {
 
 private func correlationJSONString() throws -> String {
     let data = try JSONSerialization.data(withJSONObject: correlationJSONObject(), options: [.sortedKeys])
+    return try #require(String(data: data, encoding: .utf8))
+}
+
+private func diagnosticJSONString() throws -> String {
+    var object = correlationJSONObject()
+    object["impact"] = [
+        "failedAction": "checkout.submit",
+        "userVisibleOutcome": "The order was not confirmed.",
+    ]
+    let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     return try #require(String(data: data, encoding: .utf8))
 }

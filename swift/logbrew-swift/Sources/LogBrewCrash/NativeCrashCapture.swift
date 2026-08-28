@@ -108,17 +108,17 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
     /// Replaces the crash-time trace, session, and opaque subject snapshot in one bounded write.
     @nonobjc
     public func setCorrelationContext(_ context: TelemetryContext?) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try verifyProcessLocked()
-        guard store != nil, lifecycle != .stopped else {
-            throw NativeCrashError(.notInstalled)
+        try setDiagnosticContext(context: context, impact: nil)
+    }
+
+    @nonobjc
+    func setDiagnosticContext(
+        context: TelemetryContext?,
+        impact: IssueImpactEvidence?,
+    ) throws {
+        try setSnapshot(forKey: NativeCrashCorrelation.reportKey) {
+            try NativeCrashCorrelation.encoded(context: context, impact: impact)
         }
-        try verifyStorageLocked()
-        try driver.setUserInfo(
-            NativeCrashCorrelation.encoded(context),
-            forKey: NativeCrashCorrelation.reportKey,
-        )
     }
 
     /// Replaces the crash-time breadcrumb snapshot in one bounded write.
@@ -127,6 +127,15 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
         _ breadcrumbs: [IssueBreadcrumb]?,
         truncated: Bool = false,
     ) throws {
+        try setSnapshot(forKey: NativeCrashBreadcrumbs.reportKey) {
+            try NativeCrashBreadcrumbs.encoded(breadcrumbs, truncated: truncated)
+        }
+    }
+
+    private func setSnapshot(
+        forKey key: String,
+        encoded: () throws -> String?,
+    ) throws {
         lock.lock()
         defer { lock.unlock() }
         try verifyProcessLocked()
@@ -134,10 +143,7 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
             throw NativeCrashError(.notInstalled)
         }
         try verifyStorageLocked()
-        try driver.setUserInfo(
-            NativeCrashBreadcrumbs.encoded(breadcrumbs, truncated: truncated),
-            forKey: NativeCrashBreadcrumbs.reportKey,
-        )
+        try driver.setUserInfo(encoded(), forKey: key)
     }
 
     @objc(replayPendingReportsWithHandler:error:)
