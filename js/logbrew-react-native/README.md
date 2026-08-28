@@ -293,9 +293,14 @@ module. For a bare React Native app, add the optional subspec inside the app
 target in `ios/Podfile`, then run `pod install`:
 
 ```ruby
-logbrew_react_native_path = File.dirname(`node --print "require.resolve('@logbrew/react-native')"`)
+require 'pathname'
+logbrew_react_native_path = Pathname(File.dirname(`bun --print "require.resolve('@logbrew/react-native')"`)).relative_path_from(Pathname(__dir__)).to_s
 pod 'LogBrewReactNative/AppleNativeDiagnostics', :path => logbrew_react_native_path
 ```
+
+Keep the resolved package path relative to the Podfile directory. React Native
+autolinking declares the core pod with that relative source; CocoaPods rejects
+the same pod when the optional subspec uses an absolute source.
 
 The default `LogBrewReactNative/Core` subspec remains unchanged and supports
 iOS 13. `AppleNativeDiagnostics` requires iOS 15. Install it on the main thread
