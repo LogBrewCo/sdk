@@ -19,10 +19,10 @@ test("Expo plugin adds the optional Apple diagnostics subspec exactly once", () 
   const twice = modifyPodfile(once);
   assert.equal(twice, once);
   assert.equal(
-    count(once, "pod 'LogBrewReactNative/AppleNativeDiagnostics'"),
-    1
+    once.split("pod 'LogBrewReactNative/AppleNativeDiagnostics'").length,
+    2
   );
-  assert.match(once, /require\.resolve\('@logbrew\/react-native'\)/u);
+  assert.match(once, /relative_path_from\(Pathname\(__dir__\)\)/u);
   assert.ok(once.indexOf("AppleNativeDiagnostics") < once.indexOf("use_expo_modules!"));
 });
 
@@ -37,7 +37,3 @@ test("Expo plugin fails clearly when the Podfile has no application target", () 
     /could not locate an iOS application target/u
   );
 });
-
-function count(value, needle) {
-  return value.split(needle).length - 1;
-}
