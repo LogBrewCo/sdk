@@ -1393,6 +1393,12 @@ test("invalid timestamp fails validation", () => {
     () => client.log("evt_log_001", "2026-06-02T10:00:03", { message: "worker started", level: "info" }),
     new SdkError("validation_error", "timestamp must include a timezone offset: 2026-06-02T10:00:03")
   );
+  for (const timestamp of ["not-a-timeZ", "2026-02-30T10:00:03Z", "2026-06-02T25:00:03Z"]) {
+    assert.throws(
+      () => client.log("evt_log_001", timestamp, { message: "worker started", level: "info" }),
+      (error) => error.code === "validation_error" && /invalid timestamp/u.test(error.message)
+    );
+  }
 });
 
 test("invalid issue level fails validation", () => {
@@ -1697,11 +1703,14 @@ test("issue diagnostics reject unsafe shapes and preserve explicit breadcrumb sn
     breadcrumbs: [{
       timestamp: "2026-07-17T11:59:00Z",
       category: "explicit",
-      message: "Safe explicit context"
+      message: "  Safe explicit context  ",
+      data: { step: "  submit  " }
     }]
   });
   const attributes = JSON.parse(client.previewJson()).events[0].attributes;
   assert.deepEqual(attributes.breadcrumbs.map(({ category }) => category), ["explicit"]);
+  assert.equal(attributes.breadcrumbs[0].message, "Safe explicit context");
+  assert.equal(attributes.breadcrumbs[0].data.step, "submit");
 });
 
 test("createIssueAttributesFromError bounds and sanitizes structured stack frames", () => {

@@ -48,17 +48,31 @@ export function setLogBrewAppleNativeCrashContext(context) {
   requireApplePlatform();
   const nativeModule = requireNativeModule();
   const payload = context === null ? null : normalizeCorrelationContext(context);
-  const result = callNative(nativeModule, "setNativeDiagnosticsContext", payload);
+  return updateNativeSnapshot(nativeModule, "setNativeDiagnosticsContext", payload, "context");
+}
+
+export function syncLogBrewAppleNativeCrashBreadcrumbs(snapshot) {
+  requireApplePlatform();
+  return updateNativeSnapshot(
+    requireNativeModule(),
+    "setNativeDiagnosticsBreadcrumbs",
+    snapshot,
+    "breadcrumbs"
+  );
+}
+
+function updateNativeSnapshot(nativeModule, method, payload, label) {
+  const result = callNative(nativeModule, method, payload);
   const expectedStatus = payload === null ? "cleared" : "updated";
   if (isErrorResult(result)) {
-    throw new SdkError(result.code, `LogBrew Apple native diagnostics context failed with ${result.code}`);
+    throw new SdkError(result.code, `LogBrew Apple native diagnostics ${label} failed with ${result.code}`);
   }
   if (!isPlainObject(result)
     || Object.keys(result).length !== 1
     || result.status !== expectedStatus) {
     throw new SdkError(
       "native_diagnostics_invalid_response",
-      "LogBrew Apple native diagnostics context returned an invalid response"
+      `LogBrew Apple native diagnostics ${label} returned an invalid response`
     );
   }
   return Object.freeze({ status: expectedStatus });

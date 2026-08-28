@@ -75,6 +75,7 @@ const PINO_SENSITIVE_CONTEXT_FIELDS = new Set([
 const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$/u;
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
+const RFC3339_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_EVENTS = 100;
@@ -2199,17 +2200,25 @@ function requireTraceFlags(traceFlags) {
 
 function requireTimestamp(timestamp) {
   requireNonEmpty("timestamp", timestamp);
-  if (timestamp.endsWith("Z")) {
-    return;
-  }
   const timePortion = timestamp.split("T")[1];
-  if (timePortion && (timePortion.includes("+") || /.+-.+/.test(timePortion))) {
-    return;
+  if (!timestamp.endsWith("Z")
+    && !(timePortion && (timePortion.includes("+") || /.+-.+/.test(timePortion)))) {
+    throw new SdkError(
+      "validation_error",
+      `timestamp must include a timezone offset: ${timestamp}`
+    );
   }
-  throw new SdkError(
-    "validation_error",
-    `timestamp must include a timezone offset: ${timestamp}`
-  );
+  const match = timestamp.match(RFC3339_TIMESTAMP_PATTERN);
+  const calendar = new Date(0);
+  calendar.setUTCHours(0, 0, 0, 0);
+  calendar.setUTCFullYear(Number(match?.[1]), Number(match?.[2]) - 1, Number(match?.[3]));
+  if (!match
+    || Number(match[1]) === 0
+    || calendar.getUTCFullYear() !== Number(match[1])
+    || calendar.getUTCMonth() !== Number(match[2]) - 1
+    || calendar.getUTCDate() !== Number(match[3])) {
+    throw new SdkError("validation_error", `invalid timestamp: ${timestamp}`);
+  }
 }
 
 function cloneMetadata(metadata) {

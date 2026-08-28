@@ -3,7 +3,7 @@ import Foundation
 @objc(LBRNAppleNativeDiagnostics)
 public final class LBRNAppleNativeDiagnostics: NSObject, @unchecked Sendable {
     private static let shared = LBRNAppleNativeDiagnostics()
-    private static let sdkVersion = "0.1.20"
+    private static let sdkVersion = "0.1.21"
 
     private let lock = NSLock()
     private let replayQueue = DispatchQueue(label: "co.logbrew.react-native.apple-diagnostics-replay")
@@ -42,6 +42,11 @@ public final class LBRNAppleNativeDiagnostics: NSObject, @unchecked Sendable {
     @objc(setCorrelationContext:)
     public static func setCorrelationContext(_ rawContext: NSDictionary?) -> NSDictionary {
         shared.updateCorrelationContext(rawContext)
+    }
+
+    @objc(setBreadcrumbs:)
+    public static func setBreadcrumbs(_ rawSnapshot: NSDictionary?) -> NSDictionary {
+        shared.updateBreadcrumbs(rawSnapshot)
     }
 
     private func installOnMainThread(_ rawConfiguration: NSDictionary) -> NSDictionary {
@@ -147,6 +152,26 @@ public final class LBRNAppleNativeDiagnostics: NSObject, @unchecked Sendable {
             let context = try rawContext.map { try NativeCrashCorrelation.validated($0) }
             try capture.setCorrelationContext(context)
             return ["status": rawContext == nil ? "cleared" : "updated"]
+        } catch let error as NativeCrashError {
+            return failure(error.code.rawValue)
+        } catch {
+            return failure("native_diagnostics_failed")
+        }
+    }
+
+    private func updateBreadcrumbs(_ rawSnapshot: NSDictionary?) -> NSDictionary {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let capture else {
+            return failure("native_diagnostics_not_installed")
+        }
+        do {
+            let snapshot = try rawSnapshot.map { try NativeCrashBreadcrumbs.validated($0) }
+            try capture.setBreadcrumbs(
+                snapshot?.breadcrumbs,
+                truncated: snapshot?.truncated ?? false,
+            )
+            return ["status": rawSnapshot == nil ? "cleared" : "updated"]
         } catch let error as NativeCrashError {
             return failure(error.code.rawValue)
         } catch {

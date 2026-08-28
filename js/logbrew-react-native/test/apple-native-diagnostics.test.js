@@ -193,6 +193,115 @@ test("updates and clears one privacy-bounded native crash correlation snapshot",
   });
 });
 
+test("native client mirrors its validated breadcrumb history into Apple crash capture", async () => {
+  const calls = [];
+  const nativeModule = {
+    setNativeDiagnosticsBreadcrumbs(snapshot) {
+      calls.push(structuredClone(snapshot));
+      return { status: snapshot === null ? "cleared" : "updated" };
+    }
+  };
+  await withRuntime({ entry: "index.native.js", nativeModule }, async (runtime) => {
+    const client = runtime.createLogBrewReactNativeClient({
+      clientKey: "LOGBREW_CLIENT_KEY",
+      persistentQueue: "disabled"
+    });
+    client.addBreadcrumb({
+      category: "navigation",
+      data: { sequence: 1 },
+      level: "warn",
+      message: "Checkout",
+      type: "navigation"
+    }, "2026-08-28T03:00:00Z");
+    client.addBreadcrumb({ category: "ui.action" }, "2026-08-28T03:00:01Z");
+    assert.equal(client.clearBreadcrumbs(), 2);
+
+    assert.deepEqual(calls, [
+      null,
+      {
+        breadcrumbs: [{
+          category: "navigation",
+          data: { sequence: 1 },
+          level: "warning",
+          message: "Checkout",
+          timestamp: "2026-08-28T03:00:00Z",
+          type: "navigation"
+        }],
+        schemaVersion: 1,
+        truncated: false
+      },
+      {
+        breadcrumbs: [
+          {
+            category: "navigation",
+            data: { sequence: 1 },
+            level: "warning",
+            message: "Checkout",
+            timestamp: "2026-08-28T03:00:00Z",
+            type: "navigation"
+          },
+          { category: "ui.action", timestamp: "2026-08-28T03:00:01Z" }
+        ],
+        schemaVersion: 1,
+        truncated: false
+      },
+      null
+    ]);
+  });
+});
+
+test("missing or not-installed Apple diagnostics do not break normal breadcrumbs", async () => {
+  for (const nativeModule of [
+    undefined,
+    {
+      setNativeDiagnosticsBreadcrumbs() {
+        return { code: "native_diagnostics_not_installed", status: "error" };
+      }
+    }
+  ]) {
+    await withRuntime({ entry: "index.native.js", nativeModule }, async (runtime) => {
+      const client = runtime.createLogBrewReactNativeClient({
+        clientKey: "LOGBREW_CLIENT_KEY",
+        persistentQueue: "disabled"
+      });
+      client.addBreadcrumb({ category: "navigation" }, "2026-08-28T03:00:00Z");
+      client.issue("11111111-2222-4333-8444-555555555555", "2026-08-28T03:00:01Z", {
+        level: "error",
+        title: "Example"
+      });
+      const event = JSON.parse(client.previewJson()).events[0];
+      assert.equal(event.attributes.breadcrumbs[0].category, "navigation");
+    });
+  }
+});
+
+test("native breadcrumb bridge errors never echo breadcrumb values", async () => {
+  const privateValue = "DO_NOT_ECHO_THIS_BREADCRUMB";
+  const nativeModule = {
+    setNativeDiagnosticsBreadcrumbs(snapshot) {
+      return snapshot === null
+        ? { status: "cleared" }
+        : { code: "native_diagnostics_failed", status: "error" };
+    }
+  };
+  await withRuntime({ entry: "index.native.js", nativeModule }, async (runtime) => {
+    const client = runtime.createLogBrewReactNativeClient({
+      clientKey: "LOGBREW_CLIENT_KEY",
+      persistentQueue: "disabled"
+    });
+    assert.throws(
+      () => client.addBreadcrumb({ category: "ui", message: privateValue }),
+      (error) => error.code === "native_diagnostics_failed"
+        && !error.message.includes(privateValue)
+    );
+    client.issue("11111111-2222-4333-8444-555555555555", "2026-08-28T03:00:01Z", {
+      level: "error",
+      title: "Example"
+    });
+    assert.equal(JSON.parse(client.previewJson()).events[0].attributes.breadcrumbs, undefined);
+  });
+});
+
 test("rejects broad malformed or identifying native crash context before bridging", async () => {
   const calls = [];
   const nativeModule = {
@@ -310,7 +419,14 @@ test("matches the React Native New Architecture promise selector", () => {
     /replayNativeDiagnostics:\(RCTPromiseResolveBlock\)resolve\s+reject:/u
   );
   assert.match(nativeModule, /setNativeDiagnosticsContext:\(NSDictionary \*\)context/u);
+  assert.match(nativeModule, /setNativeDiagnosticsBreadcrumbs:\(NSDictionary \*\)snapshot/u);
   assert.doesNotMatch(nativeModule, /replayNativeDiagnostics:[\s\S]*?rejecter:/u);
+
+  const spec = fs.readFileSync(
+    path.join(packageRoot, "src", "NativeLogBrewAppleDiagnostics.ts"),
+    "utf8"
+  );
+  assert.match(spec, /setNativeDiagnosticsBreadcrumbs\(/u);
 });
 
 test("namespaces embedded Swift Objective-C classes for safe package coexistence", () => {
@@ -348,23 +464,50 @@ test("keeps native storage project-scoped and the endpoint fail-closed", () => {
   assert.match(nativeBridge, /components\.fragment == nil/u);
 });
 
-async function withRuntime({ nativeModule, platform = "ios" }, callback) {
+async function withRuntime({ entry = "apple-native-diagnostics.js", nativeModule, platform = "ios" }, callback) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-rn-apple-diagnostics-"));
   globalThis.__LOGBREW_APPLE_DIAGNOSTICS_TEST_MODULE__ = nativeModule;
   try {
     const nodeModules = path.join(root, "node_modules");
     const installedPackage = path.join(nodeModules, "@logbrew", "react-native");
     fs.mkdirSync(installedPackage, { recursive: true });
-    fs.copyFileSync(
-      path.join(packageRoot, "apple-native-diagnostics.js"),
-      path.join(installedPackage, "apple-native-diagnostics.js")
-    );
+    const packageFiles = entry === "index.native.js"
+      ? [
+          "apple-native-diagnostics.js",
+          "fatal-replay.cjs",
+          "global-errors.cjs",
+          "global-errors.js",
+          "global-errors.native.js",
+          "index.cjs",
+          "index.js",
+          "index.native.js",
+          "metadata.cjs",
+          "persistent-delivery.native.js",
+          "promise-rejections.cjs"
+        ]
+      : ["apple-native-diagnostics.js"];
+    for (const file of packageFiles) {
+      fs.copyFileSync(path.join(packageRoot, file), path.join(installedPackage, file));
+    }
     fs.writeFileSync(
       path.join(installedPackage, "package.json"),
       JSON.stringify({ name: "@logbrew/react-native", type: "module" }),
       "utf8"
     );
     fs.symlinkSync(sdkRoot, path.join(nodeModules, "@logbrew", "sdk"), "dir");
+
+    const reactRoot = path.join(nodeModules, "react");
+    fs.mkdirSync(reactRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(reactRoot, "index.cjs"),
+      "module.exports={createContext:()=>({Provider:{}}),createElement:()=>null,useContext:()=>null,useMemo:(value)=>value()};",
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(reactRoot, "package.json"),
+      JSON.stringify({ name: "react", main: "index.cjs" }),
+      "utf8"
+    );
 
     const reactNativeRoot = path.join(nodeModules, "react-native");
     fs.mkdirSync(reactNativeRoot, { recursive: true });
@@ -378,13 +521,14 @@ async function withRuntime({ nativeModule, platform = "ios" }, callback) {
       [
         "const nativeModule = globalThis.__LOGBREW_APPLE_DIAGNOSTICS_TEST_MODULE__;",
         `export const Platform = {OS: ${JSON.stringify(platform)}};`,
+        "export const AppState = {currentState: 'active', addEventListener(){return {remove(){}}}};",
         "export const NativeModules = nativeModule ? {LogBrewAppleDiagnostics: nativeModule} : {};",
         "export const TurboModuleRegistry = {get(name){return name === 'LogBrewAppleDiagnostics' ? nativeModule : undefined}};"
       ].join("\n"),
       "utf8"
     );
     const runtime = await import(pathToFileURL(
-      path.join(installedPackage, "apple-native-diagnostics.js")
+      path.join(installedPackage, entry)
     ));
     await callback(runtime);
   } finally {

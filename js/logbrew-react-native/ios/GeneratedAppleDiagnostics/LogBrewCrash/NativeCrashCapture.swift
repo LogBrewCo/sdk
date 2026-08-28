@@ -122,6 +122,25 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
         )
     }
 
+    /// Replaces the crash-time breadcrumb snapshot in one bounded write.
+    @nonobjc
+    public func setBreadcrumbs(
+        _ breadcrumbs: [IssueBreadcrumb]?,
+        truncated: Bool = false,
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try verifyProcessLocked()
+        guard store != nil, lifecycle != .stopped else {
+            throw NativeCrashError(.notInstalled)
+        }
+        try verifyStorageLocked()
+        try driver.setUserInfo(
+            NativeCrashBreadcrumbs.encoded(breadcrumbs, truncated: truncated),
+            forKey: NativeCrashBreadcrumbs.reportKey,
+        )
+    }
+
     @objc(replayPendingReportsWithHandler:error:)
     public func replayPendingReports(
         _ handler: (NativeCrashRecord) -> Bool,

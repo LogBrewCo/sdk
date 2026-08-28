@@ -545,17 +545,18 @@ function buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssu
   }
 
   function boundedText(label, value, maxLength, { rejectLocationText = false } = {}) {
-    if (typeof value !== "string" || value.trim() === "") {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (normalized === "") {
       throw validationError(`${label} must be non-empty`);
     }
     if (
-      Array.from(value).length > maxLength
-      || hasControlCharacter(value)
-      || (rejectLocationText && /[?#]/u.test(value))
+      Array.from(normalized).length > maxLength
+      || hasControlCharacter(normalized)
+      || (rejectLocationText && /[?#]/u.test(normalized))
     ) {
       throw validationError(`${label} is invalid or exceeds ${maxLength} characters`);
     }
-    return value;
+    return normalized;
   }
 
   function requireObject(label, value) {
