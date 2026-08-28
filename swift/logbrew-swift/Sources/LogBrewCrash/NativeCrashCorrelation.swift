@@ -21,8 +21,6 @@ enum NativeCrashCorrelation {
                 throw NativeCrashError(.invalidConfiguration)
             }
             return value
-        } catch let error as NativeCrashError {
-            throw error
         } catch {
             throw NativeCrashError(.invalidConfiguration)
         }
