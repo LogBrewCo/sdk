@@ -163,6 +163,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
     private let nativeStackFrames: [NativeStackFrame]?
     private let artifactIdentity: NativeArtifactIdentity?
     private let context: TelemetryContext?
+    private let correlationState: NativeCrashCorrelationState?
     private let hangState: NativeHangIncidentState?
     private let hangDurationMs: Double?
     let source: NativeCrashRecordSource
@@ -176,6 +177,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         nativeStackFrames: [NativeStackFrame]?,
         artifactIdentity: NativeArtifactIdentity?,
         context: TelemetryContext?,
+        correlationState: NativeCrashCorrelationState? = nil,
         hangState: NativeHangIncidentState?,
         hangDurationMs: Double? = nil,
         source: NativeCrashRecordSource,
@@ -188,6 +190,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         self.nativeStackFrames = nativeStackFrames
         self.artifactIdentity = artifactIdentity
         self.context = context
+        self.correlationState = correlationState
         self.hangState = hangState
         self.hangDurationMs = hangDurationMs
         self.source = source
@@ -226,6 +229,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
             metadata["release"] = .string(artifactIdentity.release)
             metadata["environment"] = .string(artifactIdentity.environment)
             metadata["service"] = .string(artifactIdentity.service)
+        }
+        if let correlationState {
+            metadata["crash.correlation"] = .string(correlationState.rawValue)
         }
         if let hangState {
             metadata["crash.handled"] = .bool(hangState == .recovered)
@@ -282,6 +288,11 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         }
         for legacyField in ["exception", "exceptionChain", "context"] where actual[legacyField] == nil {
             expected.removeValue(forKey: legacyField)
+        }
+        if (actual["metadata"] as? [String: Any])?["crash.correlation"] == nil {
+            var metadata = expected["metadata"] as? [String: Any]
+            metadata?.removeValue(forKey: "crash.correlation")
+            expected["metadata"] = metadata
         }
         return actual as NSDictionary == expected as NSDictionary
     }

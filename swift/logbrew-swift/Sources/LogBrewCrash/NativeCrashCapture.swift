@@ -105,6 +105,22 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
         return try pendingReportsLocked()
     }
 
+    /// Replaces the crash-time trace, session, and opaque subject snapshot in one bounded write.
+    @nonobjc
+    public func setCorrelationContext(_ context: TelemetryContext?) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try verifyProcessLocked()
+        guard store != nil, lifecycle != .stopped else {
+            throw NativeCrashError(.notInstalled)
+        }
+        try verifyStorageLocked()
+        try driver.setUserInfo(
+            NativeCrashCorrelation.encoded(context),
+            forKey: NativeCrashCorrelation.reportKey,
+        )
+    }
+
     @objc(replayPendingReportsWithHandler:error:)
     public func replayPendingReports(
         _ handler: (NativeCrashRecord) -> Bool,

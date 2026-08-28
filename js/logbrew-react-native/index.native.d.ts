@@ -46,6 +46,7 @@ declare const defaultExport: Omit<
   installLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").installLogBrewAppleNativeDiagnostics;
   purgeLogBrewReactNativePersistentQueue: typeof purgeLogBrewReactNativePersistentQueue;
   replayLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").replayLogBrewAppleNativeDiagnostics;
+  setLogBrewAppleNativeCrashContext: typeof import("./apple-native-diagnostics.js").setLogBrewAppleNativeCrashContext;
 };
 
 export default defaultExport;

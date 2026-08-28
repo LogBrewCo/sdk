@@ -33,6 +33,7 @@ struct NativeCrashFrameCaptureAmbiguityTests {
         #expect(attributes["title"] as? String == "Native application crash")
         #expect(attributes["level"] as? String == "critical")
         #expect(attributes["metadata"] as? [String: Any] as NSDictionary? == [
+            "crash.correlation": "not_captured",
             "crash.mechanism": "signal",
             "crash.replayed": true,
         ] as NSDictionary)

@@ -41,6 +41,22 @@ func validateTelemetryContext(
     return TelemetryContext(resource: resource, trace: trace, session: session, subject: subject, tags: tags)
 }
 
+@_spi(CrashReplay)
+public func validateNativeCrashCorrelationContext(_ value: TelemetryContext) throws -> TelemetryContext {
+    let context = try validateTelemetryContext(value, label: "native crash correlation context")
+    let identifiers = [context.session?.id, context.session?.previousId, context.subject?.id].compactMap(\.self)
+    guard context.resource == nil,
+          context.tags == nil,
+          context.trace != nil || context.session != nil || context.subject != nil,
+          identifiers.allSatisfy({
+              validMachineKey($0, maximum: 200, separators: ["_", "-"], allowNumericStart: true)
+          })
+    else {
+        throw contextValidationError("native crash correlation context is invalid")
+    }
+    return context
+}
+
 func telemetryTraceContext(_ context: LogBrewTraceContext) -> TelemetryTraceContext {
     TelemetryTraceContext(
         traceId: context.traceId,

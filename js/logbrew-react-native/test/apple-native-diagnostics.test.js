@@ -165,6 +165,62 @@ test("returns bounded status and replay receipts without exposing the client key
   });
 });
 
+test("updates and clears one privacy-bounded native crash correlation snapshot", async () => {
+  const calls = [];
+  const nativeModule = {
+    setNativeDiagnosticsContext(context) {
+      calls.push(context);
+      return { status: context === null ? "cleared" : "updated" };
+    }
+  };
+  await withRuntime({ nativeModule }, async (runtime) => {
+    const context = {
+      schemaVersion: 1,
+      trace: {
+        traceId: "11111111222233334444555555555555",
+        spanId: "6666666677777777",
+        parentSpanId: "8888888899999999",
+        sampled: true
+      },
+      session: { id: "session_current", previousId: "session_previous" },
+      subject: { id: "subject_01", kind: "user" }
+    };
+
+    assert.deepEqual(runtime.setLogBrewAppleNativeCrashContext(context), { status: "updated" });
+    assert.deepEqual(runtime.setLogBrewAppleNativeCrashContext(null), { status: "cleared" });
+    assert.equal(Object.isFrozen(runtime.setLogBrewAppleNativeCrashContext(context)), true);
+    assert.deepEqual(calls, [context, null, context]);
+  });
+});
+
+test("rejects broad malformed or identifying native crash context before bridging", async () => {
+  const calls = [];
+  const nativeModule = {
+    setNativeDiagnosticsContext(context) {
+      calls.push(context);
+      return { status: "updated" };
+    }
+  };
+  await withRuntime({ nativeModule }, async (runtime) => {
+    for (const context of [
+      undefined,
+      { schemaVersion: 1, resource: { service: { name: "ios-app" } } },
+      { schemaVersion: 1, tags: { feature: "checkout" } },
+      { schemaVersion: 1, trace: { traceId: "0".repeat(32) } },
+      { schemaVersion: 1, session: { id: "192.0.2.1" } },
+      { schemaVersion: 1, subject: { id: "person@example.test", kind: "user" } },
+      { schemaVersion: 1, subject: { id: "subject_01", kind: "identified" } }
+    ]) {
+      assert.throws(
+        () => runtime.setLogBrewAppleNativeCrashContext(context),
+        (error) => error.code === "configuration_error"
+          && !error.message.includes("person@example.test")
+      );
+    }
+    assert.deepEqual(calls, []);
+  });
+});
+
 test("maps native failures to stable content-free SDK errors", async () => {
   const hiddenValue = "DO_NOT_ECHO_THIS_CLIENT_KEY";
   const nativeModule = {
@@ -234,6 +290,8 @@ test("keeps the native bridge version and public Apple diagnostics contract alig
   assert.match(readme, /logbrew debug-artifacts upload/u);
   assert.match(readme, /logbrew debug-artifacts lookup/u);
   assert.match(readme, /exact Mach-O UUID and architecture lookup\s+succeeds/u);
+  assert.match(readme, /setLogBrewAppleNativeCrashContext/u);
+  assert.match(readme, /opaque app-owned identifiers/u);
 });
 
 test("matches the React Native New Architecture promise selector", () => {
@@ -251,6 +309,7 @@ test("matches the React Native New Architecture promise selector", () => {
     nativeModule,
     /replayNativeDiagnostics:\(RCTPromiseResolveBlock\)resolve\s+reject:/u
   );
+  assert.match(nativeModule, /setNativeDiagnosticsContext:\(NSDictionary \*\)context/u);
   assert.doesNotMatch(nativeModule, /replayNativeDiagnostics:[\s\S]*?rejecter:/u);
 });
 

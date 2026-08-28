@@ -309,7 +309,8 @@ before root registration, then start replay:
 ```js
 import {
   installLogBrewAppleNativeDiagnostics,
-  replayLogBrewAppleNativeDiagnostics
+  replayLogBrewAppleNativeDiagnostics,
+  setLogBrewAppleNativeCrashContext
 } from "@logbrew/react-native/apple-native-diagnostics";
 
 const nativeStatus = installLogBrewAppleNativeDiagnostics({
@@ -320,6 +321,13 @@ const nativeStatus = installLogBrewAppleNativeDiagnostics({
   service: "ios-app",
   fatalHandlerOwnership: "logbrew",
   hangThresholdSeconds: 2
+});
+
+setLogBrewAppleNativeCrashContext({
+  schemaVersion: 1,
+  trace: { traceId: trace.traceId, spanId: trace.spanId, sampled: trace.sampled },
+  session: { id: "session_123" },
+  subject: { id: "subject_456", kind: "user" }
 });
 
 void replayLogBrewAppleNativeDiagnostics().catch((error) => {
@@ -333,6 +341,11 @@ owns the native fatal signal or Mach exception handlers. Linking both SDKs is
 allowed, but only one integration may install native fatal capture in a given
 process. LogBrew cannot transfer or remove that ownership before process
 restart.
+
+Update this snapshot when the active trace, session, or subject changes, and
+clear it with `setLogBrewAppleNativeCrashContext(null)` on logout or session
+end. The crash report keeps one atomic snapshot from the crashed process, so a
+later app launch cannot replace it. Session and subject values must be opaque app-owned identifiers made from ASCII letters, numbers, `_`, or `-`. Do not use names, email addresses, IP addresses, or device identifiers. Resource context, tags, arbitrary fields, and values over the fixed 1 KiB snapshot limit fail before storage.
 
 Installation creates app-private, data-protected storage that iOS excludes from
 device data archives. Pending reports are partitioned by project, so changing

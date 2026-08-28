@@ -13,7 +13,8 @@ import baseDefault from "./index.js";
 import {
   getLogBrewAppleNativeDiagnosticsStatus,
   installLogBrewAppleNativeDiagnostics,
-  replayLogBrewAppleNativeDiagnostics
+  replayLogBrewAppleNativeDiagnostics,
+  setLogBrewAppleNativeCrashContext
 } from "./apple-native-diagnostics.js";
 import {
   purgeReactNativePersistentQueue,
@@ -26,7 +27,8 @@ export {
 export {
   getLogBrewAppleNativeDiagnosticsStatus,
   installLogBrewAppleNativeDiagnostics,
-  replayLogBrewAppleNativeDiagnostics
+  replayLogBrewAppleNativeDiagnostics,
+  setLogBrewAppleNativeCrashContext
 };
 
 export * from "./index.js";
@@ -146,7 +148,8 @@ const defaultExport = {
   getLogBrewAppleNativeDiagnosticsStatus,
   installLogBrewAppleNativeDiagnostics,
   purgeLogBrewReactNativePersistentQueue,
-  replayLogBrewAppleNativeDiagnostics
+  replayLogBrewAppleNativeDiagnostics,
+  setLogBrewAppleNativeCrashContext
 };
 
 export default defaultExport;
