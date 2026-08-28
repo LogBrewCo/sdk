@@ -117,8 +117,8 @@ struct DurableDeliveryFailureTests {
             try captureLog(client, id: "durable-stop-in-flight")
             #expect(requestStarted.wait(timeout: .now() + 2) == .success)
 
-            let stopThread = Thread {
-                client.stopAutomaticDelivery()
+            let stopThread = Thread { [weak client] in
+                client?.stopAutomaticDelivery()
                 stopFinished.signal()
             }
             stopThread.start()

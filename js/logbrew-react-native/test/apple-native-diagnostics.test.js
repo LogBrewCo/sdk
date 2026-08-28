@@ -165,7 +165,7 @@ test("returns bounded status and replay receipts without exposing the client key
   });
 });
 
-test("updates and clears one privacy-bounded native crash correlation snapshot", async () => {
+test("updates and clears one privacy-bounded native crash investigation snapshot", async () => {
   const calls = [];
   const nativeModule = {
     setNativeDiagnosticsContext(context) {
@@ -183,7 +183,11 @@ test("updates and clears one privacy-bounded native crash correlation snapshot",
         sampled: true
       },
       session: { id: "session_current", previousId: "session_previous" },
-      subject: { id: "subject_01", kind: "user" }
+      subject: { id: "subject_01", kind: "user" },
+      impact: {
+        failedAction: "checkout.submit",
+        userVisibleOutcome: "The order was not confirmed."
+      }
     };
 
     assert.deepEqual(runtime.setLogBrewAppleNativeCrashContext(context), { status: "updated" });
@@ -318,7 +322,11 @@ test("rejects broad malformed or identifying native crash context before bridgin
       { schemaVersion: 1, trace: { traceId: "0".repeat(32) } },
       { schemaVersion: 1, session: { id: "192.0.2.1" } },
       { schemaVersion: 1, subject: { id: "person@example.test", kind: "user" } },
-      { schemaVersion: 1, subject: { id: "subject_01", kind: "identified" } }
+      { schemaVersion: 1, subject: { id: "subject_01", kind: "identified" } },
+      { schemaVersion: 1, impact: { affectedUserSegment: "cohort" } },
+      { schemaVersion: 1, impact: { failedAction: "checkout.submit?email=person@example.test" } },
+      { schemaVersion: 1, impact: { failedAction: "checkout\u0085submit" } },
+      { schemaVersion: 1, impact: { failedAction: "checkout.submit", extra: "private" } }
     ]) {
       assert.throws(
         () => runtime.setLogBrewAppleNativeCrashContext(context),

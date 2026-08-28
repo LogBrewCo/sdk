@@ -327,7 +327,11 @@ setLogBrewAppleNativeCrashContext({
   schemaVersion: 1,
   trace: { traceId: trace.traceId, spanId: trace.spanId, sampled: trace.sampled },
   session: { id: "session_123" },
-  subject: { id: "subject_456", kind: "user" }
+  subject: { id: "subject_456", kind: "user" },
+  impact: {
+    failedAction: "checkout.submit",
+    userVisibleOutcome: "The order was not confirmed."
+  }
 });
 
 void replayLogBrewAppleNativeDiagnostics().catch((error) => {
@@ -342,10 +346,15 @@ allowed, but only one integration may install native fatal capture in a given
 process. LogBrew cannot transfer or remove that ownership before process
 restart.
 
-Update this snapshot when the active trace, session, or subject changes, and
+Update this snapshot when the active trace, session, subject, or failed action changes, and
 clear it with `setLogBrewAppleNativeCrashContext(null)` on logout or session
 end. The crash report keeps one atomic snapshot from the crashed process, so a
-later app launch cannot replace it. Session and subject values must be opaque app-owned identifiers made from ASCII letters, numbers, `_`, or `-`. Do not use names, email addresses, IP addresses, or device identifiers. Resource context, tags, arbitrary fields, and values over the fixed 1 KiB snapshot limit fail before storage.
+later app launch cannot replace it. `impact` is explicit app knowledge. Use a
+stable action name and an optional safe user-visible result. Never include raw
+input, request data, authentication values, or identity. Session and subject values must
+be opaque app-owned identifiers made from ASCII letters, numbers, `_`, or `-`.
+Resource context, tags, arbitrary fields, and values over the fixed 4 KiB
+snapshot limit fail before storage.
 
 The iOS `createLogBrewReactNativeClient()` entry also mirrors its validated
 breadcrumb history into native crash capture. Install Apple diagnostics first,

@@ -36,6 +36,11 @@ export type LogBrewAppleNativeDiagnosticsReplayResult = Readonly<{
 
 export type LogBrewAppleNativeCrashContext = {
   schemaVersion: 1;
+  /** App-reported failed action and optional user-visible result. Never include raw input or identity. */
+  impact?: {
+    failedAction: string;
+    userVisibleOutcome?: string;
+  };
   trace?: TelemetryTraceContext;
   session?: TelemetrySessionContext;
   subject?: TelemetrySubjectContext;

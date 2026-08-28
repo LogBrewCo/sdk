@@ -3,7 +3,7 @@ import Foundation
 @objc(LBRNAppleNativeDiagnostics)
 public final class LBRNAppleNativeDiagnostics: NSObject, @unchecked Sendable {
     private static let shared = LBRNAppleNativeDiagnostics()
-    private static let sdkVersion = "0.1.21"
+    private static let sdkVersion = "0.1.22"
 
     private let lock = NSLock()
     private let replayQueue = DispatchQueue(label: "co.logbrew.react-native.apple-diagnostics-replay")
@@ -149,8 +149,11 @@ public final class LBRNAppleNativeDiagnostics: NSObject, @unchecked Sendable {
             return failure("native_diagnostics_not_installed")
         }
         do {
-            let context = try rawContext.map { try NativeCrashCorrelation.validated($0) }
-            try capture.setCorrelationContext(context)
+            let snapshot = try rawContext.map { try NativeCrashCorrelation.validated($0) }
+            try capture.setDiagnosticContext(
+                context: snapshot?.correlationContext,
+                impact: snapshot?.impact,
+            )
             return ["status": rawContext == nil ? "cleared" : "updated"]
         } catch let error as NativeCrashError {
             return failure(error.code.rawValue)

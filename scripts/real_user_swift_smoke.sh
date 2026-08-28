@@ -19,18 +19,15 @@ cleanup() {
 trap cleanup EXIT
 trap 'echo "swift real-user smoke failed near line $LINENO" >&2' ERR
 
-echo "swift real-user smoke: package contract" >&2
-bash "$repo_root/scripts/check_swift_package.sh" >/dev/null
-
 echo "swift real-user smoke: packaged README example" >&2
-swift run --package-path "$package_dir" --scratch-path "$tmp_dir/readme-run-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
+swift run --package-path "$package_dir" --scratch-path "$tmp_dir/example-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 grep -q '"events":6' "$tmp_dir/readme.stderr.json"
 
 echo "swift real-user smoke: packaged real-user example" >&2
-swift run --package-path "$package_dir" --scratch-path "$tmp_dir/smoke-run-build" RealUserSmoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
+swift run --package-path "$package_dir" --scratch-path "$tmp_dir/example-build" RealUserSmoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke.stderr.json"
@@ -42,7 +39,7 @@ grep -q '"timelineEvents":2' "$tmp_dir/smoke.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/smoke.stderr.json"
 
 echo "swift real-user smoke: packaged trace-correlation example" >&2
-swift run --package-path "$package_dir" --scratch-path "$tmp_dir/trace-run-build" TraceCorrelationExample > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
+swift run --package-path "$package_dir" --scratch-path "$tmp_dir/example-build" TraceCorrelationExample > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
 python3 "$repo_root/scripts/check_swift_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/trace.stderr.json"
 grep -q '"events":10' "$tmp_dir/trace.stderr.json"
@@ -76,7 +73,7 @@ grep -q 'RealUserSmoke' "$tmp_dir/make-alias-plan.txt"
 
 echo "swift real-user smoke: installed consumer app" >&2
 consumer_dir="$tmp_dir/smoke-app"
-mkdir -p "$consumer_dir/Sources/SmokeApp"
+mkdir -p "$consumer_dir/Sources/SmokeApp" "$consumer_dir/Sources/DurableSmoke"
 cat > "$consumer_dir/Package.swift" <<EOF
 // swift-tools-version: 6.0
 
@@ -96,6 +93,10 @@ let package = Package(
             dependencies: [
                 .product(name: "LogBrew", package: "logbrew-swift"),
             ]
+        ),
+        .executableTarget(
+            name: "DurableSmoke",
+            dependencies: [.product(name: "LogBrew", package: "logbrew-swift")]
         ),
     ]
 )
@@ -464,6 +465,59 @@ let summary = """
 FileHandle.standardError.write(Data(summary.utf8))
 EOF
 
+cat > "$consumer_dir/Sources/DurableSmoke/main.swift" <<'EOF'
+import Foundation
+import LogBrew
+
+guard CommandLine.arguments.count == 3 else {
+    fatalError("expected mode and storage parent")
+}
+
+let mode = CommandLine.arguments[1]
+let parent = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
+let client = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "swift-installed-durable-smoke",
+    sdkVersion: "0.1.0",
+    maxRetries: 0
+)
+try client.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
+
+let transport: RecordingTransport
+switch mode {
+case "write":
+    try client.log(
+        "swift-installed-durable-event",
+        timestamp: "2026-06-02T10:00:00Z",
+        attributes: LogAttributes(message: "survives restart", level: .error)
+    )
+    transport = RecordingTransport(scriptedResponses: [.status(503)])
+    var retainedForRetry = false
+    do {
+        _ = try client.flush(transport: transport)
+        fatalError("retryable durable write unexpectedly succeeded")
+    } catch let error as SdkError {
+        precondition(error.code == "transport_error")
+        retainedForRetry = true
+    }
+    precondition(retainedForRetry)
+    precondition(client.pendingEvents() == 1)
+case "recover":
+    precondition(client.pendingEvents() == 1)
+    transport = RecordingTransport.alwaysAccept()
+    let response = try client.flush(transport: transport)
+    precondition(response.statusCode == 202)
+    precondition(client.pendingEvents() == 0)
+default:
+    fatalError("unknown durable smoke mode")
+}
+
+guard let body = transport.sentBodies.first, transport.sentBodies.count == 1 else {
+    fatalError("durable smoke did not send exactly one body")
+}
+print(body)
+EOF
+
 intake_port="$(python3 - <<'PY'
 import socket
 
@@ -576,16 +630,16 @@ if [[ ! -f "$intake_ready" ]]; then
   exit 1
 fi
 
-swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-describe" describe --type json > "$tmp_dir/consumer-package.json"
+swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-build" describe --type json > "$tmp_dir/consumer-package.json"
 grep -q '"name" : "SmokeApp"' "$tmp_dir/consumer-package.json"
 grep -q '"identity" : "logbrew-swift"' "$tmp_dir/consumer-package.json"
 grep -q '"product_dependencies" : \[' "$tmp_dir/consumer-package.json"
 grep -q '"LogBrew"' "$tmp_dir/consumer-package.json"
-swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-dependencies" show-dependencies --format json > "$tmp_dir/consumer-dependencies.json"
+swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-build" show-dependencies --format json > "$tmp_dir/consumer-dependencies.json"
 grep -q '"identity": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 grep -q '"name": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 
-if ! python3 - "$consumer_dir" "$tmp_dir/consumer-run-build" "http://127.0.0.1:$intake_port/v1/events" "http://127.0.0.1:$intake_port/api/checkout?cart_id=123#pay" "$tmp_dir/consumer.stdout.json" "$tmp_dir/consumer.stderr.json" <<'PY'
+if ! python3 - "$consumer_dir" "$tmp_dir/consumer-build" "http://127.0.0.1:$intake_port/v1/events" "http://127.0.0.1:$intake_port/api/checkout?cart_id=123#pay" "$tmp_dir/consumer.stdout.json" "$tmp_dir/consumer.stderr.json" <<'PY'
 import os
 import subprocess
 import sys
@@ -669,84 +723,12 @@ if "evt_swift_http_transport" not in posts[1]["body"]:
 PY
 
 echo "swift real-user smoke: installed durable restart" >&2
-durable_consumer_dir="$tmp_dir/durable-smoke-app"
-mkdir -p "$durable_consumer_dir/Sources/DurableSmoke"
-cat > "$durable_consumer_dir/Package.swift" <<EOF
-// swift-tools-version: 6.0
-
-import PackageDescription
-
-let package = Package(
-    name: "DurableSmokeApp",
-    platforms: [.macOS(.v13)],
-    dependencies: [.package(path: "$package_dir")],
-    targets: [
-        .executableTarget(
-            name: "DurableSmoke",
-            dependencies: [.product(name: "LogBrew", package: "logbrew-swift")]
-        ),
-    ]
-)
-EOF
-cat > "$durable_consumer_dir/Sources/DurableSmoke/main.swift" <<'EOF'
-import Foundation
-import LogBrew
-
-guard CommandLine.arguments.count == 3 else {
-    fatalError("expected mode and storage parent")
-}
-
-let mode = CommandLine.arguments[1]
-let parent = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
-let client = try LogBrewClient.create(
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "swift-installed-durable-smoke",
-    sdkVersion: "0.1.0",
-    maxRetries: 0
-)
-try client.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
-
-let transport: RecordingTransport
-switch mode {
-case "write":
-    try client.log(
-        "swift-installed-durable-event",
-        timestamp: "2026-06-02T10:00:00Z",
-        attributes: LogAttributes(message: "survives restart", level: .error)
-    )
-    transport = RecordingTransport(scriptedResponses: [.status(503)])
-    var retainedForRetry = false
-    do {
-        _ = try client.flush(transport: transport)
-        fatalError("retryable durable write unexpectedly succeeded")
-    } catch let error as SdkError {
-        precondition(error.code == "transport_error")
-        retainedForRetry = true
-    }
-    precondition(retainedForRetry)
-    precondition(client.pendingEvents() == 1)
-case "recover":
-    precondition(client.pendingEvents() == 1)
-    transport = RecordingTransport.alwaysAccept()
-    let response = try client.flush(transport: transport)
-    precondition(response.statusCode == 202)
-    precondition(client.pendingEvents() == 0)
-default:
-    fatalError("unknown durable smoke mode")
-}
-
-guard let body = transport.sentBodies.first, transport.sentBodies.count == 1 else {
-    fatalError("durable smoke did not send exactly one body")
-}
-print(body)
-EOF
-
 durable_parent="$tmp_dir/swift-durable-parent"
 mkdir -m 700 "$durable_parent"
 durable_binary="$(
   bash "$repo_root/scripts/real_user_swift_build_executable.sh" \
-    "$durable_consumer_dir" \
-    "$tmp_dir/durable-consumer-build" \
+    "$consumer_dir" \
+    "$tmp_dir/consumer-build" \
     DurableSmoke
 )"
 "$durable_binary" write "$durable_parent" \

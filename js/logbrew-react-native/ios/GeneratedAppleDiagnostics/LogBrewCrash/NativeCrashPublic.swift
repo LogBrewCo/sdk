@@ -165,6 +165,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
     private let artifactIdentity: NativeArtifactIdentity?
     private let context: TelemetryContext?
     private let correlationState: NativeCrashContextState?
+    private let impact: IssueImpactEvidence?
     private let breadcrumbs: [IssueBreadcrumb]?
     private let breadcrumbsTruncated: Bool?
     private let breadcrumbState: NativeCrashContextState?
@@ -182,6 +183,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         artifactIdentity: NativeArtifactIdentity?,
         context: TelemetryContext?,
         correlationState: NativeCrashContextState? = nil,
+        impact: IssueImpactEvidence? = nil,
         breadcrumbs: [IssueBreadcrumb]? = nil,
         breadcrumbsTruncated: Bool? = nil,
         breadcrumbState: NativeCrashContextState? = nil,
@@ -198,6 +200,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         self.artifactIdentity = artifactIdentity
         self.context = context
         self.correlationState = correlationState
+        self.impact = impact
         self.breadcrumbs = breadcrumbs
         self.breadcrumbsTruncated = breadcrumbsTruncated
         self.breadcrumbState = breadcrumbState
@@ -259,6 +262,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
             exceptionChain: nativeCrashExceptionChain(for: issueException),
             breadcrumbs: breadcrumbs,
             breadcrumbsTruncated: breadcrumbsTruncated,
+            evidence: impact.map { IssueDiagnosticEvidence(impact: $0) },
             metadata: metadata,
             context: context,
             nativeStackFrames: nativeStackFrames,
@@ -301,7 +305,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         else {
             return false
         }
-        let legacyFields = ["exception", "exceptionChain", "breadcrumbs", "breadcrumbsTruncated", "context"]
+        let legacyFields = ["exception", "exceptionChain", "evidence", "breadcrumbs", "breadcrumbsTruncated", "context"]
         for legacyField in legacyFields where actual[legacyField] == nil {
             expected.removeValue(forKey: legacyField)
         }

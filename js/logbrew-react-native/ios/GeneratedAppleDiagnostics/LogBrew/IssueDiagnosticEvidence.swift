@@ -77,7 +77,8 @@ public struct IssueDiagnosticEvidence: Codable, Equatable, Sendable {
     }
 }
 
-func validateIssueDiagnosticEvidence(_ value: IssueDiagnosticEvidence) throws -> IssueDiagnosticEvidence {
+@_spi(CrashReplay)
+public func validateIssueDiagnosticEvidence(_ value: IssueDiagnosticEvidence) throws -> IssueDiagnosticEvidence {
     let cause = try value.likelyRootCause.map {
         try issueText($0, label: "issue evidence likelyRootCause", maximum: 1024)
     }
