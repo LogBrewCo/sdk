@@ -82,30 +82,24 @@ function bindAppleNativeCrashBreadcrumbs(client) {
   }
   const addBreadcrumb = client.addBreadcrumb.bind(client);
   const clearBreadcrumbs = client.clearBreadcrumbs.bind(client);
-  client.addBreadcrumb = (...args) => {
-    const previous = [client.issueBreadcrumbs.slice(), client.issueBreadcrumbsTruncated];
-    const result = addBreadcrumb(...args);
-    try {
-      syncAppleNativeCrashBreadcrumbs(client);
-    } catch (error) {
-      restoreBreadcrumbs(client, previous);
-      throw error;
-    }
-    return result;
-  };
-  client.clearBreadcrumbs = () => {
-    const previous = [client.issueBreadcrumbs.slice(), client.issueBreadcrumbsTruncated];
-    const result = clearBreadcrumbs();
-    try {
-      syncAppleNativeCrashBreadcrumbs(client);
-    } catch (error) {
-      restoreBreadcrumbs(client, previous);
-      throw error;
-    }
-    return result;
-  };
+  client.addBreadcrumb = (...args) => updateAppleNativeBreadcrumbs(
+    client, () => addBreadcrumb(...args)
+  );
+  client.clearBreadcrumbs = () => updateAppleNativeBreadcrumbs(client, clearBreadcrumbs);
   syncAppleNativeCrashBreadcrumbs(client);
   return client;
+}
+
+function updateAppleNativeBreadcrumbs(client, update) {
+  const previous = [client.issueBreadcrumbs.slice(), client.issueBreadcrumbsTruncated];
+  const result = update();
+  try {
+    syncAppleNativeCrashBreadcrumbs(client);
+  } catch (error) {
+    restoreBreadcrumbs(client, previous);
+    throw error;
+  }
+  return result;
 }
 
 function restoreBreadcrumbs(client, [breadcrumbs, truncated]) {
