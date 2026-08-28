@@ -21,6 +21,7 @@ struct CrashEngineConfiguration: Equatable {
 
 protocol CrashEngineDriving: AnyObject {
     func install(configuration: CrashEngineConfiguration) throws -> any CrashReportStoring
+    func setUserInfo(_ value: String?, forKey key: String)
 }
 
 protocol CrashReportStoring: AnyObject {
@@ -95,6 +96,10 @@ final class KSCrashEngineDriver: CrashEngineDriving {
             throw NativeCrashError(.engineInstallFailed)
         }
         return KSCrashReportStoreAdapter(store: reportStore)
+    }
+
+    func setUserInfo(_ value: String?, forKey key: String) {
+        KSCrash.shared.setUserInfo(value, forKey: key)
     }
 }
 

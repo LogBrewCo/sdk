@@ -1,0 +1,76 @@
+import Foundation
+@_spi(CrashReplay) import LogBrew
+
+enum NativeCrashCorrelationState: String {
+    case captured
+    case notCaptured = "not_captured"
+    case unavailable
+}
+
+enum NativeCrashCorrelation {
+    static let reportKey = "logbrew_native_correlation"
+    private static let maximumBytes = 1024
+
+    static func encoded(_ context: TelemetryContext?) throws -> String? {
+        guard let context else {
+            return nil
+        }
+        do {
+            let data = try encoder().encode(validateNativeCrashCorrelationContext(context))
+            guard data.count <= maximumBytes, let value = String(data: data, encoding: .utf8) else {
+                throw NativeCrashError(.invalidConfiguration)
+            }
+            return value
+        } catch let error as NativeCrashError {
+            throw error
+        } catch {
+            throw NativeCrashError(.invalidConfiguration)
+        }
+    }
+
+    static func captured(in rawReport: [String: Any]) -> (TelemetryContext?, NativeCrashCorrelationState) {
+        guard let user = rawReport["user"] as? [String: Any], let value = user[reportKey] else {
+            return (nil, .notCaptured)
+        }
+        guard let value = value as? String,
+              let data = value.data(using: .utf8),
+              data.count <= maximumBytes,
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let context = try? validated(object)
+        else {
+            return (nil, .unavailable)
+        }
+        return (context, .captured)
+    }
+
+    static func validated(_ object: Any) throws -> TelemetryContext {
+        do {
+            guard JSONSerialization.isValidJSONObject(object) else {
+                throw NativeCrashError(.invalidConfiguration)
+            }
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            guard data.count <= maximumBytes else {
+                throw NativeCrashError(.invalidConfiguration)
+            }
+            let context = try validateNativeCrashCorrelationContext(
+                JSONDecoder().decode(TelemetryContext.self, from: data),
+            )
+            let normalized = try encoder().encode(context)
+            let normalizedObject = try JSONSerialization.jsonObject(with: normalized)
+            guard object as? NSDictionary == normalizedObject as? NSDictionary else {
+                throw NativeCrashError(.invalidConfiguration)
+            }
+            return context
+        } catch let error as NativeCrashError {
+            throw error
+        } catch {
+            throw NativeCrashError(.invalidConfiguration)
+        }
+    }
+
+    private static func encoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }
+}

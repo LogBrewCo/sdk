@@ -60,6 +60,7 @@ final class FakeCrashEngineDriver: CrashEngineDriving {
     let store: FakeCrashReportStore
     var onInstall: ((CrashEngineConfiguration) throws -> Void)?
     private(set) var configurations: [CrashEngineConfiguration] = []
+    private(set) var userInfoUpdates: [(key: String, value: String?)] = []
 
     init(store: FakeCrashReportStore) {
         self.store = store
@@ -69,6 +70,10 @@ final class FakeCrashEngineDriver: CrashEngineDriving {
         configurations.append(configuration)
         try onInstall?(configuration)
         return store
+    }
+
+    func setUserInfo(_ value: String?, forKey key: String) {
+        userInfoUpdates.append((key, value))
     }
 }
 

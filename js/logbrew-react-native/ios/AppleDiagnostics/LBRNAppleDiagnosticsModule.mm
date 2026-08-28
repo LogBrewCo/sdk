@@ -40,6 +40,11 @@ RCT_EXPORT_METHOD(replayNativeDiagnostics:(RCTPromiseResolveBlock)resolve
     }];
 }
 
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(setNativeDiagnosticsContext:(NSDictionary *)context)
+{
+    return [LBRNAppleNativeDiagnostics setCorrelationContext:context];
+}
+
 RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(nativeDiagnosticsStatus)
 {
     return [LBRNAppleNativeDiagnostics status];

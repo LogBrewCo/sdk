@@ -6,6 +6,9 @@ export interface Spec extends TurboModule {
     configuration: CodegenTypes.UnsafeObject
   ): CodegenTypes.UnsafeObject;
   replayNativeDiagnostics(): Promise<CodegenTypes.UnsafeObject>;
+  setNativeDiagnosticsContext(
+    context: CodegenTypes.UnsafeObject | null
+  ): CodegenTypes.UnsafeObject;
   nativeDiagnosticsStatus(): CodegenTypes.UnsafeObject;
 }
 

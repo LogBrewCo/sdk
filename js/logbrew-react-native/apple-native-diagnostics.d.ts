@@ -1,3 +1,5 @@
+import type { TelemetrySessionContext, TelemetrySubjectContext, TelemetryTraceContext } from "@logbrew/sdk";
+
 type LogBrewAppleNativeDiagnosticsAuth =
   | { apiKey: string; clientKey?: never }
   | { clientKey: string; apiKey?: never };
@@ -32,6 +34,19 @@ export type LogBrewAppleNativeDiagnosticsReplayResult = Readonly<{
   pending: number;
 }>;
 
+export type LogBrewAppleNativeCrashContext = {
+  schemaVersion: 1;
+  trace?: TelemetryTraceContext;
+  session?: TelemetrySessionContext;
+  subject?: TelemetrySubjectContext;
+  resource?: never;
+  tags?: never;
+};
+
+export type LogBrewAppleNativeCrashContextResult = Readonly<{
+  status: "cleared" | "updated";
+}>;
+
 export declare function installLogBrewAppleNativeDiagnostics(
   configuration: LogBrewAppleNativeDiagnosticsConfiguration
 ): LogBrewAppleNativeDiagnosticsStatus;
@@ -43,10 +58,15 @@ export declare function replayLogBrewAppleNativeDiagnostics(): Promise<
 export declare function getLogBrewAppleNativeDiagnosticsStatus():
   LogBrewAppleNativeDiagnosticsStatus;
 
+export declare function setLogBrewAppleNativeCrashContext(
+  context: LogBrewAppleNativeCrashContext | null
+): LogBrewAppleNativeCrashContextResult;
+
 declare const defaultExport: {
   getLogBrewAppleNativeDiagnosticsStatus: typeof getLogBrewAppleNativeDiagnosticsStatus;
   installLogBrewAppleNativeDiagnostics: typeof installLogBrewAppleNativeDiagnostics;
   replayLogBrewAppleNativeDiagnostics: typeof replayLogBrewAppleNativeDiagnostics;
+  setLogBrewAppleNativeCrashContext: typeof setLogBrewAppleNativeCrashContext;
 };
 
 export default defaultExport;

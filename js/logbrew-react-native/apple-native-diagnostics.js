@@ -44,6 +44,26 @@ export function getLogBrewAppleNativeDiagnosticsStatus() {
   return requireStatusResult("status", result, new Set(["not_installed", "ready"]));
 }
 
+export function setLogBrewAppleNativeCrashContext(context) {
+  requireApplePlatform();
+  const nativeModule = requireNativeModule();
+  const payload = context === null ? null : normalizeCorrelationContext(context);
+  const result = callNative(nativeModule, "setNativeDiagnosticsContext", payload);
+  const expectedStatus = payload === null ? "cleared" : "updated";
+  if (isErrorResult(result)) {
+    throw new SdkError(result.code, `LogBrew Apple native diagnostics context failed with ${result.code}`);
+  }
+  if (!isPlainObject(result)
+    || Object.keys(result).length !== 1
+    || result.status !== expectedStatus) {
+    throw new SdkError(
+      "native_diagnostics_invalid_response",
+      "LogBrew Apple native diagnostics context returned an invalid response"
+    );
+  }
+  return Object.freeze({ status: expectedStatus });
+}
+
 function normalizeConfiguration(configuration) {
   if (!configuration
     || Array.isArray(configuration)
@@ -107,6 +127,81 @@ function normalizeConfiguration(configuration) {
     payload.hangThresholdSeconds = threshold;
   }
   return payload;
+}
+
+function normalizeCorrelationContext(context) {
+  const source = exactObject(context, ["schemaVersion", "session", "subject", "trace"], "context");
+  if (source.schemaVersion !== 1) {
+    throw configurationError("context schemaVersion must be 1");
+  }
+  const output = { schemaVersion: 1 };
+  if (source.trace !== undefined) {
+    const trace = exactObject(
+      source.trace,
+      ["parentSpanId", "sampled", "spanId", "traceId"],
+      "context trace"
+    );
+    output.trace = { traceId: correlationHexId(trace.traceId, 32, "traceId") };
+    for (const [key, width] of [["spanId", 16], ["parentSpanId", 16]]) {
+      if (trace[key] !== undefined) {
+        output.trace[key] = correlationHexId(trace[key], width, key);
+      }
+    }
+    if (trace.sampled !== undefined) {
+      if (typeof trace.sampled !== "boolean") {
+        throw configurationError("context trace sampled must be a boolean");
+      }
+      output.trace.sampled = trace.sampled;
+    }
+  }
+  if (source.session !== undefined) {
+    const session = exactObject(source.session, ["id", "previousId"], "context session");
+    output.session = { id: opaqueCorrelationId(session.id, "session id") };
+    if (session.previousId !== undefined) {
+      output.session.previousId = opaqueCorrelationId(session.previousId, "session previousId");
+      if (output.session.previousId === output.session.id) {
+        throw configurationError("context session previousId must differ from id");
+      }
+    }
+  }
+  if (source.subject !== undefined) {
+    const subject = exactObject(source.subject, ["id", "kind"], "context subject");
+    if (subject.kind !== "anonymous" && subject.kind !== "user") {
+      throw configurationError("context subject kind must be anonymous or user");
+    }
+    output.subject = { id: opaqueCorrelationId(subject.id, "subject id"), kind: subject.kind };
+  }
+  if (Object.keys(output).length === 1) {
+    throw configurationError("context must include trace, session, or subject");
+  }
+  return output;
+}
+
+function exactObject(value, allowedKeys, name) {
+  if (!isPlainObject(value)) {
+    throw configurationError(`${name} must be an object`);
+  }
+  const unknown = Object.keys(value).filter((key) => !allowedKeys.includes(key)).sort();
+  if (unknown.length > 0) {
+    throw configurationError(`${name} contains unsupported fields`);
+  }
+  return value;
+}
+
+function correlationHexId(value, width, name) {
+  if (typeof value !== "string"
+    || !new RegExp(`^[0-9a-f]{${width}}$`, "iu").test(value)
+    || /^0+$/u.test(value)) {
+    throw configurationError(`context trace ${name} must be a non-zero ${width}-character hex value`);
+  }
+  return value.toLowerCase();
+}
+
+function opaqueCorrelationId(value, name) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/u.test(value)) {
+    throw configurationError(`context ${name} must be an opaque app-owned identifier`);
+  }
+  return value;
 }
 
 function requireApplePlatform() {
@@ -280,7 +375,8 @@ function configurationError(message) {
 const logBrewAppleNativeDiagnostics = {
   getLogBrewAppleNativeDiagnosticsStatus,
   installLogBrewAppleNativeDiagnostics,
-  replayLogBrewAppleNativeDiagnostics
+  replayLogBrewAppleNativeDiagnostics,
+  setLogBrewAppleNativeCrashContext
 };
 
 export default logBrewAppleNativeDiagnostics;

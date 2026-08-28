@@ -22,6 +22,7 @@ struct CrashReportSanitizer {
         let error = crash?["error"] as? [String: Any]
         let nativeStackFrames = NativeStackFrameSanitizer().frames(from: rawReport)
         let artifactIdentity = try NativeArtifactIdentityValue.persistedIdentity(in: rawReport)
+        let correlation = NativeCrashCorrelation.captured(in: rawReport)
         return NativeCrashRecord(
             eventID: uuid.uuidString.lowercased(),
             timestamp: timestamp.normalized,
@@ -31,7 +32,9 @@ struct CrashReportSanitizer {
             context: nativeCrashContext(
                 system: rawReport["system"] as? [String: Any],
                 artifactIdentity: artifactIdentity,
+                correlation: correlation.0,
             ),
+            correlationState: correlation.1,
             hangState: nil,
             hangDurationMs: nil,
             source: .engine(reportID: reportID),
@@ -77,6 +80,7 @@ struct CrashReportSanitizer {
 func nativeCrashContext(
     system: [String: Any]?,
     artifactIdentity: NativeArtifactIdentity?,
+    correlation: TelemetryContext? = nil,
 ) -> TelemetryContext? {
     let value = { (key: String) in crashContextValue(system?[key]) }
     let operatingSystem = value("system_name").map {
@@ -94,18 +98,26 @@ func nativeCrashContext(
     let application = applicationName == nil && applicationVersion == nil && applicationBuild == nil
         ? nil
         : TelemetryApplication(name: applicationName, version: applicationVersion, build: applicationBuild)
-    guard artifactIdentity != nil || operatingSystem != nil || device != nil || application != nil else {
+    let resource = artifactIdentity != nil || operatingSystem != nil || device != nil || application != nil
+        ? TelemetryResource(
+            service: artifactIdentity.map { TelemetryNamedVersion(name: $0.service) },
+            deployment: artifactIdentity.map {
+                TelemetryDeployment(environment: $0.environment, release: $0.release)
+            },
+            operatingSystem: operatingSystem,
+            device: device,
+            application: application,
+        )
+        : nil
+    guard resource != nil || correlation != nil else {
         return nil
     }
-    return TelemetryContext(resource: TelemetryResource(
-        service: artifactIdentity.map { TelemetryNamedVersion(name: $0.service) },
-        deployment: artifactIdentity.map {
-            TelemetryDeployment(environment: $0.environment, release: $0.release)
-        },
-        operatingSystem: operatingSystem,
-        device: device,
-        application: application,
-    ))
+    return TelemetryContext(
+        resource: resource,
+        trace: correlation?.trace,
+        session: correlation?.session,
+        subject: correlation?.subject,
+    )
 }
 
 private func crashContextValue(_ rawValue: Any?) -> String? {
