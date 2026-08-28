@@ -163,7 +163,10 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
     private let nativeStackFrames: [NativeStackFrame]?
     private let artifactIdentity: NativeArtifactIdentity?
     private let context: TelemetryContext?
-    private let correlationState: NativeCrashCorrelationState?
+    private let correlationState: NativeCrashContextState?
+    private let breadcrumbs: [IssueBreadcrumb]?
+    private let breadcrumbsTruncated: Bool?
+    private let breadcrumbState: NativeCrashContextState?
     private let hangState: NativeHangIncidentState?
     private let hangDurationMs: Double?
     let source: NativeCrashRecordSource
@@ -177,7 +180,10 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         nativeStackFrames: [NativeStackFrame]?,
         artifactIdentity: NativeArtifactIdentity?,
         context: TelemetryContext?,
-        correlationState: NativeCrashCorrelationState? = nil,
+        correlationState: NativeCrashContextState? = nil,
+        breadcrumbs: [IssueBreadcrumb]? = nil,
+        breadcrumbsTruncated: Bool? = nil,
+        breadcrumbState: NativeCrashContextState? = nil,
         hangState: NativeHangIncidentState?,
         hangDurationMs: Double? = nil,
         source: NativeCrashRecordSource,
@@ -191,6 +197,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         self.artifactIdentity = artifactIdentity
         self.context = context
         self.correlationState = correlationState
+        self.breadcrumbs = breadcrumbs
+        self.breadcrumbsTruncated = breadcrumbsTruncated
+        self.breadcrumbState = breadcrumbState
         self.hangState = hangState
         self.hangDurationMs = hangDurationMs
         self.source = source
@@ -233,6 +242,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         if let correlationState {
             metadata["crash.correlation"] = .string(correlationState.rawValue)
         }
+        if let breadcrumbState {
+            metadata["crash.breadcrumbs"] = .string(breadcrumbState.rawValue)
+        }
         if let hangState {
             metadata["crash.handled"] = .bool(hangState == .recovered)
         }
@@ -244,6 +256,8 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
             level: hangState == .recovered ? .error : .fatal,
             exception: issueException,
             exceptionChain: nativeCrashExceptionChain(for: issueException),
+            breadcrumbs: breadcrumbs,
+            breadcrumbsTruncated: breadcrumbsTruncated,
             metadata: metadata,
             context: context,
             nativeStackFrames: nativeStackFrames,
@@ -286,12 +300,16 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         else {
             return false
         }
-        for legacyField in ["exception", "exceptionChain", "context"] where actual[legacyField] == nil {
+        let legacyFields = ["exception", "exceptionChain", "breadcrumbs", "breadcrumbsTruncated", "context"]
+        for legacyField in legacyFields where actual[legacyField] == nil {
             expected.removeValue(forKey: legacyField)
         }
-        if (actual["metadata"] as? [String: Any])?["crash.correlation"] == nil {
+        let actualMetadata = actual["metadata"] as? [String: Any]
+        if actualMetadata?["crash.correlation"] == nil || actualMetadata?["crash.breadcrumbs"] == nil {
             var metadata = expected["metadata"] as? [String: Any]
-            metadata?.removeValue(forKey: "crash.correlation")
+            for key in ["crash.correlation", "crash.breadcrumbs"] where actualMetadata?[key] == nil {
+                metadata?.removeValue(forKey: key)
+            }
             expected["metadata"] = metadata
         }
         return actual as NSDictionary == expected as NSDictionary

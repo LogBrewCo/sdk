@@ -145,8 +145,9 @@ extension NativeCrashDeliveryTests {
 
         #expect(metadata["traceId"] == nil)
         #expect(metadata["spanId"] == nil)
+        #expect(metadata["crash.breadcrumbs"] as? String == "not_captured")
         #expect(metadata["crash.correlation"] as? String == "not_captured")
-        #expect(metadata.count == 3)
+        #expect(metadata.count == 4)
     }
 
     @Test("an existing different event with the crash ID fails closed")

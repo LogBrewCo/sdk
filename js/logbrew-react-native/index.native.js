@@ -14,7 +14,8 @@ import {
   getLogBrewAppleNativeDiagnosticsStatus,
   installLogBrewAppleNativeDiagnostics,
   replayLogBrewAppleNativeDiagnostics,
-  setLogBrewAppleNativeCrashContext
+  setLogBrewAppleNativeCrashContext,
+  syncLogBrewAppleNativeCrashBreadcrumbs
 } from "./apple-native-diagnostics.js";
 import {
   purgeReactNativePersistentQueue,
@@ -50,7 +51,7 @@ export function createLogBrewReactNativeClient(config = {}) {
   ) && input.persistentQueue !== undefined;
   const authKey = clientKey ?? apiKey;
   if (typeof authKey !== "string" || authKey.trim() === "") {
-    return createPlatformNeutralClient(input);
+    return bindAppleNativeCrashBreadcrumbs(createPlatformNeutralClient(input));
   }
   const resolved = resolveReactNativePersistentEventStore({
     authKey,
@@ -61,17 +62,69 @@ export function createLogBrewReactNativeClient(config = {}) {
     hasExplicitPersistentQueue
   });
   try {
-    return createPlatformNeutralClient({
+    return bindAppleNativeCrashBreadcrumbs(createPlatformNeutralClient({
       ...forwarded,
       apiKey,
       clientKey,
       eventStore: resolved.eventStore,
       maxQueueBytes,
       maxQueueSize
-    });
+    }));
   } catch (error) {
     resolved.abort();
     throw error;
+  }
+}
+
+function bindAppleNativeCrashBreadcrumbs(client) {
+  if (Platform?.OS !== "ios") {
+    return client;
+  }
+  const addBreadcrumb = client.addBreadcrumb.bind(client);
+  const clearBreadcrumbs = client.clearBreadcrumbs.bind(client);
+  client.addBreadcrumb = (...args) => updateAppleNativeBreadcrumbs(
+    client, () => addBreadcrumb(...args)
+  );
+  client.clearBreadcrumbs = () => updateAppleNativeBreadcrumbs(client, clearBreadcrumbs);
+  syncAppleNativeCrashBreadcrumbs(client);
+  return client;
+}
+
+function updateAppleNativeBreadcrumbs(client, update) {
+  const previous = [client.issueBreadcrumbs.slice(), client.issueBreadcrumbsTruncated];
+  const result = update();
+  try {
+    syncAppleNativeCrashBreadcrumbs(client);
+  } catch (error) {
+    restoreBreadcrumbs(client, previous);
+    throw error;
+  }
+  return result;
+}
+
+function restoreBreadcrumbs(client, [breadcrumbs, truncated]) {
+  client.issueBreadcrumbs.splice(0, client.issueBreadcrumbs.length, ...breadcrumbs);
+  client.issueBreadcrumbsTruncated = truncated;
+}
+
+function syncAppleNativeCrashBreadcrumbs(client) {
+  const snapshot = client.issueBreadcrumbs.length === 0
+    ? null
+    : {
+        breadcrumbs: client.issueBreadcrumbs.map(({ data, ...breadcrumb }) => ({
+          ...breadcrumb,
+          ...(data === undefined ? {} : { data: { ...data } })
+        })),
+        schemaVersion: 1,
+        truncated: client.issueBreadcrumbsTruncated
+      };
+  try {
+    syncLogBrewAppleNativeCrashBreadcrumbs(snapshot);
+  } catch (error) {
+    if (error?.code !== "native_diagnostics_unavailable"
+      && error?.code !== "native_diagnostics_not_installed") {
+      throw error;
+    }
   }
 }
 

@@ -36,7 +36,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.14"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.15"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.7"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.4"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
@@ -44,7 +44,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.5"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.5"),
             "js/logbrew-react/package.json": ("@logbrew/react", "0.1.1"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.20"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.21"),
             "js/logbrew-svelte/package.json": ("@logbrew/svelte", "0.1.3"),
         }
         for relative_path, expected in npm_versions.items():
@@ -99,7 +99,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             manifest["peerDependencies"]["@logbrew/sdk"],
-            "^0.1.12",
+            "^0.1.15",
         )
 
         native_source = source_text(
@@ -192,6 +192,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         workflow = source_text(".github/workflows/publish-packages.yml")
         ci = source_text(".github/workflows/ci.yml")
 
+        self.assertIn('sdk_tarball="$(cd "$core_package"', smoke)
+        self.assertIn('tar -xzf "$sdk_tarball"', smoke)
         self.assertIn('"@logbrew/sdk@$minimum_sdk_version"', smoke)
         self.assertIn('await import("@logbrew/react-native")', smoke)
         self.assertIn('require("@logbrew/react-native")', smoke)

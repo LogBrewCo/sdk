@@ -347,6 +347,16 @@ clear it with `setLogBrewAppleNativeCrashContext(null)` on logout or session
 end. The crash report keeps one atomic snapshot from the crashed process, so a
 later app launch cannot replace it. Session and subject values must be opaque app-owned identifiers made from ASCII letters, numbers, `_`, or `-`. Do not use names, email addresses, IP addresses, or device identifiers. Resource context, tags, arbitrary fields, and values over the fixed 1 KiB snapshot limit fail before storage.
 
+The iOS `createLogBrewReactNativeClient()` entry also mirrors its validated
+breadcrumb history into native crash capture. Install Apple diagnostics first,
+then use the normal screen, app-state, action, network, or `addBreadcrumb()`
+helpers. A fatal crash retains the newest complete entries in oldest-to-newest
+order. The snapshot keeps at most 64 entries and 64 KiB, drops oldest entries
+when either limit is reached, and reports truncation. `clearBreadcrumbs()`
+clears both the JavaScript history and its native crash snapshot. Missing,
+corrupt, and captured breadcrumb state remains explicit on replay; corrupt
+optional context never discards the crash.
+
 Installation creates app-private, data-protected storage that iOS excludes from
 device data archives. Pending reports are partitioned by project, so changing
 the configured project does not replay an earlier project's records with the

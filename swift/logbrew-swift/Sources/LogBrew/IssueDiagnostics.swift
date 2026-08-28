@@ -172,7 +172,7 @@ final class IssueBreadcrumbStore: @unchecked Sendable {
     }
 }
 
-let maximumIssueBreadcrumbs = 64
+@_spi(CrashReplay) public let maximumIssueBreadcrumbs = 64
 
 func normalizeIssueAttributes(_ value: IssueAttributes) throws -> IssueAttributes {
     let exception = try value.exception.map(validateIssueException)
@@ -249,7 +249,8 @@ func validateIssueException(_ value: IssueException) throws -> IssueException {
     return IssueException(type: exceptionType, mechanism: mechanism)
 }
 
-func validateIssueBreadcrumb(_ value: IssueBreadcrumb) throws -> IssueBreadcrumb {
+@_spi(CrashReplay)
+public func validateIssueBreadcrumb(_ value: IssueBreadcrumb) throws -> IssueBreadcrumb {
     try requireTimestamp(value.timestamp)
     guard validMachineKey(value.category, maximum: 64, separators: ["_", ".", ":", "-"]) else {
         throw issueValidationError("issue breadcrumb category is invalid")

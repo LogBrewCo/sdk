@@ -465,6 +465,15 @@ try crashCapture.setCorrelationContext(TelemetryContext(
     subject: TelemetrySubjectContext(id: "subject_456", kind: .user)
 ))
 
+try crashCapture.setBreadcrumbs([
+    IssueBreadcrumb(
+        timestamp: "2026-08-28T03:00:00Z",
+        category: "navigation",
+        type: "navigation",
+        message: "Checkout"
+    )
+])
+
 let replay = try crashCapture.replayPendingReports(in: client, transport: transport)
 print("acknowledged=\(replay.acknowledged) pending=\(replay.pending)")
 ```
@@ -476,6 +485,14 @@ it. Session and subject values accept only opaque app-owned identifiers made
 from ASCII letters, numbers, `_`, or `-`; do not use names, email addresses,
 IP addresses, or device identifiers. Resource context, tags, arbitrary fields,
 and snapshots over 1 KiB fail before storage.
+
+Replace the breadcrumb snapshot after the app adds or clears its own history.
+The capture keeps the newest 64 complete entries in oldest-to-newest order and
+drops older entries until the encoded value is at most 64 KiB. Replay sets
+`breadcrumbsTruncated` when the app, count limit, or byte limit omitted earlier
+steps. Pass `nil` to clear the snapshot. Missing, corrupt, and captured state is
+reported separately, and corrupt optional breadcrumb data never discards the
+native crash.
 
 Enable durable delivery on the client before replay when a failed request must survive another restart. The direct replay method deletes a raw report only after the existing delivery engine accepts its exact issue prefix. The handler-based overload remains available when an app owns a different delivery boundary; its handler must return `true` only after acceptance. Returning `false` retains that report and every later valid report. Replay is oldest-first, uses the crash report's stable UUID as the event id, verifies the raw report did not change before acknowledgement, discards malformed or oversized reports without reflecting their contents, and fails closed on replaced or undeletable reports. Enqueueing the same retained crash into the same client is idempotent, while a different event with that ID fails closed. `purge()` is an explicit local deletion operation; `status()` exposes only lifecycle and bounded acknowledgement, discard, and pending facts with a fixed outcome enum. KSCrash does not expose a directory-fsync acknowledgement API, so a power loss immediately after deletion can conservatively replay the same stable event ID on a later launch rather than silently dropping a visible pending report.
 

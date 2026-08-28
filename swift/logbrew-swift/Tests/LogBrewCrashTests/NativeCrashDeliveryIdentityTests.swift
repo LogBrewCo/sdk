@@ -35,6 +35,7 @@ extension NativeCrashDeliveryTests {
         let frames = try #require(attributes["nativeStackFrames"] as? [[String: Any]])
 
         #expect(metadata as NSDictionary == [
+            "crash.breadcrumbs": "not_captured",
             "crash.correlation": "not_captured",
             "crash.mechanism": "signal",
             "crash.replayed": true,
@@ -74,6 +75,7 @@ extension NativeCrashDeliveryTests {
         let metadata = try #require(attributes["metadata"] as? [String: Any])
 
         #expect(metadata as NSDictionary == [
+            "crash.breadcrumbs": "not_captured",
             "crash.correlation": "not_captured",
             "crash.mechanism": "signal",
             "crash.replayed": true,
@@ -248,6 +250,7 @@ extension NativeCrashDeliveryTests {
         #expect(exceptionMechanism["type"] as? String == "signal")
         #expect(exceptionMechanism["handled"] as? Bool == false)
         #expect(metadata as NSDictionary == [
+            "crash.breadcrumbs": "not_captured",
             "crash.correlation": "not_captured",
             "crash.mechanism": "signal",
             "crash.replayed": true,

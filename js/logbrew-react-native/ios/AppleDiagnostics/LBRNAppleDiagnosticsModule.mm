@@ -45,6 +45,11 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(setNativeDiagnosticsContext:(NSDictionary
     return [LBRNAppleNativeDiagnostics setCorrelationContext:context];
 }
 
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(setNativeDiagnosticsBreadcrumbs:(NSDictionary *)snapshot)
+{
+    return [LBRNAppleNativeDiagnostics setBreadcrumbs:snapshot];
+}
+
 RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(nativeDiagnosticsStatus)
 {
     return [LBRNAppleNativeDiagnostics status];

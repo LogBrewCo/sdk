@@ -338,7 +338,7 @@ console.error(JSON.stringify({
 
 function nextTimestamp() {
   tick += 1;
-  return `2026-06-02T10:00:0${tick}Z`;
+  return `2026-06-02T10:00:${String(tick).padStart(2, "0")}Z`;
 }
 
 function fillBytes(length, value) {

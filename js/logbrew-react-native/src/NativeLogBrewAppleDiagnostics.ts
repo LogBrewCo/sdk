@@ -9,6 +9,9 @@ export interface Spec extends TurboModule {
   setNativeDiagnosticsContext(
     context: CodegenTypes.UnsafeObject | null
   ): CodegenTypes.UnsafeObject;
+  setNativeDiagnosticsBreadcrumbs(
+    snapshot: CodegenTypes.UnsafeObject | null
+  ): CodegenTypes.UnsafeObject;
   nativeDiagnosticsStatus(): CodegenTypes.UnsafeObject;
 }
 
