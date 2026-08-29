@@ -6,8 +6,6 @@ const {
 } = require("@logbrew/sdk");
 const { createNodeFetchTransport } = require("@logbrew/node");
 
-const DEFAULT_SDK_NAME = "logbrew-next";
-const DEFAULT_SDK_VERSION = "0.1.6";
 const MAX_REQUEST_ERROR_MESSAGE_LENGTH = 2048;
 const MAX_REQUEST_ROUTE_PATH_LENGTH = 512;
 const NEXT_RENDER_SOURCES = new Set([
@@ -25,8 +23,8 @@ function createLogBrewNextClient({
   apiKey,
   serverApiKey,
   context,
-  sdkName = DEFAULT_SDK_NAME,
-  sdkVersion = DEFAULT_SDK_VERSION,
+  sdkName = "logbrew-next",
+  sdkVersion = "0.1.7",
   maxRetries = 2
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();

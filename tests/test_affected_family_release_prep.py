@@ -40,9 +40,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.9"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.4"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
-            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.9"),
+            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.10"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.5"),
-            "js/logbrew-next/package.json": ("@logbrew/next", "0.1.6"),
+            "js/logbrew-next/package.json": ("@logbrew/next", "0.1.7"),
             "js/logbrew-react/package.json": ("@logbrew/react", "0.1.1"),
             "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.23"),
             "js/logbrew-svelte/package.json": ("@logbrew/svelte", "0.1.5"),
@@ -111,10 +111,15 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )
 
     def test_javascript_runtime_metadata_matches_package_releases(self) -> None:
-        for package in ("logbrew-node", "logbrew-browser"):
+        cases = (
+            ("logbrew-browser", ("index.js", "index.cjs"), 'const DEFAULT_SDK_VERSION = "{}";'),
+            ("logbrew-node", ("index.js", "index.cjs"), 'sdkVersion = "{}",'),
+            ("logbrew-next", ("index.cjs", "client.js", "client.cjs"), 'sdkVersion = "{}",'),
+        )
+        for package, entrypoints, template in cases:
             manifest = json_object(f"js/{package}/package.json")
-            declaration = f'const DEFAULT_SDK_VERSION = "{manifest["version"]}";'
-            for entrypoint in ("index.js", "index.cjs"):
+            declaration = template.format(manifest["version"])
+            for entrypoint in entrypoints:
                 source = source_text(Path("js") / package / entrypoint)
                 with self.subTest(package=package, entrypoint=entrypoint):
                     self.assertIn(declaration, source)
@@ -293,8 +298,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "scripts/real_user_npm_public_registry_smoke.sh": (
                 "LOGBREW_NPM_SDK_VERSION:-0.1.12",
                 "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
-                "LOGBREW_NPM_NODE_VERSION:-0.1.9",
-                "LOGBREW_NPM_NEXT_VERSION:-0.1.6",
+                "LOGBREW_NPM_NODE_VERSION:-0.1.10",
+                "LOGBREW_NPM_NEXT_VERSION:-0.1.7",
                 "LOGBREW_NPM_REACT_VERSION:-0.1.1",
                 "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.20",
             ),

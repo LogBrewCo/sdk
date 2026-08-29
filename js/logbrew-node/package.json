@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/node",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Node.js runtime helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",

@@ -232,7 +232,7 @@ import {
 const client = createLogBrewNextBrowserClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.6"
+  sdkVersion: "0.1.7"
 });
 
 const routePatterns = [
@@ -269,7 +269,7 @@ import { createLogBrewNextClient } from "@logbrew/next";
 const client = createLogBrewNextClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.6"
+  sdkVersion: "0.1.7"
 });
 ```
 
