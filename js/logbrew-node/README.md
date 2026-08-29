@@ -80,7 +80,7 @@ Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_AP
 
 Automatic event IDs keep a readable operation prefix and use a fresh random suffix for each capture, so repeated identical operations remain distinct. Once captured, an event keeps that same ID across delivery retries. Explicit `id` and `idFactory` values are preserved exactly.
 
-When an incoming request has a valid W3C `traceparent` header, the wrapper attaches `logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by the wrapped handler. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your server. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
+Every wrapped request has a trace. A valid inbound W3C `traceparent` is continued with a fresh request span; an absent or malformed value starts a fresh local root without breaking the server. The wrapper attaches that context to `logbrew.trace`, exposes it through `getActiveLogBrewTrace()` across asynchronous handler work, and records the completed request as a span. Logs, issues, actions, and metrics captured by the same Node client inside that scope inherit the request trace unless their event context explicitly overrides it. Use `spanIdFactory` and `traceIdFactory` when an app-owned runtime needs deterministic IDs:
 
 ```js
 const server = createServer(withLogBrewHttpHandler((req, res) => {
@@ -88,6 +88,7 @@ const server = createServer(withLogBrewHttpHandler((req, res) => {
 }, {
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   spanIdFactory: () => "b7ad6b7169203331",
+  traceIdFactory: () => "4bf92f3577b34da6a3ce929d0e0e4736",
   transport
 }));
 ```
@@ -123,7 +124,7 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 For a Node.js API, start with the signals that make incidents and product flows easy to inspect:
 
 - Send `release` and `environment` once when the service starts.
-- Wrap the `node:http` handler so completed requests become logs or W3C-linked spans.
+- Wrap the `node:http` handler so every completed request becomes a W3C-linked span.
 - Add explicit product actions for business steps such as checkout, signup, or billing.
 - Add explicit network milestones for important downstream calls.
 - Wrap important database calls with safe operation names and statement templates.

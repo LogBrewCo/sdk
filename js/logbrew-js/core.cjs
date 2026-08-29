@@ -85,6 +85,7 @@ const MAX_DELIVERY_INTERVAL_MS = 60 * 1000;
 const DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50;
 const DELIVERY_HEALTH_SCHEMA_VERSION = 1;
 const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
+const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
 const MAX_ERROR_CAUSES = 5;
 const BUILTIN_ERROR_NAMES = new Set([
   "AggregateError",
@@ -200,6 +201,7 @@ class LogBrewClient {
     sdkName,
     sdkVersion,
     context,
+    [CONTEXT_PROVIDER]: contextProvider,
     maxRetries = 2,
     eventFilter,
     maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
@@ -218,6 +220,9 @@ class LogBrewClient {
     requireNonEmpty("sdkName", sdkName);
     requireNonEmpty("sdkVersion", sdkVersion);
     const clientContext = validateTelemetryContext(context, "client telemetry context");
+    if (contextProvider !== undefined && typeof contextProvider !== "function") {
+      throw new SdkError("validation_error", "context provider must be a function");
+    }
     requireNonNegativeInteger("maxRetries", maxRetries);
     if (eventFilter !== undefined && typeof eventFilter !== "function") {
       throw new SdkError("validation_error", "eventFilter must be a function");
@@ -266,6 +271,7 @@ class LogBrewClient {
       maxQueueSize,
       onEventDropped,
       context: clientContext,
+      contextProvider,
       sdk: {
         name: sdkName,
         language: "javascript",
@@ -287,6 +293,7 @@ class LogBrewClient {
     maxQueueSize,
     onEventDropped,
     context,
+    contextProvider,
     eventStore,
     eventQueueFactory,
     transport,
@@ -305,6 +312,7 @@ class LogBrewClient {
     this.maxQueueSize = maxQueueSize;
     this.onEventDropped = onEventDropped;
     this.context = cloneTelemetryContext(context);
+    this.contextProvider = contextProvider;
     this.transport = transport;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
@@ -624,7 +632,10 @@ class LogBrewClient {
     }
     requireNonEmpty("event id", id);
     requireTimestamp(timestamp);
-    const context = mergeTelemetryContexts(this.context, attributes.context);
+    const context = mergeTelemetryContexts(
+      mergeTelemetryContexts(this.context, this.contextProvider?.()),
+      attributes.context
+    );
     const eventAttributes = context === undefined
       ? attributes
       : { ...attributes, context };

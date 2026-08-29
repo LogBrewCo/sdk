@@ -17,7 +17,6 @@ DEFAULT_SOURCE_FILES = (
     "js/logbrew-browser/index.cjs",
     "js/logbrew-browser/index.js",
     "js/logbrew-node/index.cjs",
-    "js/logbrew-node/index.js",
     "kotlin/logbrew-kotlin/src/main/kotlin/co/logbrew/sdk/PublicTypes.kt",
     "objc/logbrew-objc/src/LBWHTTPTransport.m",
     "php/logbrew-php/src/HttpTransport.php",

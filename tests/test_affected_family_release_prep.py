@@ -113,7 +113,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_javascript_runtime_metadata_matches_package_releases(self) -> None:
         cases = (
             ("logbrew-browser", ("index.js", "index.cjs"), 'const DEFAULT_SDK_VERSION = "{}";'),
-            ("logbrew-node", ("index.js", "index.cjs"), 'sdkVersion = "{}",'),
+            ("logbrew-node", ("index.cjs",), 'sdkVersion = "{}",'),
             ("logbrew-next", ("index.cjs", "client.js", "client.cjs"), 'sdkVersion = "{}",'),
         )
         for package, entrypoints, template in cases:
@@ -123,6 +123,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 source = source_text(Path("js") / package / entrypoint)
                 with self.subTest(package=package, entrypoint=entrypoint):
                     self.assertIn(declaration, source)
+
+        self.assertIn('from "./index.cjs"', source_text("js/logbrew-node/index.js"))
 
     def test_node_runtime_context_accepts_the_current_core_release(self) -> None:
         core_manifest = json_object("js/logbrew-js/package.json")

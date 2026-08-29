@@ -175,6 +175,7 @@ export type LogBrewNodeOptions = CreateLogBrewNodeClientConfig & {
   nowMs?: () => number;
   idFactory?: (req: IncomingMessage, res: ServerResponse) => string;
   spanIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
+  traceIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
   requestEvent?: (
     req: IncomingMessage,
     res: ServerResponse,
@@ -879,9 +880,10 @@ export declare function createHttpRequestEvent(
     durationMs?: number;
     idFactory?: (req: IncomingMessage, res: ServerResponse) => string;
     spanIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
+    traceIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
     trace?: LogBrewTraceContext;
   }
-): LogBrewHttpRequestEvent;
+): LogBrewHttpSpanRequestEvent;
 
 export declare function createHttpErrorEvent(
   error: unknown,
