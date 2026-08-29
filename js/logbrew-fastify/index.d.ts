@@ -14,27 +14,18 @@ import type {
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
+import type { LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
 
-type NodeFetchTransportConfig = {
-  endpoint?: string;
-  fetchImpl?: typeof fetch;
-  headers?: Record<string, string>;
-};
+export type { LogBrewTraceContext } from "@logbrew/node";
 
 export type CreateLogBrewFastifyClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
+  captureRuntimeContext?: boolean;
   context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;
-};
-
-export type LogBrewTraceContext = {
-  traceId: string;
-  spanId: string;
-  parentSpanId: string;
-  sampled: boolean;
 };
 
 export type LogBrewFastifyContext = {
@@ -110,6 +101,7 @@ export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & NodeFetch
   nowMs?: () => number;
   idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
   spanIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
+  traceIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
   metricName?: string;
   metricIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
   requestEvent?: (
@@ -139,9 +131,10 @@ export declare function createRequestEvent(
     durationMs?: number;
     idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
     spanIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
+    traceIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
     trace?: LogBrewTraceContext;
   }
-): LogBrewRequestEvent;
+): LogBrewSpanRequestEvent;
 export declare function createRequestMetricEvent(
   request: FastifyRequest,
   reply: FastifyReply,

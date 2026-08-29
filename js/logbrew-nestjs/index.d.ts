@@ -11,11 +11,14 @@ import type {
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
-import type { NodeFetchTransportConfig } from "@logbrew/node";
+import type { LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
+
+export type { LogBrewTraceContext } from "@logbrew/node";
 
 export type CreateLogBrewNestClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
+  captureRuntimeContext?: boolean;
   context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
@@ -30,13 +33,6 @@ export type LogBrewNestContext = {
   previewJson(): string;
   flush(): Promise<TransportResponse>;
   shutdown(): Promise<TransportResponse>;
-};
-
-export type LogBrewTraceContext = {
-  traceId: string;
-  spanId: string;
-  parentSpanId?: string;
-  sampled: boolean;
 };
 
 export type LogBrewNestRuntimeContext = {
@@ -128,6 +124,7 @@ export type LogBrewNestOptions = CreateLogBrewNestClientConfig & NodeFetchTransp
   nowMs?: () => number;
   idFactory?: (request: Request, response: Response) => string;
   spanIdFactory?: (request: Request, response: Response) => string;
+  traceIdFactory?: (request: Request, response: Response) => string;
   metricName?: string;
   metricIdFactory?: (request: Request, response: Response) => string;
   requestEvent?: (
@@ -160,9 +157,10 @@ export declare function createRequestEvent(
     durationMs?: number;
     idFactory?: (request: Request, response: Response) => string;
     spanIdFactory?: (request: Request, response: Response) => string;
+    traceIdFactory?: (request: Request, response: Response) => string;
     trace?: LogBrewTraceContext;
   }
-): LogBrewRequestEvent;
+): LogBrewRequestSpanEvent;
 export declare function createErrorEvent(
   error: unknown,
   request: Request,

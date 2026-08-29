@@ -189,6 +189,7 @@ app.use("/auto", logbrewMiddleware({
   nowMs: () => 100,
   metricIdFactory: () => "evt_express_metric_001",
   spanIdFactory: () => "b7ad6b7169203331",
+  traceIdFactory: () => "4bf92f3577b34da6a3ce929d0e0e4736",
   requestEvent(req, res, { durationMs }) {
     return createRequestEvent(req, res, {
       now: () => "2026-06-02T10:00:06Z",
@@ -285,11 +286,7 @@ const port = server.address().port;
 
 const okResponse = await fetch(`http://127.0.0.1:${port}/logbrew`);
 const okText = await okResponse.text();
-const autoResponse = await fetch(`http://127.0.0.1:${port}/auto?token=secret`, {
-  headers: {
-    traceparent
-  }
-});
+const autoResponse = await fetch(`http://127.0.0.1:${port}/auto?token=secret`);
 await autoResponse.json();
 await waitFor(() => autoTransport.sentBodies.length === 1 && activeTraceFromAuto);
 const metricOnlyResponse = await fetch(`http://127.0.0.1:${port}/metrics-only/123?token=secret`);
@@ -315,8 +312,8 @@ if (autoPayload.events[0].type !== "span" || autoPayload.events[0].id !== "evt_e
 if (autoPayload.events[0].attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`unexpected express trace id: ${autoTransport.lastBody()}`);
 }
-if (autoPayload.events[0].attributes.parentSpanId !== "00f067aa0ba902b7") {
-  throw new Error(`unexpected express parent span id: ${autoTransport.lastBody()}`);
+if ("parentSpanId" in autoPayload.events[0].attributes) {
+  throw new Error(`unheadered Express request must be a trace root: ${autoTransport.lastBody()}`);
 }
 if (autoPayload.events[0].attributes.spanId !== "b7ad6b7169203331") {
   throw new Error(`unexpected express request span id: ${autoTransport.lastBody()}`);
@@ -438,7 +435,7 @@ const unmatchedPreview = createRequestEvent(
   { statusCode: 404 },
   { now: () => "2026-06-02T10:00:10Z" }
 );
-if (!unmatchedPreview.attributes.message?.includes("<unmatched>") || JSON.stringify(unmatchedPreview).includes("/private/123")) {
+if (unmatchedPreview.attributes.name !== "GET <unmatched>" || JSON.stringify(unmatchedPreview).includes("/private/123")) {
   throw new Error(`unmatched requests should not retain concrete paths: ${JSON.stringify(unmatchedPreview)}`);
 }
 const mountedPreview = createRequestEvent(
@@ -517,7 +514,7 @@ if ! node smoke.mjs > "$tmp_dir/express-smoke.stdout.json" 2> "$tmp_dir/express-
   exit 1
 fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/express-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/express-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/express-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/express-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/express-smoke.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/express-smoke.stderr.json"
@@ -869,11 +866,11 @@ node node_modules/@logbrew/express/examples/index.mjs --list > "$tmp_dir/launche
 grep -q 'real-user-smoke -> node node_modules/@logbrew/express/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/express/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"attempts":1' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/express/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/express/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -882,7 +879,7 @@ npm --prefix node_modules/@logbrew/express/examples run help > "$tmp_dir/npm-hel
 grep -q 'npm --prefix node_modules/@logbrew/express/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/express/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "express real-user smoke passed with express@$express_version @types/express@$types_express_version"

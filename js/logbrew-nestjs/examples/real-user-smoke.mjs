@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import assert from "node:assert/strict";
 import { Controller, Get, Module, Req } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { RecordingTransport } from "@logbrew/sdk";
@@ -113,21 +114,15 @@ await autoApp.close();
 const autoPayload = JSON.parse(autoTransport.lastBody());
 const autoRequestEvent = autoPayload.events.find((event) => event.id === "evt_nestjs_request_001");
 const autoLoggerEvent = autoPayload.events.find((event) => event.id === "evt_nestjs_logger_info_autocontroller");
-if (!autoRequestEvent || autoRequestEvent.type !== "log") {
-  throw new Error(`unexpected auto request payload: ${autoTransport.lastBody()}`);
-}
-if (!autoLoggerEvent || autoLoggerEvent.type !== "log" || autoLoggerEvent.attributes.level !== "info") {
-  throw new Error(`unexpected auto logger payload: ${autoTransport.lastBody()}`);
-}
+assert.equal(autoRequestEvent?.type, "span", `unexpected auto request payload: ${autoTransport.lastBody()}`);
+assert.equal(autoLoggerEvent?.type, "log", `unexpected auto logger payload: ${autoTransport.lastBody()}`);
+assert.equal(autoLoggerEvent?.attributes.level, "info", `unexpected auto logger payload: ${autoTransport.lastBody()}`);
 const errorPayload = JSON.parse(errorTransport.lastBody());
 const errorEvent = errorPayload.events.find((event) => event.id === "evt_nestjs_error_001");
 const errorLoggerEvent = errorPayload.events.find((event) => event.id === "evt_nestjs_logger_error_autocontroller");
-if (!errorEvent || errorEvent.type !== "issue") {
-  throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
-}
-if (!errorLoggerEvent || errorLoggerEvent.type !== "issue" || errorLoggerEvent.attributes.level !== "error") {
-  throw new Error(`unexpected error logger payload: ${errorTransport.lastBody()}`);
-}
+assert.equal(errorEvent?.type, "issue", `unexpected error payload: ${errorTransport.lastBody()}`);
+assert.equal(errorLoggerEvent?.type, "issue", `unexpected error logger payload: ${errorTransport.lastBody()}`);
+assert.equal(errorLoggerEvent?.attributes.level, "error", `unexpected error logger payload: ${errorTransport.lastBody()}`);
 if (errorEvent.attributes.metadata.path !== "/fail") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
 }
@@ -143,7 +138,7 @@ console.log(okText);
 console.error(JSON.stringify({
   ok: true,
   attempts: requestTransport.sentBodies.length,
-  autoCaptured: autoRequestEvent.attributes.message,
+  autoCaptured: autoRequestEvent.attributes.name,
   loggerCaptured: autoLoggerEvent.attributes.message,
   errorCaptured: errorEvent.attributes.title,
   errorStatus: failResponse.status,

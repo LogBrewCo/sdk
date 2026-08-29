@@ -113,6 +113,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_javascript_runtime_metadata_matches_package_releases(self) -> None:
         cases = (
             ("logbrew-browser", ("index.js", "index.cjs"), 'const DEFAULT_SDK_VERSION = "{}";'),
+            ("logbrew-express", ("index.cjs",), 'const DEFAULT_SDK_VERSION = "{}";'),
+            ("logbrew-fastify", ("index.cjs",), 'const DEFAULT_SDK_VERSION = "{}";'),
+            ("logbrew-nestjs", ("index.cjs",), 'const DEFAULT_SDK_VERSION = "{}";'),
             ("logbrew-node", ("index.cjs",), 'sdkVersion = "{}",'),
             ("logbrew-next", ("index.cjs", "client.js", "client.cjs"), 'sdkVersion = "{}",'),
         )

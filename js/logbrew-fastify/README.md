@@ -137,7 +137,7 @@ Primitive structured fields become bounded LogBrew metadata. Credentials, cookie
 
 `onApplicationLogCaptureError` observes advisory delivery or conversion failures without interrupting Pino or app shutdown. Use `applicationLogClient` or `applicationLogTransport` for an app-owned delivery boundary. For custom filtering, metadata, or explicit stack policy, use the lower-level `installLogBrewPinoInstrumentation()` API documented by [`@logbrew/node`](../logbrew-node/README.md#existing-pino-logs) instead of `captureApplicationLogs`.
 
-When an incoming request has a valid W3C `traceparent` header, the plugin attaches `request.logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by Fastify after the plugin's `onRequest` hook. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
+Every incoming request receives a LogBrew span. A valid W3C `traceparent` continues its trace with a fresh child span; an absent or malformed value starts a fresh local root without breaking the app. The plugin exposes that context through `request.logbrew.trace` and `getActiveLogBrewTrace()` across asynchronous work. Logs, issues, actions, and metrics captured by the default Fastify client inside the request inherit the same trace unless their event context overrides it. Use `spanIdFactory` and `traceIdFactory` when your runtime needs app-provided IDs:
 
 ```js
 await app.register(logbrewFastifyPlugin, {

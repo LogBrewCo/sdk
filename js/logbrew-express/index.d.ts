@@ -9,27 +9,18 @@ import type {
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
+import type { LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
 
-type NodeFetchTransportConfig = {
-  endpoint?: string;
-  fetchImpl?: typeof fetch;
-  headers?: Record<string, string>;
-};
+export type { LogBrewTraceContext } from "@logbrew/node";
 
 export type CreateLogBrewExpressClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
+  captureRuntimeContext?: boolean;
   context?: TelemetryContext;
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;
-};
-
-export type LogBrewTraceContext = {
-  traceId: string;
-  spanId: string;
-  parentSpanId: string;
-  sampled: boolean;
 };
 
 export type LogBrewExpressContext = {
@@ -92,6 +83,7 @@ export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & NodeFetch
   nowMs?: () => number;
   idFactory?: (req: Request, res: Response) => string;
   spanIdFactory?: (req: Request, res: Response) => string;
+  traceIdFactory?: (req: Request, res: Response) => string;
   metricName?: string;
   metricIdFactory?: (req: Request, res: Response) => string;
   requestEvent?: (
@@ -121,9 +113,10 @@ export declare function createRequestEvent(
     durationMs?: number;
     idFactory?: (req: Request, res: Response) => string;
     spanIdFactory?: (req: Request, res: Response) => string;
+    traceIdFactory?: (req: Request, res: Response) => string;
     trace?: LogBrewTraceContext;
   }
-): LogBrewRequestEvent;
+): LogBrewSpanRequestEvent;
 export declare function createErrorEvent(
   error: unknown,
   req: Request,

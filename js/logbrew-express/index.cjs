@@ -1,20 +1,23 @@
 const {
   createIssueAttributesFromError,
-  LogBrewClient,
-  parseTraceparent,
   SdkError
 } = require("@logbrew/sdk");
-const { createNodeFetchTransport } = require("@logbrew/node");
-const { AsyncLocalStorage } = require("node:async_hooks");
+const {
+  createLogBrewNodeClient,
+  createLogBrewTraceContext,
+  createNodeFetchTransport,
+  getActiveLogBrewTrace,
+  runWithLogBrewTrace
+} = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-express";
 const DEFAULT_SDK_VERSION = "0.1.4";
-const activeTraceContext = new AsyncLocalStorage();
 const requestLifecycles = new WeakMap();
 
 function createLogBrewExpressClient({
   serverApiKey,
   apiKey,
+  captureRuntimeContext = true,
   context,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
@@ -27,7 +30,15 @@ function createLogBrewExpressClient({
       "createLogBrewExpressClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
+  return createLogBrewNodeClient({
+    serverApiKey: authKey,
+    automaticDelivery: false,
+    captureRuntimeContext,
+    context,
+    sdkName,
+    sdkVersion,
+    maxRetries
+  });
 }
 
 function logbrewMiddleware(options = {}) {
@@ -57,7 +68,7 @@ function logbrewMiddleware(options = {}) {
       ensureFinishFinalizer(lifecycle);
     }
 
-    activeTraceContext.run(trace, next);
+    runWithLogBrewTrace(trace, next);
   };
 }
 
@@ -97,51 +108,25 @@ function logbrewErrorHandler(options = {}) {
   };
 }
 
-function getActiveLogBrewTrace() {
-  return activeTraceContext.getStore();
-}
-
 function createRequestEvent(req, res, {
   now = () => new Date().toISOString(),
   durationMs = 0,
   idFactory = defaultRequestEventId,
-  spanIdFactory = defaultSpanIdFactory,
+  spanIdFactory,
+  traceIdFactory,
   trace = undefined
 } = {}) {
   const method = req.method ?? "GET";
   const routeTemplate = getRouteTemplate(req);
   const statusCode = Number(res.statusCode ?? 0);
   const id = idFactory(req, res);
-  const traceContext = trace ?? getRequestTraceContext(req) ?? createRequestTraceContext(req, res, { spanIdFactory });
-  const spanEvent = traceContext
-    ? createTraceparentRequestSpan(traceContext, {
-      durationMs,
-      id,
-      method,
-      now,
-      routeTemplate,
-      statusCode
-    })
-    : undefined;
-  if (spanEvent) {
-    return spanEvent;
-  }
-
-  return {
-    id,
-    timestamp: now(),
-    attributes: {
-      message: `${method} ${routeTemplate} ${statusCode}`,
-      level: statusCode >= 500 ? "error" : "info",
-      logger: "express",
-      metadata: {
-        method,
-        routeTemplate,
-        statusCode,
-        durationMs
-      }
-    }
-  };
+  return createTraceparentRequestSpan(
+    trace ?? getRequestTraceContext(req) ?? createRequestTraceContext(req, res, {
+      spanIdFactory,
+      traceIdFactory
+    }),
+    { durationMs, id, method, now, routeTemplate, statusCode }
+  );
 }
 
 function createErrorEvent(error, req, {
@@ -350,10 +335,6 @@ function defaultRequestEventId(req, res) {
   return `evt_express_request_${slugify(`${req.method ?? "GET"}_${getRouteTemplate(req)}_${res.statusCode ?? 0}`)}_${randomHex(8)}`;
 }
 
-function defaultSpanIdFactory() {
-  return randomHex(8);
-}
-
 function defaultErrorEventId(_error, req) {
   return `evt_express_error_${slugify(`${req.method ?? "GET"}_${getRouteTemplate(req)}`)}_${randomHex(8)}`;
 }
@@ -467,43 +448,17 @@ function randomHex(byteLength) {
 }
 
 function createRequestTraceContext(req, res, {
-  spanIdFactory = defaultSpanIdFactory
+  spanIdFactory,
+  traceIdFactory
 } = {}) {
-  const traceparent = getTraceparentHeader(req);
-  if (!traceparent) {
-    return undefined;
-  }
-
-  try {
-    const context = parseTraceparent(traceparent);
-    const spanId = normalizeSpanId(spanIdFactory(req, res));
-    if (!spanId) {
-      return undefined;
-    }
-    return {
-      traceId: context.traceId,
-      spanId,
-      parentSpanId: context.parentSpanId,
-      sampled: context.sampled
-    };
-  } catch {
-    return undefined;
-  }
+  return createLogBrewTraceContext(getTraceparentHeader(req), {
+    spanIdFactory: () => spanIdFactory?.(req, res),
+    traceIdFactory: () => traceIdFactory?.(req, res)
+  });
 }
 
 function getRequestTraceContext(req) {
   return req.logbrew?.trace;
-}
-
-function normalizeSpanId(value) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const spanId = value.toLowerCase();
-  if (!/^[0-9a-f]{16}$/u.test(spanId) || spanId === "0000000000000000") {
-    return undefined;
-  }
-  return spanId;
 }
 
 function readEnvApiKey() {

@@ -1,21 +1,24 @@
 "use strict";
 
-const { AsyncLocalStorage } = require("node:async_hooks");
 const { catchError, Observable, tap, throwError } = require("rxjs");
 const {
-  LogBrewClient,
-  SdkError,
-  parseTraceparent
+  SdkError
 } = require("@logbrew/sdk");
-const { createNodeFetchTransport } = require("@logbrew/node");
+const {
+  createLogBrewNodeClient,
+  createLogBrewTraceContext,
+  createNodeFetchTransport,
+  getActiveLogBrewTrace,
+  runWithLogBrewTrace
+} = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
-const DEFAULT_SDK_VERSION = "0.1.4";
-const activeTraceContext = new AsyncLocalStorage();
+const DEFAULT_SDK_VERSION = "0.1.5";
 
 function createLogBrewNestClient({
   serverApiKey,
   apiKey,
+  captureRuntimeContext = true,
   context,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
@@ -28,7 +31,15 @@ function createLogBrewNestClient({
       "createLogBrewNestClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
+  return createLogBrewNodeClient({
+    serverApiKey: authKey,
+    automaticDelivery: false,
+    captureRuntimeContext,
+    context,
+    sdkName,
+    sdkVersion,
+    maxRetries
+  });
 }
 
 class LogBrewInterceptor {
@@ -58,7 +69,7 @@ class LogBrewInterceptor {
 
     request.logbrew = createRequestContext(client, transport, trace, shutdownClient);
 
-    return new Observable((subscriber) => activeTraceContext.run(trace, () =>
+    return new Observable((subscriber) => runWithLogBrewTrace(trace, () =>
       next.handle().pipe(
         tap({
           complete: () => {
@@ -92,10 +103,6 @@ class LogBrewInterceptor {
       ).subscribe(subscriber)
     ));
   }
-}
-
-function getActiveLogBrewTrace() {
-  return activeTraceContext.getStore();
 }
 
 function createLogBrewNestLogger(options = {}) {
@@ -212,43 +219,21 @@ function createRequestEvent(request, response, {
   now = () => new Date().toISOString(),
   durationMs = 0,
   idFactory = defaultRequestEventId,
-  spanIdFactory = defaultSpanIdFactory,
+  spanIdFactory,
+  traceIdFactory,
   trace
 } = {}) {
   const method = request.method ?? "GET";
-  const path = getRequestPath(request);
+  const path = getRouteTemplate(request);
   const statusCode = Number(response.statusCode ?? 0);
   const id = idFactory(request, response);
-  const requestTrace = trace ?? getRequestTraceContext(request) ?? createRequestTraceContext(request, response, { spanIdFactory });
-  const spanEvent = requestTrace
-    ? createTraceparentRequestSpan(requestTrace, {
-      durationMs,
-      id,
-      method,
-      now,
-      path,
-      statusCode
-    })
-    : undefined;
-  if (spanEvent) {
-    return spanEvent;
-  }
-
-  return {
-    id,
-    timestamp: now(),
-    attributes: {
-      message: `${method} ${path} ${statusCode}`,
-      level: statusCode >= 500 ? "error" : "info",
-      logger: "nestjs",
-      metadata: {
-        method,
-        path,
-        statusCode,
-        durationMs
-      }
-    }
-  };
+  return createTraceparentRequestSpan(
+    trace ?? getRequestTraceContext(request) ?? createRequestTraceContext(request, response, {
+      spanIdFactory,
+      traceIdFactory
+    }),
+    { durationMs, id, method, now, path, statusCode }
+  );
 }
 
 function createErrorEvent(error, request, {
@@ -422,10 +407,6 @@ function defaultLoggerEventId(level, _message, context, sequence) {
   return `evt_nestjs_logger_${level}_${slugify(context || "app")}_${sequence}`;
 }
 
-function defaultSpanIdFactory() {
-  return randomHex(8);
-}
-
 function defaultErrorEventId(error, request) {
   const message = error instanceof Error ? error.message : String(error);
   return `evt_nestjs_error_${slugify(`${request.method ?? "GET"}_${getRequestPath(request)}_${message}`)}`;
@@ -469,43 +450,17 @@ function getTraceparentHeader(request) {
 }
 
 function createRequestTraceContext(request, response, {
-  spanIdFactory = defaultSpanIdFactory
+  spanIdFactory,
+  traceIdFactory
 } = {}) {
-  const traceparent = getTraceparentHeader(request);
-  if (!traceparent) {
-    return undefined;
-  }
-
-  try {
-    const context = parseTraceparent(traceparent);
-    const spanId = normalizeSpanId(spanIdFactory(request, response));
-    if (!spanId) {
-      return undefined;
-    }
-    return {
-      traceId: context.traceId,
-      spanId,
-      parentSpanId: context.parentSpanId,
-      sampled: context.sampled
-    };
-  } catch {
-    return undefined;
-  }
+  return createLogBrewTraceContext(getTraceparentHeader(request), {
+    spanIdFactory: () => spanIdFactory?.(request, response),
+    traceIdFactory: () => traceIdFactory?.(request, response)
+  });
 }
 
 function getRequestTraceContext(request) {
   return request.logbrew?.trace;
-}
-
-function normalizeSpanId(value) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const spanId = value.toLowerCase();
-  if (!/^[0-9a-f]{16}$/u.test(spanId) || spanId === "0000000000000000") {
-    return undefined;
-  }
-  return spanId;
 }
 
 function traceMetadata(trace) {
