@@ -4,9 +4,9 @@ import {
   mkdirSync,
   readdirSync,
   realpathSync,
+  rmSync,
   rmdirSync,
-  symlinkSync,
-  unlinkSync
+  symlinkSync
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ const testDirectory = dirname(fileURLToPath(import.meta.url));
 const packageDirectory = dirname(testDirectory);
 const scopeDirectory = join(packageDirectory, "node_modules", "@logbrew");
 const sdkLink = join(scopeDirectory, "sdk");
-const createdLink = !existsSync(sdkLink);
+const createdLink = !existsSync(sdkLink) && !existsSync(join(packageDirectory, "..", "sdk"));
 
 try {
   if (createdLink) {
@@ -51,9 +51,11 @@ try {
   process.exitCode = result.status ?? 1;
 } finally {
   if (createdLink) {
-    unlinkSync(sdkLink);
-    removeIfEmpty(scopeDirectory);
-    removeIfEmpty(dirname(scopeDirectory));
+    rmSync(sdkLink, { force: true });
+    try {
+      rmdirSync(scopeDirectory);
+      rmdirSync(dirname(scopeDirectory));
+    } catch {}
   }
 }
 
@@ -63,12 +65,4 @@ function sourceEntries() {
       .filter((name) => /\.(?:c?js|mjs)$/u.test(name))
       .map((name) => join(directory, name))
   ));
-}
-
-function removeIfEmpty(path) {
-  try {
-    rmdirSync(path);
-  } catch {
-    // Preserve directories containing files not owned by this test runner.
-  }
 }
