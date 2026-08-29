@@ -12,6 +12,7 @@ plans/
 *plan*.md
 
 /target/
+tools/npm-publish/node_modules/
 Cargo.lock
 python/logbrew_py/build/
 python/logbrew_py/dist/

@@ -46,6 +46,7 @@ NPM_PACKAGES = (
     "@logbrew/vue",
 )
 NPM_VERSION_PACKAGES = NPM_PACKAGES + ("co.logbrew.unity",)
+NPM_PROVENANCE_PREDICATE = "https://slsa.dev/provenance/v1"
 PYPI_PACKAGES = ("logbrew-sdk",)
 PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-flask", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
@@ -113,6 +114,21 @@ def npm_versions(payload: Any) -> set[str]:
     if isinstance(raw_versions, dict):
         versions.update(raw_versions.keys())
     return versions
+
+
+def npm_provenance_versions(payload: Any) -> set[str]:
+    attestations = dict_value(dict_value(payload, "dist"), "attestations")
+    version = payload.get("version") if isinstance(payload, dict) else None
+    url = attestations.get("url")
+    if (
+        dict_value(attestations, "provenance").get("predicateType") != NPM_PROVENANCE_PREDICATE
+        or not isinstance(version, str)
+        or not isinstance(url, str)
+        or not url.startswith("https://registry.npmjs.org/-/npm/v1/attestations/")
+        or not url.endswith(f"@{urllib.parse.quote(version, safe='')}")
+    ):
+        return set()
+    return {version}
 
 
 def pypi_versions(payload: Any) -> set[str]:
@@ -217,6 +233,16 @@ def npm_check(package_name: str) -> RegistryCheck:
         f"https://registry.npmjs.org/{encoded}",
         npm_versions,
         family="npm",
+    )
+
+
+def npm_provenance_check(package_name: str, version: str) -> RegistryCheck:
+    encoded = urllib.parse.quote(package_name, safe="")
+    return RegistryCheck(
+        f"{package_name} provenance",
+        f"https://registry.npmjs.org/{encoded}/{urllib.parse.quote(version, safe='')}",
+        npm_provenance_versions,
+        family="npm-provenance",
     )
 
 
@@ -372,10 +398,6 @@ def fetch_payload(url: str, timeout: float, decoder: Callable[[bytes], Any]) -> 
         return decoder(result.stdout)
 
 
-def fetch_json(url: str, timeout: float) -> Any:
-    return fetch_payload(url, timeout, decode_json)
-
-
 def is_missing_registry_page_error(error: BaseException) -> bool:
     if isinstance(error, urllib.error.HTTPError):
         return error.code == 404
@@ -502,6 +524,9 @@ def validate(args: argparse.Namespace) -> list[str]:
         if getattr(args, "expect_absent", False):
             failures.extend(validate_absent_check(check, expected, args.timeout))
         else:
+            if args.require_npm_provenance and check.family == "npm":
+                check = npm_provenance_check(check.label, version)
+                expected = {version}
             failures.extend(validate_check(check, expected, args.timeout, args.retries, args.retry_delay))
     if "go" in args.target or ("all" in args.target and args.include_go):
         failures.extend(validate_go_module(args.version))
@@ -578,38 +603,25 @@ def format_overrides(label: str, versions: dict[str, str]) -> str | None:
 def success_summary(args: argparse.Namespace) -> str:
     targets = ", ".join(args.target)
     requested_targets = set(args.target)
-    rubygems_versions = (
-        {
-            package_name: DEFAULT_PACKAGE_VERSIONS[("rubygems", package_name)]
-            for package_name in RUBYGEMS_PACKAGES
-        }
-        if "rubygems" in requested_targets or "all" in requested_targets
-        else {}
-    )
-    packagist_versions = (
-        {
-            package_name: DEFAULT_PACKAGE_VERSIONS[("packagist", package_name)]
-            for package_name in PACKAGIST_PACKAGES
-        }
-        if "packagist" in requested_targets or "all" in requested_targets
-        else {}
-    )
-    crate_versions = (
-        {
-            package_name: DEFAULT_PACKAGE_VERSIONS[("crates", package_name)]
-            for package_name in CRATES
-        }
-        if "crates" in requested_targets or "all" in requested_targets
-        else {}
-    )
+    family_versions = {}
+    for family, packages in (
+        ("rubygems", RUBYGEMS_PACKAGES),
+        ("packagist", PACKAGIST_PACKAGES),
+        ("crates", CRATES),
+    ):
+        family_versions[family] = (
+            {name: DEFAULT_PACKAGE_VERSIONS[(family, name)] for name in packages}
+            if family in requested_targets or "all" in requested_targets
+            else {}
+        )
     overrides = [
         formatted
         for formatted in (
             format_overrides("npm", args.npm_versions),
             format_overrides("pypi", args.pypi_versions),
-            format_overrides("RubyGems", rubygems_versions),
-            format_overrides("Packagist", packagist_versions),
-            format_overrides("crates.io", crate_versions),
+            format_overrides("RubyGems", family_versions["rubygems"]),
+            format_overrides("Packagist", family_versions["packagist"]),
+            format_overrides("crates.io", family_versions["crates"]),
             format_overrides("nuget", args.nuget_versions),
             format_overrides("maven", getattr(args, "maven_versions", {})),
         )
@@ -631,6 +643,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Registry family to verify. May be passed more than once.",
     )
     parser.add_argument("--include-unity-npm", action="store_true")
+    parser.add_argument("--require-npm-provenance", action="store_true")
     parser.add_argument(
         "--npm-package",
         action="append",
@@ -707,6 +720,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.target = ["all"]
     if args.npm_package and "npm" not in args.target and "all" not in args.target:
         parser.error("--npm-package requires --target npm or --target all")
+    if args.require_npm_provenance and "npm" not in args.target and "all" not in args.target:
+        parser.error("--require-npm-provenance requires --target npm or --target all")
     if args.pypi_version and "pypi" not in args.target and "all" not in args.target:
         parser.error("--pypi-version requires --target pypi or --target all")
     if args.nuget_version and "nuget" not in args.target and "all" not in args.target:
@@ -766,7 +781,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             )
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
-    args.package_versions = {**args.npm_versions, **args.pypi_versions, **args.nuget_versions, **args.maven_versions}
     return args
 
 

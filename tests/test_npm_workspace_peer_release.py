@@ -125,7 +125,7 @@ class NpmWorkspacePeerReleaseTests(unittest.TestCase):
         )
 
         check = "python3 scripts/check_npm_workspace_peer_release.py"
-        publish = 'echo "Publishing ${package_name} from ${package_dir}"'
+        publish = "bun run tools/npm-publish/publish.mjs"
         self.assertIn(check, workflow)
         self.assertLess(workflow.index(check), workflow.index(publish))
 

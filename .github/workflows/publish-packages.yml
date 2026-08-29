@@ -146,6 +146,11 @@ jobs:
         with:
           bun-version: "1.3.14"
 
+      - name: Install npm publisher
+        run: |
+          bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts
+          (cd tools/npm-publish && bun audit)
+
       - name: Publish npm packages
         id: npm-packages
         shell: bash
@@ -175,35 +180,6 @@ jobs:
 
           package_field() {
             bun -e 'const manifest = require(process.argv[1]); console.log(manifest[process.argv[2]])' "./$1/package.json" "$2"
-          }
-
-          exchange_npm_oidc_grant() {
-            NPM_PACKAGE="$1" bun -e '
-              const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-              const requestGrant = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-              const packageName = process.env.NPM_PACKAGE;
-              const fail = (message) => { console.error(message); process.exit(1); };
-              if (!requestUrl || !requestGrant || !packageName) fail("npm OIDC environment is incomplete");
-
-              const identityUrl = new URL(requestUrl);
-              identityUrl.searchParams.set("audience", "npm:registry.npmjs.org");
-              const identityResponse = await fetch(identityUrl, {
-                headers: { Accept: "application/json", Authorization: "Bearer " + requestGrant }
-              });
-              if (!identityResponse.ok) fail("GitHub OIDC request failed with " + identityResponse.status);
-              const identity = await identityResponse.json();
-              if (typeof identity.value !== "string" || !identity.value) fail("GitHub OIDC response omitted its identity");
-
-              const escapedName = packageName.replace("/", "%2f");
-              const exchangeResponse = await fetch(
-                "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/" + escapedName,
-                { method: "POST", headers: { Authorization: "Bearer " + identity.value } }
-              );
-              if (!exchangeResponse.ok) fail("npm OIDC exchange failed for " + packageName + " with " + exchangeResponse.status);
-              const exchange = await exchangeResponse.json();
-              if (typeof exchange.token !== "string" || !exchange.token) fail("npm OIDC exchange omitted its grant for " + packageName);
-              process.stdout.write(exchange.token);
-            '
           }
 
           select_npm_package_dirs() {
@@ -322,7 +298,6 @@ jobs:
             rm -f "$npm_publication_plan" "$missing_npm_packages_file"
           fi
 
-          publish_grants=()
           if [[ "$DRY_RUN" != "true" ]]; then
             if [[ -z "$NPM_PACKAGES" ]]; then
               echo "Bun publication requires an explicit npm_packages selection." >&2
@@ -333,30 +308,17 @@ jobs:
               printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
               exit 1
             fi
-            for package_name in "${selected_package_names[@]}"; do
-              publish_grant="$(exchange_npm_oidc_grant "$package_name")"
-              printf '::add-mask::%s\n' "$publish_grant"
-              publish_grants+=("$publish_grant")
-            done
           fi
 
-          for package_index in "${!package_dirs[@]}"; do
-            package_dir="${package_dirs[$package_index]}"
-            package_name="$(package_field "$package_dir" name)"
-            if [[ "$DRY_RUN" == "true" ]]; then
+          if [[ "$DRY_RUN" == "true" ]]; then
+            for package_dir in "${package_dirs[@]}"; do
+              package_name="$(package_field "$package_dir" name)"
               echo "Packing ${package_name} from ${package_dir}"
               (cd "$package_dir" && bun pm pack --dry-run --ignore-scripts)
-              continue
-            fi
-            publish_args=()
-            if [[ "$package_name" == @*/* ]]; then
-              publish_args+=(--access public)
-            fi
-
-            echo "Publishing ${package_name} from ${package_dir}"
-            (cd "$package_dir" && NPM_CONFIG_TOKEN="${publish_grants[$package_index]}" bun publish "${publish_args[@]}")
-          done
-          publish_grants=()
+            done
+          else
+            bun run tools/npm-publish/publish.mjs "${package_dirs[@]}"
+          fi
 
           {
             echo "selected_packages<<EOF"
@@ -388,7 +350,8 @@ jobs:
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             verify_args+=(--include-unity-npm)
           fi
-          python3 scripts/check_registry_publication.py "${verify_args[@]}" --retries 20 --retry-delay 15
+          python3 scripts/check_registry_publication.py "${verify_args[@]}" \
+            --require-npm-provenance --timeout 2 --retries 8 --retry-delay 1
 
   pypi:
     name: PyPI packages

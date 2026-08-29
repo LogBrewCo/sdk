@@ -478,15 +478,17 @@ def is_public_publishing_guidance(relative_text: str, line: str) -> bool:
 
 def is_npm_first_publish_placeholder(relative_text: str, line: str) -> bool:
     lower_line = line.lower()
-    if relative_text == ".github/workflows/publish-packages.yml":
-        if lower_line.strip() == '(cd "$package_dir" && npm_config_token="${publish_grants[$package_index]}" bun publish "${publish_args[@]}")':
-            return True
+    if relative_text in {
+        ".github/workflows/publish-packages.yml",
+        "tools/npm-publish/publish.mjs",
+    }:
         allowed_fragments = (
             "actions_id_token_request_url",
             "actions_id_token_request_token",
             "/-/npm/v1/oidc/token/exchange/package/",
             "typeof exchange.token",
-            "process.stdout.write(exchange.token)",
+            "return exchange.token",
+            "token: grants[index]",
             "central portal user-token credentials",
             "generated central portal publishing credentials",
             "central portal publishing credentials",
