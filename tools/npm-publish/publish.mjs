@@ -3,16 +3,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { publish } from "libnpmpublish";
 
-const registry = "https://registry.npmjs.org/";
-
 async function jsonResponse(response, label) {
   if (!response.ok) throw new Error(`${label} failed with HTTP ${response.status}`);
   return response.json();
 }
 
 async function exchangeGrant(packageName) {
-  const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-  const requestGrant = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  const { ACTIONS_ID_TOKEN_REQUEST_TOKEN: requestGrant, ACTIONS_ID_TOKEN_REQUEST_URL: requestUrl } = process.env;
   if (!requestUrl || !requestGrant) {
     throw new Error("GitHub OIDC environment is incomplete");
   }
@@ -42,13 +39,13 @@ async function exchangeGrant(packageName) {
 
 const packageDirs = Bun.argv.slice(2).map((path) => resolve(path));
 if (packageDirs.length === 0) throw new Error("At least one package directory is required");
-const manifests = await Promise.all(
-  packageDirs.map((path) => Bun.file(join(path, "package.json")).json()),
-);
-if (manifests.some(({ name, version }) =>
-  typeof name !== "string" || typeof version !== "string")) {
-  throw new Error("Every package manifest requires name and version");
-}
+const manifests = await Promise.all(packageDirs.map(async (path) => {
+  const manifest = await Bun.file(join(path, "package.json")).json();
+  if (typeof manifest.name !== "string" || typeof manifest.version !== "string") {
+    throw new Error("Every package manifest requires name and version");
+  }
+  return manifest;
+}));
 const grants = await Promise.all(manifests.map(({ name }) => exchangeGrant(name)));
 const scratch = await mkdtemp(join(tmpdir(), "logbrew-npm-publish-"));
 try {
@@ -60,11 +57,11 @@ try {
     ], { cwd: packageDirs[index] });
     if (pack.exitCode !== 0) throw new Error(`Bun pack failed for ${manifest.name}`);
     await publish(manifest, await readFile(tarballPath), {
-      access: manifest.name.startsWith("@") ? "public" : null,
+      access: "public",
       npmVersion: `bun/${Bun.version}`,
       provenance: true,
-      registry,
-      token: grants[index],
+      registry: "https://registry.npmjs.org/",
+      forceAuth: { token: grants[index] },
     });
     console.log(`Published ${manifest.name}@${manifest.version} with npm provenance`);
   }
