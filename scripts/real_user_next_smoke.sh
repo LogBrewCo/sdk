@@ -352,9 +352,7 @@ import {
 const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const transport = RecordingTransport.alwaysAccept();
 const client = createLogBrewNextClient({
-  serverApiKey: "LOGBREW_SERVER_API_KEY",
-  sdkName: "next-capture-smoke",
-  sdkVersion: "0.1.0"
+  serverApiKey: "LOGBREW_SERVER_API_KEY"
 });
 let activeTraceFromAsync;
 const POST = withLogBrewRouteHandler(
@@ -384,12 +382,12 @@ const POST = withLogBrewRouteHandler(
       const values = [100, 117];
       return () => values.shift() ?? 117;
     })(),
-    requestIdFactory: () => "evt_next_request_auto",
+    routeTemplate: () => "/api/orders/[id]",
     spanIdFactory: () => "b7ad6b7169203331",
     transport
   }
 );
-const response = await POST(new Request("https://example.com/api/logbrew?debug=true", {
+const response = await POST(new Request("https://example.com/api/orders/123?debug=true", {
   method: "POST",
   headers: { traceparent }
 }), {});
@@ -398,16 +396,19 @@ if (response.status !== 204) {
 }
 
 const payload = JSON.parse(transport.lastBody());
-if (payload.events.length !== 2) {
+if (payload.events.length !== 2 || payload.sdk.name !== "logbrew-next" || payload.sdk.version !== "0.1.6") {
   throw new Error(`expected app log and request capture event: ${transport.lastBody()}`);
 }
 const appLog = payload.events.find((candidate) => candidate.id === "evt_next_app_log_001");
-const event = payload.events.find((candidate) => candidate.id === "evt_next_request_auto");
+const event = payload.events.find((candidate) => candidate.type === "span");
 if (!appLog || appLog.type !== "log") {
   throw new Error(`missing correlated app log: ${transport.lastBody()}`);
 }
 if (!event || event.type !== "span") {
   throw new Error(`unexpected request event identity: ${transport.lastBody()}`);
+}
+if (!/^evt_next_request_[0-9a-f]{16}$/u.test(event.id)) {
+  throw new Error(`unexpected random request event id: ${transport.lastBody()}`);
 }
 if (event.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`unexpected trace id: ${transport.lastBody()}`);
@@ -427,19 +428,19 @@ if (appLog.attributes.metadata.traceId !== event.attributes.traceId) {
 if (appLog.attributes.metadata.spanId !== event.attributes.spanId) {
   throw new Error(`app log span id should match request span: ${transport.lastBody()}`);
 }
-if (event.attributes.name !== "POST /api/logbrew") {
+if (event.attributes.name !== "POST /api/orders/[id]" || event.attributes.metadata.routeTemplate !== "/api/orders/[id]") {
   throw new Error(`unexpected span name: ${transport.lastBody()}`);
 }
 if (event.attributes.durationMs !== 17) {
   throw new Error(`unexpected duration: ${transport.lastBody()}`);
 }
-if (event.attributes.metadata.framework !== "nextjs") {
+if (event.attributes.metadata.framework !== "nextjs" || event.attributes.metadata.operation !== "http.server") {
   throw new Error(`unexpected framework metadata: ${transport.lastBody()}`);
 }
 if ("search" in event.attributes.metadata) {
   throw new Error(`request capture should omit query text: ${transport.lastBody()}`);
 }
-if (transport.lastBody().includes("traceparent") || transport.lastBody().includes("debug=true")) {
+if (transport.lastBody().includes("traceparent") || transport.lastBody().includes("debug=true") || transport.lastBody().includes("/api/orders/123")) {
   throw new Error(`capture payload leaked raw propagation or query text: ${transport.lastBody()}`);
 }
 
@@ -571,7 +572,7 @@ console.error(JSON.stringify({
 EOF
 node capture-check.mjs 2> "$tmp_dir/capture-check.stderr.json"
 grep -q '"ok":true' "$tmp_dir/capture-check.stderr.json"
-grep -q 'POST /api/logbrew' "$tmp_dir/capture-check.stderr.json"
+grep -q 'POST /api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/capture-check.stderr.json"
 grep -q 'http.server.duration' "$tmp_dir/capture-check.stderr.json"
 grep -q '/api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
@@ -773,7 +774,6 @@ const spanEvent = createNextNavigationSpanEvent({
   traceparent,
   timestamp: "2026-06-02T10:00:09Z",
   durationMs: 19,
-  idFactory: () => "evt_next_client_nav_001",
   spanIdFactory: () => "b7ad6b7169203331",
   metadata: {
     service: "checkout-web",
@@ -783,6 +783,10 @@ const spanEvent = createNextNavigationSpanEvent({
 });
 if (!spanEvent || spanEvent.type !== "span") {
   throw new Error(`expected span event: ${JSON.stringify(spanEvent)}`);
+}
+const repeatedSpan = createNextNavigationSpanEvent({ routeTemplate: matchedTemplate, traceparent });
+if (!/^evt_next_route_[0-9a-f]{16}$/u.test(spanEvent.id) || repeatedSpan?.id === spanEvent.id) {
+  throw new Error(`navigation event ids must be random per occurrence: ${JSON.stringify({ spanEvent, repeatedSpan })}`);
 }
 if (spanEvent.attributes.name !== "next.route /projects/[projectId]/settings") {
   throw new Error(`unexpected navigation span name: ${JSON.stringify(spanEvent)}`);
@@ -1086,7 +1090,7 @@ const GET = withLogBrewRouteHandler(
     serverApiKey: "LOGBREW_SERVER_API_KEY",
     transport,
     now: () => "2026-06-02T10:00:06Z",
-    idFactory: () => "evt_next_error_001",
+    routeTemplate: "/api/orders/[id]",
     spanIdFactory: () => "c0ffeec0ffeec0ff"
   }
 );
@@ -1104,7 +1108,7 @@ try {
 }
 
 const payload = JSON.parse(transport.lastBody());
-if (payload.events[0].type !== "issue" || payload.events[0].id !== "evt_next_error_001") {
+if (payload.events[0].type !== "issue" || !/^evt_next_error_[0-9a-f]{16}$/u.test(payload.events[0].id)) {
   throw new Error(`unexpected error event: ${transport.lastBody()}`);
 }
 if ("search" in payload.events[0].attributes.metadata) {
@@ -1116,8 +1120,15 @@ if (payload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0
 if (payload.events[0].attributes.metadata.spanId !== "c0ffeec0ffeec0ff") {
   throw new Error(`error event should include route span id: ${transport.lastBody()}`);
 }
-if (transport.lastBody().includes("traceparent") || transport.lastBody().includes("failure?")) {
+if (payload.events[0].attributes.metadata.operation !== "http.server" || payload.events[0].attributes.metadata.routeTemplate !== "/api/orders/[id]") {
+  throw new Error(`error event should include stable route semantics: ${transport.lastBody()}`);
+}
+if (transport.lastBody().includes("traceparent") || transport.lastBody().includes("failure?") || transport.lastBody().includes("/api/failure")) {
   throw new Error(`error payload leaked raw propagation or query text: ${transport.lastBody()}`);
+}
+const repeatedError = createRouteErrorEvent(new Error("route exploded"), new Request("https://example.com/api/failure"), { routeTemplate: "/api/orders/[id]" });
+if (repeatedError.id === payload.events[0].id) {
+  throw new Error(`route error ids must be random per occurrence: ${JSON.stringify(repeatedError)}`);
 }
 const optedIn = createRouteErrorEvent(
   new Error("route exploded"),
@@ -1139,7 +1150,7 @@ console.log(JSON.stringify({
 EOF
 node error-check.mjs > "$tmp_dir/error-check.json"
 grep -q '"ok":true' "$tmp_dir/error-check.json"
-grep -q 'GET /api/failure failed' "$tmp_dir/error-check.json"
+grep -q 'GET /api/orders/\[id\] failed' "$tmp_dir/error-check.json"
 grep -q '"defaultSearchCaptured":false' "$tmp_dir/error-check.json"
 grep -q '"optInSearch":"?unsafe=sample"' "$tmp_dir/error-check.json"
 

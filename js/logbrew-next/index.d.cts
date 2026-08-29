@@ -181,9 +181,9 @@ export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewN
   routeTemplate?: string | ((request: Request, context: TContext) => string | null | undefined);
   now?: () => string;
   nowMs?: () => number;
-  idFactory?: (request: Request) => string;
-  requestIdFactory?: (request: Request, response: Response) => string;
-  metricIdFactory?: (request: Request, response: Response) => string;
+  idFactory?: (request: Request, routeTemplate?: string) => string;
+  requestIdFactory?: (request: Request, response: Response, routeTemplate?: string) => string;
+  metricIdFactory?: (request: Request, response: Response, routeTemplate?: string) => string;
   spanIdFactory?: (request: Request, response?: Response) => string;
   requestEvent?: (
     request: Request,
@@ -245,7 +245,8 @@ export declare function createRouteRequestEvent(
   options?: {
     now?: () => string;
     durationMs?: number;
-    idFactory?: (request: Request, response: Response) => string;
+    idFactory?: (request: Request, response: Response, routeTemplate?: string) => string;
+    routeTemplate?: string;
     spanIdFactory?: (request: Request, response?: Response) => string;
     trace?: LogBrewTraceContext;
   }
@@ -257,7 +258,7 @@ export declare function createRequestMetricEvent(
   options?: {
     now?: () => string;
     durationMs?: number;
-    idFactory?: (request: Request, response: Response) => string;
+    idFactory?: (request: Request, response: Response, routeTemplate?: string) => string;
     metricName?: string;
     routeTemplate?: string;
   }
@@ -269,7 +270,8 @@ export declare function createRouteErrorEvent(
   options?: {
     includeSearchParams?: boolean;
     now?: () => string;
-    idFactory?: (request: Request) => string;
+    idFactory?: (request: Request, routeTemplate?: string) => string;
+    routeTemplate?: string;
     trace?: LogBrewTraceContext;
   }
 ): LogBrewRouteErrorEvent;

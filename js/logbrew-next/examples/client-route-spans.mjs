@@ -11,9 +11,7 @@ const routeTemplate = createNextRouteTemplate({
 });
 
 const client = createLogBrewNextBrowserClient({
-  clientKey: "LOGBREW_CLIENT_KEY",
-  sdkName: "logbrew-next-client-route-example",
-  sdkVersion: "0.1.3"
+  clientKey: "LOGBREW_CLIENT_KEY"
 });
 
 const event = captureNextNavigation(client, {
@@ -25,7 +23,8 @@ const event = captureNextNavigation(client, {
   durationMs: 19
 });
 
-if (!event || event.attributes.metadata.routeTemplate !== "/projects/[projectId]/settings") {
+const payload = JSON.parse(client.previewJson());
+if (!event || event.attributes.metadata.routeTemplate !== "/projects/[projectId]/settings" || event.attributes.metadata.operation !== "browser.navigation" || payload.sdk.version !== "0.1.6") {
   throw new Error(`unexpected Next client route span: ${JSON.stringify(event)}`);
 }
 

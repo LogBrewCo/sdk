@@ -7,7 +7,7 @@ const {
 const { createNodeFetchTransport } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-next";
-const DEFAULT_SDK_VERSION = "0.1.3";
+const DEFAULT_SDK_VERSION = "0.1.6";
 const MAX_REQUEST_ERROR_MESSAGE_LENGTH = 2048;
 const MAX_REQUEST_ROUTE_PATH_LENGTH = 512;
 const NEXT_RENDER_SOURCES = new Set([
@@ -49,7 +49,7 @@ function createLogBrewNextRequestErrorHandler(options = {}) {
     try {
       const resolvedClient = resolveRequestErrorClient(options, runtime);
       const client = resolvedClient.client;
-      const transport = resolveRequestErrorTransport(options, { ...runtime, client }, defaultTransport);
+      const transport = resolveTransport(options, { ...runtime, client }, defaultTransport);
       runtime = { ...runtime, client, transport };
       const event = typeof options.errorEvent === "function"
         ? options.errorEvent(error, runtime)
@@ -113,7 +113,7 @@ function withLogBrewRouteHandler(handler, options = {}) {
 
   return async function logBrewRouteHandler(request, context = {}) {
     const client = resolveClient(options, request, context);
-    const transport = resolveTransport(options, request, context, client, defaultTransport);
+    const transport = resolveTransport(options, { request, context, client }, defaultTransport);
     const trace = createRouteTraceContext(request, undefined, options);
     const helpers = createRouteHelpers(client, transport, trace);
     const startedAt = nowMs(options);
@@ -140,13 +140,14 @@ function createRouteRequestEvent(request, response, {
   now = () => new Date().toISOString(),
   durationMs = 0,
   idFactory = defaultRouteRequestId,
+  routeTemplate,
   spanIdFactory = defaultSpanIdFactory,
   trace
 } = {}) {
-  const url = safeUrl(request);
+  const routePath = routeTemplateOnly(routeTemplate ?? safeUrl(request).pathname);
   const method = request?.method ?? "GET";
   const statusCode = Number(response?.status ?? 0);
-  const id = idFactory(request, response);
+  const id = idFactory(request, response, routePath);
   const routeTrace = trace ?? getActiveLogBrewTrace() ?? createRouteTraceContext(request, response, { spanIdFactory });
   const spanEvent = routeTrace
     ? createTraceparentRouteSpan(routeTrace, {
@@ -154,7 +155,7 @@ function createRouteRequestEvent(request, response, {
       id,
       method,
       now,
-      pathname: url.pathname,
+      routeTemplate: routePath,
       statusCode
     })
     : undefined;
@@ -166,13 +167,13 @@ function createRouteRequestEvent(request, response, {
     id,
     timestamp: now(),
     attributes: {
-      message: `${method} ${url.pathname} ${statusCode}`,
+      message: `${method} ${routePath} ${statusCode}`,
       level: statusCode >= 500 ? "error" : "info",
       logger: "next",
       metadata: {
         framework: "nextjs",
         method,
-        pathname: url.pathname,
+        routeTemplate: routePath,
         statusCode,
         durationMs
       }
@@ -184,22 +185,26 @@ function createRouteErrorEvent(error, request, {
   includeSearchParams = false,
   now = () => new Date().toISOString(),
   idFactory = defaultRouteErrorId,
+  routeTemplate,
   trace
 } = {}) {
   const url = safeUrl(request);
+  const routePath = routeTemplateOnly(routeTemplate ?? url.pathname);
   const method = request?.method ?? "GET";
   const message = error instanceof Error ? error.message : String(error);
   const routeTrace = trace ?? getActiveLogBrewTrace();
   return {
-    id: idFactory(request),
+    id: idFactory(request, routePath),
     timestamp: now(),
     attributes: {
-      title: `${method} ${url.pathname} failed`,
+      title: `${method} ${routePath} failed`,
       level: "error",
       message,
       metadata: {
+        framework: "nextjs",
         method,
-        pathname: url.pathname,
+        operation: "http.server",
+        routeTemplate: routePath,
         ...(includeSearchParams ? { search: url.search || null } : {}),
         ...traceMetadata(routeTrace)
       }
@@ -248,9 +253,9 @@ function resolveClient(options, request, context) {
   return createLogBrewNextClient(options);
 }
 
-function resolveTransport(options, request, context, client, defaultTransport) {
+function resolveTransport(options, runtime, defaultTransport) {
   if (typeof options.transport === "function") {
-    return options.transport({ request, context, client });
+    return options.transport(runtime);
   }
   return options.transport ?? defaultTransport;
 }
@@ -263,13 +268,6 @@ function resolveRequestErrorClient(options, runtime) {
     return { client: options.client, owned: false };
   }
   return { client: createLogBrewNextClient(options), owned: true };
-}
-
-function resolveRequestErrorTransport(options, runtime, defaultTransport) {
-  if (typeof options.transport === "function") {
-    return options.transport(runtime);
-  }
-  return options.transport ?? defaultTransport;
 }
 
 function createRouteHelpers(client, transport, trace) {
@@ -326,6 +324,7 @@ function recordRouteRequest(options, { request, response, context, client, durat
       ...options,
       durationMs,
       idFactory: options.requestIdFactory,
+      routeTemplate: resolveRouteTemplate(options, request, context),
       trace
     });
   captureRouteRequestEvent(client, event);
@@ -351,7 +350,11 @@ async function recordRouteError(options, error, { request, context, client, tran
   const routeTrace = trace ?? getActiveLogBrewTrace();
   const event = typeof options.errorEvent === "function"
     ? options.errorEvent(error, { request, context, client, trace: routeTrace })
-    : createRouteErrorEvent(error, request, { ...options, trace: routeTrace });
+    : createRouteErrorEvent(error, request, {
+      ...options,
+      routeTemplate: resolveRouteTemplate(options, request, context),
+      trace: routeTrace
+    });
   try {
     client.issue(event.id, event.timestamp, event.attributes);
     const flushResponse = await client.shutdown(transport);
@@ -373,39 +376,24 @@ function captureRouteMetricEvent(client, event) {
   client.metric(event.id, event.timestamp, event.attributes);
 }
 
-function defaultRouteRequestId(request, response) {
-  const url = safeUrl(request);
-  const slug = `${request?.method ?? "GET"}-${url.pathname}-${response?.status ?? 0}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return `evt_next_request_${slug || "route"}`;
+function defaultRouteRequestId() {
+  return `evt_next_request_${randomHex(8)}`;
 }
 
 function defaultSpanIdFactory() {
   return randomHex(8);
 }
 
-function defaultRouteErrorId(request) {
-  const url = safeUrl(request);
-  const slug = `${request?.method ?? "GET"}-${url.pathname}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return `evt_next_error_${slug || "route"}`;
+function defaultRouteErrorId() {
+  return `evt_next_error_${randomHex(8)}`;
 }
 
 function defaultNextRequestErrorId() {
   return `evt_next_request_error_${randomHex(8)}`;
 }
 
-function defaultRouteMetricId(request, response, routeTemplate = safeUrl(request).pathname) {
-  const sanitizedRouteTemplate = routeTemplateOnly(routeTemplate);
-  const slug = `${request?.method ?? "GET"}-${sanitizedRouteTemplate}-${response?.status ?? 0}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return `evt_next_metric_${slug || "route"}`;
+function defaultRouteMetricId() {
+  return `evt_next_metric_${randomHex(8)}`;
 }
 
 function safeUrl(request) {
@@ -551,7 +539,7 @@ function createTraceparentRouteSpan(traceContext, {
   id,
   method,
   now,
-  pathname,
+  routeTemplate,
   statusCode
 }) {
   if (!traceContext) {
@@ -563,7 +551,7 @@ function createTraceparentRouteSpan(traceContext, {
     timestamp: now(),
     type: "span",
     attributes: {
-      name: `${method} ${pathname}`,
+      name: `${method} ${routeTemplate}`,
       traceId: traceContext.traceId,
       spanId: traceContext.spanId,
       parentSpanId: traceContext.parentSpanId,
@@ -572,7 +560,8 @@ function createTraceparentRouteSpan(traceContext, {
       metadata: {
         framework: "nextjs",
         method,
-        pathname,
+        operation: "http.server",
+        routeTemplate,
         sampled: traceContext.sampled,
         statusCode
       }

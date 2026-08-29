@@ -196,11 +196,11 @@ export const POST = withLogBrewRouteHandler(handler, {
 });
 ```
 
-By default, successful Route Handler responses are captured after your handler returns. When the incoming `Request` has a valid W3C `traceparent` header, the wrapper exposes a normalized trace object through `helpers.trace` and `getActiveLogBrewTrace()`, then records the request as a LogBrew `span` that continues the incoming trace. Use that same `traceId` and `spanId` in app-owned logs, product actions, or custom event callbacks when you want route-level debugging correlation. Requests without `traceparent`, or with a malformed header, fall back to a request `log` event so bad client headers do not break your route. Use `captureRequests: false` when a route should only flush manual events, use `spanIdFactory` when your runtime needs app-provided child span IDs, and use `onCaptureError` to observe telemetry delivery failures without letting observability own the route response.
+By default, successful Route Handler responses are captured after your handler returns. When the incoming `Request` has a valid W3C `traceparent` header, the wrapper exposes a normalized trace object through `helpers.trace` and `getActiveLogBrewTrace()`, then records an `http.server` span that continues the incoming trace. Stable `routeTemplate` input controls both request names and metadata so concrete identifiers are not retained. Use that same `traceId` and `spanId` in app-owned logs, product actions, or custom event callbacks when you want route-level debugging correlation. Requests without `traceparent`, or with a malformed header, fall back to a request `log` event so bad client headers do not break your route. Use `captureRequests: false` when a route should only flush manual events, use `spanIdFactory` when your runtime needs app-provided child span IDs, and use `onCaptureError` to observe telemetry delivery failures without letting observability own the route response.
 
 The public trace helper only includes normalized W3C IDs plus sampled state: `traceId`, `spanId`, `parentSpanId`, and `sampled`. It does not expose the raw `traceparent` header, request headers, request bodies, cookies, or query strings.
 
-Automatic route error events record the method and pathname, but omit query strings by default. Pass `includeSearchParams: true` only when query capture is intentional and safe for the route.
+Automatic route error events use the same stable `routeTemplate` for their title and `http.server` metadata. Generated event IDs are random so repeated requests remain separate occurrences. Query strings stay absent by default. Pass `includeSearchParams: true` only when query capture is intentional and safe for the route.
 
 Request metrics are opt-in. Enable `captureRequestMetrics` when you want the route wrapper to emit an explicit `http.server.duration` histogram for completed App Router requests:
 
@@ -232,7 +232,7 @@ import {
 const client = createLogBrewNextBrowserClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.3"
+  sdkVersion: "0.1.6"
 });
 
 const routePatterns = [
@@ -255,7 +255,7 @@ export function LogBrewNextNavigationSpans({ traceparent }) {
 }
 ```
 
-`useLogBrewNextNavigation` records one `next.route <routeTemplate>` span when `pathname` changes to a route that matches one of your stable `routePatterns`. Use `createNextRouteTemplate` directly when you want to preview how a concrete `pathname` maps to `/projects/[projectId]/settings`, `[...catchAll]`, `[[...optionalCatchAll]]`, or a route-group pattern such as `/(app)/dashboard/[teamId]`.
+`useLogBrewNextNavigation` records one `browser.navigation` span named `next.route <routeTemplate>` when `pathname` changes to a route that matches one of your stable `routePatterns`. Use `createNextRouteTemplate` directly when you want to preview how a concrete `pathname` maps to `/projects/[projectId]/settings`, `[...catchAll]`, `[[...optionalCatchAll]]`, or a route-group pattern such as `/(app)/dashboard/[teamId]`.
 
 The client helper requires explicit W3C trace context through `traceparent` or `traceId` plus `spanId`. It does not patch `fetch`, `XMLHttpRequest`, browser history, or the Next router. It never records the concrete pathname, query string, hash, headers, cookies, request body, or raw `traceparent` value. If a pathname cannot be matched to a stable route template, it skips the span instead of emitting a high-cardinality URL. Metadata is primitive-only.
 
@@ -269,7 +269,7 @@ import { createLogBrewNextClient } from "@logbrew/next";
 const client = createLogBrewNextClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.3"
+  sdkVersion: "0.1.6"
 });
 ```
 

@@ -8,7 +8,7 @@ import {
 } from "@logbrew/sdk";
 
 const DEFAULT_SDK_NAME = "logbrew-next-client";
-const DEFAULT_SDK_VERSION = "0.1.3";
+const DEFAULT_SDK_VERSION = "0.1.6";
 
 export function createLogBrewNextBrowserClient({
   apiKey,
@@ -56,8 +56,7 @@ export function createNextRouteTemplate({
     .map((pattern) => normalizeRouteTemplate(pattern))
     .filter((pattern) => pattern && routePatternMatchesPathname(pattern, safePathname));
 
-  const matched = matches.sort(compareRouteSpecificity)[0];
-  return matched;
+  return matches.sort(compareRouteSpecificity)[0];
 }
 
 export function createNextNavigationSpanEvent({
@@ -99,6 +98,7 @@ export function createNextNavigationSpanEvent({
         framework: "nextjs",
         navigationIndex,
         navigationType,
+        operation: "browser.navigation",
         routeTemplate: safeRouteTemplate,
         source: "next.client.route",
         ...metadata
@@ -132,7 +132,7 @@ export function useLogBrewNextNavigation(options = {}) {
       if (!routeTemplate) {
         return;
       }
-      const navigationKey = nextNavigationKey(options.pathname, routeTemplate);
+      const navigationKey = `${routeTemplate}|${pathnameOnly(options.pathname) ?? ""}`;
       if (navigationKey === lastNavigationKey.current) {
         return;
       }
@@ -184,10 +184,6 @@ function traceContextFromInput({ parentSpanId, spanId, spanIdFactory, traceId, t
   return { parentSpanId, spanId, traceId };
 }
 
-function nextNavigationKey(pathname, routeTemplate) {
-  return `${routeTemplate}|${pathnameOnly(pathname) ?? ""}`;
-}
-
 function normalizeRouteTemplate(value) {
   const pathname = pathnameOnly(value);
   if (!pathname) {
@@ -195,16 +191,11 @@ function normalizeRouteTemplate(value) {
   }
   const segments = pathname
     .split("/")
-    .filter(Boolean)
-    .filter((segment) => !isRouteGroupSegment(segment) && !segment.startsWith("@"));
+    .filter((segment) => segment && !(segment.startsWith("(") && segment.endsWith(")")) && !segment.startsWith("@"));
   if (segments.length === 0) {
     return "/";
   }
   return `/${segments.join("/")}`;
-}
-
-function isRouteGroupSegment(segment) {
-  return segment.startsWith("(") && segment.endsWith(")");
 }
 
 function pathnameOnly(value) {
@@ -217,7 +208,7 @@ function pathnameOnly(value) {
   }
   const withoutQueryOrHash = trimmed.split(/[?#]/u, 1)[0];
   let pathname = withoutQueryOrHash;
-  if (hasUrlScheme(withoutQueryOrHash)) {
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(withoutQueryOrHash)) {
     try {
       pathname = new URL(withoutQueryOrHash).pathname;
     } catch {
@@ -228,10 +219,6 @@ function pathnameOnly(value) {
     pathname = `/${pathname}`;
   }
   return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
-}
-
-function hasUrlScheme(url) {
-  return /^[a-z][a-z0-9+.-]*:/iu.test(url);
 }
 
 function routePatternMatchesPathname(routePattern, pathname) {
@@ -303,15 +290,8 @@ function isOptionalCatchAllSegment(segment) {
   return /^\[\[\.\.\.[^[\]]+\]\]$/u.test(segment);
 }
 
-function defaultNextNavigationSpanId({ routeTemplate }) {
-  return `evt_next_route_${slugify(routeTemplate ?? "route")}`;
-}
-
-function slugify(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
+function defaultNextNavigationSpanId() {
+  return `evt_next_route_${randomHex(8)}`;
 }
 
 function defaultSpanIdFactory() {
