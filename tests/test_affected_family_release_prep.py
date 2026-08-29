@@ -222,16 +222,20 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertRegex(package_dirs, r"(?m)^\s+js/logbrew-react-native$")
         for needle in (
             'package_name="$(package_field "$package_dir" name)"',
-            '"$requested_package" != "$package_dir"',
-            '"$requested_package" != "$package_name"',
+            '"$requested_package" == "$package_dir"',
+            '"$requested_package" == "$package_name"',
         ):
             self.assertIn(needle, selector)
         for needle in (
             "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
             'bun-version: "1.3.14"',
+            "actions: read",
             "bun pm pack --dry-run --ignore-scripts",
             "bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts",
             'bun run tools/npm-publish/publish.mjs "${package_dirs[@]}"',
+            'gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"',
+            'bun add --exact --ignore-scripts "${install_specs[@]}"',
+            "if (( elapsed >= 60 )); then",
             "--require-npm-provenance",
         ):
             self.assertIn(needle, npm_job)
@@ -241,6 +245,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn("/-/npm/v1/oidc/" "token/exchange/package/", publisher)
         self.assertEqual(publisher_manifest["dependencies"], {"libnpmpublish": "12.0.0"})
         self.assertNotIn("bun publish", npm_job)
+        self.assertNotIn("selected_packages<<EOF", npm_job)
         for forbidden in ("actions/setup-node", "corepack"):
             self.assertNotIn(forbidden, npm_job)
         self.assertNotRegex(npm_job, r"(?m)^\s*node\s+-")

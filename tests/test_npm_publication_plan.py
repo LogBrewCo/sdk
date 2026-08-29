@@ -147,10 +147,10 @@ class NpmPublicationPlanTests(unittest.TestCase):
         )
         self.assertNotIn("const plan = require(process.argv[1]);", workflow)
         self.assertNotIn("mapfile -t existing_npm_versions < <(", workflow)
-        self.assertIn('if [[ "$package_version" == co.logbrew.unity=* ]]', workflow)
+        self.assertIn('[[ "$package_version" == co.logbrew.unity=* ]] && continue', workflow)
         self.assertIn('if [[ "${#publication_plan_args[@]}" -gt 2 ]]', workflow)
         self.assertIn(
-            'mapfile -t missing_npm_packages < "$missing_npm_packages_file"',
+            'mapfile -t missing_npm_packages < "$npm_publication_plan"',
             workflow,
         )
         self.assertIn("npm publication preflight returned an invalid receipt", workflow)
