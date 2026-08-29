@@ -117,6 +117,7 @@ test("installed browser capture uses one explicit W3C trace context across page 
     assert.equal(context.traceContext.spanId, SPAN_ID);
     assert.equal(pageView.attributes.traceId, TRACE_ID);
     assert.equal(pageView.attributes.spanId, SPAN_ID);
+    assert.equal(pageView.attributes.metadata.operation, "browser.navigation");
     assert.equal(pageView.attributes.metadata.path, "/checkout");
     assert.equal(pageView.attributes.metadata.analyticsSchemaVersion, 1);
     assert.equal(pageView.attributes.metadata.analyticsKind, "page_view");

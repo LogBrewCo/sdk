@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+sdk_package_version="$(bun -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+svelte_package_version="$(bun -p "require('${repo_root}/js/logbrew-svelte/package.json').version")"
 tmp_dir="$(mktemp -d)"
 
 remove_tmp_dir() {
@@ -73,9 +74,9 @@ grep -q '"@logbrew/svelte"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/browser @logbrew/sdk @logbrew/svelte svelte >/dev/null
 npm explain @logbrew/svelte > "$tmp_dir/npm-explain-svelte.txt"
-grep -q '@logbrew/svelte@0.1.4' "$tmp_dir/npm-explain-svelte.txt"
+grep -q "@logbrew/svelte@${svelte_package_version}" "$tmp_dir/npm-explain-svelte.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/svelte@0.1.4' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/svelte@${svelte_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'

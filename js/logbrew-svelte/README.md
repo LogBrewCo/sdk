@@ -41,7 +41,7 @@ export const handle = hooks.handle;
 export const handleError = hooks.handleError;
 ```
 
-`handle` records one bounded request span using the HTTP method, SvelteKit route ID, status, duration, and W3C trace context. It never records the concrete URL, query, headers, body, cookies, or route parameters. `handleError` adds the exception type, handled state, sanitized generated frames, bounded cause chain, one request-local route breadcrumb, and the same trace/span IDs. Shared client breadcrumbs are not used by server hooks, so concurrent users cannot inherit one another's history. Invalid incoming `traceparent` values are ignored without breaking the request. Telemetry delivery failures do not replace the application response unless `raiseCaptureErrors` is explicitly enabled.
+`handle` records one bounded `http.server` request span using the HTTP method, SvelteKit route ID, status, duration, and W3C trace context. It never records the concrete URL, query, headers, body, cookies, or route parameters. `handleError` adds the exception type, handled state, sanitized generated frames, bounded cause chain, one request-local route breadcrumb, and the same trace/span IDs. Shared client breadcrumbs are not used by server hooks, so concurrent users cannot inherit one another's history. Invalid incoming `traceparent` values are ignored without breaking the request. Telemetry delivery failures do not replace the application response unless `raiseCaptureErrors` is explicitly enabled.
 
 Pass `mapError(input)` when the application already returns a sanitized `App.Error`; its return value remains the SvelteKit hook result.
 

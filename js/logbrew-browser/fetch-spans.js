@@ -41,7 +41,7 @@ export function createLogBrewBrowserFetch(context, options = {}) {
           spanTraceContext,
           statusCode: responseStatus(response),
           tracePropagated
-        }, context, optionsWithTraceContext(options, parentTraceContext));
+        }, context, { ...options, traceContext: parentTraceContext });
       }
       return response;
     } catch (error) {
@@ -52,7 +52,7 @@ export function createLogBrewBrowserFetch(context, options = {}) {
           errorType: errorType(error),
           spanTraceContext,
           tracePropagated
-        }, context, optionsWithTraceContext(options, parentTraceContext));
+        }, context, { ...options, traceContext: parentTraceContext });
       }
       throw error;
     }
@@ -84,7 +84,7 @@ export function installLogBrewBrowserFetchInstrumentation(context, options = {})
 
 export async function captureBrowserFetchSpan(request, context, options = {}) {
   assertBrowserContext(context, "captureBrowserFetchSpan");
-  const eventOptions = optionsWithTraceContext(options, resolveTraceContext(context, options));
+  const eventOptions = { ...options, traceContext: resolveTraceContext(context, options) };
   const event = createBrowserFetchSpanEvent(request, context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
@@ -128,6 +128,7 @@ export function createBrowserFetchSpanEvent(request, browserWindow = defaultWind
   const fetchMetadata = compactMetadata({
     errorType: details.errorType,
     method: details.method,
+    operation: "http.client",
     requestPath: details.requestPath,
     responseBodySize: details.responseBodySize,
     statusCode: details.statusCode,
@@ -202,13 +203,6 @@ function resolveTraceContext(context, options) {
       : optionalBrowserTraceContext(options.traceContext);
   }
   return context.traceContext;
-}
-
-function optionsWithTraceContext(options, traceContext) {
-  return {
-    ...options,
-    traceContext
-  };
 }
 
 function fetchRequest(input, init) {
@@ -297,11 +291,12 @@ function headerEntries(headers) {
 function fetchDetails(request, resourcePathTemplate) {
   const statusCode = nonNegativeIntegerOrUndefined(request.statusCode);
   const errorTypeValue = stringOrUndefined(request.errorType);
+  const method = fetchMethod(request.input, { method: request.method });
   return {
     durationMs: nonNegativeNumberOrUndefined(request.durationMs) ?? 0,
     errorType: errorTypeValue,
-    method: fetchMethod(request.input, { method: request.method }),
-    requestPath: fetchPathTemplate(request, resourcePathTemplate),
+    method,
+    requestPath: fetchPathTemplate(request, resourcePathTemplate, method),
     responseBodySize: nonNegativeIntegerOrUndefined(request.responseBodySize),
     status: errorTypeValue || (statusCode !== undefined && statusCode >= 400) ? "error" : "ok",
     statusCode,
@@ -309,13 +304,13 @@ function fetchDetails(request, resourcePathTemplate) {
   };
 }
 
-function fetchPathTemplate(request, resourcePathTemplate) {
+function fetchPathTemplate(request, resourcePathTemplate, method) {
   const path = sanitizeSourcePath(request.url) ?? "/";
   if (typeof resourcePathTemplate === "function") {
     return routeTemplatePath(resourcePathTemplate({
       input: request.input,
       init: request.init,
-      method: fetchMethod(request.input, { method: request.method }),
+      method,
       path
     }) ?? path);
   }

@@ -22,7 +22,7 @@ function createLogBrewSvelteClient({
   serverApiKey = readEnv("LOGBREW_SERVER_API_KEY"),
   context,
   sdkName = "logbrew-svelte",
-  sdkVersion = "0.1.4",
+  sdkVersion = "0.1.5",
   maxRetries = 2
 } = {}) {
   const authKey = clientKey ?? serverApiKey ?? apiKey;
@@ -209,7 +209,7 @@ async function captureSvelteKitRequest(context, event, status, trace, startedAt,
   if (options.captureRequests === false) {
     return;
   }
-  const statusCode = validStatus(status);
+  const statusCode = Number.isInteger(status) && status >= 100 && status <= 599 ? status : 500;
   try {
     context.client.span(`evt_sveltekit_request_${trace.spanId}`, now(options), {
       durationMs: Math.max(0, nowMs(options) - startedAt),
@@ -241,8 +241,7 @@ function createSvelteKitTrace(request, options) {
   return {
     traceId: generated.traceId,
     spanId: generated.parentSpanId,
-    ...(parent ? { parentSpanId: parent.parentSpanId } : {}),
-    sampled: generated.sampled
+    ...(parent ? { parentSpanId: parent.parentSpanId } : {})
   };
 }
 
@@ -255,12 +254,12 @@ function requestTraceparent(request) {
   }
 }
 
-function svelteKitMetadata(event, status, metadata) {
-  const statusCode = validStatus(status);
+function svelteKitMetadata(event, statusCode, metadata) {
   return {
     ...metadata,
     framework: "sveltekit",
     method: svelteKitMethod(event),
+    operation: "http.server",
     routeTemplate: svelteKitRoute(event),
     statusCode,
     statusCodeClass: `${Math.floor(statusCode / 100)}xx`
@@ -279,10 +278,6 @@ function svelteKitRoute(event) {
   return typeof route === "string" && route.trim() !== "" && route.length <= 256
     ? route
     : "<unmatched>";
-}
-
-function validStatus(status) {
-  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 500;
 }
 
 function now(options) {
