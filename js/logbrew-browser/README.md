@@ -31,7 +31,7 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 });
 ```
 
-`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`. The page-view span carries the versioned `page_view` analytics classification and a path-only surface; this classifies the span already being captured and does not add a second event. Page views plus explicit browser actions and network milestones also add privacy-bounded breadcrumbs to later issues. Its built-in fetch transport owns one coalesced lifecycle delivery for `pagehide` and hidden visibility, using only an authenticated, bounded `keepalive` request. Duplicate signals do not start another exit request, and `uninstall()` removes both listeners idempotently.
+`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`. The page-view span carries the versioned `page_view` analytics classification, the semantic `browser.navigation` operation, and a path-only surface; this classifies the span already being captured and does not add a second event. Page views plus explicit browser actions and network milestones also add privacy-bounded breadcrumbs to later issues. Its built-in fetch transport owns one coalesced lifecycle delivery for `pagehide` and hidden visibility, using only an authenticated, bounded `keepalive` request. Duplicate signals do not start another exit request, and `uninstall()` removes both listeners idempotently.
 
 Automatic event IDs keep a readable signal prefix and use a fresh random suffix for each capture, so repeated visits and otherwise identical browser work remain distinct. A captured event keeps that ID across delivery retries, and an explicit `idFactory` remains authoritative.
 
@@ -395,7 +395,7 @@ await logbrewFetch("/api/orders/123", {
 });
 ```
 
-`createLogBrewBrowserFetch()` creates a child span under the active page or route trace, injects exactly one normalized `traceparent` only when `tracePropagationTargets` matches, measures duration, records method, path/template, status code, response content length when exposed, and error type for network failures, then rethrows the original fetch error. It never captures request or response bodies, arbitrary headers, full URLs, hosts, query strings, hash fragments, cookies, error messages, baggage, or tracestate.
+`createLogBrewBrowserFetch()` creates an `http.client` child span under the active page or route trace, injects exactly one normalized `traceparent` only when `tracePropagationTargets` matches, measures duration, records method, path/template, status code, response content length when exposed, and error type for network failures, then rethrows the original fetch error. It never captures request or response bodies, arbitrary headers, full URLs, hosts, query strings, hash fragments, cookies, error messages, baggage, or tracestate.
 
 If your app intentionally wants a global browser fetch patch, opt in with `installLogBrewBrowserFetchInstrumentation()` and keep the returned teardown handle.
 
@@ -436,7 +436,7 @@ const xhrInstrumentation = installLogBrewBrowserXhrInstrumentation(logbrew, {
 xhrInstrumentation.uninstall();
 ```
 
-XHR instrumentation creates a child span under the active page or route trace, injects exactly one normalized `traceparent` only when `tracePropagationTargets` matches, measures duration, records method, path/template, status code, response content length when exposed, and event type for network failures such as `error`, `abort`, or `timeout`. It never captures request or response bodies, arbitrary headers, full URLs, hosts, query strings, hash fragments, cookies, error messages, baggage, or tracestate.
+XHR instrumentation creates an `http.client` child span under the active page or route trace, injects exactly one normalized `traceparent` only when `tracePropagationTargets` matches, measures duration, records method, path/template, status code, response content length when exposed, and event type for network failures such as `error`, `abort`, or `timeout`. It never captures request or response bodies, arbitrary headers, full URLs, hosts, query strings, hash fragments, cookies, error messages, baggage, or tracestate.
 
 If your app already has its own XHR wrapper, use `captureBrowserXhrSpan()` or `createBrowserXhrSpanEvent()` with your sanitized request summary instead of installing prototype instrumentation.
 

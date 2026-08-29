@@ -96,6 +96,7 @@ test("installed browser fetch wrapper emits a sanitized child span and scoped tr
     assert.equal(event.attributes.spanId, FETCH_SPAN_ID);
     assert.equal(event.attributes.status, "error");
     assert.equal(event.attributes.durationMs, 123.456);
+    assert.equal(event.attributes.metadata.operation, "http.client");
     assert.equal(event.attributes.metadata.source, "browser.fetch");
     assert.equal(event.attributes.metadata.path, "/checkout");
     assert.equal(event.attributes.metadata.method, "POST");

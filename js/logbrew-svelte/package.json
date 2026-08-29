@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/svelte",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Svelte and SvelteKit delivery, request tracing, context, and error helpers for LogBrew.",
   "type": "module",
   "main": "./index.cjs",

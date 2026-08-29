@@ -189,6 +189,7 @@ const errorEvents = errorTransport.sentBodies.flatMap((body) => JSON.parse(body)
 const requestSpan = errorEvents.find((event) => event.type === "span");
 const capturedIssue = errorEvents.find((event) => event.type === "issue");
 if (!requestSpan || !capturedIssue
+  || requestSpan.attributes.metadata?.operation !== "http.server"
   || capturedIssue.attributes.exception?.mechanism?.type !== "sveltekit.handle_error"
   || capturedIssue.attributes.exception?.mechanism?.handled !== false
   || capturedIssue.attributes.exceptionChain?.entries?.length !== 1
