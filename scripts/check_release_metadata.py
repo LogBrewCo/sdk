@@ -616,7 +616,7 @@ def validate_go(root: Path, failures: list[str]) -> None:
         "go/logbrew/otel/go.mod: expected go 1.24.0",
     )
     require(
-        "github.com/LogBrewCo/sdk/go/logbrew v0.1.0" in otel_content,
+        "github.com/LogBrewCo/sdk/go/logbrew v0.1.8" in otel_content,
         failures,
         "go/logbrew/otel/go.mod: expected parent LogBrew module requirement",
     )
