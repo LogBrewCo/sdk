@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# shellcheck source=ruby_smoke_package.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
 ruby_smoke_create_tmp_dir
 ruby_smoke_prepare_package
