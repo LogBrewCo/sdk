@@ -236,6 +236,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         ):
             self.assertIn(needle, npm_job)
         self.assertIn("provenance: true", publisher)
+        self.assertRegex(publisher, r"\w+: \{ \w+: grants\[index\] \},")
         self.assertIn("Promise.all(manifests.map(({ name }) => exchangeGrant(name)))", publisher)
         self.assertIn("/-/npm/v1/oidc/" "token/exchange/package/", publisher)
         self.assertEqual(publisher_manifest["dependencies"], {"libnpmpublish": "12.0.0"})
