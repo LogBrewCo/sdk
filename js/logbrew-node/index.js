@@ -30,8 +30,7 @@ import {
   purgePersistentEventQueue
 } from "./persistent-queue.js";
 
-const DEFAULT_SDK_NAME = "logbrew-node";
-const DEFAULT_SDK_VERSION = "0.1.8";
+const DEFAULT_SDK_VERSION = "0.1.9";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
@@ -76,7 +75,7 @@ export function createLogBrewNodeClient({
   endpoint,
   fetchImpl,
   headers,
-  sdkName = DEFAULT_SDK_NAME,
+  sdkName = "logbrew-node",
   sdkVersion = DEFAULT_SDK_VERSION,
   maxBatchBytes,
   maxBatchEvents,

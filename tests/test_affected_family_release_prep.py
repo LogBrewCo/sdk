@@ -40,7 +40,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.9"),
             "js/logbrew-express/package.json": ("@logbrew/express", "0.1.4"),
             "js/logbrew-fastify/package.json": ("@logbrew/fastify", "0.1.5"),
-            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.8"),
+            "js/logbrew-node/package.json": ("@logbrew/node", "0.1.9"),
             "js/logbrew-nestjs/package.json": ("@logbrew/nestjs", "0.1.5"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.6"),
             "js/logbrew-react/package.json": ("@logbrew/react", "0.1.1"),
@@ -285,7 +285,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "scripts/real_user_npm_public_registry_smoke.sh": (
                 "LOGBREW_NPM_SDK_VERSION:-0.1.12",
                 "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
-                "LOGBREW_NPM_NODE_VERSION:-0.1.8",
+                "LOGBREW_NPM_NODE_VERSION:-0.1.9",
                 "LOGBREW_NPM_NEXT_VERSION:-0.1.6",
                 "LOGBREW_NPM_REACT_VERSION:-0.1.1",
                 "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.20",

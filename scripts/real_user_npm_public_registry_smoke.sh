@@ -6,7 +6,7 @@ tmp_dir="$(mktemp -d)"
 
 sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.12}"
 browser_version="${LOGBREW_NPM_BROWSER_VERSION:-0.1.3}"
-node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.8}"
+node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.9}"
 next_version="${LOGBREW_NPM_NEXT_VERSION:-0.1.6}"
 react_version="${LOGBREW_NPM_REACT_VERSION:-0.1.1}"
 react_native_version="${LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.20}"
