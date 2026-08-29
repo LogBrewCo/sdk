@@ -7,16 +7,13 @@ const {
   parseTraceparent
 } = require("@logbrew/sdk");
 
-const DEFAULT_SDK_NAME = "logbrew-next-client";
-const DEFAULT_SDK_VERSION = "0.1.6";
-
 function createLogBrewNextBrowserClient({
   apiKey,
   clientKey,
   context,
   eventFilter,
-  sdkName = DEFAULT_SDK_NAME,
-  sdkVersion = DEFAULT_SDK_VERSION,
+  sdkName = "logbrew-next-client",
+  sdkVersion = "0.1.7",
   maxQueueSize,
   maxRetries = 2,
   onEventDropped

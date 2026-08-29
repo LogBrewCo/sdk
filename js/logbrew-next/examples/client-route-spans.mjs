@@ -24,7 +24,7 @@ const event = captureNextNavigation(client, {
 });
 
 const payload = JSON.parse(client.previewJson());
-if (!event || event.attributes.metadata.routeTemplate !== "/projects/[projectId]/settings" || event.attributes.metadata.operation !== "browser.navigation" || payload.sdk.version !== "0.1.6") {
+if (!event || event.attributes.metadata.routeTemplate !== "/projects/[projectId]/settings" || event.attributes.metadata.operation !== "browser.navigation" || payload.sdk.version !== "0.1.7") {
   throw new Error(`unexpected Next client route span: ${JSON.stringify(event)}`);
 }
 

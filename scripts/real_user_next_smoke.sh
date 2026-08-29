@@ -396,7 +396,7 @@ if (response.status !== 204) {
 }
 
 const payload = JSON.parse(transport.lastBody());
-if (payload.events.length !== 2 || payload.sdk.name !== "logbrew-next" || payload.sdk.version !== "0.1.6") {
+if (payload.events.length !== 2 || payload.sdk.name !== "logbrew-next" || payload.sdk.version !== "0.1.7") {
   throw new Error(`expected app log and request capture event: ${transport.lastBody()}`);
 }
 const appLog = payload.events.find((candidate) => candidate.id === "evt_next_app_log_001");
