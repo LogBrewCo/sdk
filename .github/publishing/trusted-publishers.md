@@ -70,7 +70,9 @@ Real npm runs require an explicit `npm_packages` set. Before publishing any
 selected package, the workflow exchanges GitHub's OIDC identity for a separate
 short-lived, package-scoped npm grant for every package in that set. This
 removes reusable publish values and prevents a missing trusted-publisher record
-from creating a partial multi-package release.
+from creating a partial multi-package release. Publication also generates an
+SLSA provenance statement for each exact tarball and fails unless npm exposes
+the accepted provenance in that version's registry metadata.
 
 Brand-new npm names still need a package page before trusted publishing can be
 configured. Create that page outside this repeat-release workflow, configure

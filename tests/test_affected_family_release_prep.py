@@ -198,13 +198,15 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn('await import("@logbrew/react-native")', smoke)
         self.assertIn('require("@logbrew/react-native")', smoke)
         invocation = f"bash {smoke_name}"
-        publish = 'echo "Publishing ${package_name} from ${package_dir}"'
+        publish = "bun run tools/npm-publish/publish.mjs"
         self.assertIn(invocation, workflow)
         self.assertLess(workflow.index(invocation), workflow.index(publish))
         self.assertIn(invocation, ci)
 
     def test_npm_release_selector_and_bun_commands(self) -> None:
         workflow = source_text(".github/workflows/publish-packages.yml")
+        publisher = source_text("tools/npm-publish/publish.mjs")
+        publisher_manifest = json.loads(source_text("tools/npm-publish/package.json"))
         npm_job = workflow.split("\n  npm:\n", 1)[1].split("\n  pypi:\n", 1)[0]
         package_dirs = workflow.split("package_dirs=(", 1)[1].split("\n          )", 1)[0]
         selector = workflow.split("select_npm_package_dirs() {", 1)[1].split(
@@ -223,10 +225,16 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
             'bun-version: "1.3.14"',
             "bun pm pack --dry-run --ignore-scripts",
-            'NPM_CONFIG_TO' 'KEN="${publish_grants[$package_index]}" bun publish "${publish_args[@]}"',
-            "/-/npm/v1/oidc/" "token/exchange/package/",
+            "bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts",
+            'bun run tools/npm-publish/publish.mjs "${package_dirs[@]}"',
+            "--require-npm-provenance",
         ):
             self.assertIn(needle, npm_job)
+        self.assertIn("provenance: true", publisher)
+        self.assertIn("Promise.all(manifests.map(({ name }) => exchangeGrant(name)))", publisher)
+        self.assertIn("/-/npm/v1/oidc/" "token/exchange/package/", publisher)
+        self.assertEqual(publisher_manifest["dependencies"], {"libnpmpublish": "12.0.0"})
+        self.assertNotIn("bun publish", npm_job)
         for forbidden in ("actions/setup-node", "corepack"):
             self.assertNotIn(forbidden, npm_job)
         self.assertNotRegex(npm_job, r"(?m)^\s*node\s+-")

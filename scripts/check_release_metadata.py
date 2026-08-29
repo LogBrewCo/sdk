@@ -1281,6 +1281,12 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
     publish_packages_path = require_path(root, PUBLISH_PACKAGES_WORKFLOW, failures)
     if publish_packages_path.exists():
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
+        npm_publisher_path = require_path(root, "tools/npm-publish/publish.mjs", failures)
+        npm_publisher_text = (
+            npm_publisher_path.read_text(encoding="utf-8")
+            if npm_publisher_path.exists()
+            else ""
+        )
         verify_control_requirements = {
             "immutable verify source binding": "id: verify-source",
             "protected verify-control checkout": (
@@ -1438,9 +1444,8 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "npm explicit package selection": (
                 "Bun publication requires an explicit npm_packages selection"
             ),
-            "npm all-package auth preflight": (
-                "publish_grants+=(\"$publish_grant\")"
-            ),
+            "npm provenance generation": "provenance: true",
+            "npm provenance registry verification": "--require-npm-provenance",
             "crates.io package version output": "id: crate-version",
             "crates.io manifest version reader": "python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml",
             "crates.io exact public version verification": (
@@ -1555,8 +1560,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             required_publish_needles[f"NuGet {package.package_id} version output"] = (
                 f"{package.version_output}="
             )
+        npm_release_text = publish_packages_text + "\n" + npm_publisher_text
         for description, needle in required_publish_needles.items():
-            require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
+            require(needle in npm_release_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
         nuget_plan_path = require_path(root, "scripts/nuget_release_plan.py", failures)
         if nuget_plan_path.exists():
             nuget_plan_text = nuget_plan_path.read_text(encoding="utf-8")

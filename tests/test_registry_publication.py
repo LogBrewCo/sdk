@@ -102,6 +102,19 @@ class RegistryPublicationTests(unittest.TestCase):
 
     def test_extracts_versions_from_supported_registry_shapes(self) -> None:
         self.assertIn("0.1.0", check_registry_publication.npm_versions({"dist-tags": {"latest": "0.1.0"}}))
+        self.assertEqual(
+            check_registry_publication.npm_provenance_versions(
+                {
+                    "version": "0.1.0",
+                    "dist": {"attestations": {
+                        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@logbrew%2fsdk@0.1.0",
+                        "provenance": {"predicateType": "https://slsa.dev/provenance/v1"},
+                    }},
+                }
+            ),
+            {"0.1.0"},
+        )
+        self.assertEqual(check_registry_publication.npm_provenance_versions({"version": "0.1.0"}), set())
         self.assertIn("0.1.0", check_registry_publication.pypi_versions({"info": {"version": "0.1.0"}}))
         self.assertIn("0.1.0", check_registry_publication.rubygems_versions({"version": "0.1.0"}))
         self.assertIn("0.1.0", check_registry_publication.nuget_versions({"versions": ["0.1.0"]}))
@@ -205,77 +218,32 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("logbrew/sdk", labels)
         self.assertIn("co.logbrew:logbrew-sdk", labels)
 
-    def test_rubygems_target_uses_rubygems_package_version_by_default(self) -> None:
-        args = argparse.Namespace(
-            target=["rubygems"],
-            include_unity_npm=False,
-            include_pypi_extras=False,
-            include_crates=False,
-            include_packagist=False,
-            include_maven=False,
-            include_openupm=False,
-            include_go=False,
-            npm_package=[],
-            version=check_registry_publication.PUBLIC_VERSION,
-            package_versions={},
-            timeout=20.0,
-            retries=0,
-            retry_delay=0.0,
-        )
-        observed: dict[str, set[str]] = {}
+    def test_family_targets_use_their_release_versions_by_default(self) -> None:
         original_validate_check = check_registry_publication.validate_check
+        for target, label, version in (
+            ("rubygems", "logbrew-sdk", check_release_metadata.RUBYGEMS_VERSION),
+            ("packagist", "logbrew/sdk", check_release_metadata.PACKAGIST_VERSION),
+        ):
+            observed: dict[str, set[str]] = {}
 
-        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
-            observed[check.label] = expected
-            return []
+            def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
+                observed[check.label] = expected
+                return []
 
-        try:
-            check_registry_publication.validate_check = fake_validate_check
-            failures = check_registry_publication.validate(args)
-        finally:
-            check_registry_publication.validate_check = original_validate_check
+            try:
+                check_registry_publication.validate_check = fake_validate_check
+                failures = check_registry_publication.validate(
+                    check_registry_publication.parse_args(["--target", target])
+                )
+            finally:
+                check_registry_publication.validate_check = original_validate_check
 
-        self.assertEqual(failures, [])
-        self.assertEqual(
-            observed["logbrew-sdk"],
-            check_registry_publication.expected_versions(check_release_metadata.RUBYGEMS_VERSION),
-        )
-
-    def test_packagist_target_uses_packagist_package_version_by_default(self) -> None:
-        args = argparse.Namespace(
-            target=["packagist"],
-            include_unity_npm=False,
-            include_pypi_extras=False,
-            include_crates=False,
-            include_packagist=False,
-            include_maven=False,
-            include_openupm=False,
-            include_go=False,
-            npm_package=[],
-            version=check_registry_publication.PUBLIC_VERSION,
-            package_versions={},
-            timeout=20.0,
-            retries=0,
-            retry_delay=0.0,
-        )
-        observed: dict[str, set[str]] = {}
-        original_validate_check = check_registry_publication.validate_check
-
-        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
-            observed[check.label] = expected
-            return []
-
-        try:
-            check_registry_publication.validate_check = fake_validate_check
-            failures = check_registry_publication.validate(args)
-        finally:
-            check_registry_publication.validate_check = original_validate_check
-
-        self.assertEqual(failures, [])
-        self.assertEqual(
-            observed["logbrew/sdk"],
-            check_registry_publication.expected_versions(check_release_metadata.PACKAGIST_VERSION),
-        )
+            with self.subTest(target=target):
+                self.assertEqual(failures, [])
+                self.assertEqual(
+                    observed[label],
+                    check_registry_publication.expected_versions(version),
+                )
 
     def test_npm_package_filter_limits_npm_registry_checks(self) -> None:
         args = argparse.Namespace(
@@ -418,162 +386,109 @@ class RegistryPublicationTests(unittest.TestCase):
                     with self.assertRaises(SystemExit):
                         check_registry_publication.parse_args(arguments)
 
-    def test_parse_npm_package_versions(self) -> None:
-        self.assertEqual(
-            check_registry_publication.parse_package_versions(["@logbrew/nestjs=0.1.1"]),
-            {"@logbrew/nestjs": "0.1.1"},
-        )
-
-    def test_parse_pypi_package_versions(self) -> None:
-        self.assertEqual(
-            check_registry_publication.parse_package_versions(
-                ["logbrew-fastapi=0.1.2"],
-                allowed_packages=check_registry_publication.PYPI_PACKAGES
-                + check_registry_publication.PYPI_EXTRA_PACKAGES,
-                package_family="PyPI",
-            ),
-            {"logbrew-fastapi": "0.1.2"},
-        )
-
-    def test_parse_nuget_package_versions(self) -> None:
-        self.assertEqual(
-            check_registry_publication.parse_package_versions(
-                ["LogBrew.StackExchangeRedis=0.1.1"],
-                allowed_packages=check_registry_publication.NUGET_PACKAGES,
-                package_family="NuGet",
-            ),
-            {"LogBrew.StackExchangeRedis": "0.1.1"},
-        )
-
-    def test_parse_maven_package_versions(self) -> None:
-        self.assertEqual(
-            check_registry_publication.parse_package_versions(
-                ["co.logbrew:logbrew-sdk=0.1.0"],
-                allowed_packages=check_registry_publication.MAVEN_PACKAGE_LABELS,
-                package_family="Maven",
-            ),
-            {"co.logbrew:logbrew-sdk": "0.1.0"},
-        )
-
-    def test_success_summary_reports_npm_version_overrides(self) -> None:
-        args = argparse.Namespace(
-            target=["npm"],
-            version="0.1.0",
-            npm_versions={"@logbrew/nestjs": "0.1.1"},
-            pypi_versions={},
-            nuget_versions={},
-        )
-
-        summary = check_registry_publication.success_summary(args)
-
-        self.assertIn("public registry versions ok for npm at 0.1.0", summary)
-        self.assertIn("@logbrew/nestjs@0.1.1", summary)
-
-    def test_success_summary_reports_pypi_version_overrides(self) -> None:
-        args = argparse.Namespace(
-            target=["pypi"],
-            version="0.1.1",
-            npm_versions={},
-            pypi_versions={
-                "logbrew-fastapi": "0.1.2",
-                "logbrew-flask": "0.1.0",
-                "logbrew-django": "0.1.2",
-            },
-            nuget_versions={},
-        )
-
-        summary = check_registry_publication.success_summary(args)
-
-        self.assertIn("public registry versions ok for pypi at 0.1.1", summary)
-        self.assertIn("logbrew-fastapi@0.1.2", summary)
-        self.assertIn("logbrew-flask@0.1.0", summary)
-        self.assertIn("logbrew-django@0.1.2", summary)
-
-    def test_success_summary_reports_nuget_version_overrides(self) -> None:
-        args = argparse.Namespace(
-            target=["nuget"],
-            version="0.1.0",
-            npm_versions={},
-            pypi_versions={},
-            nuget_versions={"LogBrew": "0.1.1"},
-            maven_versions={},
-        )
-
-        summary = check_registry_publication.success_summary(args)
-
-        self.assertIn("public registry versions ok for nuget at 0.1.0", summary)
-        self.assertIn("LogBrew@0.1.1", summary)
-
-    def test_success_summary_reports_rubygems_default_version(self) -> None:
-        args = argparse.Namespace(
-            target=["rubygems"],
-            version=check_registry_publication.PUBLIC_VERSION,
-            npm_versions={},
-            pypi_versions={},
-            nuget_versions={},
-            maven_versions={},
-        )
-
-        summary = check_registry_publication.success_summary(args)
-
-        self.assertIn("public registry versions ok for rubygems at 0.1.0", summary)
-        self.assertIn(f"logbrew-sdk@{check_release_metadata.RUBYGEMS_VERSION}", summary)
-
-    def test_success_summary_reports_packagist_default_version(self) -> None:
-        args = argparse.Namespace(
-            target=["packagist"],
-            version=check_registry_publication.PUBLIC_VERSION,
-            npm_versions={},
-            pypi_versions={},
-            nuget_versions={},
-            maven_versions={},
-        )
-
-        summary = check_registry_publication.success_summary(args)
-
-        self.assertIn("public registry versions ok for packagist at 0.1.0", summary)
-        self.assertIn(f"logbrew/sdk@{check_release_metadata.PACKAGIST_VERSION}", summary)
-
-    def test_success_summary_reports_maven_version_overrides(self) -> None:
-        args = argparse.Namespace(
-            target=["maven"],
-            version="0.1.0",
-            npm_versions={},
-            pypi_versions={},
-            nuget_versions={},
-            maven_versions={"co.logbrew:logbrew-sdk": "0.1.0"},
-        )
-
-        summary = check_registry_publication.success_summary(args)
-
-        self.assertIn("public registry versions ok for maven at 0.1.0", summary)
-        self.assertIn("co.logbrew:logbrew-sdk@0.1.0", summary)
-
-    def test_parse_args_combines_package_version_overrides(self) -> None:
-        args = check_registry_publication.parse_args(
-            [
-                "--target",
-                "all",
-                "--npm-version",
+    def test_parse_package_versions_for_each_family(self) -> None:
+        cases = (
+            (
                 "@logbrew/nestjs=0.1.1",
-                "--pypi-version",
+                None,
+                "npm",
+                {"@logbrew/nestjs": "0.1.1"},
+            ),
+            (
                 "logbrew-fastapi=0.1.2",
-                "--nuget-version",
-                "LogBrew=0.1.3",
-                "--maven-version",
+                check_registry_publication.PYPI_PACKAGES
+                + check_registry_publication.PYPI_EXTRA_PACKAGES,
+                "PyPI",
+                {"logbrew-fastapi": "0.1.2"},
+            ),
+            (
+                "LogBrew.StackExchangeRedis=0.1.1",
+                check_registry_publication.NUGET_PACKAGES,
+                "NuGet",
+                {"LogBrew.StackExchangeRedis": "0.1.1"},
+            ),
+            (
                 "co.logbrew:logbrew-sdk=0.1.0",
-            ]
+                check_registry_publication.MAVEN_PACKAGE_LABELS,
+                "Maven",
+                {"co.logbrew:logbrew-sdk": "0.1.0"},
+            ),
         )
+        for raw, allowed, family, expected in cases:
+            kwargs = {} if allowed is None else {"allowed_packages": allowed, "package_family": family}
+            with self.subTest(family=family):
+                self.assertEqual(
+                    check_registry_publication.parse_package_versions([raw], **kwargs),
+                    expected,
+                )
 
-        self.assertEqual(
-            args.package_versions,
-            {
-                "@logbrew/nestjs": "0.1.1",
-                "logbrew-fastapi": "0.1.2",
-                "LogBrew": "0.1.3",
-                "co.logbrew:logbrew-sdk": "0.1.0",
-            },
+    def test_success_summary_reports_each_family_version(self) -> None:
+        cases = (
+            (
+                "npm",
+                "0.1.0",
+                {"npm_versions": {"@logbrew/nestjs": "0.1.1"}},
+                ("@logbrew/nestjs@0.1.1",),
+            ),
+            (
+                "pypi",
+                "0.1.1",
+                {
+                    "pypi_versions": {
+                        "logbrew-fastapi": "0.1.2",
+                        "logbrew-flask": "0.1.0",
+                        "logbrew-django": "0.1.2",
+                    }
+                },
+                (
+                    "logbrew-fastapi@0.1.2",
+                    "logbrew-flask@0.1.0",
+                    "logbrew-django@0.1.2",
+                ),
+            ),
+            (
+                "nuget",
+                "0.1.0",
+                {"nuget_versions": {"LogBrew": "0.1.1"}},
+                ("LogBrew@0.1.1",),
+            ),
+            (
+                "rubygems",
+                "0.1.0",
+                {},
+                (f"logbrew-sdk@{check_release_metadata.RUBYGEMS_VERSION}",),
+            ),
+            (
+                "packagist",
+                "0.1.0",
+                {},
+                (f"logbrew/sdk@{check_release_metadata.PACKAGIST_VERSION}",),
+            ),
+            (
+                "maven",
+                "0.1.0",
+                {"maven_versions": {"co.logbrew:logbrew-sdk": "0.1.0"}},
+                ("co.logbrew:logbrew-sdk@0.1.0",),
+            ),
         )
+        for target, version, overrides, identities in cases:
+            version_maps = {
+                "npm_versions": {},
+                "pypi_versions": {},
+                "nuget_versions": {},
+                "maven_versions": {},
+            }
+            version_maps.update(overrides)
+            args = argparse.Namespace(
+                target=[target],
+                version=version,
+                **version_maps,
+            )
+            summary = check_registry_publication.success_summary(args)
+            with self.subTest(target=target):
+                self.assertIn(f"public registry versions ok for {target} at {version}", summary)
+                for identity in identities:
+                    self.assertIn(identity, summary)
 
     def test_same_named_packages_use_family_scoped_versions(self) -> None:
         args = check_registry_publication.parse_args(

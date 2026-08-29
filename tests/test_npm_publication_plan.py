@@ -138,7 +138,7 @@ class NpmPublicationPlanTests(unittest.TestCase):
 
         planner = "python3 scripts/plan_npm_publication.py"
         collision = "Selected npm versions already exist and are immutable:"
-        publish = 'echo "Publishing ${package_name} from ${package_dir}"'
+        publish = "bun run tools/npm-publish/publish.mjs"
         self.assertIn(planner, workflow)
         self.assertIn(collision, workflow)
         self.assertIn(
