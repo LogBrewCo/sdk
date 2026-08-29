@@ -139,6 +139,10 @@ errorClient.addBreadcrumb({
   type: "navigation"
 }, "2026-06-02T10:00:08Z");
 const hooks = createLogBrewSvelteKitHooks(errorContext, {
+  evidence: {
+    likelyRootCause: "The order state decoder rejected a valid value.",
+    likelyFixArea: { file: "src/lib/orders.js", function: "decodeOrder", line: 42 }
+  },
   now: () => "2026-06-02T10:00:09Z",
   nowMs: (() => {
     const values = [100, 112];
@@ -194,7 +198,8 @@ if (!requestSpan || !capturedIssue
   || capturedIssue.attributes.metadata?.routeTemplate !== "/orders/[id]"
   || capturedIssue.attributes.metadata?.errorStack !== undefined
   || capturedIssue.attributes.metadata?.traceId !== requestSpan.attributes.traceId
-  || capturedIssue.attributes.metadata?.spanId !== requestSpan.attributes.spanId) {
+  || capturedIssue.attributes.metadata?.spanId !== requestSpan.attributes.spanId
+  || capturedIssue.attributes.evidence?.likelyFixArea?.file !== "src/lib/orders.js") {
   throw new Error(`unexpected correlated SvelteKit evidence: ${JSON.stringify(errorEvents)}`);
 }
 
@@ -259,14 +264,11 @@ console.error(JSON.stringify({
   ok: true,
   attempts: requestTransport.sentBodies.length,
   defaultDelivery: deliveredRequests.length,
-  errorCaptured: capturedIssue.attributes.title,
   events: JSON.parse(payload).events.length,
   issueEvidence: capturedIssue.attributes.stackFrames.length,
   missingContextFailed,
   propagatedTraceparent,
-  requestTrace: requestSpan.attributes.traceId,
-  rendered: true,
-  viewHelper: "evt_svelte_view_001"
+  rendered: true
 }));
 
 async function compileComponent(filename, source) {

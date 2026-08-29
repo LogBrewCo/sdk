@@ -22,7 +22,7 @@ export function createLogBrewSvelteClient({
   serverApiKey = readEnv("LOGBREW_SERVER_API_KEY"),
   context,
   sdkName = "logbrew-svelte",
-  sdkVersion = "0.1.3",
+  sdkVersion = "0.1.4",
   maxRetries = 2
 } = {}) {
   const authKey = clientKey ?? serverApiKey ?? apiKey;
@@ -90,42 +90,26 @@ export function createSvelteViewEvent(name, {
 
 export function createSvelteErrorEvent(error, {
   component = "",
-  debugIdMap,
-  environment,
-  fingerprint,
   handled = true,
-  includeErrorStack = false,
   info = "",
   now = () => new Date().toISOString(),
   idFactory = defaultErrorEventId,
   mechanism = "svelte.error_boundary",
   metadata,
-  platform,
-  release,
-  runtime,
-  service,
   source = "svelte.error",
   title,
-  trace
+  ...options
 } = {}) {
   return {
     id: idFactory(error, { component, info }),
     timestamp: now(),
     attributes: createIssueAttributesFromError(error, {
-      debugIdMap,
-      environment,
-      fingerprint,
+      ...options,
       handled,
-      includeErrorStack,
       mechanism,
       metadata: { ...metadata, component, info },
-      platform,
-      release,
-      runtime,
-      service,
       source,
-      title: title ?? (component ? `${component} failed` : "Svelte component failed"),
-      trace
+      title: title ?? (component ? `${component} failed` : "Svelte component failed")
     })
   };
 }
