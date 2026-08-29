@@ -73,9 +73,9 @@ grep -q '"@logbrew/svelte"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/browser @logbrew/sdk @logbrew/svelte svelte >/dev/null
 npm explain @logbrew/svelte > "$tmp_dir/npm-explain-svelte.txt"
-grep -q '@logbrew/svelte@0.1.3' "$tmp_dir/npm-explain-svelte.txt"
+grep -q '@logbrew/svelte@0.1.4' "$tmp_dir/npm-explain-svelte.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/svelte@0.1.3' "$tmp_dir/npm-list-depth0.txt"
+grep -q '@logbrew/svelte@0.1.4' "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'

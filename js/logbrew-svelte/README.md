@@ -114,6 +114,8 @@ await captureSvelteError(new Error("component failed"), logbrew, {
 
 Use `captureSvelteError()` from Svelte boundary handlers or other app-owned error hooks. It creates typed exception evidence through the shared JavaScript diagnostics path and flushes without closing the reusable context. Raw stack text remains excluded unless `includeErrorStack: true` is explicitly supplied; sanitized frames are still captured by default.
 
+The helper and SvelteKit hooks forward the core JavaScript error options, including bounded application-reported `evidence` for a likely cause, repository-relative fix area, impact, and explicit missing, redacted, or truncated fields. LogBrew keeps that content labeled as unverified application telemetry.
+
 ## Trace Propagation
 
 Use `createTraceparentFetch()` when Svelte frontend work should connect to backend traces. These exports delegate to the same canonical browser tracing implementation used by `@logbrew/browser`. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
