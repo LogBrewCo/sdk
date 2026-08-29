@@ -15,14 +15,7 @@ import (
 )
 
 func TestTraceContextFromOpenTelemetryContextCreatesLogBrewChild(t *testing.T) {
-	traceID := mustTraceID(t, "4bf92f3577b34da6a3ce929d0e0e4736")
-	spanID := mustSpanID(t, "00f067aa0ba902b7")
-	parent := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     spanID,
-		TraceFlags: oteltrace.FlagsSampled,
-		Remote:     true,
-	})
+	parent := mustSpanContext(t, "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", oteltrace.FlagsSampled)
 	ctx := oteltrace.ContextWithRemoteSpanContext(context.Background(), parent)
 
 	trace, ok, err := TraceContextFromContext(ctx, "b7ad6b7169203331")
@@ -83,18 +76,8 @@ func TestSpanExporterQueuesEndedOpenTelemetrySpansWithSafeMetadata(t *testing.T)
 		}
 	}()
 
-	parent := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
-		TraceID:    mustTraceID(t, "4bf92f3577b34da6a3ce929d0e0e4736"),
-		SpanID:     mustSpanID(t, "00f067aa0ba902b7"),
-		TraceFlags: oteltrace.FlagsSampled,
-		Remote:     true,
-	})
-	linked := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
-		TraceID:    mustTraceID(t, "11111111111111111111111111111111"),
-		SpanID:     mustSpanID(t, "2222222222222222"),
-		TraceFlags: 0,
-		Remote:     true,
-	})
+	parent := mustSpanContext(t, "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", oteltrace.FlagsSampled)
+	linked := mustSpanContext(t, "11111111111111111111111111111111", "2222222222222222", 0)
 	ctx := oteltrace.ContextWithRemoteSpanContext(context.Background(), parent)
 	tracer := provider.Tracer("checkout-service", oteltrace.WithInstrumentationVersion("1.2.3"))
 	_, span := tracer.Start(
@@ -102,6 +85,9 @@ func TestSpanExporterQueuesEndedOpenTelemetrySpansWithSafeMetadata(t *testing.T)
 		"GET /checkout/:cart_id",
 		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
 		oteltrace.WithAttributes(
+			attribute.String("code.file.path", "/home/example/checkout/handler.go"),
+			attribute.String("code.function.name", "checkout.Handler"),
+			attribute.Int("code.line.number", 73),
 			attribute.String("http.request.method", "GET"),
 			attribute.String("http.route", "/checkout/:cart_id"),
 			attribute.Int("http.response.status_code", 502),
@@ -157,6 +143,10 @@ func TestSpanExporterQueuesEndedOpenTelemetrySpansWithSafeMetadata(t *testing.T)
 	}
 	metadata := event.Attributes["metadata"].(map[string]any)
 	if metadata["source"] != "opentelemetry.go" ||
+		metadata["operation"] != "http.server" ||
+		metadata["codeFile"] != "handler.go" ||
+		metadata["codeFunction"] != "checkout.Handler" ||
+		metadata["codeLine"] != float64(73) ||
 		metadata["service"] != "checkout" ||
 		metadata["spanKind"] != "server" ||
 		metadata["instrumentationScopeName"] != "checkout-service" ||
@@ -191,6 +181,7 @@ func TestSpanExporterQueuesEndedOpenTelemetrySpansWithSafeMetadata(t *testing.T)
 		"authorization",
 		"traceparent",
 		"queue.example.test",
+		"/home/example",
 	} {
 		if strings.Contains(payload, unsafe) {
 			t.Fatalf("exported OTel span leaked %q: %s", unsafe, payload)
@@ -198,20 +189,17 @@ func TestSpanExporterQueuesEndedOpenTelemetrySpansWithSafeMetadata(t *testing.T)
 	}
 }
 
-func mustTraceID(t *testing.T, value string) oteltrace.TraceID {
+func mustSpanContext(t *testing.T, traceValue, spanValue string, flags oteltrace.TraceFlags) oteltrace.SpanContext {
 	t.Helper()
-	traceID, err := oteltrace.TraceIDFromHex(value)
+	traceID, err := oteltrace.TraceIDFromHex(traceValue)
 	if err != nil {
 		t.Fatalf("parse trace ID: %v", err)
 	}
-	return traceID
-}
-
-func mustSpanID(t *testing.T, value string) oteltrace.SpanID {
-	t.Helper()
-	spanID, err := oteltrace.SpanIDFromHex(value)
+	spanID, err := oteltrace.SpanIDFromHex(spanValue)
 	if err != nil {
 		t.Fatalf("parse span ID: %v", err)
 	}
-	return spanID
+	return oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+		TraceID: traceID, SpanID: spanID, TraceFlags: flags, Remote: true,
+	})
 }

@@ -5,9 +5,11 @@ package logbrewotel
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/LogBrewCo/sdk/go/logbrew"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,6 +29,9 @@ var safeAttributeKeys = map[string]string{
 	"db.operation.name":         "dbOperation",
 	"db.system":                 "dbSystem",
 	"db.system.name":            "dbSystem",
+	"code.function.name":        "codeFunction",
+	"code.line.number":          "codeLine",
+	"code.namespace":            "codeNamespace",
 	"error.type":                "errorType",
 	"exception.type":            "exceptionType",
 	"http.method":               "httpMethod",
@@ -83,15 +88,14 @@ func NewSpanExporter(client *logbrew.Client, config SpanExporterConfig) (*SpanEx
 	if prefix == "" {
 		prefix = defaultEventIDPrefix
 	}
-	now := config.Now
-	if now == nil {
-		now = func() time.Time { return time.Now().UTC() }
+	if config.Now == nil {
+		config.Now = time.Now
 	}
 	return &SpanExporter{
 		client:        client,
 		eventIDPrefix: prefix,
 		metadata:      compactMetadata(config.Metadata),
-		now:           now,
+		now:           config.Now,
 	}, nil
 }
 
@@ -211,8 +215,7 @@ func (exporter *SpanExporter) spanAttributes(span sdktrace.ReadOnlySpan) logbrew
 		durationMs = &duration
 	}
 	parentSpanID := ""
-	parent := span.Parent()
-	if parent.IsValid() {
+	if parent := span.Parent(); parent.IsValid() {
 		parentSpanID = parent.SpanID().String()
 	}
 	return logbrew.SpanAttributes{
@@ -229,11 +232,9 @@ func (exporter *SpanExporter) spanAttributes(span sdktrace.ReadOnlySpan) logbrew
 
 func (exporter *SpanExporter) spanMetadata(span sdktrace.ReadOnlySpan) map[string]any {
 	metadata := compactMetadata(exporter.metadata)
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
 	metadata["source"] = otelMetadataSource
-	metadata["spanKind"] = spanKindName(span.SpanKind())
+	kind := spanKindName(span.SpanKind())
+	metadata["spanKind"] = kind
 	scope := span.InstrumentationScope()
 	if strings.TrimSpace(scope.Name) != "" {
 		metadata["instrumentationScopeName"] = scope.Name
@@ -241,13 +242,10 @@ func (exporter *SpanExporter) spanMetadata(span sdktrace.ReadOnlySpan) map[strin
 	if strings.TrimSpace(scope.Version) != "" {
 		metadata["instrumentationScopeVersion"] = scope.Version
 	}
-	for _, attr := range span.Attributes() {
-		if key, ok := safeAttributeKeys[string(attr.Key)]; ok {
-			if value, include := primitiveAttributeValue(attr.Value); include {
-				metadata[key] = value
-			}
-		}
+	for key, value := range projectedAttributes(span.Attributes()) {
+		metadata[key] = value
 	}
+	metadata["operation"] = semanticOperation(metadata, kind)
 	return compactMetadata(metadata)
 }
 
@@ -269,49 +267,68 @@ func spanLinks(links []sdktrace.Link) []logbrew.SpanLinkSummary {
 		if err != nil {
 			continue
 		}
-		summary.Metadata = linkMetadata(link.Attributes)
+		summary.Metadata = projectedAttributes(link.Attributes)
 		summaries = append(summaries, summary)
-	}
-	if len(summaries) == 0 {
-		return nil
 	}
 	return summaries
 }
 
-func linkMetadata(attributes []attribute.KeyValue) map[string]any {
+func projectedAttributes(attributes []attribute.KeyValue) map[string]any {
 	metadata := map[string]any{}
 	for _, attr := range attributes {
+		if attr.Key == "code.file.path" || attr.Key == "code.file.name" {
+			if file := safeCodeFile(attr.Value); file != "" {
+				metadata["codeFile"] = file
+			}
+		}
 		if key, ok := safeAttributeKeys[string(attr.Key)]; ok {
 			if value, include := primitiveAttributeValue(attr.Value); include {
 				metadata[key] = value
 			}
 		}
 	}
-	return compactMetadata(metadata)
+	return metadata
+}
+
+func semanticOperation(metadata map[string]any, kind string) string {
+	switch {
+	case metadata["httpRoute"] != nil || metadata["httpMethod"] != nil:
+		return "http." + kind
+	case metadata["dbSystem"] != nil:
+		return "db." + kind
+	case metadata["messagingSystem"] != nil:
+		return "messaging." + kind
+	case metadata["rpcSystem"] != nil:
+		return "rpc." + kind
+	}
+	return "otel." + kind
+}
+
+func safeCodeFile(value attribute.Value) string {
+	if value.Type() != attribute.STRING {
+		return ""
+	}
+	file := path.Base(strings.ReplaceAll(strings.TrimSpace(value.AsString()), "\\", "/"))
+	if file == "." || file == "/" || len(file) > 256 || strings.IndexFunc(file, unicode.IsControl) >= 0 {
+		return ""
+	}
+	return file
 }
 
 func traceFlags(spanContext oteltrace.SpanContext) string {
-	if spanContext.IsSampled() {
-		return "01"
+	if !spanContext.IsSampled() {
+		return "00"
 	}
-	return "00"
+	return "01"
 }
 
 func spanKindName(kind oteltrace.SpanKind) string {
-	switch kind {
-	case oteltrace.SpanKindInternal:
-		return "internal"
-	case oteltrace.SpanKindServer:
-		return "server"
-	case oteltrace.SpanKindClient:
-		return "client"
-	case oteltrace.SpanKindProducer:
-		return "producer"
-	case oteltrace.SpanKindConsumer:
-		return "consumer"
-	default:
+	names := [...]string{"unspecified", "internal", "server", "client", "producer", "consumer"}
+	index := int(kind)
+	if index < 0 || index >= len(names) {
 		return "unspecified"
 	}
+	return names[index]
 }
 
 func primitiveAttributeValue(value attribute.Value) (any, bool) {
@@ -324,19 +341,13 @@ func primitiveAttributeValue(value attribute.Value) (any, bool) {
 		return value.AsFloat64(), true
 	case attribute.STRING:
 		text := strings.TrimSpace(value.AsString())
-		if text == "" {
-			return nil, false
-		}
-		return text, true
+		return text, text != "" && len(text) <= 256
 	default:
 		return nil, false
 	}
 }
 
 func compactMetadata(metadata map[string]any) map[string]any {
-	if metadata == nil {
-		return nil
-	}
 	cloned := make(map[string]any)
 	for key, value := range metadata {
 		if strings.TrimSpace(key) == "" {
@@ -346,9 +357,6 @@ func compactMetadata(metadata map[string]any) map[string]any {
 		case string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 			cloned[key] = value
 		}
-	}
-	if len(cloned) == 0 {
-		return nil
 	}
 	return cloned
 }

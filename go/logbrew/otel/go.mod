@@ -3,7 +3,7 @@ module github.com/LogBrewCo/sdk/go/logbrew/otel
 go 1.24.0
 
 require (
-	github.com/LogBrewCo/sdk/go/logbrew v0.1.0
+	github.com/LogBrewCo/sdk/go/logbrew v0.1.8
 	go.opentelemetry.io/otel v1.41.0
 	go.opentelemetry.io/otel/sdk v1.41.0
 	go.opentelemetry.io/otel/trace v1.41.0

@@ -108,7 +108,7 @@ go mod edit -go=1.24.0
 go get github.com/LogBrewCo/sdk/go/logbrew/otel@v0.1.0 >/dev/null
 grep -q 'github.com/LogBrewCo/sdk/go/logbrew/otel v0.1.0' go.mod
 go list -m all > "$tmp_dir/go-otel-modules-before-remove.txt"
-grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.8$' "$tmp_dir/go-otel-modules-before-remove.txt"
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew/otel v0.1.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
 grep -q '^go.opentelemetry.io/otel v1.41.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
 grep -q '^go.opentelemetry.io/otel/sdk v1.41.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
@@ -155,18 +155,8 @@ func main() {
 	must(err)
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)))
 
-	parent := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
-		TraceID:    mustTraceID("4bf92f3577b34da6a3ce929d0e0e4736"),
-		SpanID:     mustSpanID("00f067aa0ba902b7"),
-		TraceFlags: oteltrace.FlagsSampled,
-		Remote:     true,
-	})
-	linked := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
-		TraceID:    mustTraceID("11111111111111111111111111111111"),
-		SpanID:     mustSpanID("2222222222222222"),
-		TraceFlags: 0,
-		Remote:     true,
-	})
+	parent := mustSpanContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", oteltrace.FlagsSampled)
+	linked := mustSpanContext("11111111111111111111111111111111", "2222222222222222", 0)
 	ctx := oteltrace.ContextWithRemoteSpanContext(context.Background(), parent)
 	copied, ok, err := logbrewotel.TraceContextFromContext(ctx, "b7ad6b7169203331")
 	must(err)
@@ -184,6 +174,9 @@ func main() {
 		"GET /checkout/:cart_id",
 		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
 		oteltrace.WithAttributes(
+			attribute.String("code.file.path", "/home/example/checkout/handler.go"),
+			attribute.String("code.function.name", "checkout.Handler"),
+			attribute.Int("code.line.number", 73),
 			attribute.String("http.request.method", "GET"),
 			attribute.String("http.route", "/checkout/:cart_id"),
 			attribute.Int("http.response.status_code", 502),
@@ -228,16 +221,14 @@ func must(err error) {
 	}
 }
 
-func mustTraceID(value string) oteltrace.TraceID {
-	traceID, err := oteltrace.TraceIDFromHex(value)
+func mustSpanContext(traceValue, spanValue string, flags oteltrace.TraceFlags) oteltrace.SpanContext {
+	traceID, err := oteltrace.TraceIDFromHex(traceValue)
 	must(err)
-	return traceID
-}
-
-func mustSpanID(value string) oteltrace.SpanID {
-	spanID, err := oteltrace.SpanIDFromHex(value)
+	spanID, err := oteltrace.SpanIDFromHex(spanValue)
 	must(err)
-	return spanID
+	return oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+		TraceID: traceID, SpanID: spanID, TraceFlags: flags, Remote: true,
+	})
 }
 GO
 
@@ -248,6 +239,10 @@ grep -q '"id": "go_otel_smoke_span_1"' "$tmp_dir/go-otel.stdout.json"
 grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/go-otel.stdout.json"
 grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/go-otel.stdout.json"
 grep -q '"source": "opentelemetry.go"' "$tmp_dir/go-otel.stdout.json"
+grep -q '"operation": "http.server"' "$tmp_dir/go-otel.stdout.json"
+grep -q '"codeFile": "handler.go"' "$tmp_dir/go-otel.stdout.json"
+grep -q '"codeFunction": "checkout.Handler"' "$tmp_dir/go-otel.stdout.json"
+grep -q '"codeLine": 73' "$tmp_dir/go-otel.stdout.json"
 grep -q '"spanKind": "server"' "$tmp_dir/go-otel.stdout.json"
 grep -q '"instrumentationScopeName": "checkout-service"' "$tmp_dir/go-otel.stdout.json"
 grep -q '"instrumentationScopeVersion": "1.2.3"' "$tmp_dir/go-otel.stdout.json"
@@ -258,7 +253,7 @@ grep -q '"messagingSystem": "nats"' "$tmp_dir/go-otel.stdout.json"
 grep -Eq '"status":[[:space:]]*202' "$tmp_dir/go-otel.stderr.json"
 grep -Eq '"attempts":[[:space:]]*1' "$tmp_dir/go-otel.stderr.json"
 grep -Eq '"events":[[:space:]]*2' "$tmp_dir/go-otel.stderr.json"
-if grep -Eq 'user@example\.com|private timeout details|debug=true|authorization|queue\.example\.test' "$tmp_dir/go-otel.stdout.json"; then
+if grep -Eq 'user@example\.com|private timeout details|debug=true|authorization|queue\.example\.test|/home/example' "$tmp_dir/go-otel.stdout.json"; then
 	echo "OpenTelemetry smoke leaked unsafe metadata" >&2
 	exit 1
 fi

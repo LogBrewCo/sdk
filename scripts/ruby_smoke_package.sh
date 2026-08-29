@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+declare tmp_dir package_dir package_version repo_root gem_digest ruby_bin gem_path
+
 ruby_smoke_create_tmp_dir() {
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
@@ -27,7 +29,7 @@ ruby_smoke_prepare_package() {
   fi
   ruby_bin="${ruby_bin:-$(command -v ruby)}"
   package_version="$(
-    cd "$package_dir"
+    cd "$package_dir" || return
     "$ruby_bin" -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "invalid gemspec"; print spec.version'
   )"
   gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"

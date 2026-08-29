@@ -7,7 +7,7 @@ Use this module only when your app already has OpenTelemetry Go installed and yo
 ## Install
 
 ```bash
-go get github.com/LogBrewCo/sdk/go/logbrew/otel
+go get github.com/LogBrewCo/sdk/go/logbrew/otel@v0.1.0
 ```
 
 The base module stays separate:
@@ -52,7 +52,7 @@ func main() {
 }
 ```
 
-`NewSpanExporter` queues ended OTel spans into the app-owned LogBrew client. It does not create global providers, own delivery transports, retry, or flush. Keep using `client.Flush` or `client.Shutdown` with an app-owned LogBrew transport.
+`NewSpanExporter` queues ended OTel spans into the app-owned LogBrew client. It records a stable operation such as `http.server`, the OTel span kind, instrumentation scope, allowed protocol attributes, and a bounded code location when OTel supplies one. It does not create global providers, own delivery transports, retry, or flush. Keep using `client.Flush` or `client.Shutdown` with an app-owned LogBrew transport.
 
 ## Context Copy
 
@@ -70,4 +70,4 @@ The bridge copies only valid OTel trace ID, span ID, and sampled flags into LogB
 
 ## Privacy Boundary
 
-The exporter keeps method, route, status, database system/operation, messaging system/operation, RPC service/method, exception type, span kind, instrumentation scope, and span-link summaries. It drops full URLs, query strings, headers, cookies, payloads, SQL statements, exception messages, stacks, baggage, tracestate, and raw propagation values.
+The exporter keeps method, route, status, database system/operation, messaging system/operation, RPC service/method, exception type, semantic operation, span kind, instrumentation scope, span-link summaries, code function and namespace, source line, and only the source filename. It drops full source paths, full URLs, query strings, headers, cookies, payloads, SQL statements, exception messages, stacks, baggage, tracestate, and raw propagation values.

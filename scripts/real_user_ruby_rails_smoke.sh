@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 rails_version="${LOGBREW_RAILS_SMOKE_VERSION:-8.1.3.1}"
 
+# shellcheck source=ruby_smoke_package.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
 ruby_smoke_create_tmp_dir
 ruby_smoke_prepare_package homebrew

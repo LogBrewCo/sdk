@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# shellcheck source=ruby_smoke_package.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
 load_events="${LOGBREW_RUBY_LOAD_EVENTS:-10000}"
 retained_events=1000
