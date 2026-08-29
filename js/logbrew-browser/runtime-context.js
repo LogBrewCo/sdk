@@ -27,7 +27,7 @@ export function addBrowserRuntimeContext(context, browserNavigator = defaultNavi
   const resource = { ...defaultContext.resource, ...context.resource };
   if (isRecord(context.resource.device)) {
     resource.device = {
-      ...(defaultContext.resource.device ?? {}),
+      ...defaultContext.resource.device,
       ...context.resource.device
     };
   }
@@ -37,10 +37,7 @@ export function addBrowserRuntimeContext(context, browserNavigator = defaultNavi
 function createBrowserRuntimeContext(browserNavigator) {
   const userAgentData = safeProperty(browserNavigator, "userAgentData");
   const selectedBrand = selectBrowserBrand(userAgentData);
-  const runtime = selectedBrand === undefined
-    ? { name: "browser" }
-    : selectedBrand;
-  const resource = { runtime };
+  const resource = { runtime: selectedBrand ?? { name: "browser" } };
 
   const platform = boundedProbe(() => safeProperty(userAgentData, "platform"));
   if (platform !== undefined) {
