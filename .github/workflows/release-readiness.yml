@@ -213,21 +213,10 @@ jobs:
         with:
           bun-version: "1.3.14"
 
-      - name: Install dependencies
+      - name: Install dependencies and package-manager shims
         run: |
-          mapfile -t package_dirs < <(
-            python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          for manifest in sorted(Path("js").glob("logbrew-*/package.json")):
-              payload = json.loads(manifest.read_text())
-              if payload.get("private"):
-                  continue
-              print(manifest.parent)
-          PY
-          )
-          for dir in "${package_dirs[@]}"; do
+          corepack enable
+          while IFS= read -r dir; do
             if [ -f "$dir/package-lock.json" ]; then
               (cd "$dir" && npm ci)
             elif [ -f "$dir/pnpm-lock.yaml" ]; then
@@ -237,11 +226,7 @@ jobs:
             else
               (cd "$dir" && npm install --package-lock-only --legacy-peer-deps)
             fi
-          done
-
-      - name: Run Node package tests
-        run: |
-          mapfile -t package_dirs < <(
+          done < <(
             python3 - <<'PY'
           import json
           from pathlib import Path
@@ -253,9 +238,23 @@ jobs:
               print(manifest.parent)
           PY
           )
-          for dir in "${package_dirs[@]}"; do
+
+      - name: Run Node package tests
+        run: |
+          while IFS= read -r dir; do
             (cd "$dir" && npm test)
-          done
+          done < <(
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          for manifest in sorted(Path("js").glob("logbrew-*/package.json")):
+              payload = json.loads(manifest.read_text())
+              if payload.get("private"):
+                  continue
+              print(manifest.parent)
+          PY
+          )
 
       - name: Run JavaScript real-user smoke test
         run: bash scripts/real_user_js_smoke.sh
@@ -335,7 +334,9 @@ jobs:
       - name: Package dry-run
         run: |
           bash scripts/check_js_package.sh
-          mapfile -t package_dirs < <(
+          while IFS= read -r dir; do
+            (cd "$dir" && npm pack --dry-run)
+          done < <(
             python3 - <<'PY'
           import json
           from pathlib import Path
@@ -347,9 +348,6 @@ jobs:
               print(manifest.parent)
           PY
           )
-          for dir in "${package_dirs[@]}"; do
-            (cd "$dir" && npm pack --dry-run)
-          done
 
   python-dry-run:
     name: Python package dry-run
