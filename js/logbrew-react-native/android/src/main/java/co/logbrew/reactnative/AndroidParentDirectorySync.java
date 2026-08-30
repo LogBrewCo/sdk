@@ -6,9 +6,9 @@ import android.system.OsConstants;
 import java.io.File;
 import java.io.FileDescriptor;
 
-final class AndroidParentDirectorySync implements FatalRecordStore.ParentDirectorySync {
+final class AndroidParentDirectorySync implements EventRecordStore.ParentDirectorySync {
   @Override
-  public FatalRecordStore.ParentDirectorySyncResult sync(File directory) {
+  public EventRecordStore.ParentDirectorySyncResult sync(File directory) {
     FileDescriptor descriptor;
     try {
       descriptor =
@@ -17,39 +17,39 @@ final class AndroidParentDirectorySync implements FatalRecordStore.ParentDirecto
               OsConstants.O_RDONLY | OsConstants.O_CLOEXEC | OsConstants.O_NOFOLLOW,
               0);
     } catch (ErrnoException | RuntimeException error) {
-      return FatalRecordStore.ParentDirectorySyncResult.FAILED;
+      return EventRecordStore.ParentDirectorySyncResult.FAILED;
     }
 
-    FatalRecordStore.ParentDirectorySyncResult result;
+    EventRecordStore.ParentDirectorySyncResult result;
     try {
       if (!OsConstants.S_ISDIR(Os.fstat(descriptor).st_mode)) {
-        result = FatalRecordStore.ParentDirectorySyncResult.FAILED;
+        result = EventRecordStore.ParentDirectorySyncResult.FAILED;
       } else {
         result = syncDescriptor(descriptor);
       }
     } catch (ErrnoException | RuntimeException error) {
-      result = FatalRecordStore.ParentDirectorySyncResult.FAILED;
+      result = EventRecordStore.ParentDirectorySyncResult.FAILED;
     }
 
     try {
       Os.close(descriptor);
     } catch (ErrnoException | RuntimeException error) {
-      return FatalRecordStore.ParentDirectorySyncResult.FAILED;
+      return EventRecordStore.ParentDirectorySyncResult.FAILED;
     }
     return result;
   }
 
-  private static FatalRecordStore.ParentDirectorySyncResult syncDescriptor(
+  private static EventRecordStore.ParentDirectorySyncResult syncDescriptor(
       FileDescriptor descriptor) {
     try {
       Os.fsync(descriptor);
-      return FatalRecordStore.ParentDirectorySyncResult.SYNCHRONIZED;
+      return EventRecordStore.ParentDirectorySyncResult.SYNCHRONIZED;
     } catch (ErrnoException error) {
       return unsupportedDirectorySync(error.errno)
-          ? FatalRecordStore.ParentDirectorySyncResult.UNSUPPORTED
-          : FatalRecordStore.ParentDirectorySyncResult.FAILED;
+          ? EventRecordStore.ParentDirectorySyncResult.UNSUPPORTED
+          : EventRecordStore.ParentDirectorySyncResult.FAILED;
     } catch (RuntimeException error) {
-      return FatalRecordStore.ParentDirectorySyncResult.FAILED;
+      return EventRecordStore.ParentDirectorySyncResult.FAILED;
     }
   }
 

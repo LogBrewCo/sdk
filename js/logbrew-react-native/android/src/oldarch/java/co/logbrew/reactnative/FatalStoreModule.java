@@ -25,26 +25,6 @@ final class FatalStoreModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod(isBlockingSynchronousMethod = true)
-  public WritableMap writeFatalRecord(ReadableMap record) {
-    return implementation.writeFatalRecord(record);
-  }
-
-  @ReactMethod(isBlockingSynchronousMethod = true)
-  public WritableMap readFatalRecord() {
-    return implementation.readFatalRecord();
-  }
-
-  @ReactMethod(isBlockingSynchronousMethod = true)
-  public WritableMap acknowledgeFatalRecord(String recordId) {
-    return implementation.acknowledgeFatalRecord(recordId);
-  }
-
-  @ReactMethod(isBlockingSynchronousMethod = true)
-  public WritableMap discardFatalRecord() {
-    return implementation.discardFatalRecord();
-  }
-
-  @ReactMethod(isBlockingSynchronousMethod = true)
   public WritableMap loadEventRecords(String queueKey) {
     return implementation.loadEventRecords(queueKey);
   }
@@ -68,5 +48,20 @@ final class FatalStoreModule extends ReactContextBaseJavaModule {
   @ReactMethod(isBlockingSynchronousMethod = true)
   public WritableMap closeEventStore(String queueKey) {
     return implementation.closeEventStore(queueKey);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap installAndroidDiagnostics(ReadableMap configuration) {
+    return implementation.installAndroidDiagnostics(configuration);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap androidDiagnosticsStatus() {
+    return implementation.androidDiagnosticsStatus();
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap uninstallAndroidDiagnostics() {
+    return implementation.uninstallAndroidDiagnostics();
   }
 }

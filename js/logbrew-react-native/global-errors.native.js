@@ -1,5 +1,3 @@
-import { NativeModules, TurboModuleRegistry } from "react-native";
-
 import {
   createLogBrewReactNativePromiseRejectionHandlers,
   installLogBrewReactNativeGlobalErrorHandler as installPlatformNeutralHandler,
@@ -11,15 +9,6 @@ export {
 };
 
 const hermesTrackerAdapters = new WeakMap();
-
-function defaultFatalStore() {
-  try {
-    return TurboModuleRegistry?.get?.("LogBrewFatalStore")
-      ?? NativeModules?.LogBrewFatalStore;
-  } catch {
-    return undefined;
-  }
-}
 
 function defaultPromiseRejectionTracker() {
   let hermes;
@@ -70,7 +59,7 @@ export function installLogBrewReactNativeGlobalErrorHandler(options = {}) {
   }
   return installPlatformNeutralHandler({
     ...forwarded,
-    fatalStore: hasInjectedStore ? forwarded.fatalStore : defaultFatalStore()
+    fatalStore: hasInjectedStore ? forwarded.fatalStore : undefined
   });
 }
 

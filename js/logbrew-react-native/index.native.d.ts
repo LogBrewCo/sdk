@@ -3,6 +3,7 @@ import type { CreateLogBrewReactNativeClientConfig } from "./index.js";
 
 export * from "./index.js";
 export * from "./apple-native-diagnostics.js";
+export * from "./android-native-diagnostics.js";
 export {
   installLogBrewReactNativeGlobalErrorHandler,
   installLogBrewReactNativePromiseRejectionTracker
@@ -43,10 +44,13 @@ declare const defaultExport: Omit<
   createLogBrewReactNativeClient: typeof createLogBrewReactNativeClient;
   createDefaultLogBrewReactNativeClient: typeof createDefaultLogBrewReactNativeClient;
   getLogBrewAppleNativeDiagnosticsStatus: typeof import("./apple-native-diagnostics.js").getLogBrewAppleNativeDiagnosticsStatus;
+  getLogBrewAndroidNativeDiagnosticsStatus: typeof import("./android-native-diagnostics.js").getLogBrewAndroidNativeDiagnosticsStatus;
   installLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").installLogBrewAppleNativeDiagnostics;
+  installLogBrewAndroidNativeDiagnostics: typeof import("./android-native-diagnostics.js").installLogBrewAndroidNativeDiagnostics;
   purgeLogBrewReactNativePersistentQueue: typeof purgeLogBrewReactNativePersistentQueue;
   replayLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").replayLogBrewAppleNativeDiagnostics;
   setLogBrewAppleNativeCrashContext: typeof import("./apple-native-diagnostics.js").setLogBrewAppleNativeCrashContext;
+  uninstallLogBrewAndroidNativeDiagnostics: typeof import("./android-native-diagnostics.js").uninstallLogBrewAndroidNativeDiagnostics;
 };
 
 export default defaultExport;

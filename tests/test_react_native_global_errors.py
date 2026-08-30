@@ -66,7 +66,6 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
         for excluded in (
             "native crash capture",
             "ANR or hang detection",
-            "general offline queueing",
             "symbolication",
         ):
             self.assertIn(excluded, readme)

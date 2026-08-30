@@ -109,6 +109,52 @@ function addExistingIssue(client) {
   });
 }
 
+test("admits a fatal report into the durable event queue before chaining", async () => {
+  await withInstalledPackage(async (
+    { installLogBrewReactNativeGlobalErrorHandler },
+    _packageDir,
+    { LogBrewClient }
+  ) => {
+    const order = [];
+    const persisted = [];
+    const client = createCanonicalClient(LogBrewClient, {
+      eventStore: {
+        acknowledge() {},
+        append(record) {
+          order.push("append");
+          persisted.push(record);
+        },
+        close() {},
+        load() {
+          return [];
+        },
+        purge() {}
+      }
+    });
+    Object.defineProperty(
+      client,
+      Symbol.for("co.logbrew.react-native.durable-event-queue"),
+      { value: true }
+    );
+    const errorUtils = createErrorUtils(() => order.push("previous"));
+    const diagnostics = [];
+    const installation = installLogBrewReactNativeGlobalErrorHandler({
+      client,
+      errorUtils,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
+    });
+    assert.equal(installation.fatalHealth().available, true);
+    errorUtils.currentHandler()(new TypeError("opaque-value=hidden"), true);
+
+    assert.deepEqual(diagnostics, []);
+    assert.equal(installation.fatalHealth().lastOutcome, "stored");
+    assert.deepEqual(order, ["append", "previous"]);
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].event.attributes.exception.type, "TypeError");
+    assert.equal(JSON.stringify(persisted).includes("opaque-value"), false);
+  });
+});
+
 test("stores a privacy-bounded fatal record synchronously before chaining", async () => {
   await withInstalledPackage(async ({ installLogBrewReactNativeGlobalErrorHandler }) => {
     const order = [];
@@ -516,7 +562,7 @@ test("handler removal retains the record and explicit rollback discard clears it
   });
 });
 
-test("public documentation states stable-id replay and excludes adjacent ownership", () => {
+test("public documentation states durable fatal admission and excludes adjacent ownership", () => {
   const readme = fs.readFileSync(path.join(packageRoot, "README.md"), "utf8");
   assert.match(readme, /createLogBrewReactNativePromiseRejectionHandlers/u);
   assert.match(readme, /installLogBrewReactNativePromiseRejectionTracker/u);
@@ -524,11 +570,10 @@ test("public documentation states stable-id replay and excludes adjacent ownersh
   assert.match(readme, /one Promise rejection tracker slot/u);
   assert.match(readme, /cannot reinstate an earlier tracker/u);
   assert.match(readme, /LogBrew does not install, replace, or patch Promise/u);
-  assert.match(readme, /stable-ID at-least-once replay/u);
-  assert.match(readme, /acknowledgement happens only after local queue admission/u);
+  assert.match(readme, /same app-private persistent queue/u);
+  assert.match(readme, /pending count without increasing the dropped count/u);
   assert.match(readme, /does not claim mathematically exactly-once delivery/u);
   assert.match(readme, /native crash capture/u);
   assert.match(readme, /ANR or hang detection/u);
-  assert.match(readme, /general offline queueing/u);
   assert.match(readme, /symbolication/u);
 });

@@ -1,7 +1,6 @@
 #import "LBRNFatalStoreModule.h"
 
 #import "LBRNEventRecordStore.h"
-#import "LBRNFatalRecordStore.h"
 #import "LBRNPrivateStorage.h"
 
 #import <CommonCrypto/CommonDigest.h>
@@ -63,39 +62,10 @@ static NSString *LBRNQueueHash(NSString *queueKey)
     return value;
 }
 
-static NSDictionary *LBRNNormalizeRecord(NSDictionary *record)
-{
-    if (![record isKindOfClass:[NSDictionary class]]) {
-        return @{};
-    }
-    id framesValue = record[@"stackFrames"];
-    if (![framesValue isKindOfClass:[NSArray class]]) {
-        return record;
-    }
-    NSMutableArray *frames = [NSMutableArray arrayWithCapacity:[framesValue count]];
-    for (id value in framesValue) {
-        if (![value isKindOfClass:[NSDictionary class]]) {
-            return record;
-        }
-        NSMutableDictionary *frame = [value mutableCopy];
-        NSString *filename = frame[@"filename"];
-        if ([filename isKindOfClass:[NSString class]]
-            && [filename hasPrefix:@"/"]
-            && [[filename substringFromIndex:1] rangeOfString:@"/"].location == NSNotFound) {
-            frame[@"filename"] = [filename substringFromIndex:1];
-        }
-        [frames addObject:frame];
-    }
-    NSMutableDictionary *normalized = [record mutableCopy];
-    normalized[@"stackFrames"] = frames;
-    return normalized;
-}
-
 @interface LBRNFatalStoreModule ()
 #ifdef RCT_NEW_ARCH_ENABLED
 <NativeLogBrewFatalStoreSpec>
 #endif
-@property (nonatomic, nullable) LBRNFatalRecordStore *store;
 @property (nonatomic, nullable) NSURL *eventStoreParentURL;
 @property (nonatomic) NSMutableDictionary<NSString *, LBRNEventRecordStore *> *eventStores;
 @end
@@ -119,14 +89,6 @@ RCT_EXPORT_MODULE(LogBrewFatalStore)
         if (baseURL != nil && LBRNPreparePrivateRootDirectory(baseURL)) {
             _eventStoreParentURL = baseURL;
             _eventStores = [NSMutableDictionary dictionary];
-            NSURL *directoryURL = [baseURL URLByAppendingPathComponent:@"LogBrewFatalJS"
-                                                           isDirectory:YES];
-            LBRNFatalDirectoryPreparation directoryPreparation = ^BOOL(NSURL *preparedURL) {
-              return LBRNPrepareProtectedDirectory(preparedURL);
-            };
-            _store = [[LBRNFatalRecordStore alloc]
-                initWithDirectoryURL:directoryURL
-                directoryPreparation:directoryPreparation];
         }
     }
     return self;
@@ -170,54 +132,6 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(secureRandomHex:(double)length)
             }];
         self.eventStores[queueHash] = created;
         return created;
-    }
-}
-
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(writeFatalRecord:(NSDictionary *)record)
-{
-    if (self.store == nil) {
-        return LBRNStorageError();
-    }
-    @try {
-        return [self.store writeRecord:LBRNNormalizeRecord(record)];
-    } @catch (__unused NSException *exception) {
-        return LBRNStorageError();
-    }
-}
-
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(readFatalRecord)
-{
-    if (self.store == nil) {
-        return LBRNStorageError();
-    }
-    @try {
-        return [self.store readRecord];
-    } @catch (__unused NSException *exception) {
-        return LBRNStorageError();
-    }
-}
-
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(acknowledgeFatalRecord:(NSString *)recordId)
-{
-    if (self.store == nil || ![recordId isKindOfClass:[NSString class]]) {
-        return LBRNStorageError();
-    }
-    @try {
-        return [self.store acknowledgeRecordId:recordId];
-    } @catch (__unused NSException *exception) {
-        return LBRNStorageError();
-    }
-}
-
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(discardFatalRecord)
-{
-    if (self.store == nil) {
-        return LBRNStorageError();
-    }
-    @try {
-        return [self.store discardRecord];
-    } @catch (__unused NSException *exception) {
-        return LBRNStorageError();
     }
 }
 
@@ -298,6 +212,21 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(closeEventStore:(NSString *)queueKey)
             [self.eventStores removeObjectForKey:queueHash];
         }
     }
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(installAndroidDiagnostics:(NSDictionary *)configuration)
+{
+    return @{ @"status" : @"error", @"code" : @"unsupported_platform" };
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(androidDiagnosticsStatus)
+{
+    return @{ @"status" : @"not_installed", @"pending" : @0 };
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(uninstallAndroidDiagnostics)
+{
+    return @{ @"status" : @"not_installed", @"pending" : @0 };
 }
 
 #ifdef RCT_NEW_ARCH_ENABLED
