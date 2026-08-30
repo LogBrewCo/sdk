@@ -736,7 +736,7 @@ test("Vite release-artifact plugin prepares a build output and writes a ready ma
     });
 
     plugin.configResolved({ root: appRoot, build: { outDir: "dist" } });
-    await plugin.closeBundle();
+    await plugin.writeBundle();
 
     const minified = fs.readFileSync(path.join(buildDir, "assets", "app.js"), "utf8");
     const sourceMap = JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8"));
@@ -783,7 +783,7 @@ test("Vite release-artifact plugin can dry-run a hosted upload after manifest cr
       build: { outDir: "dist" },
       logger: { info(message) { messages.push(message); } }
     });
-    await plugin.closeBundle();
+    await plugin.writeBundle();
 
     assert.deepEqual(messages, ["LogBrew release artifacts: dry_run (1 artifact)"]);
     assert.equal(
@@ -897,7 +897,7 @@ test("Vite release-artifact upload failure exposes only a bounded status", async
     });
     plugin.configResolved({ root: appRoot, build: { outDir: "dist" } });
 
-    await assert.rejects(plugin.closeBundle(), (error) => {
+    await assert.rejects(plugin.writeBundle(), (error) => {
       assert.match(error.message, /upload-js failed: auth_missing/u);
       assert.doesNotMatch(error.message, new RegExp(authEnvName, "u"));
       return true;

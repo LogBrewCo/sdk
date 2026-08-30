@@ -85,7 +85,7 @@ cat > "$app_dir/package.json" <<'JSON'
     "@logbrew/browser": "file:../logbrew-browser.tgz",
     "@logbrew/sdk": "file:../logbrew-sdk.tgz",
     "esbuild": "0.28.1",
-    "vite": "8.0.16"
+    "vite": "8.1.0"
   }
 }
 JSON

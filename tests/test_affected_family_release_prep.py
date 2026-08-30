@@ -36,7 +36,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.16",
+            "js/logbrew-js/package.json": "0.1.17",
             "js/logbrew-browser/package.json": "0.1.9",
             "js/logbrew-express/package.json": "0.1.5",
             "js/logbrew-fastify/package.json": "0.1.6",
@@ -307,7 +307,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
         receipt_defaults = {
             "scripts/real_user_npm_public_registry_smoke.sh": (
-                "LOGBREW_NPM_SDK_VERSION:-0.1.16",
+                "LOGBREW_NPM_SDK_VERSION:-0.1.17",
                 "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
                 "LOGBREW_NPM_NODE_VERSION:-0.1.11",
                 "LOGBREW_NPM_NEXT_VERSION:-0.1.7",

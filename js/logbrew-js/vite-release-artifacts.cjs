@@ -55,13 +55,6 @@ function resolveBuildDir(root, outDir, explicitBuildDir) {
   return resolvePathFromRoot(root, outDir || "dist");
 }
 
-function resolveManifestPath(root, buildDir, explicitManifestPath) {
-  if (explicitManifestPath) {
-    return resolvePathFromRoot(root, explicitManifestPath);
-  }
-  return path.join(buildDir, DEFAULT_MANIFEST_NAME);
-}
-
 function createLogBrewViteReleaseArtifactsPlugin(options) {
   const release = requiredString(options, "release");
   const environment = requiredString(options, "environment");
@@ -95,9 +88,11 @@ function createLogBrewViteReleaseArtifactsPlugin(options) {
       viteOutDir = config?.build?.outDir || "dist";
       viteLogger = config?.logger && typeof config.logger.info === "function" ? config.logger : null;
     },
-    async closeBundle() {
+    async writeBundle() {
       const buildDir = resolveBuildDir(viteRoot, viteOutDir, explicitBuildDir);
-      const manifestPath = resolveManifestPath(viteRoot, buildDir, explicitManifestPath);
+      const manifestPath = explicitManifestPath
+        ? resolvePathFromRoot(viteRoot, explicitManifestPath)
+        : path.join(buildDir, DEFAULT_MANIFEST_NAME);
       const sourcePrefixes = userSourcePrefixes.length > 0 ? userSourcePrefixes : [viteRoot];
       const prepareArgs = ["--build-dir", buildDir, "--write"];
       if (stripSourcesContent) {
