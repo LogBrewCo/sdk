@@ -6,12 +6,18 @@ import path from "node:path";
 
 import {
   byteSize,
+  fileReference,
   normalizeProjectId,
+  parseOptions,
   printJson,
   readJsonObject,
+  relativeTo,
+  requireOption,
   requireBuildDir,
   safeResolve,
   sha256File,
+  sourceMapDebugId,
+  SOURCE_MAP_DEBUG_ID_KEYS,
   sortJson,
   stableJson
 } from "./release-artifacts-common.js";
@@ -20,9 +26,11 @@ import { verifyJavaScriptIssueSymbolication, verifyJavaScriptSymbolication } fro
 
 const DEBUG_ID_NAMESPACE = "16f4a837-7e0b-4d7c-97d9-8a7af1fd2768";
 const DEBUG_ID_RE = /(?:\/\/#|\/\*#)\s*debugId=([A-Za-z0-9._:-]+)/giu;
+const DEBUG_ID_REGISTRY_NAME = "logbrew.release-artifact.debug-ids";
+const DEBUG_ID_REGISTRY_EXPRESSION = `Symbol.for(${JSON.stringify(DEBUG_ID_REGISTRY_NAME)})`;
+const RUNTIME_DEBUG_ID_MARKER = "/*logbrew-runtime-debug-id*/";
 const MINIFIED_SOURCE_SUFFIXES = [".js", ".mjs", ".bundle", ".jsbundle"];
 const SCRIPT_VERSION = "0.1.0";
-const SOURCE_MAP_DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"];
 const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
 const SOURCE_MAPPING_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=([^\s*]+)/iu;
 
@@ -37,49 +45,6 @@ function usage() {
     "This installed-package helper prepares, validates, resolves, and uploads JavaScript source-map artifacts.",
     "upload-js is loopback-only by default; pass --allow-hosted for explicit HTTPS release-artifact endpoints."
   ].join("\n");
-}
-
-function parseOptions(args, spec) {
-  const options = {};
-  const positionals = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!arg.startsWith("--")) {
-      positionals.push(arg);
-      continue;
-    }
-    const name = arg.slice(2);
-    const kind = spec[name];
-    if (!kind) {
-      throw new Error(`unknown option: --${name}`);
-    }
-    if (kind === "boolean") {
-      options[name] = true;
-      continue;
-    }
-    const value = args[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      throw new Error(`missing value for --${name}`);
-    }
-    index += 1;
-    if (kind === "repeat") {
-      options[name] = [...(options[name] ?? []), value];
-    } else {
-      options[name] = value;
-    }
-  }
-  if (positionals.length > 0) {
-    throw new Error(`unexpected positional argument: ${positionals[0]}`);
-  }
-  return options;
-}
-
-function requireOption(options, name) {
-  const value = options[name];
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`--${name} is required`);
-  }
-  return value.trim();
 }
 
 function optionalSourceContextOptions(options) {
@@ -106,14 +71,6 @@ function optionalSourceContextOptions(options) {
     sourceRoot: path.resolve(requireOption(options, "source-root")),
     contextLines
   };
-}
-
-function toPosix(value) {
-  return value.split(path.sep).join("/");
-}
-
-function relativeTo(root, filePath) {
-  return toPosix(path.relative(root, filePath));
 }
 
 function readText(filePath) {
@@ -153,20 +110,6 @@ function findDebugId(source) {
 function findSourceMappingUrl(source) {
   const match = source.match(SOURCE_MAPPING_RE);
   return match?.[1]?.trim() ?? null;
-}
-
-function sourceMapDebugId(payload) {
-  for (const key of SOURCE_MAP_DEBUG_ID_KEYS) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim() !== "") {
-      return value.trim();
-    }
-  }
-  return null;
-}
-
-function fileReference(value) {
-  return value.split("?", 1)[0].split("#", 1)[0];
 }
 
 function resolveSourceMapPath(jsPath, buildDir, sourceMappingUrl) {
@@ -262,26 +205,40 @@ function generateDebugId(relativeJsPath, jsSource, sourceMapPayload) {
   return uuidV5(DEBUG_ID_NAMESPACE, digest.digest("hex"));
 }
 
-function sourceWithDebugId(source, debugId) {
-  if (findDebugId(source)) {
-    return source;
+function executableShebang(source) {
+  return source.startsWith("#!") ? source.match(/^#![^\r\n]*(?:\r?\n|$)/u)?.[0] ?? "" : "";
+}
+
+function sourceStartsWithDirective(source, shebang) {
+  const body = source.slice(shebang.length).replace(/^(?:\s|\/\/[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)+/u, "");
+  return body.startsWith("\"") || body.startsWith("'");
+}
+
+function sourceWithDebugId(source, debugId, relativePath) {
+  const registryLine = `;try{${RUNTIME_DEBUG_ID_MARKER}(function(){var g=globalThis,s=${DEBUG_ID_REGISTRY_EXPRESSION},r=g[s];if(!r||typeof r!=="object")r=g[s]=Object.create(null);r[${JSON.stringify(relativePath)}]=${JSON.stringify(debugId)}})()}catch(_){}\n`;
+  const shebang = executableShebang(source);
+  const prepared = source.includes(RUNTIME_DEBUG_ID_MARKER)
+    ? source
+    : `${shebang}${shebang === source && shebang ? "\n" : ""}${registryLine}${source.slice(shebang.length)}`;
+  if (findDebugId(prepared)) {
+    return prepared;
   }
   const debugLine = `//# debugId=${debugId}\n`;
-  const matches = [...source.matchAll(SOURCE_MAPPING_COMMENT_RE)];
+  const matches = [...prepared.matchAll(SOURCE_MAPPING_COMMENT_RE)];
   if (matches.length === 0) {
-    return `${source}${source.endsWith("\n") ? "" : "\n"}${debugLine}`;
+    return `${prepared}${prepared.endsWith("\n") ? "" : "\n"}${debugLine}`;
   }
   const last = matches.at(-1);
-  const prefix = source.slice(0, last.index);
+  const prefix = prepared.slice(0, last.index);
   const separator = prefix.endsWith("\n") || prefix.endsWith("\r") ? "" : "\n";
-  return `${prefix}${separator}${debugLine}${source.slice(last.index)}`;
+  return `${prefix}${separator}${debugLine}${prepared.slice(last.index)}`;
 }
 
 function normalizeSourcePrefixes(values) {
   const prefixes = [];
   for (const value of values ?? []) {
     for (const candidate of [path.resolve(value), fs.existsSync(value) ? fs.realpathSync(value) : path.resolve(value)]) {
-      const normalized = toPosix(candidate).replace(/\/+$/u, "");
+      const normalized = candidate.split(path.sep).join("/").replace(/\/+$/u, "");
       if (normalized && !prefixes.includes(normalized)) {
         prefixes.push(normalized);
       }
@@ -317,30 +274,27 @@ function sourceMapPayloadForDebugId(payload, { stripSourcesContent, sourcePrefix
   if (!stripSourcesContent && !updatedSources) {
     return payload;
   }
-  const updated = { ...payload };
+  const updated = updatedSources ? { ...payload, sources: updatedSources } : { ...payload };
   if (stripSourcesContent) {
     delete updated.sourcesContent;
-  }
-  if (updatedSources) {
-    updated.sources = updatedSources;
   }
   return updated;
 }
 
-function sourceMapWithPrivacyUpdates(payload, debugId, { stripSourcesContent, sourcePrefixes }) {
-  const updatedSources = sourceMapSourcesWithoutPrefixes(payload, sourcePrefixes);
-  if (sourceMapDebugId(payload) && (!stripSourcesContent || !("sourcesContent" in payload)) && !updatedSources) {
+function sourceMapWithPrivacyUpdates(payload, debugId, options) {
+  const privacyUpdated = sourceMapPayloadForDebugId(payload, options);
+  const { shiftGeneratedLines } = options;
+  if (sourceMapDebugId(payload)
+    && privacyUpdated === payload
+    && !shiftGeneratedLines) {
     return payload;
   }
-  const updated = { ...payload };
+  const updated = { ...privacyUpdated };
   if (!sourceMapDebugId(updated)) {
     updated.debug_id = debugId;
   }
-  if (stripSourcesContent) {
-    delete updated.sourcesContent;
-  }
-  if (updatedSources) {
-    updated.sources = updatedSources;
+  if (shiftGeneratedLines && typeof updated.mappings === "string") {
+    updated.mappings = `;${updated.mappings}`;
   }
   return updated;
 }
@@ -416,7 +370,19 @@ function buildArtifactPlan(jsPath, buildDir, options) {
   } = inspectArtifactFiles(jsPath, buildDir);
   const changes = [];
   let debugId = jsDebugId || mapDebugId;
+  const needsRuntimeDebugId = !jsSource.includes(RUNTIME_DEBUG_ID_MARKER);
+  if (needsRuntimeDebugId && sourceStartsWithDirective(jsSource, executableShebang(jsSource))) {
+    errors.push("runtime Debug ID injection cannot precede a script directive");
+  }
+  if (needsRuntimeDebugId
+    && sourceMapPayload
+    && (typeof sourceMapPayload.mappings !== "string" || sourceMapPayload.mappings === "")) {
+    errors.push("source map mappings must be a non-empty string before runtime Debug ID injection");
+  }
   if (errors.length === 0 && sourceMapPayload) {
+    if (needsRuntimeDebugId) {
+      changes.push("minifiedSource.runtimeDebugId");
+    }
     if (!debugId) {
       debugId = generateDebugId(
         relJs,
@@ -458,7 +424,8 @@ function applyArtifactPlan(artifact, buildDir, options) {
   const jsPath = path.join(buildDir, artifact.path);
   const sourceMapPath = path.join(buildDir, artifact.sourceMapPath);
   const jsSource = readText(jsPath);
-  const updatedSource = sourceWithDebugId(jsSource, debugId);
+  const shiftGeneratedLines = !jsSource.includes(RUNTIME_DEBUG_ID_MARKER);
+  const updatedSource = sourceWithDebugId(jsSource, debugId, artifact.path);
   if (updatedSource !== jsSource) {
     writeText(jsPath, updatedSource);
   }
@@ -466,7 +433,10 @@ function applyArtifactPlan(artifact, buildDir, options) {
   if (!payload || errors.length > 0) {
     throw new Error(`${artifact.path}: source map became unreadable before write`);
   }
-  const updatedPayload = sourceMapWithPrivacyUpdates(payload, debugId, options);
+  const updatedPayload = sourceMapWithPrivacyUpdates(payload, debugId, {
+    ...options,
+    shiftGeneratedLines
+  });
   if (stableJson(updatedPayload) !== stableJson(payload)) {
     writeText(sourceMapPath, `${JSON.stringify(sortJson(updatedPayload), null, 2)}\n`);
   }

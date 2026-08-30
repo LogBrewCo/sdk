@@ -114,7 +114,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn('assert "checkout exploded" in source_context["lines"][0]["text"]', smoke)
         self.assertIn('assert "cdn.example" not in serialized_runtime_issue', smoke)
         self.assertIn('assert "cache=placeholder" not in serialized_runtime_issue', smoke)
-        self.assertIn('assert "fragment" not in serialized_runtime_issue', smoke)
+        self.assertIn('assert "hidden-hash-fragment-sentinel" not in serialized_runtime_issue', smoke)
         self.assertIn("assert tmp_dir not in serialized_runtime_issue", smoke)
 
     def test_next_smoke_uploads_real_build_artifacts_to_loopback_intake(self) -> None:
