@@ -9,10 +9,12 @@ export const {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  createLogBrewTraceContext,
   createLogBrewQueueTraceHeaders,
   createLogBrewQueueTraceLinks,
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
+  enterWithLogBrewTrace,
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
   installLogBrewHttpClientInstrumentation,
@@ -26,6 +28,7 @@ export const {
   queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan,
   purgeLogBrewNodePersistentQueue,
+  runWithLogBrewTrace,
   withLogBrewHttpHandler
 } = nodeSdk;
 

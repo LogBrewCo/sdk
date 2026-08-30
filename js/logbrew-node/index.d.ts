@@ -789,6 +789,18 @@ export declare function createLogBrewNodeContext(
 ): LogBrewNodeContext;
 
 export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
+export declare function runWithLogBrewTrace<Result>(
+  trace: LogBrewTraceContext,
+  callback: () => Result
+): Result;
+export declare function enterWithLogBrewTrace(trace: LogBrewTraceContext): void;
+export declare function createLogBrewTraceContext(
+  traceparent?: string,
+  options?: {
+    spanIdFactory?: () => string;
+    traceIdFactory?: () => string;
+  }
+): LogBrewTraceContext;
 
 export declare function createLogBrewQueueTraceHeaders(
   trace?: LogBrewTraceContext
@@ -918,10 +930,12 @@ declare const defaultExport: {
   createHttpRequestEvent: typeof createHttpRequestEvent;
   createLogBrewNodeClient: typeof createLogBrewNodeClient;
   createLogBrewNodeContext: typeof createLogBrewNodeContext;
+  createLogBrewTraceContext: typeof createLogBrewTraceContext;
   createLogBrewQueueTraceHeaders: typeof createLogBrewQueueTraceHeaders;
   createLogBrewQueueTraceLinks: typeof createLogBrewQueueTraceLinks;
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
+  enterWithLogBrewTrace: typeof enterWithLogBrewTrace;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   installLogBrewFetchInstrumentation: typeof installLogBrewFetchInstrumentation;
   installLogBrewHttpClientInstrumentation: typeof installLogBrewHttpClientInstrumentation;
@@ -935,6 +949,7 @@ declare const defaultExport: {
   queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;
   queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
   purgeLogBrewNodePersistentQueue: typeof purgeLogBrewNodePersistentQueue;
+  runWithLogBrewTrace: typeof runWithLogBrewTrace;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };
 

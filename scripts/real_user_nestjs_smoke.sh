@@ -6,6 +6,7 @@ sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
 nestjs_package_version="$(node -p "require('${repo_root}/js/logbrew-nestjs/package.json').version")"
 tmp_dir="$(mktemp -d)"
+trap 'printf "nestjs real-user smoke failed at line %s\n" "$LINENO" >&2' ERR
 trap 'rm -rf "$tmp_dir"' EXIT
 
 core_pack_json="$tmp_dir/core-pack.json"
@@ -45,9 +46,6 @@ PY
 core_tgz="$tmp_dir/$core_tgz"
 node_tgz="$tmp_dir/$node_tgz"
 nestjs_tgz="$tmp_dir/$nestjs_tgz"
-test -f "$core_tgz"
-test -f "$node_tgz"
-test -f "$nestjs_tgz"
 
 tar -tzf "$nestjs_tgz" > "$tmp_dir/nestjs-tarball.txt"
 grep -q '^package/README.md$' "$tmp_dir/nestjs-tarball.txt"
@@ -319,6 +317,7 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
   spanIdFactory(request) {
     return request.url?.startsWith("/fail") ? errorSpanId : autoSpanId;
   },
+  traceIdFactory: () => "4bf92f3577b34da6a3ce929d0e0e4736",
   transport({ request }) {
     return request.url?.startsWith("/fail") ? errorTransport : autoTransport;
   }
@@ -326,11 +325,7 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
 
 await autoApp.listen(0, "127.0.0.1");
 const autoUrl = await autoApp.getUrl();
-const autoResponse = await fetch(`${autoUrl}/auto?token=secret`, {
-  headers: {
-    traceparent: autoTraceparent
-  }
-});
+const autoResponse = await fetch(`${autoUrl}/auto?token=secret`);
 await autoResponse.json();
 await waitFor(
   () => autoTransport.sentBodies.length === 1,
@@ -573,17 +568,18 @@ const malformed = createRequestEvent(
     spanIdFactory: () => {
       spanIdCalls += 1;
       return "b7ad6b7169203331";
-    }
+    },
+    traceIdFactory: () => "4bf92f3577b34da6a3ce929d0e0e4736"
   }
 );
-if (malformed.type === "span" || malformed.attributes.logger !== "nestjs") {
-  throw new Error(`malformed traceparent should fall back to log: ${JSON.stringify(malformed)}`);
+if (malformed.type !== "span" || malformed.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`malformed traceparent should start a local root: ${JSON.stringify(malformed)}`);
 }
-if (malformed.attributes.message !== "GET /bad 200") {
-  throw new Error(`malformed fallback should omit query text: ${JSON.stringify(malformed)}`);
+if (malformed.attributes.name !== "GET /bad") {
+  throw new Error(`malformed root should omit query text: ${JSON.stringify(malformed)}`);
 }
-if (spanIdCalls !== 0) {
-  throw new Error("spanIdFactory should not run for malformed traceparent");
+if (spanIdCalls !== 1) {
+  throw new Error("spanIdFactory should run once for a malformed traceparent root");
 }
 
 console.log(okText);
@@ -663,7 +659,6 @@ import {
   getActiveLogBrewTrace,
   LogBrewInterceptor,
   type LogBrewRequestMetricEvent,
-  type LogBrewRequestEvent,
   type LogBrewNestLogger,
   type LogBrewTraceContext
 } from "@logbrew/nestjs";
@@ -706,17 +701,13 @@ async function createApp(): Promise<unknown> {
     client,
     captureRequestMetrics: true,
     requestEvent(request, response, { durationMs, trace }) {
-      const event: LogBrewRequestEvent = createRequestEvent(request, response, {
+      const event = createRequestEvent(request, response, {
         durationMs,
         now: () => "2026-06-02T10:00:06Z",
         spanIdFactory: () => "b7ad6b7169203331",
         trace
       });
-      if (event.type === "span") {
-        event.attributes.parentSpanId?.toUpperCase();
-      } else {
-        event.attributes.message.toUpperCase();
-      }
+      event.attributes.parentSpanId?.toUpperCase();
       return event;
     },
     requestMetricEvent(request, response, { durationMs }) {
@@ -1046,7 +1037,7 @@ grep -q '"cjsLoggerDelivered":"evt_nestjs_cjs_logger"' "$tmp_dir/nestjs-default-
 
 node dist/smoke.js > "$tmp_dir/nestjs-smoke.stdout.json" 2> "$tmp_dir/nestjs-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/nestjs-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/nestjs-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/nestjs-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/nestjs-smoke.stderr.json"
@@ -1066,11 +1057,11 @@ node node_modules/@logbrew/nestjs/examples/index.mjs --list > "$tmp_dir/launcher
 grep -q 'real-user-smoke -> node node_modules/@logbrew/nestjs/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/nestjs/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"attempts":1' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/nestjs/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/nestjs/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -1079,7 +1070,7 @@ npm --prefix node_modules/@logbrew/nestjs/examples run help > "$tmp_dir/npm-help
 grep -q 'npm --prefix node_modules/@logbrew/nestjs/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/nestjs/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "nestjs real-user smoke passed with @nestjs/common@$nest_common_version @nestjs/core@$nest_core_version @nestjs/platform-express@$nest_platform_express_version"

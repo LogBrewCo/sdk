@@ -251,6 +251,14 @@ function getActiveLogBrewTrace() {
   return activeTraceContext.getStore();
 }
 
+function runWithLogBrewTrace(trace, callback) {
+  return activeTraceContext.run(trace, callback);
+}
+
+function enterWithLogBrewTrace(trace) {
+  activeTraceContext.enterWith(trace);
+}
+
 function createLogBrewQueueTraceHeaders(trace = getActiveLogBrewTrace()) {
   return createQueueTraceHeaders(trace);
 }
@@ -1974,8 +1982,17 @@ function createRequestTraceContext(req, res, {
   spanIdFactory = defaultSpanIdFactory,
   traceIdFactory = defaultTraceIdFactory
 } = {}) {
-  const spanId = requestGeneratedId(spanIdFactory, defaultSpanIdFactory, normalizeSpanId, req, res);
-  const traceparent = getTraceparentHeader(req);
+  return createLogBrewTraceContext(getTraceparentHeader(req), {
+    spanIdFactory: () => spanIdFactory(req, res),
+    traceIdFactory: () => traceIdFactory(req, res)
+  });
+}
+
+function createLogBrewTraceContext(traceparent, {
+  spanIdFactory = defaultSpanIdFactory,
+  traceIdFactory = defaultTraceIdFactory
+} = {}) {
+  const spanId = generatedId(spanIdFactory, defaultSpanIdFactory, normalizeSpanId);
   if (traceparent) {
     try {
       const context = parseTraceparent(traceparent);
@@ -1990,15 +2007,15 @@ function createRequestTraceContext(req, res, {
     }
   }
   return {
-    traceId: requestGeneratedId(traceIdFactory, defaultTraceIdFactory, normalizeTraceId, req, res),
+    traceId: generatedId(traceIdFactory, defaultTraceIdFactory, normalizeTraceId),
     spanId,
     sampled: true
   };
 }
 
-function requestGeneratedId(factory, fallback, normalize, req, res) {
+function generatedId(factory, fallback, normalize) {
   try {
-    return normalize(factory(req, res)) ?? fallback();
+    return normalize(factory()) ?? fallback();
   } catch {
     return fallback();
   }
@@ -2089,10 +2106,12 @@ const exported = {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  createLogBrewTraceContext,
   createLogBrewQueueTraceHeaders,
   createLogBrewQueueTraceLinks,
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
+  enterWithLogBrewTrace,
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
   installLogBrewHttpClientInstrumentation,
@@ -2106,6 +2125,7 @@ const exported = {
   queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan,
   purgeLogBrewNodePersistentQueue,
+  runWithLogBrewTrace,
   withLogBrewHttpHandler
 };
 

@@ -138,7 +138,7 @@ app.useGlobalInterceptors(new LogBrewInterceptor({
 }));
 ```
 
-When an incoming HTTP request has a valid W3C `traceparent` header, the interceptor attaches `request.logbrew.trace` and default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous controller work started after the interceptor runs. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break the controller. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` when your runtime needs app-provided child span IDs.
+Every incoming request receives a LogBrew span. A valid W3C `traceparent` continues its trace with a fresh child span; an absent or malformed value starts a fresh local root without breaking the controller. The interceptor exposes that context through `request.logbrew.trace` and `getActiveLogBrewTrace()` across asynchronous controller work. Logs, issues, actions, and metrics captured by the default NestJS client inside the request inherit the same trace unless their event context overrides it. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` and `traceIdFactory` when your runtime needs app-provided IDs.
 
 ```ts
 import { Controller, Get, Req } from "@nestjs/common";

@@ -236,6 +236,7 @@ await app.register(async (scope) => {
       pinoErrors.push(error instanceof Error ? error.message : String(error));
     },
     spanIdFactory: () => "b7ad6b7169203331",
+    traceIdFactory: () => "4bf92f3577b34da6a3ce929d0e0e4736",
     requestEvent(request, reply, { durationMs }) {
       return createRequestEvent(request, reply, {
         durationMs,
@@ -295,11 +296,7 @@ const address = await app.listen({ host: "127.0.0.1", port: 0 });
 app.log.warn({ workerState: "ready" }, "cache worker ready");
 const okResponse = await fetch(`${address}/logbrew`);
 const okText = await okResponse.text();
-const autoResponse = await fetch(`${address}/auto?token=secret`, {
-  headers: {
-    traceparent
-  }
-});
+const autoResponse = await fetch(`${address}/auto?token=secret`);
 await autoResponse.json();
 await waitFor(() => autoTransport.sentBodies.length === 1 && activeTraceFromAuto);
 const metricResponse = await fetch(`${address}/metrics-only/42?token=secret#hidden`);
@@ -330,8 +327,8 @@ if (autoPayload.events[0].type !== "span" || autoPayload.events[0].id !== "evt_f
 if (autoPayload.events[0].attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`unexpected fastify trace id: ${autoTransport.lastBody()}`);
 }
-if (autoPayload.events[0].attributes.parentSpanId !== "00f067aa0ba902b7") {
-  throw new Error(`unexpected fastify parent span id: ${autoTransport.lastBody()}`);
+if ("parentSpanId" in autoPayload.events[0].attributes) {
+  throw new Error(`unheadered Fastify request must be a trace root: ${autoTransport.lastBody()}`);
 }
 if (autoPayload.events[0].attributes.spanId !== "b7ad6b7169203331") {
   throw new Error(`unexpected fastify request span id: ${autoTransport.lastBody()}`);
@@ -509,7 +506,7 @@ if ! node smoke.mjs > "$tmp_dir/fastify-smoke.stdout.json" 2> "$tmp_dir/fastify-
   exit 1
 fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/fastify-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/fastify-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/fastify-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/fastify-smoke.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/fastify-smoke.stderr.json"
@@ -602,8 +599,7 @@ const { logbrewFastifyPlugin } = require("@logbrew/fastify");
   assert.deepEqual(captureErrors, []);
   assert.equal(transport.sentBodies.length, 1);
   const payload = JSON.parse(transport.lastBody());
-  assert.equal(payload.events.length, 2);
-  assert.deepEqual(payload.events.map((event) => event.type).sort(), ["issue", "log"]);
+  assert.deepEqual(payload.events.map((event) => event.type).sort(), ["issue", "span"]);
   assert.equal(JSON.stringify(payload).includes("view=compact"), false);
   console.log(JSON.stringify({ cjsErrorLifecycle: true, ok: true }));
 })().catch((error) => {
@@ -1081,11 +1077,11 @@ node node_modules/@logbrew/fastify/examples/index.mjs --list > "$tmp_dir/launche
 grep -q 'real-user-smoke -> node node_modules/@logbrew/fastify/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/fastify/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"attempts":1' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/fastify/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/fastify/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -1094,7 +1090,7 @@ npm --prefix node_modules/@logbrew/fastify/examples run help > "$tmp_dir/npm-hel
 grep -q 'npm --prefix node_modules/@logbrew/fastify/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/fastify/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "fastify real-user smoke passed with fastify@$fastify_version and pino@$pino_version"

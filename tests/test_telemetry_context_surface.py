@@ -32,7 +32,7 @@ def client_source(path: Path) -> str:
 
 
 class TelemetryContextSurfaceTests(unittest.TestCase):
-    def test_every_javascript_client_forwards_shared_context_to_core(self) -> None:
+    def test_every_javascript_client_forwards_shared_context_to_its_runtime(self) -> None:
         for package, entrypoint in CLIENT_ENTRYPOINTS:
             for suffix in ("js", "cjs"):
                 relative_path = f"js/logbrew-{package}/{entrypoint}.{suffix}"
@@ -42,7 +42,7 @@ class TelemetryContextSurfaceTests(unittest.TestCase):
                     self.assertRegex(
                         source,
                         re.compile(
-                            r"LogBrewClient\.create\(\{[\s\S]{0,700}?"
+                            r"(?:LogBrewClient\.create|createLogBrewNodeClient)\(\{[\s\S]{0,700}?"
                             r"\bcontext(?:\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*)?,",
                         ),
                     )

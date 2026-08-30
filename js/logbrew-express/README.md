@@ -130,7 +130,7 @@ app.use(logbrewMiddleware({
 }));
 ```
 
-When an incoming request has a valid W3C `traceparent` header, the middleware attaches `req.logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by the Express middleware. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
+Every incoming request receives a LogBrew span. A valid W3C `traceparent` continues its trace with a fresh child span; an absent or malformed value starts a fresh local root without breaking the app. The middleware exposes that context through `req.logbrew.trace` and `getActiveLogBrewTrace()` across asynchronous work. Logs, issues, actions, and metrics captured by the default Express client inside the request inherit the same trace unless their event context overrides it. Use `spanIdFactory` and `traceIdFactory` when your runtime needs app-provided IDs:
 
 ```js
 app.use(logbrewMiddleware({

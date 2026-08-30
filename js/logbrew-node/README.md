@@ -250,7 +250,7 @@ The integration captures root and child loggers, respects custom Pino message/er
 
 Primitive structured fields become `context.*` metadata. Runtime defaults and nested objects are omitted. Credentials, authorization and cookie fields, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack fields are also excluded automatically; serialized error name/message remain available, while stack text requires `includeErrorStack: true`. The log message itself is telemetry, so keep secrets and user-entered text out of messages and retain your normal Pino redaction policy.
 
-Inside `withLogBrewHttpHandler()`, active W3C trace IDs are added automatically. Framework adapters can pass their own `getActiveLogBrewTrace` as `traceProvider` so application logs join the framework request trace without copying request headers or payloads.
+Inside `withLogBrewHttpHandler()`, active W3C trace IDs are added automatically. Framework adapters share this same Node scope through `createLogBrewTraceContext()`, `runWithLogBrewTrace()`, and `enterWithLogBrewTrace()`, so application signals and child operations join the request trace without copying propagation headers or payloads.
 
 ## Delivery Bounds
 
