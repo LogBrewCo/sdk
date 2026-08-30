@@ -4,9 +4,9 @@ set -Eeuo pipefail
 registry="https://registry.npmjs.org"
 tmp_dir="$(mktemp -d)"
 
-sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.12}"
+sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.16}"
 browser_version="${LOGBREW_NPM_BROWSER_VERSION:-0.1.3}"
-node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.10}"
+node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.11}"
 next_version="${LOGBREW_NPM_NEXT_VERSION:-0.1.7}"
 react_version="${LOGBREW_NPM_REACT_VERSION:-0.1.1}"
 react_native_version="${LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.20}"

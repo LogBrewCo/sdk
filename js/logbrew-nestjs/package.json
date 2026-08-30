@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/nestjs",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "NestJS interceptor helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
@@ -47,8 +47,8 @@
     "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "peerDependencies": {
-    "@logbrew/node": "^0.1.10",
-    "@logbrew/sdk": "^0.1.3",
+    "@logbrew/node": "^0.1.11",
+    "@logbrew/sdk": "^0.1.16",
     "@nestjs/common": ">=10",
     "rxjs": ">=7"
   },

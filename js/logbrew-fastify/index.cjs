@@ -14,7 +14,7 @@ const {
 } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-fastify";
-const DEFAULT_SDK_VERSION = "0.1.5";
+const DEFAULT_SDK_VERSION = "0.1.6";
 
 function createLogBrewFastifyClient({
   serverApiKey,
