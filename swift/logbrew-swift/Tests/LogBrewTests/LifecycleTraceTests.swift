@@ -29,7 +29,9 @@ struct LifecycleTraceTests {
             atMs: 1300,
             metadata: ["component": "scene-phase"],
         )
-        let (events, preview) = try capturedEvents(client)
+        let preview = try client.previewJSON()
+        let payload = try parsePayload(preview)
+        let events = try #require(payload["events"] as? [[String: Any]])
         let lifecycleEvents = events.filter { ($0["id"] as? String)?.hasPrefix("evt_scene_lifecycle_") == true }
         let transition = try #require(lifecycleEvents.first)
 
@@ -37,10 +39,8 @@ struct LifecycleTraceTests {
             && transition["id"] as? String == "evt_scene_lifecycle_1")
         try assertLifecycleEvent(
             transition, parent: context,
-            expected: (
-                span: ("swift.lifecycle:inactive->active", 245.5),
-                transition: (("inactive", "active"), "scene-phase"),
-            ),
+            span: ("swift.lifecycle:inactive->active", 245.5),
+            stateTransition: (("inactive", "active"), "scene-phase"),
             preview: preview,
         )
     }
@@ -61,33 +61,25 @@ struct LifecycleTraceTests {
         }
     }
 
-    private func capturedEvents(_ client: LogBrewClient) throws -> ([[String: Any]], String) {
-        let preview = try client.previewJSON()
-        let payload = try parsePayload(preview)
-        return try (#require(payload["events"] as? [[String: Any]]), preview)
-    }
-
     private func assertLifecycleEvent(
         _ event: [String: Any],
         parent: LogBrewTraceContext,
-        expected: (
-            span: (name: String, durationMs: Double),
-            transition: (states: (previous: String, current: String), component: String),
-        ),
+        span: (name: String, durationMs: Double),
+        stateTransition: (states: (previous: String, current: String), component: String),
         preview: String,
     ) throws {
         let attributes = try #require(event["attributes"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
         let childSpanId = try #require(attributes["spanId"] as? String)
-        #expect(["name": expected.span.name, "traceId": parent.traceId, "parentSpanId": parent.spanId]
+        #expect(["name": span.name, "traceId": parent.traceId, "parentSpanId": parent.spanId]
             .allSatisfy { attributes[$0.key] as? String == $0.value })
         #expect(childSpanId != parent.spanId)
         #expect(attributes["status"] as? String == "ok")
-        #expect(attributes["durationMs"] as? Double == expected.span.durationMs)
+        #expect(attributes["durationMs"] as? Double == span.durationMs)
         let expectedMetadata = [
-            "source": "swift.lifecycle", "previousState": expected.transition.states.previous,
-            "currentState": expected.transition.states.current, "durationSource": "previous_state",
-            "screen": "Checkout", "component": expected.transition.component,
+            "source": "swift.lifecycle", "previousState": stateTransition.states.previous,
+            "currentState": stateTransition.states.current, "durationSource": "previous_state",
+            "screen": "Checkout", "component": stateTransition.component,
             "traceId": parent.traceId, "spanId": childSpanId, "parentSpanId": parent.spanId,
         ]
         #expect(expectedMetadata.allSatisfy { metadata[$0.key] as? String == $0.value })
