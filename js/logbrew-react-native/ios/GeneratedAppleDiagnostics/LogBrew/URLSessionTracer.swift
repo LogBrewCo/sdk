@@ -23,7 +23,6 @@ public final class LogBrewURLSessionTracer: @unchecked Sendable {
         nowMsProvider: (@Sendable () -> Double)? = nil,
         onCaptureError: (@Sendable (any Error) -> Void)? = nil,
     ) throws {
-        let loader = LogBrewURLSessionDataLoader(session: session)
         try self.init(
             client: client,
             eventIDPrefix: eventIDPrefix,
@@ -31,7 +30,7 @@ public final class LogBrewURLSessionTracer: @unchecked Sendable {
             nowMsProvider: nowMsProvider,
             onCaptureError: onCaptureError,
             dataLoader: { request in
-                try await loader.data(for: request)
+                try await session.data(for: request)
             },
         )
     }
@@ -60,45 +59,63 @@ public final class LogBrewURLSessionTracer: @unchecked Sendable {
         routeTemplate: String? = nil,
         eventID: String? = nil,
         metadata: Metadata? = nil,
+        onRequestError: (@Sendable (any Error) throws -> Void)? = nil,
     ) async throws -> (Data, URLResponse) {
         let span = try LogBrewTrace.startURLSessionSpan(for: request, routeTemplate: routeTemplate)
         let startedAtMs = nowMsProvider()
 
         do {
             let (data, response) = try await dataLoader(span.request)
-            captureSpan(URLSessionTraceCapture(
-                eventID: eventID,
-                span: span,
-                response: response,
-                durationMs: durationSince(startedAtMs),
-                error: nil,
-                metadata: metadata,
-            ))
+            let durationMs = durationSince(startedAtMs)
+            captureSpan(eventID, span: span, response: response, durationMs: durationMs, metadata: metadata)
             return (data, response)
         } catch {
-            captureSpan(URLSessionTraceCapture(
-                eventID: eventID,
-                span: span,
-                response: nil,
-                durationMs: durationSince(startedAtMs),
-                error: error,
-                metadata: metadata,
-            ))
+            let durationMs = durationSince(startedAtMs)
+            captureSpan(eventID, span: span, durationMs: durationMs, error: error, metadata: metadata)
+            captureRequestError(error, context: span.traceContext, handler: onRequestError)
             throw error
         }
     }
 
-    private func captureSpan(_ capture: URLSessionTraceCapture) {
-        do {
+    private func captureRequestError(
+        _ requestError: any Error,
+        context: LogBrewTraceContext,
+        handler: (@Sendable (any Error) throws -> Void)?,
+    ) {
+        guard let handler else {
+            return
+        }
+        capture {
+            try LogBrewTrace.withContext(context) {
+                try handler(requestError)
+            }
+        }
+    }
+
+    private func captureSpan(
+        _ eventID: String?,
+        span: LogBrewURLSessionSpan,
+        response: URLResponse? = nil,
+        durationMs: Double,
+        error: (any Error)? = nil,
+        metadata: Metadata?,
+    ) {
+        capture {
             try client.captureURLSessionSpan(
-                capture.eventID ?? nextEventID(),
+                eventID ?? nextEventID(),
                 timestamp: timestampProvider(),
-                span: capture.span,
-                statusCode: (capture.response as? HTTPURLResponse)?.statusCode,
-                durationMs: capture.durationMs,
-                error: capture.error,
-                metadata: capture.metadata,
+                span: span,
+                statusCode: (response as? HTTPURLResponse)?.statusCode,
+                durationMs: durationMs,
+                error: error,
+                metadata: metadata,
             )
+        }
+    }
+
+    private func capture(_ operation: () throws -> Void) {
+        do {
+            try operation()
         } catch {
             onCaptureError?(error)
         }
@@ -113,13 +130,11 @@ public final class LogBrewURLSessionTracer: @unchecked Sendable {
     }
 
     private func nextEventID() -> String {
-        lock.lock()
-        defer {
-            lock.unlock()
+        lock.withLock {
+            let eventID = "\(eventIDPrefix)_\(nextEventSequence)"
+            nextEventSequence += 1
+            return eventID
         }
-        let eventID = "\(eventIDPrefix)_\(nextEventSequence)"
-        nextEventSequence += 1
-        return eventID
     }
 
     private static func defaultTimestamp() -> String {
@@ -130,22 +145,5 @@ public final class LogBrewURLSessionTracer: @unchecked Sendable {
 
     private static func defaultNowMs() -> Double {
         ProcessInfo.processInfo.systemUptime * 1000
-    }
-}
-
-private struct URLSessionTraceCapture {
-    let eventID: String?
-    let span: LogBrewURLSessionSpan
-    let response: URLResponse?
-    let durationMs: Double
-    let error: (any Error)?
-    let metadata: Metadata?
-}
-
-private struct LogBrewURLSessionDataLoader: @unchecked Sendable {
-    let session: URLSession
-
-    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        try await session.data(for: request)
     }
 }
