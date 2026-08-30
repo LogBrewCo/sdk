@@ -238,7 +238,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts",
             'bun run tools/npm-publish/publish.mjs "${package_dirs[@]}"',
             'gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"',
-            'bun add --exact --ignore-scripts "${install_specs[@]}"',
+            "for attempt in {1..8}; do",
+            'bun add --force --no-cache --exact --ignore-scripts "${install_specs[@]}"',
             "if (( elapsed >= 60 )); then",
             "--require-npm-provenance",
         ):

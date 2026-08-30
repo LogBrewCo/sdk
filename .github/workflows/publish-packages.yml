@@ -158,7 +158,7 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          package_dirs=(
+          workspace_package_dirs=(
             js/logbrew-js
             js/logbrew-browser
             js/logbrew-node
@@ -177,8 +177,6 @@ jobs:
             js/logbrew-react-native
             js/logbrew-next
           )
-          workspace_package_dirs=("${package_dirs[@]}")
-
           package_field() {
             bun -e 'const manifest = require(process.argv[1]); console.log(manifest[process.argv[2]])' "./$1/package.json" "$2"
           }
@@ -214,7 +212,7 @@ jobs:
             printf '%s\n' "${selected_package_dirs[@]}"
           }
 
-          mapfile -t package_dirs < <(select_npm_package_dirs "$NPM_PACKAGES" "${package_dirs[@]}")
+          mapfile -t package_dirs < <(select_npm_package_dirs "$NPM_PACKAGES" "${workspace_package_dirs[@]}")
 
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             package_dirs+=(unity/logbrew-unity)
@@ -254,30 +252,28 @@ jobs:
             publication_plan_args+=(--package "$package_version")
           done
           missing_npm_packages=()
-          if [[ "${#publication_plan_args[@]}" -gt 2 ]]; then
-            python3 scripts/plan_npm_publication.py \
-              "${publication_plan_args[@]}" > "$npm_publication_plan"
-            bun -e '
-              const fs = require("node:fs");
-              const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-              const stringArray = (value) =>
-                Array.isArray(value) && value.every((entry) => typeof entry === "string");
-              if (!stringArray(plan.existingVersions) || !stringArray(plan.missingPackagePages)) {
-                console.error("npm publication preflight returned an invalid receipt");
-                process.exit(1);
-              }
-              if (plan.existingVersions.length > 0) {
-                const versions = plan.existingVersions.join("\n- ");
-                console.error("Selected npm versions already exist and are immutable:\n- " + versions +
-                  "\nAdvance every colliding package version before retrying the selected release.");
-                process.exit(1);
-              }
-              const missing = plan.missingPackagePages;
-              fs.writeFileSync(process.argv[1], missing.length > 0 ? missing.join("\n") + "\n" : "");
-            ' "$npm_publication_plan"
-            mapfile -t missing_npm_packages < "$npm_publication_plan"
-            rm -f "$npm_publication_plan"
-          fi
+          python3 scripts/plan_npm_publication.py \
+            "${publication_plan_args[@]}" > "$npm_publication_plan"
+          bun -e '
+            const fs = require("node:fs");
+            const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const stringArray = (value) =>
+              Array.isArray(value) && value.every((entry) => typeof entry === "string");
+            if (!stringArray(plan.existingVersions) || !stringArray(plan.missingPackagePages)) {
+              console.error("npm publication preflight returned an invalid receipt");
+              process.exit(1);
+            }
+            if (plan.existingVersions.length > 0) {
+              const versions = plan.existingVersions.join("\n- ");
+              console.error("Selected npm versions already exist and are immutable:\n- " + versions +
+                "\nAdvance every colliding package version before retrying the selected release.");
+              process.exit(1);
+            }
+            const missing = plan.missingPackagePages;
+            fs.writeFileSync(process.argv[1], missing.length > 0 ? missing.join("\n") + "\n" : "");
+          ' "$npm_publication_plan"
+          mapfile -t missing_npm_packages < "$npm_publication_plan"
+          rm -f "$npm_publication_plan"
 
           if [[ "$DRY_RUN" != "true" && -z "$NPM_PACKAGES" ]]; then
             echo "Bun publication requires an explicit npm_packages selection." >&2
@@ -291,8 +287,6 @@ jobs:
 
           if [[ "$DRY_RUN" == "true" ]]; then
             for package_dir in "${package_dirs[@]}"; do
-              package_name="$(package_field "$package_dir" name)"
-              echo "Packing ${package_name} from ${package_dir}"
               (cd "$package_dir" && bun pm pack --dry-run --ignore-scripts)
             done
           else
@@ -328,8 +322,11 @@ jobs:
 
           install_dir="$(mktemp -d)"
           trap 'find "$install_dir" -depth -delete' EXIT
-          (cd "$install_dir" && BUN_INSTALL_CACHE_DIR="$install_dir/cache" \
-            bun add --exact --ignore-scripts "${install_specs[@]}")
+          for attempt in {1..8}; do
+            (cd "$install_dir" && bun add --force --no-cache --exact --ignore-scripts "${install_specs[@]}") && break
+            (( attempt < 8 )) || exit 1
+            sleep 1
+          done
           if grep -Eq '(file:|link:|/private/tmp|/home/runner/work)' \
             "$install_dir/package.json" "$install_dir/bun.lock"; then
             echo "Clean install contains a local source reference" >&2
