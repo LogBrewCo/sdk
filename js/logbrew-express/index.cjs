@@ -11,7 +11,7 @@ const {
 } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-express";
-const DEFAULT_SDK_VERSION = "0.1.4";
+const DEFAULT_SDK_VERSION = "0.1.5";
 const requestLifecycles = new WeakMap();
 
 function createLogBrewExpressClient({

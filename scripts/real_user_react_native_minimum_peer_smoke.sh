@@ -39,7 +39,7 @@ if [[ -n "$sdk_tarball" ]]; then
 	tar -xzf "$sdk_tarball" -C "$consumer_root/node_modules/@logbrew/sdk" --strip-components=1
 else
 	bun -e 'await Bun.write(Bun.argv[1], JSON.stringify({name:"logbrew-rn-peer-smoke",private:true}))' "$consumer_root/package.json"
-	bun --cwd "$consumer_root" add --no-save --ignore-scripts --silent "@logbrew/sdk@$minimum_sdk_version"
+	bun add --cwd "$consumer_root" --no-save --ignore-scripts --silent "@logbrew/sdk@$minimum_sdk_version"
 fi
 tar -xzf "$native_tarball" -C "$consumer_root/node_modules/@logbrew/react-native" --strip-components=1
 ln -s "$react_stub" "$consumer_root/node_modules/react"

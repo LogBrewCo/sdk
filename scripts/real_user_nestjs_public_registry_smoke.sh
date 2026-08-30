@@ -6,9 +6,9 @@ tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-nestjs-public.XXXXXX")"
 registry="https://registry.npmjs.org"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
-nestjs_version="${LOGBREW_NPM_NESTJS_VERSION:-0.1.2}"
-node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.2}"
-sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.5}"
+nestjs_version="${LOGBREW_NPM_NESTJS_VERSION:-0.1.6}"
+node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.11}"
+sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.16}"
 nest_common_version="11.1.28"
 reflect_metadata_version="0.2.2"
 rxjs_version="7.8.2"
@@ -112,8 +112,8 @@ const nestManifest = JSON.parse(
   fs.readFileSync("node_modules/@logbrew/nestjs/package.json", "utf8")
 );
 if (
-  nestManifest.peerDependencies?.["@logbrew/node"] !== "^0.1.2"
-  || nestManifest.peerDependencies?.["@logbrew/sdk"] !== "^0.1.3"
+  nestManifest.peerDependencies?.["@logbrew/node"] !== "^0.1.11"
+  || nestManifest.peerDependencies?.["@logbrew/sdk"] !== "^0.1.16"
   || nestManifest.peerDependencies?.["@nestjs/common"] !== ">=10"
   || nestManifest.peerDependencies?.rxjs !== ">=7"
 ) {
@@ -137,7 +137,7 @@ import {
 const client = createLogBrewNestClient({
   serverApiKey: "receipt-key",
   sdkName: "nestjs-release-receipt",
-  sdkVersion: "0.1.2"
+  sdkVersion: "0.1.6"
 });
 const logger: LogBrewNestLogger = createLogBrewNestLogger({
   client,
@@ -272,7 +272,7 @@ try {
   const loggerClient = createLogBrewNestClient({
     serverApiKey: "logger-key",
     sdkName: "nestjs-release-receipt",
-    sdkVersion: "0.1.2",
+    sdkVersion: "0.1.6",
     maxRetries: 0
   });
   const logger = createLogBrewNestLogger({
