@@ -60,6 +60,7 @@ const HTTP_CLIENT_URL_USER_KEY = ["user", "name"].join("");
 const HTTP_CLIENT_URL_ACCESS_KEY = ["pass", "word"].join("");
 const HTTP_CLIENT_DEFAULT_AUTHORITY = ["local", "host"].join("");
 const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
+const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
 const activeTraceContext = new AsyncLocalStorage();
 const axiosInstrumentationHandles = new WeakMap();
 const httpClientInstrumentationHandles = new WeakMap();
@@ -129,6 +130,7 @@ function createLogBrewNodeClient({
       deliveryIntervalMs,
       deliveryQueueThreshold,
       eventStore,
+      [CONTEXT_PROVIDER]: activeTraceTelemetryContext,
       ...(persistentQueuePath !== undefined
         ? {
             [EVENT_QUEUE_FACTORY]: (queueConfig) => createPersistentEventQueue({
@@ -685,42 +687,25 @@ function createHttpRequestEvent(req, res, {
   durationMs = 0,
   idFactory = defaultRequestEventId,
   spanIdFactory = defaultSpanIdFactory,
+  traceIdFactory = defaultTraceIdFactory,
   trace = undefined
 } = {}) {
   const method = req.method ?? "GET";
   const path = getRequestPath(req);
   const statusCode = Number(res.statusCode ?? 0);
   const id = idFactory(req, res);
-  const traceContext = trace ?? getRequestTraceContext(req) ?? createRequestTraceContext(req, res, { spanIdFactory });
-  const spanEvent = traceContext
-    ? createTraceparentRequestSpan(traceContext, {
-      durationMs,
-      id,
-      method,
-      now,
-      path,
-      statusCode
-    })
-    : undefined;
-  if (spanEvent) {
-    return spanEvent;
-  }
-
-  return {
+  const traceContext = trace ?? getRequestTraceContext(req) ?? createRequestTraceContext(req, res, {
+    spanIdFactory,
+    traceIdFactory
+  });
+  return createTraceparentRequestSpan(traceContext, {
+    durationMs,
     id,
-    timestamp: now(),
-    attributes: {
-      message: `${method} ${path} ${statusCode}`,
-      level: statusCode >= 500 ? "error" : "info",
-      logger: "node",
-      metadata: {
-        method,
-        path,
-        statusCode,
-        durationMs
-      }
-    }
-  };
+    method,
+    now,
+    path,
+    statusCode
+  });
 }
 
 function createHttpErrorEvent(error, req, {
@@ -1940,10 +1925,6 @@ function createTraceparentRequestSpan(traceContext, {
   path,
   statusCode
 }) {
-  if (!traceContext) {
-    return undefined;
-  }
-
   return {
     id,
     timestamp: now(),
@@ -1986,31 +1967,40 @@ function randomHex(byteLength) {
   }
 
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return hex === "0000000000000000" ? "0000000000000001" : hex;
+  return /[^0]/u.test(hex) ? hex : `${hex.slice(0, -1)}1`;
 }
 
 function createRequestTraceContext(req, res, {
-  spanIdFactory = defaultSpanIdFactory
+  spanIdFactory = defaultSpanIdFactory,
+  traceIdFactory = defaultTraceIdFactory
 } = {}) {
+  const spanId = requestGeneratedId(spanIdFactory, defaultSpanIdFactory, normalizeSpanId, req, res);
   const traceparent = getTraceparentHeader(req);
-  if (!traceparent) {
-    return undefined;
-  }
-
-  try {
-    const context = parseTraceparent(traceparent);
-    const spanId = normalizeSpanId(spanIdFactory(req, res));
-    if (!spanId) {
-      return undefined;
+  if (traceparent) {
+    try {
+      const context = parseTraceparent(traceparent);
+      return {
+        traceId: context.traceId,
+        spanId,
+        parentSpanId: context.parentSpanId,
+        sampled: context.sampled
+      };
+    } catch {
+      // Invalid propagation starts a safe local root instead of breaking the request.
     }
-    return {
-      traceId: context.traceId,
-      spanId,
-      parentSpanId: context.parentSpanId,
-      sampled: context.sampled
-    };
+  }
+  return {
+    traceId: requestGeneratedId(traceIdFactory, defaultTraceIdFactory, normalizeTraceId, req, res),
+    spanId,
+    sampled: true
+  };
+}
+
+function requestGeneratedId(factory, fallback, normalize, req, res) {
+  try {
+    return normalize(factory(req, res)) ?? fallback();
   } catch {
-    return undefined;
+    return fallback();
   }
 }
 
@@ -2028,6 +2018,11 @@ function traceMetadata(trace) {
     spanId: trace.spanId,
     traceId: trace.traceId
   };
+}
+
+function activeTraceTelemetryContext() {
+  const trace = getActiveLogBrewTrace();
+  return trace ? { schemaVersion: 1, trace: traceMetadata(trace) } : undefined;
 }
 
 function nowMs(options) {

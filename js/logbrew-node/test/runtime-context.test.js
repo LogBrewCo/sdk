@@ -4,7 +4,7 @@ import { arch, release, type } from "node:os";
 import test from "node:test";
 
 import { RecordingTransport } from "@logbrew/sdk";
-import { createLogBrewNodeClient } from "../index.js";
+import nodeSdk, { createLogBrewNodeClient } from "../index.js";
 
 const FIXED_TIMESTAMP = "2026-08-02T10:00:00Z";
 const require = createRequire(import.meta.url);
@@ -175,4 +175,5 @@ test("CommonJS and ESM clients expose the same default runtime context", async (
 
   assert.deepEqual(cjs.context, esm.context);
   assert.deepEqual(cjs.context, expectedDefaultContext());
+  assert.equal(nodeSdk, commonJs.default);
 });

@@ -2,12 +2,12 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   realpathSync,
+  rmSync,
   rmdirSync,
-  symlinkSync,
-  unlinkSync
+  symlinkSync
 } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,9 +15,7 @@ const testDirectory = dirname(fileURLToPath(import.meta.url));
 const packageDirectory = dirname(testDirectory);
 const scopeDirectory = join(packageDirectory, "node_modules", "@logbrew");
 const sdkLink = join(scopeDirectory, "sdk");
-const require = createRequire(import.meta.url);
-const sdkIsInstalled = canResolveSdk();
-const createdLink = !sdkIsInstalled && !existsSync(sdkLink);
+const createdLink = !existsSync(sdkLink) && !existsSync(join(packageDirectory, "..", "sdk"));
 
 try {
   if (createdLink) {
@@ -25,13 +23,24 @@ try {
     mkdirSync(scopeDirectory, { recursive: true });
     symlinkSync(sdkSource, sdkLink, "dir");
   }
+  const build = await Bun.build({
+    entrypoints: sourceEntries(),
+    naming: "[dir]/[name]-[hash].[ext]",
+    packages: "external",
+    target: "node",
+    write: false
+  });
+  if (!build.success) {
+    throw new AggregateError(build.logs, "Node package source build failed");
+  }
   const result = spawnSync(
     process.execPath,
     [
-      "--test",
+      "test",
       ...process.argv.slice(2),
       "persistent-delivery.test.js",
       "pino-instrumentation.test.js",
+      "request-tracing.test.js",
       "runtime-context.test.js"
     ],
     {
@@ -42,25 +51,18 @@ try {
   process.exitCode = result.status ?? 1;
 } finally {
   if (createdLink) {
-    unlinkSync(sdkLink);
-    removeIfEmpty(scopeDirectory);
-    removeIfEmpty(dirname(scopeDirectory));
+    rmSync(sdkLink, { force: true });
+    try {
+      rmdirSync(scopeDirectory);
+      rmdirSync(dirname(scopeDirectory));
+    } catch {}
   }
 }
 
-function canResolveSdk() {
-  try {
-    require.resolve("@logbrew/sdk");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeIfEmpty(path) {
-  try {
-    rmdirSync(path);
-  } catch {
-    // Preserve directories containing files not owned by this test runner.
-  }
+function sourceEntries() {
+  return [packageDirectory, join(packageDirectory, "examples")].flatMap((directory) => (
+    readdirSync(directory)
+      .filter((name) => /\.(?:c?js|mjs)$/u.test(name))
+      .map((name) => join(directory, name))
+  ));
 }

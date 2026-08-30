@@ -27,6 +27,8 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 }, {
   captureRequests: false,
   client,
+  spanIdFactory: () => "b7ad6b7169203330",
+  traceIdFactory: () => "4bf92f3577b34da6a3ce929d0e0e4736",
   transport
 }));
 

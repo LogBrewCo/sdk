@@ -378,8 +378,7 @@ test("failed lease release preserves the active heartbeat and usable owner", (t)
   assert.equal(clearedHeartbeats, 1);
 });
 
-test("persistent admission resolves each injected filesystem failure to one durable outcome", async (t) => {
-  await t.test("pre-publication rejection is durably absent", () => {
+test("persistent admission keeps pre-publication rejection durably absent", (t) => {
     const parent = temporaryParent(t);
     const descriptorPaths = new Map();
     const nativeClose = fsModule.closeSync;
@@ -433,7 +432,7 @@ test("persistent admission resolves each injected filesystem failure to one dura
     queue.close();
   });
 
-  await t.test("failed rejection proof permanently fails closed", () => {
+test("persistent admission fails closed when rejection cannot be proven", (t) => {
     const parent = temporaryParent(t);
     const nativeLink = fsModule.linkSync;
     const nativeUnlink = fsModule.unlinkSync;
@@ -465,7 +464,7 @@ test("persistent admission resolves each injected filesystem failure to one dura
     assertFixedStorageError(captureThrown(() => queue.length()), "persistent_queue_unavailable");
   });
 
-  await t.test("an unrecognized second link still fails closed", () => {
+test("persistent admission rejects an unrecognized second link", (t) => {
     const parent = temporaryParent(t);
     const persistentQueue = loadPersistentQueueWith({});
     const queue = persistentQueue.createPersistentEventQueue(queueConfig(parent));
@@ -482,7 +481,7 @@ test("persistent admission resolves each injected filesystem failure to one dura
     queue.close();
   });
 
-  const durablePublicationFailures = [
+const durablePublicationFailures = [
     {
       name: "temporary unlink",
       overrides(state) {
@@ -545,8 +544,8 @@ test("persistent admission resolves each injected filesystem failure to one dura
     }
   ];
 
-  for (const scenario of durablePublicationFailures) {
-    await t.test(scenario.name, () => {
+for (const scenario of durablePublicationFailures) {
+  test(`persistent admission retains events after ${scenario.name} failure`, (t) => {
       const parent = temporaryParent(t);
       const state = { appendFsyncs: 0, armed: false, injected: 0 };
       const persistentQueue = loadPersistentQueueWith({
@@ -567,9 +566,8 @@ test("persistent admission resolves each injected filesystem failure to one dura
       recovered.acknowledge(1);
       recovered.close();
       delete require.cache[persistentQueueModulePath];
-    });
-  }
-});
+  });
+}
 
 test("a concurrent owner fails closed and clean shutdown releases ownership", async (t) => {
   const parent = temporaryParent(t);
@@ -633,8 +631,7 @@ test("hard exit replays retained events oldest first in the next process", async
   assert.deepEqual(payloadEventIds(transport.sentBodies), ["restart-0", "restart-1", "restart-2"]);
 });
 
-test("malformed, oversized, unknown, weak, and linked storage fail closed", async (t) => {
-  const cases = [
+const invalidStorageCases = [
     {
       name: "malformed",
       prepare(child) {
@@ -675,19 +672,18 @@ test("malformed, oversized, unknown, weak, and linked storage fail closed", asyn
         symlinkSync(target, join(child, "event-0000000000000001.json"));
       }
     }
-  ];
+];
 
-  for (const scenario of cases) {
-    await t.test(scenario.name, () => {
+for (const scenario of invalidStorageCases) {
+  test(`persistent storage rejects ${scenario.name} state`, (t) => {
       const parent = temporaryParent(t);
       const child = queueDirectory(parent);
       mkdirSync(child, { mode: 0o700 });
       scenario.prepare(child);
       const error = captureThrown(() => createClient(parent, scenario.options));
       assertFixedStorageError(error, "persistent_queue_invalid");
-    });
-  }
-});
+  });
+}
 
 test("a linked queue directory is rejected without falling back to memory", (t) => {
   const parent = temporaryParent(t);
@@ -698,18 +694,16 @@ test("a linked queue directory is rejected without falling back to memory", (t) 
   assertFixedStorageError(error, "persistent_queue_invalid");
 });
 
-test("weak parent and queue directory modes are rejected", async (t) => {
-  await t.test("parent", () => {
+test("weak persistent parent mode is rejected", (t) => {
     const parent = temporaryParent(t);
     chmodSync(parent, 0o755);
     assertFixedStorageError(captureThrown(() => createClient(parent)), "persistent_queue_invalid");
   });
-  await t.test("queue", () => {
+test("weak persistent queue mode is rejected", (t) => {
     const parent = temporaryParent(t);
     mkdirSync(queueDirectory(parent), { mode: 0o755 });
     assertFixedStorageError(captureThrown(() => createClient(parent)), "persistent_queue_invalid");
   });
-});
 
 test("explicit purge removes only recognized SDK storage and rejects unknown entries", async (t) => {
   const parent = temporaryParent(t);

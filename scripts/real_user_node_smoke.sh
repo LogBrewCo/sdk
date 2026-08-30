@@ -93,6 +93,11 @@ const context = {
     runtime: { name: "node", version: process.versions.node },
     operatingSystem: { name: type(), version: release() },
     device: { architecture: arch() }
+  },
+  trace: {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203330",
+    sampled: true
   }
 };
 for (const event of payload.events) {
@@ -264,6 +269,8 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 }, {
   captureRequests: false,
   client,
+  spanIdFactory: () => "b7ad6b7169203330",
+  traceIdFactory: () => "4bf92f3577b34da6a3ce929d0e0e4736",
   transport: requestTransport
 }));
 
@@ -1912,12 +1919,8 @@ const handler = withLogBrewHttpHandler((
     now: () => "2026-06-02T10:00:06Z",
     spanIdFactory: () => "b7ad6b7169203331"
   });
-  if (event.type === "span") {
-    event.attributes.parentSpanId?.toUpperCase();
-    context.client.span(event.id, event.timestamp, event.attributes);
-  } else {
-    context.client.log(event.id, event.timestamp, event.attributes);
-  }
+  event.attributes.parentSpanId?.toUpperCase();
+  context.client.span(event.id, event.timestamp, event.attributes);
   res.end(`${req.logbrew.client.pendingEvents()}`);
 }, {
   client,
