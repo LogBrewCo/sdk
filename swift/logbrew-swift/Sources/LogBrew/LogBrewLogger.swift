@@ -12,9 +12,7 @@ public enum LogBrewLoggerLevel: String, Sendable {
 
     var logBrewLevel: LogLevel {
         switch self {
-        case .trace, .debug:
-            .info
-        case .info, .notice:
+        case .trace, .debug, .info, .notice:
             .info
         case .warning:
             .warning
@@ -71,7 +69,7 @@ public final class LogBrewLogger {
         baseMetadata = metadata ?? [:]
         self.transport = transport
         self.flushOnLog = flushOnLog
-        self.timestampProvider = timestampProvider ?? Self.defaultTimestamp
+        self.timestampProvider = timestampProvider ?? currentTelemetryTimestamp
         self.onError = onError
     }
 
@@ -243,12 +241,6 @@ public final class LogBrewLogger {
             merged["swiftErrorDescription"] = .string(error.localizedDescription)
         }
         return merged
-    }
-
-    private static func defaultTimestamp() -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: Date())
     }
 }
 

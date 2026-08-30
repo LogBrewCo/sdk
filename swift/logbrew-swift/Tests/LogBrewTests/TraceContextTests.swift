@@ -7,6 +7,8 @@ import Testing
 
 @Suite("LogBrew Swift trace correlation")
 struct TraceContextTests {
+    private struct OperationFailure: Error {}
+
     private let incomingTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 
     @Test("W3C traceparent continuation creates a local child span")
@@ -25,8 +27,8 @@ struct TraceContextTests {
         #expect(context.traceparent == "00-\(context.traceId)-\(context.spanId)-01")
     }
 
-    @Test("strict traceparent parsing rejects malformed propagation")
-    func strictTraceparentParsingRejectsMalformedPropagation() throws {
+    @Test("invalid trace input fails closed or creates a safe fallback")
+    func invalidTraceInputFailsClosedOrFallsBack() throws {
         for value in [
             "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
             "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
@@ -34,10 +36,7 @@ struct TraceContextTests {
         ] {
             #expect(throws: SdkError.self) { _ = try LogBrewTrace.parseTraceparent(value) }
         }
-    }
-
-    @Test("malformed propagation falls back without leaking raw header")
-    func malformedPropagationFallsBackWithoutLeakingRawHeader() {
+        #expect(throws: SdkError.self) { _ = try LogBrewTrace.createContext(traceFlags: "zz") }
         let context = LogBrewTrace.continueOrCreateContext(fromTraceparent: "not-a-traceparent")
         let metadata = LogBrewTrace.metadata(context)
 
@@ -46,13 +45,6 @@ struct TraceContextTests {
         #expect(context.spanId.count == 16)
         #expect(metadata["traceId"] == .string(context.traceId))
         #expect(metadata["traceparent"] == nil)
-    }
-
-    @Test("explicit context creation rejects invalid trace flags")
-    func explicitContextCreationRejectsInvalidTraceFlags() throws {
-        #expect(throws: SdkError.self) {
-            _ = try LogBrewTrace.createContext(traceFlags: "zz")
-        }
     }
 
     @Test("task-local trace survives async work")
@@ -67,17 +59,36 @@ struct TraceContextTests {
         #expect(LogBrewTrace.current == nil)
     }
 
-    @Test("active trace correlates logs issues actions metrics and spans")
-    func activeTraceCorrelatesSignals() throws {
+    @Test("active operation correlates logs issues actions metrics and spans")
+    func activeOperationCorrelatesSignals() async throws {
         let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
         let logger = try makeLogger(client)
-        let context = try fixedTraceContext()
+        let parent = try fixedTraceContext()
+        var context: LogBrewTraceContext?
 
-        try recordCorrelatedSignals(client: client, logger: logger, context: context)
+        do {
+            try await LogBrewTrace.withContext(parent) {
+                try await client.withOperation("checkout.submit", onOperationError: { _ in
+                    context = LogBrewTrace.current
+                }, operation: {
+                    try recordCorrelatedSignals(client: client, logger: logger)
+                    throw OperationFailure()
+                })
+            }
+        } catch is OperationFailure {}
 
         let events = try payloadEvents(client)
-        try assertCorrelatedEvents(events, context: context)
-        try assertCorrelatedSpan(events, context: context)
+        let capturedContext = try #require(context)
+        try assertCorrelatedEvents(events, context: capturedContext)
+        try assertCorrelatedSpan(events, context: capturedContext)
+        let operation = try #require(events
+            .first { $0["id"] as? String == "swift_operation_span_\(capturedContext.spanId)" })
+        let attributes = try #require(operation["attributes"] as? [String: Any])
+        let metadata = try #require(attributes["metadata"] as? [String: Any])
+        #expect(attributes["name"] as? String == "checkout.submit")
+        #expect(attributes["status"] as? String == "error" && attributes["parentSpanId"] as? String == parent.spanId)
+        #expect(metadata["source"] as? String == "swift.operation" && (metadata["errorType"] as? String)?
+            .hasSuffix(".OperationFailure") == true)
     }
 
     @Test("outgoing headers only expose normalized traceparent")
@@ -103,23 +114,20 @@ struct TraceContextTests {
     private func recordCorrelatedSignals(
         client: LogBrewClient,
         logger: LogBrewLogger,
-        context: LogBrewTraceContext,
     ) throws {
-        try LogBrewTrace.withContext(context) {
-            try client.issue(
-                "evt_issue_001",
-                timestamp: "2026-06-02T10:00:02Z",
-                attributes: IssueAttributes(title: "Checkout timeout", level: .error, metadata: ["traceId": "spoofed"]),
-            )
-            logger.error("checkout failed")
-            try client.captureProductAction(
-                "evt_action_001",
-                timestamp: "2026-06-02T10:00:04Z",
-                name: "checkout.pay_tapped",
-                metadata: ["component": "pay-button"],
-            )
-            try recordCorrelatedMetricAndSpan(client)
-        }
+        try client.issue(
+            "evt_issue_001",
+            timestamp: "2026-06-02T10:00:02Z",
+            attributes: IssueAttributes(title: "Checkout timeout", level: .error, metadata: ["traceId": "spoofed"]),
+        )
+        logger.error("checkout failed")
+        try client.captureProductAction(
+            "evt_action_001",
+            timestamp: "2026-06-02T10:00:04Z",
+            name: "checkout.pay_tapped",
+            metadata: ["component": "pay-button"],
+        )
+        try recordCorrelatedMetricAndSpan(client)
     }
 
     private func recordCorrelatedMetricAndSpan(_ client: LogBrewClient) throws {
