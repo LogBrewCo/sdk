@@ -47,7 +47,7 @@ public final class LogBrewURLSessionTracer: @unchecked Sendable {
         try requireNonEmpty("URLSession tracer eventIDPrefix", normalizedPrefix)
         self.client = client
         self.eventIDPrefix = normalizedPrefix
-        self.timestampProvider = timestampProvider ?? Self.defaultTimestamp
+        self.timestampProvider = timestampProvider ?? currentTelemetryTimestamp
         self.nowMsProvider = nowMsProvider ?? Self.defaultNowMs
         self.onCaptureError = onCaptureError
         self.dataLoader = dataLoader
@@ -135,12 +135,6 @@ public final class LogBrewURLSessionTracer: @unchecked Sendable {
             nextEventSequence += 1
             return eventID
         }
-    }
-
-    private static func defaultTimestamp() -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: Date())
     }
 
     private static func defaultNowMs() -> Double {

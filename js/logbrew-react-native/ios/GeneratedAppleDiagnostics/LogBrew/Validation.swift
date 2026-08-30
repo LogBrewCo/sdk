@@ -2,6 +2,12 @@
 // Edit the canonical Swift source, then regenerate this package boundary.
 import Foundation
 
+func currentTelemetryTimestamp() -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.string(from: Date())
+}
+
 func validateRelease(_ attributes: ReleaseAttributes) throws -> ReleaseAttributes {
     try requireNonEmpty("release version", attributes.version)
     if let commit = attributes.commit {

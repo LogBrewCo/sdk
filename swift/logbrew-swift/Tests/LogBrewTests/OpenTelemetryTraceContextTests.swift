@@ -3,8 +3,8 @@ import Testing
 
 @Suite("LogBrew Swift OpenTelemetry trace context")
 struct OpenTelemetryTraceContextTests {
-    @Test("OpenTelemetry span context copy creates a local child span")
-    func openTelemetrySpanContextCopyCreatesChildSpan() throws {
+    @Test("OpenTelemetry copies parent, sampling, and carrier fields")
+    func openTelemetryCopiesContextFields() throws {
         let parent = try makeOpenTelemetryParent()
         let context = LogBrewTrace.context(fromOpenTelemetrySpanContext: parent)
 
@@ -17,6 +17,26 @@ struct OpenTelemetryTraceContextTests {
         #expect(context.spanId.count == 16)
         #expect(context.spanId != parent.spanId)
         #expect(context.traceFlags == parent.traceFlags)
+        let unsampled = try LogBrewTrace.openTelemetrySpanContext(
+            traceId: parent.traceId,
+            spanId: parent.spanId,
+            sampled: false,
+        )
+        #expect(!unsampled.sampled && unsampled.traceFlags == "00")
+        #expect(LogBrewTrace.context(fromOpenTelemetrySpanContext: unsampled).traceFlags == "00")
+
+        let carrier = FakeOpenTelemetrySpanContext(
+            logBrewOpenTelemetryTraceId: parent.traceId.uppercased(),
+            logBrewOpenTelemetrySpanId: parent.spanId.uppercased(),
+            logBrewOpenTelemetryTraceFlags: "01",
+            logBrewOpenTelemetryIsValid: true,
+        )
+        let copied = try #require(try LogBrewTrace.openTelemetrySpanContext(from: carrier))
+        let carried = try #require(try LogBrewTrace.context(fromOpenTelemetrySpanContextCarrier: carrier))
+        #expect(copied == parent)
+        #expect(carried.traceId == parent.traceId)
+        #expect(carried.parentSpanId == parent.spanId)
+        #expect(carried.spanId != parent.spanId)
     }
 
     @Test("OpenTelemetry span attributes create a child span with sanitized metadata")
@@ -43,57 +63,17 @@ struct OpenTelemetryTraceContextTests {
         #expect(metadata["component"] == .string("otel-bridge"))
     }
 
-    @Test("OpenTelemetry sampled flag maps to W3C trace flags")
-    func openTelemetrySampledFlagMapsToTraceFlags() throws {
-        let sampled = try LogBrewTrace.openTelemetrySpanContext(
-            traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-            spanId: "00f067aa0ba902b7",
-            sampled: false,
-        )
-        let context = LogBrewTrace.context(fromOpenTelemetrySpanContext: sampled)
-
-        #expect(!sampled.sampled)
-        #expect(sampled.traceFlags == "00")
-        #expect(context.traceFlags == "00")
-    }
-
-    @Test("OpenTelemetry carrier protocol copies valid live span context fields")
-    func openTelemetryCarrierProtocolCopiesValidFields() throws {
-        let carrier = FakeOpenTelemetrySpanContext(
-            traceId: "4BF92F3577B34DA6A3CE929D0E0E4736",
-            spanId: "00F067AA0BA902B7",
-            traceFlags: "01",
-            isValid: true,
-        )
-        let parentCandidate = try LogBrewTrace.openTelemetrySpanContext(from: carrier)
-        let contextCandidate = try LogBrewTrace.context(fromOpenTelemetrySpanContextCarrier: carrier)
-        let parent = try #require(parentCandidate)
-        let context = try #require(contextCandidate)
-
-        #expect(parent.traceId == "4bf92f3577b34da6a3ce929d0e0e4736")
-        #expect(parent.spanId == "00f067aa0ba902b7")
-        #expect(parent.traceFlags == "01")
-        #expect(context.traceId == parent.traceId)
-        #expect(context.parentSpanId == parent.spanId)
-        #expect(context.spanId != parent.spanId)
-    }
-
-    @Test("OpenTelemetry carrier protocol returns nil for invalid live span contexts")
-    func openTelemetryCarrierProtocolReturnsNilForInvalidContexts() throws {
-        let carrier = FakeOpenTelemetrySpanContext(
-            traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-            spanId: "00f067aa0ba902b7",
-            traceFlags: "01",
-            isValid: false,
-        )
-
-        #expect(try LogBrewTrace.openTelemetrySpanContext(from: carrier) == nil)
-        #expect(try LogBrewTrace.context(fromOpenTelemetrySpanContextCarrier: carrier) == nil)
-    }
-
-    @Test("OpenTelemetry span context rejects malformed ids and flags")
-    func openTelemetrySpanContextRejectsMalformedValues() throws {
+    @Test("OpenTelemetry rejects malformed values and invalid carriers")
+    func openTelemetryRejectsInvalidInputs() throws {
         let parent = try makeOpenTelemetryParent()
+        let invalidCarrier = FakeOpenTelemetrySpanContext(
+            logBrewOpenTelemetryTraceId: parent.traceId,
+            logBrewOpenTelemetrySpanId: parent.spanId,
+            logBrewOpenTelemetryTraceFlags: parent.traceFlags,
+            logBrewOpenTelemetryIsValid: false,
+        )
+        #expect(try LogBrewTrace.openTelemetrySpanContext(from: invalidCarrier) == nil)
+        #expect(try LogBrewTrace.context(fromOpenTelemetrySpanContextCarrier: invalidCarrier) == nil)
         let malformed = [
             ("00000000000000000000000000000000", parent.spanId, "01"),
             (parent.traceId, "0000000000000000", "01"),
@@ -118,24 +98,8 @@ struct OpenTelemetryTraceContextTests {
 }
 
 private struct FakeOpenTelemetrySpanContext: LogBrewOpenTelemetrySpanContextCarrier {
-    let traceId: String
-    let spanId: String
-    let traceFlags: String
-    let isValid: Bool
-
-    var logBrewOpenTelemetryTraceId: String {
-        traceId
-    }
-
-    var logBrewOpenTelemetrySpanId: String {
-        spanId
-    }
-
-    var logBrewOpenTelemetryTraceFlags: String {
-        traceFlags
-    }
-
-    var logBrewOpenTelemetryIsValid: Bool {
-        isValid
-    }
+    let logBrewOpenTelemetryTraceId: String
+    let logBrewOpenTelemetrySpanId: String
+    let logBrewOpenTelemetryTraceFlags: String
+    let logBrewOpenTelemetryIsValid: Bool
 }
