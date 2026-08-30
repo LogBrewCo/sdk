@@ -51,10 +51,20 @@ function jsonFromStdout(result) {
   return JSON.parse(result.stdout);
 }
 
+function prepareBuild(buildDir, appRoot) {
+  const args = ["prepare-js", "--build-dir", buildDir, "--strip-sources-content"];
+  if (appRoot) {
+    args.push("--strip-source-prefix", appRoot);
+  }
+  const result = runCli([...args, "--write"]);
+  assert.equal(result.status, 0, result.stderr);
+  return result;
+}
+
 test("prepare-js injects Debug IDs and strips source content from a local build", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const result = runCli([
+    const prepareArgs = [
       "prepare-js",
       "--build-dir",
       buildDir,
@@ -62,7 +72,8 @@ test("prepare-js injects Debug IDs and strips source content from a local build"
       "--strip-source-prefix",
       appRoot,
       "--write"
-    ]);
+    ];
+    const result = runCli(prepareArgs);
 
     assert.equal(result.status, 0, result.stderr);
     const plan = jsonFromStdout(result);
@@ -72,6 +83,7 @@ test("prepare-js injects Debug IDs and strips source content from a local build"
     assert.equal(plan.stripSourcePrefixCount, 1);
     assert.deepEqual(plan.artifacts[0].changes.sort(), [
       "minifiedSource.debugId",
+      "minifiedSource.runtimeDebugId",
       "sourceMap.debug_id",
       "sourceMap.sources",
       "sourceMap.sourcesContent"
@@ -83,9 +95,70 @@ test("prepare-js injects Debug IDs and strips source content from a local build"
     const sourceMap = JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8"));
     const debugId = minified.match(/debugId=([A-Za-z0-9-]+)/u)?.[1];
     assert.match(debugId, /^[0-9a-f-]{36}$/u);
+    assert.ok(minified.startsWith(";try{"));
+    assert.match(minified, /Symbol\.for\("logbrew\.release-artifact\.debug-ids"\)/u);
+    assert.match(minified, new RegExp(`assets/app\\.js[^\\n]+${debugId}`, "u"));
     assert.equal(sourceMap.debug_id, debugId);
+    assert.equal(sourceMap.mappings, ";AAAA");
     assert.deepEqual(sourceMap.sources, ["src/main.js"]);
     assert.equal(sourceMap.sourcesContent, undefined);
+    assert.equal(runCli(prepareArgs).status, 0);
+    assert.equal(fs.readFileSync(path.join(buildDir, "assets", "app.js"), "utf8"), minified);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8")), sourceMap);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prepare-js preserves an executable shebang while shifting generated mappings", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const jsPath = path.join(buildDir, "assets", "app.js");
+    const mapPath = `${jsPath}.map`;
+    fs.writeFileSync(jsPath, `#!/usr/bin/env bun\n${fs.readFileSync(jsPath, "utf8")}`, "utf8");
+    const sourceMap = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+    sourceMap.mappings = `;${sourceMap.mappings}`;
+    fs.writeFileSync(mapPath, `${JSON.stringify(sourceMap)}\n`, "utf8");
+
+    prepareBuild(buildDir, appRoot);
+
+    const prepared = fs.readFileSync(jsPath, "utf8");
+    assert.ok(prepared.startsWith("#!/usr/bin/env bun\n;try{"));
+    assert.equal(JSON.parse(fs.readFileSync(mapPath, "utf8")).mappings, ";;AAAA");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prepare-js leaves unsupported source transformations unchanged", () => {
+  const { root, buildDir } = makeBuild();
+  try {
+    const jsPath = path.join(buildDir, "assets", "app.js");
+    const mapPath = `${jsPath}.map`;
+    const regular = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+    fs.writeFileSync(mapPath, `${JSON.stringify({
+      version: 3,
+      file: "app.js",
+      sections: [{ offset: { line: 0, column: 0 }, map: regular }]
+    })}\n`, "utf8");
+    const originalJs = fs.readFileSync(jsPath, "utf8");
+    const originalMap = fs.readFileSync(mapPath, "utf8");
+
+    const result = runCli(["prepare-js", "--build-dir", buildDir, "--write"]);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(jsonFromStdout(result).validation.errors.join("\n"), /mappings must be a non-empty string/u);
+    assert.equal(fs.readFileSync(jsPath, "utf8"), originalJs);
+    assert.equal(fs.readFileSync(mapPath, "utf8"), originalMap);
+
+    const directiveSource = `/* license */\n"use strict";\n${originalJs}`;
+    const regularMap = `${JSON.stringify(regular)}\n`;
+    fs.writeFileSync(jsPath, directiveSource, "utf8");
+    fs.writeFileSync(mapPath, regularMap, "utf8");
+    const directiveResult = runCli(["prepare-js", "--build-dir", buildDir, "--write"]);
+    assert.equal(directiveResult.status, 1, directiveResult.stderr);
+    assert.match(jsonFromStdout(directiveResult).validation.errors.join("\n"), /cannot precede a script directive/u);
+    assert.equal(fs.readFileSync(jsPath, "utf8"), directiveSource);
+    assert.equal(fs.readFileSync(mapPath, "utf8"), regularMap);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -94,16 +167,7 @@ test("prepare-js injects Debug IDs and strips source content from a local build"
 test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const result = runCli([
       "manifest-js",
@@ -173,16 +237,7 @@ test("manifest-js rejects a non-UUID project id", () => {
 test("symbolicate-js resolves a sanitized minified frame through a ready manifest", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -208,14 +263,14 @@ test("symbolicate-js resolves a sanitized minified frame through a ready manifes
       "--manifest",
       manifestPath,
       "--stack-frame",
-      "at checkout (https://cdn.example/assets/assets/app.js:1:1)"
+      "at checkout (https://cdn.example/assets/assets/app.js:2:1)"
     ]);
 
     assert.equal(result.status, 0, result.stderr);
     const report = jsonFromStdout(result);
     assert.equal(report.status, "resolved");
     assert.equal(report.generated.path, "assets/app.js");
-    assert.equal(report.generated.line, 1);
+    assert.equal(report.generated.line, 2);
     assert.equal(report.generated.column, 1);
     assert.equal(report.generated.function, "checkout");
     assert.equal(report.original.source, "src/main.js");
@@ -232,16 +287,7 @@ test("symbolicate-js resolves a sanitized minified frame through a ready manifes
 test("symbolicate-js resolves a sanitized SDK issue event through a ready manifest", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -277,7 +323,7 @@ test("symbolicate-js resolves a sanitized SDK issue event through a ready manife
             service: "checkout-web",
             runtime: "browser",
             errorFrameFile: "https://cdn.example/assets/assets/app.js?flag=debug#fragment",
-            errorFrameLine: 1,
+            errorFrameLine: 2,
             errorFrameColumn: 1,
             releaseArtifactType: "sourcemap",
             releaseArtifactCodeFile: "https://cdn.example/assets/assets/app.js?flag=debug#fragment",
@@ -309,7 +355,7 @@ test("symbolicate-js resolves a sanitized SDK issue event through a ready manife
     assert.equal(report.debugId, manifest.artifacts[0].debugId);
     assert.equal(report.generated.path, "assets/app.js");
     assert.equal(report.generated.minifiedUrl, "https://cdn.example/assets/assets/app.js");
-    assert.equal(report.generated.line, 1);
+    assert.equal(report.generated.line, 2);
     assert.equal(report.generated.column, 1);
     assert.equal(report.original.source, "src/main.js");
     assert.doesNotMatch(result.stdout, /flag=debug|#fragment|source-fixture-marker/);
@@ -322,16 +368,7 @@ test("symbolicate-js resolves a sanitized SDK issue event through a ready manife
 test("symbolicate-js can include explicit local source context without local paths", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -357,7 +394,7 @@ test("symbolicate-js can include explicit local source context without local pat
       "--manifest",
       manifestPath,
       "--stack-frame",
-      "at checkout (https://cdn.example/assets/assets/app.js:1:1)",
+      "at checkout (https://cdn.example/assets/assets/app.js:2:1)",
       "--source-root",
       appRoot,
       "--context-lines",
@@ -387,16 +424,7 @@ test("symbolicate-js can include explicit local source context without local pat
 test("symbolicate-js resolves bundler-style source context under an explicit source root", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const mapPath = path.join(buildDir, "assets", "app.js.map");
     const sourceMap = JSON.parse(fs.readFileSync(mapPath, "utf8"));
@@ -427,7 +455,7 @@ test("symbolicate-js resolves bundler-style source context under an explicit sou
       "--manifest",
       manifestPath,
       "--stack-frame",
-      "at checkout (https://cdn.example/assets/assets/app.js:1:1)",
+      "at checkout (https://cdn.example/assets/assets/app.js:2:1)",
       "--source-root",
       appRoot,
       "--context-lines",
@@ -449,16 +477,7 @@ test("symbolicate-js resolves bundler-style source context under an explicit sou
 test("upload-js validates a ready manifest and prints a dry-run upload plan", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -505,16 +524,7 @@ test("upload-js validates a ready manifest and prints a dry-run upload plan", ()
 test("upload-js allows an explicit hosted HTTPS dry-run without query or auth leakage", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -563,16 +573,7 @@ test("upload-js allows an explicit hosted HTTPS dry-run without query or auth le
 test("upload-js rejects hosted manifests without a valid project id", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -615,16 +616,7 @@ test("upload-js rejects hosted manifests without a valid project id", () => {
 test("upload-js rejects unsafe hosted endpoints even with hosted upload opt-in", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--strip-source-prefix",
-      appRoot,
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir, appRoot);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -668,14 +660,7 @@ test("upload-js rejects unsafe hosted endpoints even with hosted upload opt-in",
 test("symbolicate-js blocks source maps that still expose local source paths", () => {
   const { root, buildDir } = makeBuild();
   try {
-    const prep = runCli([
-      "prepare-js",
-      "--build-dir",
-      buildDir,
-      "--strip-sources-content",
-      "--write"
-    ]);
-    assert.equal(prep.status, 0, prep.stderr);
+    prepareBuild(buildDir);
 
     const manifestResult = runCli([
       "manifest-js",
@@ -701,7 +686,7 @@ test("symbolicate-js blocks source maps that still expose local source paths", (
       "--manifest",
       manifestPath,
       "--stack-frame",
-      "https://cdn.example/assets/assets/app.js:1:1"
+      "https://cdn.example/assets/assets/app.js:2:1"
     ]);
 
     assert.equal(result.status, 1);

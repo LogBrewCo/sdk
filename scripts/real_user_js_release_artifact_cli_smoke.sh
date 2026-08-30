@@ -128,7 +128,7 @@ fs.writeFileSync(
         service: manifest.service,
         runtime: "browser",
         errorFrameFile: `${artifact.minifiedSource.minifiedUrl}?flag=debug#fragment`,
-        errorFrameLine: 1,
+        errorFrameLine: 2,
         errorFrameColumn: 1,
         releaseArtifactType: "sourcemap",
         releaseArtifactCodeFile: `${artifact.minifiedSource.minifiedUrl}?flag=debug#fragment`,
@@ -144,7 +144,7 @@ node_modules/.bin/logbrew-release-artifacts \
   symbolicate-js \
   --build-dir "$build_dir" \
   --manifest "$tmp_dir/manifest.json" \
-  --stack-frame "at checkout (https://cdn.example/assets/assets/app.js:1:1)" \
+  --stack-frame "at checkout (https://cdn.example/assets/assets/app.js:2:1)" \
   > "$tmp_dir/symbolicated-frame.json"
 
 node_modules/.bin/logbrew-release-artifacts \

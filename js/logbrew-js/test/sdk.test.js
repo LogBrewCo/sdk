@@ -1618,6 +1618,33 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
   assert.doesNotMatch(serialized, /debug=true|section|ignoredObject|nested/u);
   assert.doesNotMatch(serialized, /errorStack/u);
 
+  const registryKey = Symbol.for("logbrew.release-artifact.debug-ids");
+  const hadRegistry = Object.hasOwn(globalThis, registryKey);
+  const previousRegistry = globalThis[registryKey];
+  try {
+    globalThis[registryKey] = {
+      "vendor/app.js": "22222222-3333-4444-8555-666666666666",
+      "assets/app.js": "11111111-2222-4333-8444-555555555555"
+    };
+    const automatic = createIssueAttributesFromError(error, {
+      environment: "production",
+      release: "web@2026.07.03",
+      runtime: "browser",
+      service: "checkout-web"
+    });
+    assert.equal(automatic.stackFrames[0].debugId, "11111111-2222-4333-8444-555555555555");
+    assert.equal(
+      automatic.metadata.releaseArtifactDebugId,
+      "11111111-2222-4333-8444-555555555555"
+    );
+  } finally {
+    if (hadRegistry) {
+      globalThis[registryKey] = previousRegistry;
+    } else {
+      delete globalThis[registryKey];
+    }
+  }
+
   const client = sampleClient();
   client.issue("evt_multi_frame", "2026-07-17T12:00:00Z", attributes);
   const queued = JSON.parse(client.previewJson()).events[0].attributes;

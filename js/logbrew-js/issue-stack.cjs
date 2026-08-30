@@ -5,6 +5,7 @@ const MAX_ISSUE_STACK_FUNCTION_LENGTH = 256;
 const MAX_ISSUE_STACK_MODULE_LENGTH = 512;
 const SAFE_DEBUG_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const LOCAL_ABSOLUTE_PATH_PATTERN = /(?:^|\s)(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
+const DEBUG_ID_REGISTRY = Symbol.for("logbrew.release-artifact.debug-ids");
 
 function buildIssueStackHelpers({ SdkError }) {
   function javascriptStackEvidence(stack, debugIdMap) {
@@ -181,24 +182,52 @@ function sanitizeFrameFilename(value) {
 }
 
 function debugIdForFrame(filename, debugIdMap, SdkError) {
-  if (debugIdMap === undefined || debugIdMap === null) {
-    return null;
-  }
-  if (!debugIdMap || Array.isArray(debugIdMap) || typeof debugIdMap !== "object") {
+  if (debugIdMap !== undefined && debugIdMap !== null
+    && (!debugIdMap || Array.isArray(debugIdMap) || typeof debugIdMap !== "object")) {
     throw new SdkError("validation_error", "debugIdMap must be an object");
   }
+  return debugIdFromEntries(filename, debugIdMap ? Object.entries(debugIdMap) : [])
+    ?? debugIdFromEntries(filename, runtimeDebugIdEntries());
+}
+
+function debugIdFromEntries(filename, entries) {
   const normalizedFilename = sanitizeFrameFilename(filename);
-  const aliases = new Set([normalizedFilename, basename(normalizedFilename)].filter(Boolean));
-  for (const [candidate, debugId] of Object.entries(debugIdMap)) {
+  const frameBasename = basename(normalizedFilename);
+  let basenameMatch = null;
+  for (const [candidate, debugId] of entries) {
     if (typeof debugId !== "string" || !SAFE_DEBUG_ID_PATTERN.test(debugId.trim())) {
       continue;
     }
     const normalizedCandidate = sanitizeFrameFilename(candidate);
-    if (aliases.has(normalizedCandidate) || aliases.has(basename(normalizedCandidate))) {
-      return debugId.trim().toLowerCase();
+    const normalizedDebugId = debugId.trim().toLowerCase();
+    if (normalizedFilename === normalizedCandidate
+      || (normalizedCandidate.includes("/")
+        && normalizedFilename.endsWith(`/${normalizedCandidate.replace(/^\/+/, "")}`))) {
+      return normalizedDebugId;
+    }
+    if (frameBasename === basename(normalizedCandidate)) {
+      basenameMatch = basenameMatch === null || basenameMatch === normalizedDebugId
+        ? normalizedDebugId
+        : false;
     }
   }
-  return null;
+  return typeof basenameMatch === "string" ? basenameMatch : null;
+}
+
+function runtimeDebugIdEntries() {
+  try {
+    const registry = typeof globalThis === "object"
+      ? Object.getOwnPropertyDescriptor(globalThis, DEBUG_ID_REGISTRY)?.value
+      : null;
+    if (!registry || Array.isArray(registry) || typeof registry !== "object") {
+      return [];
+    }
+    return Object.entries(Object.getOwnPropertyDescriptors(registry)).slice(0, 512).flatMap(
+      ([candidate, descriptor]) => "value" in descriptor ? [[candidate, descriptor.value]] : []
+    );
+  } catch {
+    return [];
+  }
 }
 
 function basename(value) {

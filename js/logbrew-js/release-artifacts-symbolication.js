@@ -1,57 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  fileReference,
+  readJsonObject,
+  relativeTo,
+  safeResolve,
+  sourceMapDebugId
+} from "./release-artifacts-common.js";
+
 const SCRIPT_VERSION = "0.1.0";
 const MAX_SOURCE_CONTEXT_FILE_BYTES = 1024 * 1024;
-const SOURCE_MAP_DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"];
 const VLQ_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const VLQ_VALUES = new Map([...VLQ_CHARS].map((char, index) => [char, index]));
-
-function fileReference(value) {
-  return value.split("?", 1)[0].split("#", 1)[0];
-}
-
-function toPosix(value) {
-  return value.split(path.sep).join("/");
-}
-
-function relativeTo(root, filePath) {
-  return toPosix(path.relative(root, filePath));
-}
-
-function safeResolve(candidate, root) {
-  const resolvedRoot = fs.realpathSync(root);
-  const resolved = path.resolve(candidate);
-  const comparable = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
-  const relative = path.relative(resolvedRoot, comparable);
-  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
-    return comparable;
-  }
-  return null;
-}
-
-function readJsonObject(filePath, label) {
-  let payload;
-  try {
-    payload = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (error) {
-    throw new Error(`${label} is not valid JSON: ${error.message}`, { cause: error });
-  }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error(`${label} must be a JSON object`);
-  }
-  return payload;
-}
-
-function sourceMapDebugId(payload) {
-  for (const key of SOURCE_MAP_DEBUG_ID_KEYS) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim() !== "") {
-      return value.trim();
-    }
-  }
-  return null;
-}
 
 function parseStackFrame(stackFrame) {
   let line = stackFrame.trim();
@@ -122,7 +83,7 @@ function requireReadyArtifacts(manifest) {
   if (manifest.artifactType !== "javascript_source_map_manifest") {
     throw new Error("only javascript_source_map_manifest symbolication proof is supported");
   }
-  if (!manifest.validation || manifest.validation.status !== "ready") {
+  if (manifest.validation?.status !== "ready") {
     throw new Error("manifest validation status must be ready");
   }
   if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
@@ -132,7 +93,7 @@ function requireReadyArtifacts(manifest) {
     if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
       throw new Error("artifact entries must be JSON objects");
     }
-    if (!artifact.validation || artifact.validation.status !== "ready") {
+    if (artifact.validation?.status !== "ready") {
       throw new Error("all artifact validation statuses must be ready");
     }
   }

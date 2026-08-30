@@ -3,6 +3,45 @@ import fs from "node:fs";
 import path from "node:path";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+export const SOURCE_MAP_DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"];
+
+export function parseOptions(args, spec) {
+  const options = {};
+  const positionals = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg.startsWith("--")) {
+      positionals.push(arg);
+      continue;
+    }
+    const name = arg.slice(2);
+    const kind = spec[name];
+    if (!kind) {
+      throw new Error(`unknown option: --${name}`);
+    }
+    if (kind === "boolean") {
+      options[name] = true;
+      continue;
+    }
+    const value = args[++index];
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`missing value for --${name}`);
+    }
+    options[name] = kind === "repeat" ? [...(options[name] ?? []), value] : value;
+  }
+  if (positionals.length > 0) {
+    throw new Error(`unexpected positional argument: ${positionals[0]}`);
+  }
+  return options;
+}
+
+export function requireOption(options, name) {
+  const value = options[name];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`--${name} is required`);
+  }
+  return value.trim();
+}
 
 export function sortJson(value) {
   if (Array.isArray(value)) {
@@ -20,6 +59,24 @@ export function sortJson(value) {
 
 export function stableJson(value) {
   return JSON.stringify(sortJson(value));
+}
+
+export function fileReference(value) {
+  return value.split("?", 1)[0].split("#", 1)[0];
+}
+
+export function relativeTo(root, filePath) {
+  return path.relative(root, filePath).split(path.sep).join("/");
+}
+
+export function sourceMapDebugId(payload) {
+  for (const key of SOURCE_MAP_DEBUG_ID_KEYS) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  return null;
 }
 
 export function printJson(payload) {

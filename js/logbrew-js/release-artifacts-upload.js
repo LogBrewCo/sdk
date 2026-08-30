@@ -9,8 +9,10 @@ import path from "node:path";
 import {
   byteSize,
   normalizeProjectId,
+  parseOptions,
   printJson,
   readJsonObject,
+  requireOption,
   requireBuildDir,
   safeResolve,
   sha256File,
@@ -22,56 +24,6 @@ const HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts";
 const NON_RETRYABLE_UPLOAD_STATUSES = new Set([400, 401, 403, 413]);
 const RETRYABLE_UPLOAD_STATUSES = new Set([408, 429]);
 const SCRIPT_VERSION = "0.1.0";
-
-function parseOptions(args) {
-  const spec = {
-    "build-dir": "string",
-    manifest: "string",
-    endpoint: "string",
-    "token-env": "string",
-    "dry-run": "boolean",
-    "allow-hosted": "boolean",
-    "max-retries": "string",
-    "retry-delay": "string",
-    timeout: "string"
-  };
-  const options = {};
-  const positionals = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!arg.startsWith("--")) {
-      positionals.push(arg);
-      continue;
-    }
-    const name = arg.slice(2);
-    const kind = spec[name];
-    if (!kind) {
-      throw new Error(`unknown option: --${name}`);
-    }
-    if (kind === "boolean") {
-      options[name] = true;
-      continue;
-    }
-    const value = args[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      throw new Error(`missing value for --${name}`);
-    }
-    options[name] = value;
-    index += 1;
-  }
-  if (positionals.length > 0) {
-    throw new Error(`unexpected positional argument: ${positionals[0]}`);
-  }
-  return options;
-}
-
-function requireOption(options, name) {
-  const value = options[name];
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`--${name} is required`);
-  }
-  return value.trim();
-}
 
 function parseNonNegativeInteger(value, label) {
   const trimmed = value.trim();
@@ -238,7 +190,7 @@ function requireReadyJavaScriptManifest(manifest, requireProjectId) {
   if (manifest.artifactType !== "javascript_source_map_manifest") {
     throw new Error("only javascript_source_map_manifest uploads are supported by this verifier");
   }
-  if (!manifest.validation || manifest.validation.status !== "ready") {
+  if (manifest.validation?.status !== "ready") {
     throw new Error("manifest validation status must be ready before upload");
   }
   if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
@@ -320,7 +272,17 @@ function exitCodeForUploadStatus(status) {
 }
 
 export async function runUploadJs(args) {
-  const options = parseOptions(args);
+  const options = parseOptions(args, {
+    "build-dir": "string",
+    manifest: "string",
+    endpoint: "string",
+    "token-env": "string",
+    "dry-run": "boolean",
+    "allow-hosted": "boolean",
+    "max-retries": "string",
+    "retry-delay": "string",
+    timeout: "string"
+  });
   try {
     const endpoint = requireOption(options, "endpoint");
     const parsedEndpoint = requireUploadEndpoint(endpoint, Boolean(options["allow-hosted"]));
