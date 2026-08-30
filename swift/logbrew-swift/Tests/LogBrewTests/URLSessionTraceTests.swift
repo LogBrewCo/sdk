@@ -47,7 +47,15 @@ struct URLSessionTraceTests {
         #expect(propagatedTraceparent.hasSuffix("-\(context.traceFlags)"))
         #expect(tracedRequest.value(forHTTPHeaderField: "x-app-context") == "app-owned-header-value")
 
-        try assertURLSessionTracerSuccessEvent(preview: client.previewJSON(), context: context)
+        let (_, metadata) = try assertURLSessionSpan(
+            preview: client.previewJSON(),
+            id: "evt_traced_urlsession_1",
+            context: context,
+            expected: ("POST", "ok"),
+            durationMs: 184.75,
+        )
+        #expect(metadata["statusCode"] as? Int == 201)
+        #expect(metadata["requestWaitMs"] == nil)
     }
 
     @Test("URLSession tracer captures failed request and preserves network error")
@@ -70,27 +78,36 @@ struct URLSessionTraceTests {
 
         do {
             _ = try await LogBrewTrace.withContext(context) {
-                try await tracer.data(for: request, metadata: ["component": "pay-api"])
+                try await tracer.data(
+                    for: request,
+                    metadata: ["component": "pay-api"],
+                    onRequestError: { error in
+                        try client.issue(
+                            "evt_failed_urlsession_issue",
+                            timestamp: "2026-06-02T10:00:12Z",
+                            attributes: IssueAttributes.fromError(error, title: "Checkout request failed"),
+                        )
+                    },
+                )
             }
             Issue.record("expected URLSession tracer to rethrow the request error")
         } catch is TestURLSessionFailure {}
 
         let preview = try client.previewJSON()
-        let event = try capturedEvent(from: preview, id: "evt_failed_urlsession_1")
-        let attributes = try #require(event["attributes"] as? [String: Any])
-        let metadata = try #require(attributes["metadata"] as? [String: Any])
+        let (attributes, metadata) = try assertURLSessionSpan(
+            preview: preview,
+            id: "evt_failed_urlsession_1",
+            context: context,
+            expected: ("GET", "error"),
+            durationMs: 0,
+        )
+        let issue = try capturedEvent(from: preview, id: "evt_failed_urlsession_issue")
+        let issueAttributes = try #require(issue["attributes"] as? [String: Any])
+        let issueMetadata = try #require(issueAttributes["metadata"] as? [String: Any])
 
-        #expect(attributes["name"] as? String == "GET /api/checkout")
-        #expect(attributes["traceId"] as? String == context.traceId)
-        #expect(attributes["parentSpanId"] as? String == context.spanId)
-        #expect(attributes["status"] as? String == "error")
-        #expect(attributes["durationMs"] as? Double == 0)
-        #expect(metadata["source"] as? String == "swift.urlsession")
         #expect(metadata["errorType"] as? String == "TestURLSessionFailure")
-        #expect(metadata["component"] as? String == "pay-api")
-        #expect(!preview.contains("cart_id"))
-        #expect(!preview.contains("#pay"))
-        #expect(!preview.contains("traceparent"))
+        #expect(issueMetadata["traceId"] as? String == attributes["traceId"] as? String)
+        #expect(issueMetadata["spanId"] as? String == attributes["spanId"] as? String)
     }
 
     @Test("URLSession span helper injects child traceparent and captures sanitized span")
@@ -123,16 +140,14 @@ struct URLSessionTraceTests {
         }
 
         let preview = try client.previewJSON()
-        let event = try capturedEvent(from: preview, id: "evt_urlsession_span_001")
-        let attributes = try #require(event["attributes"] as? [String: Any])
-        let metadata = try #require(attributes["metadata"] as? [String: Any])
-        let childSpanId = try #require(attributes["spanId"] as? String)
-
-        assertSanitizedURLSessionSpan(attributes, metadata: metadata, childSpanId: childSpanId, context: context)
-        #expect(!preview.contains("cart_id"))
-        #expect(!preview.contains("#pay"))
-        #expect(!preview.contains("app-owned-header-value"))
-        #expect(!preview.contains("traceparent"))
+        let (_, metadata) = try assertURLSessionSpan(
+            preview: preview,
+            id: "evt_urlsession_span_001",
+            context: context,
+            expected: ("POST", "error"),
+            durationMs: 184.5,
+        )
+        #expect(metadata["statusCode"] as? Int == 503)
     }
 
     @Test("URLSession span helper records app-owned task timing metadata")
@@ -168,64 +183,47 @@ struct URLSessionTraceTests {
         }
 
         let preview = try client.previewJSON()
-        let event = try capturedEvent(from: preview, id: "evt_urlsession_timing_span_001")
-        let attributes = try #require(event["attributes"] as? [String: Any])
-        let metadata = try #require(attributes["metadata"] as? [String: Any])
-
-        #expect(metadata["source"] as? String == "swift.urlsession")
-        #expect(metadata["component"] as? String == "pay-api")
+        let (_, metadata) = try assertURLSessionSpan(
+            preview: preview,
+            id: "evt_urlsession_timing_span_001",
+            context: context,
+            expected: ("GET", "ok"),
+            durationMs: 188.5,
+        )
+        #expect(metadata["statusCode"] as? Int == 202)
         assertTimingMetadata(metadata)
-        #expect(!preview.contains("cart_id"))
-        #expect(!preview.contains("#pay"))
-        #expect(!preview.contains("traceparent"))
     }
 
-    private func assertSanitizedURLSessionSpan(
-        _ attributes: [String: Any],
-        metadata: [String: Any],
-        childSpanId: String,
+    private func assertURLSessionSpan(
+        preview: String,
+        id: String,
         context: LogBrewTraceContext,
-    ) {
-        #expect(attributes["name"] as? String == "POST /api/checkout")
-        #expect(attributes["traceId"] as? String == context.traceId)
-        #expect(attributes["parentSpanId"] as? String == context.spanId)
-        #expect(childSpanId != context.spanId)
-        #expect(attributes["status"] as? String == "error")
-        #expect(attributes["durationMs"] as? Double == 184.5)
-        #expect(metadata["source"] as? String == "swift.urlsession")
-        #expect(metadata["method"] as? String == "POST")
-        #expect(metadata["routeTemplate"] as? String == "/api/checkout")
-        #expect(metadata["statusCode"] as? Int == 503)
-        #expect(metadata["component"] as? String == "pay-api")
-        #expect(metadata["spanId"] as? String == childSpanId)
-        #expect(metadata["parentSpanId"] as? String == context.spanId)
-    }
-
-    private func assertURLSessionTracerSuccessEvent(preview: String, context: LogBrewTraceContext) throws {
-        let event = try capturedEvent(from: preview, id: "evt_traced_urlsession_1")
+        expected: (method: String, status: String),
+        durationMs: Double,
+    ) throws -> ([String: Any], [String: Any]) {
+        let event = try capturedEvent(from: preview, id: id)
         let attributes = try #require(event["attributes"] as? [String: Any])
         let metadata = try #require(attributes["metadata"] as? [String: Any])
         let childSpanId = try #require(attributes["spanId"] as? String)
 
-        #expect(attributes["name"] as? String == "POST /api/checkout")
+        #expect(attributes["name"] as? String == "\(expected.method) /api/checkout")
         #expect(attributes["traceId"] as? String == context.traceId)
         #expect(attributes["parentSpanId"] as? String == context.spanId)
-        #expect(attributes["status"] as? String == "ok")
-        #expect(attributes["durationMs"] as? Double == 184.75)
         #expect(childSpanId != context.spanId)
+        #expect(attributes["status"] as? String == expected.status)
+        #expect(attributes["durationMs"] as? Double == durationMs)
         #expect(metadata["source"] as? String == "swift.urlsession")
-        #expect(metadata["method"] as? String == "POST")
+        #expect(metadata["method"] as? String == expected.method)
         #expect(metadata["routeTemplate"] as? String == "/api/checkout")
-        #expect(metadata["statusCode"] as? Int == 201)
         #expect(metadata["component"] as? String == "pay-api")
         #expect(metadata["spanId"] as? String == childSpanId)
         #expect(metadata["parentSpanId"] as? String == context.spanId)
-        #expect(metadata["requestWaitMs"] == nil)
         #expect(!preview.contains("cart_id"))
         #expect(!preview.contains("#pay"))
         #expect(!preview.contains("app-owned-header-value"))
         #expect(!preview.contains("spoofed_trace"))
         #expect(!preview.contains("traceparent"))
+        return (attributes, metadata)
     }
 
     private func assertTimingMetadata(_ metadata: [String: Any]) {

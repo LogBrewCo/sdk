@@ -43,7 +43,6 @@ struct NativeCrashDiagnosticSnapshot: Codable, Equatable {
             ? nil
             : TelemetryContext(trace: trace, session: session, subject: subject)
     }
-
 }
 
 enum NativeCrashCorrelation {

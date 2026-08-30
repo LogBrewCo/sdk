@@ -301,8 +301,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.7', go_smoke)
         self.assertIn('LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2', go_smoke)
         self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2', go_gin_smoke)
-        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.13', swift_smoke)
-        self.assertIn('from: "0.1.13"', swift_readme)
+        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.14', swift_smoke)
+        self.assertIn('from: "0.1.14"', swift_readme)
 
     def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
         receipt_defaults = {

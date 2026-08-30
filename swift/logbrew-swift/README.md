@@ -11,7 +11,7 @@ For Apple app setup flows, choose the Swift path first. Use this SDK for iOS, ma
 ## Install
 
 ```swift
-.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.13")
+.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.14")
 ```
 
 Use the `LogBrew` product from the repository root SwiftPM package. Add the separate `LogBrewCrash` product only when your Apple app explicitly opts into native fatal-crash capture. Local contributors can also open the Swift package directly from `swift/logbrew-swift`.
@@ -351,7 +351,14 @@ try await LogBrewTrace.withContext(trace) {
     let (_, response) = try await urlSessionTracer.data(
         for: request,
         routeTemplate: "/api/checkout",
-        metadata: ["component": "checkout-api"]
+        metadata: ["component": "checkout-api"],
+        onRequestError: { error in
+            try client.issue(
+                "evt_checkout_request_issue_001",
+                timestamp: "2026-06-02T10:00:10Z",
+                attributes: IssueAttributes.fromError(error, title: "Checkout request failed")
+            )
+        }
     )
     print("status=\((response as? HTTPURLResponse)?.statusCode ?? 0)")
 
@@ -398,7 +405,7 @@ if let otelParent = try LogBrewTrace.openTelemetrySpanContext(from: appOwnedOpen
 }
 ```
 
-`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` writes the active `traceId`, `spanId`, `parentSpanId`, and sampled decision into typed `TelemetryContext` and keeps primitive correlation metadata for compatibility on issues, logs, actions, and metrics. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata. Use `LogBrewURLSessionTracer` when you want a small app-owned wrapper around `URLSession.data(for:)`: it injects one `traceparent`, measures monotonic duration, captures success or failure spans, reports span-capture failures through `onCaptureError`, and rethrows the original request error. If your app collects `URLSessionTaskMetrics` through its own delegate, pass `try LogBrewURLSessionTimings(taskMetrics: metrics)` or app-supplied `LogBrewURLSessionTimings(...)` to include bounded phase timings such as name lookup, connect, TLS, send, wait, receive, and body byte counts.
+`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` writes the active `traceId`, `spanId`, `parentSpanId`, and sampled decision into typed `TelemetryContext` and keeps primitive correlation metadata for compatibility on issues, logs, actions, and metrics. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata. Use `LogBrewURLSessionTracer` when you want a small app-owned wrapper around `URLSession.data(for:)`: it injects one `traceparent`, measures monotonic duration, and captures success or failure spans. Its optional per-request `onRequestError` callback runs under the failed request's child trace context before the original request error is rethrown, so an app-owned issue, log, action, or metric can link to the exact span. Callback or span-capture failures go to `onCaptureError` and never replace the request error. The callback runs only when `URLSession` throws; an HTTP error response alone does not create an issue. If your app collects `URLSessionTaskMetrics` through its own delegate, pass `try LogBrewURLSessionTimings(taskMetrics: metrics)` or app-supplied `LogBrewURLSessionTimings(...)` to include bounded phase timings such as name lookup, connect, TLS, send, wait, receive, and body byte counts.
 
 Add up to eight typed span milestones and eight W3C span links when a trace needs more than one duration row:
 
