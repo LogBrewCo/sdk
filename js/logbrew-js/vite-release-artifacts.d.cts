@@ -34,7 +34,7 @@ export interface LogBrewViteReleaseArtifactsPlugin {
     build?: { outDir?: string };
     logger?: { info(message: string): void };
   }): void;
-  closeBundle(): Promise<void>;
+  writeBundle(): Promise<void>;
 }
 
 export declare function createLogBrewViteReleaseArtifactsPlugin(
