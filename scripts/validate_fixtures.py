@@ -43,6 +43,7 @@ OPTIONAL_ATTRIBUTES = {
         "message",
         "metadata",
         "stackFrames",
+        "nativeStackFrames",
         "exception",
         "exceptionChain",
         "breadcrumbs",
@@ -72,6 +73,11 @@ SPAN_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{16}$")
 DEBUG_ID_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+NATIVE_IMAGE_UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+NATIVE_OFFSET_PATTERN = re.compile(r"^[0-9a-f]{16}$")
+NATIVE_ARCHITECTURES = {"arm", "arm64", "arm64e", "x86", "x86_64"}
 ZERO_TRACE_ID = "0" * 32
 ZERO_SPAN_ID = "0" * 16
 CONTEXT_KEYS = {"schemaVersion", "resource", "trace", "session", "subject", "tags"}
@@ -337,6 +343,25 @@ def _validate_issue_stack_frames(index: int, attributes: dict[str, Any]) -> None
     if frames is None:
         return
     _validate_issue_stack_frame_values(index, frames, f"event {index} issue stackFrames")
+
+
+def _validate_native_stack_frames(index: int, attributes: dict[str, Any]) -> None:
+    frames = attributes.get("nativeStackFrames")
+    if frames is None:
+        return
+    if not isinstance(frames, list) or not 1 <= len(frames) <= 32:
+        raise ValidationError(f"event {index} issue nativeStackFrames must contain 1-32 entries")
+    for frame_index, frame in enumerate(frames):
+        label = f"event {index} issue native stack frame {frame_index}"
+        if not isinstance(frame, dict):
+            raise ValidationError(f"{label} must be an object")
+        _reject_unknown_keys(frame, {"imageUuid", "architecture", "instructionOffset"}, label)
+        if not isinstance(frame.get("imageUuid"), str) or not NATIVE_IMAGE_UUID_PATTERN.fullmatch(frame["imageUuid"]):
+            raise ValidationError(f"{label} imageUuid is invalid")
+        if frame.get("architecture") not in NATIVE_ARCHITECTURES:
+            raise ValidationError(f"{label} architecture is invalid")
+        if not isinstance(frame.get("instructionOffset"), str) or not NATIVE_OFFSET_PATTERN.fullmatch(frame["instructionOffset"]):
+            raise ValidationError(f"{label} instructionOffset is invalid")
 
 
 def _validate_issue_stack_frame_values(index: int, frames: Any, field_label: str) -> None:
@@ -808,6 +833,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
 
         if event_type == "issue":
             _validate_issue_stack_frames(index, attributes)
+            _validate_native_stack_frames(index, attributes)
             _validate_issue_exception(index, attributes)
             _validate_issue_exception_chain(index, attributes)
             _validate_issue_breadcrumbs(index, attributes)

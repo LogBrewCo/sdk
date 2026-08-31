@@ -133,7 +133,8 @@ const {
 
 const {
   javascriptStackEvidence,
-  validateIssueStackFrames
+  validateIssueStackFrames,
+  validateNativeStackFrames
 } = buildIssueStackHelpers({ SdkError });
 const {
   MAX_ISSUE_BREADCRUMBS,
@@ -2256,6 +2257,9 @@ function cloneSpanLinks(links) {
 
 function cloneEvent(event) {
   const attributes = { ...event.attributes, ...cloneIssueDiagnostics(event.attributes) };
+  if (Array.isArray(event.attributes.nativeStackFrames)) {
+    attributes.nativeStackFrames = event.attributes.nativeStackFrames.map((frame) => ({ ...frame }));
+  }
   if (event.attributes.metadata !== undefined) {
     attributes.metadata = { ...event.attributes.metadata };
   }
@@ -2295,11 +2299,13 @@ function validateIssue(attributes) {
   requireNonEmpty("issue title", attributes.title);
   const level = normalizeSeverity("issue level", attributes.level);
   const stackFrames = validateIssueStackFrames(attributes.stackFrames);
+  const nativeStackFrames = validateNativeStackFrames(attributes.nativeStackFrames);
   return withMetadata({
     title: attributes.title,
     level,
     ...(attributes.message !== undefined ? { message: attributes.message } : {}),
     ...(stackFrames !== undefined ? { stackFrames } : {}),
+    ...(nativeStackFrames !== undefined ? { nativeStackFrames } : {}),
     ...validateIssueDiagnostics(attributes)
   }, attributes.metadata, attributes.context);
 }

@@ -50,12 +50,13 @@ function assertEventTypes(payload) {
   assert.deepEqual(payload.events.map((event) => event.type), SUPPORTED_EVENT_TYPES);
 }
 
-function sampleClient() {
+function sampleClient(overrides = {}) {
   return LogBrewClient.create({
     apiKey: "LOGBREW_API_KEY",
     sdkName: "logbrew-js",
     sdkVersion: "0.1.0",
-    maxRetries: 2
+    maxRetries: 2,
+    ...overrides
   });
 }
 
@@ -81,16 +82,13 @@ test("shared telemetry context survives every event boundary and isolates caller
     session: { id: "session_01", previousId: "session_00" },
     tags: { route: "checkout.submit" }
   };
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     context: clientContext,
     eventFilter(event) {
       event.attributes.context.resource.service.name = "filter-mutated";
       event.attributes.context.tags.plan = "filter-mutated";
       return true;
-    },
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0"
+    }
   });
 
   client.log("evt_context_log", "2026-08-01T10:00:00Z", {
@@ -158,12 +156,7 @@ test("shared telemetry context rejects ambiguous, unsafe, and unbounded shapes",
 
   for (const context of invalidContexts) {
     assert.throws(
-      () => LogBrewClient.create({
-        apiKey: "LOGBREW_API_KEY",
-        context,
-        sdkName: "logbrew-js",
-        sdkVersion: "0.1.0"
-      }),
+      () => sampleClient({ context }),
       (error) => error instanceof SdkError && error.code === "validation_error"
     );
   }
@@ -442,40 +435,24 @@ test("flush success clears the queue", async () => {
 test("automatic delivery validates its owner and supports explicit manual opt-out", async (t) => {
   const timers = fakeDeliveryTimers(t);
   assert.throws(
-    () => LogBrewClient.create({
-      apiKey: "LOGBREW_API_KEY",
-      automaticDelivery: true,
-      sdkName: "logbrew-js",
-      sdkVersion: "0.1.0"
-    }),
+    () => sampleClient({ automaticDelivery: true }),
     /automaticDelivery requires transport/
   );
   assert.throws(
-    () => LogBrewClient.create({
-      apiKey: "LOGBREW_API_KEY",
-      deliveryIntervalMs: 60001,
-      sdkName: "logbrew-js",
-      sdkVersion: "0.1.0"
-    }),
+    () => sampleClient({ deliveryIntervalMs: 60001 }),
     /deliveryIntervalMs must be at most 60000/
   );
   assert.throws(
-    () => LogBrewClient.create({
-      apiKey: "LOGBREW_API_KEY",
+    () => sampleClient({
       deliveryQueueThreshold: 2,
-      maxQueueSize: 1,
-      sdkName: "logbrew-js",
-      sdkVersion: "0.1.0"
+      maxQueueSize: 1
     }),
     /deliveryQueueThreshold must not exceed maxQueueSize/
   );
 
   const transport = RecordingTransport.alwaysAccept();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     automaticDelivery: false,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
   client.log("evt_manual_001", "2026-06-02T10:00:00Z", {
@@ -496,12 +473,9 @@ test("automatic delivery validates its owner and supports explicit manual opt-ou
 test("automatic delivery arms one unref timer and flushes on its interval", async (t) => {
   const timers = fakeDeliveryTimers(t);
   const transport = RecordingTransport.alwaysAccept();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryIntervalMs: 2500,
     deliveryQueueThreshold: 10,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
   client.log("evt_interval_001", "2026-06-02T10:00:00Z", {
@@ -593,12 +567,11 @@ test("automatic delivery arms one unref timer and flushes on its interval", asyn
 
 test("delivery health snapshot reports exact retry acceptance with stable private JSON", async () => {
   const bodies = [];
-  const client = LogBrewClient.create({
+  const client = sampleClient({
     apiKey: "private-key-value",
     automaticDelivery: false,
     maxRetries: 1,
     sdkName: "private-sdk-name",
-    sdkVersion: "0.1.0",
     transport: {
       async send(_apiKey, body) {
         bodies.push(body);
@@ -635,12 +608,7 @@ test("delivery health snapshot reports exact retry acceptance with stable privat
 });
 
 test("delivery health snapshot reports bounded queue drops by stable reason", () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    maxQueueSize: 1,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0"
-  });
+  const client = sampleClient({ maxQueueSize: 1 });
   client.log("evt_kept_001", "2026-06-02T10:00:00Z", { level: "info", message: "kept" });
   client.log("evt_dropped_001", "2026-06-02T10:00:01Z", { level: "info", message: "dropped" });
 
@@ -658,12 +626,9 @@ test("delivery health snapshot reports bounded queue drops by stable reason", ()
 test("delivery health timestamps do not move backward when the wall clock regresses", async (t) => {
   let now = 2000;
   replaceMethod(t, Date, "now", () => now);
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     automaticDelivery: false,
     maxQueueSize: 1,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport: RecordingTransport.alwaysAccept()
   });
   client.log("evt_kept_clock", "2026-06-02T10:00:00Z", { level: "info", message: "kept" });
@@ -683,11 +648,10 @@ test("delivery health timestamps do not move backward when the wall clock regres
 
 test("delivery health snapshot reports persisted restart hydration without content", () => {
   const store = recordingEventStore([storedLog("private-recovered-event")]);
-  const client = LogBrewClient.create({
+  const client = sampleClient({
     apiKey: "private-key-value",
     eventStore: store,
-    sdkName: "private-sdk-name",
-    sdkVersion: "0.1.0"
+    sdkName: "private-sdk-name"
   });
 
   const health = client.deliveryHealth();
@@ -705,11 +669,8 @@ test("delivery health snapshot reports persisted restart hydration without conte
 test("delivery health snapshot stays coherent across overlapping flush and shutdown", async () => {
   const sendStarted = deferred();
   const sendResponse = deferred();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     automaticDelivery: false,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport: {
       async send() {
         sendStarted.resolve();
@@ -739,12 +700,9 @@ test("delivery health snapshot stays coherent across overlapping flush and shutd
 });
 
 test("delivery health snapshot classifies malformed transport responses without leaking them", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     automaticDelivery: false,
     maxRetries: 0,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport: {
       async send() {
         return { statusCode: "private-malformed-status", responseBody: "private-response-body" };
@@ -780,11 +738,8 @@ test("automatic threshold coalesces capture during I/O into one trailing cohort"
       return { statusCode: 202, attempts: 1 };
     }
   };
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryQueueThreshold: 1,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
 
@@ -814,13 +769,12 @@ test("automatic transient failures back off without changing failed bytes or adm
       return { statusCode: bodies.length <= 2 ? 503 : 202, attempts: 1 };
     }
   };
-  const client = LogBrewClient.create({
+  const client = sampleClient({
     apiKey: "private-key-value",
     deliveryIntervalMs: 2500,
     deliveryQueueThreshold: 1,
     maxRetries: 0,
     sdkName: "private-host-name",
-    sdkVersion: "0.1.0",
     transport
   });
   client.log("private-event-id", "2026-06-02T10:00:00Z", {
@@ -880,11 +834,10 @@ test("automatic transient failures back off without changing failed bytes or adm
 test("automatic authentication failure pauses retained work without a retry loop", async (t) => {
   const timers = fakeDeliveryTimers(t);
   const transport = new RecordingTransport([{ statusCode: 401 }]);
-  const client = LogBrewClient.create({
+  const client = sampleClient({
     apiKey: "private-key-value",
     deliveryQueueThreshold: 1,
     sdkName: "private-host-name",
-    sdkVersion: "0.1.0",
     transport
   });
 
@@ -925,11 +878,8 @@ test("automatic rate limit pauses until an explicit successful flush", async (t)
     { statusCode: 429, retryAfterMs: 120_000 },
     { statusCode: 202 }
   ]);
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryQueueThreshold: 1,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
 
@@ -970,12 +920,9 @@ test("manual flush clears backoff armed while it waited behind automatic deliver
       return { statusCode: 202, attempts: 1 };
     }
   };
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryQueueThreshold: 1,
     maxRetries: 0,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
 
@@ -997,13 +944,10 @@ test("manual flush clears backoff armed while it waited behind automatic deliver
 test("custom manual flush failure restores the owned automatic scheduler", async (t) => {
   const timers = fakeDeliveryTimers(t);
   const ownedTransport = RecordingTransport.alwaysAccept();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryIntervalMs: 2500,
     deliveryQueueThreshold: 10,
     maxRetries: 0,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport: ownedTransport
   });
   client.log("evt_custom_flush_failure", "2026-06-02T10:00:00Z", {
@@ -1029,12 +973,9 @@ test("automatic delivery schedules recovered work and shutdown cancels stale cal
   const timers = fakeDeliveryTimers(t);
   const store = recordingEventStore([storedLog("evt_recovered_auto_001")]);
   const transport = RecordingTransport.alwaysAccept();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryIntervalMs: 2500,
     eventStore: store,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
   assert.equal(timers.length, 1);
@@ -1071,11 +1012,8 @@ test("shutdown serializes behind active automatic delivery and permits no later 
       return { statusCode: 202, attempts: 1 };
     }
   };
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryQueueThreshold: 1,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
   client.log("evt_shutdown_race_001", "2026-06-02T10:00:00Z", {
@@ -1104,11 +1042,8 @@ test("shutdown serializes behind active automatic delivery and permits no later 
 test("immediate shutdown supersedes an automatic threshold task before it starts", async (t) => {
   fakeDeliveryTimers(t);
   const transport = RecordingTransport.alwaysAccept();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryQueueThreshold: 1,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
   client.log("evt_shutdown_before_auto_001", "2026-06-02T10:00:00Z", {
@@ -1133,11 +1068,8 @@ test("immediate shutdown supersedes an automatic threshold task before it starts
 test("purge rejects an automatic threshold cohort before its microtask starts", async (t) => {
   fakeDeliveryTimers(t);
   const transport = RecordingTransport.alwaysAccept();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     deliveryQueueThreshold: 1,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport
   });
   client.log("evt_purge_race_001", "2026-06-02T10:00:00Z", {
@@ -1152,12 +1084,7 @@ test("purge rejects an automatic threshold cohort before its microtask starts", 
 
 test("event store recovers validated compact records before first capture", () => {
   const store = recordingEventStore([storedLog("evt_recovered_001")]);
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    eventStore: store
-  });
+  const client = sampleClient({ eventStore: store });
 
   assert.equal(client.pendingEvents(), 1);
   assert.equal(client.pendingBytes(), store.records[0].eventBytes);
@@ -1165,14 +1092,36 @@ test("event store recovers validated compact records before first capture", () =
   assert.deepEqual(store.calls, [["load"]]);
 });
 
+test("event store preserves canonical native issue frames across restart", () => {
+  const nativeFrame = {
+    imageUuid: "01234567-89ab-cdef-0123-456789abcdef",
+    architecture: "arm64",
+    instructionOffset: "0000000000001234"
+  };
+  const store = recordingEventStore();
+  const first = sampleClient({ eventStore: store, sdkName: "logbrew-react-native" });
+  first.issue("evt_android_native_001", "2026-06-02T10:00:00Z", {
+    title: "Native application crash",
+    level: "fatal",
+    nativeStackFrames: [nativeFrame]
+  });
+
+  const restarted = sampleClient({
+    eventStore: recordingEventStore(store.records),
+    sdkName: "logbrew-react-native"
+  });
+
+  assert.deepEqual(
+    JSON.parse(restarted.previewJson()).events[0].attributes.nativeStackFrames,
+    [nativeFrame]
+  );
+});
+
 test("event queue factory composes restart recovery, health, flush, purge, and shutdown", async () => {
   const queue = recordingEventQueue([storedLog("evt_factory_recovered_001")]);
   let factoryConfig;
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     automaticDelivery: false,
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
     transport: RecordingTransport.alwaysAccept(),
     [Symbol.for("@logbrew/sdk.eventQueueFactory")](config) {
       factoryConfig = config;
@@ -1205,11 +1154,8 @@ test("event queue factory composes restart recovery, health, flush, purge, and s
 
 test("eventStore and event queue factory fail closed when both are supplied", () => {
   assert.throws(
-    () => LogBrewClient.create({
-      apiKey: "LOGBREW_API_KEY",
+    () => sampleClient({
       eventStore: recordingEventStore(),
-      sdkName: "logbrew-js",
-      sdkVersion: "0.1.0",
       [Symbol.for("@logbrew/sdk.eventQueueFactory")]() {
         return recordingEventQueue();
       }
@@ -1220,12 +1166,7 @@ test("eventStore and event queue factory fail closed when both are supplied", ()
 
 test("event store persists a validated event before volatile admission", () => {
   const store = recordingEventStore();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    eventStore: store
-  });
+  const client = sampleClient({ eventStore: store });
 
   client.log("evt_persisted_001", "2026-06-02T10:00:00Z", { message: "persist first", level: "info" });
 
@@ -1240,12 +1181,7 @@ test("event store append failure leaves the volatile queue empty", () => {
   store.append = () => {
     throw new SdkError("persistence_error", "persistent event admission failed");
   };
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    eventStore: store
-  });
+  const client = sampleClient({ eventStore: store });
 
   assert.throws(
     () => client.log("evt_persisted_001", "2026-06-02T10:00:00Z", { message: "persist first", level: "info" }),
@@ -1258,10 +1194,7 @@ test("event store acknowledges an accepted prefix before volatile removal", asyn
   const first = storedLog("evt_ack_001");
   const second = storedLog("evt_ack_002");
   const store = recordingEventStore([first, second]);
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
+  const client = sampleClient({
     eventStore: store,
     maxBatchEvents: 1
   });
@@ -1279,12 +1212,7 @@ test("event store acknowledgement failure retains the accepted prefix for replay
   store.acknowledge = () => {
     throw new SdkError("persistence_error", "persistent acknowledgement failed");
   };
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    eventStore: store
-  });
+  const client = sampleClient({ eventStore: store });
 
   await assert.rejects(
     client.flush(RecordingTransport.alwaysAccept()),
@@ -1296,12 +1224,7 @@ test("event store acknowledgement failure retains the accepted prefix for replay
 
 test("explicit purge clears memory and persistence but rejects an active flush", async () => {
   const store = recordingEventStore();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    eventStore: store
-  });
+  const client = sampleClient({ eventStore: store });
   client.log("evt_purge_001", "2026-06-02T10:00:00Z", { message: "purge", level: "info" });
   const sendStarted = deferred();
   const sendResponse = deferred();
@@ -1325,10 +1248,7 @@ test("explicit purge clears memory and persistence but rejects an active flush",
 
 test("successful shutdown closes the event store while failure leaves it retryable", async () => {
   const store = recordingEventStore();
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
+  const client = sampleClient({
     eventStore: store,
     maxRetries: 0
   });
@@ -1345,12 +1265,7 @@ test("event store close failure leaves the client terminal instead of reopening 
   store.close = () => {
     throw new SdkError("persistence_commit_error", "persistent owner release could not be confirmed");
   };
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    eventStore: store
-  });
+  const client = sampleClient({ eventStore: store });
 
   await assert.rejects(
     client.shutdown(RecordingTransport.alwaysAccept()),
@@ -1365,21 +1280,13 @@ test("event store close failure leaves the client terminal instead of reopening 
 test("event store recovery fails closed for malformed or over-limit records", () => {
   const malformedStore = recordingEventStore([{ event: { type: "log" }, eventBytes: 2, serializedEvent: "{}" }]);
   assert.throws(
-    () => LogBrewClient.create({
-      apiKey: "LOGBREW_API_KEY",
-      sdkName: "logbrew-js",
-      sdkVersion: "0.1.0",
-      eventStore: malformedStore
-    }),
+    () => sampleClient({ eventStore: malformedStore }),
     /event store returned an invalid record/
   );
 
   const overLimitStore = recordingEventStore([storedLog("evt_limit_001"), storedLog("evt_limit_002")]);
   assert.throws(
-    () => LogBrewClient.create({
-      apiKey: "LOGBREW_API_KEY",
-      sdkName: "logbrew-js",
-      sdkVersion: "0.1.0",
+    () => sampleClient({
       eventStore: overLimitStore,
       maxQueueSize: 1
     }),
@@ -2647,10 +2554,7 @@ test("concurrent flush calls serialize without duplicating a queue prefix", asyn
 });
 
 test("flush splits by event count and retries a stable batch body", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
+  const client = sampleClient({
     maxBatchEvents: 2,
     maxRetries: 1
   });
@@ -2684,10 +2588,7 @@ test("flush splits by event count and retries a stable batch body", async () => 
 });
 
 test("partial batch success removes only acknowledged events", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
+  const client = sampleClient({
     maxBatchEvents: 2,
     maxRetries: 0
   });
@@ -2717,10 +2618,7 @@ test("queue byte bound preserves earlier events and reports content-free pressur
   probe.log("evt_bytes_001", "2026-06-02T10:00:00Z", { message: "same-size", level: "info" });
   const eventBytes = Buffer.byteLength(JSON.stringify(JSON.parse(probe.previewJson()).events[0]), "utf8");
   const dropped = [];
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
+  const client = sampleClient({
     maxQueueBytes: eventBytes,
     onEventDropped(drop) {
       dropped.push(drop);
@@ -2750,8 +2648,7 @@ test("flush splits on exact UTF-8 batch bytes and reports an oversized event", a
     attributes: { message: "coffee \u2615", level: "info" }
   };
   const singleBatchBytes = Buffer.byteLength(JSON.stringify({ sdk, events: [firstEvent] }), "utf8");
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const client = sampleClient({
     sdkName: sdk.name,
     sdkVersion: sdk.version,
     maxBatchBytes: singleBatchBytes
@@ -2770,8 +2667,7 @@ test("flush splits on exact UTF-8 batch bytes and reports an oversized event", a
   }
 
   const dropped = [];
-  const oversizeClient = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
+  const oversizeClient = sampleClient({
     sdkName: sdk.name,
     sdkVersion: sdk.version,
     maxBatchBytes: singleBatchBytes,
@@ -2791,10 +2687,7 @@ test("flush splits on exact UTF-8 batch bytes and reports an oversized event", a
 
 test("bounded queue reports overflow without mutating queued events", () => {
   const dropped = [];
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
+  const client = sampleClient({
     maxQueueSize: 2,
     onEventDropped(drop) {
       dropped.push(drop);
@@ -2819,12 +2712,7 @@ test("bounded queue reports overflow without mutating queued events", () => {
 
 test("invalid queue bound fails client configuration", () => {
   assert.throws(
-    () => LogBrewClient.create({
-      apiKey: "LOGBREW_API_KEY",
-      sdkName: "logbrew-js",
-      sdkVersion: "0.1.0",
-      maxQueueSize: 0
-    }),
+    () => sampleClient({ maxQueueSize: 0 }),
     /maxQueueSize must be a positive integer/
   );
   for (const [name, value] of [
@@ -2833,23 +2721,13 @@ test("invalid queue bound fails client configuration", () => {
     ["maxBatchBytes", -1]
   ]) {
     assert.throws(
-      () => LogBrewClient.create({
-        apiKey: "LOGBREW_API_KEY",
-        sdkName: "logbrew-js",
-        sdkVersion: "0.1.0",
-        [name]: value
-      }),
+      () => sampleClient({ [name]: value }),
       new RegExp(`${name} must be a positive integer`, "u")
     );
   }
   for (const maxRetries of [-1, 1.5, Number.POSITIVE_INFINITY]) {
     assert.throws(
-      () => LogBrewClient.create({
-        apiKey: "LOGBREW_API_KEY",
-        sdkName: "logbrew-js",
-        sdkVersion: "0.1.0",
-        maxRetries
-      }),
+      () => sampleClient({ maxRetries }),
       /maxRetries must be a non-negative integer/
     );
   }
@@ -2877,12 +2755,7 @@ test("shutdown flushes and prevents future events", async () => {
 });
 
 test("shutdown rejects capture while closing and reopens an intact queue after failure", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    maxRetries: 0
-  });
+  const client = sampleClient({ maxRetries: 0 });
   const sendStarted = deferred();
   const sendResponse = deferred();
   client.log("evt_shutdown_001", "2026-06-02T10:00:00Z", { message: "queued", level: "info" });
@@ -3225,10 +3098,7 @@ test("OpenTelemetry ReadableSpan helper creates privacy-bounded LogBrew span att
 test("OpenTelemetry span processor queues bounded spans and flushes without owning OTel setup", async () => {
   const dropped = [];
   const errors = [];
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
+  const client = sampleClient({
     maxQueueSize: 1,
     onEventDropped: (event) => dropped.push(event)
   });
@@ -3446,11 +3316,7 @@ test("OpenTelemetry trace summary records escaped exception event summaries", as
 });
 
 test("OpenTelemetry span processor avoids a redundant request for concurrent forceFlush calls", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0"
-  });
+  const client = sampleClient();
   const sends = [];
   const resolvers = [];
   const sendStarted = deferred();
@@ -3486,11 +3352,7 @@ test("OpenTelemetry span processor avoids a redundant request for concurrent for
 });
 
 test("OpenTelemetry span processor drains spans captured during an in-flight flush", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0"
-  });
+  const client = sampleClient();
   const sends = [];
   const firstSendStarted = deferred();
   const releaseFirstSend = deferred();
@@ -3535,12 +3397,7 @@ test("OpenTelemetry span processor drains spans captured during an in-flight flu
 });
 
 test("OpenTelemetry span processor coalesces an in-flight failure without retry amplification", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    maxRetries: 0
-  });
+  const client = sampleClient({ maxRetries: 0 });
   const errors = [];
   const sends = [];
   const firstSendStarted = deferred();
@@ -3576,12 +3433,7 @@ test("OpenTelemetry span processor coalesces an in-flight failure without retry 
 });
 
 test("OpenTelemetry span processor treats an undefined transport rejection as one failed flush", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    maxRetries: 0
-  });
+  const client = sampleClient({ maxRetries: 0 });
   const errors = [];
   let sends = 0;
   const processor = createLogBrewOpenTelemetrySpanProcessor({
@@ -3650,11 +3502,7 @@ test("OpenTelemetry span exporter exports batches through standard exporter call
 });
 
 test("OpenTelemetry span exporter drains spans submitted during an in-flight export", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0"
-  });
+  const client = sampleClient();
   const sends = [];
   const firstSendStarted = deferred();
   const releaseFirstSend = deferred();
@@ -3700,12 +3548,7 @@ test("OpenTelemetry span exporter drains spans submitted during an in-flight exp
 });
 
 test("OpenTelemetry span exporter coalesces export and shutdown failure without retry amplification", async () => {
-  const client = LogBrewClient.create({
-    apiKey: "LOGBREW_API_KEY",
-    sdkName: "logbrew-js",
-    sdkVersion: "0.1.0",
-    maxRetries: 0
-  });
+  const client = sampleClient({ maxRetries: 0 });
   const sends = [];
   const firstSendStarted = deferred();
   const releaseFirstSend = deferred();

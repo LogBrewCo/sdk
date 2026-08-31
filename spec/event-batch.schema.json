@@ -258,6 +258,25 @@
         }
       }
     },
+    "nativeStackFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["imageUuid", "architecture", "instructionOffset"],
+      "properties": {
+        "imageUuid": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "architecture": {
+          "type": "string",
+          "enum": ["arm", "arm64", "arm64e", "x86", "x86_64"]
+        },
+        "instructionOffset": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        }
+      }
+    },
     "issueExceptionMechanism": {
       "type": "object",
       "additionalProperties": false,
@@ -579,6 +598,12 @@
                   "minItems": 1,
                   "maxItems": 32,
                   "items": { "$ref": "#/$defs/issueStackFrame" }
+                },
+                "nativeStackFrames": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "items": { "$ref": "#/$defs/nativeStackFrame" }
                 },
                 "breadcrumbs": {
                   "type": "array",
