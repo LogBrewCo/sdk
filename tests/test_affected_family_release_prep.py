@@ -36,7 +36,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.19",
+            "js/logbrew-js/package.json": "0.1.20",
             "js/logbrew-browser/package.json": "0.1.9",
             "js/logbrew-express/package.json": "0.1.5",
             "js/logbrew-fastify/package.json": "0.1.6",
@@ -98,15 +98,14 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             manifest["peerDependencies"]["@logbrew/sdk"],
-            "^0.1.15",
+            "^0.1.20",
         )
 
-        native_source = source_text(
-            "js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift"
-        )
         self.assertIn(
             f'private static let sdkVersion = "{manifest["version"]}"',
-            native_source,
+            source_text(
+                "js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift"
+            ),
         )
 
     def test_javascript_runtime_metadata_matches_package_releases(self) -> None:
