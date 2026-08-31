@@ -127,6 +127,7 @@ function call(method, ...args) {
 }
 
 function receipt(operation, value, statuses) {
+  const keys = isObject(value) ? Object.keys(value) : [];
   if (isObject(value)
     && value.status === "error"
     && typeof value.code === "string"
@@ -137,7 +138,8 @@ function receipt(operation, value, statuses) {
     );
   }
   if (!isObject(value)
-    || !exactKeys(value, RECEIPT_KEYS)
+    || keys.length !== RECEIPT_KEYS.size
+    || !keys.every((key) => RECEIPT_KEYS.has(key))
     || !statuses.has(value.status)
     || !Number.isSafeInteger(value.pending)
     || value.pending < 0) {
@@ -147,11 +149,6 @@ function receipt(operation, value, statuses) {
     );
   }
   return Object.freeze({ pending: value.pending, status: value.status });
-}
-
-function exactKeys(value, expected) {
-  const keys = Object.keys(value);
-  return keys.length === expected.size && keys.every((key) => expected.has(key));
 }
 
 function isObject(value) {
