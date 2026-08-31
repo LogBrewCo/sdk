@@ -3,10 +3,6 @@ import { TurboModuleRegistry } from "react-native";
 
 export interface Spec extends TurboModule {
   secureRandomHex(length: number): string;
-  writeFatalRecord(record: CodegenTypes.UnsafeObject): CodegenTypes.UnsafeObject;
-  readFatalRecord(): CodegenTypes.UnsafeObject;
-  acknowledgeFatalRecord(recordId: string): CodegenTypes.UnsafeObject;
-  discardFatalRecord(): CodegenTypes.UnsafeObject;
   loadEventRecords(queueKey: string): CodegenTypes.UnsafeObject;
   appendEventRecord(
     queueKey: string,
@@ -16,6 +12,11 @@ export interface Spec extends TurboModule {
   acknowledgeEventRecords(queueKey: string, count: number): CodegenTypes.UnsafeObject;
   purgeEventRecords(queueKey: string): CodegenTypes.UnsafeObject;
   closeEventStore(queueKey: string): CodegenTypes.UnsafeObject;
+  installAndroidDiagnostics(
+    configuration: CodegenTypes.UnsafeObject
+  ): CodegenTypes.UnsafeObject;
+  androidDiagnosticsStatus(): CodegenTypes.UnsafeObject;
+  uninstallAndroidDiagnostics(): CodegenTypes.UnsafeObject;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>("LogBrewFatalStore");

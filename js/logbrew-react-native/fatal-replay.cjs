@@ -5,6 +5,7 @@ const MAX_ADMITTED_FATAL_IDS = 256;
 const MAX_FATAL_FILENAME_BYTES = 512;
 const MAX_FATAL_STACK_BYTES = 16 * 1024;
 const MAX_FATAL_STACK_FRAMES = 24;
+const DURABLE_QUEUE = Symbol.for("co.logbrew.react-native.durable-event-queue");
 
 const admittedFatalIdsByClient = new WeakMap();
 let nextFatalSequence = 0;
@@ -18,12 +19,13 @@ function createFatalController({
   sanitizers
 }) {
   const methods = fatalStoreMethods(fatalStore);
+  const directAdmission = !methods && safeReadProperty(client, DURABLE_QUEUE) === true;
   const state = {
     acknowledgedRecords: 0,
-    available: methods !== undefined,
+    available: methods !== undefined || directAdmission,
     corruptRecords: 0,
     droppedRecords: 0,
-    lastOutcome: methods ? "idle" : "unavailable",
+    lastOutcome: methods || directAdmission ? "idle" : "unavailable",
     replayedRecords: 0,
     storedRecords: 0
   };
@@ -37,6 +39,9 @@ function createFatalController({
       return fatalHealthSnapshot(state);
     },
     replay() {
+      if (!methods) {
+        return;
+      }
       replayPendingFatal({
         client,
         eventMessage,
@@ -49,6 +54,11 @@ function createFatalController({
       });
     },
     store(error) {
+      if (!methods) {
+        return directAdmission
+          ? admitFatalError({ client, error, eventMessage, issue, onDiagnostic, sanitizers, state })
+          : false;
+      }
       return storeFatalError({
         error,
         fatalStore,
@@ -59,6 +69,26 @@ function createFatalController({
       });
     }
   };
+}
+
+function admitFatalError({ client, error, eventMessage, issue, onDiagnostic, sanitizers, state }) {
+  const record = createFatalRecord(error, sanitizers);
+  const before = admissionSnapshot(client);
+  try {
+    issue.call(client, record.id, record.timestamp, fatalEventAttributes(record, eventMessage));
+  } catch {
+    state.lastOutcome = "storage_error";
+    emitDiagnostic(onDiagnostic, "fatal_store_failed");
+    return false;
+  }
+  if (!wasAdmitted(before, admissionSnapshot(client))) {
+    state.lastOutcome = "storage_error";
+    emitDiagnostic(onDiagnostic, "fatal_store_failed");
+    return false;
+  }
+  state.storedRecords = incrementBounded(state.storedRecords);
+  state.lastOutcome = "stored";
+  return true;
 }
 
 function fatalStoreMethods(fatalStore) {
@@ -327,7 +357,9 @@ function fatalEventAttributes(record, eventMessage) {
       replayed: true,
       source: "react-native.global_error"
     }),
-    stackFrames: record.stackFrames.map((frame) => Object.freeze({ ...frame })),
+    ...(record.stackFrames.length === 0
+      ? {}
+      : { stackFrames: record.stackFrames.map((frame) => Object.freeze({ ...frame })) }),
     title: eventMessage
   });
 }

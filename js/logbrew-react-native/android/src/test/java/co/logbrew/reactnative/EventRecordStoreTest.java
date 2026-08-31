@@ -160,7 +160,7 @@ public final class EventRecordStoreTest {
     withDirectory(
         directory -> {
           RecordingParentDirectorySync failed =
-              new RecordingParentDirectorySync(FatalRecordStore.ParentDirectorySyncResult.FAILED);
+              new RecordingParentDirectorySync(EventRecordStore.ParentDirectorySyncResult.FAILED);
           EventRecordStore store = new EventRecordStore(directory, failed);
           String serialized = event("evt_unknown_commit");
           assertStatus("storage_error", store.append(serialized, bytes(serialized)));
@@ -238,16 +238,16 @@ public final class EventRecordStoreTest {
   }
 
   private static final class RecordingParentDirectorySync
-      implements FatalRecordStore.ParentDirectorySync {
-    private final FatalRecordStore.ParentDirectorySyncResult result;
+      implements EventRecordStore.ParentDirectorySync {
+    private final EventRecordStore.ParentDirectorySyncResult result;
     private int calls;
 
-    RecordingParentDirectorySync(FatalRecordStore.ParentDirectorySyncResult result) {
+    RecordingParentDirectorySync(EventRecordStore.ParentDirectorySyncResult result) {
       this.result = result;
     }
 
     @Override
-    public FatalRecordStore.ParentDirectorySyncResult sync(File directory) {
+    public EventRecordStore.ParentDirectorySyncResult sync(File directory) {
       calls += 1;
       return result;
     }

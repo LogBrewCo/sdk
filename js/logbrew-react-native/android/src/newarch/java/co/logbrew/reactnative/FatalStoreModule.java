@@ -23,26 +23,6 @@ final class FatalStoreModule extends NativeLogBrewFatalStoreSpec {
   }
 
   @Override
-  public WritableMap writeFatalRecord(ReadableMap record) {
-    return implementation.writeFatalRecord(record);
-  }
-
-  @Override
-  public WritableMap readFatalRecord() {
-    return implementation.readFatalRecord();
-  }
-
-  @Override
-  public WritableMap acknowledgeFatalRecord(String recordId) {
-    return implementation.acknowledgeFatalRecord(recordId);
-  }
-
-  @Override
-  public WritableMap discardFatalRecord() {
-    return implementation.discardFatalRecord();
-  }
-
-  @Override
   public WritableMap loadEventRecords(String queueKey) {
     return implementation.loadEventRecords(queueKey);
   }
@@ -66,5 +46,20 @@ final class FatalStoreModule extends NativeLogBrewFatalStoreSpec {
   @Override
   public WritableMap closeEventStore(String queueKey) {
     return implementation.closeEventStore(queueKey);
+  }
+
+  @Override
+  public WritableMap installAndroidDiagnostics(ReadableMap configuration) {
+    return implementation.installAndroidDiagnostics(configuration);
+  }
+
+  @Override
+  public WritableMap androidDiagnosticsStatus() {
+    return implementation.androidDiagnosticsStatus();
+  }
+
+  @Override
+  public WritableMap uninstallAndroidDiagnostics() {
+    return implementation.uninstallAndroidDiagnostics();
   }
 }

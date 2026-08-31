@@ -240,9 +240,9 @@ export declare function installLogBrewReactNativePromiseRejectionTracker(
 /**
  * Install reversible automatic capture for React Native global JavaScript errors.
  *
- * The React Native conditional export injects its synchronous native fatal store by default.
- * Direct Node ESM/CJS callers can inject a compatible store explicitly. Fatal replay is
- * stable-ID at-least-once and acknowledges only after observable local queue admission.
+ * The React Native conditional export admits fatal reports into its persistent event queue
+ * before the previous handler runs. Direct Node ESM/CJS callers can inject a compatible
+ * fatal store explicitly.
  * This helper does not claim local exactly-once delivery or install Promise rejection handling.
  */
 export declare function installLogBrewReactNativeGlobalErrorHandler(

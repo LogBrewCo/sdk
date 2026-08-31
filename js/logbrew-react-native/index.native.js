@@ -18,6 +18,11 @@ import {
   syncLogBrewAppleNativeCrashBreadcrumbs
 } from "./apple-native-diagnostics.js";
 import {
+  getLogBrewAndroidNativeDiagnosticsStatus,
+  installLogBrewAndroidNativeDiagnostics,
+  uninstallLogBrewAndroidNativeDiagnostics
+} from "./android-native-diagnostics.js";
+import {
   purgeReactNativePersistentQueue,
   resolveReactNativePersistentEventStore
 } from "./persistent-delivery.native.js";
@@ -31,6 +36,11 @@ export {
   replayLogBrewAppleNativeDiagnostics,
   setLogBrewAppleNativeCrashContext
 };
+export {
+  getLogBrewAndroidNativeDiagnosticsStatus,
+  installLogBrewAndroidNativeDiagnostics,
+  uninstallLogBrewAndroidNativeDiagnostics
+};
 
 export * from "./index.js";
 
@@ -40,6 +50,7 @@ if (typeof nativeRuntime?.secureRandomHex === "function") {
   globalThis[Symbol.for("co.logbrew.react-native.secure-random-hex")] =
     nativeRuntime.secureRandomHex.bind(nativeRuntime);
 }
+const DURABLE_QUEUE = Symbol.for("co.logbrew.react-native.durable-event-queue");
 
 export function createLogBrewReactNativeClient(config = {}) {
   const input = config !== null && typeof config === "object" ? config : {};
@@ -69,14 +80,18 @@ export function createLogBrewReactNativeClient(config = {}) {
     hasExplicitPersistentQueue
   });
   try {
-    return bindAppleNativeCrashBreadcrumbs(createPlatformNeutralClient({
+    const client = createPlatformNeutralClient({
       ...forwarded,
       apiKey,
       clientKey,
       eventStore: resolved.eventStore,
       maxQueueBytes,
       maxQueueSize
-    }));
+    });
+    if (resolved.durable) {
+      Object.defineProperty(client, DURABLE_QUEUE, { value: true });
+    }
+    return bindAppleNativeCrashBreadcrumbs(client);
   } catch (error) {
     resolved.abort();
     throw error;
@@ -205,11 +220,14 @@ const defaultExport = {
   createDefaultLogBrewReactNativeClient,
   createLogBrewReactNativeClient,
   getDefaultReactNativeContext,
+  getLogBrewAndroidNativeDiagnosticsStatus,
   getLogBrewAppleNativeDiagnosticsStatus,
   installLogBrewAppleNativeDiagnostics,
+  installLogBrewAndroidNativeDiagnostics,
   purgeLogBrewReactNativePersistentQueue,
   replayLogBrewAppleNativeDiagnostics,
-  setLogBrewAppleNativeCrashContext
+  setLogBrewAppleNativeCrashContext,
+  uninstallLogBrewAndroidNativeDiagnostics
 };
 
 export default defaultExport;

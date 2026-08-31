@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package keeps event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`. It adds mobile helpers for screen views, app-state changes, product actions, API milestones, bounded issue breadcrumbs, typed handled and unhandled JavaScript errors, Promise rejection tracking, provider and hook usage, W3C trace correlation and propagation, lifecycle spans, resource spans, reversible instrumentation, and opt-in Apple native crash and app-hang diagnostics.
+This package keeps event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`. It adds mobile helpers for screen views, app-state changes, product actions, API milestones, bounded issue breadcrumbs, typed handled and unhandled JavaScript errors, Promise rejection tracking, provider and hook usage, W3C trace correlation and propagation, lifecycle spans, resource spans, reversible instrumentation, and opt-in native crash and app-hang diagnostics.
 
 ## Install
 
@@ -267,16 +267,73 @@ errorHandler.remove();
 
 Installation is idempotent for the active React Native `ErrorUtils` object. The wrapper captures a fixed-content, path-bounded issue for nonfatal global JavaScript errors and then calls the handler that was installed before it. Capture and diagnostic callback failures cannot prevent that prior handler from running. `remove()` reinstates the previous handler only while LogBrew still owns the global slot, so a later integration is not overwritten.
 
-The React Native conditional export obtains LogBrew's synchronous native fatal store through the supported TurboModule or `NativeModules` seam. Before chaining a fatal report, it writes one bounded record to app-private storage that is excluded from operating-system archives. On a later installation it performs stable-ID at-least-once replay, and acknowledgement happens only after local queue admission is observable through the SDK queue counters. Filtered, dropped, unknown-admission, persistence-failed, and acknowledgement-failed records are retained. A failed acknowledgement is retried without admitting the same ID twice in one JavaScript runtime. Use `fatalHealth()` for frozen bounded counters and status, or `discardPendingFatalRecord()` for an explicit rollback discard. The Node ESM and CommonJS entries never import React Native; non-React-Native callers must inject `fatalStore` explicitly.
+The React Native conditional export admits fatal JavaScript reports directly
+into the same app-private persistent queue used by normal delivery, then calls
+the previous handler. Queue admission is synchronous and must increase the
+pending count without increasing the dropped count. Otherwise capture fails
+closed and reports a fixed diagnostic code. The next process provides
+stable-ID at-least-once replay. Its acknowledgement happens only after local queue admission
+is observable through the SDK queue counters. Normal batch acknowledgement
+removes the event only after accepted delivery. Use
+`persistentQueue: "required"` when fatal
+survival is required. `fatalHealth()` exposes frozen bounded counters and
+status. The Node ESM and CommonJS entries never import React Native;
+non-React-Native callers may still inject the documented advanced `fatalStore`
+adapter.
 
-Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This error-handler integration does not claim mathematically exactly-once delivery, native crash capture, ANR or hang detection, general offline queueing by the fatal-record slot, or symbolication. The client-level persistent queue above owns normal event restart delivery.
+Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This error-handler integration does not claim mathematically exactly-once delivery, native crash capture, ANR or hang detection, or symbolication. The client-level persistent queue owns restart delivery.
 
 ### Apple native crash and app-hang diagnostics
 
 Apple native diagnostics are an iOS-only, opt-in build feature. They capture a
 fatal native process crash and replay one privacy-bounded issue after the next
 launch. Set `hangThresholdSeconds` to also capture recovered or ongoing UIKit
-main-thread hangs. Android native crash and ANR capture are not included.
+main-thread hangs.
+
+### Android native crash and ANR diagnostics
+
+Android diagnostics are opt-in and require a native build. They persist Java
+crashes, one NDK fault frame, and main-thread hangs to the normal app-private
+event queue. NDK evidence enters that queue on the next launch and remains
+until queue admission succeeds. Native signal records retain the project,
+release, environment, and service active at crash time, so an app update before
+relaunch cannot reassign the crash to a newer build.
+
+Remove other Android fatal handlers, then install before creating the client or
+registering the React root:
+
+```js
+import {
+  createLogBrewReactNativeClient,
+  installLogBrewAndroidNativeDiagnostics
+} from "@logbrew/react-native";
+
+installLogBrewAndroidNativeDiagnostics({
+  clientKey: process.env.EXPO_PUBLIC_LOGBREW_CLIENT_KEY,
+  projectId: "550e8400-e29b-41d4-a716-446655440000",
+  release: "com.example.app@1.2.3+45",
+  environment: "production",
+  service: "android-app",
+  fatalHandlerOwnership: "logbrew",
+  anrThresholdMs: 5000
+});
+
+const client = createLogBrewReactNativeClient({
+  clientKey: process.env.EXPO_PUBLIC_LOGBREW_CLIENT_KEY,
+  persistentQueue: "required"
+});
+```
+
+Capture excludes messages, thread names, console output, local variables,
+request data, authentication values, device identifiers, and raw tombstones. Java and
+hang reports keep at most 32 frames; NDK reports keep one build ID and offset.
+
+`uninstallLogBrewAndroidNativeDiagnostics()` reinstates prior
+handlers, stops the watchdog, and leaves queued events available. After closing
+the client, purge only for an explicit discard. Upload exact-release Android
+symbols with `logbrew debug-artifacts upload`, require build-ID/architecture
+lookup, and preserve the old integration until the target app proves crash
+replay, hang capture, and symbolicated hosted readback.
 
 For Expo prebuild or development builds, add the config plugin:
 

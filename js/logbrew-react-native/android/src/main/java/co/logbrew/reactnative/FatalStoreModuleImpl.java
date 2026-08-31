@@ -2,7 +2,6 @@ package co.logbrew.reactnative;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
-import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableMapKeySetIterator;
 import com.facebook.react.bridge.ReadableType;
@@ -13,11 +12,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -25,32 +22,26 @@ final class FatalStoreModuleImpl {
   static final String NAME = "LogBrewFatalStore";
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-  private static final Set<String> RECORD_KEYS =
+  private static final Set<String> ANDROID_DIAGNOSTICS_KEYS =
       new HashSet<>(
           Arrays.asList(
-              "schemaVersion",
-              "id",
-              "timestamp",
-              "errorName",
-              "stackFrames",
-              "droppedRecords",
-              "corruptRecords"));
-  private static final Set<String> FRAME_KEYS =
-      new HashSet<>(Arrays.asList("filename", "line", "column"));
+              "anrThresholdMs",
+              "clientKey",
+              "environment",
+              "fatalHandlerOwnership",
+              "projectId",
+              "release",
+              "service"));
 
-  private final FatalRecordStore store;
   private final File eventStoreParent;
+  private final ReactApplicationContext context;
   private final Map<String, EventRecordStore> eventStores = new HashMap<>();
+  private AndroidDiagnosticsRuntime androidDiagnostics;
 
   FatalStoreModuleImpl(ReactApplicationContext context) {
+    this.context = context;
     File root = context.getNoBackupFilesDir();
     eventStoreParent = root;
-    store =
-        root == null
-            ? null
-            : new FatalRecordStore(
-                new File(root, "logbrew-fatal-js"),
-                new AndroidParentDirectorySync());
   }
 
   String secureRandomHex(double length) {
@@ -122,125 +113,109 @@ final class FatalStoreModuleImpl {
       return eventResultMap(eventStore.close());
     } catch (RuntimeException error) {
       return status("storage_error");
-    } finally {
-      eventStores.remove(queueHash);
     }
   }
 
-  WritableMap writeFatalRecord(ReadableMap input) {
-    if (store == null) {
-      return status("storage_error");
+  synchronized WritableMap installAndroidDiagnostics(ReadableMap input) {
+    AndroidDiagnosticsInput configuration = readAndroidDiagnosticsInput(input);
+    EventRecordStore eventStore =
+        configuration == null ? null : eventStore(configuration.clientKey);
+    String queueHash =
+        configuration == null ? null : queueHash(configuration.clientKey);
+    if (eventStore == null || queueHash == null || eventStoreParent == null) {
+      return error("android_diagnostics_invalid_configuration");
+    }
+    if (androidDiagnostics != null && androidDiagnostics.installed()) {
+      return androidDiagnostics.matches(eventStore, configuration.configuration)
+          ? androidDiagnosticsReceipt("already_installed", androidDiagnostics.pending())
+          : error("android_diagnostics_owned");
+    }
+    File storageRoot = new File(eventStoreParent, "logbrew-android-diagnostics-v1-" + queueHash);
+    if ((!storageRoot.isDirectory() && !storageRoot.mkdirs()) || !storageRoot.isDirectory()) {
+      return error("android_diagnostics_storage_failed");
     }
     try {
-      FatalRecordStore.Record record = readRecord(input);
-      return record == null ? status("invalid_record") : resultMap(store.write(record));
+      androidDiagnostics =
+          new AndroidDiagnosticsRuntime(
+              context, storageRoot, eventStore, configuration.configuration);
+      String statusValue = androidDiagnostics.install();
+      return androidDiagnosticsResult(statusValue);
     } catch (RuntimeException error) {
-      return status("storage_error");
+      androidDiagnostics = null;
+      return error("android_diagnostics_install_failed");
     }
   }
 
-  WritableMap readFatalRecord() {
-    if (store == null) {
-      return status("storage_error");
+  synchronized WritableMap androidDiagnosticsStatus() {
+    if (androidDiagnostics == null || !androidDiagnostics.installed()) {
+      return androidDiagnosticsReceipt("not_installed", 0);
+    }
+    return androidDiagnosticsResult("ready");
+  }
+
+  synchronized WritableMap uninstallAndroidDiagnostics() {
+    if (androidDiagnostics == null) {
+      return androidDiagnosticsReceipt("not_installed", 0);
     }
     try {
-      return resultMap(store.read());
+      String statusValue = androidDiagnostics.uninstall();
+      WritableMap result = androidDiagnosticsResult(statusValue);
+      androidDiagnostics = null;
+      return result;
     } catch (RuntimeException error) {
-      return status("storage_error");
+      return error("android_diagnostics_uninstall_failed");
     }
   }
 
-  WritableMap acknowledgeFatalRecord(String recordId) {
-    if (store == null) {
-      return status("storage_error");
-    }
-    try {
-      return resultMap(store.acknowledge(recordId));
-    } catch (RuntimeException error) {
-      return status("storage_error");
-    }
-  }
-
-  WritableMap discardFatalRecord() {
-    if (store == null) {
-      return status("storage_error");
-    }
-    try {
-      return resultMap(store.discard());
-    } catch (RuntimeException error) {
-      return status("storage_error");
-    }
-  }
-
-  private static FatalRecordStore.Record readRecord(ReadableMap input) {
+  private static AndroidDiagnosticsInput readAndroidDiagnosticsInput(ReadableMap input) {
     if (input == null
-        || !hasExactKeys(input, RECORD_KEYS)
-        || !hasType(input, "schemaVersion", ReadableType.Number)
-        || !hasType(input, "id", ReadableType.String)
-        || !hasType(input, "timestamp", ReadableType.String)
-        || !hasType(input, "errorName", ReadableType.String)
-        || !hasType(input, "stackFrames", ReadableType.Array)
-        || !hasType(input, "droppedRecords", ReadableType.Number)
-        || !hasType(input, "corruptRecords", ReadableType.Number)) {
+        || !hasExactKeys(input, ANDROID_DIAGNOSTICS_KEYS)
+        || !hasType(input, "anrThresholdMs", ReadableType.Number)
+        || !hasType(input, "clientKey", ReadableType.String)
+        || !hasType(input, "environment", ReadableType.String)
+        || !hasType(input, "fatalHandlerOwnership", ReadableType.String)
+        || !hasType(input, "projectId", ReadableType.String)
+        || !hasType(input, "release", ReadableType.String)
+        || !hasType(input, "service", ReadableType.String)
+        || !"logbrew".equals(input.getString("fatalHandlerOwnership"))) {
       return null;
     }
-    Integer schemaVersion = integer(input, "schemaVersion");
-    Integer droppedRecords = integer(input, "droppedRecords");
-    Integer corruptRecords = integer(input, "corruptRecords");
-    if (schemaVersion == null || droppedRecords == null || corruptRecords == null) {
+    Integer threshold = integer(input, "anrThresholdMs");
+    String clientKey = input.getString("clientKey");
+    if (threshold == null || clientKey == null || clientKey.trim().isEmpty()) {
       return null;
     }
-
-    ReadableArray values = input.getArray("stackFrames");
-    if (values == null) {
+    try {
+      return new AndroidDiagnosticsInput(
+          clientKey,
+          new AndroidNativeDiagnostics.Configuration(
+              input.getString("projectId"),
+              input.getString("release"),
+              input.getString("environment"),
+              input.getString("service"),
+              android.os.Build.VERSION.RELEASE,
+              android.os.Build.MODEL,
+              androidArchitecture(),
+              threshold));
+    } catch (IllegalArgumentException error) {
       return null;
     }
-    List<FatalRecordStore.Frame> frames = new ArrayList<>(values.size());
-    for (int index = 0; index < values.size(); index += 1) {
-      if (values.getType(index) != ReadableType.Map) {
-        return null;
-      }
-      ReadableMap value = values.getMap(index);
-      FatalRecordStore.Frame frame = readFrame(value);
-      if (frame == null) {
-        return null;
-      }
-      frames.add(frame);
-    }
-    return new FatalRecordStore.Record(
-        schemaVersion,
-        input.getString("id"),
-        input.getString("timestamp"),
-        input.getString("errorName"),
-        frames,
-        droppedRecords,
-        corruptRecords);
-  }
-
-  private static FatalRecordStore.Frame readFrame(ReadableMap input) {
-    if (input == null
-        || !hasExactKeys(input, FRAME_KEYS)
-        || !hasType(input, "filename", ReadableType.String)
-        || !hasType(input, "line", ReadableType.Number)
-        || !hasType(input, "column", ReadableType.Number)) {
-      return null;
-    }
-    Integer line = integer(input, "line");
-    Integer column = integer(input, "column");
-    String filename = input.getString("filename");
-    if (line == null || column == null || filename == null) {
-      return null;
-    }
-    if (filename.startsWith("/")
-        && filename.indexOf('/', 1) < 0
-        && filename.length() > 1) {
-      filename = filename.substring(1);
-    }
-    return new FatalRecordStore.Frame(filename, line, column);
   }
 
   private static boolean hasType(ReadableMap map, String key, ReadableType type) {
     return map.hasKey(key) && !map.isNull(key) && map.getType(key) == type;
+  }
+
+  private static String androidArchitecture() {
+    String[] values = android.os.Process.is64Bit()
+        ? android.os.Build.SUPPORTED_64_BIT_ABIS
+        : android.os.Build.SUPPORTED_32_BIT_ABIS;
+    String value = values.length == 0
+        ? ""
+        : values[0];
+    return "arm64-v8a".equals(value)
+        ? "arm64"
+        : "armeabi-v7a".equals(value) ? "arm" : value;
   }
 
   private static boolean hasExactKeys(ReadableMap map, Set<String> expected) {
@@ -253,62 +228,31 @@ final class FatalStoreModuleImpl {
   }
 
   private static Integer integer(ReadableMap map, String key) {
-    double value = map.getDouble(key);
-    return Double.isFinite(value)
-            && value >= 0
-            && value <= Integer.MAX_VALUE
-            && value == Math.rint(value)
-        ? (int) value
-        : null;
-  }
-
-  private static WritableMap resultMap(FatalRecordStore.Result result) {
-    if (result == null || result.status == null) {
-      return status("storage_error");
-    }
-    WritableMap output = status(result.status);
-    if (result.recordId != null) {
-      output.putString("recordId", result.recordId);
-    }
-    if (result.droppedRecords > 0) {
-      output.putInt("droppedRecords", result.droppedRecords);
-    }
-    if (result.corruptRecords > 0) {
-      output.putInt("corruptRecords", result.corruptRecords);
-    }
-    if (result.record != null) {
-      output.putMap("record", recordMap(result.record));
-    }
-    return output;
-  }
-
-  private static WritableMap recordMap(FatalRecordStore.Record record) {
-    WritableMap output = Arguments.createMap();
-    output.putInt("schemaVersion", record.schemaVersion);
-    output.putString("id", record.id);
-    output.putString("timestamp", record.timestamp);
-    output.putString("errorName", record.errorName);
-    output.putArray("stackFrames", frameMaps(record.stackFrames));
-    output.putInt("droppedRecords", record.droppedRecords);
-    output.putInt("corruptRecords", record.corruptRecords);
-    return output;
-  }
-
-  private static WritableArray frameMaps(List<FatalRecordStore.Frame> frames) {
-    WritableArray output = Arguments.createArray();
-    for (FatalRecordStore.Frame frame : frames) {
-      WritableMap value = Arguments.createMap();
-      value.putString("filename", frame.filename);
-      value.putInt("line", frame.line);
-      value.putInt("column", frame.column);
-      output.pushMap(value);
-    }
-    return output;
+    return integer(map.getDouble(key));
   }
 
   private static WritableMap status(String value) {
     WritableMap output = Arguments.createMap();
     output.putString("status", value);
+    return output;
+  }
+
+  private static WritableMap androidDiagnosticsReceipt(String value, int pending) {
+    WritableMap output = status(value);
+    output.putInt("pending", pending);
+    return output;
+  }
+
+  private WritableMap androidDiagnosticsResult(String status) {
+    int pending = androidDiagnostics.pending();
+    return pending < 0
+        ? error("android_diagnostics_storage_failed")
+        : androidDiagnosticsReceipt(status, pending);
+  }
+
+  private static WritableMap error(String code) {
+    WritableMap output = status("error");
+    output.putString("code", code);
     return output;
   }
 
@@ -371,5 +315,16 @@ final class FatalStoreModuleImpl {
       output.putArray("records", records);
     }
     return output;
+  }
+
+  private static final class AndroidDiagnosticsInput {
+    final String clientKey;
+    final AndroidNativeDiagnostics.Configuration configuration;
+
+    AndroidDiagnosticsInput(
+        String clientKey, AndroidNativeDiagnostics.Configuration configuration) {
+      this.clientKey = clientKey;
+      this.configuration = configuration;
+    }
   }
 }

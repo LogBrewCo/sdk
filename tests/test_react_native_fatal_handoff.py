@@ -8,6 +8,37 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = ROOT / "js" / "logbrew-react-native"
+PACKAGE_ENTRIES = {
+    "LogBrewReactNative.podspec",
+    "android-native-diagnostics.js",
+    "fatal-replay.cjs",
+    "android/CMakeLists.txt",
+    "android/build.gradle",
+    "android/src/main",
+    "android/src/oldarch",
+    "android/src/newarch",
+    "ios/LBRNEventRecordStore.h",
+    "ios/LBRNEventRecordStore.m",
+    "ios/LBRNFatalStoreModule.h",
+    "ios/LBRNFatalStoreModule.mm",
+    "react-native.config.js",
+    "src",
+}
+AUTOLINK_FILES = PACKAGE_ENTRIES - {"android/src/main", "android/src/oldarch", "android/src/newarch", "src"} | {
+    "global-errors.native.js",
+    "index.native.d.ts",
+    "src/NativeLogBrewFatalStore.ts",
+    "android/src/main/AndroidManifest.xml",
+    "android/src/main/cpp/android_diagnostics.cpp",
+    "android/src/main/java/co/logbrew/reactnative/AndroidDiagnosticsRuntime.java",
+    "android/src/main/java/co/logbrew/reactnative/AndroidNativeDiagnostics.java",
+    "android/src/main/java/co/logbrew/reactnative/AndroidNativeSignalStore.java",
+    "android/src/main/java/co/logbrew/reactnative/AndroidParentDirectorySync.java",
+    "android/src/main/java/co/logbrew/reactnative/FatalStoreModuleImpl.java",
+    "android/src/main/java/co/logbrew/reactnative/LogBrewReactNativePackage.java",
+    "android/src/newarch/java/co/logbrew/reactnative/FatalStoreModule.java",
+    "android/src/oldarch/java/co/logbrew/reactnative/FatalStoreModule.java",
+}
 
 
 class ReactNativeFatalHandoffContractTests(unittest.TestCase):
@@ -37,22 +68,7 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
             manifest["codegenConfig"],
         )
         packaged = set(manifest["files"])
-        self.assertTrue(
-            {
-                "LogBrewReactNative.podspec",
-                "fatal-replay.cjs",
-                "android/build.gradle",
-                "android/src/main",
-                "android/src/oldarch",
-                "android/src/newarch",
-                "ios/LBRNFatalRecordStore.h",
-                "ios/LBRNFatalRecordStore.m",
-                "ios/LBRNFatalStoreModule.h",
-                "ios/LBRNFatalStoreModule.mm",
-                "react-native.config.js",
-                "src",
-            }.issubset(packaged)
-        )
+        self.assertTrue(PACKAGE_ENTRIES.issubset(packaged))
         self.assertEqual(
             {
                 "types": "./global-errors.d.ts",
@@ -67,26 +83,7 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
             },
             manifest["exports"]["."]["react-native"],
         )
-        for relative_path in (
-            "LogBrewReactNative.podspec",
-            "fatal-replay.cjs",
-            "global-errors.native.js",
-            "index.native.d.ts",
-            "react-native.config.js",
-            "src/NativeLogBrewFatalStore.ts",
-            "ios/LBRNFatalRecordStore.h",
-            "ios/LBRNFatalRecordStore.m",
-            "ios/LBRNFatalStoreModule.h",
-            "ios/LBRNFatalStoreModule.mm",
-            "android/build.gradle",
-            "android/src/main/AndroidManifest.xml",
-            "android/src/main/java/co/logbrew/reactnative/AndroidParentDirectorySync.java",
-            "android/src/main/java/co/logbrew/reactnative/FatalRecordStore.java",
-            "android/src/main/java/co/logbrew/reactnative/FatalStoreModuleImpl.java",
-            "android/src/main/java/co/logbrew/reactnative/LogBrewReactNativePackage.java",
-            "android/src/oldarch/java/co/logbrew/reactnative/FatalStoreModule.java",
-            "android/src/newarch/java/co/logbrew/reactnative/FatalStoreModule.java",
-        ):
+        for relative_path in AUTOLINK_FILES:
             self.assertTrue((PACKAGE_ROOT / relative_path).is_file(), relative_path)
 
     def test_pack_dry_run_owns_every_autolink_and_conditional_export_file(self) -> None:
@@ -98,27 +95,7 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
             text=True,
         )
         packed = {entry["path"] for entry in json.loads(completed.stdout)[0]["files"]}
-        required = {
-            "LogBrewReactNative.podspec",
-            "fatal-replay.cjs",
-            "global-errors.native.js",
-            "index.native.d.ts",
-            "react-native.config.js",
-            "src/NativeLogBrewFatalStore.ts",
-            "ios/LBRNFatalRecordStore.h",
-            "ios/LBRNFatalRecordStore.m",
-            "ios/LBRNFatalStoreModule.h",
-            "ios/LBRNFatalStoreModule.mm",
-            "android/build.gradle",
-            "android/src/main/AndroidManifest.xml",
-            "android/src/main/java/co/logbrew/reactnative/AndroidParentDirectorySync.java",
-            "android/src/main/java/co/logbrew/reactnative/FatalRecordStore.java",
-            "android/src/main/java/co/logbrew/reactnative/FatalStoreModuleImpl.java",
-            "android/src/main/java/co/logbrew/reactnative/LogBrewReactNativePackage.java",
-            "android/src/oldarch/java/co/logbrew/reactnative/FatalStoreModule.java",
-            "android/src/newarch/java/co/logbrew/reactnative/FatalStoreModule.java",
-        }
-        self.assertEqual(set(), required - packed)
+        self.assertEqual(set(), AUTOLINK_FILES - packed)
 
     def test_react_native_config_autolinks_ios_and_android(self) -> None:
         completed = subprocess.run(
@@ -149,7 +126,7 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
             config["dependency"]["platforms"]["android"],
         )
 
-    def test_react_native_condition_injects_owned_sync_module_with_stub_runtime(self) -> None:
+    def test_react_native_condition_admits_fatal_to_the_native_event_queue(self) -> None:
         with tempfile.TemporaryDirectory(prefix="logbrew-rn-condition-") as root_value:
             root = Path(root_value)
             modules = root / "node_modules"
@@ -223,46 +200,41 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             script = """
-const record={
-  corruptRecords:0,
-  droppedRecords:0,
-  errorName:"TypeError",
-  id:"evt_rn_fatal_condition",
-  schemaVersion:1,
-  stackFrames:[],
-  timestamp:"2026-07-25T12:00:00.000Z"
-};
-let pending=record;
+const records=[];
 globalThis.__logBrewFatalStore={
-  writeFatalRecord(){return {status:"dropped_pending"};},
-  readFatalRecord(){return pending?{record:pending,status:"pending"}:{status:"empty"};},
-  acknowledgeFatalRecord(id){
-    if (!pending || pending.id!==id) return {status:"id_mismatch"};
-    pending=undefined;
-    return {recordId:id,status:"acknowledged"};
+  acknowledgeEventRecords(){return {status:"acknowledged"};},
+  appendEventRecord(_key,serializedEvent,eventBytes){
+    records.push({eventBytes,serializedEvent});
+    return {status:"appended"};
   },
-  discardFatalRecord(){return {status:"empty"};}
+  closeEventStore(){return {status:"closed"};},
+  loadEventRecords(){return {records:[],status:"loaded"};},
+  purgeEventRecords(){return {status:"purged"};},
+  secureRandomHex(length){return "01".repeat(length);}
 };
 let handler=()=>{};
 const errorUtils={
   getGlobalHandler(){return handler;},
   setGlobalHandler(value){handler=value;}
 };
-const issues=[];
-const client={
-  droppedEvents(){return 0;},
-  issue(id,timestamp,attributes){issues.push({attributes,id,timestamp});},
-  pendingEvents(){return issues.length;}
-};
 const subpath=await import("@logbrew/react-native/global-errors");
 const root=await import("@logbrew/react-native");
+const client=root.createLogBrewReactNativeClient({
+  clientKey:"public-app-key",
+  persistentQueue:"required"
+});
 const installation=subpath.installLogBrewReactNativeGlobalErrorHandler({
   client,
   errorUtils
 });
-if (issues.length!==1 || pending!==undefined) throw new Error("native store not injected");
-if (installation.fatalHealth().lastOutcome!=="acknowledged") {
-  throw new Error("fatal replay not acknowledged");
+handler(new TypeError("opaque-value=hidden"),true);
+const admitted=JSON.parse(records[0]?.serializedEvent??"null");
+if (records.length!==1 || admitted?.attributes?.exception?.type!=="TypeError") {
+  throw new Error("fatal report was not durably admitted");
+}
+if (records[0].serializedEvent.includes("opaque-value")
+    || installation.fatalHealth().lastOutcome!=="stored") {
+  throw new Error("fatal admission was unsafe or incomplete");
 }
 if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
   throw new Error("root native convenience missing");
@@ -285,10 +257,14 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
 
     def test_old_and_new_architecture_adapters_expose_all_sync_methods(self) -> None:
         method_names = (
-            "writeFatalRecord",
-            "readFatalRecord",
-            "acknowledgeFatalRecord",
-            "discardFatalRecord",
+            "loadEventRecords",
+            "appendEventRecord",
+            "acknowledgeEventRecords",
+            "purgeEventRecords",
+            "closeEventStore",
+            "installAndroidDiagnostics",
+            "androidDiagnosticsStatus",
+            "uninstallAndroidDiagnostics",
         )
         podspec = (PACKAGE_ROOT / "LogBrewReactNative.podspec").read_text(encoding="utf-8")
         gradle = (PACKAGE_ROOT / "android" / "build.gradle").read_text(encoding="utf-8")
@@ -362,7 +338,7 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
             / "co"
             / "logbrew"
             / "reactnative"
-            / "FatalRecordStore.java"
+            / "EventRecordStore.java"
         ).read_text(encoding="utf-8")
         module = (
             PACKAGE_ROOT
@@ -386,8 +362,10 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
             / "reactnative"
             / "AndroidParentDirectorySync.java"
         )
+        signal_path = sync_path.parents[4] / "cpp" / "android_diagnostics.cpp"
 
         self.assertTrue(sync_path.is_file())
+        self.assertTrue(signal_path.is_file())
         sync = sync_path.read_text(encoding="utf-8")
         self.assertNotIn("java.lang.reflect", store)
         self.assertNotIn("Class.forName", store)
@@ -401,6 +379,7 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
             "Os.close",
         ):
             self.assertIn(platform_api, sync)
+        self.assertIn("O_NOFOLLOW", signal_path.read_text(encoding="utf-8"))
 
     def test_esm_cjs_and_typescript_publish_the_same_additive_api(self) -> None:
         esm = (PACKAGE_ROOT / "global-errors.js").read_text(encoding="utf-8")

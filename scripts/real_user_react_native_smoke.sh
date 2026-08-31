@@ -65,6 +65,8 @@ grep -q '^package/global-errors.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/promise-rejections.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/apple-native-diagnostics.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/apple-native-diagnostics.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/android-native-diagnostics.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/android-native-diagnostics.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/expo.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/expo.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/expo.d.ts$' "$tmp_dir/native-tarball.txt"
@@ -202,6 +204,7 @@ node --check node_modules/@logbrew/react-native/native-bridge.cjs
 node --check node_modules/@logbrew/react-native/resource-fetch.js
 node --check node_modules/@logbrew/react-native/resource-fetch.cjs
 node --check node_modules/@logbrew/react-native/apple-native-diagnostics.js
+node --check node_modules/@logbrew/react-native/android-native-diagnostics.js
 node --check node_modules/@logbrew/react-native/expo.js
 node --check node_modules/@logbrew/react-native/expo.cjs
 node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createReactNativeFetchTransport !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object" || typeof native.default.createReactNativeFetchTransport !== "function") process.exit(1)'

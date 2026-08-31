@@ -108,6 +108,8 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertIn("needs.changed-areas.outputs.javascript == 'true'", workflow)
         self.assertIn("needs.changed-areas.outputs.react_native_native == 'true'", workflow)
         self.assertIn("Run React Native native persistence checks", workflow)
+        self.assertIn("Compile installed Android bridge and native library", workflow)
+        self.assertIn(":logbrew:assembleRelease -PnewArchEnabled=false", workflow)
         self.assertIn("needs.changed-areas.outputs.swift == 'true'", workflow)
         self.assertIn("needs.changed-areas.outputs.objc == 'true'", workflow)
         self.assertIn("needs.changed-areas.outputs.kotlin == 'true'", workflow)

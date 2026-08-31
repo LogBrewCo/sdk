@@ -403,7 +403,7 @@ test("keeps the native bridge version and public Apple diagnostics contract alig
   assert.match(readme, /Expo Go cannot load this native\s+module/u);
   assert.match(readme, /fatalHandlerOwnership: "logbrew"/u);
   assert.match(readme, /only one integration may install native fatal capture/u);
-  assert.match(readme, /Android native crash and ANR capture are not included/u);
+  assert.match(readme, /Android native crash and ANR diagnostics/u);
   assert.match(readme, /logbrew debug-artifacts upload/u);
   assert.match(readme, /logbrew debug-artifacts lookup/u);
   assert.match(readme, /exact Mach-O UUID and architecture lookup\s+succeeds/u);
@@ -482,6 +482,7 @@ async function withRuntime({ entry = "apple-native-diagnostics.js", nativeModule
     const packageFiles = entry === "index.native.js"
       ? [
           "apple-native-diagnostics.js",
+          "android-native-diagnostics.js",
           "fatal-replay.cjs",
           "global-errors.cjs",
           "global-errors.js",

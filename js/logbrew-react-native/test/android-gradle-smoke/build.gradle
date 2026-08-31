@@ -1,0 +1,21 @@
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath("com.android.tools.build:gradle:8.7.3")
+  }
+}
+
+ext {
+  compileSdkVersion = 35
+  minSdkVersion = 24
+  targetSdkVersion = 35
+}
+
+project(":logbrew") {
+  afterEvaluate {
+    dependencies.add("implementation", "com.facebook.react:react-android:0.72.17")
+  }
+}

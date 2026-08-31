@@ -29,10 +29,10 @@ export function resolveReactNativePersistentEventStore({
         "eventStore and persistentQueue are mutually exclusive"
       );
     }
-    return { eventStore, abort() {}, release() {} };
+    return { eventStore, durable: false, abort() {}, release() {} };
   }
   if (persistentQueue === "disabled") {
-    return { eventStore: undefined, abort() {}, release() {} };
+    return { eventStore: undefined, durable: false, abort() {}, release() {} };
   }
 
   const nativeStore = defaultNativeStore();
@@ -43,7 +43,7 @@ export function resolveReactNativePersistentEventStore({
         "React Native persistent queue requires the linked LogBrew native module"
       );
     }
-    return { eventStore: undefined, abort() {}, release() {} };
+    return { eventStore: undefined, durable: false, abort() {}, release() {} };
   }
   validateNativeQueueLimits({ maxQueueBytes, maxQueueSize });
   if (ACTIVE_QUEUE_KEYS.has(authKey)) {
@@ -63,6 +63,7 @@ export function resolveReactNativePersistentEventStore({
   };
   const nativeEventStore = createNativeEventStore(nativeStore, authKey, release);
   return {
+    durable: true,
     eventStore: nativeEventStore,
     abort() {
       try {

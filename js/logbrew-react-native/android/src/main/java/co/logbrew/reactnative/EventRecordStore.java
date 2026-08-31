@@ -34,11 +34,11 @@ final class EventRecordStore {
       Pattern.compile("^event-([0-9]{20})\\.record$");
   private static final Pattern MARKER_PATTERN =
       Pattern.compile("^accepted-([0-9]{20})\\.marker$");
-  private static final FatalRecordStore.ParentDirectorySync UNSUPPORTED_PARENT_DIRECTORY_SYNC =
-      directory -> FatalRecordStore.ParentDirectorySyncResult.UNSUPPORTED;
+  private static final ParentDirectorySync UNSUPPORTED_PARENT_DIRECTORY_SYNC =
+      directory -> ParentDirectorySyncResult.UNSUPPORTED;
 
   private final File directory;
-  private final FatalRecordStore.ParentDirectorySync parentDirectorySync;
+  private final ParentDirectorySync parentDirectorySync;
   private boolean poisoned;
 
   EventRecordStore(File directory) {
@@ -46,7 +46,7 @@ final class EventRecordStore {
   }
 
   EventRecordStore(
-      File directory, FatalRecordStore.ParentDirectorySync parentDirectorySync) {
+      File directory, ParentDirectorySync parentDirectorySync) {
     this.directory = resolveCanonicalParent(directory);
     this.parentDirectorySync = parentDirectorySync;
   }
@@ -332,7 +332,7 @@ final class EventRecordStore {
         return false;
       }
       if (parentDirectorySync.sync(directory)
-          == FatalRecordStore.ParentDirectorySyncResult.FAILED) {
+          == ParentDirectorySyncResult.FAILED) {
         poisoned = true;
         return false;
       }
@@ -553,6 +553,16 @@ final class EventRecordStore {
         && value.setExecutable(false, false)
         && value.setReadable(true, true)
         && value.setWritable(true, true);
+  }
+
+  interface ParentDirectorySync {
+    ParentDirectorySyncResult sync(File directory);
+  }
+
+  enum ParentDirectorySyncResult {
+    SYNCHRONIZED,
+    UNSUPPORTED,
+    FAILED
   }
 
   static final class Record {
