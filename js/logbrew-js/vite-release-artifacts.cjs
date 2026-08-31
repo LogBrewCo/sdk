@@ -55,6 +55,16 @@ function resolveBuildDir(root, outDir, explicitBuildDir) {
   return resolvePathFromRoot(root, outDir || "dist");
 }
 
+function viteMajorVersion(root) {
+  try {
+    const manifestPath = require.resolve("vite/package.json", { paths: [path.resolve(root || process.cwd())] });
+    const version = JSON.parse(fs.readFileSync(manifestPath, "utf8")).version;
+    return Number.parseInt(version, 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 function createLogBrewViteReleaseArtifactsPlugin(options) {
   const release = requiredString(options, "release");
   const environment = requiredString(options, "environment");
@@ -78,10 +88,21 @@ function createLogBrewViteReleaseArtifactsPlugin(options) {
     apply: "build",
     enforce: "post",
     config(config = {}) {
-      if (!enableSourceMaps || config.build?.sourcemap !== undefined) {
-        return null;
-      }
-      return { build: { sourcemap: "hidden" } };
+      const sourceMap = enableSourceMaps && config.build?.sourcemap === undefined;
+      const keepNames = config.build?.minify === undefined;
+      const output = config.build?.rolldownOptions?.output;
+      const viteMajor = viteMajorVersion(config.root);
+      const modernNames = keepNames && viteMajor >= 8
+        && !Array.isArray(output) && output?.keepNames === undefined;
+      const legacyNames = keepNames && viteMajor < 8
+        && config.esbuild !== false && config.esbuild?.keepNames === undefined;
+      return sourceMap || modernNames || legacyNames ? {
+        ...(sourceMap || modernNames ? { build: {
+          ...(sourceMap ? { sourcemap: "hidden" } : {}),
+          ...(modernNames ? { rolldownOptions: { output: { keepNames: true } } } : {})
+        } } : {}),
+        ...(legacyNames ? { esbuild: { keepNames: true } } : {})
+      } : null;
     },
     configResolved(config) {
       viteRoot = config?.root ? path.resolve(config.root) : process.cwd();

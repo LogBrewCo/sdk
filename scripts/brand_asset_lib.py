@@ -154,6 +154,12 @@ def _png_chunks(data: bytes) -> tuple[bytes, bytes]:
     return header, bytes(compressed)
 
 
+def png_metadata(data: bytes) -> tuple[int, int, int, int, int, int, int]:
+    """Return validated PNG header fields without reconstructing pixels."""
+    header, _compressed = _png_chunks(data)
+    return struct.unpack(">IIBBBBB", header)
+
+
 def normalized_png_pixels(data: bytes) -> tuple[int, int, int, bytes]:
     """Return width, height, source color type, and normalized RGBA pixels."""
 

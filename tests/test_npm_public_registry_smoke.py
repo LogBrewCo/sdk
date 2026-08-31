@@ -120,6 +120,7 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
         *,
         omit_version: str | None = None,
         sdk_version: str = "0.1.4",
+        script_path: Path = SCRIPT,
     ) -> subprocess.CompletedProcess[str]:
         env = {
             **os.environ,
@@ -135,7 +136,7 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
         if omit_version is not None:
             env.pop(omit_version)
         return subprocess.run(
-            ["bash", str(SCRIPT)],
+            ["bash", str(script_path)],
             cwd=ROOT,
             env=env,
             capture_output=True,
@@ -220,15 +221,24 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_temp_dir:
             temp_dir = Path(raw_temp_dir)
             artifact_files, _ = self._receipt_fixture(temp_dir, leave_sdk_timer=True)
+            bounded_script = temp_dir / "bounded-npm-receipt-smoke.sh"
+            script_body = SCRIPT.read_text(encoding="utf-8")
+            bounded_body = script_body.replace("}, 10_000);", "}, 1_000);", 1)
+            self.assertNotEqual(bounded_body, script_body)
+            bounded_script.write_text(bounded_body, encoding="utf-8")
             started_at = time.monotonic()
-            result = self._run_receipt(temp_dir, artifact_files)
+            result = self._run_receipt(
+                temp_dir,
+                artifact_files,
+                script_path=bounded_script,
+            )
             elapsed = time.monotonic() - started_at
 
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "npm registry receipt failed at installed execution\n")
-        self.assertGreaterEqual(elapsed, 9)
-        self.assertLess(elapsed, 15)
+        self.assertGreaterEqual(elapsed, 1)
+        self.assertLess(elapsed, 10)
 
     def test_script_preserves_human_smoke_and_declares_fixed_receipt_contract(self) -> None:
         body = SCRIPT.read_text(encoding="utf-8")

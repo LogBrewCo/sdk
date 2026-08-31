@@ -25,7 +25,7 @@ node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
 npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline
 ```
 
-For Vite apps, add the build-time release-artifact plugin to `vite.config.js`. It enables hidden source maps when your config has not chosen a source-map mode, injects matching Debug IDs after the build, strips embedded source text and local source prefixes, writes a privacy-bounded manifest, and can upload the prepared artifacts before the build completes:
+For Vite apps, add the build-time release-artifact plugin to `vite.config.js`. It enables hidden source maps and function-name preservation when your config has not made either choice, injects matching Debug IDs after the build, strips embedded source text and local source prefixes, writes a privacy-bounded manifest, and can upload the prepared artifacts before the build completes:
 
 ```js
 import { createLogBrewViteReleaseArtifactsPlugin } from "@logbrew/sdk/vite-release-artifacts";
@@ -48,7 +48,7 @@ export default {
 };
 ```
 
-Set `LOGBREW_RELEASE_ARTIFACT_TOKEN` in the build environment to a dedicated release-artifact token. Use `tokenEnv` when your CI uses a different environment variable name, or `dryRun: true` to prepare the complete build output without a network request. The plugin runs only during Vite builds, keeps upload disabled when `upload` is omitted, and fails the build when preparation or upload cannot complete safely. It never uses normal SDK ingest keys or account/session API values.
+Set `LOGBREW_RELEASE_ARTIFACT_TOKEN` in the build environment to a dedicated release-artifact token. Use `tokenEnv` when your CI uses a different environment variable name, or `dryRun: true` to prepare the complete build output without a network request. The plugin runs only during Vite builds, keeps upload disabled when `upload` is omitted, and fails the build when preparation or upload cannot complete safely. It never uses normal SDK ingest keys or account/session API values. When your app chooses `build.minify` or multiple Rolldown outputs explicitly, configure `keepNames` for that build; otherwise captured stacks retain shortened function labels.
 
 The package also ships the dependency-free `logbrew-release-artifacts` command for JavaScript source-map preparation and upload. Use it after your frontend build to inject matching Debug IDs, strip embedded source text by default, and create a privacy-bounded manifest that can be inspected before upload:
 
@@ -102,7 +102,7 @@ npx logbrew-release-artifacts upload-js \
 
 Non-loopback endpoints require `--allow-hosted`, a UUID `projectId` created by `manifest-js --project-id`, HTTPS, and no embedded auth values, query strings, or fragments. Local loopback preparation remains valid without a project ID. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
 
-When you capture a JavaScript error, use `createIssueAttributesFromError()` to keep error metadata structured and source-map-friendly without sending raw stack text by default. The helper also follows `Error.cause` and `AggregateError.errors` into a bounded parent-first exception graph. Automatic messages are marked redacted, every node reports whether frames were captured, truncated, or unavailable, and unsafe accessors, cycles, or the eight-node cap mark the graph truncated instead of inventing evidence. React, browser, Node, Next.js, and React Native helpers reuse this same core projection. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md). Pass a Debug ID map from your app-owned build setup when you want the issue event to carry release-artifact metadata:
+When you capture a JavaScript error, use `createIssueAttributesFromError()` to keep error metadata structured and source-map-friendly without sending raw stack text by default. The helper also follows `Error.cause` and `AggregateError.errors` into a bounded parent-first exception graph. Automatic messages are marked redacted, every node reports whether frames were captured, truncated, or unavailable, and unsafe accessors, cycles, or the eight-node cap mark the graph truncated instead of inventing evidence. React, browser, Node, Next.js, and React Native helpers reuse this same core projection. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md). A bundle prepared by the Vite plugin registers its Debug ID automatically; use `debugIdMap` only for a different app-owned build flow:
 
 ```js
 import { createIssueAttributesFromError, LogBrewClient } from "@logbrew/sdk";

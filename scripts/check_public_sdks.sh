@@ -149,6 +149,7 @@ toolchain_versions_json() {
   python3 <<'PY'
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
 commands = {
     "node": ["node", "--version"],
@@ -182,17 +183,18 @@ commands = {
     "bundler": ["bundle", "--version"],
 }
 
-payload = {}
-for name, command in commands.items():
+def read_version(item):
+    name, command = item
     try:
         completed = subprocess.run(command, check=False, capture_output=True, text=True)
     except FileNotFoundError:
-        payload[name] = "not installed"
-        continue
+        return name, "not installed"
     output = completed.stdout.strip() or completed.stderr.strip()
     first_line = output.splitlines()[0] if output else ""
-    payload[name] = first_line
+    return name, first_line
 
+with ThreadPoolExecutor(max_workers=min(16, len(commands))) as executor:
+    payload = dict(executor.map(read_version, commands.items()))
 print(json.dumps(payload, separators=(",", ":")))
 PY
 }

@@ -1,10 +1,10 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import test from "node:test";
 
 const CLI_PATH = new URL("../release-artifacts.js", import.meta.url);
 const VITE_PLUGIN_PATH = new URL("../vite-release-artifacts.js", import.meta.url);
@@ -717,8 +717,20 @@ test("Vite release-artifact plugin prepares a build output and writes a ready ma
     assert.equal(plugin.apply, "build");
     assert.equal(plugin.enforce, "post");
     assert.deepEqual(plugin.config({ build: {} }, { command: "build", mode: "production" }), {
-      build: { sourcemap: "hidden" }
+      build: { sourcemap: "hidden" },
+      esbuild: { keepNames: true }
     });
+    assert.equal(plugin.config({ build: { sourcemap: true }, esbuild: { keepNames: false } }), null);
+
+    const vitePackageDir = path.join(appRoot, "node_modules", "vite");
+    fs.mkdirSync(vitePackageDir, { recursive: true });
+    fs.writeFileSync(path.join(vitePackageDir, "package.json"), '{"version":"8.1.0"}\n', "utf8");
+    assert.deepEqual(plugin.config({ root: appRoot, build: { sourcemap: true } }), {
+      build: { rolldownOptions: { output: { keepNames: true } } }
+    });
+    const outputs = [{ format: "es" }, { format: "cjs", keepNames: false }];
+    assert.equal(plugin.config({ root: appRoot, build: { sourcemap: true, rolldownOptions: { output: outputs } } }), null);
+    assert.deepEqual(outputs, [{ format: "es" }, { format: "cjs", keepNames: false }]);
 
     plugin.configResolved({ root: appRoot, build: { outDir: "dist" } });
     await plugin.writeBundle();

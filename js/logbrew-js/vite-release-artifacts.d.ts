@@ -28,7 +28,7 @@ export interface LogBrewViteReleaseArtifactsPlugin {
   name: "logbrew-vite-release-artifacts";
   apply: "build";
   enforce: "post";
-  config(config?: { build?: { sourcemap?: unknown } }): null | { build: { sourcemap: "hidden" } };
+  config(config?: { root?: string; build?: { sourcemap?: unknown; minify?: unknown; rolldownOptions?: { output?: { keepNames?: boolean } | Array<{ keepNames?: boolean }> } }; esbuild?: false | { keepNames?: boolean } }): null | { build?: { sourcemap?: "hidden"; rolldownOptions?: { output: { keepNames: true } } }; esbuild?: { keepNames: true } };
   configResolved(config: {
     root?: string;
     build?: { outDir?: string };

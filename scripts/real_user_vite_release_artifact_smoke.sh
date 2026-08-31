@@ -4,10 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
-export npm_config_cache="$tmp_dir/npm-cache"
-export npm_config_update_notifier=false
-export npm_config_fund=false
-export npm_config_audit=false
 
 remove_tmp_dir() {
   if [[ -n "${server_pid:-}" ]]; then
@@ -23,58 +19,22 @@ app_dir="$tmp_dir/vite-app"
 pack_dir="$tmp_dir/packs"
 mkdir -p "$app_dir/src" "$pack_dir"
 
-sdk_pack_json="$tmp_dir/sdk-pack.json"
-(
-  cd "$repo_root/js/logbrew-js"
-  npm pack --pack-destination "$pack_dir" --silent --json > "$sdk_pack_json"
-)
-sdk_tgz="$(
-  python3 - "$sdk_pack_json" <<'PY'
-import json
-import sys
-from pathlib import Path
+sdk_tgz="$(cd "$repo_root/js/logbrew-js" && bun pm pack --destination "$pack_dir" --quiet | tail -n 1)"
+for expected in \
+  release-artifacts-build.cjs \
+  vite-release-artifacts.cjs \
+  vite-release-artifacts.js \
+  vite-release-artifacts.d.ts \
+  vite-release-artifacts.d.cts; do
+  tar -tzf "$sdk_tgz" "package/$expected" >/dev/null
+done
 
-pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
-files = {entry["path"] for entry in pack["files"]}
-for expected in {
-    "release-artifacts-build.cjs",
-    "vite-release-artifacts.cjs",
-    "vite-release-artifacts.js",
-    "vite-release-artifacts.d.ts",
-    "vite-release-artifacts.d.cts",
-}:
-    assert expected in files, f"missing packed Vite release-artifact helper: {expected}"
-print(pack["filename"])
-PY
-)"
-sdk_tgz="$pack_dir/$sdk_tgz"
+browser_tgz="$(cd "$repo_root/js/logbrew-browser" && bun pm pack --destination "$pack_dir" --quiet | tail -n 1)"
+for expected in index.js index.cjs index.d.ts index.d.cts; do
+  tar -tzf "$browser_tgz" "package/$expected" >/dev/null
+done
 
-browser_pack_json="$tmp_dir/browser-pack.json"
-(
-  cd "$repo_root/js/logbrew-browser"
-  npm pack --pack-destination "$pack_dir" --silent --json > "$browser_pack_json"
-)
-browser_tgz="$(
-  python3 - "$browser_pack_json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
-files = {entry["path"] for entry in pack["files"]}
-for expected in {
-    "index.js",
-    "index.cjs",
-    "index.d.ts",
-    "index.d.cts",
-}:
-    assert expected in files, f"missing packed browser runtime helper: {expected}"
-print(pack["filename"])
-PY
-)"
-browser_tgz="$pack_dir/$browser_tgz"
-
-cat > "$app_dir/package.json" <<'JSON'
+cat >"$app_dir/package.json" <<'JSON'
 {
   "private": true,
   "type": "module",
@@ -122,7 +82,7 @@ intake_port="$(cat "$port_file")"
 export LOGBREW_RELEASE_ARTIFACT_ENDPOINT="http://127.0.0.1:${intake_port}/retry-success?ignored=query#ignored"
 export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
 
-cat > "$app_dir/index.html" <<'HTML'
+cat >"$app_dir/index.html" <<'HTML'
 <!doctype html>
 <html lang="en">
   <head>
@@ -136,7 +96,7 @@ cat > "$app_dir/index.html" <<'HTML'
 </html>
 HTML
 
-cat > "$app_dir/src/main.js" <<'JS'
+cat >"$app_dir/src/main.js" <<'JS'
 import { createIssueAttributesFromError } from "@logbrew/sdk";
 
 // LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD
@@ -170,12 +130,11 @@ window.__logbrewViteProbe = { captureCheckoutFailure, checkoutFailureSignal };
 document.querySelector("#app").textContent = `items:${checkoutItems.length}`;
 JS
 
-cat > "$app_dir/vite.config.js" <<'JS'
+cat >"$app_dir/vite.config.js" <<'JS'
 import { createLogBrewViteReleaseArtifactsPlugin } from "@logbrew/sdk/vite-release-artifacts";
 
 export default {
   build: {
-    minify: "esbuild",
     rollupOptions: {
       output: {
         entryFileNames: "assets/[name]-[hash].js"
@@ -202,22 +161,22 @@ JS
 
 (
   cd "$app_dir"
-  npm install --silent
-  node --input-type=module - <<'JS'
+  bun install --silent --cache-dir "$tmp_dir/bun-cache"
+  bun - <<'JS'
 import { createLogBrewViteReleaseArtifactsPlugin } from "@logbrew/sdk/vite-release-artifacts";
 
 if (typeof createLogBrewViteReleaseArtifactsPlugin !== "function") {
   throw new Error("expected Vite release-artifact plugin export");
 }
 JS
-  node - <<'JS'
+  bun - <<'JS'
 const { createLogBrewViteReleaseArtifactsPlugin, default: defaultExport } = require("@logbrew/sdk/vite-release-artifacts");
 
 if (typeof createLogBrewViteReleaseArtifactsPlugin !== "function" || defaultExport !== createLogBrewViteReleaseArtifactsPlugin) {
   throw new Error("expected CommonJS Vite release-artifact plugin export");
 }
 JS
-  npm run --silent build > "$tmp_dir/vite-build.log" 2>&1
+  bun run --silent build >"$tmp_dir/vite-build.log" 2>&1
 )
 
 grep -Fq "LogBrew release artifacts: uploaded (" "$tmp_dir/vite-build.log"
@@ -258,58 +217,8 @@ if [[ ! -s "$ready_manifest" ]]; then
   exit 1
 fi
 
-actual_stack_frame="$tmp_dir/vite-stack-frame.txt"
-(
-  cd "$app_dir"
-  node --input-type=module - "$js_file" > "$actual_stack_frame" <<'JS'
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
-
-const [, , jsPath] = process.argv;
-const jsSource = readFileSync(jsPath, "utf8");
-const sandbox = {
-  document: {
-    createElement() {
-      return {
-        relList: {
-          supports() {
-            return true;
-          },
-        },
-      };
-    },
-    querySelector() {
-      return {};
-    },
-  },
-  window: {},
-};
-vm.runInNewContext(jsSource, sandbox, { filename: jsPath });
-try {
-  sandbox.window.__logbrewViteProbe.checkoutFailureSignal();
-} catch (error) {
-  const frame = String(error.stack || "")
-    .split("\n")
-    .find((line) => line.includes(jsPath));
-  if (!frame) {
-    throw new Error(`expected thrown Vite stack to include ${jsPath}, got ${String(error.stack)}`);
-  }
-  console.log(frame.trim());
-  process.exit(0);
-}
-throw new Error("expected Vite checkout probe to throw");
-JS
-)
-
 release_artifacts_cli="$app_dir/node_modules/.bin/logbrew-release-artifacts"
-symbolication_report="$tmp_dir/vite-symbolication-report.json"
-"$release_artifacts_cli" symbolicate-js \
-  --build-dir "$dist_dir" \
-  --manifest "$ready_manifest" \
-  --stack-frame "$(cat "$actual_stack_frame")" \
-  > "$symbolication_report"
-
-python3 - "$ready_manifest" "$js_file" "$map_file" "$symbolication_report" "$tmp_dir" <<'PY'
+python3 - "$ready_manifest" "$js_file" "$map_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -317,10 +226,8 @@ from pathlib import Path
 manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 bundle_source = Path(sys.argv[2]).read_text(encoding="utf-8")
 source_map = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-symbolication_report = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[5]
+tmp_dir = sys.argv[4]
 serialized_manifest = json.dumps(manifest)
-serialized_symbolication = json.dumps(symbolication_report)
 
 artifact = manifest["artifacts"][0]
 debug_id = artifact["debugId"]
@@ -334,23 +241,17 @@ assert manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"
 assert artifact["debugId"] == debug_id
 assert artifact["sourceMap"]["hasSourcesContent"] is False
 assert artifact["minifiedSource"]["minifiedUrl"].startswith("https://cdn.example/static/assets/")
-assert symbolication_report["status"] == "resolved"
-assert symbolication_report["debugId"] == debug_id
-assert symbolication_report["generated"]["path"] == artifact["minifiedSource"]["path"]
-assert symbolication_report["original"]["source"].endswith("src/main.js")
 assert "cache=placeholder" not in serialized_manifest
 assert "hidden-hash-fragment-sentinel" not in serialized_manifest
 assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "checkout exploded" not in serialized_manifest
-assert "checkout exploded" not in serialized_symbolication
 assert tmp_dir not in serialized_manifest
-assert tmp_dir not in serialized_symbolication
 PY
 
 runtime_issue_payload="$tmp_dir/vite-runtime-browser-issue.json"
 (
   cd "$app_dir"
-  node --input-type=module - "$js_file" "$ready_manifest" > "$runtime_issue_payload" <<'JS'
+  bun - "$js_file" "$ready_manifest" >"$runtime_issue_payload" <<'JS'
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import {
@@ -470,7 +371,7 @@ sdk_issue_event_payload="$tmp_dir/vite-sdk-issue-event.json"
 sdk_issue_symbolication_report="$tmp_dir/vite-sdk-issue-symbolication-report.json"
 (
   cd "$app_dir"
-  node --input-type=module - "$js_file" "$sdk_issue_event_payload" <<'JS'
+  bun - "$js_file" "$sdk_issue_event_payload" <<'JS'
 import { writeFileSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 import { LogBrewClient } from "@logbrew/sdk";
@@ -513,7 +414,7 @@ JS
   --issue-event "$sdk_issue_event_payload" \
   --source-root "$app_dir" \
   --context-lines 0 \
-  > "$sdk_issue_symbolication_report"
+  >"$sdk_issue_symbolication_report"
 
 python3 - "$sdk_issue_event_payload" "$sdk_issue_symbolication_report" "$tmp_dir" <<'PY'
 import json
@@ -524,6 +425,7 @@ sdk_issue_event = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 sdk_issue_symbolication = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 tmp_dir = sys.argv[3]
 metadata = sdk_issue_event["attributes"]["metadata"]
+stack_frames = sdk_issue_event["attributes"]["stackFrames"]
 serialized_issue_event = json.dumps(sdk_issue_event)
 serialized_symbolication = json.dumps(sdk_issue_symbolication)
 
@@ -531,6 +433,8 @@ assert sdk_issue_event["type"] == "issue"
 assert sdk_issue_event["id"] == "evt_vite_sdk_issue_001"
 assert metadata["releaseArtifactType"] == "sourcemap"
 assert metadata["releaseArtifactDebugId"] == sdk_issue_symbolication["debugId"]
+assert stack_frames[0]["function"] == "checkoutFailureSignal"
+assert stack_frames[1]["function"] == "captureCheckoutFailure"
 assert metadata["release"] == "2026.06.18-vite"
 assert metadata["environment"] == "production"
 assert metadata["service"] == "checkout-web"

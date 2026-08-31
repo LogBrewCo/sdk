@@ -371,8 +371,21 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
                 hanging_path,
                 mutations={"c/logbrew-c/src/logbrew.c": hanging_source},
             )
+            bounded_script = temp_dir / "bounded-native-runtime-smoke.sh"
+            script_body = SCRIPT.read_text(encoding="utf-8")
+            bounded_body = script_body.replace(
+                "RUNTIME_TIMEOUT_SECONDS = 5",
+                "RUNTIME_TIMEOUT_SECONDS = 1",
+                1,
+            )
+            self.assertNotEqual(bounded_body, script_body)
+            bounded_script.write_text(bounded_body, encoding="utf-8")
             started_at = time.monotonic()
-            runtime_result = self._run_receipt(temp_dir, hanging_path)
+            runtime_result = self._run_receipt(
+                temp_dir,
+                hanging_path,
+                script_path=bounded_script,
+            )
             elapsed = time.monotonic() - started_at
 
         self.assertEqual(build_result.returncode, 1)
@@ -383,8 +396,8 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         self.assertEqual(runtime_result.stdout, "")
         self.assertEqual(runtime_result.stderr, "native release receipt failed at installed execution\n")
         self.assertNotIn("RUNTIME_CANARY_9D03", runtime_result.stderr)
-        self.assertGreaterEqual(elapsed, 4)
-        self.assertLess(elapsed, 29)
+        self.assertGreaterEqual(elapsed, 1)
+        self.assertLess(elapsed, 10)
 
     def test_receipt_mode_times_out_and_reaps_a_hanging_compiler(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp_dir:
