@@ -88,7 +88,9 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn("createLogBrewViteReleaseArtifactsPlugin", smoke)
         self.assertIn("upload: {", smoke)
         self.assertIn("LOGBREW_RELEASE_ARTIFACT_ENDPOINT", smoke)
-        self.assertIn('--pack-destination "$pack_dir"', smoke)
+        self.assertIn('bun pm pack --destination "$pack_dir"', smoke)
+        for forbidden in ("npm ", "npx ", "pnpm ", "yarn ", "corepack ", "node "):
+            self.assertNotIn(forbidden, smoke)
         self.assertIn("/retry-success", smoke)
         self.assertIn('grep -Fq "LogBrew release artifacts: uploaded ("', smoke)
         self.assertIn('assert [event["path"] for event in events].count("/retry-success") == 2', smoke)
@@ -109,6 +111,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn('assert sdk_issue_symbolication["input"]["type"] == "sdk_issue_event"', smoke)
         self.assertIn('assert sdk_issue_symbolication["status"] == "resolved"', smoke)
         self.assertIn('assert sdk_issue_symbolication["original"]["source"].endswith("src/main.js")', smoke)
+        self.assertIn('assert stack_frames[0]["function"] == "checkoutFailureSignal"', smoke)
         self.assertIn("--source-root", smoke)
         self.assertIn('source_context = sdk_issue_symbolication["sourceContext"]', smoke)
         self.assertIn('assert "checkout exploded" in source_context["lines"][0]["text"]', smoke)

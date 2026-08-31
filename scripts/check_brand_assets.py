@@ -15,7 +15,7 @@ from brand_asset_lib import (
     PNG_DERIVATIVES,
     REPO_ROOT,
     SVG_DERIVATIVES,
-    normalized_png_pixels,
+    png_metadata,
 )
 
 
@@ -76,10 +76,10 @@ def check_svg(path: Path, asset: dict[str, object], geometry_digest: str) -> Non
 
 
 def check_png(path: Path, asset: dict[str, object]) -> None:
-    width, height, color_type, _pixels = normalized_png_pixels(path.read_bytes())
+    metadata = png_metadata(path.read_bytes())
     expected_color_type = 2 if asset["kind"] == "png_rgb" else 6
-    expected = (asset["width"], asset["height"], expected_color_type)
-    if (width, height, color_type) != expected:
+    expected = (asset["width"], asset["height"], 8, expected_color_type, 0, 0, 0)
+    if metadata != expected:
         fail(f"brand PNG dimensions or alpha contract drifted: {path.relative_to(REPO_ROOT)}")
 
 
