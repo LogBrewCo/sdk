@@ -1212,19 +1212,28 @@ function normalizeStoredRecord(record) {
     if (!event.attributes || Array.isArray(event.attributes) || typeof event.attributes !== "object") {
       throw invalidStoredRecord();
     }
+    if (JSON.stringify(event) !== serializedEvent || utf8ByteLength(serializedEvent) !== eventBytes) {
+      throw invalidStoredRecord();
+    }
+    const context = event.attributes.context;
+    const recoveredEvent = context && !Array.isArray(context) && typeof context === "object"
+      && context.schemaVersion === undefined
+      ? { ...event, attributes: { ...event.attributes, context: { schemaVersion: 1, ...context } } }
+      : event;
     const normalizedEvent = {
-      type: event.type,
-      id: event.id,
-      timestamp: event.timestamp,
-      attributes: validator(event.attributes)
+      type: recoveredEvent.type,
+      id: recoveredEvent.id,
+      timestamp: recoveredEvent.timestamp,
+      attributes: validator(recoveredEvent.attributes)
     };
-    if (JSON.stringify(normalizedEvent) !== serializedEvent || utf8ByteLength(serializedEvent) !== eventBytes) {
+    const normalizedSerializedEvent = JSON.stringify(normalizedEvent);
+    if (normalizedSerializedEvent !== JSON.stringify(recoveredEvent)) {
       throw invalidStoredRecord();
     }
     return {
       event: cloneEvent(normalizedEvent),
-      eventBytes,
-      serializedEvent
+      eventBytes: utf8ByteLength(normalizedSerializedEvent),
+      serializedEvent: normalizedSerializedEvent
     };
   } catch (error) {
     if (error instanceof SdkError && error.code === "persistence_error") {
