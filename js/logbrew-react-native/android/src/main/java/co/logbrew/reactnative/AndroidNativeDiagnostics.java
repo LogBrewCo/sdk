@@ -185,7 +185,7 @@ final class AndroidNativeDiagnostics {
         nextId("java"),
         System.currentTimeMillis(),
         "Native application crash",
-        "fatal",
+        "critical",
         safeSymbol(error == null ? null : error.getClass().getName(), 256, "AndroidJavaCrash"),
         "uncaught_exception",
         0,
@@ -221,7 +221,7 @@ final class AndroidNativeDiagnostics {
         record.id,
         record.timestampMs,
         "Native application crash",
-        "fatal",
+        "critical",
         "AndroidNativeCrash",
         "signal",
         0,
@@ -244,8 +244,15 @@ final class AndroidNativeDiagnostics {
     output.append("{\"type\":\"issue\",\"id\":\"").append(id)
         .append("\",\"timestamp\":\"").append(timestamp(timestampMs))
         .append("\",\"attributes\":{\"title\":\"").append(title)
-        .append("\",\"level\":\"").append(level)
-        .append("\",\"exception\":{\"type\":\"").append(exceptionType)
+        .append("\",\"level\":\"").append(level).append('"');
+    appendJavaFrames(output, frames);
+    if (nativeFrame != null) {
+      output.append(",\"nativeStackFrames\":[{\"imageUuid\":\"")
+          .append(nativeFrame.imageUuid).append("\",\"architecture\":\"")
+          .append(nativeFrame.architecture).append("\",\"instructionOffset\":\"")
+          .append(nativeFrame.instructionOffset).append("\"}]");
+    }
+    output.append(",\"exception\":{\"type\":\"").append(exceptionType)
         .append("\",\"mechanism\":{\"type\":\"").append(mechanism)
         .append("\",\"handled\":false}},\"metadata\":{")
         .append("\"crash.mechanism\":\"").append(mechanism)
@@ -262,17 +269,11 @@ final class AndroidNativeDiagnostics {
     }
     output.append('}');
     appendContext(output, eventConfiguration);
-    appendJavaFrames(output, frames);
-    if (nativeFrame != null) {
-      output.append(",\"nativeStackFrames\":[{\"imageUuid\":\"")
-          .append(nativeFrame.imageUuid).append("\",\"architecture\":\"")
-          .append(nativeFrame.architecture).append("\",\"instructionOffset\":\"")
-          .append(nativeFrame.instructionOffset).append("\"}]");
-    }
     return output.append("}}").toString();
   }
 
   private static void appendJavaFrames(StringBuilder output, StackTraceElement[] frames) {
+    int start = output.length();
     output.append(",\"stackFrames\":[");
     int count = 0;
     for (StackTraceElement frame : frames) {
@@ -294,11 +295,15 @@ final class AndroidNativeDiagnostics {
           .append(json(safeSymbol(frame.getClassName(), 512, "unknown"))).append("\"}");
       count += 1;
     }
-    output.append(']');
+    if (count == 0) {
+      output.setLength(start);
+    } else {
+      output.append(']');
+    }
   }
 
   private static void appendContext(StringBuilder output, Configuration value) {
-    output.append(",\"context\":{\"resource\":{\"service\":{\"name\":\"")
+    output.append(",\"context\":{\"schemaVersion\":1,\"resource\":{\"service\":{\"name\":\"")
         .append(json(value.service)).append("\"},\"deployment\":{\"environment\":\"")
         .append(json(value.environment)).append("\",\"release\":\"")
         .append(json(value.release)).append("\"},\"operatingSystem\":{\"name\":\"Android\",\"version\":\"")
@@ -321,16 +326,16 @@ final class AndroidNativeDiagnostics {
 
   private static String safeFilename(String value) {
     String safe = safeSymbol(value, 256, null);
-    return safe == null || safe.contains("/") || safe.contains("\\") ? null : safe;
+    return safe == null || safe.contains("/") || safe.contains("\\") || safe.contains("?") || safe.contains("#") ? null : safe;
   }
 
   private static String safeSymbol(String value, int maximum, String fallback) {
     return value == null
-            || value.isEmpty()
+            || value.trim().isEmpty()
             || value.length() > maximum
             || value.chars().anyMatch(character -> character <= 31 || character == 127)
         ? fallback
-        : value;
+        : value.trim();
   }
 
   private static String json(String value) {

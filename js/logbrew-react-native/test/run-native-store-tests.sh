@@ -5,7 +5,7 @@ package_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 
 remove_temp_directory() {
-  rm -rf "$tmp_dir"
+  find "$tmp_dir" -depth -delete
 }
 trap remove_temp_directory EXIT
 

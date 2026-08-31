@@ -389,6 +389,14 @@ export type IssueDiagnosticEvidence = {
   truncatedFields?: string[];
 };
 
+export type NativeStackArchitecture = "arm" | "arm64" | "arm64e" | "x86" | "x86_64";
+
+export type NativeStackFrame = {
+  imageUuid: string;
+  architecture: NativeStackArchitecture;
+  instructionOffset: string;
+};
+
 /** Public issue event attributes. */
 export type IssueAttributes = {
   title: string;
@@ -399,6 +407,8 @@ export type IssueAttributes = {
   exceptionChain?: IssueExceptionChain;
   /** Ordered privacy-bounded generated frames, capped at 32. */
   stackFrames?: IssueStackFrame[];
+  /** Ordered native image-relative frames for exact release symbolication, capped at 32. */
+  nativeStackFrames?: NativeStackFrame[];
   /** Oldest-to-newest issue history, capped at the most recent 64 entries. */
   breadcrumbs?: IssueBreadcrumb[];
   /** True when older or invalid history was omitted before capture. */

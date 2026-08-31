@@ -4,6 +4,9 @@ const MAX_ISSUE_STACK_FRAMES = 32;
 const MAX_ISSUE_STACK_FUNCTION_LENGTH = 256;
 const MAX_ISSUE_STACK_MODULE_LENGTH = 512;
 const SAFE_DEBUG_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const NATIVE_IMAGE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const NATIVE_OFFSET_PATTERN = /^[0-9a-f]{16}$/u;
+const NATIVE_ARCHITECTURES = new Set(["arm", "arm64", "arm64e", "x86", "x86_64"]);
 const LOCAL_ABSOLUTE_PATH_PATTERN = /(?:^|\s)(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
 const DEBUG_ID_REGISTRY = Symbol.for("logbrew.release-artifact.debug-ids");
 
@@ -87,7 +90,31 @@ function buildIssueStackHelpers({ SdkError }) {
     });
   }
 
-  return { javascriptStackEvidence, validateIssueStackFrames };
+  function validateNativeStackFrames(frames) {
+    if (frames === undefined) {
+      return undefined;
+    }
+    if (!Array.isArray(frames) || frames.length === 0 || frames.length > MAX_ISSUE_STACK_FRAMES) {
+      throw new SdkError("validation_error", `issue nativeStackFrames must contain 1-${MAX_ISSUE_STACK_FRAMES} frames`);
+    }
+    return frames.map((frame) => {
+      const keys = frame && !Array.isArray(frame) && typeof frame === "object" ? Object.keys(frame) : [];
+      if (keys.length !== 3
+        || !keys.every((key) => ["imageUuid", "architecture", "instructionOffset"].includes(key))
+        || typeof frame.imageUuid !== "string" || !NATIVE_IMAGE_UUID_PATTERN.test(frame.imageUuid)
+        || !NATIVE_ARCHITECTURES.has(frame.architecture)
+        || typeof frame.instructionOffset !== "string" || !NATIVE_OFFSET_PATTERN.test(frame.instructionOffset)) {
+        throw new SdkError("validation_error", "issue native stack frame is invalid");
+      }
+      return {
+        imageUuid: frame.imageUuid,
+        architecture: frame.architecture,
+        instructionOffset: frame.instructionOffset
+      };
+    });
+  }
+
+  return { javascriptStackEvidence, validateIssueStackFrames, validateNativeStackFrames };
 }
 
 function parseJavaScriptStackFrame(rawLine) {

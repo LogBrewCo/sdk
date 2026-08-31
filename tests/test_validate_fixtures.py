@@ -799,6 +799,31 @@ class ValidateFixturesTests(unittest.TestCase):
                 "items": {"$ref": "#/$defs/issueStackFrame"},
             },
         )
+        native = schema["$defs"]["nativeStackFrame"]
+        self.assertEqual(set(native["required"]), {"imageUuid", "architecture", "instructionOffset"})
+        self.assertEqual(issue_properties["nativeStackFrames"]["maxItems"], 32)
+        self.assertEqual(issue_properties["nativeStackFrames"]["items"], {"$ref": "#/$defs/nativeStackFrame"})
+
+    def test_native_issue_frames_are_canonical_and_bounded(self) -> None:
+        payload = self.load_valid_payload()
+        frame = {
+            "imageUuid": "01234567-89ab-cdef-0123-456789abcdef",
+            "architecture": "arm64",
+            "instructionOffset": "0000000000001234",
+        }
+        self.issue_attributes(payload)["nativeStackFrames"] = [frame]
+        validate_payload(payload)
+
+        for invalid in (
+            [],
+            [{**frame, "imageUuid": frame["imageUuid"].upper()}],
+            [{**frame, "architecture": "arm64-v8a"}],
+            [{**frame, "instructionOffset": "1234"}],
+        ):
+            with self.subTest(invalid=invalid):
+                self.issue_attributes(payload)["nativeStackFrames"] = invalid
+                with self.assertRaises(ValidationError):
+                    validate_payload(payload)
 
     def test_schema_describes_bounded_issue_diagnostics(self) -> None:
         schema = self.load_schema()

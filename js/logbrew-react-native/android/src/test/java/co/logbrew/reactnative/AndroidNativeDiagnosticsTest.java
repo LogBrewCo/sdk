@@ -36,6 +36,8 @@ public final class AndroidNativeDiagnosticsTest {
 
           assertEquals(Arrays.asList("persist", "chain"), order);
           String event = onlyQueuedEvent(directory);
+          assertOrdered(event, "\"title\"", "\"level\":\"critical\"", "\"stackFrames\"", "\"exception\"", "\"metadata\"", "\"context\"");
+          assertContains(event, "\"context\":{\"schemaVersion\":1,\"resource\":");
           assertContains(event, "java.lang.IllegalStateException");
           assertContains(event, "AndroidNativeDiagnosticsTest.java");
           assertContains(event, "uncaughtExceptionPersistsBeforeChainingWithoutMessageContent");
@@ -107,12 +109,15 @@ public final class AndroidNativeDiagnosticsTest {
 
           EventRecordStore.Result loaded = diagnostics.eventStore.load();
           assertEquals(1, loaded.records.size());
-          assertContains(loaded.records.get(0).serializedEvent, "AndroidNativeCrash");
-          assertContains(loaded.records.get(0).serializedEvent, "\"crash.signal\":11");
-          assertContains(loaded.records.get(0).serializedEvent, "0000000000001234");
-          assertContains(loaded.records.get(0).serializedEvent, "com.example.app@1.2.2+44");
-          assertContains(loaded.records.get(0).serializedEvent, "\"environment\":\"canary\"");
-          assertNotContains(loaded.records.get(0).serializedEvent, "com.example.app@1.2.3+45");
+          String event = loaded.records.get(0).serializedEvent;
+          assertOrdered(event, "\"title\"", "\"level\":\"critical\"", "\"nativeStackFrames\"", "\"exception\"", "\"metadata\"", "\"context\"");
+          assertContains(event, "\"context\":{\"schemaVersion\":1,\"resource\":");
+          assertContains(event, "AndroidNativeCrash");
+          assertContains(event, "\"crash.signal\":11");
+          assertContains(event, "0000000000001234");
+          assertContains(event, "com.example.app@1.2.2+44");
+          assertContains(event, "\"environment\":\"canary\"");
+          assertNotContains(event, "com.example.app@1.2.3+45");
           assertEquals(null, diagnostics.signalStore.read());
         });
   }
@@ -274,6 +279,17 @@ public final class AndroidNativeDiagnosticsTest {
   private static void assertNotContains(String value, String forbidden) {
     if (value.contains(forbidden)) {
       throw new AssertionError("event exposed forbidden content");
+    }
+  }
+
+  private static void assertOrdered(String value, String... fields) {
+    int previous = -1;
+    for (String field : fields) {
+      int index = value.indexOf(field, previous + 1);
+      if (index <= previous) {
+        throw new AssertionError("expected canonical field order");
+      }
+      previous = index;
     }
   }
 
