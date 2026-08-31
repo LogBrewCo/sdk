@@ -330,13 +330,8 @@ async function waitForCondition(predicate, message) {
   throw new Error(message);
 }
 
-function storedLog(id, message = "persisted") {
-  const event = {
-    type: "log",
-    id,
-    timestamp: "2026-06-02T10:00:00Z",
-    attributes: { message, level: "info" }
-  };
+function storedEvent(type, id, attributes = { message: "persisted", level: "info" }) {
+  const event = { type, id, timestamp: "2026-06-02T10:00:00Z", attributes };
   const serializedEvent = JSON.stringify(event);
   return {
     event,
@@ -647,7 +642,7 @@ test("delivery health timestamps do not move backward when the wall clock regres
 });
 
 test("delivery health snapshot reports persisted restart hydration without content", () => {
-  const store = recordingEventStore([storedLog("private-recovered-event")]);
+  const store = recordingEventStore([storedEvent("log", "private-recovered-event")]);
   const client = sampleClient({
     apiKey: "private-key-value",
     eventStore: store,
@@ -971,7 +966,7 @@ test("custom manual flush failure restores the owned automatic scheduler", async
 
 test("automatic delivery schedules recovered work and shutdown cancels stale callbacks", async (t) => {
   const timers = fakeDeliveryTimers(t);
-  const store = recordingEventStore([storedLog("evt_recovered_auto_001")]);
+  const store = recordingEventStore([storedEvent("log", "evt_recovered_auto_001")]);
   const transport = RecordingTransport.alwaysAccept();
   const client = sampleClient({
     deliveryIntervalMs: 2500,
@@ -1082,43 +1077,36 @@ test("purge rejects an automatic threshold cohort before its microtask starts", 
   assert.equal(transport.sentBodies.length, 1);
 });
 
-test("event store recovers validated compact records before first capture", () => {
-  const store = recordingEventStore([storedLog("evt_recovered_001")]);
-  const client = sampleClient({ eventStore: store });
-
-  assert.equal(client.pendingEvents(), 1);
-  assert.equal(client.pendingBytes(), store.records[0].eventBytes);
-  assert.deepEqual(JSON.parse(client.previewJson()).events.map((event) => event.id), ["evt_recovered_001"]);
-  assert.deepEqual(store.calls, [["load"]]);
-});
-
-test("event store preserves canonical native issue frames across restart", () => {
+test("event store recovers native and legacy-context records", async () => {
   const nativeFrame = {
     imageUuid: "01234567-89ab-cdef-0123-456789abcdef",
     architecture: "arm64",
     instructionOffset: "0000000000001234"
   };
-  const store = recordingEventStore();
-  const first = sampleClient({ eventStore: store, sdkName: "logbrew-react-native" });
-  first.issue("evt_android_native_001", "2026-06-02T10:00:00Z", {
-    title: "Native application crash",
-    level: "fatal",
-    nativeStackFrames: [nativeFrame]
-  });
+  const store = recordingEventStore([
+    storedEvent("issue", "evt_native_001", {
+      title: "Native crash",
+      level: "critical",
+      nativeStackFrames: [nativeFrame]
+    }),
+    storedEvent("issue", "evt_legacy_001", {
+      title: "Legacy crash",
+      level: "critical",
+      context: { resource: { service: { name: "mobile-app" } } }
+    })
+  ]);
+  const transport = RecordingTransport.alwaysAccept();
+  const client = sampleClient({ automaticDelivery: false, eventStore: store, transport });
+  const recovered = JSON.parse(client.previewJson()).events;
 
-  const restarted = sampleClient({
-    eventStore: recordingEventStore(store.records),
-    sdkName: "logbrew-react-native"
-  });
-
-  assert.deepEqual(
-    JSON.parse(restarted.previewJson()).events[0].attributes.nativeStackFrames,
-    [nativeFrame]
-  );
+  assert.deepEqual(recovered[0].attributes.nativeStackFrames, [nativeFrame]);
+  assert.equal(recovered[1].attributes.context.schemaVersion, 1);
+  await client.flush();
+  assert.equal(JSON.parse(transport.lastBody()).events[1].attributes.context.schemaVersion, 1);
 });
 
 test("event queue factory composes restart recovery, health, flush, purge, and shutdown", async () => {
-  const queue = recordingEventQueue([storedLog("evt_factory_recovered_001")]);
+  const queue = recordingEventQueue([storedEvent("log", "evt_factory_recovered_001")]);
   let factoryConfig;
   const client = sampleClient({
     automaticDelivery: false,
@@ -1191,8 +1179,8 @@ test("event store append failure leaves the volatile queue empty", () => {
 });
 
 test("event store acknowledges an accepted prefix before volatile removal", async () => {
-  const first = storedLog("evt_ack_001");
-  const second = storedLog("evt_ack_002");
+  const first = storedEvent("log", "evt_ack_001");
+  const second = storedEvent("log", "evt_ack_002");
   const store = recordingEventStore([first, second]);
   const client = sampleClient({
     eventStore: store,
@@ -1208,7 +1196,7 @@ test("event store acknowledges an accepted prefix before volatile removal", asyn
 });
 
 test("event store acknowledgement failure retains the accepted prefix for replay", async () => {
-  const store = recordingEventStore([storedLog("evt_ack_failure_001")]);
+  const store = recordingEventStore([storedEvent("log", "evt_ack_failure_001")]);
   store.acknowledge = () => {
     throw new SdkError("persistence_error", "persistent acknowledgement failed");
   };
@@ -1278,13 +1266,15 @@ test("event store close failure leaves the client terminal instead of reopening 
 });
 
 test("event store recovery fails closed for malformed or over-limit records", () => {
-  const malformedStore = recordingEventStore([{ event: { type: "log" }, eventBytes: 2, serializedEvent: "{}" }]);
+  const malformedStore = recordingEventStore([storedEvent("log", "evt_malformed_001", {
+    message: "persisted", level: "info", context: { resource: {} }, unsupported: "drop-me"
+  })]);
   assert.throws(
     () => sampleClient({ eventStore: malformedStore }),
     /event store returned an invalid record/
   );
 
-  const overLimitStore = recordingEventStore([storedLog("evt_limit_001"), storedLog("evt_limit_002")]);
+  const overLimitStore = recordingEventStore([storedEvent("log", "evt_limit_001"), storedEvent("log", "evt_limit_002")]);
   assert.throws(
     () => sampleClient({
       eventStore: overLimitStore,
