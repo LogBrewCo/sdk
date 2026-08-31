@@ -329,39 +329,10 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
             self.assertIn(f"public WritableMap {method_name}", new_arch)
 
     def test_android_parent_sync_uses_public_no_follow_platform_apis(self) -> None:
-        store = (
-            PACKAGE_ROOT
-            / "android"
-            / "src"
-            / "main"
-            / "java"
-            / "co"
-            / "logbrew"
-            / "reactnative"
-            / "EventRecordStore.java"
-        ).read_text(encoding="utf-8")
-        module = (
-            PACKAGE_ROOT
-            / "android"
-            / "src"
-            / "main"
-            / "java"
-            / "co"
-            / "logbrew"
-            / "reactnative"
-            / "FatalStoreModuleImpl.java"
-        ).read_text(encoding="utf-8")
-        sync_path = (
-            PACKAGE_ROOT
-            / "android"
-            / "src"
-            / "main"
-            / "java"
-            / "co"
-            / "logbrew"
-            / "reactnative"
-            / "AndroidParentDirectorySync.java"
-        )
+        java_root = PACKAGE_ROOT / "android/src/main/java/co/logbrew/reactnative"
+        store = (java_root / "EventRecordStore.java").read_text(encoding="utf-8")
+        module = (java_root / "FatalStoreModuleImpl.java").read_text(encoding="utf-8")
+        sync_path = java_root / "AndroidParentDirectorySync.java"
         signal_path = sync_path.parents[4] / "cpp" / "android_diagnostics.cpp"
 
         self.assertTrue(sync_path.is_file())
@@ -379,7 +350,11 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
             "Os.close",
         ):
             self.assertIn(platform_api, sync)
-        self.assertIn("O_NOFOLLOW", signal_path.read_text(encoding="utf-8"))
+        signal = signal_path.read_text(encoding="utf-8")
+        self.assertIn("O_NOFOLLOW", signal)
+        self.assertIn("kMaxModules = 4096", signal)
+        self.assertIn("g_module_overflow", signal)
+        self.assertIn("if (g_module_overflow", signal)
 
     def test_esm_cjs_and_typescript_publish_the_same_additive_api(self) -> None:
         esm = (PACKAGE_ROOT / "global-errors.js").read_text(encoding="utf-8")

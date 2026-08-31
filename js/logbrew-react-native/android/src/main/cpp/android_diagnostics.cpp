@@ -26,7 +26,7 @@ constexpr size_t kProjectChars = 36;
 constexpr size_t kReleaseChars = 256;
 constexpr size_t kEnvironmentChars = 128;
 constexpr size_t kServiceChars = 128;
-constexpr size_t kMaxModules = 192;
+constexpr size_t kMaxModules = 4096;
 constexpr std::array<int, 6> kSignals = {SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
 
 #pragma pack(push, 1)
@@ -57,6 +57,7 @@ struct Module {
 
 std::array<Module, kMaxModules> g_modules{};
 size_t g_module_count = 0;
+bool g_module_overflow = false;
 std::array<struct sigaction, kSignals.size()> g_previous_actions{};
 std::array<char, 1024> g_record_path{};
 SignalRecord g_record_template{};
@@ -111,6 +112,7 @@ bool read_build_id(const dl_phdr_info* info, std::array<uint8_t, 16>* output) {
 
 int collect_module(dl_phdr_info* info, size_t, void*) {
   if (g_module_count == g_modules.size()) {
+    g_module_overflow = true;
     return 1;
   }
   uintptr_t start = UINTPTR_MAX;
@@ -329,7 +331,12 @@ Java_co_logbrew_reactnative_AndroidDiagnosticsRuntime_nativeInstall(
   g_record_template.magic = kMagic;
   g_record_template.version = kVersion;
   g_module_count = 0;
+  g_module_overflow = false;
   dl_iterate_phdr(collect_module, nullptr);
+  if (g_module_overflow) {
+    g_installed.store(false);
+    return JNI_FALSE;
+  }
   struct sigaction action {};
   sigemptyset(&action.sa_mask);
   action.sa_sigaction = signal_handler;
