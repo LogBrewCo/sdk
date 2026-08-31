@@ -1078,21 +1078,12 @@ test("purge rejects an automatic threshold cohort before its microtask starts", 
 });
 
 test("event store recovers native and legacy-context records", async () => {
-  const nativeFrame = {
-    imageUuid: "01234567-89ab-cdef-0123-456789abcdef",
-    architecture: "arm64",
-    instructionOffset: "0000000000001234"
-  };
+  const nativeFrame = { imageUuid: "01234567-89ab-cdef-0123-456789abcdef", architecture: "arm64", instructionOffset: "0000000000001234" };
   const store = recordingEventStore([
-    storedEvent("issue", "evt_native_001", {
-      title: "Native crash",
-      level: "critical",
-      nativeStackFrames: [nativeFrame]
-    }),
+    storedEvent("issue", "evt_native_001", { title: "Native crash", level: "critical", nativeStackFrames: [nativeFrame] }),
     storedEvent("issue", "evt_legacy_001", {
-      title: "Legacy crash",
-      level: "critical",
-      context: { resource: { service: { name: "mobile-app" } } }
+      title: "Legacy crash", level: "fatal",
+      context: { resource: { service: { name: "mobile-app" } } }, nativeStackFrames: [nativeFrame]
     })
   ]);
   const transport = RecordingTransport.alwaysAccept();
@@ -1100,7 +1091,7 @@ test("event store recovers native and legacy-context records", async () => {
   const recovered = JSON.parse(client.previewJson()).events;
 
   assert.deepEqual(recovered[0].attributes.nativeStackFrames, [nativeFrame]);
-  assert.equal(recovered[1].attributes.context.schemaVersion, 1);
+  assert.deepEqual([recovered[1].attributes.level, recovered[1].attributes.context.schemaVersion], ["critical", 1]);
   await client.flush();
   assert.equal(JSON.parse(transport.lastBody()).events[1].attributes.context.schemaVersion, 1);
 });
