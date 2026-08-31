@@ -1194,6 +1194,11 @@ function loadStoredEvents({
   return { events, queuedEventBytes, serializedEventBytes, serializedEvents };
 }
 
+function structuralJson(value) {
+  return JSON.stringify(value, (_, entry) => entry && !Array.isArray(entry) && typeof entry === "object"
+    ? Object.fromEntries(Object.entries(entry).sort(([left], [right]) => left.localeCompare(right))) : entry);
+}
+
 function normalizeStoredRecord(record) {
   try {
     if (!record || Array.isArray(record) || typeof record !== "object") {
@@ -1215,11 +1220,14 @@ function normalizeStoredRecord(record) {
     if (JSON.stringify(event) !== serializedEvent || utf8ByteLength(serializedEvent) !== eventBytes) {
       throw invalidStoredRecord();
     }
-    const context = event.attributes.context;
+    const recoveredAttributes = event.type === "issue" && event.attributes.level === "fatal"
+      ? { ...event.attributes, level: "critical" }
+      : event.attributes;
+    const context = recoveredAttributes.context;
     const recoveredEvent = context && !Array.isArray(context) && typeof context === "object"
       && context.schemaVersion === undefined
-      ? { ...event, attributes: { ...event.attributes, context: { schemaVersion: 1, ...context } } }
-      : event;
+      ? { ...event, attributes: { ...recoveredAttributes, context: { schemaVersion: 1, ...context } } }
+      : { ...event, attributes: recoveredAttributes };
     const normalizedEvent = {
       type: recoveredEvent.type,
       id: recoveredEvent.id,
@@ -1227,7 +1235,7 @@ function normalizeStoredRecord(record) {
       attributes: validator(recoveredEvent.attributes)
     };
     const normalizedSerializedEvent = JSON.stringify(normalizedEvent);
-    if (normalizedSerializedEvent !== JSON.stringify(recoveredEvent)) {
+    if (structuralJson(normalizedEvent) !== structuralJson(recoveredEvent)) {
       throw invalidStoredRecord();
     }
     return {
