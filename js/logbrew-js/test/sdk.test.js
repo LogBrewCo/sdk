@@ -2531,13 +2531,13 @@ test("concurrent flush calls serialize without duplicating a queue prefix", asyn
   assert.equal(client.pendingEvents(), 0);
 });
 
-test("flush splits by event count and retries a stable batch body", async () => {
+test("flush splits repeated ids and event counts while retrying a stable batch body", async () => {
   const client = sampleClient({
-    maxBatchEvents: 2,
+    maxBatchEvents: 3,
     maxRetries: 1
   });
-  for (let index = 0; index < 5; index += 1) {
-    client.log(`evt_batch_${index}`, `2026-06-02T10:00:0${index}Z`, { message: "queued", level: "info" });
+  for (const [index, id] of ["evt_batch_0", "evt_batch_1", "evt_batch_0", "evt_batch_2", "evt_batch_3", "evt_batch_4", "evt_batch_5"].entries()) {
+    client.log(id, `2026-06-02T10:00:0${index}Z`, { message: "queued", level: "info" });
   }
   const transport = new RecordingTransport([
     { statusCode: 503 },
@@ -2558,8 +2558,8 @@ test("flush splits by event count and retries a stable batch body", async () => 
     [
       ["evt_batch_0", "evt_batch_1"],
       ["evt_batch_0", "evt_batch_1"],
-      ["evt_batch_2", "evt_batch_3"],
-      ["evt_batch_4"]
+      ["evt_batch_0", "evt_batch_2", "evt_batch_3"],
+      ["evt_batch_4", "evt_batch_5"]
     ]
   );
   assert.equal(client.pendingEvents(), 0);

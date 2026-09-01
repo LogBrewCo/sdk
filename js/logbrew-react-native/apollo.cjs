@@ -176,7 +176,6 @@ function captureApolloSpan(client, {
   captureReactNativeResourceSpan(client, {
     appState,
     durationMs,
-    id: defaultApolloSpanId({ operationName: details.operationName, operationType: details.operationType, screen }),
     kind: "graphql",
     metadata: {
       ...metadata,
@@ -278,19 +277,6 @@ function errorName(error) {
     return error.name;
   }
   return undefined;
-}
-
-function defaultApolloSpanId({ operationName, operationType, screen }) {
-  return `evt_native_apollo_${slugify([screen, operationType, operationName].filter(Boolean).join("_") || "operation")}`;
-}
-
-function slugify(value) {
-  return String(value)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "_")
-    .replace(/^_+|_+$/gu, "")
-    .slice(0, 96) || "event";
 }
 
 module.exports = {

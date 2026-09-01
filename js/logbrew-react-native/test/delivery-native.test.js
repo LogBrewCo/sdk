@@ -32,7 +32,7 @@ test("managed and unlinked runtimes use Expo Crypto or fail closed", async () =>
       assert.match(managed.createReactNativeTraceContext().traceId, /^(?:cd){16}$/u);
       assert.deepEqual(lengths, [16, 8]);
       delete globalThis.expo;
-      assert.throws(() => managed.createReactNativeTraceContext(), /requires secure random values/u);
+      assert.throws(() => managed.createReactNativeTraceContext(), /secure random values are unavailable/u);
     });
   });
 });

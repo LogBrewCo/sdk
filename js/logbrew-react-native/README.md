@@ -86,6 +86,8 @@ batches, and pauses repeated automatic sends after authentication, rate-limit,
 or non-retryable failures. Do not add a second app-owned flush interval.
 `flushOnBackground: true` requests one final flush when AppState becomes
 `inactive` or `background`; a failure never escapes the AppState callback.
+Helpers generate a fresh opaque event ID by default. Explicit `id` and
+`idFactory` values remain available for app-owned idempotency.
 
 ## Confirm Hosted Delivery And Event Visibility
 

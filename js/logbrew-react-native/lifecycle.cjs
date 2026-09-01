@@ -97,8 +97,8 @@ function requireClient(client) {
   }
 }
 
-function defaultLifecycleSpanEventId({ fromState, screen, toState }) {
-  return `evt_native_lifecycle_${slugify([screen, fromState, toState].filter(Boolean).join("_") || "app_state")}`;
+function defaultLifecycleSpanEventId() {
+  return `evt_native_lifecycle_${createReactNativeTraceContext().traceId}`;
 }
 
 function normalizeLifecycleState(state) {
@@ -113,13 +113,6 @@ function subscriptionRemover(subscription) {
     return () => subscription.remove();
   }
   return () => {};
-}
-
-function slugify(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
 }
 
 module.exports = {

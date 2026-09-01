@@ -36,7 +36,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.23",
+            "js/logbrew-js/package.json": "0.1.24",
             "js/logbrew-browser/package.json": "0.1.9",
             "js/logbrew-express/package.json": "0.1.5",
             "js/logbrew-fastify/package.json": "0.1.6",
@@ -44,7 +44,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-nestjs/package.json": "0.1.6",
             "js/logbrew-next/package.json": "0.1.7",
             "js/logbrew-react/package.json": "0.1.1",
-            "js/logbrew-react-native/package.json": "0.1.28",
+            "js/logbrew-react-native/package.json": "0.1.29",
             "js/logbrew-svelte/package.json": "0.1.5",
         }
         for relative_path, expected in npm_versions.items():
@@ -96,7 +96,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_react_native_release_requires_fixed_core_range_and_updates_native_identity(self) -> None:
         manifest = json_object("js/logbrew-react-native/package.json")
 
-        self.assertEqual(manifest["peerDependencies"]["@logbrew/sdk"], "^0.1.20")
+        self.assertEqual(manifest["peerDependencies"]["@logbrew/sdk"], "^0.1.24")
 
         self.assertIn(
             f'private static let sdkVersion = "{manifest["version"]}"',
