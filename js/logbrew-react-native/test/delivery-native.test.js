@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sdkRoot = path.resolve(packageRoot, "../logbrew-js");
+const CLIENT_KEY = "LOGBREW_CLIENT_KEY";
 
 test("native entry creates secure trace identifiers without Web Crypto", async () => {
   await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
@@ -51,28 +52,19 @@ async function withoutWebCrypto(callback) {
   }
 }
 
-test("linked native queue replays an exact event after a JavaScript runtime restart", async () => {
-  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+test("linked native queue replays restart and same-process native records", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore, nativeWakeup }) => {
     const firstRuntime = await importRuntime("first", true);
-    const firstClient = firstRuntime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
-      sdkName: "react-native-restart-test",
-      sdkVersion: "0.1.0"
-    });
+    const firstClient = nativeClient(firstRuntime);
     addOfflineLog(firstClient);
 
     assert.equal(firstClient.deliveryHealth().storage, "persistent");
     assert.equal(firstClient.pendingEvents(), 1);
-    assert.equal(nativeStore.records("LOGBREW_CLIENT_KEY").length, 1);
+    assert.equal(nativeStore.records(CLIENT_KEY).length, 1);
 
     const sentBodies = [];
-    const secondRuntime = await importRuntime("second", true);
-    const secondClient = secondRuntime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
-      sdkName: "react-native-restart-test",
-      sdkVersion: "0.1.0",
+    const secondRuntime = await importRuntime("second", true, "android");
+    const secondClient = nativeClient(secondRuntime, {
       transport: {
         async send(_key, body) {
           sentBodies.push(body);
@@ -88,16 +80,20 @@ test("linked native queue replays an exact event after a JavaScript runtime rest
 
     assert.equal(sentBodies.length, 1);
     assert.equal(JSON.parse(sentBodies[0]).events[0].id, "evt_rn_offline_restart");
-    assert.equal(nativeStore.records("LOGBREW_CLIENT_KEY").length, 0);
+    assert.equal(nativeStore.records(CLIENT_KEY).length, 0);
+    nativeStore.seed(CLIENT_KEY, serializedOfflineRecord("evt_native_anr"));
+    secondClient.log("evt_after_anr", "2026-07-31T08:30:01.000Z", {
+      level: "info", message: "main thread recovered"
+    });
+    nativeWakeup();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(JSON.parse(sentBodies[1]).events.map(({ id }) => id), [
+      "evt_native_anr", "evt_after_anr"
+    ]);
     await secondClient.shutdown();
 
     const thirdRuntime = await importRuntime("third", true);
-    const thirdClient = thirdRuntime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
-      sdkName: "react-native-restart-test",
-      sdkVersion: "0.1.0"
-    });
+    const thirdClient = nativeClient(thirdRuntime);
     assert.equal(thirdClient.deliveryHealth().hydratedEvents, 0);
     assert.equal(thirdClient.pendingEvents(), 0);
   });
@@ -106,14 +102,10 @@ test("linked native queue replays an exact event after a JavaScript runtime rest
 test("native queue auto fallback is observable and required mode fails closed", async () => {
   await withNativeRuntimes(async ({ importRuntime }) => {
     const autoRuntime = await importRuntime("auto-fallback", false);
-    const memoryClient = autoRuntime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY"
-    });
+    const memoryClient = nativeClient(autoRuntime);
     assert.equal(memoryClient.deliveryHealth().storage, "memory");
     assert.throws(
-      () => autoRuntime.createLogBrewReactNativeClient({
-        automaticDelivery: false,
+      () => nativeClient(autoRuntime, {
         clientKey: "LOGBREW_INVALID_CONFIG_KEY",
         maxQueueSize: 0
       }),
@@ -123,8 +115,7 @@ test("native queue auto fallback is observable and required mode fails closed", 
 
     const requiredRuntime = await importRuntime("required-missing", false);
     assert.throws(
-      () => requiredRuntime.createLogBrewReactNativeClient({
-        automaticDelivery: false,
+      () => nativeClient(requiredRuntime, {
         clientKey: "DO_NOT_EXPOSE_THIS_KEY",
         persistentQueue: "required"
       }),
@@ -138,17 +129,12 @@ test("native queue auto fallback is observable and required mode fails closed", 
 test("an older linked native binary falls back in auto mode and fails clearly when required", async () => {
   await withNativeRuntimes(async ({ importRuntime }) => {
     const autoRuntime = await importRuntime("legacy-auto", "legacy");
-    const memoryClient = autoRuntime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY"
-    });
+    const memoryClient = nativeClient(autoRuntime);
     assert.equal(memoryClient.deliveryHealth().storage, "memory");
 
     const requiredRuntime = await importRuntime("legacy-required", "legacy");
     assert.throws(
-      () => requiredRuntime.createLogBrewReactNativeClient({
-        automaticDelivery: false,
-        clientKey: "LOGBREW_CLIENT_KEY",
+      () => nativeClient(requiredRuntime, {
         persistentQueue: "required"
       }),
       /requires the linked LogBrew native module/u
@@ -158,29 +144,24 @@ test("an older linked native binary falls back in auto mode and fails clearly wh
 
 test("failed native hydration closes its handle and permits same-key recovery", async () => {
   await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
-    nativeStore.seed("LOGBREW_CLIENT_KEY", {
+    nativeStore.seed(CLIENT_KEY, {
       eventBytes: 8,
       serializedEvent: "not-json"
     });
     const runtime = await importRuntime("failed-hydration", true);
     assert.throws(
-      () => runtime.createLogBrewReactNativeClient({
-        automaticDelivery: false,
-        clientKey: "LOGBREW_CLIENT_KEY"
-      }),
+      () => nativeClient(runtime),
       (error) => error.code === "persistence_error"
     );
     assert.deepEqual(nativeStore.calls.slice(-2), [
-      ["load", "LOGBREW_CLIENT_KEY"],
-      ["close", "LOGBREW_CLIENT_KEY"]
+      ["load", CLIENT_KEY],
+      ["close", CLIENT_KEY]
     ]);
 
     runtime.purgeLogBrewReactNativePersistentQueue({
-      clientKey: "LOGBREW_CLIENT_KEY"
+      clientKey: CLIENT_KEY
     });
-    const recovered = runtime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
+    const recovered = nativeClient(runtime, {
       transport: {
         async send() {
           return { attempts: 1, statusCode: 202 };
@@ -196,25 +177,19 @@ test("native persistence rejects queue limits above its durable bounds at startu
   await withNativeRuntimes(async ({ importRuntime }) => {
     const runtime = await importRuntime("bounded", true);
     assert.throws(
-      () => runtime.createLogBrewReactNativeClient({
-        automaticDelivery: false,
-        clientKey: "LOGBREW_CLIENT_KEY",
+      () => nativeClient(runtime, {
         maxQueueBytes: 4 * 1024 * 1024 + 1
       }),
       /maxQueueBytes must be at most 4194304/u
     );
     assert.throws(
-      () => runtime.createLogBrewReactNativeClient({
-        automaticDelivery: false,
-        clientKey: "LOGBREW_CLIENT_KEY",
+      () => nativeClient(runtime, {
         maxQueueSize: 1001
       }),
       /maxQueueSize must be at most 1000/u
     );
 
-    const memoryClient = runtime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
+    const memoryClient = nativeClient(runtime, {
       maxQueueBytes: 4 * 1024 * 1024 + 1,
       maxQueueSize: 1001,
       persistentQueue: "disabled"
@@ -226,9 +201,7 @@ test("native persistence rejects queue limits above its durable bounds at startu
 test("disabled native persistence stays memory-only and never touches the store", async () => {
   await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
     const runtime = await importRuntime("disabled", true);
-    const client = runtime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
+    const client = nativeClient(runtime, {
       persistentQueue: "disabled"
     });
     addOfflineLog(client);
@@ -258,19 +231,13 @@ test("explicit eventStore remains available without invoking the native queue", 
       close() {}
     };
     assert.throws(
-      () => runtime.createLogBrewReactNativeClient({
-        automaticDelivery: false,
-        clientKey: "LOGBREW_CLIENT_KEY",
+      () => nativeClient(runtime, {
         eventStore,
         persistentQueue: "auto"
       }),
       /eventStore and persistentQueue are mutually exclusive/u
     );
-    const client = runtime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
-      eventStore
-    });
+    const client = nativeClient(runtime, { eventStore });
     addOfflineLog(client);
 
     assert.equal(client.deliveryHealth().storage, "persistent");
@@ -282,9 +249,7 @@ test("explicit eventStore remains available without invoking the native queue", 
 test("purge requires an inactive queue owner and clears the selected key only", async () => {
   await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
     const runtime = await importRuntime("purge", true);
-    const client = runtime.createLogBrewReactNativeClient({
-      automaticDelivery: false,
-      clientKey: "LOGBREW_CLIENT_KEY",
+    const client = nativeClient(runtime, {
       transport: {
         async send() {
           return { attempts: 1, statusCode: 202 };
@@ -294,19 +259,19 @@ test("purge requires an inactive queue owner and clears the selected key only", 
     addOfflineLog(client);
     assert.throws(
       () => runtime.purgeLogBrewReactNativePersistentQueue({
-        clientKey: "LOGBREW_CLIENT_KEY"
+        clientKey: CLIENT_KEY
       }),
       /while its client is active/u
     );
     await client.shutdown();
 
-    nativeStore.seed("LOGBREW_CLIENT_KEY", serializedOfflineRecord());
+    nativeStore.seed(CLIENT_KEY, serializedOfflineRecord());
     nativeStore.seed("OTHER_CLIENT_KEY", serializedOfflineRecord("evt_other_key"));
     runtime.purgeLogBrewReactNativePersistentQueue({
-      clientKey: "LOGBREW_CLIENT_KEY"
+      clientKey: CLIENT_KEY
     });
 
-    assert.equal(nativeStore.records("LOGBREW_CLIENT_KEY").length, 0);
+    assert.equal(nativeStore.records(CLIENT_KEY).length, 0);
     assert.equal(nativeStore.records("OTHER_CLIENT_KEY").length, 1);
     assert.deepEqual(nativeStore.calls.slice(-2), [
       ["purge", "LOGBREW_CLIENT_KEY"],
@@ -332,13 +297,21 @@ test("public documentation distinguishes durable, fallback, recovery, and duplic
   assert.match(readme, /never falls back to `Math\.random`/u);
 });
 
+function nativeClient(runtime, overrides = {}) {
+  return runtime.createLogBrewReactNativeClient({
+    automaticDelivery: false,
+    clientKey: CLIENT_KEY,
+    sdkName: "react-native-restart-test",
+    sdkVersion: "0.1.0",
+    ...overrides
+  });
+}
+
 function addOfflineLog(client) {
   client.log("evt_rn_offline_restart", "2026-07-31T08:30:00.000Z", {
     level: "error",
     message: "Offline restart delivery proof",
-    metadata: {
-      runtime: "react-native"
-    }
+    metadata: { runtime: "react-native" }
   });
 }
 
@@ -350,9 +323,7 @@ function serializedOfflineRecord(id = "evt_rn_offline_restart") {
     attributes: {
       level: "error",
       message: "Offline restart delivery proof",
-      metadata: {
-        runtime: "react-native"
-      }
+      metadata: { runtime: "react-native" }
     }
   });
   return {
@@ -364,23 +335,32 @@ function serializedOfflineRecord(id = "evt_rn_offline_restart") {
 async function withNativeRuntimes(callback) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-rn-native-delivery-"));
   const nativeStore = createNativeStore();
+  const listeners = new Set();
   globalThis.__LOGBREW_REACT_NATIVE_TEST_STORE__ = nativeStore;
+  globalThis.__LOGBREW_REACT_NATIVE_TEST_EMITTER__ = {
+    addListener(_name, listener) {
+      listeners.add(listener);
+      return { remove() { listeners.delete(listener); } };
+    }
+  };
   try {
     await callback({
       nativeStore,
-      async importRuntime(name, linked) {
-        const packageDir = installRuntime(root, name, linked);
+      nativeWakeup() { for (const listener of listeners) listener(); },
+      async importRuntime(name, linked, platform = "ios") {
+        const packageDir = installRuntime(root, name, linked, platform);
         return import(pathToFileURL(path.join(packageDir, "index.native.js")));
       }
     });
   } finally {
     delete globalThis[Symbol.for("co.logbrew.react-native.secure-random-hex")];
+    delete globalThis.__LOGBREW_REACT_NATIVE_TEST_EMITTER__;
     delete globalThis.__LOGBREW_REACT_NATIVE_TEST_STORE__;
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
-function installRuntime(root, name, linked) {
+function installRuntime(root, name, linked, platform) {
   const nodeModules = path.join(root, name, "node_modules");
   const packageDir = path.join(nodeModules, "@logbrew", "react-native");
   fs.mkdirSync(path.dirname(packageDir), { recursive: true });
@@ -391,52 +371,35 @@ function installRuntime(root, name, linked) {
   fs.symlinkSync(sdkRoot, path.join(nodeModules, "@logbrew", "sdk"), "dir");
 
   const reactDir = path.join(nodeModules, "react");
-  fs.mkdirSync(reactDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(reactDir, "package.json"),
-    JSON.stringify({
-      name: "react",
-      version: "18.0.0",
-      type: "module",
-      exports: {
-        import: "./index.js",
-        require: "./index.cjs"
-      }
-    }),
-    "utf8"
-  );
   const reactSource = "{createContext(value){return {_currentValue:value}},createElement(){return {}},useContext(context){return context._currentValue},useMemo(factory){return factory()}}";
-  fs.writeFileSync(
-    path.join(reactDir, "index.js"),
-    `export default ${reactSource};\n`,
-    "utf8"
-  );
-  fs.writeFileSync(
-    path.join(reactDir, "index.cjs"),
-    `module.exports=${reactSource};\n`,
-    "utf8"
-  );
+  writePackage(reactDir, {
+    name: "react", version: "18.0.0", type: "module",
+    exports: { import: "./index.js", require: "./index.cjs" }
+  }, { "index.js": `export default ${reactSource};\n`, "index.cjs": `module.exports=${reactSource};\n` });
 
   const reactNativeDir = path.join(nodeModules, "react-native");
-  fs.mkdirSync(reactNativeDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(reactNativeDir, "package.json"),
-    JSON.stringify({ name: "react-native", version: "0.83.0", type: "module", main: "index.js" }),
-    "utf8"
-  );
-  fs.writeFileSync(
-    path.join(reactNativeDir, "index.js"),
-    [
+  writePackage(
+    reactNativeDir,
+    { name: "react-native", version: "0.83.0", type: "module", main: "index.js" },
+    { "index.js": [
       `const linked = ${JSON.stringify(linked)};`,
       "const store = linked === true ? globalThis.__LOGBREW_REACT_NATIVE_TEST_STORE__ : linked === 'legacy' ? {readFatalRecord(){return {status: 'empty'}}} : undefined;",
       "export const AppState = {currentState: 'active'};",
-      "export const Platform = {OS: 'ios', Version: '26.0'};",
+      "export const DeviceEventEmitter = globalThis.__LOGBREW_REACT_NATIVE_TEST_EMITTER__;",
+      `export const Platform = {OS: ${JSON.stringify(platform)}, Version: '26.0'};`,
       "export const NativeModules = store ? {LogBrewFatalStore: store} : {};",
       "export const TurboModuleRegistry = {get(name){return name === 'LogBrewFatalStore' ? store : undefined}};"
-    ].join("\n"),
-    "utf8"
+    ].join("\n") }
   );
   return packageDir;
+}
+
+function writePackage(directory, manifest, sources) {
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "package.json"), JSON.stringify(manifest), "utf8");
+  for (const [name, source] of Object.entries(sources)) {
+    fs.writeFileSync(path.join(directory, name), source, "utf8");
+  }
 }
 
 function createNativeStore() {

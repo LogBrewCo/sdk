@@ -36,7 +36,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.22",
+            "js/logbrew-js/package.json": "0.1.23",
             "js/logbrew-browser/package.json": "0.1.9",
             "js/logbrew-express/package.json": "0.1.5",
             "js/logbrew-fastify/package.json": "0.1.6",
@@ -44,7 +44,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-nestjs/package.json": "0.1.6",
             "js/logbrew-next/package.json": "0.1.7",
             "js/logbrew-react/package.json": "0.1.1",
-            "js/logbrew-react-native/package.json": "0.1.27",
+            "js/logbrew-react-native/package.json": "0.1.28",
             "js/logbrew-svelte/package.json": "0.1.5",
         }
         for relative_path, expected in npm_versions.items():
@@ -234,7 +234,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts",
             'bun run tools/npm-publish/publish.mjs "${package_dirs[@]}"',
             'gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"',
-            "for attempt in {1..8}; do",
+            "for attempt in {1..20}; do",
             'bun add --force --no-cache --exact --ignore-scripts "${install_specs[@]}"',
             "if (( elapsed >= 60 )); then",
             "--require-npm-provenance",

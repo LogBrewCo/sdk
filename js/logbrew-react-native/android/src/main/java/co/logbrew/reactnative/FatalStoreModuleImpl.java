@@ -7,6 +7,7 @@ import com.facebook.react.bridge.ReadableMapKeySetIterator;
 import com.facebook.react.bridge.ReadableType;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -137,13 +138,21 @@ final class FatalStoreModuleImpl {
     try {
       androidDiagnostics =
           new AndroidDiagnosticsRuntime(
-              context, storageRoot, eventStore, configuration.configuration);
+              context, storageRoot, eventStore, configuration.configuration,
+              this::notifyDiagnosticPersisted);
       String statusValue = androidDiagnostics.install();
       return androidDiagnosticsResult(statusValue);
     } catch (RuntimeException error) {
       androidDiagnostics = null;
       return error("android_diagnostics_install_failed");
     }
+  }
+
+  private void notifyDiagnosticPersisted() {
+    try {
+      context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+          .emit("logbrewAndroidDiagnosticPersisted", null);
+    } catch (RuntimeException ignored) {}
   }
 
   synchronized WritableMap androidDiagnosticsStatus() {

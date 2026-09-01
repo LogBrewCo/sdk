@@ -341,29 +341,16 @@ function storedEvent(type, id, attributes = { message: "persisted", level: "info
 }
 
 function recordingEventStore(initialRecords = []) {
-  const records = initialRecords.map((record) => structuredClone(record));
-  const calls = [];
+  const store = mutableRecordingStore(initialRecords.map((record) => structuredClone(record)));
   return {
-    calls,
-    records,
+    ...store,
     load() {
-      calls.push(["load"]);
-      return records.map((record) => structuredClone(record));
-    },
-    append(record) {
-      calls.push(["append", structuredClone(record)]);
-      records.push(structuredClone(record));
-    },
-    acknowledge(count) {
-      calls.push(["acknowledge", count]);
-      records.splice(0, count);
+      store.calls.push(["load"]);
+      return store.records.map((record) => structuredClone(record));
     },
     purge() {
-      calls.push(["purge"]);
-      records.splice(0, records.length);
-    },
-    close() {
-      calls.push(["close"]);
+      store.calls.push(["purge"]);
+      store.records.splice(0, store.records.length);
     }
   };
 }
@@ -374,35 +361,41 @@ function recordingEventQueue(initialRecords = []) {
     byteCount: eventBytes,
     serialized: serializedEvent
   }));
-  const calls = [];
+  const store = mutableRecordingStore(records);
   return {
-    calls,
-    records,
+    ...store,
     length() {
-      return records.length;
+      return store.records.length;
     },
     byteCount() {
-      return records.reduce((total, record) => total + record.byteCount, 0);
+      return store.records.reduce((total, record) => total + record.byteCount, 0);
     },
     events() {
-      return records.map((record) => structuredClone(record.event));
+      return store.records.map((record) => structuredClone(record.event));
     },
     serializedAt(index) {
-      return records[index].serialized;
+      return store.records[index].serialized;
     },
     eventBytesAt(index) {
-      return records[index].byteCount;
-    },
+      return store.records[index].byteCount;
+    }
+  };
+}
+
+function mutableRecordingStore(records) {
+  return {
+    calls: [],
+    records,
     append(record) {
-      calls.push(["append", structuredClone(record)]);
-      records.push(structuredClone(record));
+      this.calls.push(["append", structuredClone(record)]);
+      this.records.push(structuredClone(record));
     },
     acknowledge(count) {
-      calls.push(["acknowledge", count]);
-      records.splice(0, count);
+      this.calls.push(["acknowledge", count]);
+      this.records.splice(0, count);
     },
     close() {
-      calls.push(["close"]);
+      this.calls.push(["close"]);
     }
   };
 }
@@ -1170,18 +1163,22 @@ test("event store append failure leaves the volatile queue empty", () => {
 });
 
 test("event store acknowledges an accepted prefix before volatile removal", async () => {
-  const first = storedEvent("log", "evt_ack_001");
-  const second = storedEvent("log", "evt_ack_002");
-  const store = recordingEventStore([first, second]);
-  const client = sampleClient({
-    eventStore: store,
-    maxBatchEvents: 1
+  const store = recordingEventStore();
+  const client = sampleClient({ eventStore: store, maxBatchEvents: 1 });
+  store.records.push(storedEvent("issue", "evt_native_hang_001", {
+    title: "Native application hang", level: "error"
+  }));
+  client.log("evt_after_hang_001", "2026-06-02T10:00:01Z", {
+    level: "info", message: "main thread recovered"
   });
   const transport = RecordingTransport.alwaysAccept();
 
   await client.flush(transport);
 
-  assert.deepEqual(store.calls.map(([name]) => name), ["load", "acknowledge", "acknowledge"]);
+  assert.deepEqual(transport.sentBodies.map((body) => JSON.parse(body).events[0].id), [
+    "evt_native_hang_001", "evt_after_hang_001"
+  ]);
+  assert.deepEqual(store.calls.map(([name]) => name), ["load", "append", "load", "acknowledge", "acknowledge"]);
   assert.equal(store.records.length, 0);
   assert.equal(client.pendingEvents(), 0);
 });
@@ -1222,7 +1219,7 @@ test("explicit purge clears memory and persistence but rejects an active flush",
   assert.equal(client.purgePendingEvents(), 1);
   assert.equal(client.pendingEvents(), 0);
   assert.equal(client.pendingBytes(), 0);
-  assert.deepEqual(store.calls.map(([name]) => name), ["load", "append", "purge"]);
+  assert.deepEqual(store.calls.map(([name]) => name), ["load", "append", "load", "purge"]);
 });
 
 test("successful shutdown closes the event store while failure leaves it retryable", async () => {
@@ -1236,7 +1233,7 @@ test("successful shutdown closes the event store while failure leaves it retryab
   await assert.rejects(client.shutdown(new RecordingTransport([{ statusCode: 503 }])), /unexpected transport status 503/);
   assert.equal(store.calls.some(([name]) => name === "close"), false);
   await client.shutdown(RecordingTransport.alwaysAccept());
-  assert.deepEqual(store.calls.map(([name]) => name), ["load", "append", "acknowledge", "close"]);
+  assert.deepEqual(store.calls.map(([name]) => name), ["load", "append", "load", "load", "acknowledge", "close"]);
 });
 
 test("event store close failure leaves the client terminal instead of reopening without ownership", async () => {

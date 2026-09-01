@@ -322,10 +322,10 @@ jobs:
 
           install_dir="$(mktemp -d)"
           trap 'find "$install_dir" -depth -delete' EXIT
-          for attempt in {1..8}; do
+          for attempt in {1..20}; do
             (cd "$install_dir" && bun add --force --no-cache --exact --ignore-scripts "${install_specs[@]}") && break
-            (( attempt < 8 )) || exit 1
-            sleep 1
+            (( attempt < 20 )) || exit 1
+            sleep 2
           done
           if grep -Eq '(file:|link:|/private/tmp|/home/runner/work)' \
             "$install_dir/package.json" "$install_dir/bun.lock"; then

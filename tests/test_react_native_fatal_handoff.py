@@ -196,6 +196,7 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
                     "export const AppState={currentState:'active',addEventListener(){"
                     "return {remove(){}};}};"
                     "export const Platform={OS:'android'};"
+                    "export const DeviceEventEmitter={addListener(){return {remove(){}};}};"
                 ),
                 encoding="utf-8",
             )
