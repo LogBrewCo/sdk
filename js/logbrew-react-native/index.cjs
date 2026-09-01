@@ -16,7 +16,7 @@ const {
 } = require("./metadata.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
-const DEFAULT_SDK_VERSION = "0.1.27";
+const DEFAULT_SDK_VERSION = "0.1.28";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const NATIVE_RANDOM_HEX = Symbol.for("co.logbrew.react-native.secure-random-hex");
 const MAX_ACTION_NAME_LENGTH = 64;

@@ -334,14 +334,7 @@ class LogBrewClient {
     this.eventStore = resolvedEventStore;
     let recovered;
     try {
-      recovered = loadStoredEvents({
-        batchPrefixBytes: this.batchPrefixBytes,
-        batchSuffixBytes: this.batchSuffixBytes,
-        eventStore: resolvedEventStore,
-        maxBatchBytes,
-        maxQueueBytes,
-        maxQueueSize
-      });
+      recovered = loadStoredEvents(this);
     } catch (error) {
       if (ownsEventStore) {
         try {
@@ -822,6 +815,7 @@ class LogBrewClient {
   }
 
   async #flushSnapshot(transport) {
+    this.#synchronizeEventStore();
     let remainingEvents = this.events.length;
     if (remainingEvents === 0) {
       return { statusCode: 204, attempts: 0, batches: 0 };
@@ -849,6 +843,17 @@ class LogBrewClient {
     }
 
     return { statusCode, attempts, batches };
+  }
+
+  #synchronizeEventStore() {
+    if (!this.eventStore) return;
+    const recovered = loadStoredEvents(this);
+    if (!isOrderedSubsequence(this.serializedEvents, recovered.serializedEvents))
+      throw new SdkError("persistence_error", "event store lost a queued record");
+    this.events = recovered.events;
+    this.serializedEvents = recovered.serializedEvents;
+    this.serializedEventBytes = recovered.serializedEventBytes;
+    this.queuedEventBytes = recovered.queuedEventBytes;
   }
 
   #nextBatch(maxEvents) {
@@ -1192,6 +1197,14 @@ function loadStoredEvents({
     serializedEventBytes.push(normalized.eventBytes);
   }
   return { events, queuedEventBytes, serializedEventBytes, serializedEvents };
+}
+
+function isOrderedSubsequence(expected, actual) {
+  let index = 0;
+  for (const value of actual) {
+    index += value === expected[index] ? 1 : 0;
+  }
+  return index === expected.length;
 }
 
 function structuralJson(value) {

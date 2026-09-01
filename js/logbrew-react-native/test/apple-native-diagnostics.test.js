@@ -531,6 +531,7 @@ async function withRuntime({ entry = "apple-native-diagnostics.js", nativeModule
         "const nativeModule = globalThis.__LOGBREW_APPLE_DIAGNOSTICS_TEST_MODULE__;",
         `export const Platform = {OS: ${JSON.stringify(platform)}};`,
         "export const AppState = {currentState: 'active', addEventListener(){return {remove(){}}}};",
+        "export const DeviceEventEmitter = {addListener(){return {remove(){}}}};",
         "export const NativeModules = nativeModule ? {LogBrewAppleDiagnostics: nativeModule} : {};",
         "export const TurboModuleRegistry = {get(name){return name === 'LogBrewAppleDiagnostics' ? nativeModule : undefined}};"
       ].join("\n"),

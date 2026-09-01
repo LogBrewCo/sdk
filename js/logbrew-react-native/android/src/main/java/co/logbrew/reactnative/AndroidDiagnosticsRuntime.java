@@ -24,7 +24,8 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
       Context context,
       File storageRoot,
       EventRecordStore eventStore,
-      AndroidNativeDiagnostics.Configuration configuration) {
+      AndroidNativeDiagnostics.Configuration configuration,
+      Runnable afterPersist) {
     this.configuration = configuration;
     previousHandler = Thread.getDefaultUncaughtExceptionHandler();
     MainThreadScheduler scheduler = new MainThreadScheduler(context);
@@ -36,7 +37,7 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
             signalStore,
             configuration,
             scheduler,
-            () -> {},
+            afterPersist,
             this::chain,
             scheduler.mainThread::getStackTrace);
   }

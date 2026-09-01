@@ -1,4 +1,4 @@
-import { AppState, NativeModules, Platform, TurboModuleRegistry } from "react-native";
+import { AppState, DeviceEventEmitter, NativeModules, Platform, TurboModuleRegistry } from "react-native";
 import {
   captureAppStateChange,
   captureReactNativeAction,
@@ -91,11 +91,26 @@ export function createLogBrewReactNativeClient(config = {}) {
     if (resolved.durable) {
       Object.defineProperty(client, DURABLE_QUEUE, { value: true });
     }
-    return bindAppleNativeCrashBreadcrumbs(client);
+    return bindAndroidNativeDelivery(bindAppleNativeCrashBreadcrumbs(client), resolved.durable);
   } catch (error) {
     resolved.abort();
     throw error;
   }
+}
+
+function bindAndroidNativeDelivery(client, durable) {
+  if (!durable || Platform?.OS !== "android" || typeof DeviceEventEmitter?.addListener !== "function") {
+    return client;
+  }
+  const subscription = DeviceEventEmitter.addListener(
+    "logbrewAndroidDiagnosticPersisted", () => void client.flush().catch(() => {})
+  );
+  const shutdown = client.shutdown.bind(client);
+  client.shutdown = (...args) => shutdown(...args).then((result) => {
+    subscription?.remove?.();
+    return result;
+  });
+  return client;
 }
 
 function bindAppleNativeCrashBreadcrumbs(client) {
