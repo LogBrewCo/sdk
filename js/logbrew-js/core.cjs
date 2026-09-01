@@ -859,12 +859,17 @@ class LogBrewClient {
   #nextBatch(maxEvents) {
     let bodyBytes = this.batchPrefixBytes + this.batchSuffixBytes;
     let eventsCount = 0;
+    const eventIds = new Set();
     for (let index = 0; index < maxEvents; index += 1) {
+      if (eventIds.has(this.events[index].id)) {
+        break;
+      }
       const separatorBytes = eventsCount === 0 ? 0 : 1;
       const nextBodyBytes = bodyBytes + separatorBytes + this.serializedEventBytes[index];
       if (nextBodyBytes > this.maxBatchBytes) {
         break;
       }
+      eventIds.add(this.events[index].id);
       bodyBytes = nextBodyBytes;
       eventsCount += 1;
     }

@@ -101,7 +101,7 @@ function observableFrom(handler) {
   };
 }
 
-test("React Native Apollo link records one sanitized GraphQL span and propagates traceparent", async () => {
+test("React Native Apollo link records repeated operations with unique sanitized spans", async () => {
   await withInstalledPackage(async ({
     createLogBrewReactNativeClient,
     createReactNativeApolloLink,
@@ -122,7 +122,7 @@ test("React Native Apollo link records one sanitized GraphQL span and propagates
       },
       now: () => "2026-06-30T08:10:00Z",
       nowMs: (() => {
-        const values = [1000, 1041];
+        const values = [1000, 1041, 2000, 2041];
         return () => values.shift();
       })(),
       screen: "Checkout",
@@ -141,6 +141,10 @@ test("React Native Apollo link records one sanitized GraphQL span and propagates
         seen.push(value);
       }
     });
+    link.request(operation, () => observableFrom((observer) => {
+      observer.next({ data: { checkout: "ok" } });
+      observer.complete();
+    })).subscribe({});
 
     assert.equal(operation.getContext().headers.accept, "application/json");
     assert.equal(operation.getContext().headers.authorization, "RedactedAuthHeader");
@@ -151,7 +155,8 @@ test("React Native Apollo link records one sanitized GraphQL span and propagates
     assert.deepEqual(seen, [{ data: { checkout: "ok" } }, "complete"]);
 
     const events = JSON.parse(client.previewJson()).events;
-    assert.equal(events.length, 1);
+    assert.equal(events.length, 2);
+    assert.notEqual(events[0].id, events[1].id);
     assert.equal(events[0].attributes.name, "graphql.mutation CheckoutSubmit");
     assert.equal(events[0].attributes.status, "ok");
     assert.equal(events[0].attributes.durationMs, 41);

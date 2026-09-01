@@ -16,7 +16,7 @@ const {
 } = require("./metadata.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
-const DEFAULT_SDK_VERSION = "0.1.28";
+const DEFAULT_SDK_VERSION = "0.1.29";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const NATIVE_RANDOM_HEX = Symbol.for("co.logbrew.react-native.secure-random-hex");
 const MAX_ACTION_NAME_LENGTH = 64;
@@ -293,7 +293,7 @@ function getReactNativeContext({ platform, appState, metadata = {} } = {}) {
 }
 
 function captureScreenView(client, screenName, {
-  id = `evt_screen_${slugify(screenName)}`,
+  id,
   timestamp = new Date().toISOString(),
   status = "success",
   platform,
@@ -303,7 +303,7 @@ function captureScreenView(client, screenName, {
 } = {}) {
   requireClient(client);
   requireNonEmpty("screen name", screenName);
-  client.action(id, timestamp, {
+  client.action(id ?? defaultEventId("screen"), timestamp, {
     name: screenActionName(screenName),
     status,
     metadata: {
@@ -321,7 +321,7 @@ function captureScreenView(client, screenName, {
 }
 
 function captureAppStateChange(client, state, {
-  id = `evt_app_state_${slugify(state)}`,
+  id,
   timestamp = new Date().toISOString(),
   platform,
   appState,
@@ -330,7 +330,7 @@ function captureAppStateChange(client, state, {
 } = {}) {
   requireClient(client);
   requireNonEmpty("app state", state);
-  client.action(id, timestamp, {
+  client.action(id ?? defaultEventId("app_state"), timestamp, {
     name: "app_state_change",
     status: "success",
     metadata: {
@@ -855,25 +855,15 @@ function retryAfterMsFromHeader(value, now = Date.now()) {
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : undefined;
 }
 
-function defaultErrorEventId({ message, screen }) {
-  return `evt_native_error_${slugify(`${screen ?? "app"}_${message}`)}`;
+function defaultEventId(kind) {
+  return `evt_native_${kind}_${randomHex(16, defaultRandomValues)}`;
 }
 
-function defaultActionEventId({ name, screen }) {
-  return `evt_native_action_${slugify(`${screen ?? "app"}_${name ?? "event"}`)}`;
-}
-
-function defaultNetworkEventId({ method, routeTemplate, screen }) {
-  return `evt_native_network_${slugify([screen, method, routeTemplate].filter(Boolean).join("_") || "request")}`;
-}
-
-function defaultNavigationSpanEventId({ routeName, routePath, screen }) {
-  return `evt_native_navigation_${slugify([screen, routeName, routePath].filter(Boolean).join("_") || "route")}`;
-}
-
-function defaultResourceSpanEventId({ method, routeTemplate, screen }) {
-  return `evt_native_resource_${slugify([screen, method, routeTemplate].filter(Boolean).join("_") || "request")}`;
-}
+const defaultErrorEventId = () => defaultEventId("error");
+const defaultActionEventId = () => defaultEventId("action");
+const defaultNetworkEventId = () => defaultEventId("network");
+const defaultNavigationSpanEventId = () => defaultEventId("navigation");
+const defaultResourceSpanEventId = () => defaultEventId("resource");
 
 function defaultFetch() {
   return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
@@ -939,7 +929,7 @@ function defaultRandomValues(length) {
 }
 
 function secureRandomError() {
-  return new SdkError("configuration_error", "createReactNativeTraceparent requires secure random values");
+  return new SdkError("configuration_error", "React Native secure random values are unavailable");
 }
 
 function headersWithTraceparent(headers, traceparent) {

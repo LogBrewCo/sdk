@@ -246,7 +246,7 @@ test("React Native screen views and product actions use versioned analytics anno
   });
 });
 
-test("app-state listener can flush configured delivery before the app backgrounds", async () => {
+test("app-state listener gives repeated states unique ids before background delivery", async () => {
   await withInstalledPackage(async ({
     createAppStateListener,
     createLogBrewReactNativeClient,
@@ -255,6 +255,7 @@ test("app-state listener can flush configured delivery before the app background
     let listener;
     let removed = false;
     let sends = 0;
+    let sentIds = [];
     const appState = {
       currentState: "active",
       addEventListener(_name, nextListener) {
@@ -272,23 +273,25 @@ test("app-state listener can flush configured delivery before the app background
       sdkName: "react-native-background-delivery-test",
       sdkVersion: "0.1.0",
       transport: createReactNativeFetchTransport({
-        fetchImpl: async () => {
+        fetchImpl: async (_endpoint, init) => {
           sends += 1;
-          return acceptedResponse();
+          sentIds = JSON.parse(init.body).events.map((event) => event.id);
+          return new Set(sentIds).size === sentIds.length ? acceptedResponse() : { status: 422 };
         }
       })
     });
     addSetupLog(client, "evt_react_native_background_setup");
 
     const remove = createAppStateListener(client, appState, {
-      flushOnBackground: true,
-      id: "evt_react_native_background_state",
-      timestamp: "2026-07-30T12:00:01Z"
+      flushOnBackground: true
     });
+    listener("active");
+    listener("active");
     listener("background");
     await waitFor(() => client.pendingEvents() === 0);
 
     assert.equal(sends, 1);
+    assert.equal(new Set(sentIds).size, sentIds.length);
     remove();
     assert.equal(removed, true);
   });
