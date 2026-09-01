@@ -19,7 +19,6 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
   private final AndroidNativeDiagnostics diagnostics;
   private final Thread.UncaughtExceptionHandler previousHandler;
   private final AndroidNativeDiagnostics.Configuration configuration;
-  private final String signalRecordPath;
 
   AndroidDiagnosticsRuntime(
       Context context,
@@ -40,7 +39,6 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
             () -> {},
             this::chain,
             scheduler.mainThread::getStackTrace);
-    signalRecordPath = signalStore.path();
   }
 
   synchronized String install() {
@@ -55,7 +53,7 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
     if (!diagnostics.signalStore.prepare(new AndroidParentDirectorySync())
         || !SIGNAL_CAPTURE_AVAILABLE
         || !nativeInstall(
-            signalRecordPath,
+            diagnostics.signalStore.path(),
             diagnostics.nextNativeEventId(),
             configuration.projectId,
             configuration.release,
@@ -154,7 +152,6 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
                 thread.setDaemon(true);
                 return thread;
               });
-      long intervalMs = Math.max(500, thresholdMs / 2);
       executor.scheduleWithFixedDelay(
           () -> {
             long now = SystemClock.elapsedRealtime();
@@ -169,7 +166,7 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
             mainHandler.post(this::heartbeat);
           },
           thresholdMs,
-          intervalMs,
+          AndroidNativeDiagnostics.WATCHDOG_POLL_MS,
           TimeUnit.MILLISECONDS);
     }
 

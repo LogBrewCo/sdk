@@ -60,9 +60,7 @@ public final class AndroidNativeDiagnosticsTest {
           scheduler.advanceBy(5_000);
           scheduler.advanceBy(5_000);
 
-          EventRecordStore.Result loaded = diagnostics.eventStore.load();
-          assertEquals(1, loaded.records.size());
-          String event = loaded.records.get(0).serializedEvent;
+          String event = onlyQueuedEvent(directory);
           assertContains(event, "AndroidAppHang");
           assertContains(event, "\"durationMs\":5000");
           assertNotContains(event, "\"thread\"");
@@ -70,6 +68,7 @@ public final class AndroidNativeDiagnosticsTest {
   }
 
   private void anrRequiresThisProcessToBeUnresponsive() {
+    assertEquals(500L, AndroidNativeDiagnostics.WATCHDOG_POLL_MS);
     assertEquals(false, AndroidNativeDiagnostics.shouldReportHang(4_999, 5_000, false, true));
     assertEquals(false, AndroidNativeDiagnostics.shouldReportHang(5_000, 5_000, true, true));
     assertEquals(false, AndroidNativeDiagnostics.shouldReportHang(5_000, 5_000, false, false));

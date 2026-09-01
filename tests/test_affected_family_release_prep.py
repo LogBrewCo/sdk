@@ -44,7 +44,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-nestjs/package.json": "0.1.6",
             "js/logbrew-next/package.json": "0.1.7",
             "js/logbrew-react/package.json": "0.1.1",
-            "js/logbrew-react-native/package.json": "0.1.26",
+            "js/logbrew-react-native/package.json": "0.1.27",
             "js/logbrew-svelte/package.json": "0.1.5",
         }
         for relative_path, expected in npm_versions.items():
