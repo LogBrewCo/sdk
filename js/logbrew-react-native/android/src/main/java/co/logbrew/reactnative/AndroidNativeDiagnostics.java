@@ -90,6 +90,7 @@ final class AndroidNativeDiagnostics {
   }
 
   private static final int MAX_FRAMES = 32;
+  static final long WATCHDOG_POLL_MS = 500;
   private static final AtomicLong SEQUENCE = new AtomicLong();
 
   final EventRecordStore eventStore;
