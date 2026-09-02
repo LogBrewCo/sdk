@@ -45,7 +45,7 @@ final class AndroidNativeDiagnostics {
           || !bounded(service, 128)
           || !bounded(operatingSystemVersion, 128)
           || !bounded(deviceModel, 128)
-          || !isArchitecture(architecture)
+          || !Pattern.matches("^(?:arm|arm64|x86|x86_64)$", architecture)
           || anrThresholdMs < 2_000
           || anrThresholdMs > 60_000) {
         throw new IllegalArgumentException("invalid Android diagnostics configuration");
@@ -69,13 +69,6 @@ final class AndroidNativeDiagnostics {
               character -> character <= 31 || character >= 127 && character <= 159);
     }
 
-    private static boolean isArchitecture(String value) {
-      return "arm".equals(value)
-          || "arm64".equals(value)
-          || "x86".equals(value)
-          || "x86_64".equals(value);
-    }
-
     boolean matches(Configuration other) {
       return other != null
           && projectId.equals(other.projectId)
@@ -95,12 +88,13 @@ final class AndroidNativeDiagnostics {
 
   final EventRecordStore eventStore;
   final AndroidNativeSignalStore signalStore;
-  private final Configuration configuration;
+  final Configuration configuration;
   private final Scheduler scheduler;
   private final Runnable afterPersist;
   private final Thread.UncaughtExceptionHandler previousHandler;
   private final Supplier<StackTraceElement[]> mainFrames;
   private final String processNonce;
+  private final String applicationPackage;
   boolean installed;
 
   AndroidNativeDiagnostics(
@@ -110,7 +104,8 @@ final class AndroidNativeDiagnostics {
       Scheduler scheduler,
       Runnable afterPersist,
       Thread.UncaughtExceptionHandler previousHandler,
-      Supplier<StackTraceElement[]> mainFrames) {
+      Supplier<StackTraceElement[]> mainFrames,
+      String applicationPackage) {
     this.eventStore = eventStore;
     this.signalStore = signalStore;
     this.configuration = configuration;
@@ -118,6 +113,7 @@ final class AndroidNativeDiagnostics {
     this.afterPersist = afterPersist;
     this.previousHandler = previousHandler;
     this.mainFrames = mainFrames;
+    this.applicationPackage = applicationPackage;
     processNonce = randomHex(8);
   }
 
@@ -246,7 +242,7 @@ final class AndroidNativeDiagnostics {
         .append("\",\"timestamp\":\"").append(timestamp(timestampMs))
         .append("\",\"attributes\":{\"title\":\"").append(title)
         .append("\",\"level\":\"").append(level).append('"');
-    appendJavaFrames(output, frames);
+    appendJavaFrames(output, frames, applicationPackage);
     if (nativeFrame != null) {
       output.append(",\"nativeStackFrames\":[{\"imageUuid\":\"")
           .append(nativeFrame.imageUuid).append("\",\"architecture\":\"")
@@ -273,7 +269,8 @@ final class AndroidNativeDiagnostics {
     return output.append("}}").toString();
   }
 
-  private static void appendJavaFrames(StringBuilder output, StackTraceElement[] frames) {
+  private static void appendJavaFrames(
+      StringBuilder output, StackTraceElement[] frames, String applicationPackage) {
     int start = output.length();
     output.append(",\"stackFrames\":[");
     int count = 0;
@@ -293,7 +290,8 @@ final class AndroidNativeDiagnostics {
           .append(",\"column\":1,\"function\":\"")
           .append(json(safeSymbol(frame.getMethodName(), 256, "unknown")))
           .append("\",\"module\":\"")
-          .append(json(safeSymbol(frame.getClassName(), 512, "unknown"))).append("\"}");
+          .append(json(safeSymbol(frame.getClassName(), 512, "unknown"))).append("\",\"inApp\":")
+          .append(frame.getClassName().startsWith(applicationPackage + '.')).append('}');
       count += 1;
     }
     if (count == 0) {
@@ -319,10 +317,6 @@ final class AndroidNativeDiagnostics {
 
   String nextNativeEventId() {
     return nextId("native");
-  }
-
-  boolean configurationMatches(Configuration candidate) {
-    return configuration.matches(candidate);
   }
 
   private static String safeFilename(String value) {

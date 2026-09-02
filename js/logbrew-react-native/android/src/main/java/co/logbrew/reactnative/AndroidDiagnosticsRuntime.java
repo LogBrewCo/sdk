@@ -39,7 +39,8 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
             scheduler,
             afterPersist,
             this::chain,
-            scheduler.mainThread::getStackTrace);
+            scheduler.mainThread::getStackTrace,
+            context.getPackageName());
   }
 
   synchronized String install() {
@@ -92,7 +93,7 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
 
   synchronized boolean matches(
       EventRecordStore eventStore, AndroidNativeDiagnostics.Configuration configuration) {
-    return diagnostics.eventStore == eventStore && diagnostics.configurationMatches(configuration);
+    return diagnostics.eventStore == eventStore && diagnostics.configuration.matches(configuration);
   }
 
   @Override
