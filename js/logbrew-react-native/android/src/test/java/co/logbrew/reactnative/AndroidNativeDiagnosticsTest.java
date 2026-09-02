@@ -40,7 +40,7 @@ public final class AndroidNativeDiagnosticsTest {
           assertContains(event, "\"context\":{\"schemaVersion\":1,\"resource\":");
           assertContains(event, "java.lang.IllegalStateException");
           assertContains(event, "AndroidNativeDiagnosticsTest.java");
-          assertContains(event, "uncaughtExceptionPersistsBeforeChainingWithoutMessageContent");
+          assertContains(event, "\"module\":\"co.logbrew.reactnative.AndroidNativeDiagnosticsTest\",\"inApp\":true");
           assertContains(event, "\"operatingSystem\":{\"name\":\"Android\",\"version\":\"15\"}");
           assertContains(event, "\"device\":{\"model\":\"Generic Phone\",\"architecture\":\"arm64\"}");
           assertNotContains(event, "\"durationMs\"");
@@ -63,6 +63,8 @@ public final class AndroidNativeDiagnosticsTest {
           String event = onlyQueuedEvent(directory);
           assertContains(event, "AndroidAppHang");
           assertContains(event, "\"durationMs\":5000");
+          assertContains(event, "\"module\":\"java.lang.Thread\",\"inApp\":false");
+          assertContains(event, "\"module\":\"co.logbrew.reactnative.AndroidNativeDiagnosticsTest\",\"inApp\":true");
           assertNotContains(event, "\"thread\"");
         });
   }
@@ -167,7 +169,8 @@ public final class AndroidNativeDiagnosticsTest {
         scheduler,
         () -> order.add("persist"),
         (thread, error) -> order.add("chain"),
-        () -> Thread.currentThread().getStackTrace());
+        () -> Thread.currentThread().getStackTrace(),
+        "co.logbrew.reactnative");
   }
 
   private static AndroidNativeDiagnostics.Configuration configuration(
