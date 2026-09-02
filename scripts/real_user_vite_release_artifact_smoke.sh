@@ -97,10 +97,14 @@ cat >"$app_dir/index.html" <<'HTML'
 HTML
 
 cat >"$app_dir/src/main.js" <<'JS'
-import { createIssueAttributesFromError } from "@logbrew/sdk";
+import { createBrowserErrorEvent, createBrowserTraceContext } from "@logbrew/browser";
 
 // LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD
 const checkoutItems = [12, 30, 48];
+const browserWindow = {
+  document: { visibilityState: "visible" },
+  location: { href: "https://app.example.test/checkout?email=hidden@example.test#payment" }
+};
 
 function checkoutFailureSignal() {
   const total = checkoutItems.reduce((sum, item) => sum + item, 0);
@@ -112,17 +116,18 @@ function captureCheckoutFailure() {
     checkoutFailureSignal();
   } catch (error) {
     error.cause = new TypeError("payment gateway marker hidden-user-marker");
-    return createIssueAttributesFromError(error, {
+    return createBrowserErrorEvent(error, browserWindow, {
       environment: "production",
+      idFactory: () => "evt_vite_browser_issue_001",
       release: "2026.06.18-vite",
       runtime: "browser",
       service: "checkout-web",
-      trace: {
+      traceContext: createBrowserTraceContext({
         sampled: true,
         spanId: "2222333344445555",
         traceId: "00112233445566778899aabbccddeeff"
-      }
-    });
+      })
+    }).attributes;
   }
 }
 
@@ -248,125 +253,6 @@ assert "checkout exploded" not in serialized_manifest
 assert tmp_dir not in serialized_manifest
 PY
 
-runtime_issue_payload="$tmp_dir/vite-runtime-browser-issue.json"
-(
-  cd "$app_dir"
-  bun - "$js_file" "$ready_manifest" >"$runtime_issue_payload" <<'JS'
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
-import {
-  createBrowserErrorEvent,
-  createBrowserTraceContext,
-  createLogBrewBrowserClient
-} from "@logbrew/browser";
-
-const [, , jsPath, manifestPath] = process.argv;
-const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-const artifact = manifest.artifacts[0];
-const runtimeUrl = `${artifact.minifiedSource.minifiedUrl}?cache=placeholder#hidden-hash-fragment-sentinel`;
-const runtimePath = new URL(runtimeUrl).pathname;
-const jsSource = readFileSync(jsPath, "utf8");
-const sandbox = {
-  document: {
-    createElement() {
-      return {
-        relList: {
-          supports() {
-            return true;
-          },
-        },
-      };
-    },
-    querySelector() {
-      return {};
-    },
-  },
-  window: {},
-};
-
-vm.runInNewContext(jsSource, sandbox, { filename: jsPath });
-try {
-  sandbox.window.__logbrewViteProbe.checkoutFailureSignal();
-} catch (error) {
-  error.stack = String(error.stack || "").replaceAll(jsPath, runtimeUrl);
-  error.cause = new TypeError("payment gateway marker hidden-user-marker");
-
-  const traceContext = createBrowserTraceContext({
-    sampled: true,
-    spanId: "1111222233334444",
-    traceId: "00112233445566778899aabbccddeeff"
-  });
-  const browserWindow = {
-    document: { visibilityState: "visible" },
-    location: {
-      href: "https://app.example.test/checkout?email=hidden@example.test#payment"
-    }
-  };
-  const runtimeEvent = createBrowserErrorEvent(error, browserWindow, {
-    debugIdMap: {
-      [artifact.minifiedSource.minifiedUrl]: artifact.debugId,
-      [runtimeUrl]: artifact.debugId,
-      [runtimePath]: artifact.debugId
-    },
-    environment: manifest.environment,
-    release: manifest.release,
-    runtime: "browser",
-    service: manifest.service,
-    traceContext
-  });
-  const client = createLogBrewBrowserClient({
-    clientKey: "lbw_ingest_fake_vite_browser_runtime_key",
-    sdkVersion: "0.1.0"
-  });
-  client.issue(runtimeEvent.id, runtimeEvent.timestamp, runtimeEvent.attributes);
-  process.stdout.write(JSON.stringify({
-    debugId: artifact.debugId,
-    runtimePath,
-    payload: JSON.parse(client.previewJson())
-  }));
-  process.exit(0);
-}
-throw new Error("expected Vite checkout probe to throw");
-JS
-)
-
-python3 - "$runtime_issue_payload" "$tmp_dir" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[2]
-debug_id = report["debugId"]
-runtime_path = report["runtimePath"]
-payload = report["payload"]
-runtime_issue = payload["events"][0]["attributes"]
-serialized_runtime_issue = json.dumps(runtime_issue)
-
-assert payload["events"][0]["type"] == "issue"
-assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id
-assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path
-assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path
-assert runtime_issue["metadata"]["issueGroupingKey"] == f"browser.error:Error:{runtime_path}"
-assert runtime_issue["metadata"]["issueGroupingSource"] == "error_type_and_frame"
-assert runtime_issue["metadata"]["errorCauseCount"] == 1
-assert runtime_issue["metadata"]["errorCauseTypes"] == "TypeError"
-assert runtime_issue["metadata"]["errorCauseSources"] == "cause"
-assert runtime_issue["metadata"]["release"] == "2026.06.18-vite"
-assert runtime_issue["metadata"]["environment"] == "production"
-assert runtime_issue["metadata"]["service"] == "checkout-web"
-assert runtime_issue["metadata"]["runtime"] == "browser"
-assert runtime_issue["metadata"]["traceId"] == "00112233445566778899aabbccddeeff"
-assert runtime_issue["metadata"]["spanId"] == "1111222233334444"
-assert "cdn.example" not in serialized_runtime_issue
-assert "cache=placeholder" not in serialized_runtime_issue
-assert "hidden-hash-fragment-sentinel" not in serialized_runtime_issue
-assert "hidden@example.test" not in serialized_runtime_issue
-assert "payment gateway marker" not in serialized_runtime_issue
-assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runtime_issue
-assert tmp_dir not in serialized_runtime_issue
-PY
-
 sdk_issue_event_payload="$tmp_dir/vite-sdk-issue-event.json"
 sdk_issue_symbolication_report="$tmp_dir/vite-sdk-issue-symbolication-report.json"
 (
@@ -393,6 +279,7 @@ const sandbox = {
       return {};
     },
   },
+  URL,
   window: {},
 };
 
@@ -433,6 +320,12 @@ assert sdk_issue_event["type"] == "issue"
 assert sdk_issue_event["id"] == "evt_vite_sdk_issue_001"
 assert metadata["releaseArtifactType"] == "sourcemap"
 assert metadata["releaseArtifactDebugId"] == sdk_issue_symbolication["debugId"]
+assert metadata["source"] == "browser.error"
+assert metadata["path"] == "/checkout"
+assert metadata["issueGroupingSource"] == "error_type_and_frame"
+assert metadata["errorCauseCount"] == 1
+assert metadata["errorCauseTypes"] == "TypeError"
+assert metadata["errorCauseSources"] == "cause"
 assert stack_frames[0]["function"] == "checkoutFailureSignal"
 assert stack_frames[1]["function"] == "captureCheckoutFailure"
 assert metadata["release"] == "2026.06.18-vite"
@@ -458,6 +351,8 @@ assert "hidden-hash-fragment-sentinel" not in serialized_issue_event
 assert "hidden-hash-fragment-sentinel" not in serialized_symbolication
 assert "hidden-user-marker" not in serialized_issue_event
 assert "hidden-user-marker" not in serialized_symbolication
+assert "hidden@example.test" not in serialized_issue_event
+assert "payment gateway marker" not in serialized_issue_event
 assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_issue_event
 assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_symbolication
 assert tmp_dir not in serialized_issue_event

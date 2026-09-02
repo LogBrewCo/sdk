@@ -37,7 +37,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
             "js/logbrew-js/package.json": "0.1.24",
-            "js/logbrew-browser/package.json": "0.1.9",
+            "js/logbrew-browser/package.json": "0.1.10",
             "js/logbrew-express/package.json": "0.1.5",
             "js/logbrew-fastify/package.json": "0.1.6",
             "js/logbrew-node/package.json": "0.1.11",
