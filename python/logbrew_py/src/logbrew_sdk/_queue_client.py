@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, TypeAlias, TypeVar
@@ -32,6 +33,11 @@ _QUEUE_METADATA_DENYLIST = (
     "private",
     "value",
 )
+_QUEUE_OPERATION_SEMANTICS = (
+    dict.fromkeys(("enqueue", "publish", "send"), "queue.publish")
+    | {"receive": "queue.receive"}
+    | dict.fromkeys(("consume", "perform", "process"), "queue.process")
+)
 
 
 def queue_operation_with_logbrew_span(
@@ -57,27 +63,26 @@ def queue_operation_with_logbrew_span(
     """Run a caller-owned queue operation under a LogBrew child span."""
 
     _require_operation(operation)
-    return _run_queue_operation(
-        _queue_span_request(
-            operation_name=operation_name,
-            system=system,
-            client=client,
-            event_id=event_id,
-            timestamp=timestamp,
-            trace=trace,
-            operation_kind=operation_kind,
-            queue_name=queue_name,
-            task_name=task_name,
-            message_count=message_count,
-            attempt=attempt,
-            metadata=metadata,
-            span_events=span_events,
-            span_id_factory=span_id_factory,
-            clock=clock,
-            on_capture_error=on_capture_error,
-        ),
-        operation,
+    request = _queue_span_request(
+        operation_name=operation_name,
+        system=system,
+        client=client,
+        event_id=event_id,
+        timestamp=timestamp,
+        trace=trace,
+        operation_kind=operation_kind,
+        queue_name=queue_name,
+        task_name=task_name,
+        message_count=message_count,
+        attempt=attempt,
+        metadata=metadata,
+        span_events=span_events,
+        span_id_factory=span_id_factory,
+        clock=clock,
+        on_capture_error=on_capture_error,
     )
+    with _capture_queue_span(request):
+        return operation()
 
 
 async def async_queue_operation_with_logbrew_span(
@@ -121,14 +126,8 @@ async def async_queue_operation_with_logbrew_span(
         clock=clock,
         on_capture_error=on_capture_error,
     )
-    with use_logbrew_trace(request.trace):
-        try:
-            result = await operation()
-        except Exception as error:
-            request.capture("error", error=error)
-            raise
-    request.capture("ok")
-    return result
+    with _capture_queue_span(request):
+        return await operation()
 
 
 @dataclass(slots=True)
@@ -230,15 +229,15 @@ def _queue_span_request(
     )
 
 
-def _run_queue_operation(request: _QueueSpanRequest, operation: Operation[T]) -> T:
+@contextmanager
+def _capture_queue_span(request: _QueueSpanRequest) -> Iterator[None]:
     with use_logbrew_trace(request.trace):
         try:
-            result = operation()
+            yield
         except Exception as error:
             request.capture("error", error=error)
             raise
     request.capture("ok")
-    return result
 
 
 def _queue_span_metadata(
@@ -254,7 +253,7 @@ def _queue_span_metadata(
     sampled: bool,
     error_type: str | None,
 ) -> _instrumentation.Metadata:
-    span_metadata = _safe_queue_metadata(metadata)
+    span_metadata = _instrumentation.compact_metadata_without_keys(metadata, _QUEUE_METADATA_DENYLIST)
     span_metadata.update(
         {
             "source": "queue",
@@ -263,23 +262,20 @@ def _queue_span_metadata(
             "sampled": sampled,
         }
     )
-    if operation_kind is not None:
-        span_metadata["queueOperationKind"] = operation_kind
-    if queue_name is not None:
-        span_metadata["queueName"] = queue_name
-    if task_name is not None:
-        span_metadata["taskName"] = task_name
-    if message_count is not None:
-        span_metadata["messageCount"] = message_count
-    if attempt is not None:
-        span_metadata["attempt"] = attempt
-    if error_type is not None:
-        span_metadata["errorType"] = error_type
+    span_metadata.update(
+        (key, value)
+        for key, value in (
+            ("operation", operation_kind and _QUEUE_OPERATION_SEMANTICS.get(operation_kind)),
+            ("queueOperationKind", operation_kind),
+            ("queueName", queue_name),
+            ("taskName", task_name),
+            ("messageCount", message_count),
+            ("attempt", attempt),
+            ("errorType", error_type),
+        )
+        if value is not None
+    )
     return span_metadata
-
-
-def _safe_queue_metadata(metadata: Mapping[str, Any] | None) -> _instrumentation.Metadata:
-    return _instrumentation.compact_metadata_without_keys(metadata, _QUEUE_METADATA_DENYLIST)
 
 
 def _require_operation(operation: object) -> None:
