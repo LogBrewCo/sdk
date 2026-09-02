@@ -178,6 +178,7 @@ events = sidekiq_events(client)
 assert(events.length == 1 && events[0].fetch("type") == "span", "enqueue span count changed")
 enqueue_attributes = events[0].fetch("attributes")
 assert(enqueue_attributes.fetch("name") == "sidekiq.enqueue", "enqueue span name changed")
+assert(enqueue_attributes.dig("metadata", "operation") == "queue.publish", "enqueue operation changed")
 assert(enqueue_attributes.fetch("traceId") == parent.trace_id, "enqueue span trace changed")
 assert(enqueue_attributes.fetch("parentSpanId") == parent.span_id, "enqueue span parent changed")
 serialized = JSON.generate(events)
@@ -222,6 +223,7 @@ assert(events.count { |event| event.fetch("type") == "span" } == 2, "worker span
 worker_span = events.reverse.find { |event| event.fetch("type") == "span" }
 worker_metadata = worker_span.fetch("attributes").fetch("metadata")
 assert(worker_metadata.fetch("source") == "sidekiq.server", "worker source changed")
+assert(worker_metadata.fetch("operation") == "queue.process", "worker operation changed")
 assert(worker_metadata.fetch("retryCount") == 0, "worker retry count changed")
 assert(worker_metadata.fetch("queueWaitMs").between?(0, 604_800_000), "queue wait is unbounded")
 sidekiq_tests += 1

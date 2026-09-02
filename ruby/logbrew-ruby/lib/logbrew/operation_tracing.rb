@@ -6,7 +6,11 @@ module LogBrew
     UNSAFE_METADATA = /authorization|body|broker|cache.?key|command|connection|cookie|dsn|header|host|
       \bjid\z|job.?id|key|message|param|pass#{'word'}|payload|query|sec#{'ret'}|sql|statement|
       to#{'ken'}|url|username|value/ix
-    private_constant :UNSAFE_METADATA
+    QUEUE_SEMANTICS = {
+      "enqueue" => "queue.publish", "publish" => "queue.publish", "send" => "queue.publish",
+      "receive" => "queue.receive", "perform" => "queue.process", "process" => "queue.process", "consume" => "queue.process"
+    }.freeze
+    private_constant :UNSAFE_METADATA, :QUEUE_SEMANTICS
 
     module_function
 
@@ -28,20 +32,13 @@ module LogBrew
       Validation.require_non_empty("#{kind} operation name", name)
       started_at = monotonic_time
       context = child_context
-      error = nil
-      result = nil
-
-      Trace.with_context(context) do
-        begin
-          result = yield context
-        rescue StandardError => captured
-          error = captured
-        end
+      begin
+        result = Trace.with_context(context) { yield context }
+      rescue StandardError => error
+        capture_span(client, kind, name, context, started_at, options, error)
+        raise
       end
-
-      capture_span(client, kind, name, context, started_at, options, error)
-      raise error if error
-
+      capture_span(client, kind, name, context, started_at, options, nil)
       result
     end
 
@@ -88,6 +85,7 @@ module LogBrew
         metadata["source"] = read_option(options, :source) || "#{kind}.operation"
         add_option(metadata, "#{kind}.system", read_option(options, :system))
         add_option(metadata, "#{kind}.operation", read_option(options, :operation))
+        add_option(metadata, "operation", QUEUE_SEMANTICS[read_option(options, :operation)]) if kind == "queue"
         add_option(metadata, "#{kind}.target", read_option(options, :target))
         metadata["exceptionType"] = error.class.name if error
       end

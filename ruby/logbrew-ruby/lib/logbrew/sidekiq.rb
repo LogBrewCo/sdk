@@ -28,15 +28,12 @@ module LogBrew
 
       def around(terminal_failure: false)
         Trace.with_context(@context) do
-          begin
-            result = yield
-          rescue Exception => error # rubocop:disable Lint/RescueException
-            finish(error: error, terminal_failure: terminal_failure)
-            raise
-          else
-            finish
-            result
-          end
+          result = yield
+          finish
+          result
+        rescue Exception => error # rubocop:disable Lint/RescueException
+          finish(error: error, terminal_failure: terminal_failure)
+          raise
         end
       end
 
@@ -64,6 +61,7 @@ module LogBrew
       def span_attributes(error)
         metadata = {
           "source" => @source,
+          "operation" => @source == "sidekiq.client" ? "queue.publish" : "queue.process",
           "sampled" => @context.sampled
         }
         metadata["retryCount"] = @retry_count unless @retry_count.nil?

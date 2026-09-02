@@ -268,7 +268,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
         self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.4")
-        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.12")
+        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.13")
         self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.10")
         self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.7")
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.2")
@@ -311,7 +311,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.20",
             ),
             "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.4",),
-            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.12",),
+            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.13",),
             "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.10",),
             "scripts/real_user_maven_central_public_smoke.sh": (
                 "LOGBREW_MAVEN_JAVA_VERSION:-0.1.6",
