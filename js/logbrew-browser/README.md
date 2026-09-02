@@ -82,9 +82,12 @@ defaults. Explicit `context` remains intact. When an app passes an already
 created `client` to `installLogBrewBrowser()`, that client keeps the context
 chosen when it was created.
 
-## Browser Error Source-Map Hints
+## Browser Error Source Maps
 
-If your frontend build injects JavaScript source-map Debug IDs, pass the app-owned map into browser setup so captured `error` and `unhandledrejection` issues carry release-artifact metadata alongside release, environment, service, and trace correlation:
+Prepare and upload source maps with the `@logbrew/sdk` Vite release-artifact
+plugin. The built bundle registers its Debug ID automatically, so captured
+`error` and `unhandledrejection` issues carry release-artifact metadata without
+an application-owned map:
 
 ```js
 const logbrew = installLogBrewBrowser({
@@ -92,12 +95,12 @@ const logbrew = installLogBrewBrowser({
   release: "web@2026.07.04",
   environment: "production",
   service: "checkout-web",
-  runtime: "browser",
-  debugIdMap: {
-    "/assets/app.js": "11111111-2222-4333-8444-555555555555"
-  }
+  runtime: "browser"
 });
 ```
+
+Use `debugIdMap` only as an explicit override for a different app-owned build
+flow that cannot register Debug IDs at runtime.
 
 Browser issues record a typed exception, an explicit unhandled capture mechanism, prior bounded breadcrumbs, a fixed error summary, path-only frames, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. Automatic capture does not send exception messages. Every exception-chain message reports `redacted`, and `errorMessage` is absent from metadata. Raw stack text also stays out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files, grouping keys, and automatic breadcrumbs use sanitized event fields, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
 
