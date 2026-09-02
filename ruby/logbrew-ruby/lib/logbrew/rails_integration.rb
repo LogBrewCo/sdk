@@ -431,11 +431,11 @@ module LogBrew
       private_constant :LoggerTap
 
       module BroadcastOrigin
-        def dispatch(...)
+        def dispatch(*args, &block)
           previous = Thread.current[ORIGIN_KEY]
           origin = ApplicationLogCapture.application_caller?(instance_variable_get(ROOT_IVAR))
           Thread.current[ORIGIN_KEY] = origin
-          super
+          super(*args, &block)
         ensure
           Thread.current[ORIGIN_KEY] = previous
         end

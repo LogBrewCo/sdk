@@ -23,7 +23,7 @@ needed:
 
 ```ruby
 # Gemfile
-gem "logbrew-sdk", "~> 0.1.12"
+gem "logbrew-sdk", "~> 0.1.13"
 ```
 
 ```bash
@@ -57,13 +57,14 @@ paths. Exception messages and raw backtrace text are separate opt-ins.
 
 ActiveJob needs no extra initializer. Each enqueue and execution emits a
 producer or worker span, including bounded adapter identity, retry count, and
-queue wait. A versioned W3C carrier keeps retries and supported queue adapters
-on one trace. A retryable failure remains span evidence; only an unexpected
-terminal `StandardError` creates an unhandled `rails.active_job` issue with
-sanitized structured frames. The adapter does not capture job IDs, queue names,
-arguments, serialized payloads, exception messages, or raw backtraces by
-default. When ActiveJob uses LogBrew's Sidekiq middleware, the inner carrier
-suppresses duplicate Sidekiq spans and issues.
+queue wait. Enqueue spans use `queue.publish`; worker spans use `queue.process`.
+A versioned W3C carrier keeps retries and supported queue adapters on one trace.
+A retryable failure remains span evidence; only an unexpected terminal
+`StandardError` creates an unhandled `rails.active_job` issue with sanitized
+structured frames. The adapter does not capture job IDs, queue names, arguments,
+serialized payloads, exception messages, or raw backtraces by default. When
+ActiveJob uses LogBrew's Sidekiq middleware, the inner carrier suppresses
+duplicate Sidekiq spans and issues.
 
 Outbound `Net::HTTP` calls made inside an active Rails request or job trace also
 need no initializer. They propagate one W3C child and record only method,
@@ -745,7 +746,14 @@ Registration is app-owned, idempotent, and reversible with `unregister_client` a
 
 The client middleware adds one bounded `logbrew` carrier containing only a version, W3C `traceparent`, and enqueue time. Valid retries keep that carrier without creating another enqueue span. The server middleware continues a valid carrier or starts a fresh trace when it is absent or malformed, returns the caller trace state after every result, and records bounded queue-wait and execution timing. Set `max_retries` to the same default retry limit used by your Sidekiq configuration; per-job integer or disabled retry settings are honored. Retryable failures keep only error spans, while the terminal escaped failure adds one deduplicated fixed-title issue and preserves the original exception.
 
-Sidekiq spans contain only fixed source, sampled state, bounded retry count, bounded queue-wait duration, execution duration, status, and real cancellation. The integration does not capture job arguments, payload fields, job identifiers, worker names, queue values, connection data, exception messages or stacks, baggage, or tracestate. Capture failures are advisory and never replace job execution or retry behavior. Create fresh clients and instrumentation after `fork`; inherited instances fail closed without changing jobs.
+Sidekiq producer spans use `queue.publish`, and worker spans use `queue.process`.
+They contain only fixed source, sampled state, bounded retry count, bounded
+queue-wait duration, execution duration, status, and real cancellation. The
+integration does not capture job arguments, payload fields, job identifiers,
+worker names, queue values, connection data, exception messages or stacks,
+baggage, or tracestate. Capture failures are advisory and never replace job
+execution or retry behavior. Create fresh clients and instrumentation after
+`fork`; inherited instances fail closed without changing jobs.
 
 ## Persistent Worker Delivery
 

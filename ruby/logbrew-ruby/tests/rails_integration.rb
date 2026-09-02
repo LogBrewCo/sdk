@@ -405,6 +405,7 @@ begin
   span_attributes = spans.map { |event| event.fetch("attributes") }
   assert(spans.length == 4, "expected two ActiveJob producer and two worker spans")
   assert(spans.all? { |event| event.dig("attributes", "traceId") == parent.trace_id }, "expected one ActiveJob trace")
+  assert(spans.map { |event| event.dig("attributes", "metadata", "operation") } == %w[queue.publish queue.process queue.publish queue.process], "expected semantic ActiveJob operations")
   assert(span_attributes.fetch(0).fetch("parentSpanId") == parent.span_id, "expected enqueue under caller span")
   assert(span_attributes.fetch(1).fetch("parentSpanId") == span_attributes.fetch(0).fetch("spanId"), "expected first worker under enqueue")
   assert(span_attributes.fetch(2).fetch("parentSpanId") == span_attributes.fetch(1).fetch("spanId"), "expected retry enqueue under worker")
