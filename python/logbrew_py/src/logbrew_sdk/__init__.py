@@ -1730,7 +1730,13 @@ from logbrew_sdk._queue_client import (  # noqa: E402
     async_queue_operation_with_logbrew_span,
     queue_operation_with_logbrew_span,
 )
-from logbrew_sdk._rq_client import rq_operation_with_logbrew_span  # noqa: E402
+from logbrew_sdk._rq_client import (  # noqa: E402
+    LogBrewRqQueueInstrumentation,
+    LogBrewRqWorkerInstrumentation,
+    instrument_rq_queue_with_logbrew_spans,
+    instrument_rq_worker_processes_with_logbrew,
+    rq_operation_with_logbrew_span,
+)
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 from logbrew_sdk._opentelemetry_processor import (  # noqa: E402
     LogBrewOpenTelemetrySpanExporter,
@@ -1777,6 +1783,8 @@ __all__ = [
     "LogBrewPymemcacheInstrumentation",
     "LogBrewRedisInstrumentation",
     "LogBrewRequestsSessionInstrumentation",
+    "LogBrewRqQueueInstrumentation",
+    "LogBrewRqWorkerInstrumentation",
     "LogBrewSqlAlchemyInstrumentation",
     "LogBrewTraceContext",
     "Metadata",
@@ -1838,6 +1846,8 @@ __all__ = [
     "instrument_pymemcache_client_with_logbrew_spans",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_requests_session_with_logbrew_spans",
+    "instrument_rq_queue_with_logbrew_spans",
+    "instrument_rq_worker_processes_with_logbrew",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "log_attributes_from_record",
     "logbrew_trace_context_from_celery_headers",

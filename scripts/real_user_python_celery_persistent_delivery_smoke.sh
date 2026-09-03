@@ -261,7 +261,7 @@ for directory in (broker, processed, control):
 
 if "site-packages" not in str(Path(logbrew_sdk.__file__)):
     raise SystemExit("LogBrew was not imported from the installed wheel")
-if importlib.metadata.version("logbrew-sdk") != "0.1.13":
+if importlib.metadata.version("logbrew-sdk") != "0.1.14":
     raise SystemExit("installed wheel version changed")
 requirements = importlib.metadata.requires("logbrew-sdk") or []
 if not any("cryptography<50,>=49" in requirement and "persistence" in requirement for requirement in requirements):

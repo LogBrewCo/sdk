@@ -284,6 +284,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_sdk_instrumentation_restore_reference(relative_text, terms):
         return True
 
+    if relative_text == "python/logbrew_py/tests/test_rq_client.py" and terms == {"cleanup"}:
+        return ".addCleanup(" in line
+
     if relative_text.endswith((".c", ".h", ".cpp", ".hpp")) and "curl_easy_cleanup" in line:
         return True
 
@@ -368,6 +371,8 @@ def is_sdk_instrumentation_restore_reference(relative_text: str, terms: set[str]
     if terms != {"restore"}:
         return False
     if relative_text.startswith("js/") and relative_text.endswith((".js", ".cjs", ".mjs", ".ts", ".cts")):
+        return True
+    if relative_text == "python/logbrew_py/src/logbrew_sdk/_rq_client.py":
         return True
     return relative_text.startswith("scripts/real_user_") and relative_text.endswith(".sh")
 

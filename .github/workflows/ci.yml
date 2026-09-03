@@ -371,8 +371,13 @@ jobs:
 
       - name: Run Python SDK tests
         if: ${{ needs.changed-areas.outputs.python == 'true' }}
+        env:
+          LOGBREW_RQ_REDIS_URL: redis://127.0.0.1:6379/15
         run: |
-          python3 -m pip install certifi==2026.7.22 truststore==0.10.4
+          sudo apt-get install --yes --no-install-recommends redis-server
+          redis-cli ping >/dev/null 2>&1 || sudo redis-server --daemonize yes
+          trap 'redis-cli shutdown >/dev/null 2>&1 || true' EXIT
+          python3 -m pip install certifi==2026.7.22 truststore==0.10.4 fakeredis==2.31.3 rq==2.12.0
           PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run FastAPI package checks

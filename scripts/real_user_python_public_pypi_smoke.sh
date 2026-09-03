@@ -57,7 +57,7 @@ print(
 PY
     )
 else
-    sdk_version="${legacy_args[0]:-${LOGBREW_PYPI_SDK_VERSION:-0.1.13}}"
+    sdk_version="${legacy_args[0]:-${LOGBREW_PYPI_SDK_VERSION:-0.1.14}}"
     fastapi_version="${legacy_args[1]:-${LOGBREW_PYPI_FASTAPI_VERSION:-0.1.10}}"
     django_version="${legacy_args[2]:-${LOGBREW_PYPI_DJANGO_VERSION:-0.1.6}}"
     flask_version="${legacy_args[3]:-${LOGBREW_PYPI_FLASK_VERSION:-0.1.5}}"
@@ -120,7 +120,7 @@ run_receipt_smoke() {
     fi
     "$tmp_dir/receipt-venv/bin/python" -m pip install \
         --disable-pip-version-check --no-cache-dir \
-        "$install_dir/logbrew_sdk-${sdk_version}-py3-none-any.whl" \
+        "$install_dir/logbrew_sdk-${sdk_version}-py3-none-any.whl[rq]" \
         "$fastapi_requirement" \
         "$install_dir/logbrew_flask-${flask_version}-py3-none-any.whl" \
         "$install_dir/logbrew_django-${django_version}-py3-none-any.whl" \
@@ -286,7 +286,9 @@ from pathlib import Path
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 for package in payload["packages"]:
     version = tuple(int(part) for part in package["version"].split(".")[:3])
-    suffix = "[celery]" if package["id"] == "logbrew-fastapi" and version >= (0, 1, 8) else ""
+    suffix = "[rq]" if package["id"] == "logbrew-sdk" else ""
+    if package["id"] == "logbrew-fastapi" and version >= (0, 1, 8):
+        suffix = "[celery]"
     print(f'{package["wheel"]["file"]}{suffix}')
 PY
     )
@@ -296,7 +298,7 @@ else
         fastapi_requirement="logbrew-fastapi[celery]==$fastapi_version"
     fi
     packages=(
-        "logbrew-sdk==$sdk_version"
+        "logbrew-sdk[rq]==$sdk_version"
         "$fastapi_requirement"
         "logbrew-flask==$flask_version"
         "logbrew-django==$django_version"
@@ -330,6 +332,7 @@ import json
 import os
 import sqlite3
 
+import rq
 from fastapi import FastAPI
 from flask import Flask
 from logbrew_django import configure_logbrew
@@ -362,7 +365,11 @@ versions = {
     "logbrew-fastapi": require_distribution_version("logbrew-fastapi", fastapi_version),
     "logbrew-flask": require_distribution_version("logbrew-flask", flask_version),
     "logbrew-django": require_distribution_version("logbrew-django", django_version),
+    "rq": rq.__version__,
 }
+sdk_requirements = metadata.requires("logbrew-sdk") or []
+if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requirement in sdk_requirements):
+    raise AssertionError("installed core package does not expose the RQ extra")
 if os.environ["EXPECTED_LOGBREW_FASTAPI_CELERY_EXTRA"] == "1":
     import celery
 

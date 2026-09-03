@@ -1026,7 +1026,64 @@ queued = queue_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the queue system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the queue result. Publish-like kinds (`enqueue`, `publish`, `send`), `receive`, and process-like kinds (`consume`, `perform`, `process`) also produce stable `queue.publish`, `queue.receive`, or `queue.process` trace operations; custom kinds keep their queue metadata without inventing a trace operation. Metadata is intentionally bounded to primitive caller metadata, `queueSystem`, `queueOperation`, optional operation kind, optional queue/task names, optional non-negative message count/attempt, sampled state, optional bounded span events, and exception type. It drops message-like metadata fields and does not monkeypatch queue frameworks, write broker metadata, open support tickets, capture job arguments, message bodies, headers, cookies, broker URLs, baggage, tracestate, stack traces, or exception messages.
 
-For RQ jobs, use `rq_operation_with_logbrew_span()` when you want LogBrew to derive safe `func_name` and `origin` metadata from an app-owned job object without installing RQ as a LogBrew dependency or patching `Queue`/`Worker` globally:
+### Automatic RQ spans
+
+Install the RQ extra to connect enqueue and worker execution automatically:
+
+```bash
+pip install "logbrew-sdk[rq]"
+```
+
+Instrument each producer queue instance before enqueueing jobs:
+
+```python
+from logbrew_sdk import LogBrewClient, instrument_rq_queue_with_logbrew_spans
+
+producer = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+queue_instrumentation = instrument_rq_queue_with_logbrew_spans(
+    queue,
+    client=producer,
+    metadata={"service": "checkout-api"},
+)
+queue.enqueue(checkout_email_task, order_id)
+```
+
+Instrument each worker instance before `work()`. The factory must create a fresh client and transport inside the job process; never return a producer or parent-process client.
+
+```python
+from logbrew_sdk import (
+    HttpTransport,
+    LogBrewClient,
+    instrument_rq_worker_processes_with_logbrew,
+)
+
+def worker_client():
+    return LogBrewClient.create(
+        api_key="LOGBREW_API_KEY",
+        sdk_name="checkout-worker",
+        sdk_version="1.0.0",
+        transport=HttpTransport(),
+        automatic_delivery=False,
+    )
+
+worker_instrumentation = instrument_rq_worker_processes_with_logbrew(
+    worker,
+    client_factory=worker_client,
+    logger_names=["checkout.jobs"],
+    metadata={"service": "checkout-worker"},
+)
+worker.work()
+```
+
+This creates one `queue.publish` span and one linked `queue.process` span per attempt. Logs from the explicitly named application loggers inherit the worker span. A terminal unhandled failure adds one linked issue with exception type and bounded structured stack frames; retried attempts stay spans rather than duplicate issues. The SDK stores only its reserved W3C trace carrier and enqueue time in RQ job metadata; it does not capture arguments, keyword arguments, job IDs, results, descriptions, exception messages, or raw traceback text. Capture failures are fail-open. Installation is instance-scoped, idempotent, and reversible with `uninstall()` after work drains.
+
+`Queue`, the default fork-based `Worker`, and `SimpleWorker` are supported on RQ 2.x. `SpawnWorker` is not instrumented because RQ recreates it in a separate interpreter; use a supported worker until a process-bootstrap contract is available.
+
+For caller-owned or unsupported worker flows, use `rq_operation_with_logbrew_span()` to derive safe `func_name` and `origin` metadata without installing RQ or patching classes globally:
 
 ```python
 from logbrew_sdk import LogBrewClient, rq_operation_with_logbrew_span
@@ -1049,7 +1106,7 @@ queued = rq_operation_with_logbrew_span(
 )
 ```
 
-The RQ helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and still avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
+The manual helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
 
 ### Automatic Celery spans
 
