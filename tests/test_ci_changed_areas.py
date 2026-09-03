@@ -129,7 +129,7 @@ class CiChangedAreasTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         contract_job = workflow.split("\n  contract-checks:\n", 1)[1].split("\n  dotnet-durability:\n", 1)[0]
 
-        self.assertIn("timeout-minutes: 60", contract_job)
+        self.assertIn("timeout-minutes: 90", contract_job)
         for area in (
             "release_artifacts",
             "rust",

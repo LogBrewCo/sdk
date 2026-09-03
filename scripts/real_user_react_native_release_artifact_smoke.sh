@@ -25,8 +25,7 @@ trap remove_tmp_dir EXIT
 
 app_dir="$tmp_dir/react-native-artifact-app"
 pack_dir="$tmp_dir/packs"
-mkdir -p "$app_dir"
-mkdir -p "$pack_dir"
+mkdir -p "$app_dir" "$pack_dir"
 
 sdk_pack_json="$tmp_dir/sdk-pack.json"
 react_native_pack_json="$tmp_dir/react-native-pack.json"
@@ -85,11 +84,11 @@ react_native_tgz="$pack_dir/$react_native_tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 cp "$react_native_tgz" "$tmp_dir/logbrew-react-native.tgz"
 
-react_native_version="${LOGBREW_REACT_NATIVE_VERSION:-$(npm view react-native version)}"
-react_version="${LOGBREW_REACT_VERSION:-$(npm view react version)}"
-react_native_cli_version="${LOGBREW_REACT_NATIVE_CLI_VERSION:-$(npm view @react-native-community/cli version)}"
+react_native_version="${LOGBREW_REACT_NATIVE_VERSION:-0.87.1}"
+react_version="${LOGBREW_REACT_VERSION:-19.2.8}"
+react_native_cli_version="${LOGBREW_REACT_NATIVE_CLI_VERSION:-20.2.0}"
 react_native_metro_config_version="${LOGBREW_REACT_NATIVE_METRO_CONFIG_VERSION:-$react_native_version}"
-typescript_version="$(npm view typescript version)"
+typescript_version="${LOGBREW_TYPESCRIPT_VERSION:-7.0.2}"
 
 cat > "$app_dir/package.json" <<JSON
 {
@@ -166,7 +165,7 @@ JS
 
 (
   cd "$app_dir"
-  npm install --silent
+  npm install --loglevel=error
   npm ls @logbrew/sdk @logbrew/react-native react react-native @react-native-community/cli @react-native/metro-config typescript >/dev/null
   node --input-type=module - <<'JS'
 import assert from "node:assert/strict";
