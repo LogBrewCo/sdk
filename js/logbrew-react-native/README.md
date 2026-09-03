@@ -597,9 +597,11 @@ source map. If an advanced build pipeline cannot use either integration,
 discovery. LogBrew records up to 32 ordered path-only generated frames with
 matching Debug IDs, release/environment/service/runtime, and active trace IDs
 when available. It strips query strings, hashes, hosts, and local absolute
-paths from React Native frame data; raw stack text is still opt-in with
-`includeStack: true`. Hosted source-map lookup remains backend-owned and
-requires the matching uploaded release artifact.
+paths from React Native frame data. Grouping keeps an informative sanitized
+path, or falls back to a safe function name and then generated position for a
+root-only runtime URL; raw stack text is still opt-in with `includeStack: true`.
+Hosted source-map lookup remains backend-owned and requires the matching
+uploaded release artifact.
 
 ## Provider And Hooks
 

@@ -16,7 +16,7 @@ const {
 } = require("./metadata.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
-const DEFAULT_SDK_VERSION = "0.1.31";
+const DEFAULT_SDK_VERSION = "0.1.32";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const NATIVE_RANDOM_HEX = Symbol.for("co.logbrew.react-native.secure-random-hex");
 const MAX_ACTION_NAME_LENGTH = 64;
@@ -650,7 +650,7 @@ function createReactNativeErrorEvent(error, {
       ...(stackFrames ? { stackFrames } : {}),
       title: `React Native error: ${details.message}`,
       message: details.message,
-      metadata: sanitizeReactNativeIssueMetadata(attributes.metadata, compactMetadata)
+      metadata: sanitizeReactNativeIssueMetadata(attributes.metadata, compactMetadata, stackFrames)
     }
   };
 }
