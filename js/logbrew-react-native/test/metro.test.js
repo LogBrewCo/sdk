@@ -73,6 +73,7 @@ test("Metro wrapper composes an app serializer and injects one production Debug 
   assert.match(sourceMap.debug_id, DEBUG_ID_PATTERN);
   assert.equal(sourceMap.debugId, sourceMap.debug_id);
   assert.match(result.code, new RegExp(`debugId=${sourceMap.debug_id}`, "u"));
+  assert.match(result.code, new RegExp(`logbrew-runtime-debug-id\\*/.*debugId=${sourceMap.debug_id}`, "u"));
   assert.match(result.code, /@logbrew\/react-native\/debug-ids/u);
   assert.doesNotMatch(result.code, /__LOGBREW_REACT_NATIVE_DEBUG_ID__/u);
   assert.ok(result.code.indexOf(`//# debugId=${sourceMap.debug_id}`) < result.code.indexOf("//@ sourceMappingURL="));

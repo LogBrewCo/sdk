@@ -8,6 +8,7 @@ const path = require("node:path");
 const DEBUG_ID_PLACEHOLDER = "__LOGBREW_REACT_NATIVE_DEBUG_ID__";
 const DEBUG_ID_MODULE_PATH = "__logbrew_debug_id__";
 const DEBUG_ID_REGISTRY_NAME = "@logbrew/react-native/debug-ids";
+const RUNTIME_DEBUG_ID_MARKER = "/*logbrew-runtime-debug-id*/";
 const DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"];
 const DEBUG_ID_COMMENT_RE = /(?:\/\/[#@]|\/\*[#@])\s*debugId=[^\r\n]*/iu;
 const DEBUG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -31,7 +32,8 @@ function requireOptions(options) {
 }
 
 function runtimeDebugIdSnippet(debugId) {
-  return `;(()=>{try{const k=Symbol.for(${JSON.stringify(DEBUG_ID_REGISTRY_NAME)}),g=globalThis,r=g[k]||(g[k]=Object.create(null)),s=(new Error).stack;if(s){r[s]=${JSON.stringify(debugId)};const e=Object.keys(r);if(e.length>64)delete r[e[0]]}}catch{}})();`;
+  const embedded = `${RUNTIME_DEBUG_ID_MARKER}//# debugId=${debugId}`;
+  return `;(()=>{try{const d=${JSON.stringify(embedded)}.slice(-36),k=Symbol.for(${JSON.stringify(DEBUG_ID_REGISTRY_NAME)}),g=globalThis,r=g[k]||(g[k]=Object.create(null)),s=(new Error).stack;if(s){r[s]=d;const e=Object.keys(r);if(e.length>64)delete r[e[0]]}}catch{}})();`;
 }
 
 function countLines(source) {
@@ -147,7 +149,7 @@ function productionResult(result) {
   if (result.code.split(DEBUG_ID_PLACEHOLDER).length !== 2) {
     throw configurationError("LogBrew Metro production serializer must include the injected Debug ID module exactly once");
   }
-  if (DEBUG_ID_COMMENT_RE.test(result.code)) {
+  if (DEBUG_ID_COMMENT_RE.test(result.code.replace(`${RUNTIME_DEBUG_ID_MARKER}//# debugId=${DEBUG_ID_PLACEHOLDER}`, ""))) {
     throw configurationError("LogBrew Metro production serializer already contains Debug ID metadata");
   }
   const sourceMap = parseSourceMap(result.map);

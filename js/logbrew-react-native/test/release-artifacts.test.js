@@ -39,8 +39,7 @@ function writeReactNativeBundle(buildDir) {
 test("React Native release-artifact helper prepares bundle output and writes a ready manifest", () => {
   const root = tempDir();
   try {
-    const buildDir = path.join(root, "dist");
-    const { appRoot, bundlePath, sourcemapPath } = writeReactNativeBundle(buildDir);
+    const { appRoot, bundlePath, sourcemapPath } = writeReactNativeBundle(path.join(root, "dist"));
 
     const result = prepareLogBrewReactNativeReleaseArtifacts({
       bundle: bundlePath,
@@ -143,53 +142,37 @@ test("React Native release-artifact helper resolves relative build paths from th
   }
 });
 
-test("React Native release-artifact helper trusts the explicit sourcemap for Hermes-style output", () => {
+test("React Native release-artifact helper preserves Hermes bytecode with its sibling source map", () => {
   const root = tempDir();
   try {
-    const buildDir = path.join(root, "dist");
-    fs.mkdirSync(buildDir, { recursive: true });
-    const sourcePath = path.join(root, "index.js");
-    const bundlePath = path.join(buildDir, "index.android.bundle");
-    const finalSourceMapPath = path.join(buildDir, "index.android.hermes.map");
-    fs.writeFileSync(
-      bundlePath,
-      "global.__checkoutProbe=function(){throw new Error('checkout exploded')};\n//# sourceMappingURL=packager.map\n",
-      "utf8",
-    );
-    fs.writeFileSync(
-      finalSourceMapPath,
-      JSON.stringify({
-        version: 3,
-        file: "index.android.bundle",
-        sources: [sourcePath],
-        sourcesContent: ["const localSourceMarker = 'should not ship';"],
-        names: [],
-        mappings: "AAAA",
-      }),
-      "utf8",
-    );
-
-    const result = prepareLogBrewReactNativeReleaseArtifacts({
+    const { appRoot, bundlePath, sourcemapPath } = writeReactNativeBundle(path.join(root, "dist"));
+    const debugId = "11111111-2222-5333-8444-555555555555";
+    const hermesHeader = Buffer.from([0xc6, 0x1f, 0xbc, 0x03, 0xc1, 0x03, 0x19, 0x1f]);
+    const options = {
       bundle: bundlePath,
-      sourcemap: finalSourceMapPath,
+      sourcemap: sourcemapPath,
       platform: "android",
       release: "2026.06.18-react-native-hermes",
       environment: "production",
       service: "checkout-react-native",
-      root,
-    });
+      root: appRoot,
+    };
+    fs.writeFileSync(bundlePath, hermesHeader);
+    assert.throws(() => prepareLogBrewReactNativeReleaseArtifacts(options), /requires the LogBrew Metro wrapper/u);
+    assert.deepEqual(fs.readFileSync(bundlePath), hermesHeader);
 
-    const manifest = JSON.parse(fs.readFileSync(result.manifestPath, "utf8"));
-    const bundleSource = fs.readFileSync(bundlePath, "utf8");
-    const finalSourceMap = JSON.parse(fs.readFileSync(finalSourceMapPath, "utf8"));
+    const originalBundle = Buffer.concat([hermesHeader, Buffer.from(`\0/*logbrew-runtime-debug-id*///# debugId=${debugId}\0`)]);
+    fs.writeFileSync(bundlePath, originalBundle);
+    const result = prepareLogBrewReactNativeReleaseArtifacts(options);
+
+    const finalSourceMap = JSON.parse(fs.readFileSync(sourcemapPath, "utf8"));
 
     assert.equal(result.manifestReport.validation.status, "ready");
-    assert.equal(manifest.artifacts.length, 1);
-    assert.equal(manifest.artifacts[0].sourceMap.path, "index.android.hermes.map");
-    assert.match(bundleSource, /sourceMappingURL=index\.android\.hermes\.map/u);
-    assert.doesNotMatch(bundleSource, /sourceMappingURL=packager\.map/u);
+    assert.equal(result.manifestReport.artifacts[0].debugId, debugId);
+    assert.equal(finalSourceMap.debug_id, debugId);
+    assert.deepEqual(fs.readFileSync(bundlePath), originalBundle);
     assert.equal(finalSourceMap.sourcesContent, undefined);
-    assert.deepEqual(finalSourceMap.sources, ["index.js"]);
+    assert.deepEqual(finalSourceMap.sources, ["__prelude__", "index.js"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
