@@ -25,6 +25,7 @@ DOTNET_VERSION = "0.1.7"
 DOTNET_ASPNETCORE_VERSION = "0.1.2"
 DOTNET_OTEL_VERSION = "0.1.1"
 DOTNET_HTTPCLIENT_VERSION = "0.1.2"
+DOTNET_HANGFIRE_VERSION = "0.1.0"
 UNITY_VERSION = "0.2.2"
 MAVEN_VERSION = "0.2.2"
 JAVA_MAVEN_VERSION = "0.1.6"
@@ -1642,6 +1643,7 @@ def validate(
         nuget_versions.get("LogBrew", DOTNET_VERSION),
         nuget_versions.get("LogBrew.AspNetCore", DOTNET_ASPNETCORE_VERSION),
         nuget_versions.get("LogBrew.EntityFrameworkCore", PUBLIC_VERSION),
+        nuget_versions.get("LogBrew.Hangfire", DOTNET_HANGFIRE_VERSION),
         nuget_versions.get("LogBrew.StackExchangeRedis", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.OpenTelemetry", DOTNET_OTEL_VERSION),
         PUBLIC_LICENSE,
