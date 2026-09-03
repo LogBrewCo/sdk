@@ -235,25 +235,38 @@ func IssueAttributesFromError(err error, title string, mechanismType string, han
 	if err == nil {
 		return IssueAttributes{}, &SdkError{Code: "validation_error", Message: "issue error must be provided"}
 	}
+	stack := captureIssueStackEvidence(3)
+	return issueAttributesFromValue(err, title, mechanismType, handled, stack.frames, stack.truncated)
+}
+
+// IssueAttributesFromPanic creates error-level issue attributes for a
+// recovered Go value without formatting or serializing that value.
+func IssueAttributesFromPanic(recovered any, title, mechanismType string, handled bool, frames []IssueStackFrame) (IssueAttributes, error) {
+	if recovered == nil {
+		return IssueAttributes{}, &SdkError{Code: "validation_error", Message: "issue panic value must be provided"}
+	}
+	return issueAttributesFromValue(recovered, title, mechanismType, handled, frames, false)
+}
+
+func issueAttributesFromValue(value any, title, mechanismType string, handled bool, frames []IssueStackFrame, truncated bool) (IssueAttributes, error) {
 	if title == "" {
-		title = safeGoExceptionType(err)
+		title = safeGoExceptionType(value)
 	}
 	if mechanismType == "" {
 		mechanismType = "go.error"
 	}
-	stack := captureIssueStackEvidence(3)
 	exception := &IssueException{
-		Type: safeGoExceptionType(err),
+		Type: safeGoExceptionType(value),
 		Mechanism: &IssueExceptionMechanism{
 			Type:    mechanismType,
 			Handled: handled,
 		},
 	}
 	chain, chainErr := CreateIssueExceptionChain(IssueExceptionChainInput{
-		Value:                err,
+		Value:                value,
 		Exception:            exception,
-		StackFrames:          stack.frames,
-		StackFramesTruncated: stack.truncated,
+		StackFrames:          frames,
+		StackFramesTruncated: truncated,
 	})
 	if chainErr != nil {
 		return IssueAttributes{}, chainErr
@@ -263,7 +276,7 @@ func IssueAttributesFromError(err error, title string, mechanismType string, han
 		Level:          "error",
 		Exception:      exception,
 		ExceptionChain: chain,
-		StackFrames:    stack.frames,
+		StackFrames:    frames,
 	}, nil
 }
 

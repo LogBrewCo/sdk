@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,14 +26,7 @@ var _ SQLBeginTxRunner = (*sql.Conn)(nil)
 
 func TestOperationSpanHelpersCorrelateAndSanitizeMetadata(t *testing.T) {
 	client := sampleClient(t)
-	parent, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	ctx, parent := operationParent(t)
 	now := func() time.Time {
 		return time.Date(2026, 6, 2, 10, 0, 0, 25*int(time.Millisecond), time.UTC)
 	}
@@ -59,10 +51,8 @@ func TestOperationSpanHelpersCorrelateAndSanitizeMetadata(t *testing.T) {
 			"params":    []any{"private"},
 			"host":      "opaque-private-target",
 		},
-		SpanIDFactory: func() string {
-			return "b7ad6b7169203331"
-		},
-		Now: now,
+		SpanIDFactory: fixedSpanID("b7ad6b7169203331"),
+		Now:           now,
 	})
 	if err != nil || result != "order-123" {
 		t.Fatalf("unexpected result=%q err=%v", result, err)
@@ -71,24 +61,7 @@ func TestOperationSpanHelpersCorrelateAndSanitizeMetadata(t *testing.T) {
 		t.Fatalf("unexpected active operation trace: %#v", active)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed struct {
-		Events []struct {
-			Type       string         `json:"type"`
-			ID         string         `json:"id"`
-			Attributes map[string]any `json:"attributes"`
-		} `json:"events"`
-	}
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(parsed.Events), 1; got != want {
-		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
-	}
-	event := parsed.Events[0]
+	payload, event := previewEvent(t, client)
 	metadata := event.Attributes["metadata"].(map[string]any)
 	if event.Type != "span" ||
 		event.ID != "go_db_test_span_b7ad6b7169203331" ||
@@ -110,11 +83,7 @@ func TestOperationSpanHelpersCorrelateAndSanitizeMetadata(t *testing.T) {
 		metadata["component"] != "checkout" {
 		t.Fatalf("unexpected database metadata: %#v", metadata)
 	}
-	for _, unsafe := range []string{"private", "opaque-private-target", "params", "host"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("operation span leaked %q: %s", unsafe, payload)
-		}
-	}
+	assertText(t, payload, nil, []string{"private", "opaque-private-target", "params", "host"})
 }
 
 func TestCacheAndQueueOperationSpansPreserveErrors(t *testing.T) {
@@ -137,10 +106,8 @@ func TestCacheAndQueueOperationSpansPreserveErrors(t *testing.T) {
 			"value":    "sensitive-value",
 			"service":  "checkout",
 		},
-		SpanIDFactory: func() string {
-			return "b7ad6b7169203332"
-		},
-		Now: now,
+		SpanIDFactory: fixedSpanID("b7ad6b7169203332"),
+		Now:           now,
 	})
 	if !errors.Is(err, original) {
 		t.Fatalf("expected original cache error, got %v", err)
@@ -160,20 +127,15 @@ func TestCacheAndQueueOperationSpansPreserveErrors(t *testing.T) {
 			"brokerURL":   "opaque-broker-target",
 			"component":   "billing",
 		},
-		SpanIDFactory: func() string {
-			return "b7ad6b7169203333"
-		},
-		Now: now,
+		SpanIDFactory: fixedSpanID("b7ad6b7169203333"),
+		Now:           now,
 	})
 	if !errors.Is(err, original) {
 		t.Fatalf("expected original queue error, got %v", err)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
 		`"source": "cache.operation"`,
 		`"cacheSystem": "redis"`,
 		`"cacheHit": false`,
@@ -181,38 +143,13 @@ func TestCacheAndQueueOperationSpansPreserveErrors(t *testing.T) {
 		`"queueSystem": "kafka"`,
 		`"queueName": "billing-events"`,
 		`"errorType": "*errors.errorString"`,
-	} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("missing %s in payload: %s", want, payload)
-		}
-	}
-	for _, unsafe := range []string{"cart:private", "sensitive-value", "private body", "opaque-broker-target", "broker payload"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("operation span leaked %q: %s", unsafe, payload)
-		}
-	}
+	}, []string{"cart:private", "sensitive-value", "private body", "opaque-broker-target", "broker payload"})
 }
 
 func TestOperationSpanHelpersCapturePanicSpanAndRepanicWithoutLeakingValue(t *testing.T) {
 	client := sampleClient(t)
-	parent, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ContextWithLogBrewTrace(context.Background(), parent)
-	nowCalls := 0
-	now := func() time.Time {
-		nowCalls++
-		switch nowCalls {
-		case 1:
-			return time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
-		default:
-			return time.Date(2026, 6, 2, 10, 0, 0, 19*int(time.Millisecond), time.UTC)
-		}
-	}
+	ctx, _ := operationParent(t)
+	now := testNow(19 * time.Millisecond)
 
 	recovered := capturePanic(func() {
 		_, _ = DatabaseOperationWithLogBrewSpan(ctx, client, "select checkout", func(operationCtx context.Context) (string, error) {
@@ -229,46 +166,25 @@ func TestOperationSpanHelpersCapturePanicSpanAndRepanicWithoutLeakingValue(t *te
 				"component": "checkout",
 				"query":     "SELECT private",
 			},
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203331"
-			},
-			Now: now,
+			SpanIDFactory: fixedSpanID("b7ad6b7169203331"),
+			Now:           now,
 		})
 	})
 	if recovered == nil || fmt.Sprint(recovered) != "private database panic value" {
 		t.Fatalf("expected original panic value, got %#v", recovered)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(payload, `"id": "go_db_panic_span_b7ad6b7169203331"`) ||
-		!strings.Contains(payload, `"status": "error"`) ||
-		!strings.Contains(payload, `"durationMs": 19`) ||
-		!strings.Contains(payload, `"panic": true`) ||
-		!strings.Contains(payload, `"panicType": "*errors.errorString"`) ||
-		!strings.Contains(payload, `"component": "checkout"`) ||
-		!strings.Contains(payload, `"dbSystem": "postgresql"`) {
-		t.Fatalf("missing panic operation span metadata: %s", payload)
-	}
-	for _, unsafe := range []string{"private database panic value", "SELECT private"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("panic operation span leaked %q: %s", unsafe, payload)
-		}
-	}
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
+		`"id": "go_db_panic_span_b7ad6b7169203331"`, `"status": "error"`,
+		`"durationMs": 19`, `"panic": true`, `"panicType": "*errors.errorString"`,
+		`"component": "checkout"`, `"dbSystem": "postgresql"`,
+	}, []string{"private database panic value", "SELECT private"})
 }
 
 func TestQueueOperationWithLogBrewSpanInjectsOutgoingTraceparent(t *testing.T) {
 	client := sampleClient(t)
-	parent, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	ctx, parent := operationParent(t)
 	headers := map[string]string{
 		"traceparent": "caller-value-to-replace",
 	}
@@ -298,10 +214,8 @@ func TestQueueOperationWithLogBrewSpanInjectsOutgoingTraceparent(t *testing.T) {
 			"messageBody": "private body",
 			"traceparent": "raw propagation must not serialize",
 		},
-		SpanIDFactory: func() string {
-			return "b7ad6b7169203345"
-		},
-		Now: fixedOperationNow(),
+		SpanIDFactory: fixedSpanID("b7ad6b7169203345"),
+		Now:           fixedOperationNow(),
 	})
 	if err != nil || result != "published" {
 		t.Fatalf("unexpected result=%q err=%v", result, err)
@@ -313,11 +227,8 @@ func TestQueueOperationWithLogBrewSpanInjectsOutgoingTraceparent(t *testing.T) {
 		t.Fatalf("unexpected active queue trace: %#v", active)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
 		`"id": "go_queue_publish_span_b7ad6b7169203345"`,
 		`"name": "queue:publish checkout"`,
 		`"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"`,
@@ -328,16 +239,7 @@ func TestQueueOperationWithLogBrewSpanInjectsOutgoingTraceparent(t *testing.T) {
 		`"queueName": "checkout-events"`,
 		`"taskName": "checkout.completed"`,
 		`"component": "checkout"`,
-	} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("missing %s in payload: %s", want, payload)
-		}
-	}
-	for _, unsafe := range []string{"private headers", "private body", "raw propagation", "caller-value-to-replace", "traceparent-duplicate"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("queue propagation leaked %q: %s", unsafe, payload)
-		}
-	}
+	}, []string{"private headers", "private body", "raw propagation", "caller-value-to-replace", "traceparent-duplicate"})
 }
 
 func TestQueueOperationWithLogBrewSpanContinuesIncomingAndLinksBatchTraceparents(t *testing.T) {
@@ -371,10 +273,8 @@ func TestQueueOperationWithLogBrewSpanContinuesIncomingAndLinksBatchTraceparents
 			"traceparent": "raw link propagation",
 		},
 		EventIDPrefix: "go_queue_process",
-		SpanIDFactory: func() string {
-			return "b7ad6b7169203346"
-		},
-		Now: fixedOperationNow(),
+		SpanIDFactory: fixedSpanID("b7ad6b7169203346"),
+		Now:           fixedOperationNow(),
 		OnError: func(err error) {
 			reported = append(reported, err)
 		},
@@ -389,11 +289,8 @@ func TestQueueOperationWithLogBrewSpanContinuesIncomingAndLinksBatchTraceparents
 		t.Fatalf("expected one malformed linked traceparent diagnostic, got %#v", reported)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
 		`"traceId": "11111111111111111111111111111111"`,
 		`"spanId": "b7ad6b7169203346"`,
 		`"parentSpanId": "2222222222222222"`,
@@ -407,16 +304,7 @@ func TestQueueOperationWithLogBrewSpanContinuesIncomingAndLinksBatchTraceparents
 		`"sampled": false`,
 		`"relation": "batch_item"`,
 		`"delivery": 2`,
-	} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("missing %s in payload: %s", want, payload)
-		}
-	}
-	for _, unsafe := range []string{"malformed-traceparent-value", "private batch payload", "raw link propagation", "traceparent"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("queue linked propagation leaked %q: %s", unsafe, payload)
-		}
-	}
+	}, []string{"malformed-traceparent-value", "private batch payload", "raw link propagation", "traceparent"})
 }
 
 func TestOperationSpanCaptureFailureDoesNotReplaceOperationResult(t *testing.T) {
@@ -429,9 +317,7 @@ func TestOperationSpanCaptureFailureDoesNotReplaceOperationResult(t *testing.T) 
 		return "order-123", nil
 	}, DatabaseOperationConfig{
 		EventIDPrefix: "go_db_closed",
-		SpanIDFactory: func() string {
-			return "b7ad6b7169203334"
-		},
+		SpanIDFactory: fixedSpanID("b7ad6b7169203334"),
 		Now: func() time.Time {
 			return time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
 		},
@@ -449,18 +335,11 @@ func TestOperationSpanCaptureFailureDoesNotReplaceOperationResult(t *testing.T) 
 
 func TestSQLContextHelpersTraceQueryAndExecWithoutLeakingSQL(t *testing.T) {
 	client := sampleClient(t)
-	parent, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	ctx, parent := operationParent(t)
 	queryer := &fakeSQLQueryer{}
 	execer := &fakeSQLExecer{result: fakeSQLResult{rowsAffected: 3}}
 
-	_, err = SQLQueryContextWithLogBrewSpan(
+	_, err := SQLQueryContextWithLogBrewSpan(
 		ctx,
 		client,
 		queryer,
@@ -475,10 +354,8 @@ func TestSQLContextHelpersTraceQueryAndExecWithoutLeakingSQL(t *testing.T) {
 				"sql":              "SELECT * FROM orders WHERE account_ref = 'opaque-ref-value'",
 				"connectionString": "opaque-private-target",
 			},
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203335"
-			},
-			Now: fixedOperationNow(),
+			SpanIDFactory: fixedSpanID("b7ad6b7169203335"),
+			Now:           fixedOperationNow(),
 		},
 		"opaque-ref-value",
 	)
@@ -510,10 +387,8 @@ func TestSQLContextHelpersTraceQueryAndExecWithoutLeakingSQL(t *testing.T) {
 				"component": "checkout",
 				"params":    []any{"private"},
 			},
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203336"
-			},
-			Now: fixedOperationNow(),
+			SpanIDFactory: fixedSpanID("b7ad6b7169203336"),
+			Now:           fixedOperationNow(),
 		},
 		"paid",
 		"order-ref-value",
@@ -536,11 +411,8 @@ func TestSQLContextHelpersTraceQueryAndExecWithoutLeakingSQL(t *testing.T) {
 		t.Fatalf("exec helper did not activate child trace: %#v", execer.trace)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
 		`"source": "database.operation"`,
 		`"dbSystem": "postgresql"`,
 		`"dbOperation": "lookup checkout order"`,
@@ -549,12 +421,7 @@ func TestSQLContextHelpersTraceQueryAndExecWithoutLeakingSQL(t *testing.T) {
 		`"dbOperationKind": "exec"`,
 		`"rowCount": 3`,
 		`"component": "checkout"`,
-	} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("missing %s in payload: %s", want, payload)
-		}
-	}
-	for _, unsafe := range []string{
+	}, []string{
 		"SELECT * FROM orders",
 		"UPDATE orders",
 		"opaque-ref-value",
@@ -562,11 +429,7 @@ func TestSQLContextHelpersTraceQueryAndExecWithoutLeakingSQL(t *testing.T) {
 		"order-ref-value",
 		"params",
 		"connectionString",
-	} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("SQL helper leaked %q: %s", unsafe, payload)
-		}
-	}
+	})
 }
 
 func TestSQLExecRowsAffectedFailureIsDiagnosticOnly(t *testing.T) {
@@ -583,11 +446,9 @@ func TestSQLExecRowsAffectedFailureIsDiagnosticOnly(t *testing.T) {
 		"DELETE FROM orders WHERE id = ?",
 		DatabaseOperationConfig{
 			EventIDPrefix: "go_sql_exec_rows",
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203337"
-			},
-			Now:     fixedOperationNow(),
-			OnError: func(err error) { reported = err },
+			SpanIDFactory: fixedSpanID("b7ad6b7169203337"),
+			Now:           fixedOperationNow(),
+			OnError:       func(err error) { reported = err },
 		},
 		"order-ref-value-2",
 	)
@@ -601,34 +462,20 @@ func TestSQLExecRowsAffectedFailureIsDiagnosticOnly(t *testing.T) {
 		t.Fatalf("expected rows affected diagnostic, got %v", reported)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	payload := previewPayload(t, client)
 	if strings.Contains(payload, "rowCount") {
 		t.Fatalf("expected rowCount to be omitted after rows affected failure: %s", payload)
 	}
-	if strings.Contains(payload, "driver exposed private detail") ||
-		strings.Contains(payload, "order-ref-value-2") ||
-		strings.Contains(payload, "DELETE FROM orders") {
-		t.Fatalf("rows affected diagnostic leaked into payload: %s", payload)
-	}
+	assertText(t, payload, nil, []string{"driver exposed private detail", "order-ref-value-2", "DELETE FROM orders"})
 }
 
 func TestSQLContextHelpersSupportPreparedStatementRunners(t *testing.T) {
 	client := sampleClient(t)
-	parent, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	ctx, _ := operationParent(t)
 	queryer := &fakeSQLStmtQueryer{}
 	execer := &fakeSQLStmtExecer{result: fakeSQLResult{rowsAffected: 4}}
 
-	_, err = SQLQueryContextWithLogBrewSpan(
+	_, err := SQLQueryContextWithLogBrewSpan(
 		ctx,
 		client,
 		queryer,
@@ -636,10 +483,8 @@ func TestSQLContextHelpersSupportPreparedStatementRunners(t *testing.T) {
 		"SELECT * FROM orders WHERE account_ref = ?",
 		DatabaseOperationConfig{
 			EventIDPrefix: "go_sql_stmt_query",
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203338"
-			},
-			Now: fixedOperationNow(),
+			SpanIDFactory: fixedSpanID("b7ad6b7169203338"),
+			Now:           fixedOperationNow(),
 		},
 		"opaque-ref-value",
 	)
@@ -661,10 +506,8 @@ func TestSQLContextHelpersSupportPreparedStatementRunners(t *testing.T) {
 		"UPDATE orders SET status = ? WHERE id = ?",
 		DatabaseOperationConfig{
 			EventIDPrefix: "go_sql_stmt_exec",
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203339"
-			},
-			Now: fixedOperationNow(),
+			SpanIDFactory: fixedSpanID("b7ad6b7169203339"),
+			Now:           fixedOperationNow(),
 		},
 		"paid",
 		"order-ref-value",
@@ -681,43 +524,24 @@ func TestSQLContextHelpersSupportPreparedStatementRunners(t *testing.T) {
 		t.Fatalf("statement exec helper did not use statement-style runner: result=%v execer=%#v", result, execer)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
 		`"dbOperation": "prepared lookup checkout order"`,
 		`"dbOperationKind": "query"`,
 		`"dbOperation": "prepared update checkout order"`,
 		`"dbOperationKind": "exec"`,
 		`"rowCount": 4`,
-	} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("missing statement SQL trace metadata %s in payload: %s", want, payload)
-		}
-	}
-	for _, unsafe := range []string{
+	}, []string{
 		"SELECT * FROM orders",
 		"UPDATE orders",
 		"opaque-ref-value",
 		"order-ref-value",
-	} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("statement SQL helper leaked %q: %s", unsafe, payload)
-		}
-	}
+	})
 }
 
 func TestSQLTransactionWithLogBrewSpanCommitsAndParentsSQLSpans(t *testing.T) {
 	client := sampleClient(t)
-	parent, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	ctx, parent := operationParent(t)
 	state := &fakeSQLDriverState{}
 	db := newFakeSQLDB(t, state)
 	defer func() { _ = db.Close() }()
@@ -745,10 +569,8 @@ func TestSQLTransactionWithLogBrewSpanCommitsAndParentsSQLSpans(t *testing.T) {
 					System:        "postgresql",
 					DatabaseName:  "orders",
 					EventIDPrefix: "go_sql_tx_exec",
-					SpanIDFactory: func() string {
-						return "b7ad6b7169203341"
-					},
-					Now: fixedOperationNow(),
+					SpanIDFactory: fixedSpanID("b7ad6b7169203341"),
+					Now:           fixedOperationNow(),
 				},
 				"opaque-account-ref",
 			); err != nil {
@@ -764,10 +586,8 @@ func TestSQLTransactionWithLogBrewSpanCommitsAndParentsSQLSpans(t *testing.T) {
 					System:        "postgresql",
 					DatabaseName:  "orders",
 					EventIDPrefix: "go_sql_tx_query",
-					SpanIDFactory: func() string {
-						return "b7ad6b7169203342"
-					},
-					Now: fixedOperationNow(),
+					SpanIDFactory: fixedSpanID("b7ad6b7169203342"),
+					Now:           fixedOperationNow(),
 				},
 				"opaque-account-ref",
 			)
@@ -788,10 +608,8 @@ func TestSQLTransactionWithLogBrewSpanCommitsAndParentsSQLSpans(t *testing.T) {
 				"connectionString": "opaque-private-target",
 				"sql":              "BEGIN; INSERT INTO orders(account_ref) VALUES ('opaque-account-ref')",
 			},
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203340"
-			},
-			Now: fixedOperationNow(),
+			SpanIDFactory: fixedSpanID("b7ad6b7169203340"),
+			Now:           fixedOperationNow(),
 		},
 	)
 	if err != nil || result != "committed" {
@@ -814,11 +632,8 @@ func TestSQLTransactionWithLogBrewSpanCommitsAndParentsSQLSpans(t *testing.T) {
 		t.Fatalf("expected SQL child spans under transaction span: exec=%#v query=%#v tx=%#v", state.execTrace, state.queryTrace, transactionTrace)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
 		`"dbOperation": "checkout transaction"`,
 		`"dbOperationKind": "transaction"`,
 		`"dbTransactionOutcome": "commit"`,
@@ -826,22 +641,13 @@ func TestSQLTransactionWithLogBrewSpanCommitsAndParentsSQLSpans(t *testing.T) {
 		`"dbOperationKind": "exec"`,
 		`"dbOperation": "select checkout order"`,
 		`"dbOperationKind": "query"`,
-	} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("missing transaction SQL trace metadata %s in payload: %s", want, payload)
-		}
-	}
-	for _, unsafe := range []string{
+	}, []string{
 		"INSERT INTO orders",
 		"SELECT * FROM orders",
 		"opaque-account-ref",
 		"opaque-private-target",
 		"connectionString",
-	} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("transaction SQL helper leaked %q: %s", unsafe, payload)
-		}
-	}
+	})
 }
 
 func TestSQLTransactionWithLogBrewSpanRollsBackAndKeepsRollbackDiagnosticRedacted(t *testing.T) {
@@ -864,11 +670,9 @@ func TestSQLTransactionWithLogBrewSpanRollsBackAndKeepsRollbackDiagnosticRedacte
 		DatabaseOperationConfig{
 			System:        "postgresql",
 			EventIDPrefix: "go_sql_tx_rollback",
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203343"
-			},
-			Now:     fixedOperationNow(),
-			OnError: func(err error) { reported = err },
+			SpanIDFactory: fixedSpanID("b7ad6b7169203343"),
+			Now:           fixedOperationNow(),
+			OnError:       func(err error) { reported = err },
 		},
 	)
 	if !errors.Is(err, operationErr) {
@@ -881,29 +685,17 @@ func TestSQLTransactionWithLogBrewSpanRollsBackAndKeepsRollbackDiagnosticRedacte
 		t.Fatalf("expected redacted rollback diagnostic, got %v", reported)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
 		`"dbOperation": "checkout transaction"`,
 		`"dbOperationKind": "transaction"`,
 		`"dbTransactionOutcome": "rollback_error"`,
 		`"status": "error"`,
 		`"errorType": "*errors.errorString"`,
-	} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("missing rollback transaction metadata %s in payload: %s", want, payload)
-		}
-	}
-	for _, unsafe := range []string{
+	}, []string{
 		"application failure with private detail",
 		"driver rollback exposed private detail",
-	} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("transaction rollback path leaked %q: %s", unsafe, payload)
-		}
-	}
+	})
 }
 
 func TestSQLTransactionWithLogBrewSpanRollsBackAndRepanics(t *testing.T) {
@@ -919,24 +711,14 @@ func TestSQLTransactionWithLogBrewSpanRollsBackAndRepanics(t *testing.T) {
 		if state.commits.Load() != 0 || state.rollbacks.Load() != 1 {
 			t.Fatalf("expected rollback before repanic: commits=%d rollbacks=%d", state.commits.Load(), state.rollbacks.Load())
 		}
-		payload, err := client.PreviewJSON()
-		if err != nil {
-			t.Fatalf("preview json: %v", err)
-		}
-		for _, want := range []string{
+		payload := previewPayload(t, client)
+		assertText(t, payload, []string{
 			`"id": "go_sql_tx_panic_span_b7ad6b7169203344"`,
 			`"status": "error"`,
 			`"panic": true`,
 			`"panicType": "string"`,
 			`"dbTransactionOutcome": "panic_rollback"`,
-		} {
-			if !strings.Contains(payload, want) {
-				t.Fatalf("missing transaction panic span metadata %s: %s", want, payload)
-			}
-		}
-		if strings.Contains(payload, "panic from app transaction") {
-			t.Fatalf("transaction panic span leaked panic value: %s", payload)
-		}
+		}, []string{"panic from app transaction"})
 	}()
 
 	_, _ = SQLTransactionWithLogBrewSpan(
@@ -950,10 +732,8 @@ func TestSQLTransactionWithLogBrewSpanRollsBackAndRepanics(t *testing.T) {
 		},
 		DatabaseOperationConfig{
 			EventIDPrefix: "go_sql_tx_panic",
-			SpanIDFactory: func() string {
-				return "b7ad6b7169203344"
-			},
-			Now: fixedOperationNow(),
+			SpanIDFactory: fixedSpanID("b7ad6b7169203344"),
+			Now:           fixedOperationNow(),
 		},
 	)
 	t.Fatal("expected transaction helper to repanic")
@@ -965,94 +745,86 @@ func fixedOperationNow() func() time.Time {
 	}
 }
 
+func fixedSpanID(value string) func() string { return func() string { return value } }
+
+func operationParent(t *testing.T) (context.Context, TraceContext) {
+	t.Helper()
+	parent := testTrace(t, "A7AD6B7169203330")
+	return ContextWithLogBrewTrace(context.Background(), parent), parent
+}
+
 type fakeSQLQueryer struct {
 	query string
-	args  []any
-	trace TraceContext
+	fakeSQLCall
 }
 
 func (q *fakeSQLQueryer) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	q.query = query
-	q.args = append([]any{}, args...)
-	trace, ok := LogBrewTraceFromContext(ctx)
-	if !ok {
-		return nil, errors.New("missing LogBrew trace")
-	}
-	q.trace = trace
-	return nil, nil
+	return nil, q.record(ctx, args)
 }
 
 type fakeSQLExecer struct {
 	query  string
-	args   []any
-	trace  TraceContext
 	result sql.Result
 	err    error
+	fakeSQLCall
 }
 
 func (e *fakeSQLExecer) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	e.query = query
-	e.args = append([]any{}, args...)
-	trace, ok := LogBrewTraceFromContext(ctx)
-	if !ok {
-		return nil, errors.New("missing LogBrew trace")
+	if err := e.record(ctx, args); err != nil {
+		return nil, err
 	}
-	e.trace = trace
 	return e.result, e.err
 }
 
 type fakeSQLStmtQueryer struct {
-	queryTextReceived bool
-	args              []any
-	trace             TraceContext
+	fakeSQLCall
 }
 
 func (q *fakeSQLStmtQueryer) QueryContext(ctx context.Context, args ...any) (*sql.Rows, error) {
-	q.args = append([]any{}, args...)
-	if len(args) > 0 {
-		if value, ok := args[0].(string); ok && strings.Contains(value, "SELECT * FROM orders") {
-			q.queryTextReceived = true
-		}
-	}
-	trace, ok := LogBrewTraceFromContext(ctx)
-	if !ok {
-		return nil, errors.New("missing LogBrew trace")
-	}
-	q.trace = trace
-	return nil, nil
+	return nil, q.record(ctx, args)
 }
 
 type fakeSQLStmtExecer struct {
-	queryTextReceived bool
-	args              []any
-	trace             TraceContext
-	result            sql.Result
+	result sql.Result
+	fakeSQLCall
 }
 
 func (e *fakeSQLStmtExecer) ExecContext(ctx context.Context, args ...any) (sql.Result, error) {
-	e.args = append([]any{}, args...)
-	if len(args) > 0 {
-		if value, ok := args[0].(string); ok && strings.Contains(value, "UPDATE orders") {
-			e.queryTextReceived = true
-		}
+	if err := e.record(ctx, args); err != nil {
+		return nil, err
 	}
-	trace, ok := LogBrewTraceFromContext(ctx)
-	if !ok {
-		return nil, errors.New("missing LogBrew trace")
-	}
-	e.trace = trace
 	return e.result, nil
 }
 
+type fakeSQLCall struct {
+	queryTextReceived bool
+	args              []any
+	trace             TraceContext
+}
+
+func (c *fakeSQLCall) record(ctx context.Context, args []any) error {
+	c.args = append([]any{}, args...)
+	for _, arg := range args {
+		value, _ := arg.(string)
+		c.queryTextReceived = c.queryTextReceived || strings.Contains(value, "SELECT * FROM orders") || strings.Contains(value, "UPDATE orders")
+	}
+	trace, ok := LogBrewTraceFromContext(ctx)
+	if !ok {
+		return errors.New("missing LogBrew trace")
+	}
+	c.trace = trace
+	return nil
+}
+
 type fakeSQLResult struct {
-	lastInsertID    int64
-	lastInsertIDErr error
 	rowsAffected    int64
 	rowsAffectedErr error
 }
 
 func (r fakeSQLResult) LastInsertId() (int64, error) {
-	return r.lastInsertID, r.lastInsertIDErr
+	return 0, nil
 }
 
 func (r fakeSQLResult) RowsAffected() (int64, error) {

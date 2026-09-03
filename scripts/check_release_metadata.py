@@ -588,10 +588,6 @@ def validate_python(root: Path, failures: list[str]) -> None:
 def validate_go(root: Path, failures: list[str]) -> None:
     go_mod_path = require_path(root, "go/logbrew/go.mod", failures)
     require_path(root, "go/logbrew/README.md", failures)
-    otel_mod_path = require_path(root, "go/logbrew/otel/go.mod", failures)
-    require_path(root, "go/logbrew/otel/README.md", failures)
-    gin_mod_path = require_path(root, "go/logbrew/gin/go.mod", failures)
-    require_path(root, "go/logbrew/gin/README.md", failures)
     if not go_mod_path.exists():
         return
     content = go_mod_path.read_text(encoding="utf-8")
@@ -605,52 +601,27 @@ def validate_go(root: Path, failures: list[str]) -> None:
         failures,
         "go/logbrew/go.mod: expected go 1.24.0",
     )
-    if not otel_mod_path.exists():
-        return
-    otel_content = otel_mod_path.read_text(encoding="utf-8")
-    require(
-        re.search(r"^module github\.com/LogBrewCo/sdk/go/logbrew/otel$", otel_content, re.MULTILINE) is not None,
-        failures,
-        "go/logbrew/otel/go.mod: unexpected module path",
-    )
-    require(
-        re.search(r"^go 1\.24\.0$", otel_content, re.MULTILINE) is not None,
-        failures,
-        "go/logbrew/otel/go.mod: expected go 1.24.0",
-    )
-    require(
-        "github.com/LogBrewCo/sdk/go/logbrew v0.1.8" in otel_content,
-        failures,
-        "go/logbrew/otel/go.mod: expected parent LogBrew module requirement",
-    )
-    require(
-        "go.opentelemetry.io/otel/sdk v1.41.0" in otel_content,
-        failures,
-        "go/logbrew/otel/go.mod: expected OpenTelemetry SDK requirement",
-    )
-    if not gin_mod_path.exists():
-        return
-    gin_content = gin_mod_path.read_text(encoding="utf-8")
-    require(
-        re.search(r"^module github\.com/LogBrewCo/sdk/go/logbrew/gin$", gin_content, re.MULTILINE) is not None,
-        failures,
-        "go/logbrew/gin/go.mod: unexpected module path",
-    )
-    require(
-        re.search(r"^go 1\.24\.0$", gin_content, re.MULTILINE) is not None,
-        failures,
-        "go/logbrew/gin/go.mod: expected go 1.24.0",
-    )
-    require(
-        "github.com/LogBrewCo/sdk/go/logbrew v0.1.7" in gin_content,
-        failures,
-        "go/logbrew/gin/go.mod: expected parent LogBrew module requirement",
-    )
-    require(
-        "github.com/gin-gonic/gin v1.11.0" in gin_content,
-        failures,
-        "go/logbrew/gin/go.mod: expected Gin module requirement",
-    )
+    modules = {
+        "otel": ("v0.1.8", "go.opentelemetry.io/otel/sdk v1.41.0"),
+        "gin": ("v0.1.7", "github.com/gin-gonic/gin v1.11.0"),
+        "asynq": ("v0.1.9", "github.com/hibiken/asynq v0.26.0"),
+    }
+    for name, (core_version, dependency) in modules.items():
+        location = f"go/logbrew/{name}"
+        module_path = require_path(root, f"{location}/go.mod", failures)
+        require_path(root, f"{location}/README.md", failures)
+        if not module_path.exists():
+            continue
+        module = module_path.read_text(encoding="utf-8")
+        expected = f"github.com/LogBrewCo/sdk/go/logbrew/{name}"
+        checks = {
+            "unexpected module path": rf"^module {re.escape(expected)}$",
+            "expected go 1.24.0": r"^go 1\.24\.0$",
+            "expected parent LogBrew module requirement": rf"github\.com/LogBrewCo/sdk/go/logbrew {core_version}",
+            "expected framework requirement": re.escape(dependency),
+        }
+        for message, pattern in checks.items():
+            require(re.search(pattern, module, re.MULTILINE) is not None, failures, f"{location}/go.mod: {message}")
 
 
 def validate_c(root: Path, failures: list[str]) -> None:

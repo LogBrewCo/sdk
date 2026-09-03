@@ -304,35 +304,19 @@ func (m *middleware) capture(
 	}
 
 	if recovered != nil || (m.captureServerErrorIssues && statusCode >= http.StatusInternalServerError) {
-		title := "Gin request returned a server error"
-		if recovered != nil {
-			title = "Gin request panicked"
-		}
 		issueAttributes := logbrew.IssueAttributes{
-			Title:    title,
+			Title:    "Gin request returned a server error",
 			Level:    "error",
 			Metadata: metadata,
 		}
 		if recovered != nil {
-			mechanism := &logbrew.IssueExceptionMechanism{
-				Type:    "gin.recovery",
-				Handled: false,
-			}
-			issueAttributes.Exception = &logbrew.IssueException{
-				Type:      panicType(recovered),
-				Mechanism: mechanism,
-			}
-			issueAttributes.StackFrames = panicFrames
-			chain, chainErr := logbrew.CreateIssueExceptionChain(logbrew.IssueExceptionChainInput{
-				Value:       recovered,
-				Exception:   issueAttributes.Exception,
-				StackFrames: panicFrames,
-			})
-			if chainErr != nil {
-				m.report(chainErr)
+			panicAttributes, panicErr := logbrew.IssueAttributesFromPanic(recovered, "Gin request panicked", "gin.recovery", false, panicFrames)
+			if panicErr != nil {
+				m.report(panicErr)
 			} else {
-				issueAttributes.ExceptionChain = chain
+				issueAttributes = panicAttributes
 			}
+			issueAttributes.Metadata = metadata
 		}
 		issue := logbrew.IssueAttributesWithTrace(c.Request.Context(), issueAttributes)
 		if err := m.client.Issue(m.eventID("issue"), timestamp, issue); err != nil {

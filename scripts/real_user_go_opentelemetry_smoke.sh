@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
+shared_go_build_cache="$(go env GOCACHE)"
+shared_go_proxy="$(go env GOMODCACHE)/cache/download"
 
 cleanup() {
 	chmod -R u+w "$tmp_dir" 2>/dev/null || true
@@ -11,9 +13,9 @@ cleanup() {
 
 trap cleanup EXIT
 
-export GOCACHE="$tmp_dir/go-build-cache"
+export GOCACHE="$shared_go_build_cache"
 export GOMODCACHE="$tmp_dir/pkg/mod"
-mkdir -p "$GOCACHE" "$GOMODCACHE"
+mkdir -p "$GOMODCACHE"
 
 proxy_dir="$tmp_dir/proxy"
 mkdir -p "$proxy_dir"
@@ -51,7 +53,7 @@ def write_module(module_path: str, module_root: Path, *, exclude_nested: bool = 
             if not path.is_file() or ".git" in path.parts:
                 continue
             relative = path.relative_to(module_root)
-            if exclude_nested and relative.parts and relative.parts[0] in {"gin", "otel"}:
+            if exclude_nested and relative.parts and relative.parts[0] in {"asynq", "gin", "otel"}:
                 continue
             archive.write(path, zip_prefix + relative.as_posix())
 
@@ -80,7 +82,7 @@ parent_zip = Path(sys.argv[1])
 otel_zip = Path(sys.argv[2])
 with zipfile.ZipFile(parent_zip) as archive:
     names = set(archive.namelist())
-    for nested in ("gin", "otel"):
+    for nested in ("asynq", "gin", "otel"):
         if f"github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/{nested}/go.mod" in names:
             raise SystemExit(f"root Go module zip should not include nested {nested} module")
     readme = archive.read("github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/README.md").decode("utf-8")
@@ -100,7 +102,7 @@ PY
 app_dir="$tmp_dir/go-otel-smoke-app"
 mkdir -p "$app_dir"
 cd "$app_dir"
-export GOPROXY="file://$proxy_dir,https://proxy.golang.org,direct"
+export GOPROXY="file://$proxy_dir,file://$shared_go_proxy,https://proxy.golang.org,direct"
 export GOSUMDB=off
 
 go mod init logbrew-go-otel-smoke >/dev/null

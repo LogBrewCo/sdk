@@ -13,9 +13,9 @@ if [[ -z "$staticcheck_bin" ]] || \
 	exit 1
 fi
 
-go_roots=("$repo_root/go/logbrew" "$repo_root/go/logbrew/gin" "$repo_root/go/logbrew/otel" "$repo_root/tools/toolchain-probe")
+go_roots=("$repo_root/go/logbrew" "$repo_root/go/logbrew/asynq" "$repo_root/go/logbrew/gin" "$repo_root/go/logbrew/otel" "$repo_root/tools/toolchain-probe")
 (cd "$tmp_dir" && GOTOOLCHAIN=local go work init "${go_roots[@]}")
 (cd "$repo_root" && GOTOOLCHAIN=local GOWORK="$tmp_dir/go.work" "$staticcheck_bin" \
-	./go/logbrew/... ./go/logbrew/gin/... ./go/logbrew/otel/... ./tools/toolchain-probe/...)
+	./go/logbrew/... ./go/logbrew/asynq/... ./go/logbrew/gin/... ./go/logbrew/otel/... ./tools/toolchain-probe/...)
 
 printf 'go static analysis ok (Staticcheck %s)\n' "$version"

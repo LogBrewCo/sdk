@@ -269,13 +269,7 @@ func TestTelemetryContextValidationRejectsUnsafeOrAmbiguousValues(t *testing.T) 
 }
 
 func TestTraceHelpersPromoteActiveTraceIntoFirstClassContext(t *testing.T) {
-	trace, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "B7AD6B7169203331",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trace := testTrace(t, "B7AD6B7169203331")
 	ctx := ContextWithLogBrewTrace(t.Context(), trace)
 	logAttributes := LogAttributesWithTrace(ctx, LogAttributes{
 		Message: "checkout failed", Level: "error",
