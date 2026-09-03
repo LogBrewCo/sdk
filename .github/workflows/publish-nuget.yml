@@ -114,10 +114,11 @@ jobs:
           core_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           aspnetcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           efcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          hangfire_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.Hangfire/LogBrew.Hangfire.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           httpclient_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           redis_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           otel_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$httpclient_version" || -z "$redis_version" || -z "$otel_version" ]]; then
+          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$hangfire_version" || -z "$httpclient_version" || -z "$redis_version" || -z "$otel_version" ]]; then
             echo "Could not read NuGet package versions from .NET package projects" >&2
             exit 1
           fi
@@ -129,6 +130,7 @@ jobs:
             echo "core_dependency_range_msbuild=$core_dependency_range_msbuild"
             echo "aspnetcore_version=$aspnetcore_version"
             echo "efcore_version=$efcore_version"
+            echo "hangfire_version=$hangfire_version"
             echo "httpclient_version=$httpclient_version"
             echo "redis_version=$redis_version"
             echo "otel_version=$otel_version"

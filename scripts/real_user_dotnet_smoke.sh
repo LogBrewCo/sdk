@@ -30,21 +30,25 @@ fi
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.Hangfire/LogBrew.Hangfire.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 efcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+hangfire_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.Hangfire/LogBrew.Hangfire.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 redis_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 otel_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
 efcore_nupkg="$tmp_dir/packages/LogBrew.EntityFrameworkCore.${efcore_package_version}.nupkg"
+hangfire_nupkg="$tmp_dir/packages/LogBrew.Hangfire.${hangfire_package_version}.nupkg"
 redis_nupkg="$tmp_dir/packages/LogBrew.StackExchangeRedis.${redis_package_version}.nupkg"
 otel_nupkg="$tmp_dir/packages/LogBrew.OpenTelemetry.${otel_package_version}.nupkg"
 test -f "$nupkg"
 test -f "$aspnetcore_nupkg"
 test -f "$efcore_nupkg"
+test -f "$hangfire_nupkg"
 test -f "$redis_nupkg"
 test -f "$otel_nupkg"
 export NUGET_PACKAGES="$tmp_dir/nuget-packages"
@@ -174,130 +178,31 @@ for needle in (
         raise SystemExit(f"missing packaged README guidance: {needle}")
 PY
 
-redis_extract_dir="$tmp_dir/redis-package-extract"
-mkdir -p "$redis_extract_dir"
-python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_nupkg.py" "$redis_nupkg" "$redis_extract_dir" >/dev/null
-
-otel_extract_dir="$tmp_dir/opentelemetry-package-extract"
-mkdir -p "$otel_extract_dir"
-python3 - "$otel_nupkg" "$otel_extract_dir" <<'PY'
-import sys
-import zipfile
-from pathlib import Path
-
-nupkg = Path(sys.argv[1])
-extract_dir = Path(sys.argv[2])
-with zipfile.ZipFile(nupkg) as archive:
-    archive.extractall(extract_dir)
-    names = set(archive.namelist())
-    for required in (
-        "LogBrew.OpenTelemetry.nuspec",
-        "lib/netstandard2.0/LogBrew.OpenTelemetry.dll",
-        "README.md",
-        "examples/OpenTelemetrySpanProcessorTelemetry.cs",
-    ):
-        if required not in names:
-            raise SystemExit(f"missing OpenTelemetry nupkg file: {required}")
-    readme = archive.read("README.md").decode()
-    nuspec = archive.read("LogBrew.OpenTelemetry.nuspec").decode()
-if 'dependency id="LogBrew"' not in nuspec:
-    raise SystemExit("missing LogBrew dependency metadata")
-if 'dependency id="OpenTelemetry"' not in nuspec:
-    raise SystemExit("missing OpenTelemetry dependency metadata")
-for needle in (
-    "dotnet add package LogBrew.OpenTelemetry",
-    "TracerProviderBuilder.AddLogBrew",
-    "LogBrewOpenTelemetrySpanProcessor",
-    "LogBrewOpenTelemetrySpanExporter",
-    "SimpleActivityExportProcessor",
-    "does not create an OpenTelemetry provider",
-    "OTLP forwarding path",
-    "matching `TelemetryContext` trace identity",
-    "OpenTelemetrySpanProcessorTelemetry.cs",
-):
-    if needle not in readme:
-        raise SystemExit(f"missing OpenTelemetry README guidance: {needle}")
-PY
+check_integration_package() {
+  local nupkg="$1"
+  local extract_dir="$2"
+  mkdir -p "$extract_dir"
+  python3 "$repo_root/scripts/check_dotnet_integration_nupkg.py" "$nupkg" "$extract_dir" >/dev/null
+}
 
 aspnetcore_extract_dir="$tmp_dir/aspnetcore-package-extract"
-mkdir -p "$aspnetcore_extract_dir"
-python3 - "$aspnetcore_nupkg" "$aspnetcore_extract_dir" <<'PY'
-import sys
-import zipfile
-from pathlib import Path
-
-nupkg = Path(sys.argv[1])
-extract_dir = Path(sys.argv[2])
-with zipfile.ZipFile(nupkg) as archive:
-    archive.extractall(extract_dir)
-    names = set(archive.namelist())
-    for required in (
-        "LogBrew.AspNetCore.nuspec",
-        "lib/net10.0/LogBrew.AspNetCore.dll",
-        "README.md",
-        "examples/AspNetCoreMiddlewareTelemetry.cs",
-    ):
-        if required not in names:
-            raise SystemExit(f"missing ASP.NET Core nupkg file: {required}")
-    readme = archive.read("README.md").decode()
-    nuspec = archive.read("LogBrew.AspNetCore.nuspec").decode()
-if 'dependency id="LogBrew"' not in nuspec:
-    raise SystemExit("missing LogBrew dependency metadata")
-for needle in (
-    "dotnet add package LogBrew.AspNetCore",
-    "UseLogBrewRequestTelemetry",
-    "AddLogBrewDependencyActivitySourceTelemetry",
-    "UseLogBrewDependencyActivitySourceTelemetry",
-    "WithRequestFilter",
-    "WithRouteTemplateSelector",
-    "WithContextProvider",
-    "opaque approved session ID",
-    "does not read request or response bodies",
-    "mechanism `aspnetcore.middleware`",
-    "omits exception messages, raw stack text",
-    "AspNetCoreMiddlewareTelemetry.cs",
-):
-    if needle not in readme:
-        raise SystemExit(f"missing ASP.NET Core packaged README guidance: {needle}")
-PY
-
 efcore_extract_dir="$tmp_dir/efcore-package-extract"
-mkdir -p "$efcore_extract_dir"
-python3 - "$efcore_nupkg" "$efcore_extract_dir" <<'PY'
-import sys
-import zipfile
-from pathlib import Path
+hangfire_extract_dir="$tmp_dir/hangfire-package-extract"
+otel_extract_dir="$tmp_dir/opentelemetry-package-extract"
+redis_extract_dir="$tmp_dir/redis-package-extract"
+check_integration_package "$aspnetcore_nupkg" "$aspnetcore_extract_dir"
+check_integration_package "$efcore_nupkg" "$efcore_extract_dir"
+check_integration_package "$hangfire_nupkg" "$hangfire_extract_dir"
+check_integration_package "$otel_nupkg" "$otel_extract_dir"
+check_integration_package "$redis_nupkg" "$redis_extract_dir"
 
-nupkg = Path(sys.argv[1])
-extract_dir = Path(sys.argv[2])
-with zipfile.ZipFile(nupkg) as archive:
-    archive.extractall(extract_dir)
-    names = set(archive.namelist())
-    for required in (
-        "LogBrew.EntityFrameworkCore.nuspec",
-        "lib/net10.0/LogBrew.EntityFrameworkCore.dll",
-        "README.md",
-        "examples/EntityFrameworkCoreCommandTelemetry.cs",
-    ):
-        if required not in names:
-            raise SystemExit(f"missing Entity Framework Core nupkg file: {required}")
-    readme = archive.read("README.md").decode()
-    nuspec = archive.read("LogBrew.EntityFrameworkCore.nuspec").decode()
-if 'dependency id="LogBrew"' not in nuspec:
-    raise SystemExit("missing LogBrew dependency metadata")
-if 'dependency id="Microsoft.EntityFrameworkCore.Relational"' not in nuspec:
-    raise SystemExit("missing Microsoft.EntityFrameworkCore.Relational dependency metadata")
-for needle in (
-    "dotnet add package LogBrew.EntityFrameworkCore",
-    "AddLogBrewCommandTelemetry",
-    "LogBrewEntityFrameworkCoreCommandInterceptor",
-    "WithCommandFilter",
-    "WithMetadataProvider",
-    "does not capture raw database statements",
-):
-    if needle not in readme:
-        raise SystemExit(f"missing Entity Framework Core README guidance: {needle}")
-PY
+hangfire_app="$tmp_dir/HangfireInstalledApp"
+dotnet new console --framework net10.0 --output "$hangfire_app" >/dev/null
+cp "$package_dir/tests/LogBrew.Hangfire.Tests/Program.cs" "$hangfire_app/Program.cs"
+dotnet add "$hangfire_app/HangfireInstalledApp.csproj" package LogBrew.Hangfire --version "$hangfire_package_version" >/dev/null
+dotnet add "$hangfire_app/HangfireInstalledApp.csproj" package Hangfire.InMemory --version 1.0.0 >/dev/null
+dotnet add "$hangfire_app/HangfireInstalledApp.csproj" package Newtonsoft.Json --version 13.0.4 >/dev/null
+dotnet run --project "$hangfire_app/HangfireInstalledApp.csproj" --configuration Release | grep -q '"integration":"hangfire","ok":true'
 
 run_packaged_example() {
   local source_file="$1"
@@ -469,58 +374,42 @@ server_pid=""
 
 lifecycle_dir="$tmp_dir/lifecycle-app"
 dotnet new console --framework net10.0 --name LifecycleApp --output "$lifecycle_dir" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.StackExchangeRedis --version "$redis_package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.OpenTelemetry --version "$otel_package_version" >/dev/null
+lifecycle_packages=(
+  "LogBrew=$package_version"
+  "LogBrew.AspNetCore=$aspnetcore_package_version"
+  "LogBrew.EntityFrameworkCore=$efcore_package_version"
+  "LogBrew.Hangfire=$hangfire_package_version"
+  "LogBrew.StackExchangeRedis=$redis_package_version"
+  "LogBrew.OpenTelemetry=$otel_package_version"
+)
+for entry in "${lifecycle_packages[@]}"; do
+  package_id="${entry%%=*}"
+  dotnet add "$lifecycle_dir/LifecycleApp.csproj" package "$package_id" \
+    --version "${entry#*=}" >/dev/null
+done
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package > "$tmp_dir/lifecycle-packages.txt"
-grep -q 'LogBrew' "$tmp_dir/lifecycle-packages.txt"
-grep -q 'LogBrew.AspNetCore' "$tmp_dir/lifecycle-packages.txt"
-grep -q 'LogBrew.EntityFrameworkCore' "$tmp_dir/lifecycle-packages.txt"
-grep -q 'LogBrew.StackExchangeRedis' "$tmp_dir/lifecycle-packages.txt"
-grep -q 'LogBrew.OpenTelemetry' "$tmp_dir/lifecycle-packages.txt"
+for entry in "${lifecycle_packages[@]}"; do
+  package_id="${entry%%=*}"
+  grep -q "$package_id" "$tmp_dir/lifecycle-packages.txt"
+done
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package --include-transitive > "$tmp_dir/lifecycle-packages-transitive.txt"
-grep -q 'Microsoft.Extensions.Logging' "$tmp_dir/lifecycle-packages-transitive.txt"
-grep -q 'Microsoft.EntityFrameworkCore.Relational' "$tmp_dir/lifecycle-packages-transitive.txt"
-grep -q 'StackExchange.Redis' "$tmp_dir/lifecycle-packages-transitive.txt"
-grep -q 'OpenTelemetry' "$tmp_dir/lifecycle-packages-transitive.txt"
-grep -q 'LogBrew' "$tmp_dir/lifecycle-packages-transitive.txt"
-dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.OpenTelemetry >/dev/null
-if grep -q 'PackageReference Include="LogBrew.OpenTelemetry"' "$lifecycle_dir/LifecycleApp.csproj"; then
-  echo "expected dotnet remove package to remove LogBrew.OpenTelemetry reference" >&2
-  exit 1
-fi
-dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.StackExchangeRedis >/dev/null
-if grep -q 'PackageReference Include="LogBrew.StackExchangeRedis"' "$lifecycle_dir/LifecycleApp.csproj"; then
-  echo "expected dotnet remove package to remove LogBrew.StackExchangeRedis reference" >&2
-  exit 1
-fi
-dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore >/dev/null
-if grep -q 'PackageReference Include="LogBrew.EntityFrameworkCore"' "$lifecycle_dir/LifecycleApp.csproj"; then
-  echo "expected dotnet remove package to remove LogBrew.EntityFrameworkCore reference" >&2
-  exit 1
-fi
-dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore >/dev/null
-if grep -q 'PackageReference Include="LogBrew.AspNetCore"' "$lifecycle_dir/LifecycleApp.csproj"; then
-  echo "expected dotnet remove package to remove LogBrew.AspNetCore reference" >&2
-  exit 1
-fi
-dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew >/dev/null
-if grep -q 'PackageReference Include="LogBrew"' "$lifecycle_dir/LifecycleApp.csproj"; then
-  echo "expected dotnet remove package to remove LogBrew reference" >&2
-  exit 1
-fi
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.StackExchangeRedis --version "$redis_package_version" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.OpenTelemetry --version "$otel_package_version" >/dev/null
-grep -q "PackageReference Include=\"LogBrew\" Version=\"$package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
-grep -q "PackageReference Include=\"LogBrew.AspNetCore\" Version=\"$aspnetcore_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
-grep -q "PackageReference Include=\"LogBrew.EntityFrameworkCore\" Version=\"$efcore_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
-grep -q "PackageReference Include=\"LogBrew.StackExchangeRedis\" Version=\"$redis_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
-grep -q "PackageReference Include=\"LogBrew.OpenTelemetry\" Version=\"$otel_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
+for dependency in Microsoft.Extensions.Logging Microsoft.EntityFrameworkCore.Relational Hangfire.Core Newtonsoft.Json StackExchange.Redis OpenTelemetry LogBrew; do
+  grep -q "$dependency" "$tmp_dir/lifecycle-packages-transitive.txt"
+done
+for entry in "${lifecycle_packages[@]}"; do
+  package_id="${entry%%=*}"
+  dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package "$package_id" >/dev/null
+  if grep -q "PackageReference Include=\"$package_id\"" "$lifecycle_dir/LifecycleApp.csproj"; then
+    echo "expected dotnet remove package to remove $package_id reference" >&2
+    exit 1
+  fi
+done
+for entry in "${lifecycle_packages[@]}"; do
+  package_id="${entry%%=*}"
+  version="${entry#*=}"
+  dotnet add "$lifecycle_dir/LifecycleApp.csproj" package "$package_id" --version "$version" >/dev/null
+  grep -q "PackageReference Include=\"$package_id\" Version=\"$version\"" "$lifecycle_dir/LifecycleApp.csproj"
+done
 
 logging_dir="$tmp_dir/logging-app"
 dotnet new console --framework net10.0 --name LoggingApp --output "$logging_dir" >/dev/null

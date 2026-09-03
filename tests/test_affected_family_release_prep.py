@@ -259,6 +259,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         expected = {
             "LogBrew.AspNetCore": "0.1.2",
             "LogBrew.EntityFrameworkCore": "0.1.0",
+            "LogBrew.Hangfire": "0.1.0",
             "LogBrew.StackExchangeRedis": "0.1.0",
             "LogBrew.OpenTelemetry": "0.1.1",
         }
@@ -273,6 +274,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.7")
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.2")
         self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.2")
+        self.assertEqual(check_release_metadata.DOTNET_HANGFIRE_VERSION, "0.1.0")
         self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.6")
         self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.2")
         self.assertEqual(

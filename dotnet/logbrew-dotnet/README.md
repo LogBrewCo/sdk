@@ -22,6 +22,7 @@ dotnet add package LogBrew.EntityFrameworkCore
 dotnet add package LogBrew.HttpClient
 dotnet add package LogBrew.StackExchangeRedis
 dotnet add package LogBrew.OpenTelemetry
+dotnet add package LogBrew.Hangfire
 ```
 
 ## Usage
@@ -966,6 +967,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `LogBrew.EntityFrameworkCore` is an optional package for EF Core command spans through app-owned `AddLogBrewCommandTelemetry(...)`, without adding EF Core dependencies to the base `LogBrew` package.
 - `LogBrew.StackExchangeRedis` is an optional package for sync/async StackExchange.Redis command spans through app-owned `TraceLogBrewCommand(...)` calls, without capturing Redis keys, values, arguments, connection endpoints, exception messages, or stacks.
 - `LogBrew.OpenTelemetry` is an optional package for app-owned OpenTelemetry `TracerProviderBuilder.AddLogBrew(...)` span processing, without adding OpenTelemetry dependencies to the base `LogBrew` package.
+- `LogBrew.Hangfire` is an optional server filter that gives every performed Hangfire job one named `job.execute` root, correlates job-time `ILogger` records, and records escaped failures as typed unhandled issues without reading job arguments or exception messages.
 - `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.

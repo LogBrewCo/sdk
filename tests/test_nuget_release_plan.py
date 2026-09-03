@@ -51,6 +51,7 @@ class NugetReleasePlanTests(unittest.TestCase):
                 "LogBrew",
                 "LogBrew.AspNetCore",
                 "LogBrew.EntityFrameworkCore",
+                "LogBrew.Hangfire",
                 "LogBrew.HttpClient",
                 "LogBrew.StackExchangeRedis",
                 "LogBrew.OpenTelemetry",
@@ -87,6 +88,7 @@ class NugetReleasePlanTests(unittest.TestCase):
         for package_id in (
             "LogBrew.AspNetCore",
             "LogBrew.EntityFrameworkCore",
+            "LogBrew.Hangfire",
             "LogBrew.StackExchangeRedis",
             "LogBrew.OpenTelemetry",
         ):

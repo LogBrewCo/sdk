@@ -1532,32 +1532,48 @@ jobs:
             root = Path(tmp)
             package_dir = root / "dotnet" / "logbrew-dotnet"
             project_dir = package_dir / "src" / "LogBrew"
-            aspnetcore_dir = package_dir / "src" / "LogBrew.AspNetCore"
-            efcore_dir = package_dir / "src" / "LogBrew.EntityFrameworkCore"
             httpclient_dir = package_dir / "src" / "LogBrew.HttpClient"
-            redis_dir = package_dir / "src" / "LogBrew.StackExchangeRedis"
-            otel_dir = package_dir / "src" / "LogBrew.OpenTelemetry"
+            integrations = {
+                "LogBrew.AspNetCore": (
+                    "net10.0",
+                    "AspNetCoreMiddlewareTelemetry.cs",
+                    '<FrameworkReference Include="Microsoft.AspNetCore.App" />',
+                ),
+                "LogBrew.EntityFrameworkCore": (
+                    "net10.0",
+                    "EntityFrameworkCoreCommandTelemetry.cs",
+                    '<PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />',
+                ),
+                "LogBrew.Hangfire": (
+                    "netstandard2.0",
+                    "HangfireJobTelemetry.cs",
+                    '<PackageReference Include="Hangfire.Core" Version="1.8.25" />\n'
+                    '    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />',
+                ),
+                "LogBrew.StackExchangeRedis": (
+                    "netstandard2.0",
+                    "StackExchangeRedisCommandTelemetry.cs",
+                    '<PackageReference Include="StackExchange.Redis" Version="3.0.11" />',
+                ),
+                "LogBrew.OpenTelemetry": (
+                    "netstandard2.0",
+                    "OpenTelemetrySpanProcessorTelemetry.cs",
+                    '<PackageReference Include="OpenTelemetry" Version="1.16.0" />',
+                ),
+            }
             examples_dir = package_dir / "examples"
             assets_dir = root / "assets" / "brand"
             project_dir.mkdir(parents=True)
-            aspnetcore_dir.mkdir(parents=True)
-            efcore_dir.mkdir(parents=True)
             httpclient_dir.mkdir(parents=True)
-            redis_dir.mkdir(parents=True)
-            otel_dir.mkdir(parents=True)
             examples_dir.mkdir(parents=True)
             assets_dir.mkdir(parents=True)
             (package_dir / "README.md").write_text("# LogBrew .NET\n", encoding="utf-8")
-            (aspnetcore_dir / "README.md").write_text("# LogBrew ASP.NET Core\n", encoding="utf-8")
-            (efcore_dir / "README.md").write_text("# LogBrew Entity Framework Core\n", encoding="utf-8")
             (httpclient_dir / "README.md").write_text("# LogBrew HttpClient\n", encoding="utf-8")
             (httpclient_dir / "examples").mkdir()
             (httpclient_dir / "examples" / "HttpClientFactoryCorrelation.cs").write_text(
                 "// example\n",
                 encoding="utf-8",
             )
-            (redis_dir / "README.md").write_text("# LogBrew StackExchange.Redis\n", encoding="utf-8")
-            (otel_dir / "README.md").write_text("# LogBrew OpenTelemetry\n", encoding="utf-8")
             for example in (
                 "FirstUsefulTelemetry.cs",
                 "ActivityTraceCorrelation.cs",
@@ -1568,6 +1584,7 @@ jobs:
                 "AspNetCoreRequestTelemetry.cs",
                 "AspNetCoreMiddlewareTelemetry.cs",
                 "EntityFrameworkCoreCommandTelemetry.cs",
+                "HangfireJobTelemetry.cs",
                 "StackExchangeRedisCommandTelemetry.cs",
                 "OpenTelemetrySpanProcessorTelemetry.cs",
             ):
@@ -1605,42 +1622,20 @@ jobs:
                 + "\n",
                 encoding="utf-8",
             )
-            (aspnetcore_dir / "LogBrew.AspNetCore.csproj").write_text(
-                """
+            for package_id, (framework, example, dependency) in integrations.items():
+                integration_dir = package_dir / "src" / package_id
+                integration_dir.mkdir(parents=True)
+                (integration_dir / "README.md").write_text(f"# {package_id}\n", encoding="utf-8")
+                (integration_dir / f"{package_id}.csproj").write_text(
+                    f"""
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <PackageId>LogBrew.AspNetCore</PackageId>
+    <TargetFramework>{framework}</TargetFramework>
+    <PackageId>{package_id}</PackageId>
     <Version>0.1.0</Version>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
-    <Description>Public LogBrew ASP.NET Core integration.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
-  </PropertyGroup>
-  <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
-    <None Include="../../examples/AspNetCoreMiddlewareTelemetry.cs" Pack="true" PackagePath="examples/" />
-  </ItemGroup>
-</Project>
-""".strip()
-                + "\n",
-                encoding="utf-8",
-            )
-            (efcore_dir / "LogBrew.EntityFrameworkCore.csproj").write_text(
-                """
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <PackageId>LogBrew.EntityFrameworkCore</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>LogBrew</Authors>
-    <Company>LogBrew</Company>
-    <Description>Public LogBrew Entity Framework Core integration.</Description>
+    <Description>Public LogBrew integration.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
     <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
@@ -1649,14 +1644,14 @@ jobs:
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../LogBrew/LogBrew.csproj" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
-    <None Include="../../examples/EntityFrameworkCoreCommandTelemetry.cs" Pack="true" PackagePath="examples/" />
+    {dependency}
+    <None Include="../../examples/{example}" Pack="true" PackagePath="examples/" />
   </ItemGroup>
 </Project>
 """.strip()
-                + "\n",
-                encoding="utf-8",
-            )
+                    + "\n",
+                    encoding="utf-8",
+                )
             (httpclient_dir / "LogBrew.HttpClient.csproj").write_text(
                 """
 <Project Sdk="Microsoft.NET.Sdk">
@@ -1686,83 +1681,20 @@ jobs:
                 + "\n",
                 encoding="utf-8",
             )
-            (redis_dir / "LogBrew.StackExchangeRedis.csproj").write_text(
-                """
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <PackageId>LogBrew.StackExchangeRedis</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>LogBrew</Authors>
-    <Company>LogBrew</Company>
-    <Description>Public LogBrew StackExchange.Redis integration.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
-  </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
-    <PackageReference Include="StackExchange.Redis" Version="3.0.11" />
-    <None Include="../../examples/StackExchangeRedisCommandTelemetry.cs" Pack="true" PackagePath="examples/" />
-  </ItemGroup>
-</Project>
-""".strip()
-                + "\n",
-                encoding="utf-8",
-            )
-            (otel_dir / "LogBrew.OpenTelemetry.csproj").write_text(
-                """
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <PackageId>LogBrew.OpenTelemetry</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>LogBrew</Authors>
-    <Company>LogBrew</Company>
-    <Description>Public LogBrew OpenTelemetry integration.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
-  </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
-    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
-    <None Include="../../examples/OpenTelemetrySpanProcessorTelemetry.cs" Pack="true" PackagePath="examples/" />
-  </ItemGroup>
-</Project>
-""".strip()
-                + "\n",
-                encoding="utf-8",
-            )
+            def validate(core_version: str) -> list[str]:
+                failures: list[str] = []
+                check_release_metadata.validate_dotnet_packages(
+                    root,
+                    failures,
+                    core_version,
+                    *([check_release_metadata.PUBLIC_VERSION] * 5),
+                    check_release_metadata.PUBLIC_LICENSE,
+                    check_release_metadata.REPO_URL,
+                )
+                return failures
 
-            default_failures: list[str] = []
-            check_release_metadata.validate_dotnet_packages(
-                root,
-                default_failures,
-                "0.1.4",
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_LICENSE,
-                check_release_metadata.REPO_URL,
-            )
-            override_failures: list[str] = []
-            check_release_metadata.validate_dotnet_packages(
-                root,
-                override_failures,
-                "0.1.5",
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_VERSION,
-                check_release_metadata.PUBLIC_LICENSE,
-                check_release_metadata.REPO_URL,
-            )
+            default_failures = validate("0.1.4")
+            override_failures = validate("0.1.5")
 
         self.assertTrue(any("Version" in failure for failure in default_failures))
         self.assertEqual(override_failures, [])
