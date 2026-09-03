@@ -417,12 +417,8 @@ def validate_check(
                 payload = fetch_payload(check.url, timeout, check.decoder)
         except urllib.error.HTTPError as exc:
             last_failure = [f"{check.label}: registry returned HTTP {exc.code} for {check.url}"]
-            if is_missing_registry_page_error(exc):
-                break
         except (OSError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError, ET.ParseError) as exc:
             last_failure = [f"{check.label}: failed to read {check.url}: {exc}"]
-            if is_missing_registry_page_error(exc):
-                break
         else:
             found = check.extractor(payload)
             if found.intersection(expected):
