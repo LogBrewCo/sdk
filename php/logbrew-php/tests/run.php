@@ -1187,6 +1187,10 @@ foreach ([
     assertTrue(str_contains($laravelBody, $needle), "missing Laravel logger payload: {$needle}");
 }
 assertTrue(!str_contains($laravelBody, 'LOGBREW_SERVER_API_KEY'), 'expected Laravel API key to stay out of payload');
+$laravelPayload = testStringMap(json_decode($laravelBody, true, flags: JSON_THROW_ON_ERROR), 'Laravel payload');
+$laravelSdk = testStringMap($laravelPayload['sdk'] ?? null, 'Laravel SDK');
+assertTrue(($laravelSdk['name'] ?? null) === 'logbrew-php-laravel', 'expected Laravel integration identity');
+assertTrue(is_string($laravelSdk['version'] ?? null) && $laravelSdk['version'] !== '1.11.0', 'expected SDK version independent of app release');
 
 $transport = RecordingTransport::alwaysAccept();
 $errorOnlyLogger = (new LaravelLoggerFactory($transport))(LaravelLoggerFactory::configuration(
