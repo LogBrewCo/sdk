@@ -1,36 +1,9 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sdkRoot = path.resolve(packageRoot, "../logbrew-js");
-
-async function withInstalledPackage(callback) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-rn-source-map-"));
-  const nodeModules = path.join(root, "node_modules");
-  const packageDir = path.join(nodeModules, "@logbrew", "react-native");
-  try {
-    fs.mkdirSync(path.dirname(packageDir), { recursive: true });
-    fs.cpSync(packageRoot, packageDir, {
-      recursive: true,
-      filter: (source) => !source.includes(`${path.sep}node_modules${path.sep}`)
-    });
-    fs.symlinkSync(sdkRoot, path.join(nodeModules, "@logbrew", "sdk"), "dir");
-    const reactDir = path.join(nodeModules, "react");
-    fs.mkdirSync(reactDir, { recursive: true });
-    fs.writeFileSync(path.join(reactDir, "package.json"), JSON.stringify({ name: "react", version: "18.0.0", main: "index.cjs" }), "utf8");
-    fs.writeFileSync(path.join(reactDir, "index.cjs"), "module.exports={createContext(value){return {_currentValue:value,Provider(){},Consumer(){}}},createElement(type,props,...children){return {type,props:{...(props||{}),children}}}};\n", "utf8");
-    return await callback(await import(pathToFileURL(path.join(packageDir, "index.js"))));
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-}
+import { withInstalledIndex } from "./global-errors-test-support.js";
 
 test("React Native error events attach privacy-bounded release artifact metadata", async () => {
-  await withInstalledPackage(async ({ createReactNativeErrorEvent, createReactNativeTraceContext }) => {
+  await withInstalledIndex(async ({ createReactNativeErrorEvent, createReactNativeTraceContext }) => {
     const debugId = "11111111-2222-4333-8444-555555555555";
     const trace = createReactNativeTraceContext({
       traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
@@ -82,8 +55,26 @@ test("React Native error events attach privacy-bounded release artifact metadata
   });
 });
 
+test("root React Native bundle frames retain privacy-bounded grouping identity", async () => {
+  await withInstalledIndex(async ({ createReactNativeErrorEvent }) => {
+    const eventFor = (functionName, line) => {
+      const error = new Error("shared failure");
+      error.stack = `Error: shared failure\n    at ${functionName} (http://localhost:8081?logbrew_query_placeholder=hidden:${line}:20)`;
+      return createReactNativeErrorEvent(error).attributes;
+    };
+    const checkout = eventFor("checkoutFailure", 12);
+    const profile = eventFor("profileFailure", 24);
+    const generic = eventFor("anonymous", 33);
+
+    assert.equal(checkout.metadata.issueGroupingKey, "react-native.error:Error:function=checkoutFailure");
+    assert.equal(profile.metadata.issueGroupingKey, "react-native.error:Error:function=profileFailure");
+    assert.equal(generic.metadata.issueGroupingKey, "react-native.error:Error:position=33:20");
+    assert.equal(/localhost|logbrew_query_placeholder/u.test(JSON.stringify([checkout, profile, generic])), false);
+  });
+});
+
 test("React Native error events discover the Metro Debug ID without an explicit map", async () => {
-  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+  await withInstalledIndex(async ({ createReactNativeErrorEvent }) => {
     const debugId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
     const runtimeUrl = "https://mobile.example.test/react-native/index.android.bundle?logbrew_query_placeholder=hidden#checkout";
     const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
@@ -123,7 +114,7 @@ test("React Native error events discover the Metro Debug ID without an explicit 
 });
 
 test("React Native error events preserve an ordered bounded Metro stack", async () => {
-  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+  await withInstalledIndex(async ({ createReactNativeErrorEvent }) => {
     const debugId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
     const runtimeUrl = "https://mobile.example.test/react-native/index.android.bundle?hidden=value#checkout";
     const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
@@ -184,7 +175,7 @@ test("React Native error events preserve an ordered bounded Metro stack", async 
 });
 
 test("React Native error capture ignores malformed Metro registry state", async () => {
-  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+  await withInstalledIndex(async ({ createReactNativeErrorEvent }) => {
     const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
     const previousRegistry = globalThis[registrySymbol];
     const registry = {};
@@ -221,7 +212,7 @@ test("React Native error capture ignores malformed Metro registry state", async 
 });
 
 test("React Native error capture rejects ambiguous Metro Debug IDs for one runtime file", async () => {
-  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+  await withInstalledIndex(async ({ createReactNativeErrorEvent }) => {
     const runtimeUrl = "app:///index.android.bundle";
     const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
     const previousRegistry = globalThis[registrySymbol];
@@ -253,7 +244,7 @@ test("React Native error capture rejects ambiguous Metro Debug IDs for one runti
 });
 
 test("React Native error capture rejects malformed Metro stack coordinates", async () => {
-  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+  await withInstalledIndex(async ({ createReactNativeErrorEvent }) => {
     const runtimeUrl = "app:///index.android.bundle";
     const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
     const previousRegistry = globalThis[registrySymbol];

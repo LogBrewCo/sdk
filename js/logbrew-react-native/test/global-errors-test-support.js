@@ -9,7 +9,7 @@ export const packageRoot = path.resolve(
 );
 const sdkRoot = path.resolve(packageRoot, "../logbrew-js");
 
-export async function withInstalledPackage(callback) {
+export async function withInstalledPackage(callback, entry = "global-errors.js") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-rn-global-errors-"));
   const nodeModules = path.join(root, "node_modules");
   const packageDir = path.join(nodeModules, "@logbrew", "react-native");
@@ -54,7 +54,7 @@ export async function withInstalledPackage(callback) {
       "utf8"
     );
     return await callback(
-      await import(pathToFileURL(path.join(packageDir, "global-errors.js"))),
+      await import(pathToFileURL(path.join(packageDir, entry))),
       packageDir,
       await import(pathToFileURL(path.join(sdkRoot, "index.js")))
     );
@@ -62,6 +62,8 @@ export async function withInstalledPackage(callback) {
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
+
+export const withInstalledIndex = (callback) => withInstalledPackage(callback, "index.js");
 
 export function createErrorUtils(previousHandler = () => {}) {
   let currentHandler = previousHandler;

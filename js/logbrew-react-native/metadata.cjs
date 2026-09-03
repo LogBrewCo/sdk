@@ -15,6 +15,7 @@ const REACT_NATIVE_DEBUG_ID_REGISTRY = Symbol.for("@logbrew/react-native/debug-i
 const SAFE_RELEASE_ARTIFACT_DEBUG_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_REACT_NATIVE_DEBUG_ID_REGISTRY_ENTRIES = 64;
 const MAX_REACT_NATIVE_DEBUG_ID_REGISTRY_FRAMES = 128;
+const GENERIC_REACT_NATIVE_FRAME_FUNCTION = /^(?:<anonymous>|anonymous|apply|call|eval|global code|native|next)$/iu;
 
 function createSafeReactNativeMetadata(metadata, metadataFactory, context) {
   if (typeof metadataFactory !== "function") {
@@ -42,20 +43,27 @@ function safeReactNativeMetadataFactoryResult(candidate) {
   return metadata;
 }
 
-function sanitizeReactNativeIssueMetadata(metadata, compactMetadata) {
+function sanitizeReactNativeIssueMetadata(metadata, compactMetadata, stackFrames) {
   const next = { ...metadata };
   for (const key of ["errorFrameFile", "releaseArtifactCodeFile"]) {
-    const path = reactNativeCodePath(next[key]);
-    if (path) {
-      next[key] = path;
-    }
+    next[key] = reactNativeCodePath(next[key]) ?? next[key];
   }
   const match = typeof next.issueGroupingKey === "string" ? next.issueGroupingKey.match(/^([^:]+):([^:]+):(.+)$/u) : null;
-  const path = match ? reactNativeCodePath(match[3]) : undefined;
-  if (path) {
-    next.issueGroupingKey = `${match[1]}:${match[2]}:${path}`;
+  const identity = match ? reactNativeGroupingIdentity(reactNativeCodePath(match[3]), stackFrames) : undefined;
+  if (identity) {
+    next.issueGroupingKey = `${match[1]}:${match[2]}:${identity}`;
   }
   return compactMetadata(next);
+}
+
+function reactNativeGroupingIdentity(path, stackFrames = []) {
+  if (path !== "/" || stackFrames.length === 0) {
+    return path;
+  }
+  const named = stackFrames.find(({ function: name }) => name && !GENERIC_REACT_NATIVE_FRAME_FUNCTION.test(name));
+  const frame = named ?? stackFrames[0];
+  return named ? `function=${named.function}`
+    : `position=${frame.line}:${frame.column}`;
 }
 
 function sanitizeReactNativeIssueStackFrames(stackFrames) {
