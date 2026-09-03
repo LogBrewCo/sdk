@@ -698,18 +698,20 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("HTTP 404", failures[0])
 
-    def test_validate_check_does_not_retry_missing_registry_pages(self) -> None:
+    def test_validate_check_retries_missing_registry_pages(self) -> None:
         check = check_registry_publication.RegistryCheck(
             "example",
             "https://example.test/package",
-            lambda _payload: set(),
+            lambda payload: {payload["version"]},
         )
         attempts = 0
 
         def missing_fetcher(_url: str, _timeout: float) -> Any:
             nonlocal attempts
             attempts += 1
-            raise urllib.error.HTTPError("https://example.test/package", 404, "not found", {}, None)
+            if attempts < 4:
+                raise urllib.error.HTTPError("https://example.test/package", 404, "not found", {}, None)
+            return {"version": "0.1.0"}
 
         failures = check_registry_publication.validate_check(
             check,
@@ -720,11 +722,10 @@ class RegistryPublicationTests(unittest.TestCase):
             fetcher=missing_fetcher,
         )
 
-        self.assertEqual(attempts, 1)
-        self.assertEqual(len(failures), 1)
-        self.assertIn("HTTP 404", failures[0])
+        self.assertEqual(attempts, 4)
+        self.assertEqual(failures, [])
 
-    def test_validate_check_does_not_retry_curl_missing_registry_pages(self) -> None:
+    def test_validate_check_retries_curl_missing_registry_pages(self) -> None:
         check = check_registry_publication.RegistryCheck(
             "example",
             "https://example.test/package",
@@ -746,7 +747,7 @@ class RegistryPublicationTests(unittest.TestCase):
             fetcher=missing_fetcher,
         )
 
-        self.assertEqual(attempts, 1)
+        self.assertEqual(attempts, 4)
         self.assertEqual(len(failures), 1)
         self.assertIn("404", failures[0])
 
