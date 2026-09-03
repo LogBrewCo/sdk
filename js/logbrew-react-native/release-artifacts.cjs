@@ -7,6 +7,9 @@ const path = require("node:path");
 
 const PACKAGE_DIR = path.dirname(require.resolve("./package.json"));
 const DEFAULT_MANIFEST_NAME = "logbrew-release-artifacts.json";
+const HERMES_MAGIC = Buffer.from("c61fbc03c103191f", "hex");
+const HERMES_RUNTIME_DEBUG_ID_RE =
+  /\/\*logbrew-runtime-debug-id\*\/\/\/# debugId=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![0-9a-f-])/iu;
 const HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts";
 const SUPPORTED_PLATFORMS = new Set(["android", "ios"]);
 const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
@@ -176,8 +179,18 @@ function sourceWithSourceMappingUrl(source, reference) {
 }
 
 function applyExplicitSourceMapReference(bundlePath, sourcemapPath) {
+  const bundle = fs.readFileSync(bundlePath);
+  if (bundle.subarray(0, HERMES_MAGIC.length).equals(HERMES_MAGIC)) {
+    if (!HERMES_RUNTIME_DEBUG_ID_RE.test(bundle.toString("latin1"))) {
+      throw new Error("LogBrew React Native Hermes bytecode requires the LogBrew Metro wrapper");
+    }
+    if (sourcemapPath !== `${bundlePath}.map`) {
+      throw new Error("LogBrew React Native Hermes source map must use the bundle's sibling .map path");
+    }
+    return;
+  }
   const reference = sourceMapReferenceForBundle(bundlePath, sourcemapPath);
-  const source = fs.readFileSync(bundlePath, "utf8");
+  const source = bundle.toString("utf8");
   const updated = sourceWithSourceMappingUrl(source, reference);
   if (updated !== source) {
     fs.writeFileSync(bundlePath, updated, "utf8");
