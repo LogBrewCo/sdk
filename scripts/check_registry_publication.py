@@ -25,6 +25,7 @@ from check_release_metadata import (
     RUBYGEMS_VERSION,
     RUST_VERSION,
 )
+from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES
 
 
 NPM_PACKAGES = (
@@ -69,13 +70,7 @@ DEFAULT_PACKAGE_VERSIONS = {
         for package_name in MAVEN_PACKAGE_LABELS
     },
 }
-NUGET_PACKAGES = (
-    "LogBrew",
-    "LogBrew.AspNetCore",
-    "LogBrew.EntityFrameworkCore",
-    "LogBrew.HttpClient",
-    "LogBrew.StackExchangeRedis",
-)
+NUGET_PACKAGES = tuple(package.package_id for package in DOTNET_RELEASE_PACKAGES)
 OPENUPM_PACKAGES = ("co.logbrew.unity",)
 
 def decode_json(raw: bytes) -> Any:
