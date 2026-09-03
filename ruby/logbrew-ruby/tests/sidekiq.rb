@@ -18,6 +18,12 @@ def sidekiq_events(client)
   JSON.parse(client.preview_json).fetch("events")
 end
 
+def capture_exception
+  yield
+rescue Exception => error # rubocop:disable Lint/RescueException
+  error
+end
+
 def sidekiq_parent
   LogBrew::Trace.create(
     trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -276,27 +282,21 @@ LogBrew::Trace.with_context(sidekiq_parent) { client_middleware.call(nil, retry_
 retry_error = RuntimeError.new("opaque retry detail")
 [nil, 0].each do |retry_count|
   retry_job["retry_count"] = retry_count
-  raised = nil
-  begin
-    server_middleware.call(nil, retry_job, nil) { raise retry_error }
-  rescue RuntimeError => error
-    raised = error
-  end
+  raised = capture_exception { server_middleware.call(nil, retry_job, nil) { raise retry_error } }
   assert(raised.equal?(retry_error), "retry exception identity changed")
 end
 assert(sidekiq_events(client).none? { |event| event.fetch("type") == "issue" }, "retryable failure emitted an issue")
 retry_job["retry_count"] = 1
-raised = nil
-begin
-  server_middleware.call(nil, retry_job, nil) { raise retry_error }
-rescue RuntimeError => error
-  raised = error
-end
+raised = capture_exception { server_middleware.call(nil, retry_job, nil) { raise retry_error } }
 assert(raised.equal?(retry_error), "terminal exception identity changed")
 issues = sidekiq_events(client).select { |event| event.fetch("type") == "issue" }
 assert(issues.length == 1, "terminal failure issue count changed")
 issue_attributes = issues[0].fetch("attributes")
-assert(issue_attributes.fetch("title") == "Sidekiq job failed", "terminal issue title changed")
+assert(issue_attributes.fetch("title") == "RuntimeError", "terminal issue type title changed")
+expected_exception = { "type" => "RuntimeError", "mechanism" => { "type" => "sidekiq.job", "handled" => false } }
+assert(issue_attributes.fetch("exception") == expected_exception, "terminal issue exception evidence changed")
+frames = issue_attributes.fetch("stackFrames")
+assert(!frames.empty? && frames.first.fetch("filename") == "sidekiq.rb", "terminal issue fix frame changed")
 assert(issue_attributes.fetch("metadata").fetch("retryCount") == 2, "terminal retry context changed")
 assert(!JSON.generate(issues).include?(retry_error.message), "terminal issue leaked exception text")
 begin
@@ -361,12 +361,7 @@ client_middleware = LogBrew::Sidekiq::ClientMiddleware.new(instrumentation)
 job = sidekiq_job("retry" => false)
 LogBrew::Trace.with_context(sidekiq_parent) { client_middleware.call(nil, job, nil, nil) { true } }
 cancellation = SidekiqCancellation.new("opaque cancellation detail")
-raised = nil
-begin
-  LogBrew::Sidekiq::ServerMiddleware.new(instrumentation).call(nil, job, nil) { raise cancellation }
-rescue SidekiqCancellation => error
-  raised = error
-end
+raised = capture_exception { LogBrew::Sidekiq::ServerMiddleware.new(instrumentation).call(nil, job, nil) { raise cancellation } }
 assert(raised.equal?(cancellation), "cancellation identity changed")
 events = sidekiq_events(client)
 assert(events.none? { |event| event.fetch("type") == "issue" }, "cancellation emitted a failure issue")

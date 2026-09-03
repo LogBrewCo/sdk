@@ -47,7 +47,7 @@ module LogBrew
         end
 
         @instrumentation.send(:capture_span, self, error)
-        @instrumentation.send(:capture_terminal_issue, self) if error && terminal_failure && !cancellation?(error)
+        @instrumentation.send(:capture_terminal_issue, self, error) if error && terminal_failure && !cancellation?(error)
       rescue StandardError => capture_error
         @instrumentation.send(:report_capture_error, capture_error)
       end
@@ -79,20 +79,22 @@ module LogBrew
         }
       end
 
-      def issue_attributes
-        {
-          "title" => "Sidekiq job failed",
-          "level" => "error",
-          "metadata" => {
-            "source" => @source,
-            "sampled" => @context.sampled,
-            "retryCount" => @retry_count + 1
-          }
+      def issue_attributes(error)
+        exception_type = IssueDiagnostics.safe_exception_type(error)
+        frame = IssueDiagnostics.stack_frames_from_exception(error).first
+        metadata = {
+          "source" => @source,
+          "sampled" => @context.sampled,
+          "retryCount" => @retry_count + 1,
+          "errorName" => exception_type
         }
-      end
-
-      def retry_count
-        @retry_count
+        unless frame.nil?
+          metadata["errorFrameFile"] = frame.fetch("filename")
+          metadata["errorFrameLine"] = frame.fetch("line")
+        end
+        IssueDiagnostics.from_exception(
+          error, title: exception_type, mechanism_type: "sidekiq.job", handled: false, metadata: metadata
+        )
       end
 
       def failure_key
@@ -381,7 +383,7 @@ module LogBrew
         )
       end
 
-      def capture_terminal_issue(operation)
+      def capture_terminal_issue(operation, error)
         key = operation.failure_key
         reserved = @failure_mutex.synchronize do
           next false if @reported_failures.key?(key)
@@ -396,7 +398,7 @@ module LogBrew
           @client.issue(
             "ruby_sidekiq_issue_#{operation.context.span_id}",
             Time.now.utc.iso8601,
-            operation.issue_attributes
+            operation.issue_attributes(error)
           )
         rescue StandardError
           @failure_mutex.synchronize { @reported_failures.delete(key) }
