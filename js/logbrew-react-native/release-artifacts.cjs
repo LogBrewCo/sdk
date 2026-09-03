@@ -9,7 +9,7 @@ const PACKAGE_DIR = path.dirname(require.resolve("./package.json"));
 const DEFAULT_MANIFEST_NAME = "logbrew-release-artifacts.json";
 const HERMES_MAGIC = Buffer.from("c61fbc03c103191f", "hex");
 const HERMES_RUNTIME_DEBUG_ID_RE =
-  /\/\*logbrew-runtime-debug-id\*\/\/\/# debugId=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![0-9a-f-])/iu;
+  /\/\*logbrew-runtime-debug-id\*\/\/\/# debugId=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/iu;
 const HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts";
 const SUPPORTED_PLATFORMS = new Set(["android", "ios"]);
 const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
@@ -168,10 +168,6 @@ function artifactForBundle(report, relativeBundlePath) {
   return report?.artifacts?.find((artifact) => artifact?.path === relativeBundlePath) || null;
 }
 
-function sourceMapReferenceForBundle(bundlePath, sourcemapPath) {
-  return path.relative(path.dirname(bundlePath), sourcemapPath).split(path.sep).join("/");
-}
-
 function sourceWithSourceMappingUrl(source, reference) {
   const comment = `//# sourceMappingURL=${reference}`;
   const sourceWithoutMapComments = source.replace(SOURCE_MAPPING_COMMENT_RE, "").replace(/[ \t\r\n]*$/u, "");
@@ -189,7 +185,7 @@ function applyExplicitSourceMapReference(bundlePath, sourcemapPath) {
     }
     return;
   }
-  const reference = sourceMapReferenceForBundle(bundlePath, sourcemapPath);
+  const reference = path.relative(path.dirname(bundlePath), sourcemapPath).split(path.sep).join("/");
   const source = bundle.toString("utf8");
   const updated = sourceWithSourceMappingUrl(source, reference);
   if (updated !== source) {
