@@ -17,6 +17,30 @@ SPEC.loader.exec_module(check_confidentiality_scan)
 
 
 class ConfidentialityScanTests(unittest.TestCase):
+    def test_rq_control_word_allowlist_is_path_scoped(self) -> None:
+        put_back_term = "rest" + "ore"
+        teardown_term = "clean" + "up"
+        source_path = Path("python/logbrew_py/src/logbrew_sdk/_rq_client.py")
+        test_path = Path("python/logbrew_py/tests/test_rq_client.py")
+        self.assertTrue(
+            check_confidentiality_scan.is_allowed_match(
+                source_path,
+                f"_{put_back_term}(worker, method, previous)",
+            )
+        )
+        self.assertTrue(
+            check_confidentiality_scan.is_allowed_match(
+                test_path,
+                f"self.add{teardown_term.title()}(connection.flushdb)",
+            )
+        )
+        self.assertFalse(
+            check_confidentiality_scan.is_allowed_match(
+                Path("python/logbrew_py/src/logbrew_sdk/unrelated.py"),
+                f"_{put_back_term}(worker, method, previous)",
+            )
+        )
+
     def test_rust_telemetry_context_allowlist_is_path_and_symbol_scoped(self) -> None:
         context_path = "rust/logbrew/src/telemetry_context.rs"
         sensitive_name = "to" + "ken"

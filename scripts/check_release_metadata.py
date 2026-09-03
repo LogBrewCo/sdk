@@ -104,10 +104,11 @@ PYTHON_PACKAGES = {
         "optional_dependencies": {
             "celery": {"celery>=5,<6"},
             "persistence": {"cryptography>=49,<50"},
+            "rq": {"rq>=2,<3"},
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.13",
+        "version": "0.1.14",
     },
 }
 

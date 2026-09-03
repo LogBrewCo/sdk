@@ -51,7 +51,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.13"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.14"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.10"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.5"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.6"),
@@ -283,7 +283,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.13",
+                "logbrew-sdk": "0.1.14",
                 "logbrew-fastapi": "0.1.10",
                 "logbrew-flask": "0.1.5",
                 "logbrew-django": "0.1.6",
@@ -324,7 +324,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.2",
             ),
             "scripts/real_user_python_public_pypi_smoke.sh": (
-                "LOGBREW_PYPI_SDK_VERSION:-0.1.13",
+                "LOGBREW_PYPI_SDK_VERSION:-0.1.14",
                 "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.10",
                 "LOGBREW_PYPI_FLASK_VERSION:-0.1.5",
                 "LOGBREW_PYPI_DJANGO_VERSION:-0.1.6",

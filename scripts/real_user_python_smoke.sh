@@ -736,6 +736,8 @@ python -m pip install \
     "Flask-Caching>=2,<3" \
     "pymemcache>=4,<5" \
     "redis>=5,<7" \
+    "fakeredis==2.31.3" \
+    "rq==2.12.0" \
     >/dev/null
 python -m build --no-isolation --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" > "$tmp_dir/build.log" 2>&1
 wheel_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.whl' | head -n 1)"
@@ -758,6 +760,7 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/_db_client.py",
         "logbrew_sdk/_django_cache_client.py",
         "logbrew_sdk/_flask_cache_client.py",
+        "logbrew_sdk/_framework_cache_client.py",
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
         "logbrew_sdk/_pymemcache_client.py",
@@ -819,6 +822,8 @@ for needle in (
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_requests_session_with_logbrew_spans",
+    "instrument_rq_queue_with_logbrew_spans",
+    "instrument_rq_worker_processes_with_logbrew",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
@@ -862,6 +867,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/_db_client.py",
         f"{sdist_root}/src/logbrew_sdk/_django_cache_client.py",
         f"{sdist_root}/src/logbrew_sdk/_flask_cache_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_framework_cache_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
         f"{sdist_root}/src/logbrew_sdk/_pymemcache_client.py",
@@ -927,6 +933,8 @@ for needle in (
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_requests_session_with_logbrew_spans",
+    "instrument_rq_queue_with_logbrew_spans",
+    "instrument_rq_worker_processes_with_logbrew",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
@@ -1217,6 +1225,8 @@ from logbrew_sdk import (
     LogBrewFlaskCacheInstrumentation,
     LogBrewHttpxClientInstrumentation,
     LogBrewLoggingHandler,
+    LogBrewRqQueueInstrumentation,
+    LogBrewRqWorkerInstrumentation,
     LogBrewPymemcacheInstrumentation,
     LogBrewRedisInstrumentation,
     LogBrewRequestsSessionInstrumentation,
@@ -1250,6 +1260,8 @@ from logbrew_sdk import (
     instrument_pymemcache_client_with_logbrew_spans,
     instrument_redis_client_with_logbrew_spans,
     instrument_requests_session_with_logbrew_spans,
+    instrument_rq_queue_with_logbrew_spans,
+    instrument_rq_worker_processes_with_logbrew,
     logbrew_trace_context_from_celery_headers,
     parse_traceparent,
     queue_operation_with_logbrew_span,
@@ -2917,6 +2929,7 @@ required = {
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_django_cache_client.py",
     "logbrew_sdk/_flask_cache_client.py",
+    "logbrew_sdk/_framework_cache_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_pymemcache_client.py",
@@ -2951,6 +2964,8 @@ if not required_transport_dependencies.issubset(requires_dist):
         "missing installed transport dependencies: "
         f"{sorted(required_transport_dependencies - requires_dist)}"
     )
+if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requirement in requires_dist):
+    raise SystemExit("missing installed RQ extra metadata")
 for needle in (
     "python3 -m pip install logbrew-sdk",
     "LOGBREW_API_KEY",
@@ -2978,6 +2993,8 @@ for needle in (
     "instrument_pymemcache_client_with_logbrew_spans",
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
+    "instrument_rq_queue_with_logbrew_spans",
+    "instrument_rq_worker_processes_with_logbrew",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
@@ -3512,6 +3529,7 @@ run_flask_cache_span_smoke "wheel-flask-cache-span"
 run_pymemcache_span_smoke "wheel-pymemcache-span"
 run_redis_span_smoke "wheel-redis-span"
 run_queue_span_smoke "wheel-queue-span"
+PYTHONPATH="" python -m unittest discover -s "$repo_root/python/logbrew_py/tests" -p 'test_rq_client.py'
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json

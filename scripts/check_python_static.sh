@@ -29,6 +29,8 @@ python3 -m venv "$tmp_dir/venv"
   fastapi==0.136.3 \
   Flask==3.1.2 \
   httpx2==2.3.0 \
+  fakeredis==2.31.3 \
+  rq==2.12.0 \
   >/dev/null
 
 cd "$repo_root"
@@ -53,7 +55,7 @@ RUFF_CACHE_DIR="$tmp_dir/ruff-cache" "$tmp_dir/venv/bin/ruff" check \
   python/logbrew_django/tests \
   scripts/check_python_sources.py
 
-MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src" "$tmp_dir/venv/bin/mypy" \
+MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src" "$tmp_dir/venv/bin/mypy" \
   --strict \
   --python-version 3.10 \
   --explicit-package-bases \

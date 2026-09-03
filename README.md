@@ -66,6 +66,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Next.js | [`@logbrew/next`](js/logbrew-next) | App Router request-error instrumentation, Route Handler capture, and release artifacts |
 | Python | [`logbrew-sdk`](python/logbrew_py) | Core client, delivery, logging, shared telemetry context, and typed exception/stack/breadcrumb diagnostics |
 | Python / Celery | [`logbrew-sdk[celery]`](python/logbrew_py#automatic-celery-spans) | App-scoped producer/worker spans and typed privacy-bounded unexpected-failure issues |
+| Python / RQ | [`logbrew-sdk[rq]`](python/logbrew_py#automatic-rq-spans) | Instance-scoped producer/worker correlation, linked application logs, and final-failure issues |
 | FastAPI | [`logbrew-fastapi`](python/logbrew_fastapi) | Request spans plus typed unhandled-exception diagnostics |
 | Flask | [`logbrew-flask`](python/logbrew_flask) | Request spans plus typed unhandled-exception diagnostics |
 | Django | [`logbrew-django`](python/logbrew_django) | Request spans plus typed unhandled-exception diagnostics |
