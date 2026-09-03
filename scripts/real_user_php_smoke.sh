@@ -1178,6 +1178,8 @@ $body = $transport->lastBody();
 $payload = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
 $event = $payload['events'][0] ?? null;
 if (!is_array($event)
+    || ($payload['sdk']['name'] ?? null) !== 'logbrew-php-laravel'
+    || ($payload['sdk']['version'] ?? null) !== '0.1.0'
     || ($event['id'] ?? null) !== 'installed_laravel_1'
     || ($event['attributes']['logger'] ?? null) !== 'installed-laravel-app'
     || ($event['attributes']['level'] ?? null) !== 'warning'

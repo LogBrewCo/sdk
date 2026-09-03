@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace LogBrew;
 
+use Composer\InstalledVersions;
 use InvalidArgumentException;
 use Monolog\Level;
 use Monolog\Logger as MonologLogger;
@@ -29,6 +30,8 @@ use RuntimeException;
  */
 final class LaravelLoggerFactory
 {
+    private const SDK_NAME = 'logbrew-php-laravel';
+
     public function __construct(private readonly ?Transport $transport = null)
     {
     }
@@ -143,8 +146,10 @@ final class LaravelLoggerFactory
         return [
             LogBrewClient::create(
                 apiKey: $apiKey,
-                sdkName: $service,
-                sdkVersion: $release,
+                sdkName: self::SDK_NAME,
+                sdkVersion: class_exists(InstalledVersions::class) && InstalledVersions::isInstalled('logbrew/sdk')
+                    ? InstalledVersions::getPrettyVersion('logbrew/sdk') ?? 'unversioned'
+                    : 'unversioned',
                 maxRetries: self::intValue($config, 'max_retries', 0),
                 context: $context
             ),
@@ -162,22 +167,14 @@ final class LaravelLoggerFactory
     private static function stringValue(array $config, string $key, string $default): string
     {
         $value = $config[$key] ?? $default;
-        if (!is_string($value)) {
-            throw new InvalidArgumentException("Laravel LogBrew {$key} must be a string.");
-        }
-
-        return $value;
+        return is_string($value) ? $value : throw new InvalidArgumentException("Laravel LogBrew {$key} must be a string.");
     }
 
     /** @param array<string, mixed> $config */
     private static function intValue(array $config, string $key, int $default): int
     {
         $value = $config[$key] ?? $default;
-        if (!is_int($value)) {
-            throw new InvalidArgumentException("Laravel LogBrew {$key} must be an integer.");
-        }
-
-        return $value;
+        return is_int($value) ? $value : throw new InvalidArgumentException("Laravel LogBrew {$key} must be an integer.");
     }
 
     /** @param array<string, mixed> $config */
@@ -195,11 +192,7 @@ final class LaravelLoggerFactory
     private static function boolValue(array $config, string $key, bool $default): bool
     {
         $value = $config[$key] ?? $default;
-        if (!is_bool($value)) {
-            throw new InvalidArgumentException("Laravel LogBrew {$key} must be a boolean.");
-        }
-
-        return $value;
+        return is_bool($value) ? $value : throw new InvalidArgumentException("Laravel LogBrew {$key} must be a boolean.");
     }
 
     /** @param array<string, mixed> $config */
