@@ -60,6 +60,8 @@ class RegistryPublicationTests(unittest.TestCase):
                 "LogBrew=0.1.5",
                 "--nuget-version",
                 "LogBrew.HttpClient=0.1.0",
+                "--nuget-version",
+                "LogBrew.OpenTelemetry=0.1.1",
             ]
         )
         observed: list[str] = []
@@ -76,7 +78,7 @@ class RegistryPublicationTests(unittest.TestCase):
             check_registry_publication.validate_absent_check = original_validate_absent_check
 
         self.assertEqual(failures, [])
-        self.assertEqual(observed, ["LogBrew", "LogBrew.HttpClient"])
+        self.assertEqual(observed, ["LogBrew", "LogBrew.HttpClient", "LogBrew.OpenTelemetry"])
 
     def test_nuget_without_version_overrides_checks_the_full_catalog(self) -> None:
         args = check_registry_publication.parse_args(["--target", "nuget"])
@@ -89,7 +91,6 @@ class RegistryPublicationTests(unittest.TestCase):
         invalid_versions = (
             ["Unknown.Package=0.1.0"],
             ["LogBrew=0.1.5", "LogBrew=0.1.5"],
-            ["LogBrew.OpenTelemetry=0.1.1"],
         )
         for versions in invalid_versions:
             arguments = ["--target", "nuget"]
@@ -174,23 +175,22 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("logbrew-sdk", labels)
         self.assertIn("LogBrew", labels)
         self.assertIn("LogBrew.StackExchangeRedis", labels)
+        self.assertIn("LogBrew.OpenTelemetry", labels)
         self.assertNotIn("@logbrew/prisma", labels)
-        self.assertNotIn("LogBrew.OpenTelemetry", labels)
         self.assertNotIn("logbrew-fastapi", labels)
         self.assertNotIn("logbrew", labels)
         self.assertNotIn("logbrew/sdk", labels)
         self.assertNotIn("co.logbrew:logbrew-sdk", labels)
         self.assertNotIn("co.logbrew.unity", labels)
 
-    def test_released_package_sets_exclude_unpublished_packages(self) -> None:
+    def test_released_package_sets_match_metadata(self) -> None:
         self.assertEqual(
             set(check_release_metadata.JS_PACKAGES.values())
             - {"@logbrew/prisma"},
             set(check_registry_publication.NPM_PACKAGES),
         )
         self.assertEqual(
-            check_release_metadata.NUGET_PACKAGES
-            - {"LogBrew.OpenTelemetry"},
+            check_release_metadata.NUGET_PACKAGES,
             set(check_registry_publication.NUGET_PACKAGES),
         )
 
