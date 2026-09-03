@@ -19,10 +19,11 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES
 SCHEMA_VERSION = 1
 VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2}(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?")
 CATALOG = {package.package_id: package for package in DOTNET_RELEASE_PACKAGES}
-ALLOWED_SELECTED_RELEASE_PACKAGES = (
-    frozenset({"LogBrew", "LogBrew.HttpClient"}),
-    frozenset({"LogBrew.AspNetCore"}),
-)
+
+
+def is_releasable_selection(selected: set[str]) -> bool:
+    core_pair = {"LogBrew", "LogBrew.HttpClient"}
+    return selected == core_pair or len(selected) == 1 and selected.isdisjoint(core_pair)
 
 
 def fail(message: str) -> NoReturn:
@@ -50,7 +51,7 @@ def parse_selection(raw: str) -> tuple[str, ...]:
     if len(entries) != len(set(entries)) or any(entry not in CATALOG for entry in entries):
         fail("invalid NuGet package selection")
     selected = set(entries)
-    if frozenset(selected) not in ALLOWED_SELECTED_RELEASE_PACKAGES:
+    if not is_releasable_selection(selected):
         fail("invalid NuGet package selection")
     return tuple(package_id for package_id in CATALOG if package_id in selected)
 
@@ -111,7 +112,7 @@ def validate_plan(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         fail("invalid NuGet release plan")
     if (
         selection_mode == "selected"
-        and frozenset(selected_ids) not in ALLOWED_SELECTED_RELEASE_PACKAGES
+        and not is_releasable_selection(set(selected_ids))
     ):
         fail("invalid NuGet release plan")
     expected = expected_plan(root, tuple(selected_ids), selection_mode)

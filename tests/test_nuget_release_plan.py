@@ -83,28 +83,17 @@ class NugetReleasePlanTests(unittest.TestCase):
             },
         )
 
-    def test_aspnetcore_package_can_be_selected_independently(self) -> None:
-        result = self.create_plan("LogBrew.AspNetCore")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.plan,  # type: ignore[attr-defined]
-            {
-                "schemaVersion": 1,
-                "selectionMode": "selected",
-                "selected": [
-                    {
-                        "packageId": "LogBrew.AspNetCore",
-                        "projectPath": (
-                            "dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/"
-                            "LogBrew.AspNetCore.csproj"
-                        ),
-                        "version": "0.1.2",
-                        "versionOutput": "aspnetcore_version",
-                    },
-                ],
-            },
-        )
+    def test_adapter_packages_can_be_selected_independently(self) -> None:
+        for package_id in (
+            "LogBrew.AspNetCore",
+            "LogBrew.EntityFrameworkCore",
+            "LogBrew.StackExchangeRedis",
+            "LogBrew.OpenTelemetry",
+        ):
+            with self.subTest(package_id=package_id):
+                result = self.create_plan(package_id)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.plan["selected"][0]["packageId"], package_id)  # type: ignore[attr-defined]
 
     def test_invalid_dispatch_selections_fail_closed_without_reflecting_input(self) -> None:
         for raw_selection in (
@@ -182,13 +171,10 @@ class NugetReleasePlanTests(unittest.TestCase):
                 "selectionMode": "selected",
                 "selected": [
                     {
-                        "packageId": "LogBrew.EntityFrameworkCore",
-                        "projectPath": (
-                            "dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/"
-                            "LogBrew.EntityFrameworkCore.csproj"
-                        ),
-                        "version": "0.1.0",
-                        "versionOutput": "efcore_version",
+                        "packageId": "LogBrew",
+                        "projectPath": "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj",
+                        "version": "0.1.7",
+                        "versionOutput": "core_version",
                     },
                 ],
             }
