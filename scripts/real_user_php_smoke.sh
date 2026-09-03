@@ -10,6 +10,52 @@ export COMPOSER_CACHE_DIR="$tmp_dir/composer-cache"
 
 cd "$tmp_dir"
 
+assert_installed_package() {
+  local package_file
+  for package_file in \
+    README.md \
+    composer.json \
+    src/HttpTransport.php \
+    src/IssueDiagnostics.php \
+    src/ProductTimeline.php \
+    src/Traceparent.php \
+    src/TraceparentContext.php \
+    src/TraceparentSpanInput.php \
+    src/LogBrewTraceContext.php \
+    src/LogBrewTraceScope.php \
+    src/LogBrewTrace.php \
+    src/LogBrewOperationTracing.php \
+    src/LogBrewHttpRequestTelemetry.php \
+    src/LogBrewMonologHandler.php \
+    src/LaravelLoggerFactory.php \
+    src/LogBrewLaravelQueueTelemetry.php \
+    src/LogBrewPsrLogger.php \
+    src/SupportTicketDraft.php \
+    examples/readme_example.php \
+    examples/real_user_smoke.php \
+    examples/first_useful_telemetry.php \
+    examples/issue_diagnostics.php \
+    examples/http_trace_correlation.php \
+    examples/worker_lifecycle.php \
+    examples/persistent_worker_delivery.php \
+    examples/Makefile; do
+    test -f "vendor/logbrew/sdk/$package_file"
+  done
+  php -l vendor/logbrew/sdk/examples/worker_lifecycle.php >/dev/null
+  php -l vendor/logbrew/sdk/examples/persistent_worker_delivery.php >/dev/null
+  php -l vendor/logbrew/sdk/examples/issue_diagnostics.php >/dev/null
+  test -f vendor/composer/installed.json
+  test -f vendor/composer/autoload_psr4.php
+}
+
+assert_event_types() {
+  local output_file="$1" event_type
+  shift
+  for event_type in "$@"; do
+    grep -q "\"type\": \"$event_type\"" "$output_file"
+  done
+}
+
 mkdir -p artifacts "$COMPOSER_HOME" "$COMPOSER_CACHE_DIR"
 archive_src="$tmp_dir/logbrew-php"
 cp -R "$repo_root/php/logbrew-php" "$archive_src"
@@ -29,213 +75,54 @@ if ($zip->open($argv[1]) !== true) {
     fwrite(STDERR, "failed to open composer archive\n");
     exit(1);
 }
-$composerJson = null;
-$readme = null;
-$readmeExample = null;
-$example = null;
-$firstUsefulExample = null;
-$issueDiagnosticsExample = null;
-$httpTraceExample = null;
-$workerLifecycleExample = null;
-$persistentWorkerDeliveryExample = null;
-$exampleMakefile = null;
-$httpTransport = null;
-$issueDiagnostics = null;
-$productTimeline = null;
-$traceparent = null;
-$traceparentContext = null;
-$traceparentSpanInput = null;
-$traceContext = null;
-$traceScope = null;
-$trace = null;
-$operationTracing = null;
-$httpRequestTelemetry = null;
-$psrLogger = null;
-$monologHandler = null;
-$laravelLoggerFactory = null;
-$supportTicketDraft = null;
+$paths = [
+    "composerJson" => "composer.json",
+    "readme" => "README.md",
+    "readmeExample" => "examples/readme_example.php",
+    "example" => "examples/real_user_smoke.php",
+    "firstUsefulExample" => "examples/first_useful_telemetry.php",
+    "issueDiagnosticsExample" => "examples/issue_diagnostics.php",
+    "httpTraceExample" => "examples/http_trace_correlation.php",
+    "workerLifecycleExample" => "examples/worker_lifecycle.php",
+    "persistentWorkerDeliveryExample" => "examples/persistent_worker_delivery.php",
+    "exampleMakefile" => "examples/Makefile",
+    "httpTransport" => "src/HttpTransport.php",
+    "issueDiagnostics" => "src/IssueDiagnostics.php",
+    "productTimeline" => "src/ProductTimeline.php",
+    "traceparent" => "src/Traceparent.php",
+    "traceparentContext" => "src/TraceparentContext.php",
+    "traceparentSpanInput" => "src/TraceparentSpanInput.php",
+    "traceContext" => "src/LogBrewTraceContext.php",
+    "traceScope" => "src/LogBrewTraceScope.php",
+    "trace" => "src/LogBrewTrace.php",
+    "operationTracing" => "src/LogBrewOperationTracing.php",
+    "httpRequestTelemetry" => "src/LogBrewHttpRequestTelemetry.php",
+    "psrLogger" => "src/LogBrewPsrLogger.php",
+    "monologHandler" => "src/LogBrewMonologHandler.php",
+    "laravelLoggerFactory" => "src/LaravelLoggerFactory.php",
+    "laravelQueueTelemetry" => "src/LogBrewLaravelQueueTelemetry.php",
+    "supportTicketDraft" => "src/SupportTicketDraft.php",
+];
+$contents = array_fill_keys(array_keys($paths), null);
 for ($i = 0; $i < $zip->numFiles; $i++) {
     $name = $zip->getNameIndex($i);
     if ($name === false) {
         continue;
     }
-    if ($name === "composer.json" || str_ends_with($name, "/composer.json")) {
-        $composerJson = $zip->getFromIndex($i);
-    }
-    if ($name === "README.md" || str_ends_with($name, "/README.md")) {
-        $readme = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/readme_example.php" || str_ends_with($name, "/examples/readme_example.php")) {
-        $readmeExample = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/real_user_smoke.php" || str_ends_with($name, "/examples/real_user_smoke.php")) {
-        $example = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/first_useful_telemetry.php" || str_ends_with($name, "/examples/first_useful_telemetry.php")) {
-        $firstUsefulExample = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/issue_diagnostics.php" || str_ends_with($name, "/examples/issue_diagnostics.php")) {
-        $issueDiagnosticsExample = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/http_trace_correlation.php" || str_ends_with($name, "/examples/http_trace_correlation.php")) {
-        $httpTraceExample = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/worker_lifecycle.php" || str_ends_with($name, "/examples/worker_lifecycle.php")) {
-        $workerLifecycleExample = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/persistent_worker_delivery.php" || str_ends_with($name, "/examples/persistent_worker_delivery.php")) {
-        $persistentWorkerDeliveryExample = $zip->getFromIndex($i);
-    }
-    if ($name === "examples/Makefile" || str_ends_with($name, "/examples/Makefile")) {
-        $exampleMakefile = $zip->getFromIndex($i);
-    }
-    if ($name === "src/HttpTransport.php" || str_ends_with($name, "/src/HttpTransport.php")) {
-        $httpTransport = $zip->getFromIndex($i);
-    }
-    if ($name === "src/IssueDiagnostics.php" || str_ends_with($name, "/src/IssueDiagnostics.php")) {
-        $issueDiagnostics = $zip->getFromIndex($i);
-    }
-    if ($name === "src/ProductTimeline.php" || str_ends_with($name, "/src/ProductTimeline.php")) {
-        $productTimeline = $zip->getFromIndex($i);
-    }
-    if ($name === "src/Traceparent.php" || str_ends_with($name, "/src/Traceparent.php")) {
-        $traceparent = $zip->getFromIndex($i);
-    }
-    if ($name === "src/TraceparentContext.php" || str_ends_with($name, "/src/TraceparentContext.php")) {
-        $traceparentContext = $zip->getFromIndex($i);
-    }
-    if ($name === "src/TraceparentSpanInput.php" || str_ends_with($name, "/src/TraceparentSpanInput.php")) {
-        $traceparentSpanInput = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LogBrewTraceContext.php" || str_ends_with($name, "/src/LogBrewTraceContext.php")) {
-        $traceContext = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LogBrewTraceScope.php" || str_ends_with($name, "/src/LogBrewTraceScope.php")) {
-        $traceScope = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LogBrewTrace.php" || str_ends_with($name, "/src/LogBrewTrace.php")) {
-        $trace = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LogBrewOperationTracing.php" || str_ends_with($name, "/src/LogBrewOperationTracing.php")) {
-        $operationTracing = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LogBrewHttpRequestTelemetry.php" || str_ends_with($name, "/src/LogBrewHttpRequestTelemetry.php")) {
-        $httpRequestTelemetry = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LogBrewPsrLogger.php" || str_ends_with($name, "/src/LogBrewPsrLogger.php")) {
-        $psrLogger = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LogBrewMonologHandler.php" || str_ends_with($name, "/src/LogBrewMonologHandler.php")) {
-        $monologHandler = $zip->getFromIndex($i);
-    }
-    if ($name === "src/LaravelLoggerFactory.php" || str_ends_with($name, "/src/LaravelLoggerFactory.php")) {
-        $laravelLoggerFactory = $zip->getFromIndex($i);
-    }
-    if ($name === "src/SupportTicketDraft.php" || str_ends_with($name, "/src/SupportTicketDraft.php")) {
-        $supportTicketDraft = $zip->getFromIndex($i);
+    foreach ($paths as $key => $path) {
+        if ($name === $path || str_ends_with($name, "/{$path}")) {
+            $contents[$key] = $zip->getFromIndex($i);
+        }
     }
 }
 $zip->close();
-if (!is_string($composerJson)) {
-    fwrite(STDERR, "missing composer.json in composer archive\n");
-    exit(1);
+foreach ($contents as $key => $content) {
+    if (!is_string($content)) {
+        fwrite(STDERR, "missing {$paths[$key]} in composer archive\n");
+        exit(1);
+    }
 }
-if (!is_string($readme)) {
-    fwrite(STDERR, "missing README.md in composer archive\n");
-    exit(1);
-}
-if (!is_string($readmeExample)) {
-    fwrite(STDERR, "missing examples/readme_example.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($example)) {
-    fwrite(STDERR, "missing examples/real_user_smoke.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($firstUsefulExample)) {
-    fwrite(STDERR, "missing examples/first_useful_telemetry.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($issueDiagnosticsExample)) {
-    fwrite(STDERR, "missing examples/issue_diagnostics.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($httpTraceExample)) {
-    fwrite(STDERR, "missing examples/http_trace_correlation.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($workerLifecycleExample)) {
-    fwrite(STDERR, "missing examples/worker_lifecycle.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($persistentWorkerDeliveryExample)) {
-    fwrite(STDERR, "missing examples/persistent_worker_delivery.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($exampleMakefile)) {
-    fwrite(STDERR, "missing examples/Makefile in composer archive\n");
-    exit(1);
-}
-if (!is_string($httpTransport)) {
-    fwrite(STDERR, "missing src/HttpTransport.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($issueDiagnostics)) {
-    fwrite(STDERR, "missing src/IssueDiagnostics.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($productTimeline)) {
-    fwrite(STDERR, "missing src/ProductTimeline.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($traceparent)) {
-    fwrite(STDERR, "missing src/Traceparent.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($traceparentContext)) {
-    fwrite(STDERR, "missing src/TraceparentContext.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($traceparentSpanInput)) {
-    fwrite(STDERR, "missing src/TraceparentSpanInput.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($traceContext)) {
-    fwrite(STDERR, "missing src/LogBrewTraceContext.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($traceScope)) {
-    fwrite(STDERR, "missing src/LogBrewTraceScope.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($trace)) {
-    fwrite(STDERR, "missing src/LogBrewTrace.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($operationTracing)) {
-    fwrite(STDERR, "missing src/LogBrewOperationTracing.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($httpRequestTelemetry)) {
-    fwrite(STDERR, "missing src/LogBrewHttpRequestTelemetry.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($psrLogger)) {
-    fwrite(STDERR, "missing src/LogBrewPsrLogger.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($monologHandler)) {
-    fwrite(STDERR, "missing src/LogBrewMonologHandler.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($laravelLoggerFactory)) {
-    fwrite(STDERR, "missing src/LaravelLoggerFactory.php in composer archive\n");
-    exit(1);
-}
-if (!is_string($supportTicketDraft)) {
-    fwrite(STDERR, "missing src/SupportTicketDraft.php in composer archive\n");
-    exit(1);
-}
+extract($contents, EXTR_SKIP);
 $manifest = json_decode($composerJson, true, 512, JSON_THROW_ON_ERROR);
 if (($manifest["name"] ?? null) !== "logbrew/sdk") {
     fwrite(STDERR, "unexpected composer archive package name\n");
@@ -253,7 +140,8 @@ if (($manifest["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected composer archive monolog dev constraint\n");
     exit(1);
 }
-if (($manifest["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+if (($manifest["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels."
+    || ($manifest["suggest"]["laravel/framework"] ?? null) !== "Required for Laravel queue job tracing.") {
     fwrite(STDERR, "unexpected composer archive monolog suggestion\n");
     exit(1);
 }
@@ -293,6 +181,8 @@ foreach ([
     "PSR-3 Logger" => "missing composer archive PSR logger heading\n",
     "LogBrewMonologHandler" => "missing composer archive Monolog handler guidance\n",
     "LaravelLoggerFactory" => "missing composer archive Laravel factory guidance\n",
+    "registerQueueTelemetry" => "missing composer archive Laravel queue guidance\n",
+    "laravel.queue" => "missing composer archive Laravel queue privacy guidance\n",
     "Laravel Quick Start" => "missing composer archive Laravel heading\n",
     "config:cache" => "missing composer archive Laravel config-cache guidance\n",
     "LOGBREW_SERVER_API_KEY" => "missing composer archive canonical Laravel server-key guidance\n",
@@ -518,36 +408,7 @@ if (!is_array($psrLog)) {
     exit(1);
 }
 ' composer.lock
-test -f vendor/logbrew/sdk/README.md
-test -f vendor/logbrew/sdk/composer.json
-test -f vendor/logbrew/sdk/src/HttpTransport.php
-test -f vendor/logbrew/sdk/src/IssueDiagnostics.php
-test -f vendor/logbrew/sdk/src/ProductTimeline.php
-test -f vendor/logbrew/sdk/src/Traceparent.php
-test -f vendor/logbrew/sdk/src/TraceparentContext.php
-test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
-test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
-test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
-test -f vendor/logbrew/sdk/src/LogBrewTrace.php
-test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
-test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
-test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
-test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
-test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
-test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
-test -f vendor/logbrew/sdk/examples/readme_example.php
-test -f vendor/logbrew/sdk/examples/real_user_smoke.php
-test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
-test -f vendor/logbrew/sdk/examples/issue_diagnostics.php
-test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
-test -f vendor/logbrew/sdk/examples/worker_lifecycle.php
-test -f vendor/logbrew/sdk/examples/persistent_worker_delivery.php
-test -f vendor/logbrew/sdk/examples/Makefile
-php -l vendor/logbrew/sdk/examples/worker_lifecycle.php >/dev/null
-php -l vendor/logbrew/sdk/examples/persistent_worker_delivery.php >/dev/null
-php -l vendor/logbrew/sdk/examples/issue_diagnostics.php >/dev/null
-test -f vendor/composer/installed.json
-test -f vendor/composer/autoload_psr4.php
+assert_installed_package
 (cd vendor/logbrew/sdk/examples && make) > vendor-example-make-help.txt
 grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-example-make-help.txt)
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-help.txt)
@@ -596,6 +457,8 @@ foreach ([
     "PSR-3 Logger" => "missing installed README PSR logger heading\n",
     "LogBrewMonologHandler" => "missing installed README Monolog handler guidance\n",
     "LaravelLoggerFactory" => "missing installed README Laravel factory guidance\n",
+    "registerQueueTelemetry" => "missing installed README Laravel queue guidance\n",
+    "laravel.queue" => "missing installed README Laravel queue privacy guidance\n",
     "Laravel Quick Start" => "missing installed README Laravel heading\n",
     "config:cache" => "missing installed README Laravel config-cache guidance\n",
     "LOGBREW_SERVER_API_KEY" => "missing installed README canonical Laravel server-key guidance\n",
@@ -634,7 +497,8 @@ if (($data["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected installed monolog dev constraint\n");
     exit(1);
 }
-if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels."
+    || ($data["suggest"]["laravel/framework"] ?? null) !== "Required for Laravel queue job tracing.") {
     fwrite(STDERR, "unexpected installed monolog suggestion\n");
     exit(1);
 }
@@ -644,34 +508,19 @@ if (($data["autoload"]["psr-4"]["LogBrew\\"] ?? null) !== "src/") {
 }
 ' vendor/logbrew/sdk/composer.json
 php vendor/logbrew/sdk/examples/readme_example.php > vendor-readme-example.stdout.json 2> vendor-readme-example.stderr.json
-grep -q '"type": "release"' vendor-readme-example.stdout.json
-grep -q '"type": "environment"' vendor-readme-example.stdout.json
-grep -q '"type": "issue"' vendor-readme-example.stdout.json
-grep -q '"type": "log"' vendor-readme-example.stdout.json
-grep -q '"type": "span"' vendor-readme-example.stdout.json
-grep -q '"type": "action"' vendor-readme-example.stdout.json
+assert_event_types vendor-readme-example.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example.stderr.json
 grep -q '"ok":true' vendor-readme-example.stderr.json
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make.stdout.json 2> vendor-readme-example-make.stderr.json
-grep -q '"type": "release"' vendor-readme-example-make.stdout.json
-grep -q '"type": "environment"' vendor-readme-example-make.stdout.json
-grep -q '"type": "issue"' vendor-readme-example-make.stdout.json
-grep -q '"type": "log"' vendor-readme-example-make.stdout.json
-grep -q '"type": "span"' vendor-readme-example-make.stdout.json
-grep -q '"type": "action"' vendor-readme-example-make.stdout.json
+assert_event_types vendor-readme-example-make.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example-make.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example-make.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example-make.stderr.json
 grep -q '"ok":true' vendor-readme-example-make.stderr.json
 php vendor/logbrew/sdk/examples/real_user_smoke.php > vendor-example.stdout.json 2> vendor-example.stderr.json
-grep -q '"type": "release"' vendor-example.stdout.json
-grep -q '"type": "environment"' vendor-example.stdout.json
-grep -q '"type": "issue"' vendor-example.stdout.json
-grep -q '"type": "log"' vendor-example.stdout.json
-grep -q '"type": "span"' vendor-example.stdout.json
-grep -q '"type": "action"' vendor-example.stdout.json
+assert_event_types vendor-example.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example.stdout.json >/dev/null
 grep -q '"events":6' vendor-example.stderr.json
@@ -688,12 +537,7 @@ grep -q '"type": "release"' vendor-example-make-run.stdout.json
 grep -q '"events":6' vendor-example-make-run.stderr.json
 grep -q '"supportDraftRedacted":true' vendor-example-make-run.stderr.json
 grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make-run.stderr.json
-grep -q '"type": "release"' vendor-example-make.stdout.json
-grep -q '"type": "environment"' vendor-example-make.stdout.json
-grep -q '"type": "issue"' vendor-example-make.stdout.json
-grep -q '"type": "log"' vendor-example-make.stdout.json
-grep -q '"type": "span"' vendor-example-make.stdout.json
-grep -q '"type": "action"' vendor-example-make.stdout.json
+assert_event_types vendor-example-make.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-make.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-make.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-make.stderr.json
@@ -857,40 +701,15 @@ fi
 
 composer require logbrew/sdk:0.1.0 --no-interaction --quiet
 composer validate --no-check-publish --no-check-version --strict >/dev/null
-test -f vendor/logbrew/sdk/README.md
-test -f vendor/logbrew/sdk/composer.json
-test -f vendor/logbrew/sdk/src/HttpTransport.php
-test -f vendor/logbrew/sdk/src/IssueDiagnostics.php
-test -f vendor/logbrew/sdk/src/ProductTimeline.php
-test -f vendor/logbrew/sdk/src/Traceparent.php
-test -f vendor/logbrew/sdk/src/TraceparentContext.php
-test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
-test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
-test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
-test -f vendor/logbrew/sdk/src/LogBrewTrace.php
-test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
-test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
-test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
-test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
-test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
-test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
-test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
-test -f vendor/logbrew/sdk/examples/issue_diagnostics.php
-test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
-test -f vendor/logbrew/sdk/examples/worker_lifecycle.php
-test -f vendor/logbrew/sdk/examples/persistent_worker_delivery.php
-php -l vendor/logbrew/sdk/examples/worker_lifecycle.php >/dev/null
-php -l vendor/logbrew/sdk/examples/persistent_worker_delivery.php >/dev/null
-php -l vendor/logbrew/sdk/examples/issue_diagnostics.php >/dev/null
-test -f vendor/composer/installed.json
-test -f vendor/composer/autoload_psr4.php
+assert_installed_package
 php -r '
 $data = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
 if (($data["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected rerequired monolog dev constraint\n");
     exit(1);
 }
-if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels."
+    || ($data["suggest"]["laravel/framework"] ?? null) !== "Required for Laravel queue job tracing.") {
     fwrite(STDERR, "unexpected rerequired monolog suggestion\n");
     exit(1);
 }
@@ -930,6 +749,7 @@ if (!str_contains($preview, '"type": "release"')) {
 PHP
 
 composer require monolog/monolog:^3.0 --no-interaction --quiet
+composer require laravel/framework:^13.0 --no-interaction --quiet
 
 cat > installed-user-test.php <<'EOF'
 <?php
@@ -1129,64 +949,7 @@ fwrite(STDERR, json_encode([
 ], JSON_THROW_ON_ERROR) . PHP_EOL);
 EOF
 
-cat > smoke.php <<'EOF'
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\RecordingTransport;
-
-$client = LogBrewClient::create(
-    'LOGBREW_API_KEY',
-    'smoke-app',
-    '0.1.0',
-    captureRuntimeContext: false,
-);
-$client->release('evt_release_001', '2026-06-02T10:00:00Z', [
-    'version' => '1.2.3',
-    'commit' => 'abc123def456',
-    'notes' => 'Public release marker',
-]);
-$client->environment('evt_environment_001', '2026-06-02T10:00:01Z', [
-    'name' => 'production',
-    'region' => 'global',
-]);
-$client->issue('evt_issue_001', '2026-06-02T10:00:02Z', [
-    'title' => 'Checkout timeout',
-    'level' => 'error',
-    'message' => 'Request timed out after retry budget',
-]);
-$client->log('evt_log_001', '2026-06-02T10:00:03Z', [
-    'message' => 'worker started',
-    'level' => 'info',
-    'logger' => 'job-runner',
-]);
-$client->span('evt_span_001', '2026-06-02T10:00:04Z', [
-    'name' => 'GET /health',
-    'traceId' => 'trace_001',
-    'spanId' => 'span_001',
-    'status' => 'ok',
-    'durationMs' => 12.5,
-]);
-$client->action('evt_action_001', '2026-06-02T10:00:05Z', [
-    'name' => 'deploy',
-    'status' => 'success',
-]);
-
-echo $client->previewJson() . PHP_EOL;
-
-$transport = RecordingTransport::alwaysAccept();
-$response = $client->shutdown($transport);
-fwrite(STDERR, json_encode([
-    'ok' => true,
-    'status' => $response->statusCode,
-    'attempts' => $response->attempts,
-    'events' => 6,
-], JSON_THROW_ON_ERROR) . PHP_EOL);
-EOF
+cp readme-example.php smoke.php
 
 cat > psr-logger.php <<'EOF'
 <?php
@@ -1348,6 +1111,44 @@ require __DIR__ . '/vendor/autoload.php';
 use LogBrew\LaravelLoggerFactory;
 use LogBrew\RecordingTransport;
 use LogBrew\TransportError;
+use Illuminate\Bus\Dispatcher as BusDispatcher;
+use Illuminate\Container\Container;
+use Illuminate\Contracts\Bus\Dispatcher as BusDispatcherContract;
+use Illuminate\Contracts\Container\Container as ContainerContract;
+use Illuminate\Contracts\Events\Dispatcher as EventDispatcherContract;
+use Illuminate\Events\Dispatcher as EventDispatcher;
+use Illuminate\Queue\QueueManager;
+use Illuminate\Queue\SyncQueue;
+use Psr\Log\LoggerInterface;
+
+final class InstalledSuccessfulLaravelJob
+{
+    public static LoggerInterface $logger;
+
+    public function __construct(private readonly string $privatePayload)
+    {
+    }
+
+    public function handle(): void
+    {
+        self::$logger->warning('successful queue job running');
+    }
+}
+
+final class InstalledFailingLaravelJob
+{
+    public static LoggerInterface $logger;
+
+    public function __construct(private readonly string $privatePayload)
+    {
+    }
+
+    public function handle(): never
+    {
+        self::$logger->error('failing queue job running');
+        throw new RuntimeException('PRIVATE_LARAVEL_EXCEPTION_MESSAGE');
+    }
+}
 
 $config = LaravelLoggerFactory::configuration(
     apiKey: 'LOGBREW_SERVER_API_KEY',
@@ -1365,7 +1166,8 @@ if (str_contains($exported, '::__set_state') || $roundTripped !== $config) {
 }
 
 $transport = RecordingTransport::alwaysAccept();
-$logger = (new LaravelLoggerFactory($transport))($config);
+$factory = new LaravelLoggerFactory($transport);
+$logger = $factory($config);
 $logger->warning('Queue {queue} is delayed.', ['queue' => 'default', 'attempt' => 2]);
 if (count($transport->sentBodies) !== 1) {
     fwrite(STDERR, "Laravel logger did not immediately deliver the accepted record\n");
@@ -1401,8 +1203,77 @@ if (count($failedTransport->sentBodies) !== 1) {
     exit(1);
 }
 
+InstalledSuccessfulLaravelJob::$logger = $logger;
+InstalledFailingLaravelJob::$logger = $logger;
+$container = new Container();
+$events = new EventDispatcher($container);
+$container->instance('events', $events);
+$container->instance(ContainerContract::class, $container);
+$container->instance(EventDispatcherContract::class, $events);
+$container->instance(BusDispatcherContract::class, new BusDispatcher($container));
+$factory->registerQueueTelemetry(new QueueManager($container), $config);
+$queue = new SyncQueue();
+$queue->setContainer($container);
+$queue->setConnectionName('sync');
+$queue->push(new InstalledSuccessfulLaravelJob('PRIVATE_SUCCESS_PAYLOAD'), queue: 'emails');
+try {
+    $queue->push(new InstalledFailingLaravelJob('PRIVATE_FAILURE_PAYLOAD'), queue: 'billing');
+    throw new RuntimeException('expected Laravel queue failure');
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'PRIVATE_LARAVEL_EXCEPTION_MESSAGE') {
+        throw $error;
+    }
+}
+
+$traces = [];
+$spanFacts = [];
+foreach ($transport->sentBodies as $sentBody) {
+    $batch = json_decode($sentBody, true, 512, JSON_THROW_ON_ERROR);
+    foreach ($batch['events'] ?? [] as $event) {
+        $attributes = $event['attributes'] ?? [];
+        $trace = $attributes['context']['trace'] ?? $attributes;
+        if (isset($trace['traceId'], $trace['spanId'])) {
+            $traces[$trace['traceId']][] = [$event['type'], $trace['spanId']];
+        }
+        if (($event['type'] ?? null) === 'span') {
+            $spanFacts[] = implode(':', [$attributes['name'] ?? '', $attributes['status'] ?? '', $attributes['metadata']['operation'] ?? '']);
+        }
+    }
+}
+if (count($traces) !== 2) {
+    fwrite(STDERR, "expected one correlated trace for each Laravel queue job\n");
+    exit(1);
+}
+$traceTypes = [];
+foreach ($traces as $traceEvents) {
+    if (count(array_unique(array_column($traceEvents, 1))) !== 1) {
+        fwrite(STDERR, "Laravel job evidence did not share one span identity\n");
+        exit(1);
+    }
+    $types = array_column($traceEvents, 0);
+    sort($types);
+    $traceTypes[] = implode(',', $types);
+}
+sort($traceTypes);
+if ($traceTypes !== ['issue,log,span', 'log,span']) {
+    fwrite(STDERR, "unexpected Laravel queue evidence types\n");
+    exit(1);
+}
+sort($spanFacts);
+if ($spanFacts !== ['InstalledFailingLaravelJob:error:job.execute', 'InstalledSuccessfulLaravelJob:ok:job.execute']) {
+    fwrite(STDERR, "unexpected Laravel queue span identity\n");
+    exit(1);
+}
+$allBodies = implode('', $transport->sentBodies);
+foreach (['PRIVATE_SUCCESS_PAYLOAD', 'PRIVATE_FAILURE_PAYLOAD', 'PRIVATE_LARAVEL_EXCEPTION_MESSAGE'] as $privateValue) {
+    if (str_contains($allBodies, $privateValue)) {
+        fwrite(STDERR, "Laravel queue telemetry leaked a private value\n");
+        exit(1);
+    }
+}
+
 echo $body . PHP_EOL;
-fwrite(STDERR, json_encode(['laravelLoggerFactory' => true, 'events' => 1], JSON_THROW_ON_ERROR) . PHP_EOL);
+fwrite(STDERR, json_encode(['laravelLoggerFactory' => true, 'events' => 6, 'queueTraces' => 2], JSON_THROW_ON_ERROR) . PHP_EOL);
 EOF
 
 cat > http-transport.php <<'EOF'
@@ -1811,6 +1682,7 @@ grep -q '"monologHandler":true' monolog-handler.stderr.json
 composer run --no-interaction smoke-laravel-logger > laravel-logger.stdout.json 2> laravel-logger.stderr.json
 grep -q '"type":"log"' laravel-logger.stdout.json
 grep -q '"laravelLoggerFactory":true' laravel-logger.stderr.json
+grep -q '"queueTraces":2' laravel-logger.stderr.json
 composer run --no-interaction smoke-http-transport > http-transport.stdout.json 2> http-transport.stderr.json
 grep -q '"httpTransport":true' http-transport.stderr.json
 grep -q '"httpAttempts":2' http-transport.stderr.json
@@ -1825,12 +1697,7 @@ grep -q '"type": "metric"' http-trace-composer.stdout.json
 grep -q '"events":7' http-trace-composer.stderr.json
 python3 "$repo_root/scripts/check_php_http_trace_payload.py" http-trace-composer.stdout.json http-trace-composer.stderr.json >/dev/null
 php readme-example.php > readme-example.stdout.json 2> readme-example.stderr.json
-grep -q '"type": "release"' readme-example.stdout.json
-grep -q '"type": "environment"' readme-example.stdout.json
-grep -q '"type": "issue"' readme-example.stdout.json
-grep -q '"type": "log"' readme-example.stdout.json
-grep -q '"type": "span"' readme-example.stdout.json
-grep -q '"type": "action"' readme-example.stdout.json
+assert_event_types readme-example.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
 grep -q '"events":6' readme-example.stderr.json
@@ -1839,35 +1706,15 @@ grep -q '"ok":true' readme-example.stderr.json
 rm -rf vendor
 composer install --no-interaction --quiet
 composer validate --no-check-publish --no-check-version --strict >/dev/null
-test -f vendor/logbrew/sdk/README.md
-test -f vendor/logbrew/sdk/composer.json
-test -f vendor/logbrew/sdk/src/HttpTransport.php
-test -f vendor/logbrew/sdk/src/IssueDiagnostics.php
-test -f vendor/logbrew/sdk/src/ProductTimeline.php
-test -f vendor/logbrew/sdk/src/Traceparent.php
-test -f vendor/logbrew/sdk/src/TraceparentContext.php
-test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
-test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
-test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
-test -f vendor/logbrew/sdk/src/LogBrewTrace.php
-test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
-test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
-test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
-test -f vendor/logbrew/sdk/src/LaravelLoggerFactory.php
-test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
-test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
-test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
-test -f vendor/logbrew/sdk/examples/issue_diagnostics.php
-test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
-test -f vendor/composer/installed.json
-test -f vendor/composer/autoload_psr4.php
+assert_installed_package
 php -r '
 $data = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
 if (($data["require-dev"]["monolog/monolog"] ?? null) !== "^3.0") {
     fwrite(STDERR, "unexpected reinstall monolog dev constraint\n");
     exit(1);
 }
-if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels.") {
+if (($data["suggest"]["monolog/monolog"] ?? null) !== "Required for Monolog and Laravel logging channels."
+    || ($data["suggest"]["laravel/framework"] ?? null) !== "Required for Laravel queue job tracing.") {
     fwrite(STDERR, "unexpected reinstall monolog suggestion\n");
     exit(1);
 }
@@ -2067,40 +1914,26 @@ grep -q '"monologHandler":true' monolog-handler-reinstall.stderr.json
 composer run --no-interaction smoke-laravel-logger > laravel-logger-reinstall.stdout.json 2> laravel-logger-reinstall.stderr.json
 grep -q '"type":"log"' laravel-logger-reinstall.stdout.json
 grep -q '"laravelLoggerFactory":true' laravel-logger-reinstall.stderr.json
+grep -q '"queueTraces":2' laravel-logger-reinstall.stderr.json
 composer run --no-interaction smoke-http-transport > http-transport-reinstall.stdout.json 2> http-transport-reinstall.stderr.json
 grep -q '"httpTransport":true' http-transport-reinstall.stderr.json
 grep -q '"httpAttempts":2' http-transport-reinstall.stderr.json
 grep -q '"httpRequests":2' http-transport-reinstall.stderr.json
 composer run --no-interaction --quiet smoke-vendor-example >/dev/null
 php readme-example.php > readme-example-reinstall.stdout.json 2> readme-example-reinstall.stderr.json
-grep -q '"type": "release"' readme-example-reinstall.stdout.json
-grep -q '"type": "environment"' readme-example-reinstall.stdout.json
-grep -q '"type": "issue"' readme-example-reinstall.stdout.json
-grep -q '"type": "log"' readme-example-reinstall.stdout.json
-grep -q '"type": "span"' readme-example-reinstall.stdout.json
-grep -q '"type": "action"' readme-example-reinstall.stdout.json
+assert_event_types readme-example-reinstall.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" readme-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' readme-example-reinstall.stderr.json
 grep -q '"ok":true' readme-example-reinstall.stderr.json
 php vendor/logbrew/sdk/examples/readme_example.php > vendor-readme-example-reinstall.stdout.json 2> vendor-readme-example-reinstall.stderr.json
-grep -q '"type": "release"' vendor-readme-example-reinstall.stdout.json
-grep -q '"type": "environment"' vendor-readme-example-reinstall.stdout.json
-grep -q '"type": "issue"' vendor-readme-example-reinstall.stdout.json
-grep -q '"type": "log"' vendor-readme-example-reinstall.stdout.json
-grep -q '"type": "span"' vendor-readme-example-reinstall.stdout.json
-grep -q '"type": "action"' vendor-readme-example-reinstall.stdout.json
+assert_event_types vendor-readme-example-reinstall.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example-reinstall.stderr.json
 grep -q '"ok":true' vendor-readme-example-reinstall.stderr.json
 php vendor/logbrew/sdk/examples/real_user_smoke.php > vendor-example-reinstall.stdout.json 2> vendor-example-reinstall.stderr.json
-grep -q '"type": "release"' vendor-example-reinstall.stdout.json
-grep -q '"type": "environment"' vendor-example-reinstall.stdout.json
-grep -q '"type": "issue"' vendor-example-reinstall.stdout.json
-grep -q '"type": "log"' vendor-example-reinstall.stdout.json
-grep -q '"type": "span"' vendor-example-reinstall.stdout.json
-grep -q '"type": "action"' vendor-example-reinstall.stdout.json
+assert_event_types vendor-example-reinstall.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-reinstall.stderr.json
@@ -2118,12 +1951,7 @@ grep -qx 'run-worker-lifecycle -> make run-worker-lifecycle' <(sed -n '7p' vendo
 grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' <(sed -n '8p' vendor-example-make-reinstall-help.txt)
 test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "8"
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make-reinstall.stdout.json 2> vendor-readme-example-make-reinstall.stderr.json
-grep -q '"type": "release"' vendor-readme-example-make-reinstall.stdout.json
-grep -q '"type": "environment"' vendor-readme-example-make-reinstall.stdout.json
-grep -q '"type": "issue"' vendor-readme-example-make-reinstall.stdout.json
-grep -q '"type": "log"' vendor-readme-example-make-reinstall.stdout.json
-grep -q '"type": "span"' vendor-readme-example-make-reinstall.stdout.json
-grep -q '"type": "action"' vendor-readme-example-make-reinstall.stdout.json
+assert_event_types vendor-readme-example-make-reinstall.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example-make-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example-make-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example-make-reinstall.stderr.json
@@ -2138,12 +1966,7 @@ grep -q '"type": "release"' vendor-example-make-reinstall-run.stdout.json
 grep -q '"events":6' vendor-example-make-reinstall-run.stderr.json
 grep -q '"supportDraftRedacted":true' vendor-example-make-reinstall-run.stderr.json
 grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make-reinstall-run.stderr.json
-grep -q '"type": "release"' vendor-example-make-reinstall.stdout.json
-grep -q '"type": "environment"' vendor-example-make-reinstall.stdout.json
-grep -q '"type": "issue"' vendor-example-make-reinstall.stdout.json
-grep -q '"type": "log"' vendor-example-make-reinstall.stdout.json
-grep -q '"type": "span"' vendor-example-make-reinstall.stdout.json
-grep -q '"type": "action"' vendor-example-make-reinstall.stdout.json
+assert_event_types vendor-example-make-reinstall.stdout.json release environment issue log span action
 python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-make-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-make-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-make-reinstall.stderr.json
@@ -2429,6 +2252,7 @@ if (!str_contains($laravelLoggerFactoryDoc, '@phpstan-type LaravelChannelConfig 
 if (!$laravelLoggerFactory->isFinal()
     || !$laravelLoggerFactory->hasMethod('configuration')
     || !$laravelLoggerFactory->hasMethod('__invoke')
+    || !$laravelLoggerFactory->hasMethod('registerQueueTelemetry')
 ) {
     fwrite(STDERR, "missing LaravelLoggerFactory public surface\n");
     exit(1);
@@ -2711,65 +2535,6 @@ rm -rf vendor
 composer install --no-interaction --quiet
 composer run --no-interaction smoke-types
 
-cat > smoke.php <<'EOF'
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\RecordingTransport;
-
-$client = LogBrewClient::create(
-    'LOGBREW_API_KEY',
-    'smoke-app',
-    '0.1.0',
-    captureRuntimeContext: false,
-);
-$client->release('evt_release_001', '2026-06-02T10:00:00Z', [
-    'version' => '1.2.3',
-    'commit' => 'abc123def456',
-    'notes' => 'Public release marker',
-]);
-$client->environment('evt_environment_001', '2026-06-02T10:00:01Z', [
-    'name' => 'production',
-    'region' => 'global',
-]);
-$client->issue('evt_issue_001', '2026-06-02T10:00:02Z', [
-    'title' => 'Checkout timeout',
-    'level' => 'error',
-    'message' => 'Request timed out after retry budget',
-]);
-$client->log('evt_log_001', '2026-06-02T10:00:03Z', [
-    'message' => 'worker started',
-    'level' => 'info',
-    'logger' => 'job-runner',
-]);
-$client->span('evt_span_001', '2026-06-02T10:00:04Z', [
-    'name' => 'GET /health',
-    'traceId' => 'trace_001',
-    'spanId' => 'span_001',
-    'status' => 'ok',
-    'durationMs' => 12.5,
-]);
-$client->action('evt_action_001', '2026-06-02T10:00:05Z', [
-    'name' => 'deploy',
-    'status' => 'success',
-]);
-
-echo $client->previewJson() . PHP_EOL;
-
-$transport = RecordingTransport::alwaysAccept();
-$response = $client->shutdown($transport);
-fwrite(STDERR, json_encode([
-    'ok' => true,
-    'status' => $response->statusCode,
-    'attempts' => $response->attempts,
-    'events' => 6,
-], JSON_THROW_ON_ERROR) . PHP_EOL);
-EOF
-
 php smoke.php > smoke.stdout.json 2> smoke.stderr.json
 grep -q '"type": "release"' smoke.stdout.json
 grep -q '"type": "environment"' smoke.stdout.json
@@ -2870,7 +2635,7 @@ grep -q '"source": "network_timeline"' timeline.stdout.json
 grep -q '"name": "network.post \\/v1\\/payments\\/:id"' timeline.stdout.json
 grep -q '"timelineEvents":3' timeline.stderr.json
 
-cat > unauth.php <<'EOF'
+cat > transport-contracts.php <<'EOF'
 <?php
 
 declare(strict_types=1);
@@ -2880,242 +2645,74 @@ require __DIR__ . '/vendor/autoload.php';
 use LogBrew\LogBrewClient;
 use LogBrew\RecordingTransport;
 use LogBrew\SdkError;
-
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
-$client->release('evt_release_unauth', '2026-06-02T10:00:00Z', [
-    'version' => '1.2.3',
-]);
-
-try {
-    $client->flush(new RecordingTransport([401]));
-    fwrite(STDERR, "expected unauthenticated error\n");
-    exit(1);
-} catch (SdkError $error) {
-    echo json_encode([
-        'ok' => true,
-        'code' => $error->codeName,
-        'message' => $error->getMessage(),
-        'pending' => $client->pendingEvents(),
-    ], JSON_THROW_ON_ERROR) . PHP_EOL;
-}
-EOF
-
-php unauth.php > unauth.stdout.json
-grep -q '"ok":true' unauth.stdout.json
-grep -q '"code":"unauthenticated"' unauth.stdout.json
-grep -q '"message":"transport rejected the API key"' unauth.stdout.json
-grep -q '"pending":1' unauth.stdout.json
-
-cat > retry.php <<'EOF'
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\RecordingTransport;
 use LogBrew\TransportError;
 
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
-$client->release('evt_release_retry', '2026-06-02T10:00:00Z', [
-    'version' => '1.2.3',
-]);
-
-$response = $client->flush(new RecordingTransport([
-    TransportError::network('temporary outage'),
-    202,
-]));
-
-echo json_encode([
-    'ok' => true,
-    'status' => $response->statusCode,
-    'attempts' => $response->attempts,
-    'pending' => $client->pendingEvents(),
-], JSON_THROW_ON_ERROR) . PHP_EOL;
-EOF
-
-php retry.php > retry.stdout.json
-grep -q '"ok":true' retry.stdout.json
-grep -q '"status":202' retry.stdout.json
-grep -q '"attempts":2' retry.stdout.json
-grep -q '"pending":0' retry.stdout.json
-
-cat > shutdown.php <<'EOF'
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\RecordingTransport;
-use LogBrew\SdkError;
-
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
-$client->release('evt_release_shutdown', '2026-06-02T10:00:00Z', [
-    'version' => '1.2.3',
-]);
-$client->shutdown(RecordingTransport::alwaysAccept());
-
-try {
-    $client->log('evt_log_shutdown', '2026-06-02T10:00:01Z', [
-        'message' => 'should fail',
-        'level' => 'info',
-    ]);
-    fwrite(STDERR, "expected shutdown error\n");
-    exit(1);
-} catch (SdkError $error) {
-    echo json_encode([
-        'ok' => true,
-        'code' => $error->codeName,
-        'message' => $error->getMessage(),
-        'pending' => $client->pendingEvents(),
-    ], JSON_THROW_ON_ERROR) . PHP_EOL;
+function clientWithRelease(string $id): LogBrewClient
+{
+    $client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
+    $client->release("evt_release_{$id}", '2026-06-02T10:00:00Z', ['version' => '1.2.3']);
+    return $client;
 }
-EOF
 
-php shutdown.php > shutdown.stdout.json
-grep -q '"ok":true' shutdown.stdout.json
-grep -q '"code":"shutdown_error"' shutdown.stdout.json
-grep -q '"message":"client is already shut down"' shutdown.stdout.json
-grep -q '"pending":0' shutdown.stdout.json
+function expectSdkError(LogBrewClient $client, callable $operation, string $code, string $message, int $pending): void
+{
+    try {
+        $operation();
+    } catch (SdkError $error) {
+        if ($error->codeName === $code && $error->getMessage() === $message && $client->pendingEvents() === $pending) {
+            return;
+        }
+        throw $error;
+    }
+    throw new RuntimeException("expected {$code}");
+}
 
-cat > empty_flush.php <<'EOF'
-<?php
+$client = clientWithRelease('unauth');
+expectSdkError($client, fn () => $client->flush(new RecordingTransport([401])), 'unauthenticated', 'transport rejected the API key', 1);
 
-declare(strict_types=1);
+$client = clientWithRelease('retry');
+$response = $client->flush(new RecordingTransport([TransportError::network('temporary outage'), 202]));
+if ($response->statusCode !== 202 || $response->attempts !== 2 || $client->pendingEvents() !== 0) {
+    throw new RuntimeException('unexpected retry result');
+}
 
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\RecordingTransport;
+$client = clientWithRelease('shutdown');
+$client->shutdown(RecordingTransport::alwaysAccept());
+expectSdkError(
+    $client,
+    fn () => $client->log('evt_log_shutdown', '2026-06-02T10:00:01Z', ['message' => 'should fail', 'level' => 'info']),
+    'shutdown_error',
+    'client is already shut down',
+    0
+);
 
 $client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
 $response = $client->flush(RecordingTransport::alwaysAccept());
-
-echo json_encode([
-    'ok' => true,
-    'status' => $response->statusCode,
-    'attempts' => $response->attempts,
-    'pending' => $client->pendingEvents(),
-], JSON_THROW_ON_ERROR) . PHP_EOL;
-EOF
-
-php empty_flush.php > empty_flush.stdout.json
-grep -q '"ok":true' empty_flush.stdout.json
-grep -q '"status":204' empty_flush.stdout.json
-grep -q '"attempts":0' empty_flush.stdout.json
-grep -q '"pending":0' empty_flush.stdout.json
-
-cat > validation.php <<'EOF'
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\SdkError;
-
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
-
-try {
-    $client->log('evt_log_invalid', '2026-06-02T10:00:03', [
-        'message' => 'should fail',
-        'level' => 'info',
-    ]);
-    fwrite(STDERR, "expected validation error\n");
-    exit(1);
-} catch (SdkError $error) {
-    echo json_encode([
-        'ok' => true,
-        'code' => $error->codeName,
-        'message' => $error->getMessage(),
-        'pending' => $client->pendingEvents(),
-    ], JSON_THROW_ON_ERROR) . PHP_EOL;
+if ($response->statusCode !== 204 || $response->attempts !== 0 || $client->pendingEvents() !== 0) {
+    throw new RuntimeException('unexpected empty flush result');
 }
+expectSdkError(
+    $client,
+    fn () => $client->log('evt_log_invalid', '2026-06-02T10:00:03', ['message' => 'should fail', 'level' => 'info']),
+    'validation_error',
+    'timestamp must be a valid RFC3339 date-time: 2026-06-02T10:00:03',
+    0
+);
+
+$client = clientWithRelease('retry_budget');
+expectSdkError(
+    $client,
+    fn () => $client->flush(new RecordingTransport(array_fill(0, 3, TransportError::network('temporary outage')))),
+    'network_failure',
+    'transport network request failed',
+    1
+);
+$client = clientWithRelease('transport_status');
+expectSdkError($client, fn () => $client->flush(new RecordingTransport([400])), 'transport_error', 'unexpected transport status 400', 1);
+
+echo json_encode(['ok' => true, 'contracts' => 7], JSON_THROW_ON_ERROR) . PHP_EOL;
 EOF
 
-php validation.php > validation.stdout.json
-grep -q '"ok":true' validation.stdout.json
-grep -q '"code":"validation_error"' validation.stdout.json
-grep -q '"message":"timestamp must be a valid RFC3339 date-time: 2026-06-02T10:00:03"' validation.stdout.json
-grep -q '"pending":0' validation.stdout.json
-
-cat > retry_budget.php <<'EOF'
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\SdkError;
-use LogBrew\RecordingTransport;
-use LogBrew\TransportError;
-
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
-$client->release('evt_release_retry_budget', '2026-06-02T10:00:00Z', [
-    'version' => '1.2.3',
-]);
-
-try {
-    $client->flush(new RecordingTransport([
-        TransportError::network('temporary outage'),
-        TransportError::network('temporary outage'),
-        TransportError::network('temporary outage'),
-    ]));
-    fwrite(STDERR, "expected network failure\n");
-    exit(1);
-} catch (SdkError $error) {
-    echo json_encode([
-        'ok' => true,
-        'code' => $error->codeName,
-        'message' => $error->getMessage(),
-        'pending' => $client->pendingEvents(),
-    ], JSON_THROW_ON_ERROR) . PHP_EOL;
-}
-EOF
-
-php retry_budget.php > retry_budget.stdout.json
-grep -q '"ok":true' retry_budget.stdout.json
-grep -q '"code":"network_failure"' retry_budget.stdout.json
-grep -q '"message":"transport network request failed"' retry_budget.stdout.json
-grep -q '"pending":1' retry_budget.stdout.json
-
-cat > transport_status.php <<'EOF'
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use LogBrew\LogBrewClient;
-use LogBrew\RecordingTransport;
-use LogBrew\SdkError;
-
-$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app', '0.1.0');
-$client->release('evt_release_transport_status', '2026-06-02T10:00:00Z', [
-    'version' => '1.2.3',
-]);
-
-try {
-    $client->flush(new RecordingTransport([400]));
-    fwrite(STDERR, "expected transport error\n");
-    exit(1);
-} catch (SdkError $error) {
-    echo json_encode([
-        'ok' => true,
-        'code' => $error->codeName,
-        'message' => $error->getMessage(),
-        'pending' => $client->pendingEvents(),
-    ], JSON_THROW_ON_ERROR) . PHP_EOL;
-}
-EOF
-
-php transport_status.php > transport-status.stdout.json
-grep -q '"ok":true' transport-status.stdout.json
-grep -q '"code":"transport_error"' transport-status.stdout.json
-grep -q '"message":"unexpected transport status 400"' transport-status.stdout.json
-grep -q '"pending":1' transport-status.stdout.json
+php transport-contracts.php > transport-contracts.stdout.json
+grep -q '"ok":true' transport-contracts.stdout.json
+grep -q '"contracts":7' transport-contracts.stdout.json

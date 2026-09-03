@@ -77,36 +77,7 @@ final class LaravelLoggerFactory
             );
         }
 
-        $apiKey = trim(self::stringValue($config, 'api_key', ''));
-        if ($apiKey === '') {
-            throw new InvalidArgumentException(
-                'LOGBREW_SERVER_API_KEY must be configured when the logbrew channel is enabled.'
-            );
-        }
-
-        $service = self::stringValue($config, 'service', 'laravel-app');
-        $release = self::stringValue($config, 'release', 'unversioned');
-        $environment = self::stringValue($config, 'environment', 'production');
-        $context = TelemetryContext::create()
-            ->withResource(
-                TelemetryResource::create()
-                    ->withService($service)
-                    ->withDeployment($environment, $release)
-                    ->withFramework('laravel')
-                    ->build()
-            )
-            ->build();
-        $client = LogBrewClient::create(
-            apiKey: $apiKey,
-            sdkName: $service,
-            sdkVersion: $release,
-            maxRetries: self::intValue($config, 'max_retries', 0),
-            context: $context
-        );
-        $transport = $this->transport ?? new HttpTransport(
-            endpoint: self::stringValue($config, 'endpoint', HttpTransport::DEFAULT_ENDPOINT),
-            timeout: self::floatValue($config, 'timeout', 2.0)
-        );
+        [$client, $transport, $service, $release, $environment] = $this->delivery($config);
 
         $metadata = self::metadataValue($config['metadata'] ?? []);
         $metadata['framework'] = 'laravel';
@@ -132,6 +103,59 @@ final class LaravelLoggerFactory
         );
 
         return new MonologLogger($service, [$handler]);
+    }
+
+    /**
+     * Register queue-job traces and failure issues from the same scalar channel configuration.
+     *
+     * @param array<string, mixed> $config
+     * @param callable(\Throwable): void|null $onCaptureError
+     */
+    public function registerQueueTelemetry(
+        object $queue,
+        array $config,
+        ?callable $onCaptureError = null
+    ): LogBrewLaravelQueueTelemetry {
+        [$client, $transport] = $this->delivery($config);
+        return LogBrewLaravelQueueTelemetry::register($queue, $client, $transport, $onCaptureError);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array{LogBrewClient, Transport, string, string, string}
+     */
+    private function delivery(array $config): array
+    {
+        $apiKey = trim(self::stringValue($config, 'api_key', ''));
+        if ($apiKey === '') {
+            throw new InvalidArgumentException(
+                'LOGBREW_SERVER_API_KEY must be configured when the logbrew channel is enabled.'
+            );
+        }
+        $service = self::stringValue($config, 'service', 'laravel-app');
+        $release = self::stringValue($config, 'release', 'unversioned');
+        $environment = self::stringValue($config, 'environment', 'production');
+        $context = TelemetryContext::create()->withResource(TelemetryResource::create()
+            ->withService($service)
+            ->withDeployment($environment, $release)
+            ->withFramework('laravel')
+            ->build())->build();
+        return [
+            LogBrewClient::create(
+                apiKey: $apiKey,
+                sdkName: $service,
+                sdkVersion: $release,
+                maxRetries: self::intValue($config, 'max_retries', 0),
+                context: $context
+            ),
+            $this->transport ?? new HttpTransport(
+                endpoint: self::stringValue($config, 'endpoint', HttpTransport::DEFAULT_ENDPOINT),
+                timeout: self::floatValue($config, 'timeout', 2.0)
+            ),
+            $service,
+            $release,
+            $environment,
+        ];
     }
 
     /** @param array<string, mixed> $config */

@@ -839,6 +839,23 @@ Use a project-scoped server/SDK ingest key, never a user login key. The channel 
 
 The Laravel factory accepts warning-and-higher records by default and immediately flushes every accepted record with a 2-second timeout and zero retries. Every record gets typed PHP/Laravel/service/deployment context. Application middleware can activate an explicit `LogBrewTelemetry` scope to add opaque session, subject, and journey context to logs written during that request. Delivery failures stay inside the handler and do not interrupt application logging; a retained failed record is retried with the next accepted record. Override `level`, `timeout`, or `maxRetries` through named arguments to `configuration(...)` when the application has a different bounded policy. Write directly with `Log::channel('logbrew')->warning(...)` or include `logbrew` beside the existing channel in Laravel's stack.
 
+Register queue telemetry once from `AppServiceProvider::boot()` using the same channel configuration:
+
+```php
+use Illuminate\Support\Facades\Queue;
+use LogBrew\LaravelLoggerFactory;
+
+$config = config('logging.channels.logbrew');
+if (is_array($config)) {
+    (new LaravelLoggerFactory())->registerQueueTelemetry(
+        Queue::getFacadeRoot(),
+        $config,
+    );
+}
+```
+
+Each processed job gets one `job.execute` trace span. Logs written through the LogBrew channel during the job inherit that exact trace and span. A thrown job exception adds a typed, unhandled `laravel.queue` issue on the same span before the original exception continues through Laravel. The adapter records only the bounded job class, connection, queue, attempt count, duration, and PHP/Laravel/service/deployment identity. It never reads serialized job payloads, arguments, job identifiers, headers, exception messages, or raw stack text. Capture and delivery failures do not change the job result; pass `onCaptureError` only when the application needs a local diagnostic callback.
+
 ## Custom Monolog Integration
 
 Use `LogBrewMonologHandler` directly when a non-Laravel PHP app already logs through Monolog. Install `monolog/monolog:^3.0` in the application, construct a client and transport, and choose an explicit delivery boundary. The generic handler queues by default; pass both `transport` and `flushOnLog: true` for immediate delivery, or call the client's `flush()` or `shutdown()` at an application-owned lifecycle boundary.
