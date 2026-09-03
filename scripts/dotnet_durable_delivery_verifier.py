@@ -23,6 +23,7 @@ class AdmissionOutcome(Enum):
     RETRY_OBSERVATION_TIMEOUT = "admission retry observation timeout"
     PENDING_VERIFICATION_TIMEOUT = "admission pending verification timeout"
     REQUEST_TIMEOUT = "admission request timeout"
+    DEADLINE_EXCEEDED = "admission deadline exceeded before external kill"
     SPONTANEOUS_EXIT_AFTER_NONE = "admission spontaneous exit after none"
     SPONTANEOUS_EXIT_AFTER_RUNTIME_VALIDATED = "admission spontaneous exit after runtime-validated"
     SPONTANEOUS_EXIT_AFTER_DURABLE_CLIENT_CREATED = "admission spontaneous exit after durable-client-created"
@@ -622,7 +623,6 @@ def run_until_ready_and_kill(
 
     deadline = time.monotonic() + timeout_seconds
     process: subprocess.Popen[bytes] | None = None
-    last_outcome = AdmissionOutcome.RUNTIME_VALIDATION_TIMEOUT
     with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
         try:
             process = subprocess.Popen(
@@ -631,20 +631,23 @@ def run_until_ready_and_kill(
                 stdout=stdout,
                 stderr=stderr,
             )
-            while time.monotonic() < deadline:
+            while True:
                 readiness, last_stage, temporary_pending = inspect_admission_witness(
                     marker_path,
                     request_path,
                 )
                 if readiness in TERMINAL_ADMISSION_OUTCOMES:
                     return readiness
+                if process.poll() is not None:
+                    return (
+                        AdmissionOutcome.WITNESS_INVALID_PUBLICATION
+                        if temporary_pending
+                        else SPONTANEOUS_EXIT_OUTCOMES[last_stage]
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return readiness or AdmissionOutcome.DEADLINE_EXCEEDED
                 if readiness is None:
-                    if process.poll() is not None:
-                        return (
-                            AdmissionOutcome.WITNESS_INVALID_PUBLICATION
-                            if temporary_pending
-                            else SPONTANEOUS_EXIT_OUTCOMES[last_stage]
-                        )
                     try:
                         (kill_request or subprocess.Popen.kill)(process)
                     except OSError:
@@ -662,15 +665,7 @@ def run_until_ready_and_kill(
                     except (OSError, ValueError):
                         return AdmissionOutcome.WITNESS_INVALID_SUPERVISOR
                     return AdmissionOutcome.EXPECTED_NONZERO_EXIT if return_code != 0 else AdmissionOutcome.ZERO_EXIT
-                if process.poll() is not None:
-                    return (
-                        AdmissionOutcome.WITNESS_INVALID_PUBLICATION
-                        if temporary_pending
-                        else SPONTANEOUS_EXIT_OUTCOMES[last_stage]
-                    )
-                last_outcome = readiness
-                time.sleep(0.05)
-            return last_outcome
+                time.sleep(min(0.05, remaining))
         finally:
             if process is not None and process.poll() is None:
                 try:

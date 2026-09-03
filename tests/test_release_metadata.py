@@ -479,6 +479,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             "build==1.5.0",
             "setuptools==83.0.0",
             "twine==7.0.0",
+            "uv==0.12.9",
             "wheel==0.47.0",
         ):
             self.assertIn(expected, tools)

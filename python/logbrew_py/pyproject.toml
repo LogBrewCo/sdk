@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logbrew-sdk"
-version = "0.1.14"
+version = "0.1.15"
 description = "Public LogBrew Python SDK for building, validating, and flushing event batches."
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,7 @@ classifiers = [
 Repository = "https://github.com/LogBrewCo/sdk"
 
 [project.optional-dependencies]
+arq = ["arq>=0.28,<1"]
 celery = ["celery>=5,<6"]
 persistence = ["cryptography>=49,<50"]
 rq = ["rq>=2,<3"]

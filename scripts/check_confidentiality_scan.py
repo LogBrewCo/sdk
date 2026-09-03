@@ -13,6 +13,10 @@ SENSITIVE_RE = re.compile(
     r"terraform|dns|backup|restore)",
     re.IGNORECASE,
 )
+SENSITIVE_FRAGMENTS = (
+    "secret", "token", "credential", "password", "private repo", "customer", "roadmap", "strategy",
+    "runbook", "launch state", "cleanup", "hostname", "internal path", "ssh", "terraform", "dns", "backup", "restore",
+)
 PUBLIC_README_FORBIDDEN_RE = re.compile(
     r"(real[-_ ]user|smoke|\bproof\b|\bprove\b|\bverif(?:y|ied|ier|ication)\b|"
     r"\btests?\b|\btesting\b|temporary app|temp app|disposable app|fresh app|fresh temporary app|"
@@ -38,17 +42,8 @@ SKIPPED_DIRS = {
     "vendor",
 }
 
-SKIPPED_FILES = {
-    "LICENSE",
-}
-SKIPPED_EXTENSIONS = {
-    ".gif",
-    ".ico",
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-}
+SKIPPED_FILES = {"LICENSE"}
+SKIPPED_EXTENSIONS = {".gif", ".ico", ".jpg", ".jpeg", ".png", ".webp"}
 
 SELF_PATH = Path("scripts/check_confidentiality_scan.py")
 FORBIDDEN_PUBLIC_PLANNING_PATHS = (
@@ -130,6 +125,9 @@ def validate(root: Path) -> list[str]:
             if is_agent_guidance_path(relative) and USER_HOME_PATH_RE.search(line):
                 failures.append(f"./{relative.as_posix()}:{line_number}:{line}")
                 continue
+            lower_line = line.lower()
+            if not any(fragment in lower_line for fragment in SENSITIVE_FRAGMENTS):
+                continue
             if not SENSITIVE_RE.search(line):
                 continue
             if is_brand_svg_asset(relative):
@@ -179,103 +177,59 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text == "docs/github-actions.md" and "long-lived registry tokens" in lower_line:
         return True
 
-    if is_public_publishing_guidance(relative_text, line):
+    if any(
+        predicate(relative_text, line)
+        for predicate in (
+            is_public_publishing_guidance,
+            is_npm_first_publish_placeholder,
+            is_maven_central_preflight_secret_name_reference,
+            is_github_actions_oidc_or_secret_placeholder,
+            is_angular_injection_token_reference,
+            is_fake_query_secret_fixture,
+            is_sdk_metadata_denylist_literal,
+            is_java_jdbc_metadata_denylist_literal,
+            is_java_aes_key_spec_reference,
+            is_js_opentelemetry_privacy_denylist_literal,
+            is_js_pino_privacy_reference,
+            is_python_opentelemetry_privacy_denylist_literal,
+            is_release_artifact_upload_verifier_reference,
+            is_support_ticket_diagnostics_reference,
+            is_go_gin_privacy_reference,
+            is_ruby_rails_smoke_reference,
+        )
+    ):
         return True
 
-    if is_npm_first_publish_placeholder(relative_text, line):
-        return True
-
-    if is_maven_central_preflight_secret_name_reference(relative_text, line):
-        return True
-
-    if is_github_actions_oidc_or_secret_placeholder(relative_text, line):
-        return True
-
-    if is_angular_injection_token_reference(relative_text, line):
-        return True
-
-    if is_fake_query_secret_fixture(relative_text, line):
-        return True
-
-    if is_sdk_metadata_denylist_literal(relative_text, line):
-        return True
-
-    if is_java_jdbc_metadata_denylist_literal(relative_text, line):
-        return True
-
-    if is_java_aes_key_spec_reference(relative_text, line):
-        return True
-
-    if is_js_opentelemetry_privacy_denylist_literal(relative_text, line):
-        return True
-
-    if is_js_pino_privacy_reference(relative_text, line):
-        return True
-
-    if is_python_opentelemetry_privacy_denylist_literal(relative_text, line):
-        return True
-
-    if is_rust_telemetry_context_reference(relative_text, line, terms):
-        return True
-
-    if is_release_artifact_upload_verifier_reference(relative_text, line):
-        return True
-
-    if is_react_native_diagnostics_endpoint_guard(relative_text, line, terms):
-        return True
-
-    if is_support_ticket_diagnostics_reference(relative_text, line):
-        return True
-
-    if is_kscrash_report_deletion_policy_reference(relative_text, line, terms):
-        return True
-
-    if is_kotlin_okhttp_phase_timing_reference(relative_text, line, terms):
-        return True
-
-    if is_go_http_phase_timing_reference(relative_text, line, terms):
-        return True
-
-    if is_go_structured_url_hostname_reference(relative_text, line, terms):
-        return True
-
-    if is_go_gin_privacy_reference(relative_text, line):
-        return True
-
-    if is_ruby_rails_smoke_reference(relative_text, line):
-        return True
-
-    if is_python_public_registry_hostname_reference(relative_text, line, terms):
-        return True
-
-    if is_react_native_native_storage_reference(relative_text, line, terms):
-        return True
-
-    if is_apple_crash_storage_reference(relative_text, line, terms):
+    if any(
+        predicate(relative_text, line, terms)
+        for predicate in (
+            is_rust_telemetry_context_reference,
+            is_react_native_diagnostics_endpoint_guard,
+            is_kscrash_report_deletion_policy_reference,
+            is_kotlin_okhttp_phase_timing_reference,
+            is_go_http_phase_timing_reference,
+            is_go_structured_url_hostname_reference,
+            is_python_public_registry_hostname_reference,
+            is_native_archive_exclusion_reference,
+            is_kotlin_coroutine_context_reference,
+            is_dotnet_release_compatibility_reference,
+            is_dotnet_durable_delivery_reference,
+        )
+    ):
         return True
 
     if is_apple_durable_storage_reference(relative_text, terms):
         return True
 
-    if is_kotlin_coroutine_context_reference(relative_text, line, terms):
-        return True
-
     if is_dotnet_httpclient_host_reference(relative_text, terms):
         return True
 
-    if is_dotnet_release_compatibility_reference(relative_text, line, terms):
-        return True
-
-    if relative_text.endswith(".cs") and is_dotnet_cancellation_token_reference(line):
-        return True
-
-    if relative_text.startswith("scripts/real_user_") and is_dotnet_cancellation_token_reference(line):
+    if (
+        relative_text.endswith(".cs") or relative_text.startswith("scripts/real_user_")
+    ) and is_dotnet_cancellation_token_reference(line):
         return True
 
     if relative_text.endswith(".cs") and is_dotnet_analyzer_pragma_reference(line, terms):
-        return True
-
-    if is_dotnet_durable_delivery_reference(relative_text, line, terms):
         return True
 
     if relative_text.startswith("scripts/") and terms == {"cleanup"}:
@@ -284,7 +238,31 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_sdk_instrumentation_restore_reference(relative_text, terms):
         return True
 
-    if relative_text == "python/logbrew_py/tests/test_rq_client.py" and terms == {"cleanup"}:
+    # Exact public teardown/restoration lines only. Negative path and suffix cases
+    # are tested in test_confidentiality_scan.py. Reviewed 2026-09-03.
+    if (relative_text, line.strip()) in {
+        ("docs/github-actions.md", "group during cleanup, including children left behind after command exit."),
+        ("tests/test_check_public_sdks.py", "self.addCleanup(temporary.cleanup)"),
+        ("tools/toolchain-probe/main.go", 'return "cleanup failed"'),
+        ("python/logbrew_py/src/logbrew_sdk/_http_instrumentation.py",
+         "self._restore_request = _instrumentation.patch_instance_attributes("),
+        ("python/logbrew_py/src/logbrew_sdk/_http_instrumentation.py", "self._restore_request()"),
+        ("python/logbrew_py/src/logbrew_sdk/_instrumentation.py",
+         '"""Restore original attributes only while this patch still owns them."""'),
+        ("python/logbrew_py/src/logbrew_sdk/_instrumentation.py", "def restore() -> None:"),
+        ("python/logbrew_py/src/logbrew_sdk/_instrumentation.py", "return restore"),
+        ("python/logbrew_py/README.md",
+         "For Requests, HTTPX, and aiohttp, `uninstall()` restores the original method only if "
+         "LogBrew's wrapper is still installed. If your application replaces that method afterward, "
+         "removal preserves the replacement. Uninstall and reinstall instrumentation to capture "
+         "calls through the new method."),
+    }:
+        return True
+
+    if relative_text in {
+        "python/logbrew_py/tests/test_arq_client.py",
+        "python/logbrew_py/tests/test_rq_client.py",
+    } and terms == {"cleanup"}:
         return ".addCleanup(" in line
 
     if relative_text.endswith((".c", ".h", ".cpp", ".hpp")) and "curl_easy_cleanup" in line:
@@ -372,7 +350,11 @@ def is_sdk_instrumentation_restore_reference(relative_text: str, terms: set[str]
         return False
     if relative_text.startswith("js/") and relative_text.endswith((".js", ".cjs", ".mjs", ".ts", ".cts")):
         return True
-    if relative_text == "python/logbrew_py/src/logbrew_sdk/_rq_client.py":
+    if relative_text in {
+        "python/logbrew_py/src/logbrew_sdk/_arq_client.py",
+        "python/logbrew_py/src/logbrew_sdk/_queue_client.py",
+        "python/logbrew_py/src/logbrew_sdk/_rq_client.py",
+    }:
         return True
     return relative_text.startswith("scripts/real_user_") and relative_text.endswith(".sh")
 
@@ -413,37 +395,21 @@ def is_apple_durable_storage_reference(relative_text: str, terms: set[str]) -> b
     return relative_text in durable_paths and terms.issubset({"backup", "cleanup"})
 
 
-def is_apple_crash_storage_reference(
-    relative_text: str,
-    line: str,
-    terms: set[str],
-) -> bool:
-    symbol = "isExcludedFromBackup"
-    allowed_paths = {
-        "swift/logbrew-swift/Sources/LogBrewCrash/CrashStorageDirectory.swift",
-        (
-            "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/"
-            "LogBrewCrash/CrashStorageDirectory.swift"
-        ),
-        (
-            "swift/logbrew-swift/Tests/LogBrewCrashTests/"
-            "NativeHangIncidentStoreTests.swift"
-        ),
-    }
-    return (
-        relative_text in allowed_paths
-        and terms == {"backup"}
-        and symbol in line
-        and SENSITIVE_RE.search(line.replace(symbol, "")) is None
-    )
-
-
-def is_react_native_native_storage_reference(
+def is_native_archive_exclusion_reference(
     relative_text: str,
     line: str,
     terms: set[str],
 ) -> bool:
     symbol_by_path = {
+        "swift/logbrew-swift/Sources/LogBrewCrash/CrashStorageDirectory.swift": "isExcludedFromBackup",
+        (
+            "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/"
+            "LogBrewCrash/CrashStorageDirectory.swift"
+        ): "isExcludedFromBackup",
+        (
+            "swift/logbrew-swift/Tests/LogBrewCrashTests/"
+            "NativeHangIncidentStoreTests.swift"
+        ): "isExcludedFromBackup",
         (
             "js/logbrew-react-native/android/src/main/java/co/logbrew/reactnative/"
             "FatalStoreModuleImpl.java"

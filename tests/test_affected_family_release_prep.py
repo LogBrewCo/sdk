@@ -17,12 +17,8 @@ from check_npm_peer_compatibility import caret_range_allows  # noqa: E402
 import check_repo_wide_release_versions  # noqa: E402
 
 
-def xml_value(path: Path, name: str) -> str | None:
-    return ET.parse(path).getroot().findtext(f"./PropertyGroup/{name}")
-
-
-def maven_version(path: Path) -> str | None:
-    return ET.parse(path).getroot().findtext("{*}version")
+def xml_value(path: Path, xpath: str) -> str | None:
+    return ET.parse(path).getroot().findtext(xpath)
 
 
 def source_text(relative_path: str | Path) -> str:
@@ -51,7 +47,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.14"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.15"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.10"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.5"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.6"),
@@ -64,32 +60,20 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(rust["package"]["version"], "0.1.4")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
-        self.assertEqual(maven_version(ROOT / "java/logbrew-java/pom.xml"), "0.1.6")
-        self.assertEqual(
-            xml_value(ROOT / "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", "Version"),
-            "0.1.7",
-        )
-        self.assertEqual(
-            xml_value(
-                ROOT / "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
-                "Version",
-            ),
-            "0.1.2",
-        )
+        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.6")
+        for package, version in (("LogBrew", "0.1.7"), ("LogBrew.HttpClient", "0.1.2")):
+            path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
+            with self.subTest(package=package):
+                self.assertEqual(xml_value(path, "./PropertyGroup/Version"), version)
 
     def test_native_family_versions_advance(self) -> None:
-        self.assertIn(
-            '#define LOGBREW_C_VERSION "0.2.2"',
-            source_text("c/logbrew-c/include/logbrew.h"),
-        )
-        self.assertIn(
-            'inline constexpr const char *version = "0.2.3"',
-            source_text("cpp/logbrew-cpp/include/logbrew.hpp"),
-        )
-        self.assertIn(
-            'LogBrewObjectiveCVersion = @"0.2.3"',
-            source_text("objc/logbrew-objc/src/LogBrew.m"),
-        )
+        for path, declaration in (
+            ("c/logbrew-c/include/logbrew.h", '#define LOGBREW_C_VERSION "0.2.2"'),
+            ("cpp/logbrew-cpp/include/logbrew.hpp", 'inline constexpr const char *version = "0.2.3"'),
+            ("objc/logbrew-objc/src/LogBrew.m", 'LogBrewObjectiveCVersion = @"0.2.3"'),
+        ):
+            with self.subTest(path=path):
+                self.assertIn(declaration, source_text(path))
         unity = json_object("unity/logbrew-unity/package.json")
         self.assertEqual((unity["name"], unity["version"]), ("co.logbrew.unity", "0.2.2"))
 
@@ -253,8 +237,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertNotRegex(npm_job, r"(?m)^\s*(?:\([^)]*&&\s*)?npm\s+(?:pack|publish)\b")
 
     def test_maven_and_nuget_package_versions_match_the_release_matrix(self) -> None:
-        self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin/pom.xml"), "0.2.2")
-        self.assertEqual(maven_version(ROOT / "kotlin/logbrew-kotlin-okhttp/pom.xml"), "0.2.2")
+        self.assertEqual(xml_value(ROOT / "kotlin/logbrew-kotlin/pom.xml", "{*}version"), "0.2.2")
+        self.assertEqual(xml_value(ROOT / "kotlin/logbrew-kotlin-okhttp/pom.xml", "{*}version"), "0.2.2")
 
         expected = {
             "LogBrew.AspNetCore": "0.1.2",
@@ -265,7 +249,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         }
         for package_id, version in expected.items():
             project = ROOT / f"dotnet/logbrew-dotnet/src/{package_id}/{package_id}.csproj"
-            self.assertEqual(xml_value(project, "Version"), version)
+            self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
         self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.4")
@@ -283,7 +267,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.14",
+                "logbrew-sdk": "0.1.15",
                 "logbrew-fastapi": "0.1.10",
                 "logbrew-flask": "0.1.5",
                 "logbrew-django": "0.1.6",

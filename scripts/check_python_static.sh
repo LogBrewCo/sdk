@@ -2,40 +2,32 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tmp_dir="$(mktemp -d)"
+tool_env="${LOGBREW_PYTHON_STATIC_ENV:-${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/python-static/ruff-0.15.15-mypy-2.1.0}"
+cache_dir="${LOGBREW_PYTHON_STATIC_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/logbrew/python-static/ruff-0.15.15-mypy-2.1.0}"
+mkdir -p "$cache_dir"
 
-remove_tmp_dir() {
-  rm -rf "$tmp_dir"
-}
+tool_python="$tool_env/bin/python"
+tool_ruff="$tool_env/bin/ruff"
+if [[ ! -x "$tool_python" || ! -x "$tool_ruff" ]]; then
+  printf '%s\n' "provision the Python static-analysis environment from scripts/python_static_tools.txt" >&2
+  exit 1
+fi
 
-trap remove_tmp_dir EXIT
+"$tool_python" - "$repo_root/scripts/python_static_tools.txt" <<'PY'
+from importlib.metadata import version
+from pathlib import Path
+import sys
 
-python3 -m venv "$tmp_dir/venv"
-"$tmp_dir/venv/bin/python" -m pip install \
-  --upgrade \
-  --disable-pip-version-check \
-  pip \
-  >/dev/null
-"$tmp_dir/venv/bin/python" -m pip install \
-  --no-cache-dir \
-  --disable-pip-version-check \
-  ruff==0.15.15 \
-  mypy==2.1.0 \
-  certifi==2026.7.22 \
-  truststore==0.10.4 \
-  celery==5.6.3 \
-  django==5.2.16 \
-  django-stubs==5.2.9 \
-  fastapi==0.136.3 \
-  Flask==3.1.2 \
-  httpx2==2.3.0 \
-  fakeredis==2.31.3 \
-  rq==2.12.0 \
-  >/dev/null
+for requirement in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    name, expected = requirement.split("==", 1)
+    actual = version(name)
+    if actual != expected:
+        raise SystemExit(f"{name} {expected} is required, found {actual}")
+PY
 
 cd "$repo_root"
 
-RUFF_CACHE_DIR="$tmp_dir/ruff-cache" "$tmp_dir/venv/bin/ruff" check \
+RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check \
   --isolated \
   --target-version py310 \
   --line-length 120 \
@@ -55,11 +47,11 @@ RUFF_CACHE_DIR="$tmp_dir/ruff-cache" "$tmp_dir/venv/bin/ruff" check \
   python/logbrew_django/tests \
   scripts/check_python_sources.py
 
-MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src" "$tmp_dir/venv/bin/mypy" \
+MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src" "$tool_python" -m mypy \
   --strict \
   --python-version 3.10 \
   --explicit-package-bases \
-  --cache-dir "$tmp_dir/mypy-cache" \
+  --cache-dir "$cache_dir/mypy" \
   python/logbrew_py/src \
   python/logbrew_py/examples \
   python/logbrew_py/tests \

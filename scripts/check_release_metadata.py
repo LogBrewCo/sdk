@@ -102,13 +102,14 @@ PYTHON_PACKAGES = {
             "typing-extensions>=4.1; python_version < '3.11'",
         },
         "optional_dependencies": {
+            "arq": {"arq>=0.28,<1"},
             "celery": {"celery>=5,<6"},
             "persistence": {"cryptography>=49,<50"},
             "rq": {"rq>=2,<3"},
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.14",
+        "version": "0.1.15",
     },
 }
 

@@ -4,6 +4,26 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+run_toolchain_probe() {
+  if [[ -n "${LOGBREW_TOOLCHAIN_PROBE_BIN:-}" ]]; then
+    [[ "$LOGBREW_TOOLCHAIN_PROBE_BIN" == /* && -f "$LOGBREW_TOOLCHAIN_PROBE_BIN" &&
+      ! -L "$LOGBREW_TOOLCHAIN_PROBE_BIN" && -x "$LOGBREW_TOOLCHAIN_PROBE_BIN" ]] || return
+    "$LOGBREW_TOOLCHAIN_PROBE_BIN" "$@"
+    return
+  fi
+  (
+    cd "$repo_root/tools/toolchain-probe" || return
+    IFS= read -r toolchain_version < .go-version || return
+    [[ "$(GOTOOLCHAIN=local go version)" == "go version go$toolchain_version "* ]] || return
+    GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go run . "$@"
+  )
+}
+
+if ! run_started_ns="$(run_toolchain_probe clock)"; then
+  printf '%s\n' "native toolchain clock unavailable" >&2
+  exit 1
+fi
+
 json_mode=false
 json_output_path=""
 current_step_number=0
@@ -13,12 +33,6 @@ steps_completed=0
 schema_version="1"
 lock_dir="${TMPDIR:-/tmp}/logbrewco-sdk-public-checks.lock"
 lock_pid_file="$lock_dir/pid"
-run_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-run_started_epoch="$(python3 - <<'PY'
-import time
-print(f"{time.time():.6f}")
-PY
-)"
 STEP_LABELS=(
   "Root contract tests"
   "Rust tests"
@@ -136,147 +150,30 @@ STEP_LABELS=(
 )
 steps_total="${#STEP_LABELS[@]}"
 
-json_array_from_args() {
-  python3 - "$@" <<'PY'
-import json
-import sys
-
-print(json.dumps(sys.argv[1:], separators=(",", ":")))
-PY
-}
-
-toolchain_versions_json() {
-  python3 <<'PY'
-import json
-import subprocess
-from concurrent.futures import ThreadPoolExecutor
-
-commands = {
-    "node": ["node", "--version"],
-    "npm": ["npm", "--version"],
-    "pnpm": ["pnpm", "--version"],
-    "cc": ["cc", "--version"],
-    "clang": ["clang", "--version"],
-    "objc": ["clang", "--version"],
-    "c++": ["c++", "--version"],
-    "clang++": ["clang++", "--version"],
-    "make": ["make", "--version"],
-    "python3": ["python3", "--version"],
-    "pip": ["python3", "-m", "pip", "--version"],
-    "go": ["go", "version"],
-    "java": ["java", "-version"],
-    "javac": ["javac", "-version"],
-    "jar": ["jar", "--version"],
-    "jdeps": ["jdeps", "--version"],
-    "dotnet": ["dotnet", "--version"],
-    "kotlinc": ["kotlinc", "-version"],
-    "gradle": ["gradle", "--version"],
-    "swift": ["swift", "--version"],
-    "swiftformat": ["swiftformat", "--version"],
-    "swiftlint": ["swiftlint", "version"],
-    "cargo": ["cargo", "--version"],
-    "rustc": ["rustc", "--version"],
-    "php": ["php", "--version"],
-    "composer": ["composer", "--version"],
-    "ruby": ["ruby", "--version"],
-    "gem": ["gem", "--version"],
-    "bundler": ["bundle", "--version"],
-}
-
-def read_version(item):
-    name, command = item
-    try:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True)
-    except FileNotFoundError:
-        return name, "not installed"
-    output = completed.stdout.strip() or completed.stderr.strip()
-    first_line = output.splitlines()[0] if output else ""
-    return name, first_line
-
-with ThreadPoolExecutor(max_workers=min(16, len(commands))) as executor:
-    payload = dict(executor.map(read_version, commands.items()))
-print(json.dumps(payload, separators=(",", ":")))
-PY
-}
-
 write_summary_json() {
+  failure_json_emitted=true
   local ok="$1"
   local message="$2"
   local failed_step_number="${3:-}"
   local failed_step_label="${4:-}"
   local failure_reason="${5:-}"
   local exit_code="${6:-}"
-  local step_labels_json
-  local completed_step_labels_json
   local toolchain_versions_json_payload
-  local finished_at
-  local duration_ms
-
-  step_labels_json="$(json_array_from_args "${STEP_LABELS[@]}")"
-  if (( steps_completed > 0 )); then
-    completed_step_labels_json="$(json_array_from_args "${STEP_LABELS[@]:0:steps_completed}")"
-  else
-    completed_step_labels_json="[]"
+  if ! toolchain_versions_json_payload="$(run_toolchain_probe)"; then
+    printf '%s\n' "native toolchain inventory unavailable" >&2
+    return 1
   fi
-  toolchain_versions_json_payload="$(toolchain_versions_json)"
-  finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  duration_ms="$(
-    python3 - "$run_started_epoch" <<'PY'
-import sys
-import time
-
-started = float(sys.argv[1])
-print(int(round((time.time() - started) * 1000)))
-PY
-  )"
 
   local json_payload
-  json_payload="$(
-    python3 - "$ok" "$steps_completed" "$steps_total" "$message" "$failed_step_number" "$failed_step_label" "$step_labels_json" "$completed_step_labels_json" "$toolchain_versions_json_payload" "$run_started_at" "$finished_at" "$duration_ms" "$failure_reason" "$exit_code" "$schema_version" <<'PY'
-import json
-import sys
-
-ok = sys.argv[1] == "true"
-steps_completed = int(sys.argv[2])
-steps_total = int(sys.argv[3])
-message = sys.argv[4]
-failed_step_number = sys.argv[5]
-failed_step_label = sys.argv[6]
-step_labels = json.loads(sys.argv[7])
-completed_step_labels = json.loads(sys.argv[8])
-toolchain_versions = json.loads(sys.argv[9])
-started_at = sys.argv[10]
-finished_at = sys.argv[11]
-duration_ms = int(sys.argv[12])
-failure_reason = sys.argv[13]
-exit_code = sys.argv[14]
-schema_version = sys.argv[15]
-
-payload = {
-    "schema_version": schema_version,
-    "ok": ok,
-    "steps_completed": steps_completed,
-    "steps_total": steps_total,
-    "message": message,
-    "step_labels": step_labels,
-    "completed_step_labels": completed_step_labels,
-    "toolchain_versions": toolchain_versions,
-    "started_at": started_at,
-    "finished_at": finished_at,
-    "duration_ms": duration_ms,
-}
-if failure_reason:
-    payload["failure_reason"] = failure_reason
-if exit_code:
-    payload["exit_code"] = int(exit_code)
-if failed_step_number:
-    payload["failed_step_number"] = int(failed_step_number)
-if failed_step_label:
-    payload["failed_step_label"] = failed_step_label
-
-print(json.dumps(payload, separators=(",", ":")))
-PY
-  )"
+  if ! json_payload="$(
+    run_toolchain_probe summary \
+      "$ok" "$steps_completed" "$steps_total" "$message" "$failed_step_number" \
+      "$failed_step_label" "$toolchain_versions_json_payload" "$run_started_ns" \
+      "$failure_reason" "$exit_code" "$schema_version" "${STEP_LABELS[@]}"
+  )"; then
+    printf '%s\n' "native summary unavailable" >&2
+    return 1
+  fi
 
   if [[ -n "$json_output_path" ]]; then
     printf '%s' "$json_payload" > "$json_output_path"
@@ -291,7 +188,6 @@ emit_failure_json() {
   local exit_code="${3:-1}"
   if [[ "$json_mode" == true && "$failure_json_emitted" == false ]]; then
     write_summary_json false "$message" "$current_step_number" "$current_step_label" "$failure_reason" "$exit_code"
-    failure_json_emitted=true
   fi
 }
 

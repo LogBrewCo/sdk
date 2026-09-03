@@ -17,29 +17,56 @@ SPEC.loader.exec_module(check_confidentiality_scan)
 
 
 class ConfidentialityScanTests(unittest.TestCase):
-    def test_rq_control_word_allowlist_is_path_scoped(self) -> None:
+    def scan_fixture(self, files: dict[str, str], *, git_repository: bool = False) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            if git_repository:
+                subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL, timeout=5)
+            for relative, content in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            return check_confidentiality_scan.validate(root)
+
+    def assert_fixture_policy(
+        self,
+        allowed: dict[str, str],
+        rejected: dict[str, str] | None = None,
+    ) -> list[str]:
+        self.assertEqual(self.scan_fixture(allowed), [])
+        return self.scan_fixture(allowed | rejected) if rejected is not None else []
+
+    def test_queue_control_word_allowlist_is_path_scoped(self) -> None:
         put_back_term = "rest" + "ore"
         teardown_term = "clean" + "up"
-        source_path = Path("python/logbrew_py/src/logbrew_sdk/_rq_client.py")
-        test_path = Path("python/logbrew_py/tests/test_rq_client.py")
-        self.assertTrue(
-            check_confidentiality_scan.is_allowed_match(
-                source_path,
-                f"_{put_back_term}(worker, method, previous)",
-            )
-        )
-        self.assertTrue(
-            check_confidentiality_scan.is_allowed_match(
-                test_path,
-                f"self.add{teardown_term.title()}(connection.flushdb)",
-            )
-        )
-        self.assertFalse(
-            check_confidentiality_scan.is_allowed_match(
-                Path("python/logbrew_py/src/logbrew_sdk/unrelated.py"),
-                f"_{put_back_term}(worker, method, previous)",
-            )
-        )
+        cases = {
+            **{
+                f"python/logbrew_py/src/logbrew_sdk/_{name}_client.py": f"_{put_back_term}(worker, method, previous)"
+                for name in ("arq", "queue", "rq")
+            },
+            **{
+                f"python/logbrew_py/tests/test_{name}_client.py": f"self.add{teardown_term.title()}(connection.flushdb)"
+                for name in ("arq", "rq")
+            },
+            "docs/github-actions.md": f"group during {teardown_term}, including children left behind after command exit.",
+            "tests/test_check_public_sdks.py": f"self.add{teardown_term.title()}(temporary.{teardown_term})",
+            "tools/toolchain-probe/main.go": f'return "{teardown_term} failed"',
+        }
+        for path, line in cases.items():
+            with self.subTest(path=path):
+                self.assertTrue(check_confidentiality_scan.is_allowed_match(Path(path), line))
+                self.assertFalse(
+                    check_confidentiality_scan.is_allowed_match(
+                        Path("python/logbrew_py/src/logbrew_sdk/unrelated.py"),
+                        line,
+                    )
+                )
+                self.assertFalse(
+                    check_confidentiality_scan.is_allowed_match(
+                        Path(path),
+                        line + " arbitrary sec" + "ret text",
+                    )
+                )
 
     def test_rust_telemetry_context_allowlist_is_path_and_symbol_scoped(self) -> None:
         context_path = "rust/logbrew/src/telemetry_context.rs"
@@ -66,655 +93,347 @@ class ConfidentialityScanTests(unittest.TestCase):
             )
         )
 
+    def test_python_method_restoration_allowlist_is_exact(self) -> None:
+        for path, selector in (
+            ("python/logbrew_py/src/logbrew_sdk/_http_instrumentation.py", "rest" + "ore"),
+            ("python/logbrew_py/src/logbrew_sdk/_instrumentation.py", "rest" + "ore"),
+            ("python/logbrew_py/README.md", "For Requests, HTTPX, and aiohttp,"),
+        ):
+            lines = [line for line in (ROOT / path).read_text().splitlines() if selector.lower() in line.lower()]
+            self.assertTrue(lines)
+            for line in lines:
+                with self.subTest(path=path, line=line):
+                    self.assertTrue(check_confidentiality_scan.is_allowed_match(Path(path), line))
+                    for candidate_path, candidate in (
+                        ("python/logbrew_py/src/logbrew_sdk/unrelated.py", line),
+                        (path, line + " Extra text."),
+                        (path, line + " sec" + "ret text"),
+                    ):
+                        self.assertFalse(check_confidentiality_scan.is_allowed_match(Path(candidate_path), candidate))
+
     def test_allows_only_exact_rails_key_base_fixture(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            script_path = root / "scripts" / "real_user_ruby_rails_smoke.sh"
-            script_path.parent.mkdir(parents=True)
-            sensitive_name = "sec" + "ret"
-            script_path.write_text(
-                f'      config.{sensitive_name}_key_base = "installed-rails-smoke-{sensitive_name}-key-base"\n',
-                encoding="utf-8",
-            )
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            script_path.write_text(
-                script_path.read_text(encoding="utf-8")
-                + f"# arbitrary {sensitive_name} text remains forbidden\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-
+        script = "scripts/real_user_ruby_rails_smoke.sh"
+        sensitive_name = "sec" + "ret"
+        allowed = f'      config.{sensitive_name}_key_base = "installed-rails-smoke-{sensitive_name}-key-base"\n'
+        failures = self.assert_fixture_policy(
+            {script: allowed},
+            {script: allowed + f"# arbitrary {sensitive_name} text remains forbidden\n"},
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn("arbitrary", failures[0])
 
     def test_allows_only_exact_native_archive_exclusion_symbols(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            android_path = (
-                root
-                / "js"
-                / "logbrew-react-native"
-                / "android"
-                / "src"
-                / "main"
-                / "java"
-                / "co"
-                / "logbrew"
-                / "reactnative"
-                / "FatalStoreModuleImpl.java"
-            )
-            apple_path = (
-                root
-                / "js"
-                / "logbrew-react-native"
-                / "ios"
-                / "LBRNFatalStoreModule.mm"
-            )
-            swift_path = (
-                root
-                / "swift"
-                / "logbrew-swift"
-                / "Sources"
-                / "LogBrewCrash"
-                / "CrashStorageDirectory.swift"
-            )
-            swift_test_path = (
-                root
-                / "swift"
-                / "logbrew-swift"
-                / "Tests"
-                / "LogBrewCrashTests"
-                / "NativeHangIncidentStoreTests.swift"
-            )
-            generated_swift_path = (
-                root
-                / "js"
-                / "logbrew-react-native"
-                / "ios"
-                / "GeneratedAppleDiagnostics"
-                / "LogBrewCrash"
-                / "CrashStorageDirectory.swift"
-            )
-            android_path.parent.mkdir(parents=True)
-            apple_path.parent.mkdir(parents=True)
-            swift_path.parent.mkdir(parents=True)
-            swift_test_path.parent.mkdir(parents=True)
-            generated_swift_path.parent.mkdir(parents=True)
-            archive_term = "back" + "up"
-            android_path.write_text(
+        archive_term = "back" + "up"
+        fixtures = (
+            (
+                "js/logbrew-react-native/android/src/main/java/co/logbrew/reactnative/FatalStoreModuleImpl.java",
                 f"File root = context.getNo{archive_term.title()}FilesDir();\n",
-                encoding="utf-8",
-            )
-            apple_path.write_text(
-                (
-                    "[url setResourceValue:@YES "
-                    f"forKey:NSURLIsExcludedFrom{archive_term.title()}Key error:nil];\n"
-                ),
-                encoding="utf-8",
-            )
-            swift_path.write_text(
+                True,
+            ),
+            (
+                "js/logbrew-react-native/ios/LBRNFatalStoreModule.mm",
+                f"[url setResourceValue:@YES forKey:NSURLIsExcludedFrom{archive_term.title()}Key error:nil];\n",
+                False,
+            ),
+            (
+                "swift/logbrew-swift/Sources/LogBrewCrash/CrashStorageDirectory.swift",
                 f"values.isExcludedFrom{archive_term.title()} = true\n",
-                encoding="utf-8",
-            )
-            swift_test_path.write_text(
+                True,
+            ),
+            (
+                "swift/logbrew-swift/Tests/LogBrewCrashTests/NativeHangIncidentStoreTests.swift",
                 f"#expect(values.isExcludedFrom{archive_term.title()} == true)\n",
-                encoding="utf-8",
-            )
-            generated_swift_path.write_text(
+                True,
+            ),
+            (
+                "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/LogBrewCrash/CrashStorageDirectory.swift",
                 f"values.isExcludedFrom{archive_term.title()} = true\n",
-                encoding="utf-8",
-            )
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            android_path.write_text(
-                android_path.read_text(encoding="utf-8")
-                + f"// arbitrary {archive_term} language remains forbidden\n",
-                encoding="utf-8",
-            )
-            swift_path.write_text(
-                swift_path.read_text(encoding="utf-8")
-                + f"// arbitrary {archive_term} language remains forbidden\n",
-                encoding="utf-8",
-            )
-            swift_test_path.write_text(
-                swift_test_path.read_text(encoding="utf-8")
-                + f"// arbitrary {archive_term} language remains forbidden\n",
-                encoding="utf-8",
-            )
-            unrelated = root / "Other.java"
-            unrelated.write_text(
-                f"context.getNo{archive_term.title()}FilesDir();\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-
+                False,
+            ),
+        )
+        rejected = {
+            relative: content + f"// arbitrary {archive_term} language remains forbidden\n"
+            for relative, content, reject_suffix in fixtures
+            if reject_suffix
+        }
+        rejected["Other.java"] = f"context.getNo{archive_term.title()}FilesDir();\n"
+        failures = self.assert_fixture_policy(
+            {relative: content for relative, content, _ in fixtures},
+            rejected,
+        )
         self.assertEqual(len(failures), 4)
         self.assertTrue(any("arbitrary" in failure for failure in failures))
-        self.assertTrue(any("Other.java" in failure for failure in failures))
-        self.assertTrue(any("CrashStorageDirectory.swift" in failure for failure in failures))
-        self.assertTrue(any("NativeHangIncidentStoreTests.swift" in failure for failure in failures))
+        expected_paths = {f"./{path}" for path, _, reject_suffix in fixtures if reject_suffix}
+        self.assertEqual(
+            {failure.split(":", 1)[0] for failure in failures},
+            expected_paths | {"./Other.java"},
+        )
 
     def test_repo_confidentiality_scan_passes(self) -> None:
         self.assertEqual(check_confidentiality_scan.validate(ROOT), [])
 
     def test_allows_intentional_sdk_fixture_terms(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "js" / "logbrew-angular").mkdir(parents=True)
-            (root / "scripts").mkdir()
-            (root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew").mkdir(parents=True)
-            (root / "unity" / "logbrew-unity" / "Runtime").mkdir(parents=True)
-            (root / "python" / "logbrew_py" / "src" / "logbrew_sdk").mkdir(parents=True)
-            angular_keyword = "Injection" + "To" + "ken"
-            fake_query = "?to" + "ken=sec" + "ret"
-            cleaner_name = "clean" + "up"
-            cancellation_source = "Cancellation" + "To" + "kenSource"
-            cancellation_member = ".To" + "ken"
-            (root / "js" / "logbrew-angular" / "index.js").write_text(
-                f'export const LOG_BREW_ANGULAR_CONTEXT = new {angular_keyword}("LogBrew Angular context");\n',
-                encoding="utf-8",
-            )
-            (root / "scripts" / "real_user_node_smoke.sh").write_text(
-                f"fetch(`http://127.0.0.1:3000/fail{fake_query}`)\n"
+        angular_keyword = "Injection" + "To" + "ken"
+        fake_query = "?to" + "ken=sec" + "ret"
+        cleaner_name = "clean" + "up"
+        cancellation_source = "Cancellation" + "To" + "kenSource"
+        cancellation_member = ".To" + "ken"
+        self.assert_fixture_policy(
+            {
+                "js/logbrew-angular/index.js": f'export const LOG_BREW_ANGULAR_CONTEXT = new {angular_keyword}("LogBrew Angular context");\n',
+                "scripts/real_user_node_smoke.sh": f"fetch(`http://127.0.0.1:3000/fail{fake_query}`)\n"
                 f"{cleaner_name}() {{\n"
                 "}\n",
-                encoding="utf-8",
-            )
-            (root / "scripts" / "real_user_dotnet_smoke.sh").write_text(
-                f"private readonly Cancellation{cancellation_member}Source cancellation = new {cancellation_source}();\n",
-                encoding="utf-8",
-            )
-            (root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew" / "LogBrew.cs").write_text(
-                "#pragma warning " + "rest" + "ore CA1031\n"
+                "scripts/real_user_dotnet_smoke.sh": f"private readonly Cancellation{cancellation_member}Source cancellation = new {cancellation_source}();\n",
+                "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.cs": "#pragma warning " + "rest" + "ore CA1031\n"
                 "return SendAsync(request, cancellation" + "To" + "ken);\n",
-                encoding="utf-8",
-            )
-            (root / "unity" / "logbrew-unity" / "Runtime" / "PublicTypes.cs").write_text(
-                f"using var cancellation = new {cancellation_source}();\n"
+                "unity/logbrew-unity/Runtime/PublicTypes.cs": f"using var cancellation = new {cancellation_source}();\n"
                 f"await client.SendAsync(request, cancellation{cancellation_member}).ConfigureAwait(false);\n",
-                encoding="utf-8",
-            )
-            (root / "python" / "logbrew_py" / "src" / "logbrew_sdk" / "_db_client.py").write_text(
-                "_DB_SPAN_EVENT_METADATA_DENYLIST = (\n"
+                "python/logbrew_py/src/logbrew_sdk/_db_client.py": "_DB_SPAN_EVENT_METADATA_DENYLIST = (\n"
                 f'    "sec{"ret"}",\n'
                 f'    "to{"ken"}",\n'
                 ")\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+            }
+        )
 
     def test_pino_privacy_allowlist_is_exact(self) -> None:
         sensitive_name = "to" + "ken"
         allowed_line = f'requestUrl: "/checkout/42?{sensitive_name}=hidden",'
-        self.assertTrue(
-            check_confidentiality_scan.is_js_pino_privacy_reference(
-                "js/logbrew-js/test/sdk.test.js",
-                allowed_line,
-            )
-        )
-        self.assertFalse(
-            check_confidentiality_scan.is_js_pino_privacy_reference(
-                "js/logbrew-js/test/sdk.test.js",
-                f'console.log("arbitrary {sensitive_name}")',
-            )
-        )
         fastify_readme = ROOT / "js" / "logbrew-fastify" / "README.md"
         fastify_line = next(
             line
             for line in fastify_readme.read_text(encoding="utf-8").splitlines()
             if line.startswith("Primitive structured fields become bounded LogBrew metadata.")
         )
-        self.assertTrue(
-            check_confidentiality_scan.is_js_pino_privacy_reference(
-                "js/logbrew-fastify/README.md",
-                fastify_line,
-            )
+        cases = (
+            ("js/logbrew-js/test/sdk.test.js", allowed_line, True),
+            (
+                "js/logbrew-js/test/sdk.test.js",
+                f'console.log("arbitrary {sensitive_name}")',
+                False,
+            ),
+            ("js/logbrew-fastify/README.md", fastify_line, True),
+            ("js/logbrew-fastify/README.md", fastify_line + " Extra text.", False),
         )
-        self.assertFalse(
-            check_confidentiality_scan.is_js_pino_privacy_reference(
-                "js/logbrew-fastify/README.md",
-                fastify_line + " Extra text.",
-            )
-        )
+        for path, line, expected in cases:
+            with self.subTest(path=path, line=line):
+                self.assertEqual(
+                    check_confidentiality_scan.is_js_pino_privacy_reference(path, line),
+                    expected,
+                )
 
     def test_go_gin_privacy_allowlist_is_path_and_line_scoped(self) -> None:
         sensitive_name = "to" + "ken"
         allowed_line = (
-            'request := httptest.NewRequest(http.MethodGet, '
-            f'"/profiles/private-user?{sensitive_name}=private", nil)'
+            f'request := httptest.NewRequest(http.MethodGet, "/profiles/private-user?{sensitive_name}=private", nil)'
         )
         path = "go/logbrew/gin/middleware_test.go"
 
-        self.assertTrue(
-            check_confidentiality_scan.is_go_gin_privacy_reference(path, allowed_line)
-        )
+        self.assertTrue(check_confidentiality_scan.is_go_gin_privacy_reference(path, allowed_line))
         self.assertFalse(
-            check_confidentiality_scan.is_go_gin_privacy_reference(
-                "go/logbrew/gin/unrelated.go", allowed_line
-            )
+            check_confidentiality_scan.is_go_gin_privacy_reference("go/logbrew/gin/unrelated.go", allowed_line)
         )
-        self.assertFalse(
-            check_confidentiality_scan.is_go_gin_privacy_reference(
-                path, allowed_line + " // extra"
-            )
-        )
+        self.assertFalse(check_confidentiality_scan.is_go_gin_privacy_reference(path, allowed_line + " // extra"))
 
     def test_allows_only_exact_dotnet_release_compatibility_terms(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workflow_dir = root / ".github" / "workflows"
-            scripts_dir = root / "scripts"
-            tests_dir = root / "tests"
-            unrelated_dir = root / "dotnet"
-            workflow_dir.mkdir(parents=True)
-            scripts_dir.mkdir()
-            tests_dir.mkdir()
-            unrelated_dir.mkdir()
-            dependency_action = "rest" + "ore"
-            identity_member = "PublicKey" + "To" + "ken"
-            identity_value = "to" + "ken"
-            (workflow_dir / "publish-nuget.yml").write_text(
-                f"dotnet {dependency_action} dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj\n"
+        dependency_action = "rest" + "ore"
+        identity_member = "PublicKey" + "To" + "ken"
+        identity_value = "to" + "ken"
+        failures = self.assert_fixture_policy(
+            {
+                ".github/workflows/publish-nuget.yml": f"dotnet {dependency_action} dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj\n"
                 f"dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-{dependency_action}\n",
-                encoding="utf-8",
-            )
-            (scripts_dir / "real_user_dotnet_httpclient_package_compatibility_smoke.sh").write_text(
-                f"Get{identity_member}()\n"
+                "scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh": f"Get{identity_member}()\n"
                 f'return {identity_value} == null || {identity_value}.Length == 0 ? "unsigned" '
                 f": Convert.ToHexString({identity_value}).ToLowerInvariant();\n",
-                encoding="utf-8",
-            )
-            (tests_dir / "test_dotnet_httpclient_package_compatibility_smoke.py").write_text(
-                f'"Get{identity_member}"\n',
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            (unrelated_dir / "Other.cs").write_text(
-                f"Get{identity_member}()\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-
+                "tests/test_dotnet_httpclient_package_compatibility_smoke.py": f'"Get{identity_member}"\n',
+            },
+            {"dotnet/Other.cs": f"Get{identity_member}()\n"},
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn("Other.cs", failures[0])
 
     def test_allows_only_exact_reusable_workflow_inheritance(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workflow_dir = root / ".github" / "workflows"
-            workflow_dir.mkdir(parents=True)
-            inheritance_key = "se" + "crets"
-            (workflow_dir / "publish-packages.yml").write_text(
-                f"{inheritance_key}: inherit\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            (workflow_dir / "other.yml").write_text(
-                f"{inheritance_key}: inherit\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-
+        inheritance_key = "se" + "crets"
+        failures = self.assert_fixture_policy(
+            {".github/workflows/publish-packages.yml": f"{inheritance_key}: inherit\n"},
+            {".github/workflows/other.yml": f"{inheritance_key}: inherit\n"},
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn("other.yml", failures[0])
 
     def test_allows_only_standard_github_workflow_authorization_placeholders(
         self,
     ) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workflow_dir = root / ".github" / "workflows"
-            workflow_dir.mkdir(parents=True)
-            sensitive_name = "to" + "ken"
-            workflow = workflow_dir / "reconcile.yml"
-            workflow.write_text(
-                f"GITHUB_AUTHORIZATION: ${{{{ github.{sensitive_name} }}}}\n"
-                f"github-{sensitive_name}: ${{{{ github.{sensitive_name} }}}}\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            workflow.write_text(
-                f"github-{sensitive_name}: untrusted-value\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-
+        sensitive_name = "to" + "ken"
+        workflow = ".github/workflows/reconcile.yml"
+        failures = self.assert_fixture_policy(
+            {
+                workflow: f"GITHUB_AUTHORIZATION: ${{{{ github.{sensitive_name} }}}}\n"
+                f"github-{sensitive_name}: ${{{{ github.{sensitive_name} }}}}\n"
+            },
+            {workflow: f"github-{sensitive_name}: untrusted-value\n"},
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn("reconcile.yml", failures[0])
 
     def test_allows_only_exact_python_registry_host_property_checks(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            scripts_dir = root / "scripts"
-            scripts_dir.mkdir()
-            smoke = scripts_dir / "real_user_python_public_pypi_smoke.sh"
-            host_member = "host" + "name"
-            smoke.write_text(
-                f'if parsed.scheme != "https" or parsed.{host_member} != "files.pythonhosted.org":\n'
-                f'if final_url.scheme != "https" or final_url.{host_member} != "files.pythonhosted.org":\n',
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            (scripts_dir / "other.py").write_text(
-                f"print(request.{host_member})\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-
+        host_member = "host" + "name"
+        failures = self.assert_fixture_policy(
+            {
+                "scripts/real_user_python_public_pypi_smoke.sh": f'if parsed.scheme != "https" or parsed.{host_member} != "files.pythonhosted.org":\n'
+                f'if final_url.scheme != "https" or final_url.{host_member} != "files.pythonhosted.org":\n'
+            },
+            {"scripts/other.py": f"print(request.{host_member})\n"},
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn("other.py", failures[0])
 
     def test_allows_generated_brand_svg_image_carriers(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            brand_dir = root / "assets" / "brand"
-            brand_dir.mkdir(parents=True)
-            sensitive_line = "embedded generated image carrier to" + "ken-shaped base64 text\n"
-            (brand_dir / "logbrew-logo-espresso-bg-512.svg").write_text(
-                sensitive_line,
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+        sensitive_line = "embedded generated image carrier to" + "ken-shaped base64 text\n"
+        self.assert_fixture_policy({"assets/brand/logbrew-logo-espresso-bg-512.svg": sensitive_line})
 
     def test_allows_only_exact_java_aes_key_spec_references(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            package_dir = root / "java" / "logbrew-java" / "src" / "main" / "java" / "co" / "logbrew" / "sdk"
-            package_dir.mkdir(parents=True)
-            crypto = package_dir / "PersistenceCrypto.java"
-            key_spec = "Sec" + "retKeySpec"
-            crypto.write_text(
-                f"import javax.crypto.spec.{key_spec};\n"
-                f'new {key_spec}(key, "AES"),\n',
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            unsafe_name = "raw" + "Sec" + "ret"
-            crypto.write_text(
-                f"import javax.crypto.spec.{key_spec};\n"
-                f'new {key_spec}({unsafe_name}, "AES"),\n',
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-
+        crypto = "java/logbrew-java/src/main/java/co/logbrew/sdk/PersistenceCrypto.java"
+        key_spec = "Sec" + "retKeySpec"
+        unsafe_name = "raw" + "Sec" + "ret"
+        failures = self.assert_fixture_policy(
+            {crypto: f'import javax.crypto.spec.{key_spec};\nnew {key_spec}(key, "AES"),\n'},
+            {crypto: f'import javax.crypto.spec.{key_spec};\nnew {key_spec}({unsafe_name}, "AES"),\n'},
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn(unsafe_name, failures[0])
 
     def test_allows_sdk_instrumentation_uninstall_terms(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            package_dir = root / "js" / "logbrew-kafkajs"
-            package_dir.mkdir(parents=True)
-            scripts_dir = root / "scripts"
-            scripts_dir.mkdir()
-            undo_member = "rest" + "ores"
-            undo_label = "rest" + "ores"
-            (package_dir / "index.js").write_text(
-                f'state.{undo_member}.push(installMethod(producer, "send", () => {{}}));\n'
+        undo_member = "rest" + "ores"
+        undo_label = "rest" + "ores"
+        self.assert_fixture_policy(
+            {
+                "js/logbrew-kafkajs/index.js": f'state.{undo_member}.push(installMethod(producer, "send", () => {{}}));\n'
                 f"state.{undo_member}.pop()();\n",
-                encoding="utf-8",
-            )
-            (scripts_dir / "real_user_kafkajs_smoke.sh").write_text(
-                f'assertEqual(client.pendingEvents(), pendingAfterUninstall, "uninstall {undo_label} original send");\n',
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+                "scripts/real_user_kafkajs_smoke.sh": f'assertEqual(client.pendingEvents(), pendingAfterUninstall, "uninstall {undo_label} original send");\n',
+            }
+        )
 
     def test_allows_only_the_kscrash_report_deletion_policy_symbol(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source_dir = root / "swift" / "logbrew-swift" / "Sources" / "LogBrewCrash"
-            source_dir.mkdir(parents=True)
-            generated_dir = (
-                root
-                / "js"
-                / "logbrew-react-native"
-                / "ios"
-                / "GeneratedAppleDiagnostics"
-                / "LogBrewCrash"
-            )
-            generated_dir.mkdir(parents=True)
-            policy = "reportClean" + "upPolicy"
-            (source_dir / "CrashEngine.swift").write_text(
-                f"configuration.{policy} = .never\n",
-                encoding="utf-8",
-            )
-            (generated_dir / "CrashEngine.swift").write_text(
-                f"configuration.{policy} = .never\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            (source_dir / "Other.swift").write_text(
-                f"unexpected {policy}\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-            self.assertEqual(len(failures), 1)
-            self.assertIn("Other.swift", failures[0])
+        source_dir = "swift/logbrew-swift/Sources/LogBrewCrash"
+        generated_dir = "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/LogBrewCrash"
+        policy = "reportClean" + "upPolicy"
+        failures = self.assert_fixture_policy(
+            {
+                f"{directory}/CrashEngine.swift": f"configuration.{policy} = .never\n"
+                for directory in (source_dir, generated_dir)
+            },
+            {f"{source_dir}/Other.swift": f"unexpected {policy}\n"},
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn("Other.swift", failures[0])
 
     def test_allows_apple_durable_storage_terms_only_in_owned_files(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            durable_dir = root / "swift" / "logbrew-swift" / "Sources" / "LogBrew"
-            durable_dir.mkdir(parents=True)
-            allowed = durable_dir / "DurableDeliveryStoreRecovery.swift"
-            archive_label = "back" + "up"
-            cleaner_name = "clean" + "up"
-            allowed.write_text(
-                f"exclude durable files from {archive_label} and {cleaner_name} invalid records\n",
-                encoding="utf-8",
-            )
-            generated_dir = (
-                root
-                / "js"
-                / "logbrew-react-native"
-                / "ios"
-                / "GeneratedAppleDiagnostics"
-                / "LogBrew"
-            )
-            generated_dir.mkdir(parents=True)
-            (generated_dir / "DurableDeliveryStoreRecovery.swift").write_text(
-                f"exclude durable files from {archive_label} and {cleaner_name} invalid records\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
-
-            unrelated = durable_dir / "DeliveryEngine.swift"
-            unrelated.write_text(
-                f"unexpected {archive_label} {cleaner_name} guidance\n",
-                encoding="utf-8",
-            )
-            failures = check_confidentiality_scan.validate(root)
-            self.assertEqual(len(failures), 1)
-            self.assertIn("DeliveryEngine.swift", failures[0])
+        durable_dir = "swift/logbrew-swift/Sources/LogBrew"
+        generated_dir = "js/logbrew-react-native/ios/GeneratedAppleDiagnostics/LogBrew"
+        archive_label = "back" + "up"
+        cleaner_name = "clean" + "up"
+        failures = self.assert_fixture_policy(
+            {
+                f"{directory}/DurableDeliveryStoreRecovery.swift": f"exclude durable files from {archive_label} and {cleaner_name} invalid records\n"
+                for directory in (durable_dir, generated_dir)
+            },
+            {f"{durable_dir}/DeliveryEngine.swift": f"unexpected {archive_label} {cleaner_name} guidance\n"},
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn("DeliveryEngine.swift", failures[0])
 
     def test_allows_maven_central_preflight_secret_names_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workflow_dir = root / ".github" / "workflows"
-            workflow_dir.mkdir(parents=True)
-            scripts_dir = root / "scripts"
-            scripts_dir.mkdir()
-            tests_dir = root / "tests"
-            tests_dir.mkdir()
-            (workflow_dir / "publish-packages.yml").write_text(
-                "CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}\n"
+        self.assert_fixture_policy(
+            {
+                ".github/workflows/publish-packages.yml": "CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}\n"
                 "CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}\n",
-                encoding="utf-8",
-            )
-            (scripts_dir / "check_maven_central_auth_preflight.sh").write_text(
-                '${CENTRAL_PORTAL_PASSWORD:-}\n'
+                "scripts/check_maven_central_auth_preflight.sh": "${CENTRAL_PORTAL_PASSWORD:-}\n"
                 "os.environ['CENTRAL_PORTAL_USERNAME']\n"
                 "os.environ['CENTRAL_PORTAL_PASSWORD']\n"
                 "generated Central Portal publishing values\n",
-                encoding="utf-8",
-            )
-            (tests_dir / "test_maven_central_auth_preflight.py").write_text(
-                '"CENTRAL_PORTAL_PASSWORD": password\n'
-                '"fixture-user-token"\n'
-                '"fixture-secret-token"\n',
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+                "tests/test_maven_central_auth_preflight.py": '"CENTRAL_PORTAL_PASSWORD": password\n"fixture-user-token"\n"fixture-secret-token"\n',
+            }
+        )
 
     def test_allows_release_artifact_build_auth_boundaries(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            js_dir = root / "js" / "logbrew-js"
-            next_dir = root / "js" / "logbrew-next"
-            js_dir.mkdir(parents=True)
-            next_dir.mkdir(parents=True)
-            auth_option = "to" + "kenEnv"
-            (js_dir / "release-artifacts-build.cjs").write_text(
-                f"const {auth_option} = upload.{auth_option};\n",
-                encoding="utf-8",
-            )
-            (next_dir / "release-artifacts.d.ts").write_text(
-                f"{auth_option}?: string;\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+        auth_option = "to" + "kenEnv"
+        self.assert_fixture_policy(
+            {
+                "js/logbrew-js/release-artifacts-build.cjs": f"const {auth_option} = upload.{auth_option};\n",
+                "js/logbrew-next/release-artifacts.d.ts": f"{auth_option}?: string;\n",
+            }
+        )
 
     def test_allows_exact_react_native_diagnostics_endpoint_guards(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            js_path = root / "js" / "logbrew-react-native" / "apple-native-diagnostics.js"
-            swift_path = (
-                root
-                / "js"
-                / "logbrew-react-native"
-                / "ios"
-                / "AppleDiagnostics"
-                / "LBRNAppleNativeDiagnostics.swift"
-            )
-            js_path.parent.mkdir(parents=True)
-            swift_path.parent.mkdir(parents=True)
-            field = "pass" + "word"
-            js_path.write_text(f"if (parsed.{field}) reject();\n", encoding="utf-8")
-            swift_path.write_text(
-                f"components.{field} == nil,\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+        field = "pass" + "word"
+        self.assert_fixture_policy(
+            {
+                "js/logbrew-react-native/apple-native-diagnostics.js": f"if (parsed.{field}) reject();\n",
+                "js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift": f"components.{field} == nil,\n",
+            }
+        )
 
     def test_reports_unexpected_sensitive_terms(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            sensitive_line = "production " + "pass" + "word: hunter2\n"
-            (root / "README.md").write_text(sensitive_line, encoding="utf-8")
-
-            failures = check_confidentiality_scan.validate(root)
-
+        sensitive_line = "production " + "pass" + "word: hunter2\n"
+        failures = self.scan_fixture({"README.md": sensitive_line})
         self.assertEqual(len(failures), 1)
         self.assertIn("production " + "pass" + "word", failures[0])
 
     def test_sensitive_match_does_not_cross_identifier_boundaries(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source_dir = root / "java" / "logbrew-java" / "src" / "main" / "java"
-            source_dir.mkdir(parents=True)
-            source = source_dir / "AutomaticDeliveryController.java"
-            source.write_text(
-                "ProcessHandle owner = ProcessHandle.current();\n"
-                "return ProcessHandle.current().equals(owner);\n",
-                encoding="utf-8",
-            )
-            remote_term = "s" + "sh_private_key"
-            unsafe = root / "unsafe.txt"
-            unsafe.write_text(f"{remote_term}=fixture\n", encoding="utf-8")
-
-            failures = check_confidentiality_scan.validate(root)
-
+        remote_term = "s" + "sh_private_key"
+        failures = self.scan_fixture(
+            {
+                "java/logbrew-java/src/main/java/AutomaticDeliveryController.java": "ProcessHandle owner = ProcessHandle.current();\nreturn ProcessHandle.current().equals(owner);\n",
+                "unsafe.txt": f"{remote_term}=fixture\n",
+            }
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn(remote_term, failures[0])
 
     def test_reports_forbidden_public_planning_files(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "skills-lock.json").write_text('{"version": 1}\n', encoding="utf-8")
-
-            failures = check_confidentiality_scan.validate(root)
-
+        failures = self.scan_fixture({"skills-lock.json": '{"version": 1}\n'})
         self.assertEqual(len(failures), 1)
         self.assertIn("skills-lock.json", failures[0])
         self.assertIn("forbidden public planning file", failures[0])
 
     def test_allows_public_safe_root_agent_guide(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
-            (root / "AGENTS.md").write_text(
-                "# SDK contributor guidance\n\n"
-                "Run the focused package checks before repository-wide checks.\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+        failures = self.scan_fixture(
+            {
+                "AGENTS.md": "# SDK contributor guidance\n\nRun the focused package checks before repository-wide checks.\n",
+            },
+            git_repository=True,
+        )
+        self.assertEqual(failures, [])
 
     def test_allows_public_safe_nested_agent_guides(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
-            nested_root = root / "js"
-            nested_root.mkdir()
-            for filename in ("AGENTS.md", "AGENTS.override.md"):
-                (nested_root / filename).write_text(
-                    "# Package contributor guidance\n",
-                    encoding="utf-8",
-                )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+        failures = self.scan_fixture(
+            {f"js/{filename}": "# Package contributor guidance\n" for filename in ("AGENTS.md", "AGENTS.override.md")},
+            git_repository=True,
+        )
+        self.assertEqual(failures, [])
 
     def test_scans_nested_agent_guides_normally(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
-            nested_root = root / "js"
-            nested_root.mkdir()
-            sensitive_term = "pass" + "word"
-            for filename in ("AGENTS.md", "AGENTS.override.md"):
-                (nested_root / filename).write_text(
-                    f"Use the production {sensitive_term} from a local file.\n",
-                    encoding="utf-8",
-                )
-
-            failures = check_confidentiality_scan.validate(root)
-
+        sensitive_term = "pass" + "word"
+        failures = self.scan_fixture(
+            {
+                f"js/{filename}": f"Use the production {sensitive_term} from a local file.\n"
+                for filename in ("AGENTS.md", "AGENTS.override.md")
+            },
+            git_repository=True,
+        )
         self.assertEqual(len(failures), 2)
         self.assertTrue(all(sensitive_term in failure for failure in failures))
 
     def test_scans_root_agent_guide_content_normally(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
-            sensitive_term = "pass" + "word"
-            (root / "AGENTS.md").write_text(
-                f"Use the production {sensitive_term} from a local file.\n",
-                encoding="utf-8",
-            )
-
-            failures = check_confidentiality_scan.validate(root)
-
+        sensitive_term = "pass" + "word"
+        failures = self.scan_fixture(
+            {
+                "AGENTS.md": f"Use the production {sensitive_term} from a local file.\n",
+            },
+            git_repository=True,
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn(sensitive_term, failures[0])
 
@@ -727,23 +446,12 @@ class ConfidentialityScanTests(unittest.TestCase):
         )
         for relative_path, home_path, should_report in cases:
             with self.subTest(relative_path=relative_path):
-                with tempfile.TemporaryDirectory() as tmp:
-                    root = Path(tmp)
-                    subprocess.run(
-                        ["git", "init"],
-                        cwd=root,
-                        check=True,
-                        stdout=subprocess.DEVNULL,
-                    )
-                    guide = root / relative_path
-                    guide.parent.mkdir(parents=True, exist_ok=True)
-                    guide.write_text(
-                        f"Read additional guidance from {home_path}.\n",
-                        encoding="utf-8",
-                    )
-
-                    failures = check_confidentiality_scan.validate(root)
-
+                failures = self.scan_fixture(
+                    {
+                        relative_path: f"Read additional guidance from {home_path}.\n",
+                    },
+                    git_repository=True,
+                )
                 if should_report:
                     self.assertEqual(len(failures), 1)
                     self.assertIn(home_path, failures[0])
@@ -751,41 +459,30 @@ class ConfidentialityScanTests(unittest.TestCase):
                     self.assertEqual(failures, [])
 
     def test_reports_public_research_memory_and_private_plan_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            research = root / "docs" / "competitor-research"
-            private_plans = root / "docs" / "private-plans"
-            research.mkdir(parents=True)
-            private_plans.mkdir(parents=True)
-            (research / "transport.md").write_text("Public source notes\n", encoding="utf-8")
-            (private_plans / "task.md").write_text("Local task notes\n", encoding="utf-8")
-            (root / "memory.md").write_text("SDK lane memory\n", encoding="utf-8")
-
-            failures = check_confidentiality_scan.validate(root)
-
+        failures = self.scan_fixture(
+            {
+                "docs/competitor-research/transport.md": "Public source notes\n",
+                "docs/private-plans/task.md": "Local task notes\n",
+                "memory.md": "SDK lane memory\n",
+            }
+        )
         self.assertEqual(len(failures), 3)
         self.assertTrue(any("docs/competitor-research" in failure for failure in failures))
         self.assertTrue(any("docs/private-plans" in failure for failure in failures))
         self.assertTrue(any("memory.md" in failure for failure in failures))
 
     def test_allows_local_ignored_agent_redirect_and_plans(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
-            (root / ".gitignore").write_text("AGENTS.md\nplans/\n", encoding="utf-8")
-            sensitive_term = "cre" + "dential"
-            planning_term = "stra" + "tegy"
-            (root / "AGENTS.md").write_text(
-                f"Read private guidance. Do not copy {sensitive_term} or backend/storage details.\n",
-                encoding="utf-8",
-            )
-            (root / "plans").mkdir()
-            (root / "plans" / "private-plan.md").write_text(
-                f"Local private plan with {planning_term} notes.\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(check_confidentiality_scan.validate(root), [])
+        sensitive_term = "cre" + "dential"
+        planning_term = "stra" + "tegy"
+        failures = self.scan_fixture(
+            {
+                ".gitignore": "AGENTS.md\nplans/\n",
+                "AGENTS.md": f"Read private guidance. Do not copy {sensitive_term} or backend/storage details.\n",
+                "plans/private-plan.md": f"Local private plan with {planning_term} notes.\n",
+            },
+            git_repository=True,
+        )
+        self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":

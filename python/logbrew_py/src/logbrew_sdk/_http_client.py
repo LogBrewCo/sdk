@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from importlib import import_module
 from time import perf_counter
 from typing import Any, TypeAlias, cast
@@ -45,51 +46,35 @@ def urlopen_with_logbrew_span(
     source_request = _request_from_input(request, data)
     traced_request = _clone_request_with_traceparent(source_request, child_trace)
     method = traced_request.get_method().upper()
-    route = _route_from_request(traced_request, route_template)
+    route = _route_from_url(traced_request.full_url, route_template)
     open_callable = open_url or urlopen
     read_clock = clock or perf_counter
     start = read_clock()
+    capture = _HttpSpanCapture(
+        client=client,
+        event_id=event_id,
+        timestamp=timestamp,
+        trace=child_trace,
+        method=method,
+        route=route,
+        metadata=metadata,
+        on_capture_error=on_capture_error,
+        source="urllib.request",
+        clock=read_clock,
+        start=start,
+    )
 
     with use_logbrew_trace(child_trace):
         try:
             response = _call_urlopen(open_callable, traced_request, timeout)
         except Exception as error:
-            duration_ms = _instrumentation.duration_ms(start, read_clock)
-            _capture_http_span(
-                client,
-                event_id,
-                timestamp,
-                child_trace,
-                method,
-                route,
-                "error",
-                duration_ms,
-                metadata,
-                _status_from_error(error),
-                error,
-                on_capture_error,
-                "urllib.request",
-            )
+            capture.failed(error)
             raise
 
     duration_ms = _instrumentation.duration_ms(start, read_clock)
     status_code = _status_from_response(response)
     span_status = "error" if status_code is not None and status_code >= 400 else "ok"
-    _capture_http_span(
-        client,
-        event_id,
-        timestamp,
-        child_trace,
-        method,
-        route,
-        span_status,
-        duration_ms,
-        metadata,
-        status_code,
-        None,
-        on_capture_error,
-        "urllib.request",
-    )
+    capture.record(span_status, duration_ms, status_code, None)
     return response
 
 
@@ -114,13 +99,13 @@ def requests_request_with_logbrew_span(
 ) -> Any:
     """Run a caller-owned ``requests`` call under a LogBrew child span and W3C trace header."""
 
-    return _sync_request_with_logbrew_span(
+    return _request_with_logbrew_span(
         method,
         url,
         client=client,
         event_id=event_id,
         timestamp=timestamp,
-        request_callable=_requests_callable(request=request, session=session),
+        request_callable=_default_request_callable(request=request, session=session, dependency="requests"),
         headers=headers,
         timeout=timeout,
         trace=trace,
@@ -155,13 +140,13 @@ def httpx_request_with_logbrew_span(
 ) -> Any:
     """Run a caller-owned sync ``httpx`` request under a LogBrew child span."""
 
-    return _sync_request_with_logbrew_span(
+    return _request_with_logbrew_span(
         method,
         url,
         client=client,
         event_id=event_id,
         timestamp=timestamp,
-        request_callable=_httpx_callable(request=request, session=session),
+        request_callable=_default_request_callable(request=request, session=session, dependency="httpx"),
         headers=headers,
         timeout=timeout,
         trace=trace,
@@ -196,7 +181,7 @@ async def async_httpx_request_with_logbrew_span(
 ) -> Any:
     """Run a caller-owned async ``httpx`` request under a LogBrew child span."""
 
-    return await _async_request_with_logbrew_span(
+    return await _request_with_logbrew_span(
         method,
         url,
         client=client,
@@ -213,6 +198,7 @@ async def async_httpx_request_with_logbrew_span(
         on_capture_error=on_capture_error,
         source="httpx.async",
         request_kwargs=request_kwargs,
+        asynchronous=True,
     )
 
 
@@ -237,7 +223,7 @@ async def aiohttp_request_with_logbrew_span(
 ) -> Any:
     """Run a caller-owned async ``aiohttp`` request under a LogBrew child span."""
 
-    return await _async_request_with_logbrew_span(
+    return await _request_with_logbrew_span(
         method,
         str(url),
         client=client,
@@ -254,17 +240,18 @@ async def aiohttp_request_with_logbrew_span(
         on_capture_error=on_capture_error,
         source="aiohttp",
         request_kwargs=request_kwargs,
+        asynchronous=True,
     )
 
 
-def _sync_request_with_logbrew_span(
+def _request_with_logbrew_span(
     method: str,
     url: str,
     *,
     client: Any,
     event_id: str,
     timestamp: str | None,
-    request_callable: RequestCallable,
+    request_callable: RequestCallable | AsyncRequestCallable,
     headers: Mapping[str, str] | None,
     timeout: Any | None,
     trace: LogBrewTraceContext | None,
@@ -275,6 +262,7 @@ def _sync_request_with_logbrew_span(
     on_capture_error: Callable[[Exception], None] | None,
     source: str,
     request_kwargs: Mapping[str, Any],
+    asynchronous: bool = False,
 ) -> Any:
     method_value = _method_name(method)
     _require_url(url)
@@ -284,106 +272,41 @@ def _sync_request_with_logbrew_span(
     route = _route_from_url(url, route_template)
     read_clock = clock or perf_counter
     start = read_clock()
+    capture = _HttpSpanCapture(
+        client=client,
+        event_id=event_id,
+        timestamp=timestamp,
+        trace=child_trace,
+        method=method_value,
+        route=route,
+        metadata=metadata,
+        on_capture_error=on_capture_error,
+        source=source,
+        clock=read_clock,
+        start=start,
+    )
+
+    async def async_request() -> Any:
+        with use_logbrew_trace(child_trace):
+            try:
+                response = await request_callable(method, url, **call_kwargs)
+            except Exception as error:
+                capture.failed(error)
+                raise
+        capture.successful(response)
+        return response
+
+    if asynchronous:
+        return async_request()
 
     with use_logbrew_trace(child_trace):
         try:
             response = request_callable(method, url, **call_kwargs)
         except Exception as error:
-            _capture_failed_http_span(
-                client,
-                event_id,
-                timestamp,
-                child_trace,
-                method_value,
-                route,
-                start,
-                read_clock,
-                metadata,
-                error,
-                on_capture_error,
-                source,
-            )
+            capture.failed(error)
             raise
 
-    _capture_successful_http_span(
-        client,
-        event_id,
-        timestamp,
-        child_trace,
-        method_value,
-        route,
-        start,
-        read_clock,
-        metadata,
-        response,
-        on_capture_error,
-        source,
-    )
-    return response
-
-
-async def _async_request_with_logbrew_span(
-    method: str,
-    url: str,
-    *,
-    client: Any,
-    event_id: str,
-    timestamp: str | None,
-    request_callable: AsyncRequestCallable,
-    headers: Mapping[str, str] | None,
-    timeout: Any | None,
-    trace: LogBrewTraceContext | None,
-    route_template: str | None,
-    metadata: Mapping[str, Any] | None,
-    span_id_factory: Callable[[], str] | None,
-    clock: _instrumentation.Clock | None,
-    on_capture_error: Callable[[Exception], None] | None,
-    source: str,
-    request_kwargs: Mapping[str, Any],
-) -> Any:
-    method_value = _method_name(method)
-    _require_url(url)
-    parent_trace = trace if trace is not None else get_active_logbrew_trace()
-    child_trace = _instrumentation.child_trace(parent_trace, span_id_factory)
-    call_kwargs = _outbound_request_kwargs(request_kwargs, headers, timeout, child_trace)
-    route = _route_from_url(url, route_template)
-    read_clock = clock or perf_counter
-    start = read_clock()
-
-    with use_logbrew_trace(child_trace):
-        try:
-            response = await request_callable(method, url, **call_kwargs)
-        except Exception as error:
-            _capture_failed_http_span(
-                client,
-                event_id,
-                timestamp,
-                child_trace,
-                method_value,
-                route,
-                start,
-                read_clock,
-                metadata,
-                error,
-                on_capture_error,
-                source,
-            )
-            raise
-
-    _capture_successful_http_span(
-        client,
-        event_id,
-        timestamp,
-        child_trace,
-        method_value,
-        route,
-        start,
-        read_clock,
-        metadata,
-        response,
-        on_capture_error,
-        source,
-    )
+    capture.successful(response)
     return response
 
 
@@ -398,70 +321,6 @@ def _outbound_request_kwargs(
     if timeout is not None:
         call_kwargs["timeout"] = timeout
     return call_kwargs
-
-
-def _capture_failed_http_span(
-    client: Any,
-    event_id: str,
-    timestamp: str | None,
-    trace: LogBrewTraceContext,
-    method: str,
-    route: str,
-    start: float,
-    clock: _instrumentation.Clock,
-    metadata: Mapping[str, Any] | None,
-    error: Exception,
-    on_capture_error: Callable[[Exception], None] | None,
-    source: str,
-) -> None:
-    _capture_http_span(
-        client,
-        event_id,
-        timestamp,
-        trace,
-        method,
-        route,
-        "error",
-        _instrumentation.duration_ms(start, clock),
-        metadata,
-        _status_from_error(error),
-        error,
-        on_capture_error,
-        source,
-    )
-
-
-def _capture_successful_http_span(
-    client: Any,
-    event_id: str,
-    timestamp: str | None,
-    trace: LogBrewTraceContext,
-    method: str,
-    route: str,
-    start: float,
-    clock: _instrumentation.Clock,
-    metadata: Mapping[str, Any] | None,
-    response: Any,
-    on_capture_error: Callable[[Exception], None] | None,
-    source: str,
-) -> None:
-    status_code = _status_from_response(response)
-    span_status = "error" if status_code is not None and status_code >= 400 else "ok"
-    _capture_http_span(
-        client,
-        event_id,
-        timestamp,
-        trace,
-        method,
-        route,
-        span_status,
-        _instrumentation.duration_ms(start, clock),
-        metadata,
-        status_code,
-        None,
-        on_capture_error,
-        source,
-    )
 
 
 def _request_from_input(request: str | Request, data: bytes | None) -> Request:
@@ -480,18 +339,10 @@ def _request_from_input(request: str | Request, data: bytes | None) -> Request:
 
 
 def _clone_request_with_traceparent(request: Request, trace: LogBrewTraceContext) -> Request:
-    headers = {
-        name: value
-        for name, value in request.header_items()
-        if name.lower() != "traceparent"
-    }
-    headers["traceparent"] = (
-        f"00-{trace.trace_id}-{trace.span_id}-{'01' if trace.sampled else '00'}"
-    )
     return Request(
         request.full_url,
         data=getattr(request, "data", None),
-        headers=headers,
+        headers=_headers_with_traceparent(dict(request.header_items()), trace),
         method=request.get_method(),
     )
 
@@ -502,47 +353,56 @@ def _call_urlopen(open_url: Callable[..., Any], request: Request, timeout: float
     return open_url(request, timeout=timeout)
 
 
-def _capture_http_span(
-    client: Any,
-    event_id: str,
-    timestamp: str | None,
-    trace: LogBrewTraceContext,
-    method: str,
-    route: str,
-    status: str,
-    duration_ms: float,
-    metadata: Mapping[str, Any] | None,
-    status_code: int | None,
-    error: Exception | None,
-    on_capture_error: Callable[[Exception], None] | None,
-    source: str,
-) -> None:
-    try:
-        client.span(
-            event_id,
-            timestamp or _instrumentation.now_timestamp(),
-            {
-                "name": f"{method} {route}",
-                "traceId": trace.trace_id,
-                "spanId": trace.span_id,
-                **({"parentSpanId": trace.parent_span_id} if trace.parent_span_id else {}),
-                "status": status,
-                "durationMs": duration_ms,
-                "metadata": _span_metadata(
-                    method=method,
-                    route=route,
-                    sampled=trace.sampled,
-                    metadata=metadata,
+@dataclass(slots=True)
+class _HttpSpanCapture:
+    client: Any
+    event_id: str
+    timestamp: str | None
+    trace: LogBrewTraceContext
+    method: str
+    route: str
+    metadata: Mapping[str, Any] | None
+    on_capture_error: Callable[[Exception], None] | None
+    source: str
+    clock: _instrumentation.Clock
+    start: float
+
+    def failed(self, error: Exception) -> None:
+        duration_ms = _instrumentation.duration_ms(self.start, self.clock)
+        self.record("error", duration_ms, _status_from_error(error), error)
+
+    def successful(self, response: Any) -> None:
+        status_code = _status_from_response(response)
+        status = "error" if status_code is not None and status_code >= 400 else "ok"
+        self.record(status, _instrumentation.duration_ms(self.start, self.clock), status_code, None)
+
+    def record(
+        self, status: str, duration_ms: float, status_code: int | None, error: Exception | None,
+    ) -> None:
+        try:
+            _instrumentation.capture_client_span(
+                client=self.client,
+                event_id=self.event_id,
+                timestamp=self.timestamp or _instrumentation.now_timestamp(),
+                trace=self.trace,
+                name=f"{self.method} {self.route}",
+                status=status,
+                duration_ms=duration_ms,
+                metadata=_span_metadata(
+                    method=self.method,
+                    route=self.route,
+                    sampled=self.trace.sampled,
+                    metadata=self.metadata,
                     status_code=status_code,
                     error=error,
-                    source=source,
+                    source=self.source,
                 ),
-            },
-        )
-    except Exception as capture_error:
-        if on_capture_error is not None:
-            with suppress(Exception):
-                on_capture_error(capture_error)
+                on_capture_error=self.on_capture_error,
+            )
+        except Exception as capture_error:
+            if self.on_capture_error is not None:
+                with suppress(Exception):
+                    self.on_capture_error(capture_error)
 
 
 def _span_metadata(
@@ -569,11 +429,6 @@ def _span_metadata(
     if error is not None:
         span_metadata["errorType"] = type(error).__name__
     return span_metadata
-
-
-def _route_from_request(request: Request, route_template: str | None) -> str:
-    candidate = route_template if route_template is not None else request.full_url
-    return _route_from_url(candidate, None)
 
 
 def _route_from_url(url: str, route_template: str | None) -> str:
@@ -625,40 +480,24 @@ def _headers_with_traceparent(headers: Mapping[str, str] | None, trace: LogBrewT
     return traced_headers
 
 
-def _requests_callable(
+def _default_request_callable(
     *,
     request: Callable[..., Any] | None,
     session: Any | None,
+    dependency: str,
 ) -> RequestCallable:
     if request is not None or session is not None:
-        return _single_request_callable(request=request, session=session, dependency="requests")
+        return _single_request_callable(request=request, session=session, dependency=dependency)
     try:
-        requests_request = cast("RequestCallable", import_module("requests").request)
+        default_request = cast("RequestCallable", import_module(dependency).request)
     except ImportError as error:
         raise ImportError(
-            "requests_request_with_logbrew_span requires requests to be installed or a request callable/session"
+            f"{dependency}_request_with_logbrew_span requires {dependency} to be installed "
+            "or a request callable/session"
         ) from error
-    if not callable(requests_request):
-        raise TypeError("requests.request must be callable")
-    return requests_request
-
-
-def _httpx_callable(
-    *,
-    request: Callable[..., Any] | None,
-    session: Any | None,
-) -> RequestCallable:
-    if request is not None or session is not None:
-        return _single_request_callable(request=request, session=session, dependency="httpx")
-    try:
-        httpx_request = cast("RequestCallable", import_module("httpx").request)
-    except ImportError as error:
-        raise ImportError(
-            "httpx_request_with_logbrew_span requires httpx to be installed or a request callable/session"
-        ) from error
-    if not callable(httpx_request):
-        raise TypeError("httpx.request must be callable")
-    return httpx_request
+    if not callable(default_request):
+        raise TypeError(f"{dependency}.request must be callable")
+    return default_request
 
 
 def _async_httpx_callable(
@@ -666,15 +505,10 @@ def _async_httpx_callable(
     request: Callable[..., Awaitable[Any]] | None,
     session: Any | None,
 ) -> AsyncRequestCallable:
-    if request is not None:
+    if request is not None or session is not None:
         return cast(
             "AsyncRequestCallable",
             _single_request_callable(request=request, session=session, dependency="httpx"),
-        )
-    if session is not None:
-        return cast(
-            "AsyncRequestCallable",
-            _single_request_callable(request=None, session=session, dependency="httpx"),
         )
 
     async def default_async_request(method: str, url: str, **kwargs: Any) -> Any:

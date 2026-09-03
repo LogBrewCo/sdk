@@ -4,7 +4,9 @@ set -Eeuo pipefail
 artifact_id="native:LogBrewCo/sdk"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 version="${1:-0.2.2}"
+repo_root="${LOGBREW_SDK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-native-release-public.XXXXXX")"
+toolchain_probe_bin="${LOGBREW_TOOLCHAIN_PROBE_BIN:-$tmp_dir/toolchain-probe}"
 
 if [[ $# -gt 1 ]] || { [[ "$receipt_mode" != "0" ]] && [[ "$receipt_mode" != "1" ]]; }; then
   echo "usage: $0 [version]" >&2
@@ -32,97 +34,24 @@ require_command() {
 }
 
 run_bounded_command() {
-  local stdout_path="$1"
-  local stderr_path="$2"
-  shift 2
-  BUILD_STDOUT="$stdout_path" \
-    BUILD_STDERR="$stderr_path" \
-    BUILD_TMPDIR="$tmp_dir" \
-    python3 - "$@" >"$tmp_dir/bounded-command.out" 2>"$tmp_dir/bounded-command.err" <<'PY'
-import os
-import resource
-import signal
-import subprocess
-import sys
-import time
-from pathlib import Path
-
-BUILD_TIMEOUT_SECONDS = 30
-BUILD_FILE_LIMIT_BYTES = 32 * 1024 * 1024
-stdout_path = Path(os.environ["BUILD_STDOUT"])
-stderr_path = Path(os.environ["BUILD_STDERR"])
-command = sys.argv[1:]
-if not command:
-    raise SystemExit(1)
-
-
-def child_setup() -> None:
-    os.setsid()
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (BUILD_FILE_LIMIT_BYTES, BUILD_FILE_LIMIT_BYTES))
-
-
-def terminate_group(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    deadline = time.monotonic() + 1
-    while time.monotonic() < deadline:
-        try:
-            os.killpg(process.pid, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.02)
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-
-
-environment = {
-    "HOME": os.environ["BUILD_TMPDIR"],
-    "LC_ALL": "C",
-    "PATH": os.environ.get("PATH", ""),
-    "TMPDIR": os.environ["BUILD_TMPDIR"],
-}
-with stdout_path.open("ab") as stdout_handle, stderr_path.open("ab") as stderr_handle:
-    try:
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            close_fds=True,
-            env=environment,
-            preexec_fn=child_setup,
-        )
-    except OSError:
-        raise SystemExit(1)
-    deadline = time.monotonic() + BUILD_TIMEOUT_SECONDS
-    try:
-        return_code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
-    except subprocess.TimeoutExpired:
-        terminate_group(process)
-        process.wait(timeout=2)
-        raise SystemExit(1)
-    while True:
-        try:
-            os.killpg(process.pid, 0)
-        except ProcessLookupError:
-            break
-        if time.monotonic() >= deadline:
-            terminate_group(process)
-            raise SystemExit(1)
-        time.sleep(0.02)
-if return_code != 0:
-    raise SystemExit(1)
-PY
+  local mode="$1" stdout_path="$2" stderr_path="$3"
+  shift 3
+  local timeout=30000 limit=33554432 environment=(/usr/bin/env -i "PATH=$PATH")
+  if [[ "$mode" == "runtime" ]]; then
+    timeout=5000
+    limit=65536
+  else
+    environment+=("HOME=$tmp_dir" "LC_ALL=C" "TMPDIR=$tmp_dir")
+  fi
+  "$toolchain_probe_bin" deadline "$timeout" "$limit" "${environment[@]}" "$@" \
+    >>"$stdout_path" 2>>"$stderr_path"
 }
 
 require_command python3
 require_command cc
 require_command ar
+require_command cmp
+require_command go
 
 if ! python3 - "$version" >"$tmp_dir/version.out" 2>"$tmp_dir/version.err" <<'PY'
 import re
@@ -614,6 +543,13 @@ fi
 
 build_dir="$tmp_dir/build"
 install_dir="$tmp_dir/install"
+if [[ -n "${LOGBREW_TOOLCHAIN_PROBE_BIN:-}" ]]; then
+  [[ "$toolchain_probe_bin" == /* && -f "$toolchain_probe_bin" &&
+    ! -L "$toolchain_probe_bin" && -x "$toolchain_probe_bin" ]] || fail_stage "toolchain"
+elif ! (cd "$repo_root/tools/toolchain-probe" && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off \
+  go build -o "$toolchain_probe_bin" .) >"$tmp_dir/probe-build.out" 2>"$tmp_dir/probe-build.err"; then
+  fail_stage "toolchain"
+fi
 mkdir -p "$build_dir/objects" "$install_dir/include" "$install_dir/lib" \
   >"$tmp_dir/build-setup.out" 2>"$tmp_dir/build-setup.err" \
   || fail_stage "native build"
@@ -629,22 +565,24 @@ sdk_sources=(
   "src/logbrew_trace.c"
 )
 objects=()
-for index in "${!sdk_sources[@]}"; do
-  object="$build_dir/objects/${index}.o"
-  if ! run_bounded_command "$tmp_dir/build.out" "$tmp_dir/build.err" cc \
+sources=()
+for source in "${sdk_sources[@]}"; do
+  basename="${source##*/}"
+  objects+=("$build_dir/objects/${basename%.c}.o")
+  sources+=("$source_root/c/logbrew-c/$source")
+done
+if ! (cd "$build_dir/objects" && \
+  run_bounded_command build "$tmp_dir/build.out" "$tmp_dir/build.err" cc \
     -std=c99 \
     -Wall \
     -Wextra \
     -Wpedantic \
     -Werror \
     -I"$source_root/c/logbrew-c/include" \
-    -c "$source_root/c/logbrew-c/${sdk_sources[$index]}" \
-    -o "$object"; then
-    fail_stage "native build"
-  fi
-  objects+=("$object")
-done
-if ! run_bounded_command "$tmp_dir/build.out" "$tmp_dir/build.err" \
+    -c "${sources[@]}"); then
+  fail_stage "native build"
+fi
+if ! run_bounded_command build "$tmp_dir/build.out" "$tmp_dir/build.err" \
   ar rcs "$install_dir/lib/liblogbrew.a" "${objects[@]}"; then
   fail_stage "native build"
 fi
@@ -791,7 +729,7 @@ then
   fail_stage "native build"
 fi
 
-if ! run_bounded_command "$tmp_dir/build.out" "$tmp_dir/build.err" cc \
+if ! run_bounded_command build "$tmp_dir/build.out" "$tmp_dir/build.err" cc \
   -std=c99 \
   -Wall \
   -Wextra \
@@ -804,85 +742,12 @@ if ! run_bounded_command "$tmp_dir/build.out" "$tmp_dir/build.err" cc \
   fail_stage "native build"
 fi
 
-if ! CONSUMER_BINARY="$consumer_binary" \
-  CONSUMER_STDOUT="$tmp_dir/consumer.out" \
-  CONSUMER_STDERR="$tmp_dir/consumer.err" \
-  python3 >"$tmp_dir/runtime-check.out" 2>"$tmp_dir/runtime-check.err" <<'PY'
-import os
-import resource
-import signal
-import subprocess
-import time
-from pathlib import Path
-
-RUNTIME_TIMEOUT_SECONDS = 5
-OUTPUT_LIMIT_BYTES = 64 * 1024
-binary = os.environ["CONSUMER_BINARY"]
-stdout_path = Path(os.environ["CONSUMER_STDOUT"])
-stderr_path = Path(os.environ["CONSUMER_STDERR"])
-
-
-def child_setup() -> None:
-    os.setsid()
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (OUTPUT_LIMIT_BYTES, OUTPUT_LIMIT_BYTES))
-
-
-def terminate_group(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    deadline = time.monotonic() + 1
-    while time.monotonic() < deadline:
-        try:
-            os.killpg(process.pid, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.02)
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-
-
-with stdout_path.open("xb") as stdout_handle, stderr_path.open("xb") as stderr_handle:
-    try:
-        process = subprocess.Popen(
-            [binary],
-            stdin=subprocess.DEVNULL,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            close_fds=True,
-            env={"PATH": os.environ.get("PATH", "")},
-            preexec_fn=child_setup,
-        )
-    except OSError:
-        raise SystemExit(1)
-    try:
-        return_code = process.wait(timeout=RUNTIME_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        terminate_group(process)
-        process.wait(timeout=2)
-        raise SystemExit(1)
-    try:
-        os.killpg(process.pid, 0)
-    except ProcessLookupError:
-        pass
-    else:
-        terminate_group(process)
-        raise SystemExit(1)
-
-if (
-    return_code != 0
-    or stdout_path.stat().st_size > OUTPUT_LIMIT_BYTES
-    or stderr_path.stat().st_size > OUTPUT_LIMIT_BYTES
-    or stdout_path.read_bytes() != b"native-release-consumer-passed\n"
-    or stderr_path.read_bytes() != b""
-):
-    raise SystemExit(1)
-PY
-then
+if ! run_bounded_command runtime "$tmp_dir/consumer.out" "$tmp_dir/consumer.err" \
+  "$consumer_binary"; then
+  fail_stage "installed execution"
+fi
+printf '%s\n' "native-release-consumer-passed" >"$tmp_dir/consumer.expected"
+if ! cmp -s "$tmp_dir/consumer.expected" "$tmp_dir/consumer.out" || [[ -s "$tmp_dir/consumer.err" ]]; then
   fail_stage "installed execution"
 fi
 

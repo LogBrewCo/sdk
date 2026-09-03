@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import unittest
+from functools import partial
+from itertools import product
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
 
+import http_span_contract as http_contract
 from logbrew_sdk import (
     LogBrewAiohttpClientSessionInstrumentation,
     LogBrewClient,
@@ -15,7 +22,7 @@ from logbrew_sdk import (
     instrument_aiohttp_client_session_with_logbrew_spans,
     instrument_httpx_client_with_logbrew_spans,
     instrument_requests_session_with_logbrew_spans,
-    use_logbrew_trace,
+    requests_request_with_logbrew_span,
 )
 
 
@@ -29,286 +36,151 @@ def sample_client() -> LogBrewClient:
 
 
 class HttpxSpanTests(unittest.TestCase):
+    def test_optional_http_dependencies_preserve_selection_and_errors(self) -> None:
+        for operation, dependency in (
+            (requests_request_with_logbrew_span, "requests"),
+            (httpx_request_with_logbrew_span, "httpx"),
+        ):
+            with self.subTest(dependency=dependency):
+                client = sample_client()
+                request = Mock(return_value=SimpleNamespace(status_code=204))
+                call = partial(
+                    operation, "GET", "https://example.test/", client=client,
+                    event_id="evt_dependency_selection",
+                )
+
+                with patch("logbrew_sdk._http_client.import_module") as importer:
+                    importer.return_value = SimpleNamespace(request=request)
+                    self.assertIs(call(), request.return_value)
+                    importer.assert_called_once_with(dependency)
+                    self.assertEqual(request.call_args.args, ("GET", "https://example.test/"))
+                    self.assertIn("traceparent", request.call_args.kwargs["headers"])
+                    self.assertEqual(len(json.loads(client.preview_json())["events"]), 1)
+                    importer.reset_mock()
+                    for explicit in ({"request": request}, {"session": SimpleNamespace(request=request)}):
+                        self.assertIs(
+                            call(**explicit), request.return_value,
+                        )
+                    importer.assert_not_called()
+                    prior_events = client.preview_json()
+                    missing = ImportError("dependency unavailable")
+                    cases: tuple[tuple[Any, ...], ...] = (
+                        (None, missing, {}, ImportError,
+                         f"{dependency}_request_with_logbrew_span requires {dependency} to be installed "
+                         "or a request callable/session"),
+                        (SimpleNamespace(request=None), None, {}, TypeError, f"{dependency}.request must be callable"),
+                        (None, None, {"request": request, "session": object()}, TypeError,
+                         "pass either request or session, not both"),
+                        (None, None, {"session": object()}, TypeError,
+                         f"{dependency} session must expose a callable request method"),
+                    )
+                    for module, error, overrides, expected_type, message in cases:
+                        with self.subTest(message=message):
+                            importer.reset_mock()
+                            importer.return_value, importer.side_effect = module, error
+                            with self.assertRaises(expected_type) as raised:
+                                call(**overrides)
+                            self.assertEqual(str(raised.exception), message)
+                            self.assertIs(raised.exception.__cause__, error)
+                            self.assertEqual(client.preview_json(), prior_events)
+                            if overrides:
+                                importer.assert_not_called()
+                            else:
+                                importer.assert_called_once_with(dependency)
+
     def test_httpx_request_with_logbrew_span_injects_child_trace_and_queues_span(self) -> None:
-        client = sample_client()
-        request_active_trace: LogBrewTraceContext | None = None
-        caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
-        calls: list[dict[str, object]] = []
-        parent_trace = LogBrewTraceContext(
-            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-            span_id="00f067aa0ba902b7",
-            sampled=True,
-        )
-        clock_values = iter([50.0, 50.061])
-
-        class StubHttpxResponse:
-            status_code = 202
-
-        def request(method: str, url: str, **kwargs: object) -> StubHttpxResponse:
-            nonlocal request_active_trace
-            calls.append({"method": method, "url": url, **kwargs})
-            request_active_trace = get_active_logbrew_trace()
-            return StubHttpxResponse()
-
-        with use_logbrew_trace(parent_trace):
-            response = httpx_request_with_logbrew_span(
-                "put",
-                "https://api.example.test/payments/123?coupon=summer#receipt",
-                client=client,
-                event_id="evt_python_httpx_client",
-                timestamp="2026-06-19T09:00:00Z",
-                request=request,
-                timeout=4.5,
-                headers=caller_headers,
-                json={"card": "private"},
-                route_template="/payments/:payment_id",
-                span_id_factory=lambda: "b7ad6b7169203337",
-                clock=lambda: next(clock_values),
-                metadata={"service": "checkout", "headers": {"authorization": "private"}},
-            )
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(caller_headers["Traceparent"], "spoofed")
-        call = calls[0]
-        self.assertEqual(call["method"], "put")
-        self.assertEqual(call["url"], "https://api.example.test/payments/123?coupon=summer#receipt")
-        self.assertEqual(call["timeout"], 4.5)
-        sent_headers = call["headers"]
-        self.assertIsInstance(sent_headers, dict)
-        assert isinstance(sent_headers, dict)
-        self.assertIsNot(sent_headers, caller_headers)
-        self.assertEqual(sent_headers["x-caller"], "checkout")
-        self.assertEqual(
-            sent_headers["traceparent"],
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203337-01",
-        )
-        self.assertNotIn("Traceparent", sent_headers)
-        self.assertEqual(
-            request_active_trace,
-            LogBrewTraceContext(
-                trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+        http_contract.assert_success(
+            self,
+            sample_client(),
+            http_contract.HttpSpanCase(
+                operation=httpx_request_with_logbrew_span,
+                source="httpx",
+                status=202,
                 span_id="b7ad6b7169203337",
-                parent_span_id="00f067aa0ba902b7",
-                sampled=True,
+                method="put",
+                duration_ms=61.0,
+                timeout=4.5,
             ),
         )
 
-        event = json.loads(client.preview_json())["events"][0]
-        self.assertEqual(event["attributes"]["name"], "PUT /payments/:payment_id")
-        self.assertEqual(event["attributes"]["durationMs"], 61.0)
-        metadata = event["attributes"]["metadata"]
-        self.assertEqual(metadata["source"], "httpx")
-        self.assertEqual(metadata["method"], "PUT")
-        self.assertEqual(metadata["statusCode"], 202)
-        serialized = client.preview_json()
-        self.assertNotIn("coupon=summer", serialized)
-        self.assertNotIn("authorization", serialized)
-        self.assertNotIn("traceparent", serialized)
-        self.assertNotIn("card", serialized)
-
     def test_httpx_request_with_logbrew_span_preserves_errors_and_capture_failures(self) -> None:
-        client = sample_client()
-
-        class StubHttpxResponse:
-            status_code = 502
-
-        class StubHttpxError(RuntimeError):
-            def __init__(self) -> None:
-                super().__init__("connection failed for redacted-url")
-                self.response = StubHttpxResponse()
-
-        original_error = StubHttpxError()
-
-        with self.assertRaises(StubHttpxError) as raised:
-            httpx_request_with_logbrew_span(
-                "GET",
-                "https://api.example.test/payments/123?coupon=summer",
-                client=client,
-                event_id="evt_python_httpx_failure",
-                timestamp="2026-06-19T09:00:01Z",
-                request=lambda _method, _url, **_kwargs: (_ for _ in ()).throw(original_error),
-                span_id_factory=lambda: "b7ad6b7169203338",
-                clock=lambda: 60.0,
-            )
-
-        self.assertIs(raised.exception, original_error)
-        event = json.loads(client.preview_json())["events"][0]
-        self.assertEqual(event["attributes"]["status"], "error")
-        self.assertEqual(event["attributes"]["metadata"]["source"], "httpx")
-        self.assertEqual(event["attributes"]["metadata"]["statusCode"], 502)
-        self.assertEqual(event["attributes"]["metadata"]["errorType"], "StubHttpxError")
-        serialized_failure = client.preview_json()
-        self.assertNotIn("errorMessage", event["attributes"]["metadata"])
-        self.assertNotIn("connection failed for redacted-url", serialized_failure)
-        self.assertNotIn("coupon=summer", serialized_failure)
-
-        closed_client = sample_client()
-        closed_client.closed = True
-        capture_errors: list[str] = []
-        response = httpx_request_with_logbrew_span(
-            "GET",
-            "https://api.example.test/health",
-            client=closed_client,
-            event_id="evt_python_httpx_capture_error",
-            timestamp="2026-06-19T09:00:02Z",
-            request=lambda _method, _url, **_kwargs: StubHttpxResponse(),
-            span_id_factory=lambda: "b7ad6b7169203339",
-            on_capture_error=lambda error: capture_errors.append(str(error)),
+        http_contract.assert_failure(
+            self,
+            sample_client(),
+            http_contract.HttpSpanCase(
+                operation=httpx_request_with_logbrew_span,
+                source="httpx",
+                status=502,
+                span_id="b7ad6b7169203338",
+            ),
         )
 
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(len(capture_errors), 1)
-        self.assertIn("client is already shut down", capture_errors[0])
-
     def test_async_httpx_request_with_logbrew_span_injects_child_trace_and_queues_span(self) -> None:
-        async def run() -> None:
-            client = sample_client()
-            request_active_trace: LogBrewTraceContext | None = None
-            caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
-            calls: list[dict[str, object]] = []
-            parent_trace = LogBrewTraceContext(
-                trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-                span_id="00f067aa0ba902b7",
-                sampled=True,
-            )
-            clock_values = iter([70.0, 70.074])
-
-            class StubHttpxResponse:
-                status_code = 204
-
-            async def request(method: str, url: str, **kwargs: object) -> StubHttpxResponse:
-                nonlocal request_active_trace
-                calls.append({"method": method, "url": url, **kwargs})
-                request_active_trace = get_active_logbrew_trace()
-                return StubHttpxResponse()
-
-            with use_logbrew_trace(parent_trace):
-                response = await async_httpx_request_with_logbrew_span(
-                    "delete",
-                    "https://api.example.test/payments/123?coupon=summer#receipt",
-                    client=client,
-                    event_id="evt_python_httpx_async_client",
-                    timestamp="2026-06-19T09:00:03Z",
-                    request=request,
-                    timeout=5.5,
-                    headers=caller_headers,
-                    route_template="/payments/:payment_id",
-                    span_id_factory=lambda: "b7ad6b7169203340",
-                    clock=lambda: next(clock_values),
-                    metadata={"service": "checkout", "headers": {"authorization": "private"}},
-                )
-
-            self.assertEqual(response.status_code, 204)
-            self.assertEqual(caller_headers["Traceparent"], "spoofed")
-            sent_headers = calls[0]["headers"]
-            self.assertIsInstance(sent_headers, dict)
-            assert isinstance(sent_headers, dict)
-            self.assertEqual(
-                sent_headers["traceparent"],
-                "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203340-01",
-            )
-            self.assertEqual(
-                request_active_trace,
-                LogBrewTraceContext(
-                    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-                    span_id="b7ad6b7169203340",
-                    parent_span_id="00f067aa0ba902b7",
-                    sampled=True,
-                ),
-            )
-            event = json.loads(client.preview_json())["events"][0]
-            self.assertEqual(event["attributes"]["name"], "DELETE /payments/:payment_id")
-            self.assertEqual(event["attributes"]["durationMs"], 74.0)
-            metadata = event["attributes"]["metadata"]
-            self.assertEqual(metadata["source"], "httpx.async")
-            self.assertEqual(metadata["method"], "DELETE")
-            self.assertEqual(metadata["statusCode"], 204)
-            serialized = client.preview_json()
-            self.assertNotIn("coupon=summer", serialized)
-            self.assertNotIn("authorization", serialized)
-            self.assertNotIn("traceparent", serialized)
-
-        asyncio.run(run())
+        http_contract.assert_success(
+            self,
+            sample_client(),
+            http_contract.HttpSpanCase(
+                operation=async_httpx_request_with_logbrew_span,
+                source="httpx.async",
+                status=204,
+                span_id="b7ad6b7169203340",
+                method="delete",
+                duration_ms=74.0,
+                timeout=5.5,
+                asynchronous=True,
+            ),
+        )
 
 
 class HttpClientInstrumentationTests(unittest.TestCase):
+    def test_instrumentation_registry_handles_missing_or_replaced_marker(self) -> None:
+        class SlottedSession:
+            __slots__ = ("_request", "request")
+
+        for factory, marker, method in (
+            (instrument_requests_session_with_logbrew_spans, "_logbrew_requests_session_instrumentation", "request"),
+            (instrument_httpx_client_with_logbrew_spans, "_logbrew_httpx_client_instrumentation", "request"),
+            (instrument_aiohttp_client_session_with_logbrew_spans,
+             "_logbrew_aiohttp_client_session_instrumentation", "_request"),
+        ):
+            for session_type, replace_request in product((SlottedSession, SimpleNamespace), (False, True)):
+                with self.subTest(factory=factory.__name__, session=session_type.__name__, replace=replace_request):
+                    session = session_type()
+                    original = AsyncMock() if method == "_request" else Mock()
+                    setattr(session, method, original)
+                    client = sample_client()
+                    instrumentation = factory(session, client=client)
+                    if isinstance(session, SimpleNamespace):
+                        setattr(session, marker, "another owner's marker")
+                    self.assertIs(factory(session, client=client), instrumentation)
+                    self.assertIsNot(getattr(session, method), original)
+                    expected = Mock() if replace_request else original
+                    if replace_request:
+                        setattr(session, method, expected)
+                    instrumentation.uninstall()
+                    self.assertIs(getattr(session, method), expected)
+                    if isinstance(session, SimpleNamespace):
+                        self.assertEqual(getattr(session, marker), "another owner's marker")
+                    replacement = factory(session, client=client)
+                    self.assertIsNot(replacement, instrumentation)
+                    replacement.uninstall()
+
     def test_aiohttp_request_with_logbrew_span_injects_child_trace_and_queues_span(self) -> None:
-        client = sample_client()
-        caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
-        calls: list[dict[str, object]] = []
-        request_active_trace: LogBrewTraceContext | None = None
-        clock_values = iter([80.0, 80.044])
-        parent_trace = LogBrewTraceContext(
-            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-            span_id="00f067aa0ba902b7",
-            sampled=True,
+        http_contract.assert_success(
+            self,
+            sample_client(),
+            http_contract.HttpSpanCase(
+                operation=aiohttp_request_with_logbrew_span,
+                source="aiohttp",
+                status=202,
+                span_id="b7ad6b7169203347",
+                method="post",
+                duration_ms=44.0,
+                asynchronous=True,
+                status_attribute="status",
+                explicit_trace=True,
+            ),
         )
-
-        class StubAiohttpResponse:
-            status = 202
-
-        async def request(method: str, url: str, **kwargs: object) -> StubAiohttpResponse:
-            nonlocal request_active_trace
-            calls.append({"method": method, "url": url, **kwargs})
-            request_active_trace = get_active_logbrew_trace()
-            return StubAiohttpResponse()
-
-        async def run() -> None:
-            nonlocal request_active_trace
-            response = await aiohttp_request_with_logbrew_span(
-                "post",
-                "https://api.example.test/payments/123?coupon=summer#receipt",
-                client=client,
-                event_id="evt_python_aiohttp_client",
-                timestamp="2026-07-04T09:00:02Z",
-                request=request,
-                timeout=3.5,
-                headers=caller_headers,
-                json={"card": "sensitive"},
-                trace=parent_trace,
-                route_template="/payments/:payment_id",
-                span_id_factory=lambda: "b7ad6b7169203347",
-                clock=lambda: next(clock_values),
-                metadata={"service": "checkout", "headers": {"authorization": "sensitive"}},
-            )
-
-            self.assertEqual(response.status, 202)
-            self.assertEqual(caller_headers["Traceparent"], "spoofed")
-            self.assertEqual(
-                request_active_trace,
-                LogBrewTraceContext(
-                    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-                    span_id="b7ad6b7169203347",
-                    parent_span_id="00f067aa0ba902b7",
-                    sampled=True,
-                ),
-            )
-            call = calls[0]
-            self.assertEqual(call["method"], "post")
-            self.assertEqual(call["url"], "https://api.example.test/payments/123?coupon=summer#receipt")
-            self.assertEqual(call["timeout"], 3.5)
-            sent_headers = call["headers"]
-            self.assertIsInstance(sent_headers, dict)
-            assert isinstance(sent_headers, dict)
-            self.assertEqual(sent_headers["x-caller"], "checkout")
-            self.assertEqual(
-                sent_headers["traceparent"],
-                "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203347-01",
-            )
-            event = json.loads(client.preview_json())["events"][0]
-            self.assertEqual(event["attributes"]["name"], "POST /payments/:payment_id")
-            self.assertEqual(event["attributes"]["durationMs"], 44.0)
-            metadata = event["attributes"]["metadata"]
-            self.assertEqual(metadata["source"], "aiohttp")
-            self.assertEqual(metadata["method"], "POST")
-            self.assertEqual(metadata["statusCode"], 202)
-            serialized = client.preview_json()
-            self.assertNotIn("coupon=summer", serialized)
-            self.assertNotIn("authorization", serialized)
-            self.assertNotIn("traceparent", serialized)
-            self.assertNotIn("card", serialized)
-
-        asyncio.run(run())
 
     def test_aiohttp_client_session_instrumentation_traces_request_and_uninstalls(self) -> None:
         client = sample_client()
@@ -446,6 +318,7 @@ class HttpClientInstrumentationTests(unittest.TestCase):
         class StubRequestsSession:
             def request(self, method: str, url: str, **kwargs: object) -> StubResponse:
                 calls.append({"method": method, "url": url, **kwargs})
+                calls[-1]["activeTrace"] = get_active_logbrew_trace()
                 return StubResponse()
 
             def get(self, url: str, **kwargs: object) -> StubResponse:
@@ -481,6 +354,7 @@ class HttpClientInstrumentationTests(unittest.TestCase):
         self.assertIs(duplicate, instrumentation)
         self.assertTrue(instrumentation.installed)
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(getattr(calls[0]["activeTrace"], "span_id", None), "b7ad6b7169203342")
         self.assertEqual(caller_headers["Traceparent"], "spoofed")
         sent_headers = calls[0]["headers"]
         self.assertIsInstance(sent_headers, dict)
@@ -509,6 +383,7 @@ class HttpClientInstrumentationTests(unittest.TestCase):
         session.get("https://api.example.test/after-uninstall")
         self.assertEqual(len(json.loads(client.preview_json())["events"]), 1)
         self.assertNotIn("headers", calls[-1])
+        self.assertIsNone(calls[-1]["activeTrace"])
 
     def test_requests_session_instrumentation_preserves_errors_without_message_metadata(self) -> None:
         client = sample_client()
@@ -571,6 +446,7 @@ class HttpClientInstrumentationTests(unittest.TestCase):
 
             def request(self, method: str, url: str, **kwargs: object) -> StubResponse:
                 self.calls.append({"method": method, "url": url, **kwargs})
+                self.calls[-1]["activeTrace"] = get_active_logbrew_trace()
                 return StubResponse()
 
         class StubAsyncHttpxClient:
@@ -579,12 +455,13 @@ class HttpClientInstrumentationTests(unittest.TestCase):
 
             async def request(self, method: str, url: str, **kwargs: object) -> StubResponse:
                 self.calls.append({"method": method, "url": url, **kwargs})
+                self.calls[-1]["activeTrace"] = get_active_logbrew_trace()
                 return StubResponse()
 
         async def run() -> None:
             sync_client = StubHttpxClient()
             async_client = StubAsyncHttpxClient()
-            instrument_httpx_client_with_logbrew_spans(
+            sync_instrumentation = instrument_httpx_client_with_logbrew_spans(
                 sync_client,
                 client=client,
                 event_id_factory=lambda: next(event_ids),
@@ -619,6 +496,8 @@ class HttpClientInstrumentationTests(unittest.TestCase):
             self.assertTrue(async_instrumentation.installed)
             self.assertEqual(sync_response.status_code, 202)
             self.assertEqual(async_response.status_code, 202)
+            self.assertEqual(getattr(sync_client.calls[0]["activeTrace"], "span_id", None), "b7ad6b7169203345")
+            self.assertEqual(getattr(async_client.calls[0]["activeTrace"], "span_id", None), "b7ad6b7169203346")
             self.assertEqual(
                 sync_client.calls[0]["headers"]["traceparent"],  # type: ignore[index]
                 "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203345-00",
@@ -627,6 +506,16 @@ class HttpClientInstrumentationTests(unittest.TestCase):
                 async_client.calls[0]["headers"]["traceparent"],  # type: ignore[index]
                 "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203346-00",
             )
+            sync_instrumentation.uninstall()
+            async_instrumentation.uninstall()
+            self.assertFalse(sync_instrumentation.installed)
+            self.assertFalse(async_instrumentation.installed)
+            sync_client.request("GET", "https://api.example.test/after-uninstall")
+            await async_client.request("GET", "https://api.example.test/after-uninstall")
+            self.assertNotIn("headers", sync_client.calls[-1])
+            self.assertNotIn("headers", async_client.calls[-1])
+            self.assertIsNone(sync_client.calls[-1]["activeTrace"])
+            self.assertIsNone(async_client.calls[-1]["activeTrace"])
 
         asyncio.run(run())
 
@@ -644,44 +533,123 @@ class HttpClientInstrumentationTests(unittest.TestCase):
         self.assertNotIn("spoofed", serialized)
 
     def test_async_httpx_request_with_logbrew_span_preserves_errors_without_message_metadata(self) -> None:
-        async def run() -> None:
-            client = sample_client()
+        http_contract.assert_failure(
+            self,
+            sample_client(),
+            http_contract.HttpSpanCase(
+                operation=async_httpx_request_with_logbrew_span,
+                source="httpx.async",
+                status=504,
+                span_id="b7ad6b7169203341",
+                asynchronous=True,
+                error_message="async connection failed for redacted-url",
+            ),
+        )
 
-            class StubHttpxResponse:
-                status_code = 504
 
-            class StubHttpxError(RuntimeError):
-                def __init__(self) -> None:
-                    super().__init__("async connection failed for redacted-url")
-                    self.response = StubHttpxResponse()
+class AiohttpIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        try:
+            self.aiohttp = importlib.import_module("aiohttp")
+            self.web = importlib.import_module("aiohttp.web")
+            self.test_utils = importlib.import_module("aiohttp.test_utils")
+        except ImportError:
+            self.skipTest("aiohttp is not installed")
 
-            original_error = StubHttpxError()
+    async def test_real_requests_preserve_trace_errors_privacy_and_uninstall(
+        self,
+    ) -> None:
+        aiohttp, web, test_utils = self.aiohttp, self.web, self.test_utils
+        received: list[dict[str, str | None]] = []
 
-            async def request(_method: str, _url: str, **_kwargs: object) -> object:
-                raise original_error
+        async def record(request: Any) -> Any:
+            received.append(
+                {
+                    "caller": request.headers.get("x-caller"),
+                    "traceparent": request.headers.get("traceparent"),
+                }
+            )
+            if request.path.startswith("/failures/"):
+                return web.Response(status=503, text="private upstream body")
+            return web.Response(status=204 if request.path == "/after-uninstall" else 202)
 
-            with self.assertRaises(StubHttpxError) as raised:
-                await async_httpx_request_with_logbrew_span(
-                    "GET",
-                    "https://api.example.test/payments/123?coupon=summer",
-                    client=client,
-                    event_id="evt_python_httpx_async_failure",
-                    timestamp="2026-06-19T09:00:06Z",
-                    request=request,
-                    span_id_factory=lambda: "b7ad6b7169203341",
-                    clock=lambda: 80.0,
+        app = web.Application()
+        app.router.add_route("*", "/{tail:.*}", record)
+        client = sample_client()
+        event_ids = iter(["evt_python_aiohttp_client", "evt_python_aiohttp_failure"])
+        span_ids = iter(["b7ad6b7169203342", "b7ad6b7169203343"])
+        clock_values = iter([80.0, 80.031, 81.0, 81.012])
+        options: dict[str, Any] = {
+            "client": client,
+            "event_id_factory": lambda: next(event_ids),
+            "span_id_factory": lambda: next(span_ids),
+            "clock": lambda: next(clock_values),
+            "timestamp": "2026-07-04T09:00:11Z",
+            "trace": LogBrewTraceContext(
+                trace_id="4bf92f3577b34da6a3ce929d0e0e4736", span_id="00f067aa0ba902b7", sampled=True
+            ),
+            "route_template_resolver": lambda _method, url: (
+                "/failures/:failure_id" if "/failures/" in url else "/payments/:payment_id"
+            ),
+            "metadata": {
+                "service": "checkout",
+                "headers": {"authorization": "private"},
+            },
+        }
+        async with (
+            test_utils.TestServer(app) as server,
+            aiohttp.ClientSession() as session,
+        ):
+            instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(session, **options)
+            self.assertIs(
+                instrument_aiohttp_client_session_with_logbrew_spans(session, client=client),
+                instrumentation,
+            )
+            async with session.get(
+                str(server.make_url("/payments/123?coupon=summer#receipt")),
+                headers={"Traceparent": "spoofed", "x-caller": "checkout"},
+            ) as response:
+                self.assertEqual(response.status, 202)
+                await response.read()
+            self.assertEqual(
+                received[-1],
+                {
+                    "caller": "checkout",
+                    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203342-01",
+                },
+            )
+            instrumentation.uninstall()
+            self.assertFalse(instrumentation.installed)
+            async with session.get(str(server.make_url("/after-uninstall"))) as response:
+                self.assertEqual(response.status, 204)
+                await response.read()
+            self.assertIsNone(received[-1]["traceparent"])
+            instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(session, **options)
+            with self.assertRaises(aiohttp.ClientResponseError) as raised:
+                await session.get(
+                    str(server.make_url("/failures/123?debug=redacted")),
+                    raise_for_status=True,
                 )
-
-            self.assertIs(raised.exception, original_error)
-            event = json.loads(client.preview_json())["events"][0]
-            metadata = event["attributes"]["metadata"]
-            self.assertEqual(event["attributes"]["status"], "error")
-            self.assertEqual(metadata["source"], "httpx.async")
-            self.assertEqual(metadata["statusCode"], 504)
-            self.assertEqual(metadata["errorType"], "StubHttpxError")
-            serialized_failure = client.preview_json()
-            self.assertNotIn("errorMessage", metadata)
-            self.assertNotIn("async connection failed for redacted-url", serialized_failure)
-            self.assertNotIn("coupon=summer", serialized_failure)
-
-        asyncio.run(run())
+            self.assertEqual(raised.exception.status, 503)
+            instrumentation.uninstall()
+            self.assertFalse(instrumentation.installed)
+        events = json.loads(client.preview_json())["events"]
+        self.assertEqual(len(events), 2)
+        self.assertEqual([event["type"] for event in events], ["span", "span"])
+        success, failure = (event["attributes"] for event in events)
+        self.assertEqual(success["spanId"], "b7ad6b7169203342")
+        self.assertEqual(success["metadata"]["method"], "GET")
+        self.assertEqual(success["metadata"]["routeTemplate"], "/payments/:payment_id")
+        self.assertEqual(failure["metadata"]["errorType"], "ClientResponseError")
+        self.assertEqual(failure["metadata"]["statusCode"], 503)
+        self.assertNotIn("errorMessage", failure["metadata"])
+        for forbidden in (
+            "coupon=summer",
+            "debug=redacted",
+            "authorization",
+            "private upstream body",
+            "Traceparent",
+            "traceparent",
+            "spoofed",
+        ):
+            self.assertNotIn(forbidden, client.preview_json())
