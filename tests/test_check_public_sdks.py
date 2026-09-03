@@ -3,18 +3,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
+import shlex
 import subprocess
-import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "check_public_sdks.sh"
-LOCK_DIR = Path(os.environ.get("TMPDIR", "/tmp")) / "logbrewco-sdk-public-checks.lock"
-LOCK_PID_FILE = LOCK_DIR / "pid"
 EXPECTED_TOOLCHAIN_KEYS = {
+    "bun",
     "node",
     "npm",
     "pnpm",
@@ -48,16 +47,32 @@ EXPECTED_TOOLCHAIN_KEYS = {
 
 
 class CheckPublicSdksJsonContractTests(unittest.TestCase):
-    def tearDown(self) -> None:
-        shutil.rmtree(LOCK_DIR, ignore_errors=True)
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.temp_dir = Path(temporary.name)
+        self.lock_dir = self.temp_dir / "logbrewco-sdk-public-checks.lock"
+        self.lock_pid_file = self.lock_dir / "pid"
+        self.script = SCRIPT
 
-    def run_script(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def assert_step_sequence(self, *steps: tuple[str, str | None]) -> None:
+        blocks = []
+        for label, command in steps:
+            block = f'begin_next_step "{label}"'
+            if command is not None:
+                block += f'\nrun_shell_step "{command}"\nmark_step_complete'
+            blocks.append(block)
+        self.assertIn("\n\n".join(blocks), SCRIPT.read_text())
+
+    def run_script(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["bash", str(SCRIPT), *args],
+            ["bash", str(self.script), *args],
             check=False,
             capture_output=True,
             text=True,
             cwd=ROOT,
+            env={**os.environ, "TMPDIR": str(self.temp_dir), **(env or {})},
+            timeout=20,
         )
 
     def assert_toolchain_versions_shape(self, payload: dict[str, object]) -> None:
@@ -68,503 +83,256 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         for key in EXPECTED_TOOLCHAIN_KEYS:
             self.assertIsInstance(toolchain_versions[key], str)
             self.assertTrue(toolchain_versions[key], f"expected non-empty toolchain version for {key}")
+        for key in ("node", "npm", "pnpm"):
+            self.assertEqual(toolchain_versions[key], "unsupported: use bun")
+
+    def assert_failure_summary(self, result: subprocess.CompletedProcess[str], reason: str, message: str) -> None:
+        self.assertEqual(result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["schema_version"], "1")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["steps_completed"], 0)
+        self.assertEqual(payload["steps_total"], len(payload["step_labels"]))
+        self.assertEqual(payload["completed_step_labels"], [])
+        self.assertEqual(payload["failure_reason"], reason)
+        self.assertEqual(payload["exit_code"], 1)
+        self.assertEqual(payload["message"], message)
+        self.assert_toolchain_versions_shape(payload)
+        self.assertIn("started_at", payload)
+        self.assertIn("finished_at", payload)
+        self.assertGreaterEqual(payload["duration_ms"], 0)
 
     def test_json_invalid_argument_is_structured(self) -> None:
-        result = self.run_script("--json", "--bad-arg")
+        self.assert_failure_summary(
+            self.run_script("--json", "--bad-arg"),
+            "invalid_argument",
+            "unknown argument: --bad-arg",
+        )
 
+    def test_native_probe_failure_stops_without_recursive_reporting(self) -> None:
+        fake_go = self.temp_dir / "go"
+        fake_go.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = version ]; then printf "go version go1.27.1 fixture\\n"; exit 0; fi\n'
+            '[ "$GOTOOLCHAIN:$GOPROXY:$GOSUMDB" = "local:off:off" ] || printf "unexpected build policy\\n" >&2\n'
+            "exit 7\n"
+        )
+        fake_go.chmod(0o700)
+        result = self.run_script(
+            "--json", "--bad-arg", env={
+                "LOGBREW_TOOLCHAIN_PROBE_BIN": "",
+                "PATH": f"{self.temp_dir}{os.pathsep}{os.environ['PATH']}",
+            },
+        )
         self.assertEqual(result.returncode, 1)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["schema_version"], "1")
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["steps_completed"], 0)
-        self.assertEqual(payload["steps_total"], len(payload["step_labels"]))
-        self.assertEqual(payload["completed_step_labels"], [])
-        self.assertEqual(payload["failure_reason"], "invalid_argument")
-        self.assertEqual(payload["exit_code"], 1)
-        self.assertEqual(payload["message"], "unknown argument: --bad-arg")
-        self.assert_toolchain_versions_shape(payload)
-        self.assertIn("started_at", payload)
-        self.assertIn("finished_at", payload)
-        self.assertIn("duration_ms", payload)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "native toolchain clock unavailable\n")
+
+    def test_missing_probe_inputs_do_not_invoke_go(self) -> None:
+        fake_go = self.temp_dir / "go"
+        fake_go.write_text('#!/bin/sh\nprintf "unexpected compiler invocation\\n" >&2\nexit 7\n')
+        fake_go.chmod(0o700)
+        for state in ("missing-directory", "missing-pin", "empty-pin"):
+            with self.subTest(state=state):
+                project = self.temp_dir / state
+                self.script = project / "scripts" / SCRIPT.name
+                self.script.parent.mkdir(parents=True)
+                self.script.write_text(SCRIPT.read_text())
+                probe = project / "tools" / "toolchain-probe"
+                if state != "missing-directory":
+                    probe.mkdir(parents=True)
+                if state == "empty-pin":
+                    (probe / ".go-version").touch()
+                result = self.run_script(
+                    "--json", "--bad-arg", env={
+                        "LOGBREW_TOOLCHAIN_PROBE_BIN": "",
+                        "PATH": f"{self.temp_dir}{os.pathsep}{os.environ['PATH']}",
+                    },
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("unexpected compiler invocation", result.stderr)
+                self.assertEqual(result.stderr.count("native toolchain clock unavailable"), 1)
 
     def test_json_reports_concurrent_run_cleanly(self) -> None:
-        LOCK_DIR.mkdir(parents=True, exist_ok=True)
-        LOCK_PID_FILE.write_text(str(os.getpid()))
+        self.lock_dir.mkdir(parents=True, exist_ok=True)
+        self.lock_pid_file.write_text(str(os.getpid()))
 
-        result = self.run_script("--json")
-
-        self.assertEqual(result.returncode, 1)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["schema_version"], "1")
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["steps_completed"], 0)
-        self.assertEqual(payload["steps_total"], len(payload["step_labels"]))
-        self.assertEqual(payload["completed_step_labels"], [])
-        self.assertEqual(payload["failure_reason"], "concurrent_run")
-        self.assertEqual(payload["exit_code"], 1)
-        self.assertEqual(
-            payload["message"],
+        self.assert_failure_summary(
+            self.run_script("--json"),
+            "concurrent_run",
             "another public SDK verifier run is already in progress",
         )
-        self.assert_toolchain_versions_shape(payload)
-        self.assertIn("started_at", payload)
-        self.assertIn("finished_at", payload)
-        self.assertIn("duration_ms", payload)
 
-    def test_json_recovers_from_stale_lock(self) -> None:
-        LOCK_DIR.mkdir(parents=True, exist_ok=True)
-        LOCK_PID_FILE.write_text("999999")
+    def test_recovers_from_stale_lock(self) -> None:
+        self.lock_dir.mkdir(parents=True, exist_ok=True)
+        self.lock_pid_file.write_text("999999")
 
-        result = self.run_script("--json", "--bad-arg")
+        prefix = SCRIPT.read_text().split("if ! acquire_lock; then", 1)[0]
+        prefix = prefix.replace('cd "$repo_root"', f'repo_root={shlex.quote(str(ROOT))}\ncd "$repo_root"', 1)
+        script = self.temp_dir / "acquire-lock.sh"
+        script.write_text(prefix + '\nacquire_lock\nprintf "%s\\n" "$(< "$lock_pid_file")"\n')
+        result = subprocess.run(
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "TMPDIR": str(self.temp_dir)},
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.strip().isdecimal())
+        self.assertNotEqual(result.stdout.strip(), "999999")
+        self.assertEqual(result.stdout.strip(), self.lock_pid_file.read_text().strip())
 
-        self.assertEqual(result.returncode, 1)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["schema_version"], "1")
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["failure_reason"], "invalid_argument")
-        self.assertEqual(payload["exit_code"], 1)
-        self.assertEqual(payload["message"], "unknown argument: --bad-arg")
-        self.assert_toolchain_versions_shape(payload)
-
-    def test_public_verifier_runs_backend_contract_gate(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Backend contract report checks"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Backend contract report checks"\n'
-            r'run_shell_step "python3 scripts/check_backend_contract_reports\.py"\n'
-            r"mark_step_complete",
+    def test_public_verifier_runs_single_command_contract_gates(self) -> None:
+        self.assert_step_sequence(
+            ("Backend contract report checks", "python3 scripts/check_backend_contract_reports.py"),
+        )
+        self.assert_step_sequence(
+            ("GitHub release safety checks", "python3 scripts/check_github_release_safety.py"),
         )
 
     def test_public_verifier_runs_release_artifact_smokes_before_hygiene(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"JavaScript release artifact smoke"', script)
-        self.assertIn('"JavaScript release artifact installed CLI smoke"', script)
-        self.assertIn('"Vite release artifact smoke"', script)
-        self.assertIn('"Next.js release artifact smoke"', script)
-        self.assertIn('"React Native release artifact smoke"', script)
-        self.assertIn('"JavaScript release artifact upload smoke"', script)
-        self.assertIn('"Native release artifact smoke"', script)
-        self.assertIn('"Native release artifact upload smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "JavaScript release artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_release_artifact_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript release artifact installed CLI smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_release_artifact_cli_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Vite release artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_vite_release_artifact_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Next\.js release artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_next_release_artifact_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "React Native release artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_react_native_release_artifact_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript release artifact upload smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_release_artifact_upload_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Native release artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_native_release_artifact_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Native release artifact upload smoke"\n'
-            r'run_shell_step "bash scripts/real_user_native_release_artifact_upload_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Generated artifact hygiene"',
+        self.assert_step_sequence(
+            ("JavaScript release artifact smoke", "bash scripts/real_user_js_release_artifact_smoke.sh"),
+            (
+                "JavaScript release artifact installed CLI smoke",
+                "bash scripts/real_user_js_release_artifact_cli_smoke.sh",
+            ),
+            ("Vite release artifact smoke", "bash scripts/real_user_vite_release_artifact_smoke.sh"),
+            ("Next.js release artifact smoke", "bash scripts/real_user_next_release_artifact_smoke.sh"),
+            ("React Native release artifact smoke", "bash scripts/real_user_react_native_release_artifact_smoke.sh"),
+            ("JavaScript release artifact upload smoke", "bash scripts/real_user_js_release_artifact_upload_smoke.sh"),
+            ("Native release artifact smoke", "bash scripts/real_user_native_release_artifact_smoke.sh"),
+            ("Native release artifact upload smoke", "bash scripts/real_user_native_release_artifact_upload_smoke.sh"),
+            ("Generated artifact hygiene", None),
         )
 
     def test_public_verifier_runs_browser_fake_intake_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Browser installed-artifact fake-intake smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Browser real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_browser_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Browser installed-artifact fake-intake smoke"\n'
-            r'run_shell_step "bash scripts/real_user_browser_fake_intake_smoke\.sh"\n'
-            r"mark_step_complete",
-        )
-
-    def test_public_verifier_runs_js_high_load_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"JavaScript high-load installed-artifact smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "JavaScript real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript OpenTelemetry installed-artifact smoke"',
+        self.assert_step_sequence(
+            ("Browser real-user smoke", "bash scripts/real_user_browser_smoke.sh"),
+            ("Browser installed-artifact fake-intake smoke", "bash scripts/real_user_browser_fake_intake_smoke.sh"),
         )
 
     def test_public_verifier_runs_node_queue_high_load_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Node Redis real-package smoke"', script)
-        self.assertIn('"Node Mongoose real-package smoke"', script)
-        self.assertIn('"Node Axios real-package smoke"', script)
-        self.assertIn('"Node HTTP client real-package smoke"', script)
-        self.assertIn('"Node queue high-load fake-intake smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Node\.js real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Node Redis real-package smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_redis_packages_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Node Mongoose real-package smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_mongoose_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Node Axios real-package smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_axios_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Node HTTP client real-package smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_http_client_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Node queue high-load fake-intake smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_queue_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Node persistent delivery restart smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_persistent_delivery_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Node encrypted persistent delivery smoke"\n'
-            r'run_shell_step "bash scripts/real_user_node_encrypted_persistent_delivery_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Prisma real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_prisma_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "BullMQ real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_bullmq_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "KafkaJS real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_kafkajs_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "AMQP/RabbitMQ real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_amqplib_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "AWS SQS real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_aws_sqs_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "npm public registry install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_npm_public_registry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Express real-user smoke"',
-        )
-
-    def test_public_verifier_runs_npm_public_registry_install_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"npm public registry install smoke"', script)
-        self.assertIn('"Prisma real-user smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "AWS SQS real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_aws_sqs_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "npm public registry install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_npm_public_registry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Express real-user smoke"',
+        self.assert_step_sequence(
+            ("Node.js real-user smoke", "bash scripts/real_user_node_smoke.sh"),
+            ("Node Redis real-package smoke", "bash scripts/real_user_node_redis_packages_smoke.sh"),
+            ("Node Mongoose real-package smoke", "bash scripts/real_user_node_mongoose_smoke.sh"),
+            ("Node Axios real-package smoke", "bash scripts/real_user_node_axios_smoke.sh"),
+            ("Node HTTP client real-package smoke", "bash scripts/real_user_node_http_client_smoke.sh"),
+            ("Node queue high-load fake-intake smoke", "bash scripts/real_user_node_queue_high_load_smoke.sh"),
+            ("Node persistent delivery restart smoke", "bash scripts/real_user_node_persistent_delivery_smoke.sh"),
+            (
+                "Node encrypted persistent delivery smoke",
+                "bash scripts/real_user_node_encrypted_persistent_delivery_smoke.sh",
+            ),
+            ("Prisma real-user smoke", "bash scripts/real_user_prisma_smoke.sh"),
+            ("BullMQ real-user smoke", "bash scripts/real_user_bullmq_smoke.sh"),
+            ("KafkaJS real-user smoke", "bash scripts/real_user_kafkajs_smoke.sh"),
+            ("AMQP/RabbitMQ real-user smoke", "bash scripts/real_user_amqplib_smoke.sh"),
+            ("AWS SQS real-user smoke", "bash scripts/real_user_aws_sqs_smoke.sh"),
+            ("npm public registry install smoke", "bash scripts/real_user_npm_public_registry_smoke.sh"),
+            ("Express real-user smoke", None),
         )
 
     def test_public_verifier_runs_java_messaging_smokes(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Java JMS installed-artifact smoke"', script)
-        self.assertIn('"Java high-load installed-artifact smoke"', script)
-        self.assertIn('"Java OpenTelemetry installed-artifact smoke"', script)
-        self.assertIn('"Java Spring HTTP installed-artifact smoke"', script)
-        self.assertIn('"Maven Central public install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Java real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_java_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Java OpenTelemetry installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_java_opentelemetry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Java Spring Kafka installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_java_spring_kafka_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Java Spring HTTP installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_java_spring_http_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Java queue trace installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_java_queue_trace_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Java JMS installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_java_jms_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Java high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_java_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Maven Central public install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_maven_central_public_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Spring Boot real-user smoke"',
+        self.assert_step_sequence(
+            ("Java real-user smoke", "bash scripts/real_user_java_smoke.sh"),
+            ("Java OpenTelemetry installed-artifact smoke", "bash scripts/real_user_java_opentelemetry_smoke.sh"),
+            ("Java Spring Kafka installed-artifact smoke", "bash scripts/real_user_java_spring_kafka_smoke.sh"),
+            ("Java Spring HTTP installed-artifact smoke", "bash scripts/real_user_java_spring_http_smoke.sh"),
+            ("Java queue trace installed-artifact smoke", "bash scripts/real_user_java_queue_trace_smoke.sh"),
+            ("Java JMS installed-artifact smoke", "bash scripts/real_user_java_jms_smoke.sh"),
+            ("Java high-load installed-artifact smoke", "bash scripts/real_user_java_high_load_smoke.sh"),
+            ("Maven Central public install smoke", "bash scripts/real_user_maven_central_public_smoke.sh"),
+            ("Spring Boot real-user smoke", None),
         )
 
     def test_public_verifier_runs_cratesio_public_install_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"crates.io public install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Rust Actix real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_rust_actix_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Rust Rocket real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_rust_rocket_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Rust tracing real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_rust_tracing_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "crates\.io public install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_cratesio_public_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript real-user smoke"',
+        self.assert_step_sequence(
+            ("Rust Actix real-user smoke", "bash scripts/real_user_rust_actix_smoke.sh"),
+            ("Rust Rocket real-user smoke", "bash scripts/real_user_rust_rocket_smoke.sh"),
+            ("Rust tracing real-user smoke", "bash scripts/real_user_rust_tracing_smoke.sh"),
+            ("crates.io public install smoke", "bash scripts/real_user_cratesio_public_smoke.sh"),
+            ("JavaScript real-user smoke", None),
         )
 
-    def test_public_verifier_runs_dotnet_high_load_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('".NET high-load installed-artifact smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "\.NET real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_dotnet_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "\.NET high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_dotnet_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "\.NET public NuGet install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_dotnet_public_nuget_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Unity real-user smoke"',
-        )
-
-    def test_public_verifier_runs_dotnet_public_nuget_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('".NET public NuGet install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "\.NET real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_dotnet_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "\.NET high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_dotnet_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "\.NET public NuGet install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_dotnet_public_nuget_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Unity real-user smoke"',
+    def test_public_verifier_runs_dotnet_high_load_and_public_nuget_smokes(self) -> None:
+        self.assert_step_sequence(
+            (".NET real-user smoke", "bash scripts/real_user_dotnet_smoke.sh"),
+            (".NET high-load installed-artifact smoke", "bash scripts/real_user_dotnet_high_load_smoke.sh"),
+            (".NET public NuGet install smoke", "bash scripts/real_user_dotnet_public_nuget_smoke.sh"),
+            ("Unity real-user smoke", None),
         )
 
     def test_public_verifier_runs_openupm_public_install_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"OpenUPM public install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Unity real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_unity_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "OpenUPM public install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_openupm_public_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Kotlin real-user smoke"',
+        self.assert_step_sequence(
+            ("Unity real-user smoke", "bash scripts/real_user_unity_smoke.sh"),
+            ("OpenUPM public install smoke", "bash scripts/real_user_openupm_public_smoke.sh"),
+            ("Kotlin real-user smoke", None),
         )
 
     def test_public_verifier_runs_rubygems_public_install_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"RubyGems public install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Ruby real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_ruby_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "RubyGems public install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_rubygems_public_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Swift real-user smoke"',
+        self.assert_step_sequence(
+            ("Ruby real-user smoke", "bash scripts/real_user_ruby_smoke.sh"),
+            ("RubyGems public install smoke", "bash scripts/real_user_rubygems_public_smoke.sh"),
+            ("Swift real-user smoke", None),
         )
 
     def test_public_verifier_runs_symfony_before_packagist_public_install_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"PHP Symfony installed-app smoke"', script)
-        self.assertIn('"Packagist public install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "PHP real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_php_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "PHP Symfony installed-app smoke"\n'
-            r'run_shell_step "bash scripts/real_user_php_symfony_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Packagist public install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_packagist_public_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Python package build checks"',
+        self.assert_step_sequence(
+            ("PHP real-user smoke", "bash scripts/real_user_php_smoke.sh"),
+            ("PHP Symfony installed-app smoke", "bash scripts/real_user_php_symfony_smoke.sh"),
+            ("Packagist public install smoke", "bash scripts/real_user_packagist_public_smoke.sh"),
+            ("Python package build checks", None),
         )
 
     def test_public_verifier_runs_python_celery_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Python Celery real-user smoke"', script)
-        self.assertIn('"Python OpenTelemetry installed-artifact smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Python real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_python_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Python high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_python_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Python OpenTelemetry installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_python_opentelemetry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Python Celery real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_python_celery_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "FastAPI real-user smoke"',
+        self.assert_step_sequence(
+            ("Python real-user smoke", "bash scripts/real_user_python_smoke.sh"),
+            ("Python high-load installed-artifact smoke", "bash scripts/real_user_python_high_load_smoke.sh"),
+            ("Python OpenTelemetry installed-artifact smoke", "bash scripts/real_user_python_opentelemetry_smoke.sh"),
+            ("Python Celery real-user smoke", "bash scripts/real_user_python_celery_smoke.sh"),
+            ("FastAPI real-user smoke", None),
         )
 
     def test_public_verifier_runs_python_public_pypi_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Python public PyPI install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Python Celery real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_python_celery_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "FastAPI real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_fastapi_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Django real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_django_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Python public PyPI install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_python_public_pypi_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go real-user smoke"',
+        self.assert_step_sequence(
+            ("Python Celery real-user smoke", "bash scripts/real_user_python_celery_smoke.sh"),
+            ("FastAPI real-user smoke", "bash scripts/real_user_fastapi_smoke.sh"),
+            ("Django real-user smoke", "bash scripts/real_user_django_smoke.sh"),
+            ("Python public PyPI install smoke", "bash scripts/real_user_python_public_pypi_smoke.sh"),
+            ("Go real-user smoke", None),
         )
 
     def test_public_verifier_runs_javascript_opentelemetry_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"JavaScript OpenTelemetry installed-artifact smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "JavaScript real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript OpenTelemetry installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_opentelemetry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Browser real-user smoke"',
-        )
-
-    def test_public_verifier_runs_go_high_load_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Go high-load installed-artifact smoke"', script)
-        self.assertIn('"Go delivery lifecycle installed-artifact smoke"', script)
-        self.assertIn('"Go OpenTelemetry installed-artifact smoke"', script)
-        self.assertIn('"Go Gin installed-artifact smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Go real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go OpenTelemetry installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_opentelemetry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go Gin installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_gin_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go delivery lifecycle installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_delivery_lifecycle_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go support-ticket real-user smoke"',
+        self.assert_step_sequence(
+            ("JavaScript real-user smoke", "bash scripts/real_user_js_smoke.sh"),
+            ("JavaScript high-load installed-artifact smoke", "bash scripts/real_user_js_high_load_smoke.sh"),
+            ("JavaScript OpenTelemetry installed-artifact smoke", "bash scripts/real_user_js_opentelemetry_smoke.sh"),
+            ("Browser real-user smoke", None),
         )
 
     def test_public_verifier_runs_go_public_module_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"Go public module install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "Go real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go OpenTelemetry installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_opentelemetry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go Gin installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_gin_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go high-load installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_high_load_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go delivery lifecycle installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_delivery_lifecycle_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go support-ticket real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_support_ticket_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Go public module install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_go_public_module_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "C real-user smoke"',
+        self.assert_step_sequence(
+            ("Go real-user smoke", "bash scripts/real_user_go_smoke.sh"),
+            ("Go OpenTelemetry installed-artifact smoke", "bash scripts/real_user_go_opentelemetry_smoke.sh"),
+            ("Go Gin installed-artifact smoke", "bash scripts/real_user_go_gin_smoke.sh"),
+            ("Go high-load installed-artifact smoke", "bash scripts/real_user_go_high_load_smoke.sh"),
+            ("Go delivery lifecycle installed-artifact smoke", "bash scripts/real_user_go_delivery_lifecycle_smoke.sh"),
+            ("Go support-ticket real-user smoke", "bash scripts/real_user_go_support_ticket_smoke.sh"),
+            ("Go public module install smoke", "bash scripts/real_user_go_public_module_smoke.sh"),
+            ("C real-user smoke", None),
         )
 
     def test_public_verifier_runs_swiftpm_public_install_smoke(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"SwiftPM public install smoke"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "RubyGems public install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_rubygems_public_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Swift real-user smoke"\n'
-            r'run_shell_step "bash scripts/real_user_swift_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "SwiftPM public install smoke"\n'
-            r'run_shell_step "bash scripts/real_user_swiftpm_public_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "PHP package metadata"',
-        )
-
-    def test_public_verifier_runs_github_release_safety_gate(self) -> None:
-        script = SCRIPT.read_text()
-
-        self.assertIn('"GitHub release safety checks"', script)
-        self.assertRegex(
-            script,
-            r'begin_next_step "GitHub release safety checks"\n'
-            r'run_shell_step "python3 scripts/check_github_release_safety\.py"\n'
-            r"mark_step_complete",
+        self.assert_step_sequence(
+            ("RubyGems public install smoke", "bash scripts/real_user_rubygems_public_smoke.sh"),
+            ("Swift real-user smoke", "bash scripts/real_user_swift_smoke.sh"),
+            ("SwiftPM public install smoke", "bash scripts/real_user_swiftpm_public_smoke.sh"),
+            ("PHP package metadata", None),
         )
 
     def test_public_verifier_removes_disposable_package_outputs(self) -> None:

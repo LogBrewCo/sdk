@@ -34,8 +34,10 @@ AREA_NAMES = (
     "maven",
 )
 
+SOURCE_AREAS = frozenset(AREA_NAMES) - {"release_artifacts", "react_native_native", "javascript", "maven"}
 
 SCRIPT_AREA_PREFIXES = {
+    **{f"{action}_{area}_": {area} for area in SOURCE_AREAS for action in ("real_user", "check")},
     "real_user_js_": {"javascript"},
     "real_user_browser_": {"javascript"},
     "real_user_node_": {"javascript"},
@@ -52,62 +54,17 @@ SCRIPT_AREA_PREFIXES = {
     "real_user_svelte_": {"javascript"},
     "real_user_react_": {"javascript"},
     "check_js_": {"javascript"},
-    "real_user_rust_": {"rust"},
-    "check_rust_": {"rust"},
-    "real_user_python_": {"python"},
-    "check_python_": {"python"},
     "check_fastapi_": {"python"},
     "check_flask_": {"python"},
     "check_django_": {"python"},
     "real_user_fastapi_": {"python"},
     "real_user_flask_": {"python"},
     "real_user_django_": {"python"},
-    "real_user_go_": {"go"},
-    "check_go_": {"go"},
-    "real_user_c_": {"c"},
     "real_user_native_release_public_": {"c"},
-    "check_c_": {"c"},
-    "real_user_cpp_": {"cpp"},
-    "check_cpp_": {"cpp"},
-    "real_user_java_": {"java"},
-    "check_java_": {"java"},
     "real_user_spring_": {"java"},
-    "real_user_dotnet_": {"dotnet"},
-    "check_dotnet_": {"dotnet"},
-    "real_user_unity_": {"unity"},
-    "check_unity_": {"unity"},
-    "real_user_ruby_": {"ruby"},
-    "check_ruby_": {"ruby"},
-    "real_user_php_": {"php"},
-    "check_php_": {"php"},
-    "real_user_swift_": {"swift"},
-    "check_swift_": {"swift"},
-    "real_user_objc_": {"objc"},
-    "check_objc_": {"objc"},
-    "real_user_kotlin_": {"kotlin"},
-    "check_kotlin_": {"kotlin"},
     "real_user_maven_": {"maven"},
     "build_maven_": {"maven"},
     "check_maven_": {"maven"},
-}
-
-
-RELEASE_ARTIFACT_SCRIPT_NAMES = {
-    "real_user_js_release_artifact_smoke.sh",
-    "real_user_js_release_artifact_cli_smoke.sh",
-    "real_user_vite_release_artifact_smoke.sh",
-    "real_user_next_release_artifact_smoke.sh",
-    "real_user_react_native_release_artifact_smoke.sh",
-    "real_user_react_native_native_release_artifact_smoke.sh",
-    "real_user_js_release_artifact_upload_smoke.sh",
-    "real_user_native_release_artifact_smoke.sh",
-    "real_user_native_release_artifact_upload_smoke.sh",
-    "create_js_release_artifact_manifest.py",
-    "create_native_release_artifact_manifest.py",
-    "prepare_js_release_artifact_debug_ids.py",
-    "upload_js_release_artifacts.py",
-    "upload_native_release_artifacts.py",
-    "verify_js_release_artifact_symbolication.py",
 }
 
 
@@ -138,7 +95,7 @@ def add_script_areas(path: str, areas: set[str]) -> None:
     if not path.startswith("scripts/"):
         return
     name = path.removeprefix("scripts/")
-    if name in RELEASE_ARTIFACT_SCRIPT_NAMES or "release_artifact" in name:
+    if "release_artifact" in name:
         areas.add("release_artifacts")
     for prefix, owned_areas in SCRIPT_AREA_PREFIXES.items():
         if name.startswith(prefix):
@@ -146,16 +103,16 @@ def add_script_areas(path: str, areas: set[str]) -> None:
 
 
 def classify(paths: Iterable[str]) -> dict[str, bool]:
-    areas = {name: False for name in AREA_NAMES}
     enabled: set[str] = set()
     for raw_path in paths:
-        path = raw_path.strip()
-        if path.startswith("./"):
-            path = path[2:]
+        path = raw_path.strip().removeprefix("./")
         if not path:
             continue
         add_script_areas(path, enabled)
-        if path.startswith("rust/") or path in {"Cargo.toml", "Cargo.lock"}:
+        directory, separator, _ = path.partition("/")
+        if separator and directory in SOURCE_AREAS:
+            enabled.add(directory)
+        if path in {"Cargo.toml", "Cargo.lock"}:
             enabled.add("rust")
         if path.startswith("js/"):
             enabled.add("javascript")
@@ -175,35 +132,13 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
             }
         ):
             enabled.update({"javascript", "react_native_native"})
-        if path.startswith("python/"):
-            enabled.add("python")
-        if path.startswith("go/"):
+        if path.startswith("tools/toolchain-probe/"):
             enabled.add("go")
-        if path.startswith("c/"):
-            enabled.add("c")
-        if path.startswith("cpp/"):
-            enabled.add("cpp")
-        if path.startswith("java/"):
-            enabled.add("java")
-        if path.startswith("dotnet/"):
-            enabled.add("dotnet")
-        if path.startswith("unity/"):
-            enabled.add("unity")
-        if path.startswith("ruby/"):
-            enabled.add("ruby")
-        if path.startswith("php/"):
-            enabled.add("php")
-        if path.startswith("swift/") or path == "Package.swift":
+        if path == "Package.swift":
             enabled.add("swift")
-        if path.startswith("objc/"):
-            enabled.add("objc")
-        if path.startswith("kotlin/"):
-            enabled.add("kotlin")
         if path == ".github/workflows/publish-packages.yml":
             enabled.add("maven")
-    for name in enabled:
-        areas[name] = True
-    return areas
+    return {name: name in enabled for name in AREA_NAMES}
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

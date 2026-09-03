@@ -741,6 +741,8 @@ async def submit_payment() -> int:
 
 The `aiohttp` helpers add no `aiohttp` dependency to LogBrew. They write one normalized child `traceparent`, keep the child trace active during the awaited request, queue one sanitized dependency span, and return the original response or re-raise the original exception. `instrument_aiohttp_client_session_with_logbrew_spans()` returns a `LogBrewAiohttpClientSessionInstrumentation` handle. The handle wraps only the provided session instance, returns the existing handle on duplicate install, and puts the original `_request` coroutine back with `uninstall()`. It does not patch `aiohttp.ClientSession` globally, add `TraceConfig`, own sessions/connectors, capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, exception messages, baggage, tracestate, or raw propagation values.
 
+For Requests, HTTPX, and aiohttp, `uninstall()` restores the original method only if LogBrew's wrapper is still installed. If your application replaces that method afterward, removal preserves the replacement. Uninstall and reinstall instrumentation to capture calls through the new method.
+
 ## Database Operation Spans
 
 Use `database_operation_with_logbrew_span()` for sync database calls and `async_database_operation_with_logbrew_span()` for async calls when you want one app-owned DB span without installing or patching a database driver:
@@ -1107,6 +1109,43 @@ queued = rq_operation_with_logbrew_span(
 ```
 
 The manual helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
+
+### Automatic ARQ spans
+
+Install the ARQ extra and instrument the exact producer pool and worker instances your application owns:
+
+```bash
+pip install "logbrew-sdk[arq]"
+```
+
+```python
+from logbrew_sdk import (
+    instrument_arq_pool_with_logbrew_spans,
+    instrument_arq_worker_with_logbrew_spans,
+)
+
+producer_instrumentation = instrument_arq_pool_with_logbrew_spans(
+    redis_pool,
+    client=producer_client,
+)
+worker_instrumentation = instrument_arq_worker_with_logbrew_spans(
+    worker,
+    client=worker_client,
+    logger_names=["my_app.jobs"],
+)
+```
+
+Install worker instrumentation after `create_worker(...)`, once every function is registered. Configure the producer and worker separately when they run in different processes. Each enqueue creates one `queue.publish` span. Each instrumented task attempt creates one `queue.process` span, linked to the publish span when its producer carrier is readable. Application logs emitted through the selected logger names inherit the active worker trace. Unexpected task exceptions, including `JobExecutionFailed`, create one unhandled `arq.job` issue with bounded structured frames. `Retry` and `RetryJob` remain span-only while the worker permits retries; with `retry_jobs=False`, they create terminal issues. Intentional cancellation remains span-only.
+
+Failed jobs that never reach a task also produce a span and a linked issue. This includes unknown functions, expired or unreadable jobs, exhausted attempts, and exceptions escaping the start hook. Their metadata contains `queueFailureStage: before_execution`; duration measures the observed pre-execution work, not task execution. Task name, attempt, and queue wait are included only when available. Capture works even when ARQ result retention is disabled. A pre-start abort produces only an error span. The adapter preserves application codecs and ARQ result bytes and does not duplicate evidence when ARQ retries result serialization. Missing producer context creates an independent trace, never a link inferred from another active request.
+
+For a cancelled task, LogBrew waits for the worker's outcome before finalizing its span. It observes ARQ's typed worker exception through a passive logging filter, without copying log messages or arguments, changing logger levels, or suppressing output. Result serialization provides a second observation path. A confirmed timeout creates a `TimeoutError` issue and error span, with the cancellation cause and available task frames. Ordinary cancellation remains span-only. The task span is finalized before the first configured post-job hook, or when `run_job` exits if no such hook runs. Metadata records `queueCancellationOutcome: observed` when the worker outcome is available. If neither path provides an outcome, for example when worker errors are disabled and result retention is off, it records `queueCancellationOutcome: unavailable` and the observed `CancelledError`; it does not invent a timeout cause. LogBrew never changes ARQ retention or retry settings to obtain evidence.
+
+The carrier is an internal `_logbrew_trace` key in ARQ's serialized job dictionary. LogBrew calls the configured job serializer and deserializer, or ARQ's pickle defaults when neither is set. Custom codecs such as JSON must preserve that additional dictionary key for producer/worker correlation. If a serializer rejects the carrier, LogBrew reports the failure through `on_capture_error` and retries serialization with the original dictionary so the job can still run. A codec that drops or rejects the carrier cannot provide a producer link; the worker starts its own trace. Serialization callbacks must be side-effect-free because this fallback can call them twice. The SDK never records job IDs, arguments, keyword arguments, results, exception messages, Redis addresses, or raw tracebacks.
+
+Configured `on_job_end` and `after_job_end` hooks each create a separate span with `queueHook` identifying the callback. These spans follow the task trace when it is available, otherwise the known producer context. Selected application logs inside a hook link to that hook's span. A hook exception creates an `arq.hook` issue with its own source frames, `hookState: failure`, and `queueFailureStage: after_execution`, without relabeling the task result as failed. ARQ does not retry exceptions escaping these hooks, so even `Retry` and `RetryJob` produce hook issues. Hook cancellation remains span-only. The adapter preserves callback return values, exceptions, ordering, and result storage. Register hooks before installing instrumentation. After replacing a hook, uninstall and reinstall instrumentation to capture the replacement.
+
+Both instrumentation objects are idempotent per instance and provide `uninstall()`. Removal is rejected while an enqueue or job is running. Enqueue cancellation records an error span with its exception type and preserves the original cancellation.
 
 ### Automatic Celery spans
 

@@ -800,6 +800,8 @@ class LogBrewClient:
         require_non_empty("event id", event_id)
         require_timestamp(timestamp)
         event_context = attributes.pop("context", None)
+        if (active_trace := trace_metadata()) and event_type != "span":
+            event_context = merge_telemetry_contexts({"schemaVersion": 1, "trace": active_trace}, event_context)
         merged_context = merge_telemetry_contexts(self._context, event_context)
         if merged_context is not None:
             attributes["context"] = merged_context
@@ -1076,9 +1078,7 @@ def metadata_from_log_record(
         "threadName": record.threadName,
     }
     metadata.update(extra_metadata_from_log_record(record))
-    active_trace = get_active_logbrew_trace()
-    if active_trace is not None:
-        metadata.update(active_trace.metadata())
+    metadata.update(trace_metadata())
     if record.exc_info is not None:
         exception = record.exc_info[1]
         if exception is not None:
@@ -1737,6 +1737,12 @@ from logbrew_sdk._rq_client import (  # noqa: E402
     instrument_rq_worker_processes_with_logbrew,
     rq_operation_with_logbrew_span,
 )
+from logbrew_sdk._arq_client import (  # noqa: E402
+    LogBrewArqPoolInstrumentation,
+    LogBrewArqWorkerInstrumentation,
+    instrument_arq_pool_with_logbrew_spans,
+    instrument_arq_worker_with_logbrew_spans,
+)
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 from logbrew_sdk._opentelemetry_processor import (  # noqa: E402
     LogBrewOpenTelemetrySpanExporter,
@@ -1769,6 +1775,8 @@ __all__ = [
     "IssueStackFrame",
     "LogAttributes",
     "LogBrewAiohttpClientSessionInstrumentation",
+    "LogBrewArqPoolInstrumentation",
+    "LogBrewArqWorkerInstrumentation",
     "LogBrewCeleryInstrumentation",
     "LogBrewCeleryWorkerLifecycle",
     "LogBrewClient",
@@ -1837,6 +1845,8 @@ __all__ = [
     "get_active_logbrew_trace",
     "httpx_request_with_logbrew_span",
     "instrument_aiohttp_client_session_with_logbrew_spans",
+    "instrument_arq_pool_with_logbrew_spans",
+    "instrument_arq_worker_with_logbrew_spans",
     "instrument_celery_app_with_logbrew_spans",
     "instrument_celery_worker_processes_with_logbrew",
     "instrument_dbapi_connection_with_logbrew_spans",

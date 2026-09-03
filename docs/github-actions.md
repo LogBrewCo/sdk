@@ -17,6 +17,44 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 - `publish-packages.yml`: manual-only registry publishing with trusted publishing where registries support OIDC, plus public registry version verification after real publishes
 - `publish-release.yml`: dispatches package publishing for repo-wide `vMAJOR.MINOR.PATCH` GitHub Releases and intentionally skips package publishing for scoped package tags such as `go/logbrew/v0.1.1`
 
+## Local verifier inventory
+
+The JSON summary from `scripts/check_public_sdks.sh` requires the exact local Go
+version in `tools/toolchain-probe/.go-version`, currently 1.27.1. CI reads the
+same pin. The build selects that version explicitly, uses only the standard
+library, verifies the selected binary's reported version, and disables toolchain
+and module downloads with `GOTOOLCHAIN=local`. A missing or mismatched pinned
+toolchain fails instead of downloading or falling back. Compilation time is
+separate from the probe deadlines below. The Go SDK's public compiler floor is
+unchanged.
+
+On macOS and Linux, the inventory runs at most four distinct version commands at
+once. Each command has a two-second deadline and a 4 KiB limit per output stream.
+The inventory has a shared three-second deadline. It kills each command's process
+group during cleanup, including children left behind after command exit.
+
+Missing, timed-out, failed, empty, invalid, and oversized output remain explicit
+states, not version claims. Unsupported platforms return an explicit state.
+The legacy `node`, `npm`, and `pnpm` keys remain in the JSON shape as
+`unsupported: use bun`; those executables are not invoked by the inventory.
+If the Go probe cannot start, the verifier fails without a JSON summary and
+identifies whether the native clock or toolchain inventory was unavailable.
+
+`scripts/check_go_tests.sh` and `scripts/check_go_static.sh` cover the probe
+alongside the Go packages. Install Staticcheck 2026.2.1 on `PATH` before local
+checks; the timed check validates the version and does not download tools. CI
+installs Go before root contract tests as well.
+
+Provision the pinned Python static-analysis environment once before local
+checks; the timed check validates every direct package version and does not
+download tools:
+
+```bash
+tools="${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/python-static/ruff-0.15.15-mypy-2.1.0"
+python3 -m venv "$tools"
+"$tools/bin/python" -m pip install --requirement scripts/python_static_tools.txt
+```
+
 ## GitHub Release tags
 
 Use repo-wide tags such as `v0.1.1` only when the whole SDK repository should run the real `target=all` package publishing path. The repo-wide release workflow checks that every package manifest it would publish already matches the tag version before dispatching registry jobs; if versions are mixed, use scoped/manual changed-package publishing or bump every listed package first.

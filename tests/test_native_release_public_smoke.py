@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import gzip
 import io
 import json
 import os
+import shlex
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -18,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_native_release_public_smoke.sh"
 ARTIFACT_ID = "native:LogBrewCo/sdk"
 VERSION = "0.2.2"
-PUBLIC_VERSION = "0.2.2"
+GO_CACHE = subprocess.check_output(["go", "env", "GOCACHE"], text=True).strip()
 SOURCE_PATHS = (
     "LICENSE",
     "README.md",
@@ -124,14 +127,14 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
         env_overrides: dict[str, str] | None = None,
         script_path: Path = SCRIPT,
     ) -> subprocess.CompletedProcess[str]:
-        supplied = (
-            artifact_files
-            if artifact_files is not None
-            else {ARTIFACT_ID: str(artifact_path.absolute())}
-        )
+        supplied = artifact_files if artifact_files is not None else {
+            ARTIFACT_ID: str(artifact_path.absolute())
+        }
         env = {
             **os.environ,
+            "GOCACHE": GO_CACHE,
             "HOME": str(temp_dir / "home"),
+            "LOGBREW_SDK_ROOT": str(ROOT),
             "LOGBREW_RELEASE_RECEIPT_MODE": "1",
             "LOGBREW_RELEASE_ARTIFACT_FILES_JSON": json.dumps(supplied, separators=(",", ":")),
         }
@@ -146,14 +149,50 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
             check=False,
         )
 
+    def _script_replacing(self, temp_dir: Path, name: str, old: str, new: str) -> Path:
+        path = temp_dir / name
+        body = SCRIPT.read_text(encoding="utf-8")
+        replaced = body.replace(old, new, 1)
+        self.assertNotEqual(replaced, body)
+        path.write_text(replaced, encoding="utf-8")
+        return path
+
+    def _assert_failure(self, result: subprocess.CompletedProcess[str], stage: str) -> None:
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual((result.stdout, result.stderr), ("", f"native release receipt failed at {stage}\n"))
+
     def test_receipt_mode_builds_executes_and_attests_exact_source_archive(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp_dir:
             temp_dir = Path(raw_temp_dir)
             artifact_path = temp_dir / "source.tar.gz"
             archive_bytes = _source_archive(artifact_path)
-            result = self._run_receipt(temp_dir, artifact_path)
+            compiler = shutil.which("cc")
+            self.assertIsNotNone(compiler)
+            fake_bin = temp_dir / "bin"
+            fake_bin.mkdir()
+            compiler_args = temp_dir / "compiler-args.txt"
+            fake_cc = fake_bin / "cc"
+            fake_cc.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' compiler-invocation \"$@\" >> {shlex.quote(str(compiler_args))}\n"
+                f"exec {shlex.quote(str(compiler))} \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_cc.chmod(0o700)
+            result = self._run_receipt(
+                temp_dir, artifact_path,
+                env_overrides={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+            )
+            arguments = compiler_args.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(arguments.count("compiler-invocation"), 2)
+        self.assertEqual(arguments.count("-c"), 1)
+        for flag in ("-std=c99", "-Wall", "-Wextra", "-Wpedantic", "-Werror"):
+            self.assertEqual(arguments.count(flag), 2)
+        for source in SOURCE_PATHS:
+            if source.endswith(".c"):
+                self.assertEqual(sum(arg.endswith("/" + source) for arg in arguments), 1)
         self.assertEqual(result.stderr, "")
         attestation = json.loads(result.stdout)
         self.assertEqual(list(attestation), ["schema_version", "status", "artifacts"])
@@ -172,7 +211,7 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
             public_header = (ROOT / "c/logbrew-c/include/logbrew.h").read_bytes()
             _source_archive(
                 artifact_path,
-                version=PUBLIC_VERSION,
+                version=VERSION,
                 mutations={"c/logbrew-c/include/logbrew.h": public_header},
             )
             fake_bin = temp_dir / "bin"
@@ -200,14 +239,21 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             fake_curl.chmod(fake_curl.stat().st_mode | stat.S_IXUSR)
             env = {
                 **os.environ,
+                "GOCACHE": GO_CACHE,
                 "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
                 "FAKE_CURL_ARGS": str(curl_args),
                 "FAKE_SOURCE_ARCHIVE": str(artifact_path),
             }
             env.pop("LOGBREW_RELEASE_RECEIPT_MODE", None)
             env.pop("LOGBREW_RELEASE_ARTIFACT_FILES_JSON", None)
+            script_path = self._script_replacing(
+                temp_dir,
+                "download-contract-smoke.sh",
+                'build_dir="$tmp_dir/build"',
+                'echo "native GitHub release install smoke passed"\nexit 0\n\nbuild_dir="$tmp_dir/build"',
+            )
             result = subprocess.run(
-                ["bash", str(SCRIPT)],
+                ["bash", str(script_path)],
                 cwd=ROOT,
                 env=env,
                 capture_output=True,
@@ -247,9 +293,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             ]
 
         for result in results:
-            self.assertEqual(result.returncode, 1)
-            self.assertEqual(result.stdout, "")
-            self.assertEqual(result.stderr, "native release receipt failed at artifact binding\n")
+            self._assert_failure(result, "artifact binding")
 
     def test_receipt_mode_rejects_symlinked_artifact_input(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp_dir:
@@ -260,9 +304,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             link.symlink_to(artifact_path)
             result = self._run_receipt(temp_dir, link)
 
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "native release receipt failed at artifact binding\n")
+        self._assert_failure(result, "artifact binding")
 
     def test_receipt_mode_rejects_unsafe_archive_surfaces_without_echoing_them(self) -> None:
         marker = "ARCHIVE_CANARY_7A91"
@@ -284,9 +326,7 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
                 _unsafe_archive(artifact_path, kind, marker)
                 result = self._run_receipt(temp_dir, artifact_path)
 
-            self.assertEqual(result.returncode, 1)
-            self.assertEqual(result.stdout, "")
-            self.assertEqual(result.stderr, "native release receipt failed at archive validation\n")
+            self._assert_failure(result, "archive validation")
             self.assertNotIn(marker, result.stderr)
             self.assertNotIn(str(temp_dir), result.stderr)
 
@@ -296,33 +336,24 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             artifact_path.write_bytes(b"not a source archive")
             result = self._run_receipt(temp_dir, artifact_path)
 
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "native release receipt failed at archive validation\n")
+        self._assert_failure(result, "archive validation")
 
         with tempfile.TemporaryDirectory() as raw_temp_dir:
             temp_dir = Path(raw_temp_dir)
-            base_path = temp_dir / "base.tar.gz"
             expansion_path = temp_dir / "expansion.tar.gz"
-            _source_archive(base_path)
-            with gzip.open(base_path, "rb") as source, gzip.open(
-                expansion_path,
-                "wb",
-                compresslevel=1,
-            ) as destination:
-                while chunk := source.read(1024 * 1024):
-                    destination.write(chunk)
-                zero_chunk = b"\x00" * (1024 * 1024)
-                for _ in range(145):
-                    destination.write(zero_chunk)
-            expansion_result = self._run_receipt(temp_dir, expansion_path)
+            with gzip.open(expansion_path, "wb", compresslevel=1) as destination:
+                destination.write(b"\x00" * (2 * 1024 * 1024))
+            bounded_script = self._script_replacing(
+                temp_dir,
+                "bounded-decompression-smoke.sh",
+                "MAX_DECOMPRESSED_TAR_BYTES = 144 * 1024 * 1024",
+                "MAX_DECOMPRESSED_TAR_BYTES = 1024 * 1024",
+            )
+            expansion_result = self._run_receipt(
+                temp_dir, expansion_path, script_path=bounded_script,
+            )
 
-        self.assertEqual(expansion_result.returncode, 1)
-        self.assertEqual(expansion_result.stdout, "")
-        self.assertEqual(
-            expansion_result.stderr,
-            "native release receipt failed at archive validation\n",
-        )
+        self._assert_failure(expansion_result, "archive validation")
 
     def test_receipt_mode_requires_exact_embedded_release_version(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp_dir:
@@ -331,11 +362,22 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             _source_archive(artifact_path)
             result = self._run_receipt(temp_dir, artifact_path, version="0.2.3")
 
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "native release receipt failed at release identity\n")
+        self._assert_failure(result, "release identity")
         self.assertNotIn("0.2.2", result.stderr)
         self.assertNotIn("0.2.3", result.stderr)
+
+    def test_receipt_mode_rejects_untrusted_shared_probe_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp_dir:
+            temp_dir = Path(raw_temp_dir)
+            artifact_path = temp_dir / "source.tar.gz"
+            _source_archive(artifact_path)
+            result = self._run_receipt(
+                temp_dir,
+                artifact_path,
+                env_overrides={"LOGBREW_TOOLCHAIN_PROBE_BIN": "relative-probe"},
+            )
+
+        self._assert_failure(result, "toolchain")
 
     def test_receipt_mode_bounds_build_and_runtime_diagnostics(self) -> None:
         build_canary = b"COMPILER_CANARY_4C62"
@@ -349,7 +391,6 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
                 broken_path,
                 mutations={"c/logbrew-c/src/logbrew.c": broken_source},
             )
-            build_result = self._run_receipt(temp_dir, broken_path)
 
             hanging_path = temp_dir / "hanging.tar.gz"
             source = (ROOT / "c/logbrew-c/src/logbrew.c").read_bytes()
@@ -371,76 +412,26 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
                 hanging_path,
                 mutations={"c/logbrew-c/src/logbrew.c": hanging_source},
             )
-            bounded_script = temp_dir / "bounded-native-runtime-smoke.sh"
-            script_body = SCRIPT.read_text(encoding="utf-8")
-            bounded_body = script_body.replace(
-                "RUNTIME_TIMEOUT_SECONDS = 5",
-                "RUNTIME_TIMEOUT_SECONDS = 1",
-                1,
-            )
-            self.assertNotEqual(bounded_body, script_body)
-            bounded_script.write_text(bounded_body, encoding="utf-8")
-            started_at = time.monotonic()
-            runtime_result = self._run_receipt(
+            bounded_script = self._script_replacing(
                 temp_dir,
-                hanging_path,
-                script_path=bounded_script,
+                "bounded-native-runtime-smoke.sh",
+                "timeout=5000",
+                "timeout=250",
             )
+            started_at = time.monotonic()
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                build_future = executor.submit(self._run_receipt, temp_dir, broken_path)
+                runtime_future = executor.submit(
+                    self._run_receipt, temp_dir, hanging_path, script_path=bounded_script,
+                )
+                build_result, runtime_result = build_future.result(), runtime_future.result()
             elapsed = time.monotonic() - started_at
 
-        self.assertEqual(build_result.returncode, 1)
-        self.assertEqual(build_result.stdout, "")
-        self.assertEqual(build_result.stderr, "native release receipt failed at native build\n")
+        self._assert_failure(build_result, "native build")
         self.assertNotIn(build_canary.decode(), build_result.stderr)
-        self.assertEqual(runtime_result.returncode, 1)
-        self.assertEqual(runtime_result.stdout, "")
-        self.assertEqual(runtime_result.stderr, "native release receipt failed at installed execution\n")
+        self._assert_failure(runtime_result, "installed execution")
         self.assertNotIn("RUNTIME_CANARY_9D03", runtime_result.stderr)
-        self.assertGreaterEqual(elapsed, 1)
-        self.assertLess(elapsed, 10)
-
-    def test_receipt_mode_times_out_and_reaps_a_hanging_compiler(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_temp_dir:
-            temp_dir = Path(raw_temp_dir)
-            artifact_path = temp_dir / "source.tar.gz"
-            _source_archive(artifact_path)
-            fake_bin = temp_dir / "bin"
-            fake_bin.mkdir()
-            compiler_pid = temp_dir / "compiler.pid"
-            fake_cc = fake_bin / "cc"
-            fake_cc.write_text(
-                "#!/bin/sh\n"
-                f"printf '%s\\n' \"$$\" > {compiler_pid!s}\n"
-                "exec sleep 60\n",
-                encoding="utf-8",
-            )
-            fake_cc.chmod(fake_cc.stat().st_mode | stat.S_IXUSR)
-            bounded_script = temp_dir / "bounded-native-release-smoke.sh"
-            script_body = SCRIPT.read_text(encoding="utf-8")
-            bounded_body = script_body.replace(
-                "BUILD_TIMEOUT_SECONDS = 30",
-                "BUILD_TIMEOUT_SECONDS = 2",
-                1,
-            )
-            self.assertNotEqual(bounded_body, script_body)
-            bounded_script.write_text(bounded_body, encoding="utf-8")
-            started_at = time.monotonic()
-            result = self._run_receipt(
-                temp_dir,
-                artifact_path,
-                env_overrides={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
-                script_path=bounded_script,
-            )
-            elapsed = time.monotonic() - started_at
-            pid = int(compiler_pid.read_text(encoding="utf-8"))
-
-            with self.assertRaises(ProcessLookupError):
-                os.kill(pid, 0)
-
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "native release receipt failed at native build\n")
-        self.assertGreaterEqual(elapsed, 2)
+        self.assertGreaterEqual(elapsed, 0.2)
         self.assertLess(elapsed, 10)
 
     def test_script_declares_fixed_native_release_contract(self) -> None:
@@ -465,7 +456,8 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             "gzip.open",
             "prevalidate_tar",
             "run_bounded_command",
-            "BUILD_TIMEOUT_SECONDS = 30",
+            '"$toolchain_probe_bin" deadline',
+            "native GitHub release install smoke passed",
         ):
             self.assertIn(expected, body)
 

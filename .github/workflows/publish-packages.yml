@@ -360,6 +360,12 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Set up Go deadline tool
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: tools/toolchain-probe/.go-version
+          cache: false
+
       - name: Read Python package versions
         id: pypi-version
         shell: bash

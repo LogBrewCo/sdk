@@ -4,6 +4,11 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-python-public-pypi.XXXXXX")"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
+uv_version="0.12.9"
+uv_bin="${LOGBREW_UV_BIN:-$(command -v uv || true)}"
+if [[ -z "$uv_bin" ]]; then
+    uv_bin="${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/uv/$uv_version/bin/uv"
+fi
 
 manifest_path=""
 artifact_root=""
@@ -63,14 +68,21 @@ else
     flask_version="${legacy_args[3]:-${LOGBREW_PYPI_FLASK_VERSION:-0.1.5}}"
 fi
 
-fastapi_celery_extra="$(python3 - "$fastapi_version" <<'PY'
+IFS=$'\t' read -r sdk_arq_extra fastapi_celery_extra < <(python3 - "$sdk_version" "$fastapi_version" <<'PY'
 import re
 import sys
 
-match = re.match(r"^(\d+)\.(\d+)\.(\d+)", sys.argv[1])
-print("1" if match and tuple(map(int, match.groups())) >= (0, 1, 8) else "0")
+def at_least(version: str, minimum: tuple[int, int, int]) -> str:
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
+    return "1" if match and tuple(map(int, match.groups())) >= minimum else "0"
+
+print(at_least(sys.argv[1], (0, 1, 15)), at_least(sys.argv[2], (0, 1, 8)), sep="\t")
 PY
-)"
+)
+sdk_extras="rq"
+if [[ "$sdk_arq_extra" == "1" ]]; then
+    sdk_extras="arq,rq"
+fi
 
 on_error() {
     local status=$?
@@ -87,6 +99,10 @@ on_error() {
         "$tmp_dir/logbrew-fastapi.show.txt" \
         "$tmp_dir/logbrew-flask.show.txt" \
         "$tmp_dir/logbrew-django.show.txt" \
+        "$tmp_dir/receipt-install.err" \
+        "$tmp_dir/receipt-replay-install.err" \
+        "$tmp_dir/public-install.err" \
+        "$tmp_dir/public-replay-install.err" \
         "$tmp_dir/proof.json"; do
         if [[ -f "$diagnostic" ]]; then
             echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
@@ -96,10 +112,49 @@ on_error() {
     exit "$status"
 }
 
-trap 'rm -rf "$tmp_dir"' EXIT
+trap 'find "$tmp_dir" -depth -delete' EXIT
 trap on_error ERR
 
 cd "$repo_root"
+
+uv_report="$("$uv_bin" --version 2>/dev/null || true)"
+if [[ "$uv_report" != "uv $uv_version"* ]]; then
+    printf 'uv %s is required, got %s\n' "$uv_version" "${uv_report:-unavailable}" >&2
+    exit 1
+fi
+
+if ! (cd tools/toolchain-probe && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off \
+    go build -o "$tmp_dir/toolchain-probe" .) >"$tmp_dir/probe-build.out" 2>"$tmp_dir/probe-build.err"; then
+    printf '%s\n' "native deadline tool unavailable" >&2
+    exit 1
+fi
+
+run_bounded_command() {
+    local stdout_path="$1" stderr_path="$2"
+    shift 2
+    "$tmp_dir/toolchain-probe" deadline 30000 33554432 "$@" \
+        >"$stdout_path" 2>"$stderr_path" || return
+}
+
+install_with_public_dependencies() {
+    local python_bin="$1" stdout_path="$2" stderr_path="$3"
+    shift 3
+    run_bounded_command "$stdout_path" "$stderr_path" \
+        env UV_CONCURRENT_DOWNLOADS=4 UV_HTTP_TIMEOUT=5 UV_HTTP_RETRIES=0 "$uv_bin" pip install \
+        --python "$python_bin" --strict --no-cache --no-config --no-python-downloads \
+        --only-binary :all: --default-index "$index_url" "$@"
+}
+
+replay_local_wheels_with_pip() {
+    local python_bin="$1" output_prefix="$2"
+    shift 2
+    run_bounded_command "$tmp_dir/${output_prefix}-uninstall.out" "$tmp_dir/${output_prefix}-uninstall.err" \
+        "$python_bin" -m pip uninstall -y \
+        logbrew-sdk logbrew-fastapi logbrew-flask logbrew-django
+    run_bounded_command "$tmp_dir/${output_prefix}-install.out" "$tmp_dir/${output_prefix}-install.err" \
+        "$python_bin" -m pip install --disable-pip-version-check --no-cache-dir \
+        --no-index --timeout 5 --retries 0 --only-binary=:all: "$@"
+}
 
 run_receipt_smoke() {
     local bound="$tmp_dir/receipt-artifacts"
@@ -118,13 +173,16 @@ run_receipt_smoke() {
     if [[ "$fastapi_celery_extra" == "1" ]]; then
         fastapi_requirement="${fastapi_requirement}[celery]"
     fi
-    "$tmp_dir/receipt-venv/bin/python" -m pip install \
-        --disable-pip-version-check --no-cache-dir \
-        "$install_dir/logbrew_sdk-${sdk_version}-py3-none-any.whl[rq]" \
+    local requirements=(
+        "$install_dir/logbrew_sdk-${sdk_version}-py3-none-any.whl[$sdk_extras]" \
         "$fastapi_requirement" \
         "$install_dir/logbrew_flask-${flask_version}-py3-none-any.whl" \
-        "$install_dir/logbrew_django-${django_version}-py3-none-any.whl" \
-        >"$tmp_dir/receipt-install.out" 2>"$tmp_dir/receipt-install.err"
+        "$install_dir/logbrew_django-${django_version}-py3-none-any.whl"
+    )
+    install_with_public_dependencies "$tmp_dir/receipt-venv/bin/python" \
+        "$tmp_dir/receipt-install.out" "$tmp_dir/receipt-install.err" "${requirements[@]}"
+    replay_local_wheels_with_pip "$tmp_dir/receipt-venv/bin/python" \
+        receipt-replay "${requirements[@]}"
     EXPECTED_LOGBREW_SDK_VERSION="$sdk_version" \
     EXPECTED_LOGBREW_FASTAPI_VERSION="$fastapi_version" \
     EXPECTED_LOGBREW_FLASK_VERSION="$flask_version" \
@@ -174,8 +232,6 @@ fi
 
 python3 -m venv "$tmp_dir/venv"
 export PATH="$tmp_dir/venv/bin:$PATH"
-
-python -m pip install --disable-pip-version-check --upgrade pip >/dev/null
 
 if [[ -n "$manifest_path" ]]; then
     if [[ -z "$artifact_root" ]]; then
@@ -286,7 +342,9 @@ from pathlib import Path
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 for package in payload["packages"]:
     version = tuple(int(part) for part in package["version"].split(".")[:3])
-    suffix = "[rq]" if package["id"] == "logbrew-sdk" else ""
+    suffix = "[arq,rq]" if package["id"] == "logbrew-sdk" and version >= (0, 1, 15) else ""
+    if package["id"] == "logbrew-sdk" and not suffix:
+        suffix = "[rq]"
     if package["id"] == "logbrew-fastapi" and version >= (0, 1, 8):
         suffix = "[celery]"
     print(f'{package["wheel"]["file"]}{suffix}')
@@ -298,18 +356,18 @@ else
         fastapi_requirement="logbrew-fastapi[celery]==$fastapi_version"
     fi
     packages=(
-        "logbrew-sdk[rq]==$sdk_version"
+        "logbrew-sdk[$sdk_extras]==$sdk_version"
         "$fastapi_requirement"
         "logbrew-flask==$flask_version"
         "logbrew-django==$django_version"
     )
 fi
 
-python -m pip install \
-    --disable-pip-version-check \
-    --no-cache-dir \
-    --index-url "$index_url" \
-    "${packages[@]}"
+install_with_public_dependencies "$(command -v python)" \
+    "$tmp_dir/public-install.out" "$tmp_dir/public-install.err" "${packages[@]}"
+if [[ -n "$manifest_path" ]]; then
+    replay_local_wheels_with_pip "$(command -v python)" public-replay "${packages[@]}"
+fi
 python -m pip check > "$tmp_dir/pip-check.txt"
 python -m pip show logbrew-sdk > "$tmp_dir/logbrew-sdk.show.txt"
 python -m pip show logbrew-fastapi > "$tmp_dir/logbrew-fastapi.show.txt"
@@ -322,6 +380,7 @@ export EXPECTED_LOGBREW_SDK_VERSION="$sdk_version"
 export EXPECTED_LOGBREW_FASTAPI_VERSION="$fastapi_version"
 export EXPECTED_LOGBREW_FLASK_VERSION="$flask_version"
 export EXPECTED_LOGBREW_DJANGO_VERSION="$django_version"
+export EXPECTED_LOGBREW_SDK_ARQ_EXTRA="$sdk_arq_extra"
 export EXPECTED_LOGBREW_FASTAPI_CELERY_EXTRA="$fastapi_celery_extra"
 
 cat > "$tmp_dir/prove_public_pypi_install.py" <<'PY'
@@ -368,6 +427,12 @@ versions = {
     "rq": rq.__version__,
 }
 sdk_requirements = metadata.requires("logbrew-sdk") or []
+if os.environ["EXPECTED_LOGBREW_SDK_ARQ_EXTRA"] == "1":
+    import arq
+
+    versions["arq"] = arq.__version__
+    if not any("arq<1,>=0.28" in requirement and 'extra == "arq"' in requirement for requirement in sdk_requirements):
+        raise AssertionError("installed core package does not expose the ARQ extra")
 if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requirement in sdk_requirements):
     raise AssertionError("installed core package does not expose the RQ extra")
 if os.environ["EXPECTED_LOGBREW_FASTAPI_CELERY_EXTRA"] == "1":

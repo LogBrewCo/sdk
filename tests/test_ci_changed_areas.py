@@ -40,7 +40,15 @@ class CiChangedAreasTests(unittest.TestCase):
             "js/logbrew-js/src/index.ts": "javascript",
             "python/logbrew_py/src/logbrew/__init__.py": "python",
             "go/logbrew/logbrew.go": "go",
+            "tools/toolchain-probe/main.go": "go",
+            "tools/toolchain-probe/.go-version": "go",
+            "c/logbrew-c/src/logbrew.c": "c",
+            "cpp/logbrew-cpp/include/logbrew.hpp": "cpp",
             "java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewClient.java": "java",
+            "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.cs": "dotnet",
+            "unity/logbrew-unity/Runtime/LogBrew.cs": "unity",
+            "ruby/logbrew-ruby/lib/logbrew.rb": "ruby",
+            "php/logbrew-php/src/Client.php": "php",
             "swift/logbrew-swift/Sources/LogBrew/LogBrew.swift": "swift",
             "objc/logbrew-objc/Sources/LogBrew.m": "objc",
             "kotlin/logbrew-kotlin/src/main/kotlin/LogBrew.kt": "kotlin",
@@ -52,13 +60,16 @@ class CiChangedAreasTests(unittest.TestCase):
                 self.assertFalse(areas["maven"])
 
     def test_release_artifact_scripts_enable_only_release_artifact_area(self) -> None:
-        areas = ci_changed_areas.classify(
-            ["scripts/real_user_next_release_artifact_smoke.sh"]
-        )
+        areas = ci_changed_areas.classify(["scripts/real_user_next_release_artifact_smoke.sh"])
 
         self.assertTrue(areas["release_artifacts"])
         self.assertFalse(areas["maven"])
         self.assertFalse(areas["rust"])
+
+    def test_non_source_names_and_bare_directory_names_are_not_languages(self) -> None:
+        for path in ("go", "./go", "gopher/main.go", "javascript/main.js", "maven/pom.xml", "release_artifacts/a.json"):
+            with self.subTest(path=path):
+                self.assertFalse(any(ci_changed_areas.classify([path]).values()))
 
     def test_react_native_native_sources_enable_native_durability_checks(self) -> None:
         for path in (
@@ -81,9 +92,7 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertFalse(areas["react_native_native"])
 
     def test_native_release_public_smoke_enables_only_c_area(self) -> None:
-        areas = ci_changed_areas.classify(
-            ["scripts/real_user_native_release_public_smoke.sh"]
-        )
+        areas = ci_changed_areas.classify(["scripts/real_user_native_release_public_smoke.sh"])
 
         self.assertTrue(areas["c"])
         self.assertFalse(areas["release_artifacts"])
@@ -92,9 +101,7 @@ class CiChangedAreasTests(unittest.TestCase):
                 self.assertFalse(areas[area])
 
     def test_ci_workflow_uses_changed_areas_instead_of_repo_presence(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
         self.assertIn("name: Detect changed SDK areas", workflow)
         self.assertIn("needs: changed-areas", workflow)
@@ -102,6 +109,9 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertIn("unit_test_modules", workflow)
         self.assertIn("Run focused unit tests", workflow)
         self.assertIn("Run full unit tests", workflow)
+        self.assertIn("name: Set up Go\n        uses: actions/setup-go@", workflow)
+        self.assertIn("go-version-file: tools/toolchain-probe/.go-version", workflow)
+        self.assertEqual((ROOT / "tools/toolchain-probe/.go-version").read_text(), "1.27.1\n")
         self.assertIn("needs.changed-areas.outputs.maven == 'true'", workflow)
         self.assertIn("Run Maven Central public install smoke", workflow)
         self.assertIn("needs.changed-areas.outputs.rust == 'true'", workflow)
@@ -116,12 +126,8 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertNotIn("hashFiles(", workflow)
 
     def test_contract_checks_budget_preserves_changed_area_gates(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        contract_job = workflow.split("\n  contract-checks:\n", 1)[1].split(
-            "\n  dotnet-durability:\n", 1
-        )[0]
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        contract_job = workflow.split("\n  contract-checks:\n", 1)[1].split("\n  dotnet-durability:\n", 1)[0]
 
         self.assertIn("timeout-minutes: 60", contract_job)
         for area in (

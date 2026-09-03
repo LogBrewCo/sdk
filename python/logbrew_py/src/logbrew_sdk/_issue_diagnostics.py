@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 import math
 import os
@@ -132,6 +133,14 @@ def issue_exception_chain_from_exception(
         mechanism_handled: bool,
     ) -> None:
         nonlocal truncated
+        # Python 3.10 wait_for inserts a second cancellation wrapper without app frames.
+        while (
+            isinstance(current, asyncio.CancelledError)
+            and current.__cause__ is None
+            and not current.__suppress_context__
+            and isinstance(current.__context__, asyncio.CancelledError)
+        ):
+            current = current.__context__
         identity = id(current)
         if identity in seen or len(entries) >= MAX_ISSUE_EXCEPTIONS:
             truncated = True
@@ -434,17 +443,7 @@ def _validate_exception_chain_entry(value: Any, entry_index: int) -> dict[str, A
 def _validate_mechanism(value: Any) -> dict[str, Any]:
     mechanism = _require_object("issue exception mechanism", value)
     _reject_unknown_keys("issue exception mechanism", mechanism, {"type", "handled"})
-    mechanism_type = mechanism.get("type")
-    if not isinstance(mechanism_type, str) or _MACHINE_NAME_PATTERN.fullmatch(mechanism_type) is None:
-        raise SdkError(
-            "validation_error",
-            "issue exception mechanism type must be a stable machine name",
-        )
-    if len(mechanism_type) > MAX_MECHANISM_TYPE_LENGTH:
-        raise SdkError(
-            "validation_error",
-            f"issue exception mechanism type must be at most {MAX_MECHANISM_TYPE_LENGTH} characters",
-        )
+    mechanism_type = _machine_name("issue exception mechanism type", mechanism.get("type"), MAX_MECHANISM_TYPE_LENGTH)
     handled = mechanism.get("handled")
     if not isinstance(handled, bool):
         raise SdkError(
@@ -721,13 +720,13 @@ def _positive_coordinate(label: str, value: Any) -> int:
     return value
 
 
-def _machine_name(label: str, value: Any) -> str:
+def _machine_name(label: str, value: Any, maximum_length: int = MAX_BREADCRUMB_NAME_LENGTH) -> str:
     if not isinstance(value, str) or _MACHINE_NAME_PATTERN.fullmatch(value) is None:
         raise SdkError("validation_error", f"{label} must be a stable machine name")
-    if len(value) > MAX_BREADCRUMB_NAME_LENGTH:
+    if len(value) > maximum_length:
         raise SdkError(
             "validation_error",
-            f"{label} must be at most {MAX_BREADCRUMB_NAME_LENGTH} characters",
+            f"{label} must be at most {maximum_length} characters",
         )
     return value
 

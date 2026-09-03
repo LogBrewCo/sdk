@@ -93,8 +93,10 @@ def load_verifier():
 
 def write_test_witness(root: Path, stages: tuple[str, ...] = APP_WITNESS_STAGES) -> None:
     root.mkdir(parents=True, exist_ok=True)
+    temporary = root / load_verifier().WITNESS_TEMPORARY_NAME
     for stage in stages:
-        (root / stage).write_text("observed", encoding="ascii")
+        temporary.write_bytes(b"observed")
+        temporary.replace(root / stage)
 
 
 class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
@@ -377,6 +379,7 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
             "admission retry observation timeout",
             "admission pending verification timeout",
             "admission request timeout",
+            "admission deadline exceeded before external kill",
             "admission spontaneous exit after none",
             "admission spontaneous exit after runtime-validated",
             "admission spontaneous exit after durable-client-created",
@@ -436,10 +439,9 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
             stderr_path = root / "stderr"
             child = (
                 "from pathlib import Path; import signal, sys, time; "
+                "from tests.test_dotnet_durable_delivery_workflow_gates import write_test_witness; "
                 "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-                "root=Path(sys.argv[1]); root.mkdir(); "
-                "[(root / stage).write_text('observed', encoding='ascii') "
-                "for stage in sys.argv[3].split(',')]; "
+                "write_test_witness(Path(sys.argv[1]), tuple(sys.argv[3].split(','))); "
                 "Path(sys.argv[2]).write_bytes(b'request'); "
                 "time.sleep(60)"
             )
@@ -563,22 +565,10 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
                 root = Path(temporary_directory)
                 witness = root / "witness"
                 request = root / "request"
-                child = (
-                    "from pathlib import Path; import sys; "
-                    "root=Path(sys.argv[1]); root.mkdir(); "
-                    "[(root / stage).write_text('observed', encoding='ascii') "
-                    "for stage in sys.argv[2].split(',') if stage]; "
-                    "raise SystemExit(7)"
-                )
+                write_test_witness(witness, APP_WITNESS_STAGES[:stage_count])
 
                 result = verifier.run_until_ready_and_kill(
-                    [
-                        sys.executable,
-                        "-c",
-                        child,
-                        str(witness),
-                        ",".join(APP_WITNESS_STAGES[:stage_count]),
-                    ],
+                    [sys.executable, "-S", "-c", "raise SystemExit(7)"],
                     witness,
                     request,
                     root / "stdout",
@@ -1163,35 +1153,46 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
     def test_admission_timeout_distinguishes_witness_and_request(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
         verifier = load_verifier()
+        for ready, expected in (
+            (False, verifier.AdmissionOutcome.RUNTIME_VALIDATION_TIMEOUT),
+            (True, verifier.AdmissionOutcome.REQUEST_TIMEOUT),
+        ):
+            with self.subTest(ready=ready), tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                witness = root / "witness"
+                if ready:
+                    write_test_witness(witness)
+                result = verifier.run_until_ready_and_kill(
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    witness,
+                    root / "request",
+                    root / "stdout",
+                    root / "stderr",
+                    timeout_seconds=0.05,
+                )
+                self.assertEqual(result, expected)
 
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            result = verifier.run_until_ready_and_kill(
-                [sys.executable, "-c", "import time; time.sleep(60)"],
-                root / "witness",
-                root / "request",
-                root / "stdout",
-                root / "stderr",
-                timeout_seconds=0.05,
-            )
-            self.assertEqual(
-                result,
-                verifier.AdmissionOutcome.RUNTIME_VALIDATION_TIMEOUT,
-            )
-
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            witness = root / "witness"
-            write_test_witness(witness)
-            result = verifier.run_until_ready_and_kill(
-                [sys.executable, "-c", "import time; time.sleep(60)"],
-                witness,
-                root / "request",
-                root / "stdout",
-                root / "stderr",
-                timeout_seconds=0.05,
-            )
-            self.assertEqual(result, verifier.AdmissionOutcome.REQUEST_TIMEOUT)
+    def test_expired_startup_inspects_evidence_without_accepting_late_readiness(self) -> None:
+        verifier = load_verifier()
+        for ready in (False, True):
+            with self.subTest(ready=ready), tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                witness, request = root / "witness", root / "request"
+                write_test_witness(witness)
+                if ready:
+                    request.write_bytes(b"request")
+                with mock.patch.object(verifier.time, "monotonic", side_effect=(0.0, 1.0)):
+                    result = verifier.run_until_ready_and_kill(
+                        [sys.executable, "-c", "import time; time.sleep(60)"],
+                        witness,
+                        request,
+                        root / "stdout",
+                        root / "stderr",
+                        timeout_seconds=0.05,
+                    )
+                expected = "admission deadline exceeded before external kill" if ready else "admission request timeout"
+                self.assertEqual(result.value, expected)
+                self.assertFalse((witness / "external-kill-requested").exists())
 
     def test_installed_smoke_binds_package_and_restart_delivery(self) -> None:
         smoke = SMOKE.read_text(encoding="utf-8")

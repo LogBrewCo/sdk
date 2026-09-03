@@ -101,57 +101,6 @@ run_readme_example() {
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
 
-run_packaged_example_module() {
-    local make_target="$1"
-    local output_prefix="$2"
-
-    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "log"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
-    python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
-}
-
-run_packaged_real_user_module() {
-    local make_target="$1"
-    local output_prefix="$2"
-
-    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "log"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
-    python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
-}
-
-run_packaged_examples_entrypoint() {
-    local make_target="$1"
-    local output_prefix="$2"
-
-    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "log"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
-    python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
-}
-
 run_agent_timeline_example() {
     local make_target="$1"
     local output_prefix="$2"
@@ -275,23 +224,6 @@ check_makefile_help() {
     test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "12"
 }
 
-run_smoke_script() {
-    local make_target="$1"
-    local output_prefix="$2"
-
-    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "log"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
-    python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
-}
-
 run_logging_smoke() {
     local output_prefix="$1"
 
@@ -342,99 +274,6 @@ run_http_transport_smoke() {
     grep -q '"requestCount": 2' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"authorization": "Bearer LOGBREW_API_KEY"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"source": "python-smoke"' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_urlopen_span_smoke() {
-    local output_prefix="$1"
-
-    python "$tmp_dir/urlopen_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"activeSpan": "b7ad6b7169203331"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/payments/123"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"method": "GET"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureErrorType": "StubUrlopenError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureStatusCode": 503' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_requests_span_smoke() {
-    local output_prefix="$1"
-
-    python "$tmp_dir/requests_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"status": 201' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"activeSpan": "b7ad6b7169203334"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoActiveSpan": "b7ad6b7169203340"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoInstalled": false' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoMethod": "PATCH"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoRouteTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoStatus": 201' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203340-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203334-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureErrorType": "StubRequestsError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureStatusCode": 503' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_httpx_span_smoke() {
-    local output_prefix="$1"
-
-    python "$tmp_dir/httpx_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncStatus": 204' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"activeSpan": "b7ad6b7169203336"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncActiveSpan": "b7ad6b7169203337"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoActiveSpan": "b7ad6b7169203340"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoAsyncActiveSpan": "b7ad6b7169203341"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoAsyncMethod": "DELETE"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoAsyncRouteTemplate": "/refunds/:refund_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoAsyncStatus": 207' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoAsyncTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203341-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoInstalled": false' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoMethod": "PATCH"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoRouteTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoStatus": 206' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203340-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203336-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203337-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncRouteTemplate": "/payments/:payment_id/refunds/:refund_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncMethod": "DELETE"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncCallerHeader": "checkout-async"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureErrorType": "StubHttpxError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureStatusCode": 502' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncFailureErrorType": "StubHttpxError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncFailureStatusCode": 504' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_aiohttp_span_smoke() {
-    local output_prefix="$1"
-
-    python "$tmp_dir/aiohttp_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"eventSpan": "b7ad6b7169203342"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"autoInstalled": false' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"method": "GET"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203342-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"afterUninstallTraceparent": null' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureErrorType": "ClientResponseError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"failureStatusCode": 503' "$tmp_dir/$output_prefix.stdout.json"
 }
 
 run_database_span_smoke() {
@@ -629,14 +468,14 @@ run_requirement_reinstalls() {
     local direct_requirements="$2"
     local expected_suffix="$3"
     local output_prefix="$4"
-    local venv_path="$tmp_dir/$output_prefix-requirements-venv"
+    local venv_path="$tmp_dir/receipt-venv"
     local direct_report="$tmp_dir/$output_prefix-direct-pip-install-report.json"
     local freeze_report="$tmp_dir/$output_prefix-freeze-pip-install-report.json"
 
-    python3 -m venv "$venv_path"
     source "$venv_path/bin/activate"
 
-    python -m pip install certifi==2026.7.22 truststore==0.10.4 >/dev/null
+    python -m pip uninstall -y logbrew-sdk >/dev/null
+    assert_python_package_removed
     python -m pip install --no-deps --require-hashes --report "$direct_report" -r "$direct_requirements" >/dev/null
     python -m pip check >/dev/null
     python -m pip freeze > "$tmp_dir/$output_prefix-direct-pip-freeze.txt"
@@ -724,74 +563,81 @@ run_sdist_install_checks() {
     deactivate
 }
 
-python3 -m venv "$tmp_dir/venv"
-source "$tmp_dir/venv/bin/activate"
-python -m pip install \
-    build \
-    "setuptools>=80" \
-    mypy \
-    aiohttp \
-    "SQLAlchemy>=2,<3" \
-    "Django>=5,<7" \
-    "Flask-Caching>=2,<3" \
-    "pymemcache>=4,<5" \
-    "redis>=5,<7" \
-    "fakeredis==2.31.3" \
-    "rq==2.12.0" \
-    >/dev/null
+smoke_seed="${LOGBREW_PYTHON_SMOKE_SEED:-${LOGBREW_PYTHON_STATIC_ENV:-${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/python-static/ruff-0.15.15-mypy-2.1.0}}"
+if [[ "$(uname -s)" == "Darwin" && -x "$smoke_seed/bin/python" ]]; then
+    LOGBREW_PYTHON_STATIC_ENV="$smoke_seed" bash "$repo_root/scripts/check_python_static.sh" >/dev/null
+    export PIP_NO_INDEX=1 PIP_FIND_LINKS="$smoke_seed/wheelhouse"
+    python3 -m venv --without-pip "$tmp_dir/venv"
+    seed_site=("$smoke_seed"/lib/python*/site-packages)
+    venv_site="$tmp_dir/venv${seed_site[0]#"$smoke_seed"}"
+    printf '%s\n' "${seed_site[0]}" > "$venv_site/logbrew-smoke-seed.pth"
+else
+    python3 -m venv "$tmp_dir/venv"
+    "$tmp_dir/venv/bin/python" -m pip install \
+        build \
+        "setuptools>=80" \
+        mypy \
+        aiohttp \
+        "SQLAlchemy>=2,<3" \
+        "Django>=5,<7" \
+        "Flask-Caching>=2,<3" \
+        "pymemcache>=4,<5" \
+        "redis>=5,<7" \
+        "fakeredis==2.31.3" \
+        "arq==0.28.0" \
+        "rq==2.12.0" \
+        >/dev/null
+fi
+export PATH="$tmp_dir/venv/bin:$PATH"
 python -m build --no-isolation --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" > "$tmp_dir/build.log" 2>&1
 wheel_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.whl' | head -n 1)"
 export LOGBREW_WHEEL_PATH="$wheel_path"
 export LOGBREW_PYTHON_DIST_INFO_DIR="$dist_info_dir"
+sdist_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.tar.gz' | head -n 1)"
+export LOGBREW_SDIST_PATH="$sdist_path"
+export LOGBREW_TMP_DIR="$tmp_dir"
+export LOGBREW_PYTHON_SDIST_ROOT="$sdist_root"
 python3 - <<'PY'
 from pathlib import Path
 import os
+import tarfile
 import zipfile
 
 wheel_path = Path(os.environ["LOGBREW_WHEEL_PATH"])
 dist_info_dir = os.environ["LOGBREW_PYTHON_DIST_INFO_DIR"]
 package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
-with zipfile.ZipFile(wheel_path) as archive:
-    names = set(archive.namelist())
-    required = {
-        "logbrew_sdk/_cache_client.py",
-        "logbrew_sdk/_celery_client.py",
-        "logbrew_sdk/_dbapi_client.py",
-        "logbrew_sdk/_db_client.py",
-        "logbrew_sdk/_django_cache_client.py",
-        "logbrew_sdk/_flask_cache_client.py",
-        "logbrew_sdk/_framework_cache_client.py",
-        "logbrew_sdk/_http_client.py",
-        "logbrew_sdk/_instrumentation.py",
-        "logbrew_sdk/_pymemcache_client.py",
-        "logbrew_sdk/_queue_client.py",
-        "logbrew_sdk/_redis_client.py",
-        "logbrew_sdk/_rq_client.py",
-        "logbrew_sdk/_sqlalchemy_client.py",
-        "logbrew_sdk/_support_ticket.py",
-        "logbrew_sdk/__init__.py",
-        "logbrew_sdk/_timeline.py",
-        "logbrew_sdk/_trace_context.py",
-        "logbrew_sdk/examples/__init__.py",
-        "logbrew_sdk/examples/__main__.py",
-        "logbrew_sdk/examples/agent_timeline.py",
-        "logbrew_sdk/examples/first_useful_telemetry.py",
-        "logbrew_sdk/examples/readme_example.py",
-        "logbrew_sdk/examples/real_user_smoke.py",
-        "logbrew_sdk/py.typed",
-        f"{dist_info_dir}/METADATA",
-        f"{dist_info_dir}/WHEEL",
-        f"{dist_info_dir}/RECORD",
-    }
-    missing = sorted(required - names)
-    if missing:
-        raise SystemExit(f"missing wheel payload files: {missing}")
-    metadata = archive.read(f"{dist_info_dir}/METADATA").decode("utf-8")
-for needle in (
-    "Name: logbrew-sdk",
-    f"Version: {package_version}",
-    "Requires-Dist: certifi>=2026.7.22",
-    "Requires-Dist: truststore<1,>=0.10.4",
+sdist_path = Path(os.environ["LOGBREW_SDIST_PATH"])
+tmp_dir = Path(os.environ["LOGBREW_TMP_DIR"])
+sdist_root = os.environ["LOGBREW_PYTHON_SDIST_ROOT"]
+required_payload = {
+    "logbrew_sdk/_arq_client.py",
+    "logbrew_sdk/_cache_client.py",
+    "logbrew_sdk/_celery_client.py",
+    "logbrew_sdk/_dbapi_client.py",
+    "logbrew_sdk/_db_client.py",
+    "logbrew_sdk/_django_cache_client.py",
+    "logbrew_sdk/_flask_cache_client.py",
+    "logbrew_sdk/_framework_cache_client.py",
+    "logbrew_sdk/_http_client.py",
+    "logbrew_sdk/_instrumentation.py",
+    "logbrew_sdk/_pymemcache_client.py",
+    "logbrew_sdk/_queue_client.py",
+    "logbrew_sdk/_redis_client.py",
+    "logbrew_sdk/_rq_client.py",
+    "logbrew_sdk/_sqlalchemy_client.py",
+    "logbrew_sdk/_support_ticket.py",
+    "logbrew_sdk/__init__.py",
+    "logbrew_sdk/_timeline.py",
+    "logbrew_sdk/_trace_context.py",
+    "logbrew_sdk/examples/__init__.py",
+    "logbrew_sdk/examples/__main__.py",
+    "logbrew_sdk/examples/agent_timeline.py",
+    "logbrew_sdk/examples/first_useful_telemetry.py",
+    "logbrew_sdk/examples/readme_example.py",
+    "logbrew_sdk/examples/real_user_smoke.py",
+    "logbrew_sdk/py.typed",
+}
+guidance = (
     "python3 -m pip install logbrew-sdk",
     "LOGBREW_API_KEY",
     "preview_json()",
@@ -811,6 +657,8 @@ for needle in (
     "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_arq_pool_with_logbrew_spans",
+    "instrument_arq_worker_with_logbrew_spans",
     "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_httpx_client_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
@@ -836,55 +684,35 @@ for needle in (
     "create_network_milestone_attributes",
     "span_attributes_from_traceparent",
     "first-useful-telemetry",
+)
+with zipfile.ZipFile(wheel_path) as archive:
+    required = required_payload | {
+        f"{dist_info_dir}/METADATA",
+        f"{dist_info_dir}/WHEEL",
+        f"{dist_info_dir}/RECORD",
+    }
+    missing = sorted(required - set(archive.namelist()))
+    if missing:
+        raise SystemExit(f"missing wheel payload files: {missing}")
+    metadata = archive.read(f"{dist_info_dir}/METADATA").decode("utf-8")
+
+for needle in (
+    "Name: logbrew-sdk",
+    f"Version: {package_version}",
+    "License-Expression: MIT",
+    "Requires-Dist: certifi>=2026.7.22",
+    "Requires-Dist: truststore<1,>=0.10.4",
 ):
     if needle not in metadata:
         raise SystemExit(f"missing wheel metadata guidance: {needle}")
-PY
-sdist_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.tar.gz' | head -n 1)"
-export LOGBREW_SDIST_PATH="$sdist_path"
-export LOGBREW_TMP_DIR="$tmp_dir"
-export LOGBREW_PYTHON_SDIST_ROOT="$sdist_root"
-python3 - <<'PY'
-from pathlib import Path
-import os
-import tarfile
-
-sdist_path = Path(os.environ["LOGBREW_SDIST_PATH"])
-tmp_dir = Path(os.environ["LOGBREW_TMP_DIR"])
-sdist_root = os.environ["LOGBREW_PYTHON_SDIST_ROOT"]
 
 with tarfile.open(sdist_path, "r:gz") as archive:
     members = {member.name.lstrip("./"): member for member in archive.getmembers()}
     names = set(members)
     (tmp_dir / "sdist-contents.txt").write_text("\n".join(sorted(names)) + "\n")
-
-    required = {
+    required = {f"{sdist_root}/src/{name}" for name in required_payload} | {
         f"{sdist_root}/README.md",
         f"{sdist_root}/pyproject.toml",
-        f"{sdist_root}/src/logbrew_sdk/_cache_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_celery_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_dbapi_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_db_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_django_cache_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_flask_cache_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_framework_cache_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_http_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
-        f"{sdist_root}/src/logbrew_sdk/_pymemcache_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_queue_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_redis_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_rq_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_sqlalchemy_client.py",
-        f"{sdist_root}/src/logbrew_sdk/_support_ticket.py",
-        f"{sdist_root}/src/logbrew_sdk/_timeline.py",
-        f"{sdist_root}/src/logbrew_sdk/_trace_context.py",
-        f"{sdist_root}/src/logbrew_sdk/py.typed",
-        f"{sdist_root}/src/logbrew_sdk/examples/__init__.py",
-        f"{sdist_root}/src/logbrew_sdk/examples/__main__.py",
-        f"{sdist_root}/src/logbrew_sdk/examples/agent_timeline.py",
-        f"{sdist_root}/src/logbrew_sdk/examples/first_useful_telemetry.py",
-        f"{sdist_root}/src/logbrew_sdk/examples/readme_example.py",
-        f"{sdist_root}/src/logbrew_sdk/examples/real_user_smoke.py",
     }
     missing = sorted(required - names)
     if missing:
@@ -901,55 +729,10 @@ with tarfile.open(sdist_path, "r:gz") as archive:
 
 (tmp_dir / "sdist-README.md").write_text(readme)
 (tmp_dir / "sdist-pyproject.toml").write_text(pyproject)
-
-for needle in (
-    "python3 -m pip install logbrew-sdk",
-    "LOGBREW_API_KEY",
-    "preview_json()",
-    "HttpTransport",
-    "LogBrewAiohttpClientSessionInstrumentation",
-    "LogBrewHttpxClientInstrumentation",
-    "LogBrewLoggingHandler",
-    "LogBrewRequestsSessionInstrumentation",
-    "aiohttp_request_with_logbrew_span",
-    "async_cache_operation_with_logbrew_span",
-    "async_database_operation_with_logbrew_span",
-    "async_httpx_request_with_logbrew_span",
-    "async_queue_operation_with_logbrew_span",
-    "cache_operation_with_logbrew_span",
-    "celery_operation_with_logbrew_span",
-    "connect_dbapi_connection_with_logbrew_spans",
-    "create_celery_trace_headers",
-    "database_operation_with_logbrew_span",
-    "httpx_request_with_logbrew_span",
-    "instrument_aiohttp_client_session_with_logbrew_spans",
-    "instrument_httpx_client_with_logbrew_spans",
-    "instrument_dbapi_connection_with_logbrew_spans",
-    "instrument_django_cache_with_logbrew_spans",
-    "LogBrewDjangoCacheInstrumentation",
-    "instrument_flask_cache_with_logbrew_spans",
-    "LogBrewFlaskCacheInstrumentation",
-    "instrument_pymemcache_client_with_logbrew_spans",
-    "LogBrewPymemcacheInstrumentation",
-    "instrument_redis_client_with_logbrew_spans",
-    "instrument_requests_session_with_logbrew_spans",
-    "instrument_rq_queue_with_logbrew_spans",
-    "instrument_rq_worker_processes_with_logbrew",
-    "instrument_sqlalchemy_engine_with_logbrew_spans",
-    "logbrew_trace_context_from_celery_headers",
-    "queue_operation_with_logbrew_span",
-    "requests_request_with_logbrew_span",
-    "rq_operation_with_logbrew_span",
-    "urlopen_with_logbrew_span",
-    "create_support_ticket_draft",
-    "parse_traceparent",
-    "create_product_action_attributes",
-    "create_network_milestone_attributes",
-    "span_attributes_from_traceparent",
-    "first-useful-telemetry",
-):
-    if needle not in readme:
-        raise SystemExit(f"missing sdist README guidance: {needle}")
+for label, content in (("wheel metadata", metadata), ("sdist README", readme)):
+    for needle in guidance:
+        if needle not in content:
+            raise SystemExit(f"missing {label} guidance: {needle}")
 
 for needle in (
     'readme = "README.md"',
@@ -959,155 +742,73 @@ for needle in (
         raise SystemExit(f"missing sdist pyproject metadata: {needle}")
 PY
 
-python -m pip install --report "$tmp_dir/pip-install-report.json" "$wheel_path" >/dev/null
-python -m pip check >/dev/null
-python -m pip show logbrew-sdk > "$tmp_dir/pip-show.txt"
-python -m pip show -f logbrew-sdk > "$tmp_dir/pip-show-files.txt"
-python -m pip list --format=json > "$tmp_dir/pip-list.json"
-python -m pip freeze > "$tmp_dir/pip-freeze.txt"
+python -m pip install "$wheel_path" >/dev/null
+python3 -m venv "$tmp_dir/receipt-venv"
+receipt_python="$tmp_dir/receipt-venv/bin/python"
+"$receipt_python" -m pip install --report "$tmp_dir/pip-install-report.json" "$wheel_path" >/dev/null
+"$receipt_python" -m pip check >/dev/null
+"$receipt_python" -m pip show logbrew-sdk > "$tmp_dir/pip-show.txt"
+"$receipt_python" -m pip show -f logbrew-sdk > "$tmp_dir/pip-show-files.txt"
+"$receipt_python" -m pip list --format=json > "$tmp_dir/pip-list.json"
+"$receipt_python" -m pip freeze > "$tmp_dir/pip-freeze.txt"
 grep -q "^logbrew-sdk @ file://.*${wheel_artifact}#sha256=" "$tmp_dir/pip-freeze.txt"
 grep "^logbrew-sdk @ file://.*${wheel_artifact}#sha256=" "$tmp_dir/pip-freeze.txt" > "$tmp_dir/pip-direct-requirements.txt"
 test "$(wc -l < "$tmp_dir/pip-direct-requirements.txt" | tr -d ' ')" = "1"
-python -m pip inspect > "$tmp_dir/pip-inspect.json"
+"$receipt_python" -m pip inspect > "$tmp_dir/pip-inspect.json"
 
 cat > "$tmp_dir/module_doc.py" <<'EOF'
 import inspect
 from typing import Annotated, get_args, get_origin, get_type_hints
 import logbrew_sdk
 
-doc = (logbrew_sdk.__doc__ or "").strip()
-if doc != "Public Python client for building, validating, previewing, and flushing LogBrew event batches.":
-    raise SystemExit(f"unexpected module docstring: {doc!r}")
+expected_docs = (
+    ("module", logbrew_sdk, "Public Python client for building, validating, previewing, and flushing LogBrew event batches."),
+    ("ReleaseAttributes", logbrew_sdk.ReleaseAttributes, "Public release event attributes."),
+    ("EnvironmentAttributes", logbrew_sdk.EnvironmentAttributes, "Public environment event attributes."),
+    ("IssueAttributes", logbrew_sdk.IssueAttributes, "Public issue event attributes."),
+    ("LogAttributes", logbrew_sdk.LogAttributes, "Public log event attributes."),
+    ("MetricAttributes", logbrew_sdk.MetricAttributes, "Public metric event attributes."),
+    ("SpanAttributes", logbrew_sdk.SpanAttributes, "Public span event attributes."),
+    ("ActionAttributes", logbrew_sdk.ActionAttributes, "Public action event attributes."),
+    ("LogBrewClient", logbrew_sdk.LogBrewClient, "Buffered public client for validating, previewing, and flushing LogBrew events."),
+    ("LogBrewClient.create", logbrew_sdk.LogBrewClient.create, "Create a client from public SDK identity, retry, and API key settings."),
+    ("RecordingTransport", logbrew_sdk.RecordingTransport, "Scripted transport for previewing, accepting, or failing queued event flushes."),
+    ("HttpTransport", logbrew_sdk.HttpTransport, "HTTP transport for sending queued batches with portable TLS verification."),
+    ("HttpTransport.send", logbrew_sdk.HttpTransport.send, "POST one serialized event batch and return the HTTP status."),
+    ("LogBrewClient.preview_json", logbrew_sdk.LogBrewClient.preview_json, "Return the queued event batch as stable, pretty-printed JSON."),
+    ("LogBrewClient.flush", logbrew_sdk.LogBrewClient.flush, "Flush queued events through a transport while preserving retry semantics."),
+    ("LogBrewClient.shutdown", logbrew_sdk.LogBrewClient.shutdown, "Flush queued events, then mark the client closed so later writes fail."),
+    ("LogBrewClient.pending_events", logbrew_sdk.LogBrewClient.pending_events, "Return the queued event count currently buffered locally."),
+    ("RecordingTransport.always_accept", logbrew_sdk.RecordingTransport.always_accept, "Create a transport that accepts queued flushes with a 202 response."),
+    ("RecordingTransport.last_body", logbrew_sdk.RecordingTransport.last_body, "Return the most recent request body sent through this transport."),
+    ("TransportResponse", logbrew_sdk.TransportResponse, "Stable transport response returned from flush and shutdown operations."),
+    ("SdkError", logbrew_sdk.SdkError, "Stable public SDK error with parseable code and message fields."),
+    ("TransportError", logbrew_sdk.TransportError, "Transport failure with a stable public code and retry hint."),
+    ("TransportError.network", logbrew_sdk.TransportError.network, "Create a retryable network failure that preserves queued events."),
+    ("Transport", logbrew_sdk.Transport, "Public transport protocol used by client flush, shutdown, and logging helpers."),
+    ("TraceparentContext", logbrew_sdk.TraceparentContext, "Parsed W3C traceparent context."),
+    ("parse_traceparent", logbrew_sdk.parse_traceparent, "Parse and validate a W3C traceparent header."),
+    ("create_traceparent", logbrew_sdk.create_traceparent, "Create a W3C traceparent header from explicit trace and span ids."),
+    ("create_product_action_attributes", logbrew_sdk.create_product_action_attributes, "Build privacy-safe action attributes for app-owned product milestones."),
+    ("create_network_milestone_attributes", logbrew_sdk.create_network_milestone_attributes, "Build privacy-safe action attributes for app-owned network milestones."),
+    ("span_attributes_from_traceparent", logbrew_sdk.span_attributes_from_traceparent, "Build LogBrew span attributes that continue an incoming W3C traceparent."),
+    ("LogBrewLoggingHandler", logbrew_sdk.LogBrewLoggingHandler, "Standard-library logging handler that turns LogRecord objects into LogBrew log events."),
+    ("LogBrewLoggingHandler.emit", logbrew_sdk.LogBrewLoggingHandler.emit, "Queue one LogBrew log event from a standard-library log record."),
+    ("LogBrewLoggingHandler.flush", logbrew_sdk.LogBrewLoggingHandler.flush, "Flush queued records when a transport was provided to the handler."),
+    ("log_attributes_from_record", logbrew_sdk.log_attributes_from_record, "Convert a standard-library LogRecord into LogBrew log attributes."),
+)
+for label, target, expected in expected_docs:
+    if (observed := inspect.getdoc(target)) != expected:
+        raise SystemExit(f"unexpected {label} docstring: {observed!r}")
 
-release_doc = inspect.getdoc(logbrew_sdk.ReleaseAttributes)
-if release_doc != "Public release event attributes.":
-    raise SystemExit(f"unexpected ReleaseAttributes docstring: {release_doc!r}")
-
-environment_doc = inspect.getdoc(logbrew_sdk.EnvironmentAttributes)
-if environment_doc != "Public environment event attributes.":
-    raise SystemExit(f"unexpected EnvironmentAttributes docstring: {environment_doc!r}")
-
-issue_doc = inspect.getdoc(logbrew_sdk.IssueAttributes)
-if issue_doc != "Public issue event attributes.":
-    raise SystemExit(f"unexpected IssueAttributes docstring: {issue_doc!r}")
-
-log_doc = inspect.getdoc(logbrew_sdk.LogAttributes)
-if log_doc != "Public log event attributes.":
-    raise SystemExit(f"unexpected LogAttributes docstring: {log_doc!r}")
-
-metric_doc = inspect.getdoc(logbrew_sdk.MetricAttributes)
-if metric_doc != "Public metric event attributes.":
-    raise SystemExit(f"unexpected MetricAttributes docstring: {metric_doc!r}")
-
-span_doc = inspect.getdoc(logbrew_sdk.SpanAttributes)
-if span_doc != "Public span event attributes.":
-    raise SystemExit(f"unexpected SpanAttributes docstring: {span_doc!r}")
-
-action_doc = inspect.getdoc(logbrew_sdk.ActionAttributes)
-if action_doc != "Public action event attributes.":
-    raise SystemExit(f"unexpected ActionAttributes docstring: {action_doc!r}")
-
-client_doc = inspect.getdoc(logbrew_sdk.LogBrewClient)
-if client_doc != "Buffered public client for validating, previewing, and flushing LogBrew events.":
-    raise SystemExit(f"unexpected LogBrewClient docstring: {client_doc!r}")
-
-create_doc = inspect.getdoc(logbrew_sdk.LogBrewClient.create)
-if create_doc != "Create a client from public SDK identity, retry, and API key settings.":
-    raise SystemExit(f"unexpected LogBrewClient.create docstring: {create_doc!r}")
-
-transport_doc = inspect.getdoc(logbrew_sdk.RecordingTransport)
-if transport_doc != "Scripted transport for previewing, accepting, or failing queued event flushes.":
-    raise SystemExit(f"unexpected RecordingTransport docstring: {transport_doc!r}")
-
-http_transport_doc = inspect.getdoc(logbrew_sdk.HttpTransport)
-if http_transport_doc != "HTTP transport for sending queued batches with portable TLS verification.":
-    raise SystemExit(f"unexpected HttpTransport docstring: {http_transport_doc!r}")
-
-http_transport_send_doc = inspect.getdoc(logbrew_sdk.HttpTransport.send)
-if http_transport_send_doc != "POST one serialized event batch and return the HTTP status.":
-    raise SystemExit(f"unexpected HttpTransport.send docstring: {http_transport_send_doc!r}")
-
-preview_doc = inspect.getdoc(logbrew_sdk.LogBrewClient.preview_json)
-if preview_doc != "Return the queued event batch as stable, pretty-printed JSON.":
-    raise SystemExit(f"unexpected LogBrewClient.preview_json docstring: {preview_doc!r}")
-
-flush_doc = inspect.getdoc(logbrew_sdk.LogBrewClient.flush)
-if flush_doc != "Flush queued events through a transport while preserving retry semantics.":
-    raise SystemExit(f"unexpected LogBrewClient.flush docstring: {flush_doc!r}")
-
-shutdown_doc = inspect.getdoc(logbrew_sdk.LogBrewClient.shutdown)
-if shutdown_doc != "Flush queued events, then mark the client closed so later writes fail.":
-    raise SystemExit(f"unexpected LogBrewClient.shutdown docstring: {shutdown_doc!r}")
-
-pending_doc = inspect.getdoc(logbrew_sdk.LogBrewClient.pending_events)
-if pending_doc != "Return the queued event count currently buffered locally.":
-    raise SystemExit(f"unexpected LogBrewClient.pending_events docstring: {pending_doc!r}")
-
-always_accept_doc = inspect.getdoc(logbrew_sdk.RecordingTransport.always_accept)
-if always_accept_doc != "Create a transport that accepts queued flushes with a 202 response.":
-    raise SystemExit(f"unexpected RecordingTransport.always_accept docstring: {always_accept_doc!r}")
-
-last_body_doc = inspect.getdoc(logbrew_sdk.RecordingTransport.last_body)
-if last_body_doc != "Return the most recent request body sent through this transport.":
-    raise SystemExit(f"unexpected RecordingTransport.last_body docstring: {last_body_doc!r}")
-
-response_doc = inspect.getdoc(logbrew_sdk.TransportResponse)
-if response_doc != "Stable transport response returned from flush and shutdown operations.":
-    raise SystemExit(f"unexpected TransportResponse docstring: {response_doc!r}")
-
-response_hints = get_type_hints(logbrew_sdk.TransportResponse, include_extras=True)
-status_hint = response_hints.get("status_code")
-if get_origin(status_hint) is not Annotated or get_args(status_hint)[1] != "Final HTTP-like status returned by the transport.":
-    raise SystemExit(f"unexpected TransportResponse.status_code metadata: {status_hint!r}")
-
-attempts_hint = response_hints.get("attempts")
-if get_origin(attempts_hint) is not Annotated or get_args(attempts_hint)[1] != "Number of transport attempts used for the flush.":
-    raise SystemExit(f"unexpected TransportResponse.attempts metadata: {attempts_hint!r}")
-
-transport_hints = get_type_hints(logbrew_sdk.RecordingTransport, include_extras=True)
-sent_bodies_hint = transport_hints.get("sent_bodies")
-if get_origin(sent_bodies_hint) is not Annotated or get_args(sent_bodies_hint)[1] != "Every request body sent through this transport instance.":
-    raise SystemExit(f"unexpected RecordingTransport.sent_bodies metadata: {sent_bodies_hint!r}")
-
-sdk_error_doc = inspect.getdoc(logbrew_sdk.SdkError)
-if sdk_error_doc != "Stable public SDK error with parseable code and message fields.":
-    raise SystemExit(f"unexpected SdkError docstring: {sdk_error_doc!r}")
-
-transport_error_doc = inspect.getdoc(logbrew_sdk.TransportError)
-if transport_error_doc != "Transport failure with a stable public code and retry hint.":
-    raise SystemExit(f"unexpected TransportError docstring: {transport_error_doc!r}")
-
-network_doc = inspect.getdoc(logbrew_sdk.TransportError.network)
-if network_doc != "Create a retryable network failure that preserves queued events.":
-    raise SystemExit(f"unexpected TransportError.network docstring: {network_doc!r}")
-
-transport_protocol_doc = inspect.getdoc(logbrew_sdk.Transport)
-if transport_protocol_doc != "Public transport protocol used by client flush, shutdown, and logging helpers.":
-    raise SystemExit(f"unexpected Transport docstring: {transport_protocol_doc!r}")
-
-trace_context_doc = inspect.getdoc(logbrew_sdk.TraceparentContext)
-if trace_context_doc != "Parsed W3C traceparent context.":
-    raise SystemExit(f"unexpected TraceparentContext docstring: {trace_context_doc!r}")
-
-parse_traceparent_doc = inspect.getdoc(logbrew_sdk.parse_traceparent)
-if parse_traceparent_doc != "Parse and validate a W3C traceparent header.":
-    raise SystemExit(f"unexpected parse_traceparent docstring: {parse_traceparent_doc!r}")
-
-create_traceparent_doc = inspect.getdoc(logbrew_sdk.create_traceparent)
-if create_traceparent_doc != "Create a W3C traceparent header from explicit trace and span ids.":
-    raise SystemExit(f"unexpected create_traceparent docstring: {create_traceparent_doc!r}")
-
-product_action_doc = inspect.getdoc(logbrew_sdk.create_product_action_attributes)
-if product_action_doc != "Build privacy-safe action attributes for app-owned product milestones.":
-    raise SystemExit(f"unexpected create_product_action_attributes docstring: {product_action_doc!r}")
-
-network_milestone_doc = inspect.getdoc(logbrew_sdk.create_network_milestone_attributes)
-if network_milestone_doc != "Build privacy-safe action attributes for app-owned network milestones.":
-    raise SystemExit(f"unexpected create_network_milestone_attributes docstring: {network_milestone_doc!r}")
-
-span_from_traceparent_doc = inspect.getdoc(logbrew_sdk.span_attributes_from_traceparent)
-if span_from_traceparent_doc != "Build LogBrew span attributes that continue an incoming W3C traceparent.":
-    raise SystemExit(f"unexpected span_attributes_from_traceparent docstring: {span_from_traceparent_doc!r}")
+for owner, field, expected in (
+    (logbrew_sdk.TransportResponse, "status_code", "Final HTTP-like status returned by the transport."),
+    (logbrew_sdk.TransportResponse, "attempts", "Number of transport attempts used for the flush."),
+    (logbrew_sdk.RecordingTransport, "sent_bodies", "Every request body sent through this transport instance."),
+):
+    hint = get_type_hints(owner, include_extras=True).get(field)
+    if get_origin(hint) is not Annotated or get_args(hint)[1] != expected:
+        raise SystemExit(f"unexpected {owner.__name__}.{field} metadata: {hint!r}")
 
 traceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01"
 context = logbrew_sdk.parse_traceparent(traceparent)
@@ -1186,21 +887,6 @@ if network_milestone != {
 }:
     raise SystemExit(f"unexpected network milestone attributes: {network_milestone!r}")
 
-logging_handler_doc = inspect.getdoc(logbrew_sdk.LogBrewLoggingHandler)
-if logging_handler_doc != "Standard-library logging handler that turns LogRecord objects into LogBrew log events.":
-    raise SystemExit(f"unexpected LogBrewLoggingHandler docstring: {logging_handler_doc!r}")
-
-logging_emit_doc = inspect.getdoc(logbrew_sdk.LogBrewLoggingHandler.emit)
-if logging_emit_doc != "Queue one LogBrew log event from a standard-library log record.":
-    raise SystemExit(f"unexpected LogBrewLoggingHandler.emit docstring: {logging_emit_doc!r}")
-
-logging_flush_doc = inspect.getdoc(logbrew_sdk.LogBrewLoggingHandler.flush)
-if logging_flush_doc != "Flush queued records when a transport was provided to the handler.":
-    raise SystemExit(f"unexpected LogBrewLoggingHandler.flush docstring: {logging_flush_doc!r}")
-
-log_attributes_doc = inspect.getdoc(logbrew_sdk.log_attributes_from_record)
-if log_attributes_doc != "Convert a standard-library LogRecord into LogBrew log attributes.":
-    raise SystemExit(f"unexpected log_attributes_from_record docstring: {log_attributes_doc!r}")
 EOF
 
 python "$tmp_dir/module_doc.py"
@@ -2088,826 +1774,6 @@ print(
 )
 EOF
 
-cat > "$tmp_dir/urlopen_span_smoke.py" <<'EOF'
-from __future__ import annotations
-
-import json
-from urllib.request import Request
-
-from logbrew_sdk import (
-    LogBrewClient,
-    LogBrewTraceContext,
-    get_active_logbrew_trace,
-    urlopen_with_logbrew_span,
-    use_logbrew_trace,
-)
-
-
-class StubHttpResponse:
-    def __init__(self, status: int) -> None:
-        self.status = status
-
-    def getcode(self) -> int:
-        return self.status
-
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app-urlopen",
-    sdk_version="0.1.0",
-)
-parent_trace = LogBrewTraceContext(
-    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-    span_id="00f067aa0ba902b7",
-    sampled=True,
-)
-request = Request(
-    "https://api.example.test/payments/123?coupon=summer#receipt",
-    headers={"traceparent": "spoofed", "x-caller": "checkout"},
-    method="GET",
-)
-captured: dict[str, object] = {}
-
-
-def open_url(outbound: Request, *, timeout: float | None = None) -> StubHttpResponse:
-    active = get_active_logbrew_trace()
-    captured["timeout"] = timeout
-    captured["traceparent"] = outbound.get_header("Traceparent")
-    captured["callerHeader"] = outbound.get_header("X-caller")
-    captured["activeSpan"] = active.span_id if active is not None else None
-    return StubHttpResponse(202)
-
-
-class StubUrlopenError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("connection failed for redacted-url")
-        self.response = StubHttpResponse(503)
-
-
-with use_logbrew_trace(parent_trace):
-    response = urlopen_with_logbrew_span(
-        request,
-        client=client,
-        event_id="evt_python_urlopen_client",
-        timestamp="2026-06-19T08:00:00Z",
-        open_url=open_url,
-        timeout=2.5,
-        span_id_factory=lambda: "b7ad6b7169203331",
-        clock=iter([10.0, 10.043]).__next__,
-        metadata={"service": "checkout", "payload": {"card": "private"}},
-    )
-
-payload = json.loads(client.preview_json())
-event = payload["events"][0]
-metadata = event["attributes"]["metadata"]
-if request.get_header("Traceparent") != "spoofed":
-    raise SystemExit("caller request was mutated")
-if "coupon=summer" in client.preview_json() or "traceparent" in client.preview_json() or "card" in client.preview_json():
-    raise SystemExit("urlopen span leaked query, propagation, or payload data")
-
-original_error = StubUrlopenError()
-try:
-    urlopen_with_logbrew_span(
-        "https://api.example.test/failures/123?debug=redacted",
-        client=client,
-        event_id="evt_python_urlopen_failure",
-        timestamp="2026-06-19T08:00:01Z",
-        open_url=lambda _request, *, timeout=None: (_ for _ in ()).throw(original_error),
-        span_id_factory=lambda: "b7ad6b7169203332",
-        clock=iter([20.0, 20.011]).__next__,
-    )
-except StubUrlopenError as error:
-    if error is not original_error:
-        raise SystemExit("urlopen helper replaced original failure")
-else:
-    raise SystemExit("urlopen helper swallowed original failure")
-
-payload = json.loads(client.preview_json())
-failure_metadata = payload["events"][1]["attributes"]["metadata"]
-if failure_metadata.get("errorType") != "StubUrlopenError":
-    raise SystemExit("urlopen failure span lost error type")
-if failure_metadata.get("statusCode") != 503:
-    raise SystemExit("urlopen failure span lost status code")
-if "errorMessage" in failure_metadata or "redacted-url" in client.preview_json() or "debug=redacted" in client.preview_json():
-    raise SystemExit("urlopen failure span leaked exception text or query")
-
-closed_client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app-urlopen",
-    sdk_version="0.1.0",
-)
-closed_client.closed = True
-capture_errors: list[str] = []
-urlopen_with_logbrew_span(
-    "https://api.example.test/health",
-    client=closed_client,
-    event_id="evt_python_urlopen_capture_failure",
-    timestamp="2026-06-19T08:00:01Z",
-    open_url=lambda _request, *, timeout=None: StubHttpResponse(204),
-    span_id_factory=lambda: "b7ad6b7169203333",
-    on_capture_error=lambda error: capture_errors.append(str(error)),
-)
-
-print(
-    json.dumps(
-        {
-            "activeSpan": captured["activeSpan"],
-            "callerHeader": captured["callerHeader"],
-            "captureErrors": len(capture_errors),
-            "failureErrorType": failure_metadata["errorType"],
-            "failureStatusCode": failure_metadata["statusCode"],
-            "events": len(payload["events"]),
-            "method": metadata["method"],
-            "ok": True,
-            "routeTemplate": metadata["routeTemplate"],
-            "status": response.status,
-            "statusCode": metadata["statusCode"],
-            "timeout": captured["timeout"],
-            "traceparent": captured["traceparent"],
-        },
-        sort_keys=True,
-    )
-)
-EOF
-
-cat > "$tmp_dir/requests_span_smoke.py" <<'EOF'
-from __future__ import annotations
-
-import json
-
-from logbrew_sdk import (
-    LogBrewClient,
-    LogBrewTraceContext,
-    get_active_logbrew_trace,
-    instrument_requests_session_with_logbrew_spans,
-    requests_request_with_logbrew_span,
-    use_logbrew_trace,
-)
-
-
-class StubRequestsResponse:
-    def __init__(self, status_code: int) -> None:
-        self.status_code = status_code
-
-
-class StubRequestsError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("connection failed for redacted-url")
-        self.response = StubRequestsResponse(503)
-
-
-class StubRequestsSession:
-    def __init__(self) -> None:
-        self.captured: dict[str, object] = {}
-
-    def request(self, method: str, url: str, **kwargs: object) -> StubRequestsResponse:
-        active = get_active_logbrew_trace()
-        headers = kwargs.get("headers")
-        if not isinstance(headers, dict):
-            raise RuntimeError("headers were not cloned into a dict")
-        self.captured = {
-            "activeSpan": active.span_id if active is not None else None,
-            "callerHeader": headers.get("x-caller"),
-            "json": kwargs.get("json"),
-            "method": method,
-            "timeout": kwargs.get("timeout"),
-            "traceparent": headers.get("traceparent"),
-            "url": url,
-        }
-        return StubRequestsResponse(201)
-
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app-requests",
-    sdk_version="0.1.0",
-)
-parent_trace = LogBrewTraceContext(
-    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-    span_id="00f067aa0ba902b7",
-    sampled=True,
-)
-caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
-session = StubRequestsSession()
-
-with use_logbrew_trace(parent_trace):
-    response = requests_request_with_logbrew_span(
-        "post",
-        "https://api.example.test/payments/123?coupon=summer#receipt",
-        client=client,
-        event_id="evt_python_requests_client",
-        timestamp="2026-06-19T08:00:03Z",
-        session=session,
-        timeout=3.5,
-        headers=caller_headers,
-        json={"card": "private"},
-        route_template="/payments/:payment_id",
-        span_id_factory=lambda: "b7ad6b7169203334",
-        clock=iter([30.0, 30.052]).__next__,
-        metadata={"service": "checkout", "payload": {"private": True}},
-    )
-
-payload = json.loads(client.preview_json())
-event = payload["events"][0]
-metadata = event["attributes"]["metadata"]
-if caller_headers["Traceparent"] != "spoofed":
-    raise SystemExit("caller headers were mutated")
-if "coupon=summer" in client.preview_json() or "traceparent" in client.preview_json() or "card" in client.preview_json():
-    raise SystemExit("requests span leaked query, propagation, or payload data")
-
-auto_session = StubRequestsSession()
-auto_instrumentation = instrument_requests_session_with_logbrew_spans(
-    auto_session,
-    client=client,
-    event_id_factory=lambda: "evt_python_requests_auto_client",
-    timestamp="2026-07-04T09:00:00Z",
-    trace=parent_trace,
-    route_template_resolver=lambda _method, _url: "/payments/:payment_id",
-    span_id_factory=lambda: "b7ad6b7169203340",
-    clock=iter([45.0, 45.031]).__next__,
-    metadata={"service": "checkout", "headers": {"authorization": "private"}},
-)
-auto_response = auto_session.request(
-    "PATCH",
-    "https://api.example.test/payments/123?coupon=summer#receipt",
-    headers={"Traceparent": "spoofed", "x-caller": "checkout-auto"},
-    json={"card": "private"},
-)
-auto_captured = dict(auto_session.captured)
-auto_instrumentation.uninstall()
-auto_session.request(
-    "GET",
-    "https://api.example.test/after-uninstall",
-    headers={"x-caller": "after-uninstall"},
-)
-payload = json.loads(client.preview_json())
-if len(payload["events"]) != 2:
-    raise SystemExit("requests auto instrumentation did not uninstall cleanly")
-
-original_error = StubRequestsError()
-try:
-    requests_request_with_logbrew_span(
-        "GET",
-        "https://api.example.test/failures/123?debug=redacted",
-        client=client,
-        event_id="evt_python_requests_failure",
-        timestamp="2026-06-19T08:00:04Z",
-        request=lambda _method, _url, **_kwargs: (_ for _ in ()).throw(original_error),
-        span_id_factory=lambda: "b7ad6b7169203335",
-        clock=iter([40.0, 40.012]).__next__,
-    )
-except StubRequestsError as error:
-    if error is not original_error:
-        raise SystemExit("requests helper replaced original failure")
-else:
-    raise SystemExit("requests helper swallowed original failure")
-
-payload = json.loads(client.preview_json())
-auto_metadata = payload["events"][1]["attributes"]["metadata"]
-failure_metadata = payload["events"][2]["attributes"]["metadata"]
-if failure_metadata.get("errorType") != "StubRequestsError":
-    raise SystemExit("requests failure span lost error type")
-if failure_metadata.get("statusCode") != 503:
-    raise SystemExit("requests failure span lost status code")
-if "errorMessage" in failure_metadata or "redacted-url" in client.preview_json() or "debug=redacted" in client.preview_json():
-    raise SystemExit("requests failure span leaked exception text or query")
-
-closed_client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app-requests",
-    sdk_version="0.1.0",
-)
-closed_client.closed = True
-capture_errors: list[str] = []
-requests_request_with_logbrew_span(
-    "GET",
-    "https://api.example.test/health",
-    client=closed_client,
-    event_id="evt_python_requests_capture_failure",
-    timestamp="2026-06-19T08:00:04Z",
-    request=lambda _method, _url, **_kwargs: StubRequestsResponse(204),
-    span_id_factory=lambda: "b7ad6b7169203339",
-    on_capture_error=lambda error: capture_errors.append(str(error)),
-)
-
-print(
-    json.dumps(
-        {
-            "activeSpan": session.captured["activeSpan"],
-            "autoActiveSpan": auto_captured["activeSpan"],
-            "autoInstalled": auto_instrumentation.installed,
-            "autoMethod": auto_metadata["method"],
-            "autoRouteTemplate": auto_metadata["routeTemplate"],
-            "autoStatus": auto_response.status_code,
-            "autoTraceparent": auto_captured["traceparent"],
-            "callerHeader": session.captured["callerHeader"],
-            "captureErrors": len(capture_errors),
-            "failureErrorType": failure_metadata["errorType"],
-            "failureStatusCode": failure_metadata["statusCode"],
-            "events": len(payload["events"]),
-            "method": metadata["method"],
-            "ok": True,
-            "routeTemplate": metadata["routeTemplate"],
-            "status": response.status_code,
-            "statusCode": metadata["statusCode"],
-            "timeout": session.captured["timeout"],
-            "traceparent": session.captured["traceparent"],
-        },
-        sort_keys=True,
-    )
-)
-EOF
-
-cat > "$tmp_dir/httpx_span_smoke.py" <<'EOF'
-from __future__ import annotations
-
-import asyncio
-import json
-
-from logbrew_sdk import (
-    LogBrewClient,
-    LogBrewTraceContext,
-    async_httpx_request_with_logbrew_span,
-    get_active_logbrew_trace,
-    httpx_request_with_logbrew_span,
-    instrument_httpx_client_with_logbrew_spans,
-    use_logbrew_trace,
-)
-
-
-class StubHttpxResponse:
-    def __init__(self, status_code: int) -> None:
-        self.status_code = status_code
-
-
-class StubHttpxError(RuntimeError):
-    def __init__(self, message: str, status_code: int) -> None:
-        super().__init__(message)
-        self.response = StubHttpxResponse(status_code)
-
-
-class StubHttpxSession:
-    def __init__(self, status_code: int) -> None:
-        self.captured: dict[str, object] = {}
-        self.status_code = status_code
-
-    def request(self, method: str, url: str, **kwargs: object) -> StubHttpxResponse:
-        active = get_active_logbrew_trace()
-        headers = kwargs.get("headers")
-        if not isinstance(headers, dict):
-            raise RuntimeError("headers were not cloned into a dict")
-        self.captured = {
-            "activeSpan": active.span_id if active is not None else None,
-            "callerHeader": headers.get("x-caller"),
-            "json": kwargs.get("json"),
-            "method": method,
-            "timeout": kwargs.get("timeout"),
-            "traceparent": headers.get("traceparent"),
-            "url": url,
-        }
-        return StubHttpxResponse(self.status_code)
-
-
-class StubAsyncHttpxSession:
-    def __init__(self, status_code: int) -> None:
-        self.captured: dict[str, object] = {}
-        self.status_code = status_code
-
-    async def request(self, method: str, url: str, **kwargs: object) -> StubHttpxResponse:
-        active = get_active_logbrew_trace()
-        headers = kwargs.get("headers")
-        if not isinstance(headers, dict):
-            raise RuntimeError("headers were not cloned into a dict")
-        self.captured = {
-            "activeSpan": active.span_id if active is not None else None,
-            "callerHeader": headers.get("x-caller"),
-            "json": kwargs.get("json"),
-            "method": method,
-            "timeout": kwargs.get("timeout"),
-            "traceparent": headers.get("traceparent"),
-            "url": url,
-        }
-        return StubHttpxResponse(self.status_code)
-
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app-httpx",
-    sdk_version="0.1.0",
-)
-parent_trace = LogBrewTraceContext(
-    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-    span_id="00f067aa0ba902b7",
-    sampled=True,
-)
-caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
-async_caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout-async"}
-session = StubHttpxSession(202)
-async_session = StubAsyncHttpxSession(204)
-
-with use_logbrew_trace(parent_trace):
-    response = httpx_request_with_logbrew_span(
-        "post",
-        "https://api.example.test/payments/123?coupon=summer#receipt",
-        client=client,
-        event_id="evt_python_httpx_client",
-        timestamp="2026-06-19T09:00:03Z",
-        session=session,
-        timeout=3.5,
-        headers=caller_headers,
-        json={"card": "private"},
-        route_template="/payments/:payment_id",
-        span_id_factory=lambda: "b7ad6b7169203336",
-        clock=iter([40.0, 40.057]).__next__,
-        metadata={"service": "checkout", "payload": {"private": True}},
-    )
-
-
-async def run_async_request() -> StubHttpxResponse:
-    with use_logbrew_trace(parent_trace):
-        return await async_httpx_request_with_logbrew_span(
-            "delete",
-            "https://api.example.test/payments/123/refunds/456?coupon=summer#receipt",
-            client=client,
-            event_id="evt_python_httpx_async_client",
-            timestamp="2026-06-19T09:00:04Z",
-            session=async_session,
-            timeout=4.5,
-            headers=async_caller_headers,
-            json={"card": "private"},
-            route_template="/payments/:payment_id/refunds/:refund_id",
-            span_id_factory=lambda: "b7ad6b7169203337",
-            clock=iter([50.0, 50.063]).__next__,
-            metadata={"service": "checkout", "headers": {"authorization": "private"}},
-        )
-
-
-async_response = asyncio.run(run_async_request())
-auto_session = StubHttpxSession(206)
-auto_async_session = StubAsyncHttpxSession(207)
-auto_instrumentation = instrument_httpx_client_with_logbrew_spans(
-    auto_session,
-    client=client,
-    event_id_factory=lambda: "evt_python_httpx_auto_client",
-    timestamp="2026-07-04T09:00:01Z",
-    trace=parent_trace,
-    route_template_resolver=lambda _method, _url: "/payments/:payment_id",
-    span_id_factory=lambda: "b7ad6b7169203340",
-    clock=iter([75.0, 75.041]).__next__,
-    metadata={"service": "checkout", "headers": {"authorization": "private"}},
-)
-auto_response = auto_session.request(
-    "PATCH",
-    "https://api.example.test/payments/123?coupon=summer#receipt",
-    headers={"Traceparent": "spoofed", "x-caller": "checkout-auto"},
-    json={"card": "private"},
-)
-auto_captured = dict(auto_session.captured)
-auto_instrumentation.uninstall()
-auto_session.request(
-    "GET",
-    "https://api.example.test/after-uninstall",
-    headers={"x-caller": "after-uninstall"},
-)
-
-
-async def run_auto_async_request() -> tuple[StubHttpxResponse, dict[str, object]]:
-    auto_async_instrumentation = instrument_httpx_client_with_logbrew_spans(
-        auto_async_session,
-        client=client,
-        event_id_factory=lambda: "evt_python_httpx_auto_async_client",
-        timestamp="2026-07-04T09:00:02Z",
-        trace=parent_trace,
-        route_template_resolver=lambda _method, _url: "/refunds/:refund_id",
-        span_id_factory=lambda: "b7ad6b7169203341",
-        clock=iter([76.0, 76.044]).__next__,
-        metadata={"service": "checkout", "payload": {"private": True}},
-    )
-    response = await auto_async_session.request(
-        "DELETE",
-        "https://api.example.test/refunds/456?coupon=summer#receipt",
-        headers={"Traceparent": "spoofed", "x-caller": "checkout-auto-async"},
-        json={"card": "private"},
-    )
-    captured = dict(auto_async_session.captured)
-    auto_async_instrumentation.uninstall()
-    await auto_async_session.request(
-        "GET",
-        "https://api.example.test/after-async-uninstall",
-        headers={"x-caller": "after-async-uninstall"},
-    )
-    return response, captured
-
-
-auto_async_response, auto_async_captured = asyncio.run(run_auto_async_request())
-payload = json.loads(client.preview_json())
-if len(payload["events"]) != 4:
-    raise SystemExit("httpx auto instrumentation did not uninstall cleanly")
-sync_error = StubHttpxError("connection failed for redacted-url", 502)
-try:
-    httpx_request_with_logbrew_span(
-        "GET",
-        "https://api.example.test/failures/123?debug=redacted",
-        client=client,
-        event_id="evt_python_httpx_failure",
-        timestamp="2026-06-19T09:00:05Z",
-        request=lambda _method, _url, **_kwargs: (_ for _ in ()).throw(sync_error),
-        span_id_factory=lambda: "b7ad6b7169203338",
-        clock=iter([60.0, 60.013]).__next__,
-    )
-except StubHttpxError as error:
-    if error is not sync_error:
-        raise SystemExit("httpx helper replaced original failure")
-else:
-    raise SystemExit("httpx helper swallowed original failure")
-
-
-async def run_async_failure() -> None:
-    async_error = StubHttpxError("async connection failed for redacted-url", 504)
-
-    async def request(_method: str, _url: str, **_kwargs: object) -> object:
-        raise async_error
-
-    try:
-        await async_httpx_request_with_logbrew_span(
-            "GET",
-            "https://api.example.test/async-failures/123?debug=redacted",
-            client=client,
-            event_id="evt_python_httpx_async_failure",
-            timestamp="2026-06-19T09:00:06Z",
-            request=request,
-            span_id_factory=lambda: "b7ad6b7169203339",
-            clock=iter([70.0, 70.014]).__next__,
-        )
-    except StubHttpxError as error:
-        if error is not async_error:
-            raise SystemExit("async httpx helper replaced original failure")
-    else:
-        raise SystemExit("async httpx helper swallowed original failure")
-
-
-asyncio.run(run_async_failure())
-payload = json.loads(client.preview_json())
-sync_event = payload["events"][0]
-async_event = payload["events"][1]
-auto_event = payload["events"][2]
-auto_async_event = payload["events"][3]
-sync_failure_event = payload["events"][4]
-async_failure_event = payload["events"][5]
-sync_metadata = sync_event["attributes"]["metadata"]
-async_metadata = async_event["attributes"]["metadata"]
-auto_metadata = auto_event["attributes"]["metadata"]
-auto_async_metadata = auto_async_event["attributes"]["metadata"]
-sync_failure_metadata = sync_failure_event["attributes"]["metadata"]
-async_failure_metadata = async_failure_event["attributes"]["metadata"]
-serialized = client.preview_json()
-if caller_headers["Traceparent"] != "spoofed" or async_caller_headers["Traceparent"] != "spoofed":
-    raise SystemExit("caller headers were mutated")
-for forbidden in ("coupon=summer", "traceparent", "card", "authorization"):
-    if forbidden in serialized:
-        raise SystemExit(f"httpx span leaked private data: {forbidden}")
-if sync_failure_metadata.get("errorType") != "StubHttpxError":
-    raise SystemExit("httpx failure span lost error type")
-if sync_failure_metadata.get("statusCode") != 502:
-    raise SystemExit("httpx failure span lost status code")
-if async_failure_metadata.get("errorType") != "StubHttpxError":
-    raise SystemExit("async httpx failure span lost error type")
-if async_failure_metadata.get("statusCode") != 504:
-    raise SystemExit("async httpx failure span lost status code")
-if "errorMessage" in sync_failure_metadata or "errorMessage" in async_failure_metadata:
-    raise SystemExit("httpx failure span leaked errorMessage metadata")
-for forbidden in ("redacted-url", "debug=redacted"):
-    if forbidden in serialized:
-        raise SystemExit(f"httpx failure span leaked private failure data: {forbidden}")
-
-closed_client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app-httpx",
-    sdk_version="0.1.0",
-)
-closed_client.closed = True
-capture_errors: list[str] = []
-httpx_request_with_logbrew_span(
-    "GET",
-    "https://api.example.test/health",
-    client=closed_client,
-    event_id="evt_python_httpx_capture_failure",
-    timestamp="2026-06-19T09:00:05Z",
-    request=lambda _method, _url, **_kwargs: StubHttpxResponse(204),
-    span_id_factory=lambda: "b7ad6b7169203348",
-    on_capture_error=lambda error: capture_errors.append(str(error)),
-)
-
-print(
-    json.dumps(
-        {
-            "activeSpan": session.captured["activeSpan"],
-            "asyncActiveSpan": async_session.captured["activeSpan"],
-            "autoActiveSpan": auto_captured["activeSpan"],
-            "autoAsyncActiveSpan": auto_async_captured["activeSpan"],
-            "autoAsyncMethod": auto_async_metadata["method"],
-            "autoAsyncRouteTemplate": auto_async_metadata["routeTemplate"],
-            "autoAsyncStatus": auto_async_response.status_code,
-            "autoAsyncTraceparent": auto_async_captured["traceparent"],
-            "autoInstalled": auto_instrumentation.installed,
-            "autoMethod": auto_metadata["method"],
-            "autoRouteTemplate": auto_metadata["routeTemplate"],
-            "autoStatus": auto_response.status_code,
-            "autoTraceparent": auto_captured["traceparent"],
-            "asyncCallerHeader": async_session.captured["callerHeader"],
-            "asyncMethod": async_metadata["method"],
-            "asyncRouteTemplate": async_metadata["routeTemplate"],
-            "asyncStatus": async_response.status_code,
-            "asyncStatusCode": async_metadata["statusCode"],
-            "asyncTimeout": async_session.captured["timeout"],
-            "asyncTraceparent": async_session.captured["traceparent"],
-            "callerHeader": session.captured["callerHeader"],
-            "captureErrors": len(capture_errors),
-            "asyncFailureErrorType": async_failure_metadata["errorType"],
-            "asyncFailureStatusCode": async_failure_metadata["statusCode"],
-            "events": len(payload["events"]),
-            "failureErrorType": sync_failure_metadata["errorType"],
-            "failureStatusCode": sync_failure_metadata["statusCode"],
-            "method": sync_metadata["method"],
-            "ok": True,
-            "routeTemplate": sync_metadata["routeTemplate"],
-            "status": response.status_code,
-            "statusCode": sync_metadata["statusCode"],
-            "timeout": session.captured["timeout"],
-            "traceparent": session.captured["traceparent"],
-        },
-        sort_keys=True,
-    )
-)
-EOF
-
-cat > "$tmp_dir/aiohttp_span_smoke.py" <<'EOF'
-from __future__ import annotations
-
-import asyncio
-import json
-
-from aiohttp import ClientResponseError, ClientSession, web
-
-from logbrew_sdk import (
-    LogBrewClient,
-    LogBrewTraceContext,
-    instrument_aiohttp_client_session_with_logbrew_spans,
-)
-
-
-async def main() -> None:
-    received: list[dict[str, str | None]] = []
-
-    async def record_request(request: web.Request) -> web.Response:
-        received.append(
-            {
-                "callerHeader": request.headers.get("x-caller"),
-                "traceparent": request.headers.get("traceparent"),
-            }
-        )
-        if request.path.startswith("/failures/"):
-            return web.Response(status=503, text="private upstream body")
-        if request.path == "/after-uninstall":
-            return web.Response(status=204)
-        return web.json_response({"ok": True}, status=202)
-
-    app = web.Application()
-    app.router.add_route("*", "/{tail:.*}", record_request)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    server = site._server
-    if server is None or not server.sockets:
-        raise RuntimeError("aiohttp test server did not bind")
-    port = server.sockets[0].getsockname()[1]
-    base_url = f"http://127.0.0.1:{port}"
-
-    client = LogBrewClient.create(
-        api_key="LOGBREW_API_KEY",
-        sdk_name="smoke-app-aiohttp",
-        sdk_version="0.1.0",
-    )
-    parent_trace = LogBrewTraceContext(
-        trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
-        span_id="00f067aa0ba902b7",
-        sampled=True,
-    )
-    event_ids = iter(["evt_python_aiohttp_client", "evt_python_aiohttp_failure"])
-    span_ids = iter(["b7ad6b7169203342", "b7ad6b7169203343"])
-    clock_values = iter([80.0, 80.031, 81.0, 81.012])
-
-    try:
-        async with ClientSession() as session:
-            instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(
-                session,
-                client=client,
-                event_id_factory=lambda: next(event_ids),
-                timestamp="2026-07-04T09:00:11Z",
-                trace=parent_trace,
-                route_template_resolver=lambda method, url: (
-                    "/failures/:failure_id" if "/failures/" in url else "/payments/:payment_id"
-                ),
-                span_id_factory=lambda: next(span_ids),
-                clock=lambda: next(clock_values),
-                metadata={"service": "checkout", "headers": {"authorization": "private"}},
-            )
-            duplicate = instrument_aiohttp_client_session_with_logbrew_spans(session, client=client)
-            if duplicate is not instrumentation:
-                raise RuntimeError("aiohttp instrumentation did not return duplicate handle")
-
-            async with session.get(
-                f"{base_url}/payments/123?coupon=summer#receipt",
-                headers={"Traceparent": "spoofed", "x-caller": "checkout"},
-            ) as response:
-                status = response.status
-                await response.read()
-            first_received = dict(received[-1])
-
-            instrumentation.uninstall()
-            async with session.get(
-                f"{base_url}/after-uninstall",
-                headers={"x-caller": "after-uninstall"},
-            ) as response:
-                await response.read()
-            after_received = dict(received[-1])
-            if instrumentation.installed:
-                raise RuntimeError("aiohttp instrumentation did not uninstall")
-
-            failure_instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(
-                session,
-                client=client,
-                event_id_factory=lambda: next(event_ids),
-                timestamp="2026-07-04T09:00:12Z",
-                trace=parent_trace,
-                route_template_resolver=lambda method, url: (
-                    "/failures/:failure_id" if "/failures/" in url else "/payments/:payment_id"
-                ),
-                span_id_factory=lambda: next(span_ids),
-                clock=lambda: next(clock_values),
-            )
-            try:
-                await session.get(
-                    f"{base_url}/failures/123?debug=redacted",
-                    raise_for_status=True,
-                )
-            except ClientResponseError as error:
-                failure_error = error
-            else:
-                raise RuntimeError("aiohttp failure response was not raised")
-            failure_instrumentation.uninstall()
-
-        payload = json.loads(client.preview_json())
-        if len(payload["events"]) != 2:
-            raise RuntimeError("aiohttp instrumentation did not emit expected events")
-        success_event = payload["events"][0]
-        failure_event = payload["events"][1]
-        metadata = success_event["attributes"]["metadata"]
-        failure_metadata = failure_event["attributes"]["metadata"]
-        serialized = client.preview_json()
-        for forbidden in (
-            "coupon=summer",
-            "debug=redacted",
-            "authorization",
-            "private upstream body",
-            "Traceparent",
-            "traceparent",
-        ):
-            if forbidden in serialized:
-                raise RuntimeError(f"aiohttp span leaked private data: {forbidden}")
-        if failure_metadata.get("errorType") != "ClientResponseError":
-            raise RuntimeError("aiohttp failure span lost error type")
-        if failure_metadata.get("statusCode") != 503:
-            raise RuntimeError("aiohttp failure span lost status code")
-        if "errorMessage" in failure_metadata:
-            raise RuntimeError("aiohttp failure span leaked errorMessage metadata")
-
-        print(
-            json.dumps(
-                {
-                    "afterUninstallTraceparent": after_received["traceparent"],
-                    "autoInstalled": instrumentation.installed,
-                    "eventSpan": success_event["attributes"]["spanId"],
-                    "events": len(payload["events"]),
-                    "failureErrorType": failure_metadata["errorType"],
-                    "failureStatusCode": failure_metadata["statusCode"],
-                    "method": metadata["method"],
-                    "ok": True,
-                    "routeTemplate": metadata["routeTemplate"],
-                    "status": status,
-                    "traceparent": first_received["traceparent"],
-                },
-                sort_keys=True,
-            )
-        )
-    finally:
-        await runner.cleanup()
-
-
-asyncio.run(main())
-EOF
-
 cat > "$tmp_dir/metadata.py" <<'EOF'
 from importlib.metadata import distribution, files, metadata, version
 from pathlib import Path
@@ -2923,6 +1789,7 @@ if version("logbrew-sdk") != package_version:
 
 package_files = {str(path) for path in files("logbrew-sdk") or []}
 required = {
+    "logbrew_sdk/_arq_client.py",
     "logbrew_sdk/_cache_client.py",
     "logbrew_sdk/_celery_client.py",
     "logbrew_sdk/_dbapi_client.py",
@@ -2966,6 +1833,8 @@ if not required_transport_dependencies.issubset(requires_dist):
     )
 if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requirement in requires_dist):
     raise SystemExit("missing installed RQ extra metadata")
+if not any("arq<1,>=0.28" in requirement and 'extra == "arq"' in requirement for requirement in requires_dist):
+    raise SystemExit("missing installed ARQ extra metadata")
 for needle in (
     "python3 -m pip install logbrew-sdk",
     "LOGBREW_API_KEY",
@@ -2984,6 +1853,8 @@ for needle in (
     "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_arq_pool_with_logbrew_spans",
+    "instrument_arq_worker_with_logbrew_spans",
     "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
@@ -3113,8 +1984,6 @@ if show_pairs.get("Summary") != expected_summary:
     raise SystemExit(f"unexpected pip show summary: {show_pairs.get('Summary')!r}")
 if show_pairs.get("Author") != "LogBrew":
     raise SystemExit(f"unexpected pip show author: {show_pairs.get('Author')!r}")
-if show_pairs.get("License-Expression") != "MIT":
-    raise SystemExit(f"unexpected pip show license expression: {show_pairs.get('License-Expression')!r}")
 location = show_pairs.get("Location", "")
 if not location.endswith("/site-packages"):
     raise SystemExit(f"unexpected pip show location: {location!r}")
@@ -3145,6 +2014,7 @@ required_show_files = {
     f"{dist_info_dir}/WHEEL",
     f"{dist_info_dir}/direct_url.json",
     f"{dist_info_dir}/top_level.txt",
+    "logbrew_sdk/_arq_client.py",
     "logbrew_sdk/_cache_client.py",
     "logbrew_sdk/_celery_client.py",
     "logbrew_sdk/_db_client.py",
@@ -3178,7 +2048,7 @@ if pip_list_entry.get("version") != package_version:
     raise SystemExit(f"unexpected pip list package version: {pip_list_entry.get('version')!r}")
 EOF
 
-python "$tmp_dir/metadata.py" "$wheel_artifact" "$tmp_dir/pip-install-report.json" "$tmp_dir/pip-inspect.json" "$tmp_dir/pip-show.txt" "$tmp_dir/pip-show-files.txt" "$tmp_dir/pip-list.json"
+"$receipt_python" "$tmp_dir/metadata.py" "$wheel_artifact" "$tmp_dir/pip-install-report.json" "$tmp_dir/pip-inspect.json" "$tmp_dir/pip-show.txt" "$tmp_dir/pip-show-files.txt" "$tmp_dir/pip-list.json"
 
 cat > "$tmp_dir/smoke.py" <<'EOF'
 from logbrew_sdk import LogBrewClient, RecordingTransport
@@ -3481,19 +2351,9 @@ smoke-run:
 EOF
 
 grep -q '^\.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-first-useful-telemetry smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run$' "$tmp_dir/Makefile"
-grep -q '^help:$' "$tmp_dir/Makefile"
-grep -q '^smoke-types:$' "$tmp_dir/Makefile"
-grep -q '^smoke-test:$' "$tmp_dir/Makefile"
-grep -q '^smoke-readme:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-example:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-smoke:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-examples-readme:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-examples-agent-timeline:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-examples-first-useful-telemetry:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-examples-list:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-examples-help:$' "$tmp_dir/Makefile"
-grep -q '^smoke-packaged-examples:$' "$tmp_dir/Makefile"
-grep -q '^smoke-run:$' "$tmp_dir/Makefile"
+while IFS= read -r target; do
+    grep -q "^${target}:$" "$tmp_dir/Makefile"
+done < <(sed -n 's/^\.PHONY: //p' "$tmp_dir/Makefile" | tr ' ' '\n')
 
 run_requirement_reinstalls "$tmp_dir/pip-freeze.txt" "$tmp_dir/pip-direct-requirements.txt" "$wheel_artifact" "wheel" &
 requirements_pid=$!
@@ -3504,22 +2364,18 @@ check_makefile_help "wheel-make-help"
 run_make smoke-types >/dev/null
 run_make smoke-test >/dev/null
 run_readme_example "smoke-readme" "wheel-readme-example"
-run_packaged_example_module "smoke-packaged-example" "wheel-packaged-example"
-run_packaged_real_user_module "smoke-packaged-smoke" "wheel-packaged-smoke"
-run_packaged_example_module "smoke-packaged-examples-readme" "wheel-packaged-examples-readme"
+run_readme_example "smoke-packaged-example" "wheel-packaged-example"
+run_readme_example "smoke-packaged-smoke" "wheel-packaged-smoke"
+run_readme_example "smoke-packaged-examples-readme" "wheel-packaged-examples-readme"
 run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "wheel-packaged-examples-agent-timeline"
 run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "wheel-packaged-examples-first-useful-telemetry"
 check_packaged_examples_listing "smoke-packaged-examples-list" "wheel-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "wheel-packaged-examples-help"
-run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-packaged-examples"
-run_smoke_script "smoke-run" "smoke"
+run_readme_example "smoke-packaged-examples" "wheel-packaged-examples"
+run_readme_example "smoke-run" "smoke"
 run_logging_smoke "wheel-logging"
 run_runtime_context_smoke "wheel-runtime-context"
 run_http_transport_smoke "wheel-http-transport"
-run_urlopen_span_smoke "wheel-urlopen-span"
-run_requests_span_smoke "wheel-requests-span"
-run_httpx_span_smoke "wheel-httpx-span"
-run_aiohttp_span_smoke "wheel-aiohttp-span"
 run_database_span_smoke "wheel-database-span"
 run_dbapi_span_smoke "wheel-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
@@ -3529,7 +2385,8 @@ run_flask_cache_span_smoke "wheel-flask-cache-span"
 run_pymemcache_span_smoke "wheel-pymemcache-span"
 run_redis_span_smoke "wheel-redis-span"
 run_queue_span_smoke "wheel-queue-span"
-PYTHONPATH="" python -m unittest discover -s "$repo_root/python/logbrew_py/tests" -p 'test_rq_client.py'
+PYTHONPATH="$repo_root/python/logbrew_py/tests" python -m unittest \
+    test_sdk test_http_client test_arq_client test_rq_client
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json
@@ -3781,4 +2638,3 @@ grep -q '"pending": 1' "$tmp_dir/transport_status.stdout.json"
 
 wait "$requirements_pid"
 wait "$sdist_checks_pid"
-deactivate

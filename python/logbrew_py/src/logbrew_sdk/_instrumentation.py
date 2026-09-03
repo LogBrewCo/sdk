@@ -160,6 +160,30 @@ def capture_client_span(
                 on_capture_error(capture_error)
 
 
+def patch_instance_attributes(instance: object, replacements: Mapping[str, Any]) -> Callable[[], None]:
+    """Restore original attributes only while this patch still owns them."""
+    missing = object()
+    replacements = dict(replacements)
+    attributes = getattr(instance, "__dict__", None)
+    previous = {
+        name: attributes.get(name, missing) if isinstance(attributes, Mapping) else getattr(instance, name, missing)
+        for name in replacements
+    }
+    for name, replacement in replacements.items():
+        setattr(instance, name, replacement)
+
+    def restore() -> None:
+        for name, replacement in replacements.items():
+            if getattr(instance, name, missing) is replacement:
+                original = previous[name]
+                if original is missing:
+                    delattr(instance, name)
+                else:
+                    setattr(instance, name, original)
+
+    return restore
+
+
 def required_label(name: str, value: str) -> str:
     normalized = optional_label(value)
     if normalized is None:
