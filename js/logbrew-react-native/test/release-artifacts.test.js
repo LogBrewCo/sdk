@@ -161,7 +161,7 @@ test("React Native release-artifact helper preserves Hermes bytecode with its si
     assert.throws(() => prepareLogBrewReactNativeReleaseArtifacts(options), /requires the LogBrew Metro wrapper/u);
     assert.deepEqual(fs.readFileSync(bundlePath), hermesHeader);
 
-    const originalBundle = Buffer.concat([hermesHeader, Buffer.from(`\0/*logbrew-runtime-debug-id*///# debugId=${debugId}\0`)]);
+    const originalBundle = Buffer.concat([hermesHeader, Buffer.from(`\0/*logbrew-runtime-debug-id*///# debugId=${debugId}00createReactNativeComponent`)]);
     fs.writeFileSync(bundlePath, originalBundle);
     const result = prepareLogBrewReactNativeReleaseArtifacts(options);
 

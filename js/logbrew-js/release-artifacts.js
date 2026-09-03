@@ -28,6 +28,7 @@ const DEBUG_ID_NAMESPACE = "16f4a837-7e0b-4d7c-97d9-8a7af1fd2768";
 const DEBUG_ID_RE = /(?:\/\/#|\/\*#)\s*debugId=([A-Za-z0-9._:-]+)/giu;
 const DEBUG_ID_REGISTRY_NAME = "logbrew.release-artifact.debug-ids";
 const DEBUG_ID_REGISTRY_EXPRESSION = `Symbol.for(${JSON.stringify(DEBUG_ID_REGISTRY_NAME)})`;
+const HERMES_RUNTIME_DEBUG_ID_RE = /\/\*logbrew-runtime-debug-id\*\/\/\/# debugId=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/iu;
 const RUNTIME_DEBUG_ID_MARKER = "/*logbrew-runtime-debug-id*/";
 const MINIFIED_SOURCE_SUFFIXES = [".js", ".mjs", ".bundle", ".jsbundle"];
 const SCRIPT_VERSION = "0.1.0";
@@ -104,7 +105,8 @@ function findLastMatch(source, regex) {
 }
 
 function findDebugId(source) {
-  return findLastMatch(source, DEBUG_ID_RE);
+  const runtimeDebugId = source.match(HERMES_RUNTIME_DEBUG_ID_RE)?.[1];
+  return runtimeDebugId ?? findLastMatch(source, DEBUG_ID_RE);
 }
 
 function findSourceMappingUrl(source) {
