@@ -16,6 +16,7 @@
   },
   "suggest": {
     "guzzlehttp/guzzle": "Required for Guzzle 7 outbound HTTP tracing.",
+    "laravel/framework": "Required for Laravel queue job tracing.",
     "monolog/monolog": "Required for Monolog and Laravel logging channels.",
     "symfony/console": "Required for the optional Symfony status and delivery-probe command.",
     "psr/http-client": "Required to wrap an app-owned PSR-18 client.",
