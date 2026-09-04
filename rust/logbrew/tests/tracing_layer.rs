@@ -2,6 +2,7 @@
 
 use logbrew::{
     LogBrewClient, LogBrewTracingLayer, TelemetryContext, TelemetryNamedVersion, TelemetryResource,
+    TelemetryTraceContext,
 };
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -208,11 +209,16 @@ fn tracing_layer_can_queue_privacy_bounded_spans() {
 
 #[test]
 fn tracing_layer_continues_incoming_traceparent_on_root_span() {
+    let stale_trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let stale_span_id = "bbbbbbbbbbbbbbbb";
     let client = Arc::new(Mutex::new(sample_client()));
     let layer =
         LogBrewTracingLayer::new(Arc::clone(&client), || "2026-06-02T10:00:00Z".to_string())
             .with_span_events()
-            .with_allowed_fields(["routeTemplate", "statusCode"]);
+            .with_allowed_fields(["routeTemplate", "statusCode"])
+            .with_context(TelemetryContext::new().with_trace(
+                TelemetryTraceContext::new(stale_trace_id).with_span_id(stale_span_id),
+            ));
     let subscriber = tracing_subscriber::registry().with(layer);
     let incoming_traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 
@@ -300,6 +306,8 @@ fn tracing_layer_continues_incoming_traceparent_on_root_span() {
     let text = payload.to_string();
     assert!(!text.contains(incoming_traceparent));
     assert!(!text.contains("coupon=sample"));
+    assert!(!text.contains(stale_trace_id));
+    assert!(!text.contains(stale_span_id));
 }
 
 #[cfg(feature = "tracing-opentelemetry")]

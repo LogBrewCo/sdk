@@ -1,9 +1,9 @@
 #[cfg(feature = "tracing-opentelemetry")]
 use crate::OpenTelemetrySpanContext;
 use crate::{
-    LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent,
-    TelemetryContext, TelemetryNamedVersion, TelemetryResource, TelemetryTraceContext, Traceparent,
-    TraceparentContext, http_fields::sanitize_route_template, merge_telemetry_contexts,
+    LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent, TelemetryContext,
+    TelemetryNamedVersion, TelemetryResource, TelemetryTraceContext, Traceparent,
+    TraceparentContext, http_fields::sanitize_route_template,
 };
 use std::fmt;
 use std::sync::{
@@ -267,7 +267,7 @@ where
         let sequence = self.next_id.fetch_add(1, Ordering::Relaxed);
         let event_id = format!("{}_{}", self.event_id_prefix.trim(), sequence);
         if let Ok(mut client) = self.client.lock() {
-            let _ = queue_log(&mut client, event_id, (self.timestamp)(), log);
+            let _ = client.log(event_id, (self.timestamp)(), log);
         }
 
         if self.capture_spans {
@@ -306,27 +306,9 @@ where
         }
 
         if let Ok(mut client) = self.client.lock() {
-            let _ = queue_span(&mut client, state.event_id, state.timestamp, event);
+            let _ = client.span(state.event_id, state.timestamp, event);
         }
     }
-}
-
-fn queue_log(
-    client: &mut LogBrewClient,
-    event_id: String,
-    timestamp: String,
-    log: LogEvent,
-) -> Result<(), crate::SdkError> {
-    client.log(event_id, timestamp, log)
-}
-
-fn queue_span(
-    client: &mut LogBrewClient,
-    event_id: String,
-    timestamp: String,
-    span: SpanEvent,
-) -> Result<(), crate::SdkError> {
-    client.span(event_id, timestamp, span)
 }
 
 fn severity_for(level: &Level) -> &'static str {
@@ -364,9 +346,12 @@ fn tracing_event_context(
         }
         TelemetryContext::new().with_trace(trace)
     });
-    let context = merge_telemetry_contexts(Some(&framework), trace.as_ref())?
-        .expect("tracing framework context is always populated");
-    merge_telemetry_contexts(Some(&context), configured)?.ok_or_else(|| {
+    crate::telemetry_context::merge_captured_contexts([
+        Some(framework),
+        configured.cloned(),
+        trace,
+    ])?
+    .ok_or_else(|| {
         crate::SdkError::new(
             "validation_error",
             "tracing telemetry context could not be created",
