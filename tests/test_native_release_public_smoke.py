@@ -383,35 +383,33 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
         build_canary = b"COMPILER_CANARY_4C62"
         with tempfile.TemporaryDirectory() as raw_temp_dir:
             temp_dir = Path(raw_temp_dir)
-            broken_path = temp_dir / "broken.tar.gz"
-            broken_source = (
-                ROOT / "c/logbrew-c/src/logbrew.c"
-            ).read_bytes() + build_canary
-            _source_archive(
-                broken_path,
-                mutations={"c/logbrew-c/src/logbrew.c": broken_source},
-            )
+            artifact_path = temp_dir / "source.tar.gz"
+            _source_archive(artifact_path)
+            fake_bin = temp_dir / "bin"
+            fake_bin.mkdir()
+            fake_cc = fake_bin / "cc"
+            fake_cc.write_bytes(b"#!/bin/sh\nprintf '%s\\n' " + build_canary + b" >&2\nexit 1\n")
+            fake_cc.chmod(0o700)
 
-            hanging_path = temp_dir / "hanging.tar.gz"
-            source = (ROOT / "c/logbrew-c/src/logbrew.c").read_bytes()
-            needle = b"void logbrew_recording_transport_init(\n"
-            hanging_source = source.replace(
-                needle,
-                needle + b"    /* RUNTIME_CANARY_9D03 */\n",
-                1,
-            ).replace(
-                b"    size_t step_count) {\n  if (transport == NULL)",
-                b"    size_t step_count) {\n"
-                b"  fputs(\"RUNTIME_CANARY_9D03\\n\", stderr);\n"
-                b"  for (;;) { }\n"
-                b"  if (transport == NULL)",
-                1,
+            runtime_bin = temp_dir / "runtime-bin"
+            runtime_bin.mkdir()
+            runtime_cc = runtime_bin / "cc"
+            runtime_cc.write_text(
+                """#!/usr/bin/env python3
+from pathlib import Path
+import sys
+arguments = sys.argv[1:]
+if "-o" in arguments:
+    output = Path(arguments[arguments.index("-o") + 1])
+    output.write_text('#!/bin/sh\\nprintf "RUNTIME_CANARY_9D03\\\\n" >&2\\nwhile :; do :; done\\n')
+    output.chmod(0o700)
+else:
+    for source in (Path(value) for value in arguments if value.endswith(".c")):
+        Path(source.stem + ".o").touch()
+""",
+                encoding="utf-8",
             )
-            self.assertNotEqual(hanging_source, source)
-            _source_archive(
-                hanging_path,
-                mutations={"c/logbrew-c/src/logbrew.c": hanging_source},
-            )
+            runtime_cc.chmod(0o700)
             bounded_script = self._script_replacing(
                 temp_dir,
                 "bounded-native-runtime-smoke.sh",
@@ -420,9 +418,13 @@ cp "$FAKE_SOURCE_ARCHIVE" "$destination"
             )
             started_at = time.monotonic()
             with ThreadPoolExecutor(max_workers=2) as executor:
-                build_future = executor.submit(self._run_receipt, temp_dir, broken_path)
+                build_future = executor.submit(
+                    self._run_receipt, temp_dir, artifact_path,
+                    env_overrides={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+                )
                 runtime_future = executor.submit(
-                    self._run_receipt, temp_dir, hanging_path, script_path=bounded_script,
+                    self._run_receipt, temp_dir, artifact_path, script_path=bounded_script,
+                    env_overrides={"PATH": f"{runtime_bin}{os.pathsep}{os.environ['PATH']}"},
                 )
                 build_result, runtime_result = build_future.result(), runtime_future.result()
             elapsed = time.monotonic() - started_at
