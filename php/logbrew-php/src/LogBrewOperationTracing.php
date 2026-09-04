@@ -125,6 +125,7 @@ final class LogBrewOperationTracing
                 'spanId' => $trace->spanId,
                 'status' => $status === 'error' ? 'error' : 'ok',
                 'durationMs' => self::durationMs($startedAt, $options['durationMs'] ?? null),
+                'context' => TelemetryContext::create()->withTrace($trace)->build(),
                 'metadata' => LogBrewTrace::metadataWithTrace($trace, $metadata),
             ];
             if ($trace->parentSpanId !== null) {
@@ -132,7 +133,7 @@ final class LogBrewOperationTracing
             }
             $client->span(
                 (string) ($options['eventId'] ?? self::generateEventId($source)),
-                (string) ($options['timestamp'] ?? self::timestampNow()),
+                (string) ($options['timestamp'] ?? gmdate('Y-m-d\TH:i:s\Z')),
                 $attributes
             );
         } catch (Throwable $captureError) {
@@ -197,15 +198,9 @@ final class LogBrewOperationTracing
         return max(0.0, (hrtime(true) - $startedAt) / 1_000_000);
     }
 
-    private static function timestampNow(): string
-    {
-        return gmdate('Y-m-d\TH:i:s\Z');
-    }
-
     private static function generateEventId(string $source): string
     {
-        $prefix = str_replace('.', '_', $source);
-        return 'evt_span_php_' . $prefix . '_' . bin2hex(random_bytes(6));
+        return 'evt_span_php_' . str_replace('.', '_', $source) . '_' . bin2hex(random_bytes(6));
     }
 
     private static function reportCaptureError(mixed $callback, Throwable $error): void

@@ -92,13 +92,14 @@ try {
     $dependencyScope->close();
 }
 
-$dependencyPayload = json_decode($client->previewJson(), true, 512, JSON_THROW_ON_ERROR);
-if (!is_array($dependencyPayload)) {
-    fwrite(STDERR, 'expected dependency payload object' . PHP_EOL);
-    exit(1);
-}
-$dependencyEvents = $dependencyPayload['events'] ?? null;
-assertTrue(is_array($dependencyEvents) && count($dependencyEvents) === 3, 'expected three dependency spans');
+$dependencyEvents = testEvents(
+    testStringMap(json_decode($client->previewJson(), true, 512, JSON_THROW_ON_ERROR), 'dependency payload'),
+    'dependency spans'
+);
+assertTrue(count($dependencyEvents) === 3, 'expected three dependency spans');
+$dependencyAttributes = testAttributes($dependencyEvents[0], 'dependency span');
+$traceContext = testStringMap(testContext($dependencyEvents[0], 'dependency span')['trace'] ?? null, 'dependency span trace');
+assertTrue(($traceContext['traceId'] ?? null) === $dependencyParent->traceId && ($traceContext['spanId'] ?? null) === ($dependencyAttributes['spanId'] ?? null), 'expected typed dependency span context');
 $dependencyPreview = $client->previewJson();
 foreach ([
     '"id": "evt_dependency_db"',
