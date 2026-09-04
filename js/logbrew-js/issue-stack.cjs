@@ -49,8 +49,8 @@ function buildIssueStackHelpers({ SdkError }) {
       if (!filename || filename.length > 2048 || hasControlCharacter(filename)) {
         throw new SdkError("validation_error", "issue stack frame filename is invalid");
       }
-      const line = positiveIntegerFromText(frame.line);
-      const column = positiveIntegerFromText(frame.column);
+      const line = frameCoordinateFromText(frame.line);
+      const column = frameCoordinateFromText(frame.column);
       if (line === null || column === null || line > 2147483647 || column > 2147483647) {
         throw new SdkError("validation_error", "issue stack frame coordinates must be positive integers");
       }
@@ -136,12 +136,15 @@ function parseJavaScriptStackFrame(rawLine) {
     functionName = generatedFrameFunction(location.slice(0, marker));
     location = location.slice(marker + 1);
   }
+  const hermesBytecode = location.startsWith("address at ");
+  location = location.replace(/^address at /u, "");
   const parts = location.split(":");
   if (parts.length < 3) {
     return null;
   }
-  const column = positiveIntegerFromText(parts.pop());
-  const lineNumber = positiveIntegerFromText(parts.pop());
+  const rawColumn = parts.pop();
+  const lineNumber = frameCoordinateFromText(parts.pop());
+  const column = frameCoordinateFromText(rawColumn, hermesBytecode && lineNumber === 1 ? 1 : 0);
   const filename = sanitizeFrameFilename(parts.join(":"));
   if (!filename || lineNumber === null || column === null) {
     return null;
@@ -184,13 +187,13 @@ function generatedFrameFunction(value) {
   return functionName;
 }
 
-function positiveIntegerFromText(value) {
+function frameCoordinateFromText(value, offset = 0) {
   const text = String(value);
-  if (!/^[1-9][0-9]*$/u.test(text)) {
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(text)) {
     return null;
   }
-  const parsed = Number(text);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  const parsed = Number(text) + offset;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function sanitizeFrameFilename(value) {
