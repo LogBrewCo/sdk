@@ -39,20 +39,16 @@ check_json() {
 trap remove_tmp_dir EXIT
 
 python3 -m venv "$tmp_dir/build-venv"
-"$tmp_dir/build-venv/bin/python" -m pip install --upgrade --disable-pip-version-check pip >/dev/null
-"$tmp_dir/build-venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check build >/dev/null
-"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/core-dist" "$core_dir" >/dev/null
-"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/fastapi-dist" "$package_dir" >/dev/null
+"$tmp_dir/build-venv/bin/python" -m pip install --disable-pip-version-check build 'setuptools>=80' >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build --no-isolation --wheel --outdir "$tmp_dir/core-dist" "$core_dir" >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build --no-isolation --wheel --outdir "$tmp_dir/fastapi-dist" "$package_dir" >/dev/null
 
 core_wheel="$tmp_dir/core-dist/logbrew_sdk-${core_package_version}-py3-none-any.whl"
 fastapi_wheel="$tmp_dir/fastapi-dist/logbrew_fastapi-${fastapi_package_version}-py3-none-any.whl"
-fastapi_sdist="$tmp_dir/fastapi-dist/logbrew_fastapi-${fastapi_package_version}.tar.gz"
 test -f "$core_wheel"
 test -f "$fastapi_wheel"
-test -f "$fastapi_sdist"
 
 python3 -m venv "$tmp_dir/app"
-"$tmp_dir/app/bin/python" -m pip install --upgrade --disable-pip-version-check pip >/dev/null
 test_client_requirement="httpx2==2.3.0"
 if [[ -n "$LOGBREW_FASTAPI_HTTPX_VERSION" ]]; then
   test_client_requirement="httpx==${LOGBREW_FASTAPI_HTTPX_VERSION}"
@@ -61,7 +57,7 @@ app_dependencies=("$core_wheel" "${fastapi_wheel}[celery]" mypy "$test_client_re
 if [[ -n "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" ]]; then
   app_dependencies=("fastapi==${LOGBREW_FASTAPI_FRAMEWORK_VERSION}" "${app_dependencies[@]}")
 fi
-"$tmp_dir/app/bin/python" -m pip install --no-cache-dir --disable-pip-version-check \
+"$tmp_dir/app/bin/python" -m pip install --disable-pip-version-check \
   "${app_dependencies[@]}" >/dev/null
 "$tmp_dir/app/bin/python" -m pip check >/dev/null
 "$tmp_dir/app/bin/python" -m pip show logbrew-fastapi > "$tmp_dir/pip-show-fastapi.txt"

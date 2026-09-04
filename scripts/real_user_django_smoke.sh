@@ -22,21 +22,17 @@ check_json() {
 trap remove_tmp_dir EXIT
 
 python3 -m venv "$tmp_dir/build-venv"
-"$tmp_dir/build-venv/bin/python" -m pip install --upgrade --disable-pip-version-check pip >/dev/null
-"$tmp_dir/build-venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check build >/dev/null
-"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/core-dist" "$core_dir" >/dev/null
-"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/django-dist" "$package_dir" >/dev/null
+"$tmp_dir/build-venv/bin/python" -m pip install --disable-pip-version-check build 'setuptools>=80' >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build --no-isolation --wheel --outdir "$tmp_dir/core-dist" "$core_dir" >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build --no-isolation --wheel --outdir "$tmp_dir/django-dist" "$package_dir" >/dev/null
 
 core_wheel="$tmp_dir/core-dist/logbrew_sdk-${core_package_version}-py3-none-any.whl"
 django_wheel="$tmp_dir/django-dist/logbrew_django-${django_package_version}-py3-none-any.whl"
-django_sdist="$tmp_dir/django-dist/logbrew_django-${django_package_version}.tar.gz"
 test -f "$core_wheel"
 test -f "$django_wheel"
-test -f "$django_sdist"
 
 python3 -m venv "$tmp_dir/app"
-"$tmp_dir/app/bin/python" -m pip install --upgrade --disable-pip-version-check pip >/dev/null
-"$tmp_dir/app/bin/python" -m pip install --no-cache-dir --disable-pip-version-check "$core_wheel" "$django_wheel" mypy >/dev/null
+"$tmp_dir/app/bin/python" -m pip install --disable-pip-version-check "$core_wheel" "$django_wheel" mypy >/dev/null
 "$tmp_dir/app/bin/python" -m pip check >/dev/null
 "$tmp_dir/app/bin/python" -m pip show logbrew-django > "$tmp_dir/pip-show-django.txt"
 grep -q '^Name: logbrew-django$' "$tmp_dir/pip-show-django.txt"

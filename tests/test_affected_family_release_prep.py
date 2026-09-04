@@ -47,7 +47,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.15"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.16"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.10"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.5"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.6"),
@@ -267,7 +267,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.15",
+                "logbrew-sdk": "0.1.16",
                 "logbrew-fastapi": "0.1.10",
                 "logbrew-flask": "0.1.5",
                 "logbrew-django": "0.1.6",
