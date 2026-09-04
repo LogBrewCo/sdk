@@ -69,12 +69,11 @@ elif [[ -n "$release_plan_path" ]]; then
     kotlin_version="$(plan_version "logbrew-kotlin")"
     okhttp_version="$(plan_version "logbrew-kotlin-okhttp")"
 else
-    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.7}}"
+    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.8}}"
     kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.2}}"
     okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"
 fi
 kotlin_stdlib_version="${LOGBREW_MAVEN_KOTLIN_STDLIB_VERSION:-2.4.0}"
-selected_modules=()
 for artifact in logbrew-sdk logbrew-kotlin logbrew-kotlin-okhttp; do
     if artifact_selected "$artifact"; then
         selected_modules+=("$artifact")
