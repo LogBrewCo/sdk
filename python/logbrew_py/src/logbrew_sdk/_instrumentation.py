@@ -6,8 +6,9 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import datetime, timezone
-from typing import Any, TypeAlias
+from typing import Any, Generic, TypeAlias, TypeVar, cast
 from uuid import uuid4
+from weakref import WeakKeyDictionary
 
 from logbrew_sdk._trace_context import LogBrewTraceContext
 
@@ -19,6 +20,50 @@ Clock: TypeAlias = Callable[[], float]
 HEX16 = re.compile(r"^[0-9a-fA-F]{16}$")
 ZERO_SPAN_ID = "0000000000000000"
 SPAN_EVENT_LIMIT = 8
+_T = TypeVar("_T")
+
+
+class InstanceRegistry(Generic[_T]):
+    """Track instance-scoped instrumentation across weak-reference edge cases."""
+
+    def __init__(self, attribute: str | None = None) -> None:
+        self.attribute = attribute
+        self.weak: WeakKeyDictionary[Any, _T] = WeakKeyDictionary()
+        self.by_id: dict[int, _T] = {}
+
+    def get(self, instance: Any) -> _T | None:
+        if self.attribute:
+            with suppress(Exception):
+                value = getattr(instance, self.attribute, None)
+                if value is not None:
+                    return cast(_T, value)
+        try:
+            return self.weak.get(instance)
+        except TypeError:
+            return self.by_id.get(id(instance))
+
+    def remember(self, instance: Any, value: _T) -> None:
+        if self.attribute:
+            with suppress(Exception):
+                setattr(instance, self.attribute, value)
+        try:
+            self.weak[instance] = value
+        except TypeError:
+            self.by_id[id(instance)] = value
+
+    def forget(self, instance: Any, value: _T) -> None:
+        if self.attribute:
+            with suppress(Exception):
+                if getattr(instance, self.attribute, None) is value:
+                    delattr(instance, self.attribute)
+        try:
+            if self.weak.get(instance) is value:
+                del self.weak[instance]
+            return
+        except TypeError:
+            pass
+        if self.by_id.get(id(instance)) is value:
+            del self.by_id[id(instance)]
 
 
 def child_trace(

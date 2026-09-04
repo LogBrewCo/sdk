@@ -68,7 +68,7 @@ else
     flask_version="${legacy_args[3]:-${LOGBREW_PYPI_FLASK_VERSION:-0.1.5}}"
 fi
 
-IFS=$'\t' read -r sdk_arq_extra fastapi_celery_extra < <(python3 - "$sdk_version" "$fastapi_version" <<'PY'
+IFS=$'\t' read -r sdk_arq_extra sdk_dramatiq_extra fastapi_celery_extra < <(python3 - "$sdk_version" "$fastapi_version" <<'PY'
 import re
 import sys
 
@@ -76,12 +76,20 @@ def at_least(version: str, minimum: tuple[int, int, int]) -> str:
     match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
     return "1" if match and tuple(map(int, match.groups())) >= minimum else "0"
 
-print(at_least(sys.argv[1], (0, 1, 15)), at_least(sys.argv[2], (0, 1, 8)), sep="\t")
+print(
+    at_least(sys.argv[1], (0, 1, 15)),
+    at_least(sys.argv[1], (0, 1, 16)),
+    at_least(sys.argv[2], (0, 1, 8)),
+    sep="\t",
+)
 PY
 )
 sdk_extras="rq"
 if [[ "$sdk_arq_extra" == "1" ]]; then
     sdk_extras="arq,rq"
+fi
+if [[ "$sdk_dramatiq_extra" == "1" ]]; then
+    sdk_extras="dramatiq,$sdk_extras"
 fi
 
 on_error() {
@@ -334,18 +342,16 @@ PY
     while IFS= read -r wheel_path; do
         packages+=("$artifact_root/$wheel_path")
     done < <(
-        python3 - "$manifest_path" <<'PY'
+        python3 - "$manifest_path" "$sdk_extras" "$fastapi_celery_extra" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+sdk_extras, fastapi_celery_extra = sys.argv[2:]
 for package in payload["packages"]:
-    version = tuple(int(part) for part in package["version"].split(".")[:3])
-    suffix = "[arq,rq]" if package["id"] == "logbrew-sdk" and version >= (0, 1, 15) else ""
-    if package["id"] == "logbrew-sdk" and not suffix:
-        suffix = "[rq]"
-    if package["id"] == "logbrew-fastapi" and version >= (0, 1, 8):
+    suffix = f"[{sdk_extras}]" if package["id"] == "logbrew-sdk" else ""
+    if package["id"] == "logbrew-fastapi" and fastapi_celery_extra == "1":
         suffix = "[celery]"
     print(f'{package["wheel"]["file"]}{suffix}')
 PY
@@ -381,6 +387,7 @@ export EXPECTED_LOGBREW_FASTAPI_VERSION="$fastapi_version"
 export EXPECTED_LOGBREW_FLASK_VERSION="$flask_version"
 export EXPECTED_LOGBREW_DJANGO_VERSION="$django_version"
 export EXPECTED_LOGBREW_SDK_ARQ_EXTRA="$sdk_arq_extra"
+export EXPECTED_LOGBREW_SDK_DRAMATIQ_EXTRA="$sdk_dramatiq_extra"
 export EXPECTED_LOGBREW_FASTAPI_CELERY_EXTRA="$fastapi_celery_extra"
 
 cat > "$tmp_dir/prove_public_pypi_install.py" <<'PY'
@@ -403,6 +410,7 @@ from logbrew_sdk import (
     RecordingTransport,
     connect_dbapi_connection_with_logbrew_spans,
     create_logbrew_open_telemetry_span_exporter,
+    instrument_dramatiq_broker_with_logbrew_spans,
     span_attributes_from_trace_context,
 )
 
@@ -435,6 +443,16 @@ if os.environ["EXPECTED_LOGBREW_SDK_ARQ_EXTRA"] == "1":
         raise AssertionError("installed core package does not expose the ARQ extra")
 if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requirement in sdk_requirements):
     raise AssertionError("installed core package does not expose the RQ extra")
+if os.environ["EXPECTED_LOGBREW_SDK_DRAMATIQ_EXTRA"] == "1":
+    import dramatiq
+    from dramatiq.brokers.stub import StubBroker
+
+    versions["dramatiq"] = dramatiq.__version__
+    if not any(
+        "dramatiq<3,>=2.2.1" in requirement and 'extra == "dramatiq"' in requirement
+        for requirement in sdk_requirements
+    ):
+        raise AssertionError("installed core package does not expose the Dramatiq extra")
 if os.environ["EXPECTED_LOGBREW_FASTAPI_CELERY_EXTRA"] == "1":
     import celery
 
@@ -451,6 +469,11 @@ client = LogBrewClient(
     sdk={"name": "python-public-pypi-smoke", "version": sdk_version},
     max_retries=1,
 )
+if os.environ["EXPECTED_LOGBREW_SDK_DRAMATIQ_EXTRA"] == "1":
+    dramatiq_instrumentation = instrument_dramatiq_broker_with_logbrew_spans(
+        StubBroker(), client=client
+    )
+    dramatiq_instrumentation.uninstall()
 client.log(
     "evt_public_pypi_smoke",
     "2026-07-01T00:00:00Z",

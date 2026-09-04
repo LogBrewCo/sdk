@@ -279,6 +279,7 @@ class _QueueInstrumentationConfig:
         error: BaseException,
         *,
         hook_name: str | None = None,
+        mechanism: str | None = None,
     ) -> None:
         task_name, queue_name = request.task_name, request.queue_name
         issue_metadata = {
@@ -291,6 +292,7 @@ class _QueueInstrumentationConfig:
             **({"hookState": "failure"} if hook_name else {"taskState": "failure"}),
             **({"queueName": queue_name} if queue_name else {}),
             **({"attempt": request.attempt} if request.attempt is not None else {}),
+            "errorName": type(error).__name__,
             **request.trace.metadata(),
         }
         request.client.issue(
@@ -301,7 +303,7 @@ class _QueueInstrumentationConfig:
                 title=(f"{self.display_name} hook {hook_name} failed" if hook_name
                        else f"{self.display_name} task {task_name or 'unknown'} failed"),
                 message=type(error).__name__,
-                mechanism=f"{self.system}.{'hook' if hook_name else 'job'}",
+                mechanism=mechanism or f"{self.system}.{'hook' if hook_name else 'job'}",
                 handled=False,
                 metadata=issue_metadata,
             ),

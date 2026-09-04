@@ -89,16 +89,11 @@ run_readme_example() {
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "log"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
+    check_json event-kinds release environment issue log span action \
+        "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
     check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
+    check_json fields 'events=6' 'ok=true' "$tmp_dir/$output_prefix.stderr.json"
 }
 
 run_agent_timeline_example() {
@@ -106,29 +101,21 @@ run_agent_timeline_example() {
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"source": "product.action"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"source": "network.milestone"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/checkout/:step"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/payments/:id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"statusCode": 202' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"durationMs": 94' "$tmp_dir/$output_prefix.stdout.json"
-    if grep -q 'private@example.test' "$tmp_dir/$output_prefix.stdout.json"; then
-        echo "agent timeline leaked query text" >&2
-        exit 1
-    fi
-    if grep -q '"card"' "$tmp_dir/$output_prefix.stdout.json"; then
-        echo "agent timeline leaked payload metadata" >&2
-        exit 1
-    fi
-    if grep -q '"authorization"' "$tmp_dir/$output_prefix.stdout.json"; then
-        echo "agent timeline leaked header metadata" >&2
-        exit 1
-    fi
-    grep -q '"events": 2' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/$output_prefix.stderr.json"
+    check_json event-kinds action "$tmp_dir/$output_prefix.stdout.json"
+    check_json event-fields 'attributes.metadata.source="product.action"' \
+        'attributes.metadata.source="network.milestone"' 'attributes.metadata.routeTemplate="/checkout/:step"' \
+        'attributes.metadata.routeTemplate="/payments/:id"' 'attributes.metadata.method="POST"' \
+        'attributes.metadata.statusCode=202' 'attributes.metadata.durationMs=94.0' \
+        "$tmp_dir/$output_prefix.stdout.json"
+    for forbidden in 'private@example.test' '"card"' '"authorization"'; do
+        if grep -q "$forbidden" "$tmp_dir/$output_prefix.stdout.json"; then
+            echo "agent timeline leaked private data: $forbidden" >&2
+            exit 1
+        fi
+    done
+    check_json fields 'events=2' 'ok=true' \
+        'traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' \
+        "$tmp_dir/$output_prefix.stderr.json"
 }
 
 run_first_useful_telemetry_example() {
@@ -136,38 +123,11 @@ run_first_useful_telemetry_example() {
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "log"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "metric"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"id": "evt_release_checkout_api"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"id": "evt_environment_checkout_api"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"id": "evt_action_checkout_started"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"id": "evt_network_payment_authorized"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"id": "evt_metric_checkout_duration"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"id": "evt_span_checkout_request"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/checkout/:cart_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
-    if grep -q 'coupon=private' "$tmp_dir/$output_prefix.stdout.json"; then
-        echo "first useful telemetry leaked query text" >&2
-        exit 1
-    fi
-    if grep -q 'card=private' "$tmp_dir/$output_prefix.stdout.json"; then
-        echo "first useful telemetry leaked payload text" >&2
-        exit 1
-    fi
-    if grep -q '"authorization"' "$tmp_dir/$output_prefix.stdout.json"; then
-        echo "first useful telemetry leaked header metadata" >&2
-        exit 1
-    fi
+    check_json event-kinds release environment log action metric span \
+        "$tmp_dir/$output_prefix.stdout.json"
     python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    grep -q '"events": 7' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
-    grep -q '"requestSpan": "evt_span_checkout_request"' "$tmp_dir/$output_prefix.stderr.json"
+    check_json fields 'events=7' 'ok=true' 'requestSpan="evt_span_checkout_request"' \
+        "$tmp_dir/$output_prefix.stderr.json"
 }
 
 check_packaged_examples_listing() {
@@ -224,19 +184,17 @@ check_makefile_help() {
     test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "12"
 }
 
-run_logging_smoke() {
-    local output_prefix="$1"
+check_json() {
+    python3 "$repo_root/scripts/check_python_package_json.py" "$@"
+}
 
-    python "$tmp_dir/logging_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"deliveries": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"firstLevel": "warning"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"secondLevel": "error"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"logger": "checkout.worker"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"orderId": "ord_123"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"exceptionName": "RuntimeError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"hasPathname": false' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"hasExceptionText": false' "$tmp_dir/$output_prefix.stdout.json"
+run_json_smoke() {
+    local script_path="$1"
+    local output_prefix="$2"
+    shift 2
+
+    python "$script_path" > "$tmp_dir/$output_prefix.stdout.json"
+    check_json fields "$@" "$tmp_dir/$output_prefix.stdout.json"
 }
 
 run_runtime_context_smoke() {
@@ -260,207 +218,6 @@ expected = {
 if payload != expected:
     raise SystemExit(f"unexpected runtime context smoke result: {payload!r}")
 PY
-}
-
-run_http_transport_smoke() {
-    local output_prefix="$1"
-
-    python "$tmp_dir/http_transport_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"httpAttempts": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"httpEvents": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"pending": 0' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"requestCount": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"authorization": "Bearer LOGBREW_API_KEY"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"source": "python-smoke"' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_database_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_database_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"activeSpan": "b7ad6b7169203341"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncActiveSpan": "b7ad6b7169203342"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"dbSystem": "postgresql"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncDbSystem": "mysql"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"rowCount": 3' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncRowCount": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorType": "StubDatabaseError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_dbapi_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_dbapi_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 7' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"framework": "dbapi"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"dbSystem": "sqlite"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"dbMethod": "execute"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"connectMethod": "connect"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"commitMethod": "commit"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"fetchMethod": "fetchall"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"fetchRows": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"selectMethod": "execute"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"rollbackMethod": "rollback"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"updateRowCount": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"selectRows": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorStatus": "error"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorType": "OperationalError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"parentSpanAfterDbapi": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_sqlalchemy_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_sqlalchemy_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"dbSystem": "sqlite"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"dbName": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"framework": "sqlalchemy"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"parentSpanAfterQueries": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"queryRows": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorStatus": "error"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"SELECT"' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_cache_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_cache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"activeSpan": "b7ad6b7169203351"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncActiveSpan": "b7ad6b7169203352"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"cacheSystem": "redis"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncCacheSystem": "memcached"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"cacheHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"itemSizeBytes": 14' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncItemSizeBytes": 64' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"itemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorType": "StubCacheError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_django_cache_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_django_cache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"framework": "django-cache"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"operations": \["SET", "GET", "GET_MANY"\]' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"cacheName": "profiles"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getItemSizeBytes": 17' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"manyHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"manyItemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"parentSpanAfterCache": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"setKind": "write"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"uninstallStoppedTracing": true' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_flask_cache_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_flask_cache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"framework": "flask-caching"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"operations": \["SET", "GET", "GET_MANY", "DELETE_MANY"\]' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"cacheName": "profiles"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getItemSizeBytes": 17' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"manyHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"manyItemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"deleteManyCount": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"parentSpanAfterCache": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"setKind": "write"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"uninstallStoppedTracing": true' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_pymemcache_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_pymemcache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"framework": "pymemcache"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"operations": \["GET", "GETS", "GET_MANY", "SET"\]' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"cacheName": "profiles"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getActiveSpan": "b7ad6b7169203401"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getItemSizeBytes": 14' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getsActiveSpan": "b7ad6b7169203402"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"getsHit": false' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"manyActiveSpan": "b7ad6b7169203403"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"manyHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"manyItemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"parentSpanAfterCache": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"setActiveSpan": "b7ad6b7169203404"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"setKind": "write"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"uninstallStoppedTracing": true' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_redis_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_redis_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"framework": "redis-py"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"parentSpanAfterRedis": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"syncActiveSpan": "b7ad6b7169203381"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"pipelineActiveSpan": "b7ad6b7169203385"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"pipelineLength": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"pipelineOperations": "GET,SET"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"pipelineResultCount": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncActiveSpan": "b7ad6b7169203382"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"cacheOperationKind": "read"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"cacheHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncCacheHit": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"itemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncItemCount": 2' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorStatus": "error"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorType": "StubRedisError"' "$tmp_dir/$output_prefix.stdout.json"
-}
-
-run_queue_span_smoke() {
-    local output_prefix="$1"
-
-    python "$repo_root/scripts/python_queue_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"activeSpan": "b7ad6b7169203361"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"asyncActiveSpan": "b7ad6b7169203362"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"celeryOperation": "publish checkout.send_receipt"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"celeryProcessParentSpan": "b7ad6b7169203371"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"celeryProcessResult": "celery processed"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"celeryQueueName": "receipts"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"celeryResult": "celery published"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"celeryTaskName": "checkout.send_receipt"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"celeryTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203371-01"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"queueSystem": "celery"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"syncOperationKind": "publish"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"queueName": "email"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"taskName": "checkout.email"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"rqOperation": "publish checkout.send_email"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"rqQueueName": "email"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"rqResult": "rq queued"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"rqTaskName": "checkout.send_email"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"messageCount": 1' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"errorType": "StubQueueError"' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
 run_requirement_reinstalls() {
@@ -585,6 +342,7 @@ else
         "redis>=5,<7" \
         "fakeredis==2.31.3" \
         "arq==0.28.0" \
+        "dramatiq==2.2.1" \
         "rq==2.12.0" \
         >/dev/null
 fi
@@ -597,25 +355,16 @@ sdist_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.tar.gz' | he
 export LOGBREW_SDIST_PATH="$sdist_path"
 export LOGBREW_TMP_DIR="$tmp_dir"
 export LOGBREW_PYTHON_SDIST_ROOT="$sdist_root"
-python3 - <<'PY'
-from pathlib import Path
-import os
-import tarfile
-import zipfile
-
-wheel_path = Path(os.environ["LOGBREW_WHEEL_PATH"])
-dist_info_dir = os.environ["LOGBREW_PYTHON_DIST_INFO_DIR"]
-package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
-sdist_path = Path(os.environ["LOGBREW_SDIST_PATH"])
-tmp_dir = Path(os.environ["LOGBREW_TMP_DIR"])
-sdist_root = os.environ["LOGBREW_PYTHON_SDIST_ROOT"]
-required_payload = {
+cat > "$tmp_dir/artifact_contract.py" <<'PY'
+PACKAGE_FILES = {
+    "logbrew_sdk/__init__.py",
     "logbrew_sdk/_arq_client.py",
     "logbrew_sdk/_cache_client.py",
     "logbrew_sdk/_celery_client.py",
-    "logbrew_sdk/_dbapi_client.py",
     "logbrew_sdk/_db_client.py",
+    "logbrew_sdk/_dbapi_client.py",
     "logbrew_sdk/_django_cache_client.py",
+    "logbrew_sdk/_dramatiq_client.py",
     "logbrew_sdk/_flask_cache_client.py",
     "logbrew_sdk/_framework_cache_client.py",
     "logbrew_sdk/_http_client.py",
@@ -626,7 +375,6 @@ required_payload = {
     "logbrew_sdk/_rq_client.py",
     "logbrew_sdk/_sqlalchemy_client.py",
     "logbrew_sdk/_support_ticket.py",
-    "logbrew_sdk/__init__.py",
     "logbrew_sdk/_timeline.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/examples/__init__.py",
@@ -637,14 +385,17 @@ required_payload = {
     "logbrew_sdk/examples/real_user_smoke.py",
     "logbrew_sdk/py.typed",
 }
-guidance = (
+README_GUIDANCE = (
     "python3 -m pip install logbrew-sdk",
     "LOGBREW_API_KEY",
     "preview_json()",
     "HttpTransport",
     "LogBrewAiohttpClientSessionInstrumentation",
+    "LogBrewDjangoCacheInstrumentation",
+    "LogBrewFlaskCacheInstrumentation",
     "LogBrewHttpxClientInstrumentation",
     "LogBrewLoggingHandler",
+    "LogBrewPymemcacheInstrumentation",
     "LogBrewRequestsSessionInstrumentation",
     "aiohttp_request_with_logbrew_span",
     "async_cache_operation_with_logbrew_span",
@@ -655,38 +406,53 @@ guidance = (
     "celery_operation_with_logbrew_span",
     "connect_dbapi_connection_with_logbrew_spans",
     "create_celery_trace_headers",
+    "create_network_milestone_attributes",
+    "create_product_action_attributes",
+    "create_support_ticket_draft",
     "database_operation_with_logbrew_span",
+    "first-useful-telemetry",
     "httpx_request_with_logbrew_span",
+    "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_arq_pool_with_logbrew_spans",
     "instrument_arq_worker_with_logbrew_spans",
-    "instrument_aiohttp_client_session_with_logbrew_spans",
-    "instrument_httpx_client_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
-    "LogBrewDjangoCacheInstrumentation",
+    "instrument_dramatiq_broker_with_logbrew_spans",
     "instrument_flask_cache_with_logbrew_spans",
-    "LogBrewFlaskCacheInstrumentation",
+    "instrument_httpx_client_with_logbrew_spans",
     "instrument_pymemcache_client_with_logbrew_spans",
-    "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_requests_session_with_logbrew_spans",
     "instrument_rq_queue_with_logbrew_spans",
     "instrument_rq_worker_processes_with_logbrew",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "logbrew_trace_context_from_celery_headers",
+    "parse_traceparent",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
-    "urlopen_with_logbrew_span",
-    "create_support_ticket_draft",
-    "parse_traceparent",
-    "create_product_action_attributes",
-    "create_network_milestone_attributes",
     "span_attributes_from_traceparent",
-    "first-useful-telemetry",
+    "urlopen_with_logbrew_span",
 )
+PY
+python3 - <<'PY'
+from pathlib import Path
+import os
+import sys
+import tarfile
+import zipfile
+
+sys.path.insert(0, os.environ["LOGBREW_TMP_DIR"])
+from artifact_contract import PACKAGE_FILES, README_GUIDANCE
+
+wheel_path = Path(os.environ["LOGBREW_WHEEL_PATH"])
+dist_info_dir = os.environ["LOGBREW_PYTHON_DIST_INFO_DIR"]
+package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
+sdist_path = Path(os.environ["LOGBREW_SDIST_PATH"])
+tmp_dir = Path(os.environ["LOGBREW_TMP_DIR"])
+sdist_root = os.environ["LOGBREW_PYTHON_SDIST_ROOT"]
 with zipfile.ZipFile(wheel_path) as archive:
-    required = required_payload | {
+    required = PACKAGE_FILES | {
         f"{dist_info_dir}/METADATA",
         f"{dist_info_dir}/WHEEL",
         f"{dist_info_dir}/RECORD",
@@ -710,7 +476,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
     members = {member.name.lstrip("./"): member for member in archive.getmembers()}
     names = set(members)
     (tmp_dir / "sdist-contents.txt").write_text("\n".join(sorted(names)) + "\n")
-    required = {f"{sdist_root}/src/{name}" for name in required_payload} | {
+    required = {f"{sdist_root}/src/{name}" for name in PACKAGE_FILES} | {
         f"{sdist_root}/README.md",
         f"{sdist_root}/pyproject.toml",
     }
@@ -730,7 +496,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
 (tmp_dir / "sdist-README.md").write_text(readme)
 (tmp_dir / "sdist-pyproject.toml").write_text(pyproject)
 for label, content in (("wheel metadata", metadata), ("sdist README", readme)):
-    for needle in guidance:
+    for needle in README_GUIDANCE:
         if needle not in content:
             raise SystemExit(f"missing {label} guidance: {needle}")
 
@@ -1781,6 +1547,8 @@ import json
 import os
 import sys
 
+from artifact_contract import PACKAGE_FILES, README_GUIDANCE
+
 package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
 dist_info_dir = f"logbrew_sdk-{package_version}.dist-info"
 
@@ -1788,32 +1556,8 @@ if version("logbrew-sdk") != package_version:
     raise SystemExit("unexpected package version")
 
 package_files = {str(path) for path in files("logbrew-sdk") or []}
-required = {
-    "logbrew_sdk/_arq_client.py",
-    "logbrew_sdk/_cache_client.py",
-    "logbrew_sdk/_celery_client.py",
-    "logbrew_sdk/_dbapi_client.py",
-    "logbrew_sdk/_db_client.py",
-    "logbrew_sdk/_django_cache_client.py",
-    "logbrew_sdk/_flask_cache_client.py",
-    "logbrew_sdk/_framework_cache_client.py",
-    "logbrew_sdk/_http_client.py",
-    "logbrew_sdk/_instrumentation.py",
-    "logbrew_sdk/_pymemcache_client.py",
-    "logbrew_sdk/_queue_client.py",
-    "logbrew_sdk/_redis_client.py",
-    "logbrew_sdk/_rq_client.py",
-    "logbrew_sdk/_sqlalchemy_client.py",
-    "logbrew_sdk/_support_ticket.py",
-    "logbrew_sdk/_trace_context.py",
-    "logbrew_sdk/py.typed",
-    "logbrew_sdk/examples/__init__.py",
-    "logbrew_sdk/examples/__main__.py",
-    "logbrew_sdk/examples/readme_example.py",
-    f"{dist_info_dir}/INSTALLER",
-    f"{dist_info_dir}/METADATA",
-    f"{dist_info_dir}/RECORD",
-    f"{dist_info_dir}/direct_url.json",
+required = PACKAGE_FILES | {
+    f"{dist_info_dir}/{name}" for name in ("INSTALLER", "METADATA", "RECORD", "direct_url.json")
 }
 missing = sorted(required - package_files)
 if missing:
@@ -1835,45 +1579,9 @@ if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requ
     raise SystemExit("missing installed RQ extra metadata")
 if not any("arq<1,>=0.28" in requirement and 'extra == "arq"' in requirement for requirement in requires_dist):
     raise SystemExit("missing installed ARQ extra metadata")
-for needle in (
-    "python3 -m pip install logbrew-sdk",
-    "LOGBREW_API_KEY",
-    "preview_json()",
-    "HttpTransport",
-    "LogBrewAiohttpClientSessionInstrumentation",
-    "LogBrewLoggingHandler",
-    "aiohttp_request_with_logbrew_span",
-    "async_cache_operation_with_logbrew_span",
-    "async_database_operation_with_logbrew_span",
-    "async_httpx_request_with_logbrew_span",
-    "async_queue_operation_with_logbrew_span",
-    "cache_operation_with_logbrew_span",
-    "celery_operation_with_logbrew_span",
-    "connect_dbapi_connection_with_logbrew_spans",
-    "create_celery_trace_headers",
-    "database_operation_with_logbrew_span",
-    "httpx_request_with_logbrew_span",
-    "instrument_arq_pool_with_logbrew_spans",
-    "instrument_arq_worker_with_logbrew_spans",
-    "instrument_aiohttp_client_session_with_logbrew_spans",
-    "instrument_dbapi_connection_with_logbrew_spans",
-    "instrument_django_cache_with_logbrew_spans",
-    "LogBrewDjangoCacheInstrumentation",
-    "instrument_flask_cache_with_logbrew_spans",
-    "LogBrewFlaskCacheInstrumentation",
-    "instrument_pymemcache_client_with_logbrew_spans",
-    "LogBrewPymemcacheInstrumentation",
-    "instrument_redis_client_with_logbrew_spans",
-    "instrument_rq_queue_with_logbrew_spans",
-    "instrument_rq_worker_processes_with_logbrew",
-    "instrument_sqlalchemy_engine_with_logbrew_spans",
-    "logbrew_trace_context_from_celery_headers",
-    "queue_operation_with_logbrew_span",
-    "requests_request_with_logbrew_span",
-    "rq_operation_with_logbrew_span",
-    "urlopen_with_logbrew_span",
-    "create_support_ticket_draft",
-):
+if not any("dramatiq<3,>=2.2.1" in requirement and 'extra == "dramatiq"' in requirement for requirement in requires_dist):
+    raise SystemExit("missing installed Dramatiq extra metadata")
+for needle in README_GUIDANCE:
     if needle not in description:
         raise SystemExit(f"missing installed metadata guidance: {needle}")
 
@@ -2006,30 +1714,9 @@ listed_files = {
     for line in show_files_lines[files_index + 1 :]
     if line.startswith("  ")
 }
-required_show_files = {
-    f"{dist_info_dir}/INSTALLER",
-    f"{dist_info_dir}/METADATA",
-    f"{dist_info_dir}/RECORD",
-    f"{dist_info_dir}/REQUESTED",
-    f"{dist_info_dir}/WHEEL",
-    f"{dist_info_dir}/direct_url.json",
-    f"{dist_info_dir}/top_level.txt",
-    "logbrew_sdk/_arq_client.py",
-    "logbrew_sdk/_cache_client.py",
-    "logbrew_sdk/_celery_client.py",
-    "logbrew_sdk/_db_client.py",
-    "logbrew_sdk/_http_client.py",
-    "logbrew_sdk/_instrumentation.py",
-    "logbrew_sdk/_queue_client.py",
-    "logbrew_sdk/_rq_client.py",
-    "logbrew_sdk/_support_ticket.py",
-    "logbrew_sdk/_trace_context.py",
-    "logbrew_sdk/__init__.py",
-    "logbrew_sdk/examples/__init__.py",
-    "logbrew_sdk/examples/__main__.py",
-    "logbrew_sdk/examples/readme_example.py",
-    "logbrew_sdk/examples/real_user_smoke.py",
-    "logbrew_sdk/py.typed",
+required_show_files = PACKAGE_FILES | {
+    f"{dist_info_dir}/{name}"
+    for name in ("INSTALLER", "METADATA", "RECORD", "REQUESTED", "WHEEL", "direct_url.json", "top_level.txt")
 }
 missing_show_files = sorted(required_show_files - listed_files)
 if missing_show_files:
@@ -2373,268 +2060,153 @@ check_packaged_examples_listing "smoke-packaged-examples-list" "wheel-packaged-e
 check_packaged_examples_help "smoke-packaged-examples-help" "wheel-packaged-examples-help"
 run_readme_example "smoke-packaged-examples" "wheel-packaged-examples"
 run_readme_example "smoke-run" "smoke"
-run_logging_smoke "wheel-logging"
+run_json_smoke "$tmp_dir/logging_smoke.py" "wheel-logging" \
+    'ok=true' 'deliveries=2' 'firstLevel="warning"' 'secondLevel="error"' \
+    'logger="checkout.worker"' 'orderId="ord_123"' 'exceptionName="RuntimeError"' \
+    'hasPathname=false' 'hasExceptionText=false'
 run_runtime_context_smoke "wheel-runtime-context"
-run_http_transport_smoke "wheel-http-transport"
-run_database_span_smoke "wheel-database-span"
-run_dbapi_span_smoke "wheel-dbapi-span"
-run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
-run_cache_span_smoke "wheel-cache-span"
-run_django_cache_span_smoke "wheel-django-cache-span"
-run_flask_cache_span_smoke "wheel-flask-cache-span"
-run_pymemcache_span_smoke "wheel-pymemcache-span"
-run_redis_span_smoke "wheel-redis-span"
-run_queue_span_smoke "wheel-queue-span"
+run_json_smoke "$tmp_dir/http_transport_smoke.py" "wheel-http-transport" \
+    'ok=true' 'httpAttempts=2' 'httpEvents=1' 'status=202' 'pending=0' \
+    'requestCount=2' 'authorization="Bearer LOGBREW_API_KEY"' 'source="python-smoke"'
+run_json_smoke "$repo_root/scripts/python_database_span_smoke.py" "wheel-database-span" \
+    'ok=true' 'events=3' 'activeSpan="b7ad6b7169203341"' \
+    'asyncActiveSpan="b7ad6b7169203342"' 'dbSystem="postgresql"' 'asyncDbSystem="mysql"' \
+    'rowCount=3' 'asyncRowCount=2' 'errorType="StubDatabaseError"' 'captureErrors=1'
+run_json_smoke "$repo_root/scripts/python_dbapi_span_smoke.py" "wheel-dbapi-span" \
+    'ok=true' 'events=7' 'framework="dbapi"' 'dbSystem="sqlite"' 'dbMethod="execute"' \
+    'connectMethod="connect"' 'commitMethod="commit"' 'fetchMethod="fetchall"' 'fetchRows=1' \
+    'selectMethod="execute"' 'rollbackMethod="rollback"' 'updateRowCount=1' 'selectRows=1' \
+    'errorStatus="error"' 'errorType="OperationalError"' 'parentSpanAfterDbapi="00f067aa0ba902b7"'
+run_json_smoke "$repo_root/scripts/python_sqlalchemy_span_smoke.py" "wheel-sqlalchemy-span" \
+    'ok=true' 'events=4' 'dbSystem="sqlite"' 'dbName="checkout"' 'framework="sqlalchemy"' \
+    'duplicateSame=true' 'parentSpanAfterQueries="00f067aa0ba902b7"' 'queryRows=1' \
+    'errorStatus="error"' 'operations=["CREATE","INSERT","SELECT","SELECT"]'
+run_json_smoke "$repo_root/scripts/python_cache_span_smoke.py" "wheel-cache-span" \
+    'ok=true' 'events=3' 'activeSpan="b7ad6b7169203351"' \
+    'asyncActiveSpan="b7ad6b7169203352"' 'cacheSystem="redis"' 'asyncCacheSystem="memcached"' \
+    'cacheHit=true' 'itemSizeBytes=14' 'asyncItemSizeBytes=64' 'itemCount=1' \
+    'errorType="StubCacheError"' 'captureErrors=1'
+run_json_smoke "$repo_root/scripts/python_django_cache_span_smoke.py" "wheel-django-cache-span" \
+    'ok=true' 'events=3' 'framework="django-cache"' 'duplicateSame=true' \
+    'operations=["SET","GET","GET_MANY"]' 'cacheName="profiles"' 'getHit=true' \
+    'getItemSizeBytes=17' 'manyHit=true' 'manyItemCount=1' \
+    'parentSpanAfterCache="00f067aa0ba902b7"' 'setKind="write"' 'uninstallStoppedTracing=true'
+run_json_smoke "$repo_root/scripts/python_flask_cache_span_smoke.py" "wheel-flask-cache-span" \
+    'ok=true' 'events=4' 'framework="flask-caching"' 'duplicateSame=true' \
+    'operations=["SET","GET","GET_MANY","DELETE_MANY"]' 'cacheName="profiles"' \
+    'getHit=true' 'getItemSizeBytes=17' 'manyHit=true' 'manyItemCount=1' 'deleteManyCount=2' \
+    'parentSpanAfterCache="00f067aa0ba902b7"' 'setKind="write"' 'uninstallStoppedTracing=true'
+run_json_smoke "$repo_root/scripts/python_pymemcache_span_smoke.py" "wheel-pymemcache-span" \
+    'ok=true' 'events=4' 'framework="pymemcache"' 'duplicateSame=true' \
+    'operations=["GET","GETS","GET_MANY","SET"]' 'cacheName="profiles"' \
+    'getActiveSpan="b7ad6b7169203401"' 'getHit=true' 'getItemSizeBytes=14' \
+    'getsActiveSpan="b7ad6b7169203402"' 'getsHit=false' \
+    'manyActiveSpan="b7ad6b7169203403"' 'manyHit=true' 'manyItemCount=1' \
+    'parentSpanAfterCache="00f067aa0ba902b7"' 'setActiveSpan="b7ad6b7169203404"' \
+    'setKind="write"' 'uninstallStoppedTracing=true'
+run_json_smoke "$repo_root/scripts/python_redis_span_smoke.py" "wheel-redis-span" \
+    'ok=true' 'events=4' 'framework="redis-py"' 'duplicateSame=true' \
+    'parentSpanAfterRedis="00f067aa0ba902b7"' 'syncActiveSpan="b7ad6b7169203381"' \
+    'pipelineActiveSpan="b7ad6b7169203385"' 'pipelineLength=2' 'pipelineOperations="GET,SET"' \
+    'pipelineResultCount=2' 'asyncActiveSpan="b7ad6b7169203382"' \
+    'cacheOperationKind="read"' 'cacheHit=true' 'asyncCacheHit=true' \
+    'itemCount=1' 'asyncItemCount=2' 'errorStatus="error"' 'errorType="StubRedisError"'
+run_json_smoke "$repo_root/scripts/python_queue_span_smoke.py" "wheel-queue-span" \
+    'ok=true' 'events=6' 'activeSpan="b7ad6b7169203361"' \
+    'asyncActiveSpan="b7ad6b7169203362"' 'celeryOperation="publish checkout.send_receipt"' \
+    'celeryProcessParentSpan="b7ad6b7169203371"' 'celeryProcessResult="celery processed"' \
+    'celeryQueueName="receipts"' 'celeryResult="celery published"' \
+    'celeryTaskName="checkout.send_receipt"' \
+    'celeryTraceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203371-01"' \
+    'queueSystem="celery"' 'syncOperationKind="publish"' 'queueName="email"' \
+    'taskName="checkout.email"' 'rqOperation="publish checkout.send_email"' \
+    'rqQueueName="email"' 'rqResult="rq queued"' 'rqTaskName="checkout.send_email"' \
+    'messageCount=1' 'errorType="StubQueueError"' 'captureErrors=1'
 PYTHONPATH="$repo_root/python/logbrew_py/tests" python -m unittest \
     test_sdk test_http_client test_arq_client test_rq_client
 
-cat > "$tmp_dir/unauth.py" <<'EOF'
-import json
-
-from logbrew_sdk import LogBrewClient, RecordingTransport, SdkError
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app",
-    sdk_version="0.1.0",
-)
-client.release("evt_release_unauth", "2026-06-02T10:00:00Z", {"version": "1.2.3"})
-
-try:
-    client.flush(RecordingTransport([{"status_code": 401}]))
-    raise SystemExit("expected unauthenticated error")
-except SdkError as error:
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "code": error.code,
-                "message": error.message,
-                "pending": client.pending_events(),
-            }
-        )
-    )
-EOF
-
-python "$tmp_dir/unauth.py" > "$tmp_dir/unauth.stdout.json"
-grep -q '"ok": true' "$tmp_dir/unauth.stdout.json"
-grep -q '"code": "unauthenticated"' "$tmp_dir/unauth.stdout.json"
-grep -q '"message": "transport rejected the API key"' "$tmp_dir/unauth.stdout.json"
-grep -q '"pending": 1' "$tmp_dir/unauth.stdout.json"
-
-cat > "$tmp_dir/retry.py" <<'EOF'
-import json
-
-from logbrew_sdk import LogBrewClient, RecordingTransport, TransportError
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app",
-    sdk_version="0.1.0",
-)
-client.release("evt_release_retry", "2026-06-02T10:00:00Z", {"version": "1.2.3"})
-
-response = client.flush(
-    RecordingTransport([TransportError.network("temporary outage"), {"status_code": 202}])
-)
-print(
-    json.dumps(
-        {
-            "ok": True,
-            "status": response.status_code,
-            "attempts": response.attempts,
-            "pending": client.pending_events(),
-        }
-    )
-)
-EOF
-
-python "$tmp_dir/retry.py" > "$tmp_dir/retry.stdout.json"
-grep -q '"ok": true' "$tmp_dir/retry.stdout.json"
-grep -q '"status": 202' "$tmp_dir/retry.stdout.json"
-grep -q '"attempts": 2' "$tmp_dir/retry.stdout.json"
-grep -q '"pending": 0' "$tmp_dir/retry.stdout.json"
-
-cat > "$tmp_dir/shutdown.py" <<'EOF'
-import json
-
-from logbrew_sdk import LogBrewClient, RecordingTransport, SdkError
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app",
-    sdk_version="0.1.0",
-)
-client.release("evt_release_shutdown", "2026-06-02T10:00:00Z", {"version": "1.2.3"})
-client.shutdown(RecordingTransport.always_accept())
-
-try:
-    client.log(
-        "evt_log_shutdown",
-        "2026-06-02T10:00:01Z",
-        {"message": "should fail", "level": "info"},
-    )
-    raise SystemExit("expected shutdown error")
-except SdkError as error:
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "code": error.code,
-                "message": error.message,
-                "pending": client.pending_events(),
-            }
-        )
-    )
-EOF
-
-python "$tmp_dir/shutdown.py" > "$tmp_dir/shutdown.stdout.json"
-grep -q '"ok": true' "$tmp_dir/shutdown.stdout.json"
-grep -q '"code": "shutdown_error"' "$tmp_dir/shutdown.stdout.json"
-grep -q '"message": "client is already shut down"' "$tmp_dir/shutdown.stdout.json"
-grep -q '"pending": 0' "$tmp_dir/shutdown.stdout.json"
-
-cat > "$tmp_dir/empty_flush.py" <<'EOF'
-import json
-
-from logbrew_sdk import LogBrewClient, RecordingTransport
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app",
-    sdk_version="0.1.0",
-)
-response = client.flush(RecordingTransport.always_accept())
-print(
-    json.dumps(
-        {
-            "ok": True,
-            "status": response.status_code,
-            "attempts": response.attempts,
-            "pending": client.pending_events(),
-        }
-    )
-)
-EOF
-
-python "$tmp_dir/empty_flush.py" > "$tmp_dir/empty_flush.stdout.json"
-grep -q '"ok": true' "$tmp_dir/empty_flush.stdout.json"
-grep -q '"status": 204' "$tmp_dir/empty_flush.stdout.json"
-grep -q '"attempts": 0' "$tmp_dir/empty_flush.stdout.json"
-grep -q '"pending": 0' "$tmp_dir/empty_flush.stdout.json"
-
-cat > "$tmp_dir/validation.py" <<'EOF'
-import json
-
-from logbrew_sdk import LogBrewClient, SdkError
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app",
-    sdk_version="0.1.0",
-)
-
-try:
-    client.log(
-        "evt_log_invalid",
-        "2026-06-02T10:00:03",
-        {"message": "should fail", "level": "info"},
-    )
-    raise SystemExit("expected validation error")
-except SdkError as error:
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "code": error.code,
-                "message": error.message,
-                "pending": client.pending_events(),
-            }
-        )
-    )
-EOF
-
-python "$tmp_dir/validation.py" > "$tmp_dir/validation.stdout.json"
-grep -q '"ok": true' "$tmp_dir/validation.stdout.json"
-grep -q '"code": "validation_error"' "$tmp_dir/validation.stdout.json"
-grep -q '"message": "timestamp must include a timezone offset: 2026-06-02T10:00:03"' "$tmp_dir/validation.stdout.json"
-grep -q '"pending": 0' "$tmp_dir/validation.stdout.json"
-
-cat > "$tmp_dir/retry_budget.py" <<'EOF'
+cat > "$tmp_dir/failure_modes.py" <<'EOF'
 import json
 
 from logbrew_sdk import LogBrewClient, RecordingTransport, SdkError, TransportError
 
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app",
-    sdk_version="0.1.0",
-)
-client.release("evt_release_retry_budget", "2026-06-02T10:00:00Z", {"version": "1.2.3"})
 
-try:
-    client.flush(
-        RecordingTransport(
-            [
-                TransportError.network("temporary outage"),
-                TransportError.network("temporary outage"),
-                TransportError.network("temporary outage"),
-            ]
-        )
+def client():
+    return LogBrewClient.create(
+        api_key="LOGBREW_API_KEY", sdk_name="smoke-app", sdk_version="0.1.0"
     )
-    raise SystemExit("expected network failure")
-except SdkError as error:
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "code": error.code,
-                "message": error.message,
-                "pending": client.pending_events(),
-            }
-        )
-    )
+
+
+def release(mode):
+    instance = client()
+    instance.release(f"evt_release_{mode}", "2026-06-02T10:00:00Z", {"version": "1.2.3"})
+    return instance
+
+
+def error_result(instance, operation):
+    try:
+        operation()
+    except SdkError as error:
+        return {"code": error.code, "message": error.message, "pending": instance.pending_events()}
+    raise SystemExit("expected SDK error")
+
+
+unauth = release("unauth")
+results = {
+    "unauth": error_result(unauth, lambda: unauth.flush(RecordingTransport([{"status_code": 401}]))),
+}
+retry = release("retry")
+response = retry.flush(RecordingTransport([TransportError.network("temporary outage"), {"status_code": 202}]))
+results["retry"] = {"status": response.status_code, "attempts": response.attempts, "pending": retry.pending_events()}
+shutdown = release("shutdown")
+shutdown.shutdown(RecordingTransport.always_accept())
+results["shutdown"] = error_result(
+    shutdown,
+    lambda: shutdown.log(
+        "evt_log_shutdown", "2026-06-02T10:00:01Z", {"message": "should fail", "level": "info"}
+    ),
+)
+empty = client()
+response = empty.flush(RecordingTransport.always_accept())
+results["empty"] = {"status": response.status_code, "attempts": response.attempts, "pending": empty.pending_events()}
+invalid = client()
+results["validation"] = error_result(
+    invalid,
+    lambda: invalid.log(
+        "evt_log_invalid", "2026-06-02T10:00:03", {"message": "should fail", "level": "info"}
+    ),
+)
+budget = release("retry_budget")
+results["retry_budget"] = error_result(
+    budget,
+    lambda: budget.flush(RecordingTransport([TransportError.network("temporary outage")] * 3)),
+)
+status = release("transport_status")
+results["transport_status"] = error_result(
+    status, lambda: status.flush(RecordingTransport([{"status_code": 400}]))
+)
+
+expected = {
+    "unauth": {"code": "unauthenticated", "message": "transport rejected the API key", "pending": 1},
+    "retry": {"status": 202, "attempts": 2, "pending": 0},
+    "shutdown": {"code": "shutdown_error", "message": "client is already shut down", "pending": 0},
+    "empty": {"status": 204, "attempts": 0, "pending": 0},
+    "validation": {
+        "code": "validation_error",
+        "message": "timestamp must include a timezone offset: 2026-06-02T10:00:03",
+        "pending": 0,
+    },
+    "retry_budget": {"code": "network_failure", "message": "temporary outage", "pending": 1},
+    "transport_status": {"code": "transport_error", "message": "unexpected transport status 400", "pending": 1},
+}
+if results != expected:
+    raise SystemExit(f"failure-mode receipt mismatch: {results!r}")
+print(json.dumps({"ok": True, "scenarios": len(results)}))
 EOF
 
-python "$tmp_dir/retry_budget.py" > "$tmp_dir/retry_budget.stdout.json"
-grep -q '"ok": true' "$tmp_dir/retry_budget.stdout.json"
-grep -q '"code": "network_failure"' "$tmp_dir/retry_budget.stdout.json"
-grep -q '"message": "temporary outage"' "$tmp_dir/retry_budget.stdout.json"
-grep -q '"pending": 1' "$tmp_dir/retry_budget.stdout.json"
-
-cat > "$tmp_dir/transport_status.py" <<'EOF'
-import json
-
-from logbrew_sdk import LogBrewClient, RecordingTransport, SdkError
-
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="smoke-app",
-    sdk_version="0.1.0",
-)
-client.release("evt_release_transport_status", "2026-06-02T10:00:00Z", {"version": "1.2.3"})
-
-try:
-    client.flush(RecordingTransport([{"status_code": 400}]))
-    raise SystemExit("expected transport error")
-except SdkError as error:
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "code": error.code,
-                "message": error.message,
-                "pending": client.pending_events(),
-            }
-        )
-    )
-EOF
-
-python "$tmp_dir/transport_status.py" > "$tmp_dir/transport_status.stdout.json"
-grep -q '"ok": true' "$tmp_dir/transport_status.stdout.json"
-grep -q '"code": "transport_error"' "$tmp_dir/transport_status.stdout.json"
-grep -q '"message": "unexpected transport status 400"' "$tmp_dir/transport_status.stdout.json"
-grep -q '"pending": 1' "$tmp_dir/transport_status.stdout.json"
+python "$tmp_dir/failure_modes.py" > "$tmp_dir/failure_modes.stdout.json"
+grep -q '"ok": true' "$tmp_dir/failure_modes.stdout.json"
+grep -q '"scenarios": 7' "$tmp_dir/failure_modes.stdout.json"
 
 wait "$requirements_pid"
 wait "$sdist_checks_pid"

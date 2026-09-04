@@ -8,19 +8,19 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from threading import RLock
-from time import perf_counter, time
 from typing import Any
-from uuid import uuid4
-from weakref import WeakKeyDictionary
 
-from logbrew_sdk import SdkError, _instrumentation, create_traceparent
+from logbrew_sdk import SdkError, _instrumentation
 from logbrew_sdk._celery_client import (
     _safe_celery_queue_name,
     _safe_task_label,
     logbrew_trace_context_from_celery_headers,
 )
-from logbrew_sdk._issue_diagnostics import safe_issue_exception_type
-from logbrew_sdk._queue_client import _queue_span_request, _QueueSpanRequest
+from logbrew_sdk._queue_client import (
+    _queue_trace_carrier,
+    _QueueInstrumentationConfig,
+    _QueueSpanRequest,
+)
 from logbrew_sdk._trace_context import (
     LogBrewTraceContext,
     get_active_logbrew_trace,
@@ -45,10 +45,10 @@ _TASK_STATES = frozenset(
         "success",
     }
 )
-_APP_INSTRUMENTATIONS: WeakKeyDictionary[Any, LogBrewCeleryInstrumentation] = WeakKeyDictionary()
-_APP_INSTRUMENTATIONS_BY_ID: dict[int, LogBrewCeleryInstrumentation] = {}
-_APP_WORKER_LIFECYCLES: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
-_APP_WORKER_LIFECYCLES_BY_ID: dict[int, Any] = {}
+_APP_INSTRUMENTATIONS = _instrumentation.InstanceRegistry["LogBrewCeleryInstrumentation"](
+    _INSTRUMENTATION_ATTR
+)
+_APP_WORKER_LIFECYCLES = _instrumentation.InstanceRegistry[Any](_WORKER_LIFECYCLE_ATTR)
 
 
 def instrument_celery_app_with_logbrew_spans(
@@ -82,15 +82,19 @@ def instrument_celery_app_with_logbrew_spans(
         app=app,
         signals=_require_celery_signals(),
         client=client,
-        event_id_factory=event_id_factory,
+        config=_QueueInstrumentationConfig.create(
+            "celery",
+            "Celery",
+            metadata,
+            event_id_factory,
+            span_id_factory,
+            clock,
+            wall_clock,
+            on_capture_error,
+        ),
         timestamp=timestamp,
         trace=trace,
-        metadata=metadata,
-        span_id_factory=span_id_factory,
-        clock=clock,
-        wall_clock=wall_clock,
         max_in_flight_tasks=max_in_flight_tasks,
-        on_capture_error=on_capture_error,
     )
     instrumentation.install()
     _remember_instrumentation(app, instrumentation)
@@ -102,15 +106,10 @@ def _new_celery_instrumentation(
     app: Any,
     signals: Any,
     client: Any,
-    event_id_factory: Callable[[], str] | None,
+    config: _QueueInstrumentationConfig,
     timestamp: str | None,
     trace: LogBrewTraceContext | None,
-    metadata: Mapping[str, Any] | None,
-    span_id_factory: Callable[[], str] | None,
-    clock: _instrumentation.Clock | None,
-    wall_clock: _instrumentation.Clock | None,
     max_in_flight_tasks: int,
-    on_capture_error: Callable[[Exception], None] | None,
 ) -> LogBrewCeleryInstrumentation:
     send_task = getattr(app, "send_task", None)
     if not callable(send_task):
@@ -128,16 +127,11 @@ def _new_celery_instrumentation(
         send_task=send_task,
         had_instance_send_task=_has_instance_attribute(app, "send_task"),
         instance_send_task=_instance_attribute(app, "send_task"),
+        config=config,
         client=client,
-        event_id_factory=event_id_factory or _default_event_id,
         timestamp=timestamp,
         trace=trace,
-        metadata={**(metadata or {}), "framework": "celery"},
-        span_id_factory=span_id_factory,
-        clock=clock or perf_counter,
-        wall_clock=wall_clock or time,
         max_in_flight_tasks=max_in_flight_tasks,
-        on_capture_error=on_capture_error,
     )
 
 
@@ -152,32 +146,21 @@ class LogBrewCeleryInstrumentation:
         send_task: Callable[..., Any],
         had_instance_send_task: bool,
         instance_send_task: Any,
+        config: _QueueInstrumentationConfig,
         client: Any,
-        event_id_factory: Callable[[], str],
         timestamp: str | None,
         trace: LogBrewTraceContext | None,
-        metadata: Mapping[str, Any],
-        span_id_factory: Callable[[], str] | None,
-        clock: _instrumentation.Clock,
-        wall_clock: _instrumentation.Clock,
         max_in_flight_tasks: int,
-        on_capture_error: Callable[[Exception], None] | None,
     ) -> None:
         self.app = app
         self._signals = signals
         self._send_task = send_task
         self._had_instance_send_task = had_instance_send_task
         self._instance_send_task = instance_send_task
-        self._client = client
-        self._event_id_factory = event_id_factory
+        self._client, self._config = client, config
         self._timestamp = timestamp
         self._trace = trace
-        self._metadata = metadata
-        self._span_id_factory = span_id_factory
-        self._clock = clock
-        self._wall_clock = wall_clock
         self._max_in_flight_tasks = max_in_flight_tasks
-        self._on_capture_error = on_capture_error
         self._active_tasks: dict[int, _CeleryTaskSpanState] = {}
         self._lock = RLock()
         self._dispatch_prefix = f"logbrew-celery-{id(self)}"
@@ -248,7 +231,7 @@ class LogBrewCeleryInstrumentation:
             try:
                 return self._send_task_with_span(name, args, kwargs)
             except _CeleryInstrumentationError as error:
-                _notify_capture_error(self._on_capture_error, error)
+                self._config.notify(error)
                 return self._send_task(name, *args, **kwargs)
 
         return send_task
@@ -268,8 +251,9 @@ class LogBrewCeleryInstrumentation:
                 attempt=_safe_non_negative_int(kwargs.get("retries")),
                 metadata=None,
             )
-            headers["traceparent"] = _traceparent(request.trace)
-            headers[_ENQUEUED_AT_HEADER] = str(round(self._wall_clock() * 1000))
+            carrier = _queue_trace_carrier(request.trace, self._config.wall_clock)
+            headers["traceparent"] = carrier["traceparent"]
+            headers[_ENQUEUED_AT_HEADER] = carrier["enqueued_at_ms"]
             call_kwargs = dict(kwargs)
             call_kwargs["headers"] = headers
         except _CeleryInstrumentationError:
@@ -306,7 +290,7 @@ class LogBrewCeleryInstrumentation:
                 raise _CeleryInstrumentationError("Celery task name is unavailable; span skipped")
             headers = _request_headers(request_context)
             span_metadata: dict[str, Any] = {}
-            queue_wait_ms = _queue_wait_ms(headers, self._wall_clock)
+            queue_wait_ms = _queue_wait_ms(headers, self._config.wall_clock)
             if queue_wait_ms is not None:
                 span_metadata["queueWaitMs"] = queue_wait_ms
             request = self._new_span_request(
@@ -329,7 +313,7 @@ class LogBrewCeleryInstrumentation:
                     raise _CeleryInstrumentationError("Celery in-flight task limit reached; span skipped")
                 self._active_tasks[request_key] = state
         except Exception as error:
-            _notify_capture_error(self._on_capture_error, error)
+            self._config.notify(error)
 
     def _on_task_failure(self, sender: Any = None, exception: Any = None, **kwargs: Any) -> None:
         if not self._owns_task(sender):
@@ -337,10 +321,10 @@ class LogBrewCeleryInstrumentation:
         try:
             state = self._active_state(sender)
             if state is not None and isinstance(exception, BaseException):
-                state.error_type = safe_issue_exception_type(exception)
+                state.error = exception
                 state.capture_failure_issue = not _is_declared_task_exception(sender, exception)
         except Exception as error:
-            _notify_capture_error(self._on_capture_error, error)
+            self._config.notify(error)
 
     def _on_task_retry(self, sender: Any = None, request: Any = None, reason: Any = None, **kwargs: Any) -> None:
         if not self._owns_task(sender):
@@ -349,9 +333,9 @@ class LogBrewCeleryInstrumentation:
             state = self._active_state(sender, request=request)
             retry_error = getattr(reason, "exc", None)
             if state is not None and isinstance(retry_error, BaseException):
-                state.error_type = type(retry_error).__name__
+                state.error = retry_error
         except Exception as error:
-            _notify_capture_error(self._on_capture_error, error)
+            self._config.notify(error)
 
     def _on_task_postrun(self, sender: Any = None, task: Any = None, state: Any = None, **kwargs: Any) -> None:
         owned_task = task if task is not None else sender
@@ -364,48 +348,16 @@ class LogBrewCeleryInstrumentation:
             if active is None:
                 return
             task_state = _normalized_task_state(state)
-            if task_state == "failure" and active.capture_failure_issue:
+            if task_state == "failure" and active.capture_failure_issue and active.error is not None:
                 try:
-                    self._capture_task_failure_issue(active)
+                    self._config.capture_issue(
+                        active.request, active.error, mechanism="celery.task"
+                    )
                 except Exception as error:
-                    _notify_capture_error(self._on_capture_error, error)
+                    self._config.notify(error)
             active.finish(task_state)
         except Exception as error:
-            _notify_capture_error(self._on_capture_error, error)
-
-    def _capture_task_failure_issue(self, state: _CeleryTaskSpanState) -> None:
-        request = state.request
-        task_name = request.task_name or "unknown"
-        error_type = state.error_type or "Exception"
-        service = _safe_issue_service(request.metadata)
-        issue_metadata: dict[str, Any] = {
-            "framework": "celery",
-            "source": "queue",
-            "taskName": task_name,
-            "taskState": "failure",
-            "errorName": error_type,
-            **request.trace.metadata(),
-        }
-        if request.queue_name is not None:
-            issue_metadata["queueName"] = request.queue_name
-        if request.attempt is not None:
-            issue_metadata["attempt"] = request.attempt
-        if service is not None:
-            issue_metadata["service"] = service
-        request.client.issue(
-            self._event_id_factory(),
-            request.timestamp or _instrumentation.now_timestamp(),
-            {
-                "title": f"Celery task {task_name} failed",
-                "level": "error",
-                "message": error_type,
-                "exception": {
-                    "type": error_type,
-                    "mechanism": {"type": "celery.task", "handled": False},
-                },
-                "metadata": issue_metadata,
-            },
-        )
+            self._config.notify(error)
 
     def _new_span_request(
         self,
@@ -417,24 +369,17 @@ class LogBrewCeleryInstrumentation:
         attempt: int | None,
         metadata: Mapping[str, Any] | None,
     ) -> _QueueSpanRequest:
-        return _queue_span_request(
-            operation_name=f"{operation_kind} {task_name}",
-            system="celery",
-            client=self._client,
-            event_id=self._event_id_factory(),
-            timestamp=self._timestamp,
-            trace=trace,
-            operation_kind=operation_kind,
-            queue_name=queue_name,
-            task_name=task_name,
-            message_count=1,
+        request = self._config.request(
+            operation_kind,
+            self._client,
+            task_name,
+            queue_name,
+            trace,
             attempt=attempt,
-            metadata={**self._metadata, **(metadata or {})},
-            span_events=None,
-            span_id_factory=self._span_id_factory,
-            clock=self._clock,
-            on_capture_error=self._on_capture_error,
+            metadata=metadata,
         )
+        request.timestamp = self._timestamp
+        return request
 
     def _active_state(self, task: Any, *, request: Any = None) -> _CeleryTaskSpanState | None:
         request_context = request if request is not None else getattr(task, "request", None)
@@ -472,7 +417,7 @@ class _CeleryTaskSpanState:
     request: _QueueSpanRequest
     trace_scope: AbstractContextManager[Any]
     metadata: dict[str, Any]
-    error_type: str | None = None
+    error: BaseException | None = None
     capture_failure_issue: bool = False
 
     def finish(self, task_state: str) -> None:
@@ -480,7 +425,7 @@ class _CeleryTaskSpanState:
         try:
             self.request.capture(
                 "ok" if task_state == "success" else "error",
-                error_type=self.error_type,
+                error_type=type(self.error).__name__ if self.error is not None else None,
             )
         finally:
             self.trace_scope.__exit__(None, None, None)
@@ -494,14 +439,6 @@ def _is_declared_task_exception(task: Any, exception: BaseException) -> bool:
     with suppress(Exception):
         return isinstance(exception, getattr(task, "throws", ()))
     return False
-
-
-def _safe_issue_service(metadata: Mapping[str, Any] | None) -> str | None:
-    if not isinstance(metadata, Mapping):
-        return None
-    with suppress(Exception):
-        return _instrumentation.optional_label(metadata.get("service"))
-    return None
 
 
 def _require_celery_signals() -> Any:
@@ -536,14 +473,6 @@ def _copied_headers(headers: Any) -> dict[str, Any]:
 def _request_headers(request: Any) -> Mapping[str, Any] | None:
     headers = request.get("headers") if isinstance(request, Mapping) else getattr(request, "headers", None)
     return headers if isinstance(headers, Mapping) else None
-
-
-def _traceparent(trace: LogBrewTraceContext) -> str:
-    return create_traceparent(
-        trace_id=trace.trace_id,
-        span_id=trace.span_id,
-        trace_flags="01" if trace.sampled else "00",
-    )
 
 
 def _publish_queue_name(kwargs: Mapping[str, Any]) -> str | None:
@@ -582,10 +511,6 @@ def _normalized_task_state(state: Any) -> str:
     return normalized if normalized in _TASK_STATES else "unknown"
 
 
-def _default_event_id() -> str:
-    return f"evt_python_celery_{uuid4().hex}"
-
-
 def _has_instance_attribute(instance: Any, name: str) -> bool:
     try:
         return name in vars(instance)
@@ -600,72 +525,12 @@ def _instance_attribute(instance: Any, name: str) -> Any:
         return None
 
 
-def _existing_instrumentation(app: Any) -> LogBrewCeleryInstrumentation | None:
-    with suppress(Exception):
-        instrumentation = getattr(app, _INSTRUMENTATION_ATTR, None)
-        if isinstance(instrumentation, LogBrewCeleryInstrumentation):
-            return instrumentation
-    try:
-        return _APP_INSTRUMENTATIONS.get(app)
-    except TypeError:
-        return _APP_INSTRUMENTATIONS_BY_ID.get(id(app))
-
-
-def _remember_instrumentation(app: Any, instrumentation: LogBrewCeleryInstrumentation) -> None:
-    with suppress(Exception):
-        setattr(app, _INSTRUMENTATION_ATTR, instrumentation)
-    try:
-        _APP_INSTRUMENTATIONS[app] = instrumentation
-    except TypeError:
-        _APP_INSTRUMENTATIONS_BY_ID[id(app)] = instrumentation
-
-
-def _forget_instrumentation(app: Any, instrumentation: LogBrewCeleryInstrumentation) -> None:
-    with suppress(Exception):
-        if getattr(app, _INSTRUMENTATION_ATTR, None) is instrumentation:
-            delattr(app, _INSTRUMENTATION_ATTR)
-    try:
-        if _APP_INSTRUMENTATIONS.get(app) is instrumentation:
-            del _APP_INSTRUMENTATIONS[app]
-        return
-    except TypeError:
-        pass
-    if _APP_INSTRUMENTATIONS_BY_ID.get(id(app)) is instrumentation:
-        del _APP_INSTRUMENTATIONS_BY_ID[id(app)]
-
-
-def _existing_worker_lifecycle(app: Any) -> Any:
-    with suppress(Exception):
-        lifecycle = getattr(app, _WORKER_LIFECYCLE_ATTR, None)
-        if lifecycle is not None:
-            return lifecycle
-    try:
-        return _APP_WORKER_LIFECYCLES.get(app)
-    except TypeError:
-        return _APP_WORKER_LIFECYCLES_BY_ID.get(id(app))
-
-
-def _remember_worker_lifecycle(app: Any, lifecycle: Any) -> None:
-    with suppress(Exception):
-        setattr(app, _WORKER_LIFECYCLE_ATTR, lifecycle)
-    try:
-        _APP_WORKER_LIFECYCLES[app] = lifecycle
-    except TypeError:
-        _APP_WORKER_LIFECYCLES_BY_ID[id(app)] = lifecycle
-
-
-def _forget_worker_lifecycle(app: Any, lifecycle: Any) -> None:
-    with suppress(Exception):
-        if getattr(app, _WORKER_LIFECYCLE_ATTR, None) is lifecycle:
-            delattr(app, _WORKER_LIFECYCLE_ATTR)
-    try:
-        if _APP_WORKER_LIFECYCLES.get(app) is lifecycle:
-            del _APP_WORKER_LIFECYCLES[app]
-        return
-    except TypeError:
-        pass
-    if _APP_WORKER_LIFECYCLES_BY_ID.get(id(app)) is lifecycle:
-        del _APP_WORKER_LIFECYCLES_BY_ID[id(app)]
+_existing_instrumentation = _APP_INSTRUMENTATIONS.get
+_remember_instrumentation = _APP_INSTRUMENTATIONS.remember
+_forget_instrumentation = _APP_INSTRUMENTATIONS.forget
+_existing_worker_lifecycle = _APP_WORKER_LIFECYCLES.get
+_remember_worker_lifecycle = _APP_WORKER_LIFECYCLES.remember
+_forget_worker_lifecycle = _APP_WORKER_LIFECYCLES.forget
 
 
 def _notify_capture_error(callback: Callable[[Exception], None] | None, error: Exception) -> None:

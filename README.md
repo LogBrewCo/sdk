@@ -67,6 +67,7 @@ npm install @logbrew/sdk @logbrew/node @logbrew/next next react react-dom
 | Python | [`logbrew-sdk`](python/logbrew_py) | Core client, delivery, logging, shared telemetry context, and typed exception/stack/breadcrumb diagnostics |
 | Python / Celery | [`logbrew-sdk[celery]`](python/logbrew_py#automatic-celery-spans) | App-scoped producer/worker spans and typed privacy-bounded unexpected-failure issues |
 | Python / RQ | [`logbrew-sdk[rq]`](python/logbrew_py#automatic-rq-spans) | Instance-scoped producer/worker correlation, linked application logs, and final-failure issues |
+| Python / Dramatiq | [`logbrew-sdk[dramatiq]`](python/logbrew_py#automatic-dramatiq-spans) | Broker-scoped producer/worker correlation, retry chains, linked logs, and terminal-failure issues |
 | Python / ARQ | [`logbrew-sdk[arq]`](python/logbrew_py#automatic-arq-spans) | Async producer/worker correlation, linked application logs, retries, and terminal-failure issues |
 | FastAPI | [`logbrew-fastapi`](python/logbrew_fastapi) | Request spans plus typed unhandled-exception diagnostics |
 | Flask | [`logbrew-flask`](python/logbrew_flask) | Request spans plus typed unhandled-exception diagnostics |

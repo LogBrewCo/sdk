@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
-from weakref import WeakKeyDictionary
 
 from logbrew_sdk import SdkError, _instrumentation
 from logbrew_sdk._db_client import _DB_SPAN_EVENT_METADATA_DENYLIST, _db_span_request
@@ -42,8 +41,9 @@ _SYSTEM_ALIASES = {
     "mssql": "mssql",
 }
 
-_ENGINE_INSTRUMENTATIONS: WeakKeyDictionary[Any, LogBrewSqlAlchemyInstrumentation] = WeakKeyDictionary()
-_ENGINE_INSTRUMENTATIONS_BY_ID: dict[int, LogBrewSqlAlchemyInstrumentation] = {}
+_ENGINE_INSTRUMENTATIONS = _instrumentation.InstanceRegistry[
+    "LogBrewSqlAlchemyInstrumentation"
+]()
 
 
 def instrument_sqlalchemy_engine_with_logbrew_spans(
@@ -248,29 +248,9 @@ def _require_sqlalchemy_event() -> Any:
     return sqlalchemy_event
 
 
-def _existing_instrumentation(engine: Any) -> LogBrewSqlAlchemyInstrumentation | None:
-    try:
-        return _ENGINE_INSTRUMENTATIONS.get(engine)
-    except TypeError:
-        return _ENGINE_INSTRUMENTATIONS_BY_ID.get(id(engine))
-
-
-def _remember_instrumentation(engine: Any, instrumentation: LogBrewSqlAlchemyInstrumentation) -> None:
-    try:
-        _ENGINE_INSTRUMENTATIONS[engine] = instrumentation
-    except TypeError:
-        _ENGINE_INSTRUMENTATIONS_BY_ID[id(engine)] = instrumentation
-
-
-def _forget_instrumentation(engine: Any, instrumentation: LogBrewSqlAlchemyInstrumentation) -> None:
-    try:
-        if _ENGINE_INSTRUMENTATIONS.get(engine) is instrumentation:
-            del _ENGINE_INSTRUMENTATIONS[engine]
-        return
-    except TypeError:
-        pass
-    if _ENGINE_INSTRUMENTATIONS_BY_ID.get(id(engine)) is instrumentation:
-        del _ENGINE_INSTRUMENTATIONS_BY_ID[id(engine)]
+_existing_instrumentation = _ENGINE_INSTRUMENTATIONS.get
+_remember_instrumentation = _ENGINE_INSTRUMENTATIONS.remember
+_forget_instrumentation = _ENGINE_INSTRUMENTATIONS.forget
 
 
 def _operation_from_statement(statement: Any) -> str:

@@ -22,6 +22,7 @@ from logbrew_sdk._celery_instrumentation import (
     _notify_capture_error,
     _remember_worker_lifecycle,
 )
+from logbrew_sdk._queue_client import _QueueInstrumentationConfig
 
 _DEFAULT_MAX_IN_FLIGHT_TASKS = 1024
 
@@ -89,14 +90,18 @@ def instrument_celery_worker_processes_with_logbrew(
         signals=_require_celery_worker_signals(),
         client_factory=client_factory,
         transport_factory=transport_factory,
-        event_id_factory=event_id_factory,
+        config=_QueueInstrumentationConfig.create(
+            "celery",
+            "Celery",
+            metadata,
+            event_id_factory,
+            span_id_factory,
+            clock,
+            wall_clock,
+            on_capture_error,
+        ),
         timestamp=timestamp,
-        metadata=dict(metadata or {}),
-        span_id_factory=span_id_factory,
-        clock=clock,
-        wall_clock=wall_clock,
         max_in_flight_tasks=max_in_flight_tasks,
-        on_capture_error=on_capture_error,
     )
     lifecycle.install()
     _remember_worker_lifecycle(app, lifecycle)
@@ -113,27 +118,17 @@ class LogBrewCeleryWorkerLifecycle:
         signals: Any,
         client_factory: Callable[[], Any],
         transport_factory: Callable[[], Any],
-        event_id_factory: Callable[[], str] | None,
+        config: _QueueInstrumentationConfig,
         timestamp: str | None,
-        metadata: Mapping[str, Any],
-        span_id_factory: Callable[[], str] | None,
-        clock: _instrumentation.Clock | None,
-        wall_clock: _instrumentation.Clock | None,
         max_in_flight_tasks: int,
-        on_capture_error: Callable[[Exception], None] | None,
     ) -> None:
         self.app = app
         self._signals = signals
         self._client_factory = client_factory
         self._transport_factory = transport_factory
-        self._event_id_factory = event_id_factory
+        self._config = config
         self._timestamp = timestamp
-        self._metadata = dict(metadata)
-        self._span_id_factory = span_id_factory
-        self._clock = clock
-        self._wall_clock = wall_clock
         self._max_in_flight_tasks = max_in_flight_tasks
-        self._on_capture_error = on_capture_error
         self._state: _WorkerProcessState | None = None
         self._lock = RLock()
         self._dispatch_prefix = f"logbrew-celery-worker-{id(self)}"
@@ -197,15 +192,10 @@ class LogBrewCeleryWorkerLifecycle:
                 app=self.app,
                 signals=self._signals,
                 client=client,
-                event_id_factory=self._event_id_factory,
+                config=self._config,
                 timestamp=self._timestamp,
                 trace=None,
-                metadata=self._metadata,
-                span_id_factory=self._span_id_factory,
-                clock=self._clock,
-                wall_clock=self._wall_clock,
                 max_in_flight_tasks=self._max_in_flight_tasks,
-                on_capture_error=self._on_capture_error,
             )
             self._state = _WorkerProcessState(
                 client=client,
@@ -277,7 +267,9 @@ class LogBrewCeleryWorkerLifecycle:
             self._notify("Celery worker delivery failed; retry is only available before process exit")
 
     def _notify(self, message: str) -> None:
-        _notify_capture_error(self._on_capture_error, _CeleryWorkerLifecycleError(message))
+        _notify_capture_error(
+            self._config.on_capture_error, _CeleryWorkerLifecycleError(message)
+        )
 
     def _signal_receivers(self) -> tuple[tuple[str, Callable[..., None]], ...]:
         return (

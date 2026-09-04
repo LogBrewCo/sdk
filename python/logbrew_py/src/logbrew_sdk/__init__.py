@@ -1743,6 +1743,10 @@ from logbrew_sdk._arq_client import (  # noqa: E402
     instrument_arq_pool_with_logbrew_spans,
     instrument_arq_worker_with_logbrew_spans,
 )
+from logbrew_sdk._dramatiq_client import (  # noqa: E402
+    LogBrewDramatiqInstrumentation,
+    instrument_dramatiq_broker_with_logbrew_spans,
+)
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 from logbrew_sdk._opentelemetry_processor import (  # noqa: E402
     LogBrewOpenTelemetrySpanExporter,
@@ -1783,6 +1787,7 @@ __all__ = [
     "LogBrewDbapiConnection",
     "LogBrewDbapiCursor",
     "LogBrewDjangoCacheInstrumentation",
+    "LogBrewDramatiqInstrumentation",
     "LogBrewFlaskCacheInstrumentation",
     "LogBrewHttpxClientInstrumentation",
     "LogBrewLoggingHandler",
@@ -1851,6 +1856,7 @@ __all__ = [
     "instrument_celery_worker_processes_with_logbrew",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
+    "instrument_dramatiq_broker_with_logbrew_spans",
     "instrument_flask_cache_with_logbrew_spans",
     "instrument_httpx_client_with_logbrew_spans",
     "instrument_pymemcache_client_with_logbrew_spans",

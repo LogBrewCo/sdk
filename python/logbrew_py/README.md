@@ -1110,6 +1110,39 @@ queued = rq_operation_with_logbrew_span(
 
 The manual helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
 
+### Automatic Dramatiq spans
+
+Install the Dramatiq extra, then instrument each broker instance in the process that owns it:
+
+```bash
+pip install "logbrew-sdk[dramatiq]"
+```
+
+```python
+import dramatiq
+from dramatiq.brokers.redis import RedisBroker
+
+from logbrew_sdk import LogBrewClient, instrument_dramatiq_broker_with_logbrew_spans
+
+broker = RedisBroker()
+dramatiq.set_broker(broker)
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.0.0",
+)
+instrumentation = instrument_dramatiq_broker_with_logbrew_spans(
+    broker,
+    client=client,
+    logger_names=["checkout.jobs"],
+    metadata={"service": "checkout-worker"},
+)
+```
+
+Call the helper in producer and worker processes with the client owned by that process. Each initial enqueue creates one `queue.publish` span. Each worker attempt creates one `queue.process` span; delayed retries continue from the preceding attempt without adding a second publish span. Logs from the explicitly selected application loggers inherit the worker span. A terminal unhandled failure creates one linked issue with the exception type and bounded structured frames. Explicit `dramatiq.Retry` and exceptions declared through the actor's `throws` option remain span-only.
+
+The instrumentation stores only a reserved bounded W3C trace carrier and enqueue time in message options. It never reads or records actor arguments, keyword arguments, results, message IDs, broker URLs, exception messages, or raw traceback text. Capture failures are fail-open. Installation is broker-scoped, idempotent, and reversible with `uninstall()` after active work drains. The integration supports Dramatiq 2.x and respects the broker's existing `Retries` middleware when deciding whether a failure is terminal.
+
 ### Automatic ARQ spans
 
 Install the ARQ extra and instrument the exact producer pool and worker instances your application owns:
