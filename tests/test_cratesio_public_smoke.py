@@ -4,8 +4,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "real_user_cratesio_public_smoke.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "real_user_cratesio_public_smoke.sh"
 
 
 class CratesIoPublicSmokeTests(unittest.TestCase):
@@ -14,7 +13,7 @@ class CratesIoPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_CRATESIO_VERSION",
-            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.5}}"',
+            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.6}}"',
             "cargo add logbrew@",
             "cargo tree",
             "cargo run --quiet",
