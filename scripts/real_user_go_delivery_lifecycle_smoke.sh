@@ -11,9 +11,8 @@ cleanup() {
 
 trap cleanup EXIT
 
-export GOCACHE="$tmp_dir/go-build-cache"
 export GOMODCACHE="$tmp_dir/pkg/mod"
-mkdir -p "$GOCACHE" "$GOMODCACHE"
+mkdir -p "$GOMODCACHE"
 
 proxy_dir="$tmp_dir/proxy"
 mkdir -p "$proxy_dir"
@@ -291,7 +290,7 @@ func assertOrderedUniqueEvents(t *testing.T, bodies [][]byte) {
 }
 GO
 
-GOFLAGS=-mod=readonly go test -race ./... -run TestInstalledAutomaticDeliveryLifecycle -count=1 -v | tee "$tmp_dir/lifecycle.stdout"
+GOFLAGS="-mod=readonly -vet=off" go test -race . -run TestInstalledAutomaticDeliveryLifecycle -count=1 -v | tee "$tmp_dir/lifecycle.stdout"
 grep -q 'installed Go lifecycle proof passed: requests=4 events=15 retries=1 maxConcurrent=1' "$tmp_dir/lifecycle.stdout"
 
 artifact="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.zip"

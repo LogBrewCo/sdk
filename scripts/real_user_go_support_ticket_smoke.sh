@@ -9,9 +9,8 @@ teardown_tmp_dir() {
 }
 trap teardown_tmp_dir EXIT
 
-export GOCACHE="$tmp_dir/go-build-cache"
 export GOMODCACHE="$tmp_dir/pkg/mod"
-mkdir -p "$GOCACHE" "$GOMODCACHE"
+mkdir -p "$GOMODCACHE"
 
 proxy_dir="$tmp_dir/proxy"
 mkdir -p "$proxy_dir"
