@@ -20,6 +20,7 @@ public final class TelemetryContextTest {
         testRuntimeDefaultsCanBeDisabledWithoutDroppingExplicitContext();
         testContextValidationRejectsUnsafeOrAmbiguousValues();
         testTraceHelpersPromoteExactCorrelation();
+        testActiveTraceAutomaticallyCorrelatesNonSpanSignals();
         testRequestTelemetryPromotesExactContextAcrossSignals();
         testConcurrentContextCaptureRemainsBoundedAndDeterministic();
         System.out.println("java telemetry context tests ok (" + testsRun + " tests)");
@@ -109,15 +110,7 @@ public final class TelemetryContextTest {
             "normalized trace"
         );
 
-        LogBrewClient client = LogBrewClient.create(
-            "LOGBREW_API_KEY",
-            "logbrew-java",
-            "0.1.0",
-            LogBrewClientOptions.builder()
-                .context(clientContext)
-                .disableRuntimeContext(true)
-                .build()
-        );
+        LogBrewClient client = clientWithoutRuntime(clientContext);
         client.log(
             "evt_context",
             "2026-08-03T00:00:00Z",
@@ -131,12 +124,7 @@ public final class TelemetryContextTest {
     }
 
     private void testRuntimeDefaultsCanBeDisabledWithoutDroppingExplicitContext() {
-        LogBrewClient absent = LogBrewClient.create(
-            "LOGBREW_API_KEY",
-            "logbrew-java",
-            "0.1.0",
-            LogBrewClientOptions.builder().disableRuntimeContext(true).build()
-        );
+        LogBrewClient absent = clientWithoutRuntime(null);
         absent.log(
             "evt_absent",
             "2026-08-03T00:00:00Z",
@@ -144,14 +132,8 @@ public final class TelemetryContextTest {
         );
         assertNotContains(absent.previewJson(), "\"context\"");
 
-        LogBrewClient explicit = LogBrewClient.create(
-            "LOGBREW_API_KEY",
-            "logbrew-java",
-            "0.1.0",
-            LogBrewClientOptions.builder()
-                .disableRuntimeContext(true)
-                .context(TelemetryContext.builder().tag("plan", "team").build())
-                .build()
+        LogBrewClient explicit = clientWithoutRuntime(
+            TelemetryContext.builder().tag("plan", "team").build()
         );
         explicit.log(
             "evt_explicit",
@@ -226,34 +208,49 @@ public final class TelemetryContextTest {
         assertEquals(trace.parentSpanId(), traceValue.get("parentSpanId"), "parent span id");
         assertEquals(Boolean.TRUE, traceValue.get("sampled"), "sampled flag");
 
-        LogBrewClient client = LogBrewClient.create(
-            "LOGBREW_API_KEY",
-            "logbrew-java",
-            "0.1.0",
-            LogBrewClientOptions.builder().disableRuntimeContext(true).build()
-        );
-        client.log(
-            "evt_traced",
-            "2026-08-03T00:00:00Z",
-            LogAttributes.create("checkout failed", "error")
-                .metadata(LogBrewTrace.metadataWithTrace(trace, Map.of("stage", "payment")))
-                .context(traced)
-        );
+        LogBrewClient client = clientWithoutRuntime(null);
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(LogBrewTraceContext.create(
+            "11111111111111111111111111111111", "2222222222222222"
+        ));
+        try {
+            client.log(
+                "evt_traced",
+                "2026-08-03T00:00:00Z",
+                LogAttributes.create("checkout failed", "error")
+                    .metadata(LogBrewTrace.metadataWithTrace(trace, Map.of("stage", "payment")))
+                    .context(traced)
+            );
+        } finally {
+            scope.close();
+        }
         String payload = client.previewJson();
         assertContains(payload, "\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"");
         assertContains(payload, "\"spanId\": \"b7ad6b7169203331\"");
         assertContains(payload, "\"sampled\": true");
         assertContains(payload, "\"operation\": \"checkout\"");
+        assertNotContains(payload, "11111111111111111111111111111111");
+        testsRun++;
+    }
+
+    private void testActiveTraceAutomaticallyCorrelatesNonSpanSignals() {
+        LogBrewClient client = clientWithoutRuntime(null);
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(LogBrewTraceContext.create(
+            "11111111111111111111111111111111", "2222222222222222"
+        ));
+        try {
+            enqueueAll(client);
+        } finally {
+            scope.close();
+        }
+
+        String payload = client.previewJson();
+        assertEquals(6, count(payload, "\"traceId\": \"11111111111111111111111111111111\""), "active trace count");
+        assertEquals(6, count(payload, "\"spanId\": \"2222222222222222\""), "active span count");
         testsRun++;
     }
 
     private void testRequestTelemetryPromotesExactContextAcrossSignals() {
-        LogBrewClient client = LogBrewClient.create(
-            "LOGBREW_API_KEY",
-            "logbrew-java",
-            "0.1.0",
-            LogBrewClientOptions.builder().disableRuntimeContext(true).build()
-        );
+        LogBrewClient client = clientWithoutRuntime(null);
         LogBrewTraceContext trace = LogBrewTraceContext.create(
             "4bf92f3577b34da6a3ce929d0e0e4736",
             "b7ad6b7169203331",
@@ -286,15 +283,7 @@ public final class TelemetryContextTest {
     private void testConcurrentContextCaptureRemainsBoundedAndDeterministic() {
         TelemetryContext clientContext = TelemetryContext.builder().tag("region", "eu").build();
         TelemetryContext eventContext = TelemetryContext.builder().tag("operation", "checkout").build();
-        LogBrewClient client = LogBrewClient.create(
-            "LOGBREW_API_KEY",
-            "logbrew-java",
-            "0.1.0",
-            LogBrewClientOptions.builder()
-                .context(clientContext)
-                .disableRuntimeContext(true)
-                .build()
-        );
+        LogBrewClient client = clientWithoutRuntime(clientContext);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         List<Thread> workers = new ArrayList<>();
         for (int worker = 0; worker < 8; worker++) {
@@ -377,6 +366,14 @@ public final class TelemetryContextTest {
             "2026-08-03T00:00:06Z",
             MetricAttributes.create("checkout.duration", "histogram", 42.0, "ms", "delta")
         );
+    }
+
+    private static LogBrewClient clientWithoutRuntime(TelemetryContext context) {
+        LogBrewClientOptions.Builder options = LogBrewClientOptions.builder().disableRuntimeContext(true);
+        if (context != null) {
+            options.context(context);
+        }
+        return LogBrewClient.create("LOGBREW_API_KEY", "logbrew-java", "0.1.0", options.build());
     }
 
     private static int count(String value, String needle) {
