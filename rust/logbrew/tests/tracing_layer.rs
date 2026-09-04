@@ -16,6 +16,62 @@ fn sample_client() -> LogBrewClient {
         .expect("client should build")
 }
 
+fn queued_events(client: &Arc<Mutex<LogBrewClient>>) -> Vec<Value> {
+    let payload: Value =
+        serde_json::from_str(&client.lock().unwrap().preview_json().unwrap()).unwrap();
+    payload["events"].as_array().unwrap().clone()
+}
+
+fn assert_strings(value: &Value, expected: &[(&str, &str)]) {
+    for (pointer, expected) in expected {
+        assert_eq!(
+            value.pointer(pointer).and_then(Value::as_str),
+            Some(*expected),
+            "{pointer}"
+        );
+    }
+}
+
+fn assert_absent(value: &Value, pointers: &[&str]) {
+    for pointer in pointers {
+        assert!(value.pointer(pointer).is_none(), "unexpected {pointer}");
+    }
+}
+
+fn assert_not_contains(value: &Value, fragments: &[&str]) {
+    let text = serde_json::to_string(value).unwrap().to_ascii_lowercase();
+    for fragment in fragments {
+        assert!(!text.contains(fragment), "unexpected {fragment}");
+    }
+}
+
+fn assert_event_types(events: &[Value], expected: &[&str]) {
+    let actual = events
+        .iter()
+        .map(|event| event["type"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+}
+
+fn assert_correlation(
+    attributes: &Value,
+    trace_id: &str,
+    span_id: &str,
+    parent_span_id: Option<&str>,
+) {
+    let flat = attributes
+        .get("traceId")
+        .map_or(&attributes["metadata"], |_| attributes);
+    let trace = &attributes["context"]["trace"];
+    for values in [flat, trace] {
+        assert_strings(values, &[("/traceId", trace_id), ("/spanId", span_id)]);
+        assert_eq!(
+            values.get("parentSpanId").and_then(Value::as_str),
+            parent_span_id
+        );
+    }
+}
+
 #[test]
 fn tracing_layer_queues_allowed_log_fields() {
     let client = Arc::new(Mutex::new(sample_client()));
@@ -41,58 +97,50 @@ fn tracing_layer_queues_allowed_log_fields() {
             requestBody = "card=sample",
             "checkout tracing event accepted"
         );
-    });
-
-    let client = client.lock().unwrap();
-    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
-    let events = payload["events"].as_array().unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0]["type"], "log");
-    assert_eq!(events[0]["timestamp"], "2026-06-02T10:00:00Z");
-    assert_eq!(
-        events[0]["attributes"]["message"],
-        "checkout tracing event accepted"
-    );
-    assert_eq!(events[0]["attributes"]["level"], "info");
-    assert_eq!(events[0]["attributes"]["logger"], "checkout");
-    let metadata = &events[0]["attributes"]["metadata"];
-    assert_eq!(metadata["routeTemplate"], "/checkout/{cart_id}");
-    assert_eq!(metadata["statusCode"], 202);
-    assert_eq!(metadata["sampled"], true);
-    assert_eq!(metadata["tracingTarget"], "checkout");
-    assert_eq!(metadata["tracingLevel"], "INFO");
-    let context = &events[0]["attributes"]["context"];
-    assert_eq!(context["resource"]["framework"]["name"], "tracing");
-    assert_eq!(context["resource"]["service"]["name"], "checkout-service");
-    assert!(metadata.get("unsafeDebug").is_none());
-    assert!(metadata.get("authorization").is_none());
-    assert!(metadata.get("requestBody").is_none());
-    let text = payload.to_string().to_ascii_lowercase();
-    assert!(!text.contains("coupon=sample"));
-    assert!(!text.contains("bearer sample"));
-    assert!(!text.contains("card=sample"));
-    assert!(!text.contains("debug-value"));
-}
-
-#[test]
-fn tracing_layer_normalizes_warning_and_debug_levels() {
-    let client = Arc::new(Mutex::new(sample_client()));
-    let layer =
-        LogBrewTracingLayer::new(Arc::clone(&client), || "2026-06-02T10:00:00Z".to_string());
-    let subscriber = tracing_subscriber::registry().with(layer);
-
-    tracing::subscriber::with_default(subscriber, || {
         tracing::debug!(target: "worker", "debug event");
         tracing::warn!(target: "worker", "warning event");
+        tracing::error!(target: "worker", "error event");
     });
 
-    let client = client.lock().unwrap();
-    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
-    let events = payload["events"].as_array().unwrap();
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0]["attributes"]["level"], "info");
-    assert_eq!(events[1]["attributes"]["level"], "warning");
-    assert!(events[0]["attributes"]["metadata"].get("message").is_none());
+    let events = queued_events(&client);
+    assert_event_types(&events, &["log", "log", "log", "log"]);
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event["attributes"]["level"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["info", "info", "warning", "error"]
+    );
+    assert_strings(
+        &events[0],
+        &[
+            ("/timestamp", "2026-06-02T10:00:00Z"),
+            ("/attributes/message", "checkout tracing event accepted"),
+            ("/attributes/logger", "checkout"),
+            ("/attributes/metadata/routeTemplate", "/checkout/{cart_id}"),
+            ("/attributes/context/resource/framework/name", "tracing"),
+            (
+                "/attributes/context/resource/service/name",
+                "checkout-service",
+            ),
+        ],
+    );
+    let metadata = &events[0]["attributes"]["metadata"];
+    assert_eq!(metadata["statusCode"], 202);
+    assert_eq!(metadata["sampled"], true);
+    assert_absent(
+        metadata,
+        &["/unsafeDebug", "/authorization", "/requestBody"],
+    );
+    assert_not_contains(
+        &Value::Array(events),
+        &[
+            "coupon=sample",
+            "bearer sample",
+            "card=sample",
+            "debug-value",
+        ],
+    );
 }
 
 #[test]
@@ -101,6 +149,7 @@ fn tracing_layer_can_queue_privacy_bounded_spans() {
     let layer =
         LogBrewTracingLayer::new(Arc::clone(&client), || "2026-06-02T10:00:00Z".to_string())
             .with_span_events()
+            .with_error_issues()
             .with_allowed_fields(["routeTemplate", "statusCode", "cartTier", "unsafeDebug"]);
     let subscriber = tracing_subscriber::registry().with(layer);
 
@@ -124,87 +173,82 @@ fn tracing_layer_can_queue_privacy_bounded_spans() {
         tracing::error!(target: "checkout", "cart validation failed");
     });
 
-    let client = client.lock().unwrap();
-    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
-    let events = payload["events"].as_array().unwrap();
-    assert_eq!(
-        events
-            .iter()
-            .map(|event| &event["type"])
-            .collect::<Vec<_>>(),
-        vec!["log", "log", "span", "span"]
-    );
+    let events = queued_events(&client);
+    assert_event_types(&events, &["log", "log", "issue", "span", "span"]);
 
-    let info_log_metadata = &events[0]["attributes"]["metadata"];
-    assert_eq!(
-        info_log_metadata["traceId"],
-        "00000000000000000000000000000001"
+    for (index, span_id, parent_id) in [
+        (0, "0000000000000001", None),
+        (2, "0000000000000002", Some("0000000000000001")),
+        (3, "0000000000000002", Some("0000000000000001")),
+        (4, "0000000000000001", None),
+    ] {
+        assert_correlation(
+            &events[index]["attributes"],
+            "00000000000000000000000000000001",
+            span_id,
+            parent_id,
+        );
+    }
+    let issue = &events[2]["attributes"];
+    assert_strings(
+        issue,
+        &[
+            ("/title", "cart validation failed"),
+            ("/message", "cart validation failed"),
+            ("/level", "error"),
+            ("/metadata/mechanism", "tracing.event"),
+            ("/metadata/sourceFileName", "tracing_layer.rs"),
+            ("/metadata/issueGroupingSource", "tracing_callsite"),
+            ("/metadata/issueEvidenceCompleteness", "partial"),
+            ("/metadata/issueMissingEvidence", "exception,stackFrames"),
+        ],
     );
-    assert_eq!(info_log_metadata["spanId"], "0000000000000001");
-    let info_log_context = &events[0]["attributes"]["context"];
-    assert_eq!(info_log_context["resource"]["framework"]["name"], "tracing");
-    assert_eq!(
-        info_log_context["trace"]["traceId"],
-        "00000000000000000000000000000001"
-    );
-    assert_eq!(info_log_context["trace"]["spanId"], "0000000000000001");
+    assert_eq!(issue["metadata"]["handled"], true);
+    assert!(issue["metadata"]["sourceLineNumber"].as_u64().is_some());
+    assert_absent(issue, &["/stackFrames", "/exception"]);
 
-    let child_span = &events[2]["attributes"];
-    assert_eq!(child_span["name"], "checkout.validate");
-    assert_eq!(child_span["traceId"], "00000000000000000000000000000001");
-    assert_eq!(child_span["spanId"], "0000000000000002");
-    assert_eq!(child_span["parentSpanId"], "0000000000000001");
-    assert_eq!(
-        child_span["context"]["trace"]["traceId"],
-        child_span["traceId"]
+    let child_span = &events[3]["attributes"];
+    assert_strings(
+        child_span,
+        &[
+            ("/name", "checkout.validate"),
+            ("/status", "error"),
+            ("/metadata/tracingLastErrorLevel", "ERROR"),
+            ("/metadata/tracingLastErrorTarget", "checkout"),
+        ],
     );
-    assert_eq!(
-        child_span["context"]["trace"]["spanId"],
-        child_span["spanId"]
-    );
-    assert_eq!(
-        child_span["context"]["trace"]["parentSpanId"],
-        child_span["parentSpanId"]
-    );
-    assert_eq!(
-        child_span["context"]["resource"]["framework"]["name"],
-        "tracing"
-    );
-    assert_eq!(child_span["status"], "error");
     assert!(child_span["durationMs"].as_f64().unwrap() >= 0.0);
     assert_eq!(child_span["metadata"]["tracingSpanEventCount"], 1);
     assert_eq!(child_span["metadata"]["tracingSpanErrorEventCount"], 1);
-    assert_eq!(child_span["metadata"]["tracingLastErrorLevel"], "ERROR");
-    assert_eq!(child_span["metadata"]["tracingLastErrorTarget"], "checkout");
     assert!(
         !child_span["metadata"]
             .to_string()
             .contains("cart validation failed")
     );
 
-    let root_span = &events[3]["attributes"];
-    assert_eq!(root_span["name"], "checkout.request");
-    assert_eq!(root_span["traceId"], "00000000000000000000000000000001");
-    assert_eq!(root_span["spanId"], "0000000000000001");
-    assert_eq!(root_span["status"], "ok");
+    let root_span = &events[4]["attributes"];
+    assert_strings(
+        root_span,
+        &[
+            ("/name", "checkout.request"),
+            ("/status", "ok"),
+            ("/metadata/routeTemplate", "/checkout/{cart_id}"),
+            ("/metadata/cartTier", "gold"),
+        ],
+    );
     assert_eq!(root_span["metadata"]["tracingSpanEventCount"], 1);
-    assert!(
-        root_span["metadata"]
-            .get("tracingSpanErrorEventCount")
-            .is_none()
+    assert_absent(
+        &root_span["metadata"],
+        &[
+            "/tracingSpanErrorEventCount",
+            "/unsafeDebug",
+            "/authorization",
+        ],
     );
-    assert_eq!(
-        root_span["metadata"]["routeTemplate"],
-        "/checkout/{cart_id}"
+    assert_not_contains(
+        &Value::Array(events),
+        &["coupon=sample", "bearer sample", "debug-value"],
     );
-    assert_eq!(root_span["metadata"]["cartTier"], "gold");
-    assert!(root_span["metadata"].get("unsafeDebug").is_none());
-    assert!(root_span["metadata"].get("authorization").is_none());
-
-    let text = payload.to_string().to_ascii_lowercase();
-    assert!(!text.contains("coupon=sample"));
-    assert!(!text.contains("bearer sample"));
-    assert!(!text.contains("debug-value"));
 }
 
 #[test]
@@ -240,74 +284,51 @@ fn tracing_layer_continues_incoming_traceparent_on_root_span() {
         tracing::info!(target: "checkout", "cart validation passed");
     });
 
-    let client = client.lock().unwrap();
-    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
-    let events = payload["events"].as_array().unwrap();
-    assert_eq!(
-        events
-            .iter()
-            .map(|event| &event["type"])
-            .collect::<Vec<_>>(),
-        vec!["log", "log", "span", "span"]
-    );
+    let events = queued_events(&client);
+    assert_event_types(&events, &["log", "log", "span", "span"]);
 
-    let root_log_metadata = &events[0]["attributes"]["metadata"];
-    assert_eq!(
-        root_log_metadata["traceId"],
-        "4bf92f3577b34da6a3ce929d0e0e4736"
-    );
-    assert_eq!(root_log_metadata["spanId"], "0000000000000001");
-    assert_eq!(root_log_metadata["parentSpanId"], "00f067aa0ba902b7");
+    for (index, span_id, parent_id) in [
+        (0, "0000000000000001", "00f067aa0ba902b7"),
+        (1, "0000000000000002", "0000000000000001"),
+        (2, "0000000000000002", "0000000000000001"),
+        (3, "0000000000000001", "00f067aa0ba902b7"),
+    ] {
+        assert_correlation(
+            &events[index]["attributes"],
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id,
+            Some(parent_id),
+        );
+    }
+    let root_log = &events[0]["attributes"];
+    let root_log_metadata = &root_log["metadata"];
     assert_eq!(root_log_metadata["sampled"], true);
-    let root_log_context = &events[0]["attributes"]["context"];
-    assert_eq!(
-        root_log_context["trace"]["traceId"],
-        root_log_metadata["traceId"]
-    );
-    assert_eq!(
-        root_log_context["trace"]["spanId"],
-        root_log_metadata["spanId"]
-    );
-    assert_eq!(root_log_context["trace"]["sampled"], true);
+    assert_eq!(root_log["context"]["trace"]["sampled"], true);
 
-    let child_log_metadata = &events[1]["attributes"]["metadata"];
-    assert_eq!(
-        child_log_metadata["traceId"],
-        "4bf92f3577b34da6a3ce929d0e0e4736"
-    );
-    assert_eq!(child_log_metadata["spanId"], "0000000000000002");
-    assert_eq!(child_log_metadata["parentSpanId"], "0000000000000001");
-    assert_eq!(child_log_metadata["sampled"], true);
+    assert_eq!(events[1]["attributes"]["metadata"]["sampled"], true);
 
     let child_span = &events[2]["attributes"];
-    assert_eq!(child_span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
-    assert_eq!(child_span["spanId"], "0000000000000002");
-    assert_eq!(child_span["parentSpanId"], "0000000000000001");
     assert_eq!(child_span["metadata"]["sampled"], true);
     assert_eq!(child_span["metadata"]["tracingSpanEventCount"], 1);
-    assert!(
-        child_span["metadata"]
-            .get("tracingSpanErrorEventCount")
-            .is_none()
-    );
+    assert_absent(&child_span["metadata"], &["/tracingSpanErrorEventCount"]);
 
     let root_span = &events[3]["attributes"];
-    assert_eq!(root_span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
-    assert_eq!(root_span["spanId"], "0000000000000001");
-    assert_eq!(root_span["parentSpanId"], "00f067aa0ba902b7");
-    assert_eq!(
-        root_span["metadata"]["routeTemplate"],
-        "/checkout/{cart_id}"
+    assert_strings(
+        root_span,
+        &[("/metadata/routeTemplate", "/checkout/{cart_id}")],
     );
     assert_eq!(root_span["metadata"]["sampled"], true);
     assert_eq!(root_span["metadata"]["tracingSpanEventCount"], 1);
-    assert!(root_span["metadata"].get("traceparent").is_none());
-
-    let text = payload.to_string();
-    assert!(!text.contains(incoming_traceparent));
-    assert!(!text.contains("coupon=sample"));
-    assert!(!text.contains(stale_trace_id));
-    assert!(!text.contains(stale_span_id));
+    assert_absent(&root_span["metadata"], &["/traceparent"]);
+    assert_not_contains(
+        &Value::Array(events),
+        &[
+            incoming_traceparent,
+            "coupon=sample",
+            stale_trace_id,
+            stale_span_id,
+        ],
+    );
 }
 
 #[cfg(feature = "tracing-opentelemetry")]

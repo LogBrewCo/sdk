@@ -1,8 +1,8 @@
 #[cfg(feature = "tracing-opentelemetry")]
 use crate::OpenTelemetrySpanContext;
 use crate::{
-    LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent, TelemetryContext,
-    TelemetryNamedVersion, TelemetryResource, TelemetryTraceContext, Traceparent,
+    IssueEvent, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent,
+    TelemetryContext, TelemetryNamedVersion, TelemetryResource, TelemetryTraceContext, Traceparent,
     TraceparentContext, http_fields::sanitize_route_template,
 };
 use std::fmt;
@@ -30,6 +30,7 @@ pub struct LogBrewTracingLayer<T> {
     next_span_id: Arc<AtomicU64>,
     logger_name: Option<String>,
     capture_spans: bool,
+    capture_error_issues: bool,
     context: Option<TelemetryContext>,
 }
 
@@ -46,6 +47,7 @@ impl<T> LogBrewTracingLayer<T> {
             next_span_id: Arc::new(AtomicU64::new(1)),
             logger_name: None,
             capture_spans: false,
+            capture_error_issues: false,
             context: None,
         }
     }
@@ -81,6 +83,12 @@ impl<T> LogBrewTracingLayer<T> {
     /// Opt in to converting closed `tracing` spans into LogBrew span events.
     pub fn with_span_events(mut self) -> Self {
         self.capture_spans = true;
+        self
+    }
+
+    /// Opt in to a message-based Issue for each error-level `tracing` event.
+    pub fn with_error_issues(mut self) -> Self {
+        self.capture_error_issues = true;
         self
     }
 
@@ -141,23 +149,18 @@ where
         let metadata = attrs.metadata();
         let mut visitor = TracingLogVisitor::new(&self.allowed_fields);
         attrs.record(&mut visitor);
-        let incoming_trace = incoming_trace_context(&visitor);
+        let parent = parent_span_reference(attrs, &ctx).or_else(|| {
+            incoming_trace_context(&visitor).map(|trace| SpanReference {
+                trace_id: trace.trace_id,
+                span_id: trace.parent_span_id,
+                parent_span_id: None,
+                sampled: Some(trace.sampled),
+            })
+        });
         let mut span_metadata = visitor.metadata;
-        span_metadata.insert(
-            "tracingTarget".to_string(),
-            MetadataValue::String(metadata.target().to_string()),
-        );
-        span_metadata.insert(
-            "tracingLevel".to_string(),
-            MetadataValue::String(metadata.level().as_str().to_string()),
-        );
-
-        let parent = parent_span_reference(attrs, &ctx);
+        insert_callsite_metadata(&mut span_metadata, metadata);
         let sequence = self.next_span_id.fetch_add(1, Ordering::Relaxed);
-        let sampled = parent
-            .as_ref()
-            .and_then(|state| state.sampled)
-            .or_else(|| incoming_trace.as_ref().map(|trace| trace.sampled));
+        let sampled = parent.as_ref().and_then(|state| state.sampled);
         if let Some(sampled) = sampled {
             span_metadata
                 .entry("sampled".to_string())
@@ -165,16 +168,12 @@ where
         }
         let state = TracingSpanState {
             event_id: format!("{}_{}", self.span_id_prefix.trim(), sequence),
-            trace_id: parent
-                .as_ref()
-                .map(|state| state.trace_id.clone())
-                .or_else(|| incoming_trace.as_ref().map(|trace| trace.trace_id.clone()))
-                .unwrap_or_else(|| trace_id_for(sequence)),
-            span_id: span_id_for(sequence),
-            parent_span_id: parent
-                .as_ref()
-                .map(|state| state.span_id.clone())
-                .or_else(|| incoming_trace.map(|trace| trace.parent_span_id)),
+            trace_id: parent.as_ref().map_or_else(
+                || format!("{:032x}", sequence as u128),
+                |state| state.trace_id.clone(),
+            ),
+            span_id: format!("{sequence:016x}"),
+            parent_span_id: parent.map(|state| state.span_id),
             name: metadata.name().trim().to_string(),
             timestamp: (self.timestamp)(),
             started_at: Instant::now(),
@@ -183,7 +182,7 @@ where
             error: false,
             event_count: 0,
             error_event_count: 0,
-            last_error_event: None,
+            last_error_target: None,
         };
 
         if let Some(span) = ctx.span(id) {
@@ -219,34 +218,9 @@ where
         let mut log_metadata = visitor.metadata;
         let correlation = current_event_span_correlation(event, &ctx);
         if let Some(state) = correlation.as_ref() {
-            log_metadata.insert(
-                "traceId".to_string(),
-                MetadataValue::String(state.trace_id.clone()),
-            );
-            log_metadata.insert(
-                "spanId".to_string(),
-                MetadataValue::String(state.span_id.clone()),
-            );
-            if let Some(parent_span_id) = &state.parent_span_id {
-                log_metadata.insert(
-                    "parentSpanId".to_string(),
-                    MetadataValue::String(parent_span_id.clone()),
-                );
-            }
-            if let Some(sampled) = state.sampled {
-                log_metadata
-                    .entry("sampled".to_string())
-                    .or_insert(MetadataValue::Bool(sampled));
-            }
+            state.extend_metadata(&mut log_metadata);
         }
-        log_metadata.insert(
-            "tracingTarget".to_string(),
-            MetadataValue::String(metadata.target().to_string()),
-        );
-        log_metadata.insert(
-            "tracingLevel".to_string(),
-            MetadataValue::String(metadata.level().as_str().to_string()),
-        );
+        insert_callsite_metadata(&mut log_metadata, metadata);
 
         let logger = self
             .logger_name
@@ -257,7 +231,15 @@ where
         let Ok(context) = tracing_event_context(correlation.as_ref(), self.context.as_ref()) else {
             return;
         };
-        let mut log = LogEvent::new(message, severity_for(metadata.level()))
+        let issue = (self.capture_error_issues && *metadata.level() == Level::ERROR).then(|| {
+            tracing_error_issue(&message, metadata, log_metadata.clone(), context.clone())
+        });
+        let level = match *metadata.level() {
+            Level::ERROR => "error",
+            Level::WARN => "warning",
+            _ => "info",
+        };
+        let mut log = LogEvent::new(message, level)
             .with_metadata(log_metadata)
             .with_context(context);
         if !logger.is_empty() {
@@ -266,8 +248,12 @@ where
 
         let sequence = self.next_id.fetch_add(1, Ordering::Relaxed);
         let event_id = format!("{}_{}", self.event_id_prefix.trim(), sequence);
+        let timestamp = (self.timestamp)();
         if let Ok(mut client) = self.client.lock() {
-            let _ = client.log(event_id, (self.timestamp)(), log);
+            let _ = client.log(&event_id, &timestamp, log);
+            if let Some(issue) = issue {
+                let _ = client.issue(format!("{event_id}_issue"), timestamp, issue);
+            }
         }
 
         if self.capture_spans {
@@ -311,22 +297,67 @@ where
     }
 }
 
-fn severity_for(level: &Level) -> &'static str {
-    if *level == Level::ERROR {
-        "error"
-    } else if *level == Level::WARN {
-        "warning"
-    } else {
-        "info"
+fn insert_callsite_metadata(metadata: &mut Metadata, callsite: &tracing_core::Metadata<'_>) {
+    metadata.extend([
+        ("tracingTarget".into(), callsite.target().into()),
+        ("tracingLevel".into(), callsite.level().as_str().into()),
+    ]);
+}
+
+fn tracing_error_issue(
+    message: &str,
+    callsite: &tracing_core::Metadata<'_>,
+    mut metadata: Metadata,
+    context: TelemetryContext,
+) -> IssueEvent {
+    let filename = callsite
+        .file()
+        .and_then(|value| crate::issue_diagnostics::sanitize_filename(value).ok());
+    let grouping_key = format!(
+        "rust.tracing.event:{}:{}:{}",
+        callsite.target(),
+        filename.as_deref().unwrap_or("unknown"),
+        callsite
+            .line()
+            .map_or_else(|| "unknown".into(), |line| line.to_string())
+    )
+    .chars()
+    .take(1024)
+    .collect::<String>();
+    metadata.extend([
+        ("mechanism".into(), "tracing.event".into()),
+        ("handled".into(), true.into()),
+        ("issueGroupingKey".into(), grouping_key.into()),
+        ("issueGroupingSource".into(), "tracing_callsite".into()),
+        ("issueEvidenceCompleteness".into(), "partial".into()),
+        (
+            "issueMissingEvidence".into(),
+            "exception,stackFrames".into(),
+        ),
+        (
+            "issueRedactedEvidence".into(),
+            "unallowlistedEventFields".into(),
+        ),
+    ]);
+    if let Some(filename) = filename {
+        metadata.insert("sourceFileName".into(), filename.into());
     }
-}
-
-fn trace_id_for(sequence: u64) -> String {
-    format!("{:032x}", sequence as u128)
-}
-
-fn span_id_for(sequence: u64) -> String {
-    format!("{sequence:016x}")
+    if let Some(line) = callsite.line() {
+        metadata.insert("sourceLineNumber".into(), line.into());
+    }
+    if let Some(module) = callsite
+        .module_path()
+        .filter(|value| !value.trim().is_empty())
+    {
+        metadata.insert(
+            "sourceModule".into(),
+            module.chars().take(512).collect::<String>().into(),
+        );
+    }
+    IssueEvent::new(message, "error")
+        .with_message(message)
+        .with_metadata(metadata)
+        .with_context(context)
 }
 
 fn tracing_event_context(
@@ -373,13 +404,7 @@ struct TracingSpanState {
     error: bool,
     event_count: u64,
     error_event_count: u64,
-    last_error_event: Option<TracingSpanErrorEvent>,
-}
-
-#[derive(Clone, Debug)]
-struct TracingSpanErrorEvent {
-    level: String,
-    target: String,
+    last_error_target: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -401,20 +426,35 @@ impl From<&TracingSpanState> for SpanReference {
     }
 }
 
+impl SpanReference {
+    fn extend_metadata(&self, metadata: &mut Metadata) {
+        metadata.extend([
+            ("traceId".into(), self.trace_id.clone().into()),
+            ("spanId".into(), self.span_id.clone().into()),
+        ]);
+        if let Some(value) = &self.parent_span_id {
+            metadata.insert("parentSpanId".into(), value.clone().into());
+        }
+        if let Some(value) = self.sampled {
+            metadata.entry("sampled").or_insert(value.into());
+        }
+    }
+}
+
 fn parent_span_reference<S>(attrs: &Attributes<'_>, ctx: &Context<'_, S>) -> Option<SpanReference>
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
-    let span = attrs
-        .parent()
-        .and_then(|parent_id| ctx.span(parent_id))
-        .or_else(|| {
-            attrs
-                .is_contextual()
-                .then(|| ctx.current_span().id().and_then(|id| ctx.span(id)))
-                .flatten()
-        })?;
-    span.extensions().get::<TracingSpanState>().map(Into::into)
+    let id = attrs.parent().cloned().or_else(|| {
+        attrs
+            .is_contextual()
+            .then(|| ctx.current_span().id().cloned())
+            .flatten()
+    })?;
+    ctx.span(&id)?
+        .extensions()
+        .get::<TracingSpanState>()
+        .map(Into::into)
 }
 
 fn current_event_span_correlation<S>(
@@ -447,37 +487,26 @@ where
         if *event.metadata().level() == Level::ERROR {
             state.error = true;
             state.error_event_count = state.error_event_count.saturating_add(1);
-            state.last_error_event = Some(TracingSpanErrorEvent {
-                level: event.metadata().level().as_str().to_string(),
-                target: event.metadata().target().to_string(),
-            });
+            state.last_error_target = Some(event.metadata().target().to_string());
         }
     }
 }
 
 fn span_metadata_with_event_summary(state: &TracingSpanState) -> Metadata {
     let mut metadata = state.metadata.clone();
-    if state.event_count > 0 {
-        metadata.insert(
-            "tracingSpanEventCount".to_string(),
-            MetadataValue::from(state.event_count),
-        );
+    for (name, count) in [
+        ("tracingSpanEventCount", state.event_count),
+        ("tracingSpanErrorEventCount", state.error_event_count),
+    ] {
+        if count > 0 {
+            metadata.insert(name.into(), count.into());
+        }
     }
-    if state.error_event_count > 0 {
-        metadata.insert(
-            "tracingSpanErrorEventCount".to_string(),
-            MetadataValue::from(state.error_event_count),
-        );
-    }
-    if let Some(event) = &state.last_error_event {
-        metadata.insert(
-            "tracingLastErrorLevel".to_string(),
-            MetadataValue::String(event.level.clone()),
-        );
-        metadata.insert(
-            "tracingLastErrorTarget".to_string(),
-            MetadataValue::String(event.target.clone()),
-        );
+    if let Some(target) = &state.last_error_target {
+        metadata.extend([
+            ("tracingLastErrorLevel".into(), "ERROR".into()),
+            ("tracingLastErrorTarget".into(), target.clone().into()),
+        ]);
     }
     metadata
 }
