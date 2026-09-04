@@ -51,11 +51,11 @@ func main() {
 			slog.String("cartTier", "standard"),
 			slog.Any("payload", map[string]any{"card": "ignored"}),
 		)
-		must(client.Issue("evt_issue_checkout_upstream", "2026-06-02T10:00:03Z", logbrew.IssueAttributesWithTrace(r.Context(), logbrew.IssueAttributes{
+		must(client.IssueContext(r.Context(), "evt_issue_checkout_upstream", "2026-06-02T10:00:03Z", logbrew.IssueAttributes{
 			Title:   "checkout upstream failed",
 			Level:   "error",
 			Message: "payment provider timed out",
-		})))
+		}))
 		http.Error(w, "upstream failed", http.StatusBadGateway)
 	}), logbrew.HTTPHandlerConfig{
 		Client:               client,

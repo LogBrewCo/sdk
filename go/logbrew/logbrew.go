@@ -543,61 +543,41 @@ type MetricAttributes struct {
 }
 
 func (c *Client) Release(id, timestamp string, attributes ReleaseAttributes) error {
-	validated, err := validateRelease(attributes)
-	if err != nil {
-		return err
-	}
-	return c.pushEvent("release", id, timestamp, validated)
+	return validateAndPush(c, "release", id, timestamp, attributes, validateRelease)
 }
 
 func (c *Client) Environment(id, timestamp string, attributes EnvironmentAttributes) error {
-	validated, err := validateEnvironment(attributes)
-	if err != nil {
-		return err
-	}
-	return c.pushEvent("environment", id, timestamp, validated)
+	return validateAndPush(c, "environment", id, timestamp, attributes, validateEnvironment)
 }
 
 func (c *Client) Issue(id, timestamp string, attributes IssueAttributes) error {
-	validated, err := validateIssue(attributes)
-	if err != nil {
-		return err
-	}
-	return c.pushEvent("issue", id, timestamp, validated)
+	return validateAndPush(c, "issue", id, timestamp, attributes, validateIssue)
 }
 
 func (c *Client) Log(id, timestamp string, attributes LogAttributes) error {
-	validated, err := validateLog(attributes)
-	if err != nil {
-		return err
-	}
-	return c.pushEvent("log", id, timestamp, validated)
+	return validateAndPush(c, "log", id, timestamp, attributes, validateLog)
 }
 
 func (c *Client) Span(id, timestamp string, attributes SpanAttributes) error {
-	validated, err := validateSpan(attributes)
-	if err != nil {
-		return err
-	}
-	return c.pushEvent("span", id, timestamp, validated)
+	return validateAndPush(c, "span", id, timestamp, attributes, validateSpan)
 }
 
 func (c *Client) Action(id, timestamp string, attributes ActionAttributes) error {
-	validated, err := validateAction(attributes)
-	if err != nil {
-		return err
-	}
-	return c.pushEvent("action", id, timestamp, validated)
+	return validateAndPush(c, "action", id, timestamp, attributes, validateAction)
 }
 
 // Metric queues an explicit, application-owned metric event after validating
 // name, optional description, kind, value, unit, temporality, and optional metadata.
 func (c *Client) Metric(id, timestamp string, attributes MetricAttributes) error {
-	validated, err := validateMetric(attributes)
+	return validateAndPush(c, "metric", id, timestamp, attributes, validateMetric)
+}
+
+func validateAndPush[T any](client *Client, eventType, id, timestamp string, attributes T, validate func(T) (map[string]any, error)) error {
+	validated, err := validate(attributes)
 	if err != nil {
 		return err
 	}
-	return c.pushEvent("metric", id, timestamp, validated)
+	return client.pushEvent(eventType, id, timestamp, validated)
 }
 
 func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[string]any) error {

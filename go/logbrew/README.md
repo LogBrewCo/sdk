@@ -529,7 +529,7 @@ fmt.Println(outgoing)
 
 `ParseTraceparent` validates W3C shape, rejects forbidden version `ff`, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `SpanAttributesFromTraceparent` returns LogBrew span attributes with `TraceID` from the incoming trace and `ParentSpanID` from the incoming parent span, while copying only primitive metadata values. `CreateTraceparent` emits a normalized outgoing `traceparent` from explicit IDs and defaults empty flags to sampled `01`.
 
-For request-local correlation, use `NewTraceContext` and attach it with `ContextWithLogBrewTrace`. `LogBrewTraceFromContext` returns the active request trace. `LogAttributesWithTrace`, `IssueAttributesWithTrace`, `ActionAttributesWithTrace`, and `MetricAttributesWithTrace` attach the exact trace/span as first-class shared context and retain primitive trace metadata for older readers:
+For request-local correlation, use `NewTraceContext` and attach it with `ContextWithLogBrewTrace`. `LogBrewTraceFromContext` returns the active request trace. Prefer `LogContext`, `IssueContext`, `ActionContext`, and `MetricContext` for direct capture. They read the trace from the supplied Go context, attach it as first-class shared context, and retain primitive trace metadata for older readers. The existing `LogAttributesWithTrace`, `IssueAttributesWithTrace`, `ActionAttributesWithTrace`, and `MetricAttributesWithTrace` helpers remain available when an integration must prepare attributes before capture:
 
 ```go
 trace, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
@@ -544,12 +544,14 @@ if err != nil {
 }
 r = r.WithContext(logbrew.ContextWithLogBrewTrace(r.Context(), trace))
 
-must(client.Log("evt_handler_log", "2026-06-02T10:00:03Z", logbrew.LogAttributesWithTrace(r.Context(), logbrew.LogAttributes{
+must(client.LogContext(r.Context(), "evt_handler_log", "2026-06-02T10:00:03Z", logbrew.LogAttributes{
   Message: "checkout handler reached",
   Level:   "info",
   Logger:  "checkout-service",
-})))
+}))
 ```
+
+When the supplied context has no LogBrew trace, these methods preserve the direct capture behavior and do not manufacture a causal link. The standard HTTP, Gin, OpenTelemetry, and worker integrations attach a real request, dependency, or job trace before application code runs.
 
 ## OpenTelemetry Bridge
 

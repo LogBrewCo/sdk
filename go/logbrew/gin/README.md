@@ -102,8 +102,9 @@ middleware, err := logbrewgin.NewMiddleware(logbrewgin.Config{
 
 Inside a downstream handler, use either `logbrewgin.TraceFromContext(c)` or
 `logbrew.LogBrewTraceFromContext(c.Request.Context())`. App-owned logs and
-issues can join the request trace with `LogAttributesWithTrace` and
-`IssueAttributesWithTrace`.
+issues join the request trace directly through `client.LogContext(...)` and
+`client.IssueContext(...)`. The core `*AttributesWithTrace` helpers remain for
+integrations that prepare attributes before capture.
 
 ## Delivery and Hosted Readback
 
