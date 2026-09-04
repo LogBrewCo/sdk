@@ -14,7 +14,7 @@ class CratesIoPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_CRATESIO_VERSION",
-            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.4}}"',
+            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.5}}"',
             "cargo add logbrew@",
             "cargo tree",
             "cargo run --quiet",
@@ -27,9 +27,8 @@ class CratesIoPublicSmokeTests(unittest.TestCase):
             self.assertIn(expected, body)
 
         self.assertNotIn("api.logbrew", body)
-        prefix = "LOGBREW_"
         for suffix in ("".join(chr(value) for value in (84, 79, 75, 69, 78)), "API_URL"):
-            self.assertNotIn(prefix + suffix, body)
+            self.assertNotIn("LOGBREW_" + suffix, body)
 
 
 if __name__ == "__main__":
