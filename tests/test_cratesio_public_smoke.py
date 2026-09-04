@@ -12,8 +12,7 @@ class CratesIoPublicSmokeTests(unittest.TestCase):
         body = SCRIPT.read_text(encoding="utf-8")
 
         for expected in (
-            "LOGBREW_CRATESIO_VERSION",
-            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.6}}"',
+            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.7}}"',
             "cargo add logbrew@",
             "cargo tree",
             "cargo run --quiet",
