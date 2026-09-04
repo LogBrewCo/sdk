@@ -584,7 +584,9 @@ public final class LogBrewClient {
             throw new SdkException("validation_error", "event context must be a TelemetryContext");
         }
         TelemetryContext eventContext = (TelemetryContext) rawEventContext;
-        TelemetryContext mergedContext = TelemetryContext.merge(context, eventContext);
+        TelemetryContext ambientContext = "span".equals(type)
+            ? context : LogBrewTrace.contextWithCurrentTrace(context);
+        TelemetryContext mergedContext = TelemetryContext.merge(ambientContext, eventContext);
         if (mergedContext != null) {
             attributes.put("context", mergedContext.asMap());
         }

@@ -60,7 +60,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(rust["package"]["version"], "0.1.4")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
-        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.6")
+        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.7")
         for package, version in (("LogBrew", "0.1.7"), ("LogBrew.HttpClient", "0.1.2")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
@@ -259,7 +259,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.2")
         self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.2")
         self.assertEqual(check_release_metadata.DOTNET_HANGFIRE_VERSION, "0.1.0")
-        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.6")
+        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.7")
         self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.2")
         self.assertEqual(
             {

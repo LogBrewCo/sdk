@@ -16,7 +16,7 @@ Install from Maven Central:
 <dependency>
   <groupId>co.logbrew</groupId>
   <artifactId>logbrew-sdk</artifactId>
-  <version>0.1.6</version>
+  <version>0.1.7</version>
 </dependency>
 ```
 
@@ -378,7 +378,7 @@ request.finishSpanAndMetric(
 Map<String, String> outgoingHeaders = request.outgoingHeaders();
 ```
 
-`LogBrewTrace.activate(...)` reinstates the previous active trace when closed. Use `LogBrewTrace.wrapCurrent(...)` when handing work to another thread or executor; plain Java threads do not inherit request trace state automatically. The request helper falls back to a local root trace when incoming propagation is missing or malformed, while `Traceparent.parse(...)` stays strict for explicit validation paths. `LogBrewJulHandler` and `LogBrewLogbackAppender` attach active typed trace context plus compatibility metadata automatically, while preserving app-owned logger handlers and primitive metadata. Framework-created request spans, request metrics, and escaped issues also carry the same typed context.
+`LogBrewTrace.activate(...)` reinstates the previous active trace when closed. The core client attaches that active trace to every non-span signal; explicit event trace context wins, while span identity remains canonical in the span itself. Use `LogBrewTrace.wrapCurrent(...)` when handing work to another thread or executor; plain Java threads do not inherit request trace state automatically. The request helper falls back to a local root trace when incoming propagation is missing or malformed, while `Traceparent.parse(...)` stays strict for explicit validation paths. `LogBrewJulHandler` and `LogBrewLogbackAppender` preserve app-owned logger handlers and primitive metadata. Framework-created request spans, request metrics, and escaped issues also carry the same typed context.
 
 ## Java HttpClient Spans
 
