@@ -46,6 +46,7 @@ cat > "$app_dir/composer.json" <<'JSON'
     "logbrew/sdk": "0.1.0",
     "symfony/console": "^6.4 || ^7.0 || ^8.0",
     "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
+    "symfony/messenger": "^6.4 || ^7.0 || ^8.0",
     "symfony/monolog-bundle": "^3.10 || ^4.0",
     "symfony/yaml": "^6.4 || ^7.0 || ^8.0"
   },
@@ -62,7 +63,7 @@ php -r '
 $path = $argv[1];
 $constraint = $argv[2];
 $manifest = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
-foreach (["symfony/console", "symfony/framework-bundle", "symfony/yaml"] as $package) {
+foreach (["symfony/console", "symfony/framework-bundle", "symfony/messenger", "symfony/yaml"] as $package) {
     $manifest["require"][$package] = $constraint;
 }
 file_put_contents($path, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
@@ -73,6 +74,8 @@ test -f "$app_dir/vendor/logbrew/sdk/src/Symfony/LogBrewBundle.php"
 test -f "$app_dir/vendor/logbrew/sdk/src/Symfony/SymfonyTelemetry.php"
 test -f "$app_dir/vendor/logbrew/sdk/src/Symfony/SymfonyRequestSubscriber.php"
 test -f "$app_dir/vendor/logbrew/sdk/src/Symfony/SymfonyStatusCommand.php"
+test -f "$app_dir/vendor/logbrew/sdk/src/Symfony/MessengerTraceStamp.php"
+test -f "$app_dir/vendor/logbrew/sdk/src/Symfony/SymfonyMessengerTelemetry.php"
 
 no_monolog_dir="$tmp_dir/symfony-without-monolog"
 mkdir -p "$no_monolog_dir/bin" "$no_monolog_dir/config/packages" "$no_monolog_dir/src" "$no_monolog_dir/var/cache" "$no_monolog_dir/var/log"
@@ -190,6 +193,10 @@ framework:
   router:
     resource: 'kernel::loadRoutes'
     utf8: true
+  messenger:
+    buses:
+      messenger.bus.default:
+        middleware: [logbrew.symfony.messenger]
 YAML
 
 cat > "$app_dir/config/packages/log_brew.yaml" <<'YAML'

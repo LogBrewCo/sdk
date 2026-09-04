@@ -809,6 +809,28 @@ The provider context and continued trace stay active while the main request runs
 
 Automatic request telemetry records only the method, bounded Symfony route name, status, duration, typed PHP/framework/service/release/environment identity, and normalized trace identifiers. It does not record concrete paths, query strings, request or response bodies, arbitrary headers, or the raw `traceparent` value. Automatic exception issues include a first-class exception type, `symfony.kernel_exception` mechanism with `handled: false`, up to 32 newest-first basename-only frames with safe function/module identity, and a hashed type/route/file grouping key. Arguments, locals, source text, and absolute paths are never captured; exception messages and raw trace text remain off unless explicitly enabled. The handler excludes Symfony's `request`, `event`, `doctrine`, and `deprecation` channels to avoid duplicating framework exception reports or copying Symfony's formatted exception message. Application-authored log messages and primitive context remain under the application's control.
 
+### Symfony Messenger correlation
+
+Install Messenger and place the LogBrew middleware on every bus whose messages should retain producer-to-worker trace context:
+
+```shell
+composer require symfony/messenger
+```
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+  messenger:
+    buses:
+      messenger.bus.default:
+        middleware:
+          - logbrew.symfony.messenger
+```
+
+Keep the middleware before Symfony's send and handle middleware when a bus declares the complete middleware order. A dispatch creates a `messaging.send` span and a serializable W3C context stamp. Processing creates a `messaging.process` child span, so application logs written by the handler inherit the worker span. Retried attempts remain error spans; LogBrew emits one `symfony.messenger` issue only after Symfony reports that the failure will not be retried. The original application result or exception always wins over telemetry capture and delivery failures.
+
+The integration records only the bounded message class, safe transport name, attempt number, operation, framework, and trace identifiers. It does not inspect the message body, serialized envelope, stamp values other than its own trace context, transport properties, exception message, arguments, locals, or raw traceback. The terminal issue uses typed exception identity and bounded structured frames from the standard PHP issue projection.
+
 ## Laravel Quick Start
 
 Laravel already owns Monolog, so `logbrew/sdk` keeps it optional and supplies the framework glue. Add this scalar-only channel to `config/logging.php`; it is safe to persist with `php artisan config:cache`:

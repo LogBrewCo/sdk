@@ -195,6 +195,19 @@ final class SymfonyTelemetry
         );
     }
 
+    public function messengerTelemetry(): SymfonyMessengerTelemetry
+    {
+        return new SymfonyMessengerTelemetry(
+            $this->client,
+            $this->transport,
+            fn (string $kind): string => $this->eventId('messenger_' . $kind),
+            fn (): string => $this->timestamp(),
+            function (Throwable $error): void {
+                $this->reportError($error);
+            }
+        );
+    }
+
     /**
      * Send one explicit diagnostic event for intake confirmation.
      */

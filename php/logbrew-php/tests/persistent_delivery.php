@@ -11,14 +11,6 @@ use LogBrew\SdkError;
 use LogBrew\Transport;
 use LogBrew\TransportResponse;
 
-function assertPersistentDelivery(bool $condition, string $message): void
-{
-    if (!$condition) {
-        fwrite(STDERR, $message . PHP_EOL);
-        exit(1);
-    }
-}
-
 function persistentDeliveryDirectory(): string
 {
     $parent = sys_get_temp_dir() . '/logbrew-php-persistence-' . bin2hex(random_bytes(8));
@@ -73,18 +65,6 @@ function persistentDeliveryEventFiles(string $directory): array
     return $files;
 }
 
-function expectPersistentDeliveryError(callable $callback, string $codeName): SdkError
-{
-    try {
-        $callback();
-    } catch (SdkError $error) {
-        assertPersistentDelivery($error->codeName === $codeName, 'persistent failure must use the expected stable code');
-        return $error;
-    }
-
-    throw new RuntimeException('expected persistent delivery error was not thrown');
-}
-
 $directory = persistentDeliveryDirectory();
 $key = random_bytes(32);
 $store = EncryptedFileEventStore::open($directory, $key);
@@ -99,21 +79,21 @@ $client->log('evt_persisted', '2026-07-14T08:00:00Z', [
     'level' => 'warning',
 ]);
 
-assertPersistentDelivery($client->pendingEvents() === 1, 'persistent capture must remain queued');
+assertTrue($client->pendingEvents() === 1, 'persistent capture must remain queued');
 $storedBytes = '';
 $entries = scandir($directory);
-assertPersistentDelivery(is_array($entries), 'persistent directory must be readable');
+assertTrue(is_array($entries), 'persistent directory must be readable');
 foreach ($entries as $entry) {
     if ($entry === '.' || $entry === '..') {
         continue;
     }
     $contents = file_get_contents($directory . '/' . $entry);
-    assertPersistentDelivery(is_string($contents), 'persistent file must be readable');
+    assertTrue(is_string($contents), 'persistent file must be readable');
     $storedBytes .= $contents;
 }
-assertPersistentDelivery(!str_contains($storedBytes, 'evt_persisted'), 'event id must be encrypted at rest');
-assertPersistentDelivery(!str_contains($storedBytes, 'restart-safe delivery'), 'event content must be encrypted at rest');
-assertPersistentDelivery(!str_contains($storedBytes, $key), 'encryption key must not be stored in the queue');
+assertTrue(!str_contains($storedBytes, 'evt_persisted'), 'event id must be encrypted at rest');
+assertTrue(!str_contains($storedBytes, 'restart-safe delivery'), 'event content must be encrypted at rest');
+assertTrue(!str_contains($storedBytes, $key), 'encryption key must not be stored in the queue');
 
 $store->close();
 unset($client, $store);
@@ -125,8 +105,8 @@ $reopenedClient = LogBrewClient::create(
     '0.1.0',
     eventStore: $reopenedStore
 );
-assertPersistentDelivery($reopenedClient->pendingEvents() === 1, 'restart must recover the persisted event');
-assertPersistentDelivery(str_contains($reopenedClient->previewJson(), 'evt_persisted'), 'restart must preserve the event id');
+assertTrue($reopenedClient->pendingEvents() === 1, 'restart must recover the persisted event');
+assertTrue(str_contains($reopenedClient->previewJson(), 'evt_persisted'), 'restart must preserve the event id');
 $reopenedClient->purgePersistedEvents();
 $reopenedStore->close();
 removePersistentDeliveryDirectory($directory);
@@ -149,11 +129,11 @@ foreach (['evt_retry_1', 'evt_retry_2'] as $index => $eventId) {
     ]);
 }
 $failedTransport = new RecordingTransport([503]);
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => $retryClient->flush($failedTransport),
     'transport_error'
 );
-assertPersistentDelivery(count($failedTransport->sentBodies) === 1, 'failed persistent flush must send once');
+assertTrue(count($failedTransport->sentBodies) === 1, 'failed persistent flush must send once');
 $failedBody = $failedTransport->sentBodies[0];
 $retryClient->log('evt_after_failure', '2026-07-14T08:01:02Z', [
     'message' => 'later capture',
@@ -173,11 +153,11 @@ $retryClient = LogBrewClient::create(
 );
 $recoveryTransport = RecordingTransport::alwaysAccept();
 $retryResponse = $retryClient->flush($recoveryTransport);
-assertPersistentDelivery($retryResponse->batches === 2, 'restart must keep the frozen retry boundary before later work');
-assertPersistentDelivery(count($recoveryTransport->sentBodies) === 2, 'restart must send the retry and later capture separately');
-assertPersistentDelivery($recoveryTransport->sentBodies[0] === $failedBody, 'restart retry body must be byte-identical');
-assertPersistentDelivery(str_contains($recoveryTransport->sentBodies[1], 'evt_after_failure'), 'later capture must follow the retry');
-assertPersistentDelivery(str_contains($recoveryTransport->sentBodies[1], 'logbrew-php-upgraded'), 'later capture must use the current SDK identity');
+assertTrue($retryResponse->batches === 2, 'restart must keep the frozen retry boundary before later work');
+assertTrue(count($recoveryTransport->sentBodies) === 2, 'restart must send the retry and later capture separately');
+assertTrue($recoveryTransport->sentBodies[0] === $failedBody, 'restart retry body must be byte-identical');
+assertTrue(str_contains($recoveryTransport->sentBodies[1], 'evt_after_failure'), 'later capture must follow the retry');
+assertTrue(str_contains($recoveryTransport->sentBodies[1], 'logbrew-php-upgraded'), 'later capture must use the current SDK identity');
 $retryStore->close();
 unset($retryClient, $retryStore);
 
@@ -188,7 +168,7 @@ $retryClient = LogBrewClient::create(
     '0.1.0',
     eventStore: $retryStore
 );
-assertPersistentDelivery($retryClient->pendingEvents() === 0, 'accepted persistent events must not replay after restart');
+assertTrue($retryClient->pendingEvents() === 0, 'accepted persistent events must not replay after restart');
 $retryStore->close();
 unset($retryClient, $retryStore);
 removePersistentDeliveryDirectory($retryDirectory);
@@ -210,11 +190,11 @@ foreach (['evt_prefix_1', 'evt_prefix_2', 'evt_prefix_3'] as $index => $eventId)
         'level' => 'info',
     ]);
 }
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => $prefixClient->flush(new RecordingTransport([202, 503])),
     'transport_error'
 );
-assertPersistentDelivery($prefixClient->pendingEvents() === 1, 'in-memory partial failure must retain only the failed suffix');
+assertTrue($prefixClient->pendingEvents() === 1, 'in-memory partial failure must retain only the failed suffix');
 $prefixStore->close();
 unset($prefixClient, $prefixStore);
 
@@ -225,9 +205,9 @@ $prefixClient = LogBrewClient::create(
     '0.1.0',
     eventStore: $prefixStore
 );
-assertPersistentDelivery($prefixClient->pendingEvents() === 1, 'restart must retain only the unacknowledged suffix');
-assertPersistentDelivery(str_contains($prefixClient->previewJson(), 'evt_prefix_3'), 'restart must preserve the failed suffix');
-assertPersistentDelivery(!str_contains($prefixClient->previewJson(), 'evt_prefix_1'), 'restart must omit the accepted prefix');
+assertTrue($prefixClient->pendingEvents() === 1, 'restart must retain only the unacknowledged suffix');
+assertTrue(str_contains($prefixClient->previewJson(), 'evt_prefix_3'), 'restart must preserve the failed suffix');
+assertTrue(!str_contains($prefixClient->previewJson(), 'evt_prefix_1'), 'restart must omit the accepted prefix');
 $prefixClient->purgePersistedEvents();
 $prefixStore->close();
 unset($prefixClient, $prefixStore);
@@ -255,23 +235,23 @@ $successClient->log('evt_second_success', '2026-07-14T08:03:01Z', [
 ]);
 $secondSuccessTransport = RecordingTransport::alwaysAccept();
 $successClient->flush($secondSuccessTransport);
-assertPersistentDelivery(count($secondSuccessTransport->sentBodies) === 1, 'later flush must not replay an accepted staged batch');
-assertPersistentDelivery(str_contains($secondSuccessTransport->sentBodies[0], 'evt_second_success'), 'later flush must send only new work');
-assertPersistentDelivery(!str_contains($secondSuccessTransport->sentBodies[0], 'evt_first_success'), 'later flush must omit the accepted event');
+assertTrue(count($secondSuccessTransport->sentBodies) === 1, 'later flush must not replay an accepted staged batch');
+assertTrue(str_contains($secondSuccessTransport->sentBodies[0], 'evt_second_success'), 'later flush must send only new work');
+assertTrue(!str_contains($secondSuccessTransport->sentBodies[0], 'evt_first_success'), 'later flush must omit the accepted event');
 $successStore->close();
 unset($successClient, $successStore);
 removePersistentDeliveryDirectory($successDirectory);
 
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => EncryptedFileEventStore::open('relative/queue', random_bytes(32)),
     'validation_error'
 );
 $invalidKeyDirectory = persistentDeliveryDirectory();
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => EncryptedFileEventStore::open($invalidKeyDirectory, 'too-short'),
     'validation_error'
 );
-assertPersistentDelivery(!file_exists($invalidKeyDirectory), 'invalid keys must not create a queue directory');
+assertTrue(!file_exists($invalidKeyDirectory), 'invalid keys must not create a queue directory');
 if (!rmdir(dirname($invalidKeyDirectory))) {
     throw new RuntimeException('failed to remove invalid-key test parent');
 }
@@ -279,11 +259,11 @@ if (!rmdir(dirname($invalidKeyDirectory))) {
 $exclusiveDirectory = persistentDeliveryDirectory();
 $exclusiveKey = random_bytes(32);
 $exclusiveStore = EncryptedFileEventStore::open($exclusiveDirectory, $exclusiveKey);
-$exclusiveError = expectPersistentDeliveryError(
+$exclusiveError = expectSdkError(
     static fn () => EncryptedFileEventStore::open($exclusiveDirectory, $exclusiveKey),
     'persistent_queue_error'
 );
-assertPersistentDelivery(!str_contains($exclusiveError->getMessage(), $exclusiveDirectory), 'lock errors must not expose local paths');
+assertTrue(!str_contains($exclusiveError->getMessage(), $exclusiveDirectory), 'lock errors must not expose local paths');
 $exclusiveStore->close();
 unset($exclusiveStore);
 removePersistentDeliveryDirectory($exclusiveDirectory);
@@ -302,12 +282,12 @@ $lockIdentityClient->log('evt_lock_identity', '2026-07-14T08:03:00Z', [
     'level' => 'warning',
 ]);
 $lockIdentityPath = $lockIdentityDirectory . '/.lock';
-assertPersistentDelivery(unlink($lockIdentityPath), 'locked path must be removed for identity test');
-assertPersistentDelivery(file_put_contents($lockIdentityPath, '') === 0, 'replacement lock file must be created');
-assertPersistentDelivery(chmod($lockIdentityPath, 0600), 'replacement lock file must be owner-only');
+assertTrue(unlink($lockIdentityPath), 'locked path must be removed for identity test');
+assertTrue(file_put_contents($lockIdentityPath, '') === 0, 'replacement lock file must be created');
+assertTrue(chmod($lockIdentityPath, 0600), 'replacement lock file must be owner-only');
 $replacementLockStore = EncryptedFileEventStore::open($lockIdentityDirectory, $lockIdentityKey);
 $lockSendMarker = dirname($lockIdentityDirectory) . '/lock-send-marker';
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => $lockIdentityClient->flush(new class($lockSendMarker) implements Transport {
         public function __construct(private readonly string $marker)
         {
@@ -321,14 +301,14 @@ expectPersistentDeliveryError(
     }),
     'persistent_queue_error'
 );
-assertPersistentDelivery(!file_exists($lockSendMarker), 'replaced lock path must fail before transport');
+assertTrue(!file_exists($lockSendMarker), 'replaced lock path must fail before transport');
 $replacementLockClient = LogBrewClient::create(
     'LOGBREW_API_KEY',
     'logbrew-php',
     '0.1.0',
     eventStore: $replacementLockStore
 );
-assertPersistentDelivery($replacementLockClient->pendingEvents() === 1, 'replacement lock owner must recover the event');
+assertTrue($replacementLockClient->pendingEvents() === 1, 'replacement lock owner must recover the event');
 $replacementLockClient->shutdown(RecordingTransport::alwaysAccept());
 $lockIdentityStore->close();
 unset($lockIdentityClient, $lockIdentityStore, $replacementLockClient, $replacementLockStore);
@@ -350,7 +330,7 @@ $wrongKeyClient->log('evt_wrong_key', '2026-07-14T08:04:00Z', [
 $wrongKeyStore->close();
 unset($wrongKeyClient, $wrongKeyStore);
 $mismatchedStore = EncryptedFileEventStore::open($wrongKeyDirectory, str_repeat('Q', 32));
-$wrongKeyError = expectPersistentDeliveryError(
+$wrongKeyError = expectSdkError(
     static fn () => LogBrewClient::create(
         'LOGBREW_API_KEY',
         'logbrew-php',
@@ -359,8 +339,8 @@ $wrongKeyError = expectPersistentDeliveryError(
     ),
     'persistent_queue_error'
 );
-assertPersistentDelivery(!str_contains($wrongKeyError->getMessage(), 'evt_wrong_key'), 'wrong-key failures must not expose event IDs');
-assertPersistentDelivery(!str_contains($wrongKeyError->getMessage(), $wrongKeyDirectory), 'wrong-key failures must not expose local paths');
+assertTrue(!str_contains($wrongKeyError->getMessage(), 'evt_wrong_key'), 'wrong-key failures must not expose event IDs');
+assertTrue(!str_contains($wrongKeyError->getMessage(), $wrongKeyDirectory), 'wrong-key failures must not expose local paths');
 $mismatchedStore->close();
 unset($mismatchedStore);
 $wrongKeyStore = EncryptedFileEventStore::open($wrongKeyDirectory, $wrongKey);
@@ -410,7 +390,7 @@ foreach ($invalidEventCases as $invalidEvent) {
     unset($invalidStore);
 
     $invalidStore = EncryptedFileEventStore::open($invalidDirectory, $invalidKey);
-    $invalidError = expectPersistentDeliveryError(
+    $invalidError = expectSdkError(
         static fn () => LogBrewClient::create(
             'LOGBREW_API_KEY',
             'logbrew-php',
@@ -419,7 +399,7 @@ foreach ($invalidEventCases as $invalidEvent) {
         ),
         'persistent_queue_error'
     );
-    assertPersistentDelivery(
+    assertTrue(
         !str_contains($invalidError->getMessage(), 'evt_invalid_')
             && !str_contains($invalidError->getMessage(), $invalidDirectory),
         'invalid recovered event failures must not expose content or local paths'
@@ -443,7 +423,7 @@ foreach ([
     ['nested' => ['value']],
     [0 => 'numeric-key'],
 ] as $invalidMetadata) {
-    expectPersistentDeliveryError(
+    expectSdkError(
         static fn () => $logMethod->invoke(
             $metadataClient,
             'evt_invalid_metadata',
@@ -457,7 +437,7 @@ foreach ([
         'validation_error'
     );
 }
-assertPersistentDelivery($metadataClient->pendingEvents() === 0, 'invalid metadata must not enter the persistent queue');
+assertTrue($metadataClient->pendingEvents() === 0, 'invalid metadata must not enter the persistent queue');
 $metadataStore->close();
 unset($metadataClient, $metadataStore);
 removePersistentDeliveryDirectory($metadataDirectory);
@@ -470,14 +450,14 @@ $timestampClient = LogBrewClient::create(
     '0.1.0',
     eventStore: $timestampStore
 );
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => $timestampClient->log('evt_invalid_timestamp', 'not-a-dateZ', [
         'message' => 'invalid timestamp must not persist',
         'level' => 'error',
     ]),
     'validation_error'
 );
-assertPersistentDelivery($timestampClient->pendingEvents() === 0, 'invalid timestamps must not enter the persistent queue');
+assertTrue($timestampClient->pendingEvents() === 0, 'invalid timestamps must not enter the persistent queue');
 $timestampStore->close();
 unset($timestampClient, $timestampStore);
 removePersistentDeliveryDirectory($timestampDirectory);
@@ -498,16 +478,16 @@ $tamperClient->log('evt_tampered', '2026-07-14T08:05:00Z', [
 $tamperStore->close();
 unset($tamperClient, $tamperStore);
 $tamperFiles = persistentDeliveryEventFiles($tamperDirectory);
-assertPersistentDelivery(count($tamperFiles) === 1, 'tamper test must have one encrypted record');
+assertTrue(count($tamperFiles) === 1, 'tamper test must have one encrypted record');
 $tampered = file_get_contents($tamperFiles[0]);
 if (!is_string($tampered) || strlen($tampered) <= 40) {
     throw new RuntimeException('tamper test record must be readable');
 }
 $replacement = $tampered[40] === "\0" ? "\1" : "\0";
 $tampered = substr_replace($tampered, $replacement, 40, 1);
-assertPersistentDelivery(file_put_contents($tamperFiles[0], $tampered) === strlen($tampered), 'tamper test must rewrite the record');
+assertTrue(file_put_contents($tamperFiles[0], $tampered) === strlen($tampered), 'tamper test must rewrite the record');
 $tamperedStore = EncryptedFileEventStore::open($tamperDirectory, $tamperKey);
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => LogBrewClient::create(
         'LOGBREW_API_KEY',
         'logbrew-php',
@@ -518,7 +498,7 @@ expectPersistentDeliveryError(
 );
 $tamperedStore->close();
 unset($tamperedStore);
-assertPersistentDelivery(unlink($tamperFiles[0]), 'tampered test record must be removable');
+assertTrue(unlink($tamperFiles[0]), 'tampered test record must be removable');
 removePersistentDeliveryDirectory($tamperDirectory);
 
 $unsafeDirectory = persistentDeliveryDirectory();
@@ -527,14 +507,14 @@ $unsafeStore = EncryptedFileEventStore::open($unsafeDirectory, $unsafeKey);
 $unsafeStore->close();
 unset($unsafeStore);
 $outsideAck = dirname($unsafeDirectory) . '/outside-ack';
-assertPersistentDelivery(file_put_contents($outsideAck, 'unsafe') === 6, 'unsafe metadata target must be created');
-assertPersistentDelivery(symlink($outsideAck, $unsafeDirectory . '/.ack'), 'unsafe metadata symlink must be created');
-expectPersistentDeliveryError(
+assertTrue(file_put_contents($outsideAck, 'unsafe') === 6, 'unsafe metadata target must be created');
+assertTrue(symlink($outsideAck, $unsafeDirectory . '/.ack'), 'unsafe metadata symlink must be created');
+expectSdkError(
     static fn () => EncryptedFileEventStore::open($unsafeDirectory, $unsafeKey),
     'persistent_queue_error'
 );
-assertPersistentDelivery(unlink($unsafeDirectory . '/.ack'), 'unsafe metadata symlink must be removed');
-assertPersistentDelivery(unlink($outsideAck), 'unsafe metadata target must be removed');
+assertTrue(unlink($unsafeDirectory . '/.ack'), 'unsafe metadata symlink must be removed');
+assertTrue(unlink($outsideAck), 'unsafe metadata target must be removed');
 removePersistentDeliveryDirectory($unsafeDirectory);
 
 $brokenMetadataDirectory = persistentDeliveryDirectory();
@@ -542,15 +522,15 @@ $brokenMetadataKey = random_bytes(32);
 $brokenMetadataStore = EncryptedFileEventStore::open($brokenMetadataDirectory, $brokenMetadataKey);
 $brokenMetadataStore->close();
 unset($brokenMetadataStore);
-assertPersistentDelivery(
+assertTrue(
     symlink(dirname($brokenMetadataDirectory) . '/missing-retry-target', $brokenMetadataDirectory . '/.retry'),
     'broken retry symlink must be created'
 );
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => EncryptedFileEventStore::open($brokenMetadataDirectory, $brokenMetadataKey),
     'persistent_queue_error'
 );
-assertPersistentDelivery(unlink($brokenMetadataDirectory . '/.retry'), 'broken retry symlink must be removed');
+assertTrue(unlink($brokenMetadataDirectory . '/.retry'), 'broken retry symlink must be removed');
 removePersistentDeliveryDirectory($brokenMetadataDirectory);
 
 $replaceDirectory = persistentDeliveryDirectory();
@@ -563,9 +543,9 @@ $replaceClient = LogBrewClient::create(
     eventStore: $replaceStore
 );
 $movedDirectory = $replaceDirectory . '-moved';
-assertPersistentDelivery(rename($replaceDirectory, $movedDirectory), 'queue directory must move for identity test');
-assertPersistentDelivery(mkdir($replaceDirectory, 0700) && chmod($replaceDirectory, 0700), 'replacement queue directory must be created');
-expectPersistentDeliveryError(
+assertTrue(rename($replaceDirectory, $movedDirectory), 'queue directory must move for identity test');
+assertTrue(mkdir($replaceDirectory, 0700) && chmod($replaceDirectory, 0700), 'replacement queue directory must be created');
+expectSdkError(
     static fn () => $replaceClient->log('evt_replaced', '2026-07-14T08:06:00Z', [
         'message' => 'directory identity changed',
         'level' => 'error',
@@ -594,12 +574,12 @@ if (function_exists('pcntl_fork')) {
         'message' => 'parent-owned retry',
         'level' => 'warning',
     ]);
-    expectPersistentDeliveryError(
+    expectSdkError(
         static fn () => $forkClient->flush(new RecordingTransport([503])),
         'transport_error'
     );
     $childPid = pcntl_fork();
-    assertPersistentDelivery($childPid >= 0, 'fork test must create a child');
+    assertTrue($childPid >= 0, 'fork test must create a child');
     if ($childPid === 0) {
         $captureCode = null;
         $flushCode = null;
@@ -633,22 +613,22 @@ if (function_exists('pcntl_fork')) {
         exit(0);
     }
     $forkStatus = 0;
-    assertPersistentDelivery(pcntl_waitpid($childPid, $forkStatus) === $childPid, 'fork test child must finish');
+    assertTrue(pcntl_waitpid($childPid, $forkStatus) === $childPid, 'fork test child must finish');
     if (!is_int($forkStatus)) {
         throw new RuntimeException('fork test child status must be an integer');
     }
-    assertPersistentDelivery(pcntl_wifexited($forkStatus) && pcntl_wexitstatus($forkStatus) === 0, 'fork test child must exit cleanly');
+    assertTrue(pcntl_wifexited($forkStatus) && pcntl_wexitstatus($forkStatus) === 0, 'fork test child must exit cleanly');
     $forkCodes = json_decode((string) file_get_contents($forkResult), true, 512, JSON_THROW_ON_ERROR);
-    assertPersistentDelivery(
+    assertTrue(
         is_array($forkCodes)
             && ($forkCodes['capture'] ?? null) === 'process_ownership_error'
             && ($forkCodes['flush'] ?? null) === 'process_ownership_error',
         'copied child store must reject capture and flush'
     );
-    assertPersistentDelivery(!file_exists($forkSendMarker), 'copied child store must reject before transport');
+    assertTrue(!file_exists($forkSendMarker), 'copied child store must reject before transport');
     $forkClient->flush(RecordingTransport::alwaysAccept());
-    assertPersistentDelivery(count(persistentDeliveryEventFiles($forkDirectory)) === 0, 'parent retry must drain its persisted event');
-    assertPersistentDelivery(unlink($forkResult), 'fork result must be removed');
+    assertTrue(count(persistentDeliveryEventFiles($forkDirectory)) === 0, 'parent retry must drain its persisted event');
+    assertTrue(unlink($forkResult), 'fork result must be removed');
     $forkStore->close();
     unset($forkClient, $forkStore);
     removePersistentDeliveryDirectory($forkDirectory);
@@ -668,7 +648,7 @@ $shutdownClient->log('evt_clean_shutdown', '2026-07-14T08:08:00Z', [
     'level' => 'info',
 ]);
 $shutdownResponse = $shutdownClient->shutdown(RecordingTransport::alwaysAccept());
-assertPersistentDelivery($shutdownResponse->statusCode === 202, 'persistent shutdown must deliver queued work');
+assertTrue($shutdownResponse->statusCode === 202, 'persistent shutdown must deliver queued work');
 $afterShutdownStore = EncryptedFileEventStore::open($shutdownDirectory, $shutdownKey);
 $afterShutdownClient = LogBrewClient::create(
     'LOGBREW_API_KEY',
@@ -676,7 +656,7 @@ $afterShutdownClient = LogBrewClient::create(
     '0.1.0',
     eventStore: $afterShutdownStore
 );
-assertPersistentDelivery($afterShutdownClient->pendingEvents() === 0, 'clean shutdown must leave no restart work');
+assertTrue($afterShutdownClient->pendingEvents() === 0, 'clean shutdown must leave no restart work');
 $afterShutdownStore->close();
 unset($shutdownClient, $shutdownStore, $afterShutdownClient, $afterShutdownStore);
 removePersistentDeliveryDirectory($shutdownDirectory);
@@ -687,19 +667,19 @@ $defaultClient->log('evt_memory_only', '2026-07-14T08:09:00Z', [
     'message' => 'default remains in memory',
     'level' => 'info',
 ]);
-assertPersistentDelivery(!file_exists($defaultDirectory), 'default client must not create persistence state');
+assertTrue(!file_exists($defaultDirectory), 'default client must not create persistence state');
 if (!rmdir(dirname($defaultDirectory))) {
     throw new RuntimeException('failed to remove default-mode test parent');
 }
 
 $permissionDirectory = persistentDeliveryDirectory();
-assertPersistentDelivery(mkdir($permissionDirectory, 0755) && chmod($permissionDirectory, 0755), 'permission test directory must be created');
-expectPersistentDeliveryError(
+assertTrue(mkdir($permissionDirectory, 0755) && chmod($permissionDirectory, 0755), 'permission test directory must be created');
+expectSdkError(
     static fn () => EncryptedFileEventStore::open($permissionDirectory, random_bytes(32)),
     'persistent_queue_error'
 );
-assertPersistentDelivery(rmdir($permissionDirectory), 'permission test directory must be removed');
-assertPersistentDelivery(rmdir(dirname($permissionDirectory)), 'permission test parent must be removed');
+assertTrue(rmdir($permissionDirectory), 'permission test directory must be removed');
+assertTrue(rmdir(dirname($permissionDirectory)), 'permission test parent must be removed');
 
 $temporaryDirectory = persistentDeliveryDirectory();
 $temporaryKey = random_bytes(32);
@@ -707,22 +687,22 @@ $temporaryStore = EncryptedFileEventStore::open($temporaryDirectory, $temporaryK
 $temporaryStore->close();
 unset($temporaryStore);
 $temporaryPath = $temporaryDirectory . '/.tmp-' . str_repeat('a', 32);
-assertPersistentDelivery(file_put_contents($temporaryPath, 'interrupted') === 11, 'interrupted temporary file must be created');
-assertPersistentDelivery(chmod($temporaryPath, 0644), 'interrupted temporary file must model a pre-chmod process exit');
+assertTrue(file_put_contents($temporaryPath, 'interrupted') === 11, 'interrupted temporary file must be created');
+assertTrue(chmod($temporaryPath, 0644), 'interrupted temporary file must model a pre-chmod process exit');
 $temporaryStore = EncryptedFileEventStore::open($temporaryDirectory, $temporaryKey);
-assertPersistentDelivery(!file_exists($temporaryPath), 'restart must remove a validated interrupted temporary file');
+assertTrue(!file_exists($temporaryPath), 'restart must remove a validated interrupted temporary file');
 $temporaryStore->close();
 unset($temporaryStore);
 removePersistentDeliveryDirectory($temporaryDirectory);
 
 $lockRecoveryDirectory = persistentDeliveryDirectory();
-assertPersistentDelivery(mkdir($lockRecoveryDirectory, 0700) && chmod($lockRecoveryDirectory, 0700), 'lock recovery directory must be owner-only');
+assertTrue(mkdir($lockRecoveryDirectory, 0700) && chmod($lockRecoveryDirectory, 0700), 'lock recovery directory must be owner-only');
 $lockRecoveryPath = $lockRecoveryDirectory . '/.lock';
-assertPersistentDelivery(file_put_contents($lockRecoveryPath, '') === 0, 'interrupted lock file must be created');
-assertPersistentDelivery(chmod($lockRecoveryPath, 0644), 'interrupted lock file must model a pre-chmod process exit');
+assertTrue(file_put_contents($lockRecoveryPath, '') === 0, 'interrupted lock file must be created');
+assertTrue(chmod($lockRecoveryPath, 0644), 'interrupted lock file must model a pre-chmod process exit');
 $lockRecoveryStore = EncryptedFileEventStore::open($lockRecoveryDirectory, random_bytes(32));
 clearstatcache(true, $lockRecoveryPath);
-assertPersistentDelivery((fileperms($lockRecoveryPath) & 0777) === 0600, 'reopened lock file must be owner-only');
+assertTrue((fileperms($lockRecoveryPath) & 0777) === 0600, 'reopened lock file must be owner-only');
 $lockRecoveryStore->close();
 unset($lockRecoveryStore);
 removePersistentDeliveryDirectory($lockRecoveryDirectory);
@@ -743,15 +723,15 @@ $hardLinkClient->log('evt_hard_link', '2026-07-14T08:10:00Z', [
 $hardLinkStore->close();
 unset($hardLinkClient, $hardLinkStore);
 $hardLinkFiles = persistentDeliveryEventFiles($hardLinkDirectory);
-assertPersistentDelivery(count($hardLinkFiles) === 1, 'hard-link test must have one record');
+assertTrue(count($hardLinkFiles) === 1, 'hard-link test must have one record');
 $outsideHardLink = dirname($hardLinkDirectory) . '/outside-event-link';
-assertPersistentDelivery(link($hardLinkFiles[0], $outsideHardLink), 'hard-link test must create a second link');
-expectPersistentDeliveryError(
+assertTrue(link($hardLinkFiles[0], $outsideHardLink), 'hard-link test must create a second link');
+expectSdkError(
     static fn () => EncryptedFileEventStore::open($hardLinkDirectory, $hardLinkKey),
     'persistent_queue_error'
 );
-assertPersistentDelivery(unlink($outsideHardLink), 'outside hard link must be removed');
-assertPersistentDelivery(unlink($hardLinkFiles[0]), 'hard-linked record must be removed');
+assertTrue(unlink($outsideHardLink), 'outside hard link must be removed');
+assertTrue(unlink($hardLinkFiles[0]), 'hard-linked record must be removed');
 removePersistentDeliveryDirectory($hardLinkDirectory);
 
 $boundDirectory = persistentDeliveryDirectory();
@@ -770,13 +750,13 @@ foreach (['evt_bound_1', 'evt_bound_2', 'evt_bound_dropped'] as $index => $event
         'level' => 'info',
     ]);
 }
-assertPersistentDelivery($boundClient->pendingEvents() === 2, 'persistent queue must keep its exact event bound');
-assertPersistentDelivery($boundClient->droppedEvents() === 1, 'persistent queue must report admission loss');
-assertPersistentDelivery(count(glob($boundDirectory . '/*.event') ?: []) === 2, 'dropped events must not reach disk');
+assertTrue($boundClient->pendingEvents() === 2, 'persistent queue must keep its exact event bound');
+assertTrue($boundClient->droppedEvents() === 1, 'persistent queue must report admission loss');
+assertTrue(count(glob($boundDirectory . '/*.event') ?: []) === 2, 'dropped events must not reach disk');
 $boundStore->close();
 unset($boundClient, $boundStore);
 $tooSmallStore = EncryptedFileEventStore::open($boundDirectory, $boundKey);
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => LogBrewClient::create(
         'LOGBREW_API_KEY',
         'logbrew-php',
@@ -815,13 +795,13 @@ $failedShutdownClient->log('evt_failed_shutdown', '2026-07-14T08:12:00Z', [
     'message' => 'retry after failed stop',
     'level' => 'warning',
 ]);
-expectPersistentDeliveryError(
+expectSdkError(
     static fn () => $failedShutdownClient->shutdown(new RecordingTransport([503])),
     'transport_error'
 );
-assertPersistentDelivery($failedShutdownClient->pendingEvents() === 1, 'failed persistent shutdown must retain queued work');
+assertTrue($failedShutdownClient->pendingEvents() === 1, 'failed persistent shutdown must retain queued work');
 $recoveredShutdown = $failedShutdownClient->shutdown(RecordingTransport::alwaysAccept());
-assertPersistentDelivery($recoveredShutdown->statusCode === 202, 'failed persistent shutdown must remain retryable');
+assertTrue($recoveredShutdown->statusCode === 202, 'failed persistent shutdown must remain retryable');
 $postFailureQueue = EncryptedFileEventStore::open($failedShutdownDirectory, $failedShutdownKey);
 $postFailureClient = LogBrewClient::create(
     'LOGBREW_API_KEY',
@@ -829,7 +809,7 @@ $postFailureClient = LogBrewClient::create(
     '0.1.0',
     eventStore: $postFailureQueue
 );
-assertPersistentDelivery($postFailureClient->pendingEvents() === 0, 'recovered persistent shutdown must not replay');
+assertTrue($postFailureClient->pendingEvents() === 0, 'recovered persistent shutdown must not replay');
 $postFailureQueue->close();
 unset($failedShutdownClient, $failedShutdownStore, $postFailureClient, $postFailureQueue);
 removePersistentDeliveryDirectory($failedShutdownDirectory);
