@@ -14,7 +14,7 @@ class GoPublicModuleSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_GO_MODULE_VERSION",
-            'requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.7}}"',
+            'requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.10}}"',
             'export LOGBREW_GO_MODULE_VERSION="$module_version"',
             "LOGBREW_GO_GIN_MODULE_VERSION",
             'gin_requested_version="${LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2}"',
@@ -55,9 +55,8 @@ class GoPublicModuleSmokeTests(unittest.TestCase):
 
         self.assertNotIn("api.logbrew", body)
         self.assertNotIn('SDKVersion: "0.1.3"', body)
-        prefix = "LOGBREW_"
         for suffix in ("".join(chr(value) for value in (84, 79, 75, 69, 78)), "API_URL"):
-            self.assertNotIn(prefix + suffix, body)
+            self.assertNotIn("LOGBREW_" + suffix, body)
 
 
 if __name__ == "__main__":

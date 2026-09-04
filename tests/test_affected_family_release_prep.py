@@ -280,7 +280,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         swift_smoke = source_text("scripts/real_user_swiftpm_public_smoke.sh")
         swift_readme = source_text("swift/logbrew-swift/README.md")
 
-        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.7', go_smoke)
+        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.10', go_smoke)
         self.assertIn('LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2', go_smoke)
         self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2', go_gin_smoke)
         self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.15', swift_smoke)
