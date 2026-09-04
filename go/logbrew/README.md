@@ -578,6 +578,14 @@ _ = provider
 
 `TraceContextFromContext` and `TraceContextFromSpanContext` copy only valid OTel trace ID, span ID, and sampled flags into LogBrew child trace context. `NewSpanExporter` queues ended OTel spans as LogBrew span events with safe method/route/status, database, messaging, RPC, exception-type, span-kind, instrumentation-scope, and span-link summaries. It does not install global providers, own exporters/processors, retry, flush, capture full URLs, headers, payloads, SQL statements, exception messages, stacks, baggage, tracestate, or raw propagation values. Keep using `client.Flush` or `client.Shutdown` with your app-owned transport.
 
+## Asynq Background Jobs
+
+Install `github.com/LogBrewCo/sdk/go/logbrew/asynq@latest` for first-class
+producer-to-worker trace propagation, enqueue/process spans, and terminal job
+issues plus unhandled panic evidence. The adapter preserves application-owned
+Asynq options and headers while keeping task payloads, headers, and error
+messages out of telemetry. See the [Asynq integration guide](./asynq/README.md).
+
 ## Gin Middleware
 
 Gin applications can add the optional framework module without adding Gin to

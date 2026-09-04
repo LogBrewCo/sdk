@@ -54,7 +54,7 @@ with zipfile.ZipFile(
 ) as archive:
     for path in repo.rglob("*"):
         relative = path.relative_to(repo)
-        if path.is_file() and ".git" not in path.parts and (not relative.parts or relative.parts[0] not in {"gin", "otel"}):
+        if path.is_file() and ".git" not in path.parts and (not relative.parts or relative.parts[0] not in {"asynq", "gin", "otel"}):
             archive.write(path, zip_prefix + relative.as_posix())
 PY
 

@@ -102,6 +102,8 @@ jobs:
           go-version-file: tools/toolchain-probe/.go-version
           cache-dependency-path: |
             go/logbrew/go.mod
+            go/logbrew/asynq/go.mod
+            go/logbrew/asynq/go.sum
             go/logbrew/gin/go.mod
             go/logbrew/gin/go.sum
             go/logbrew/otel/go.mod

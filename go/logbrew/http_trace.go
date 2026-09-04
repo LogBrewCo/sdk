@@ -254,35 +254,19 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 		h.report(err)
 	}
 	if panicked || (statusCode >= http.StatusInternalServerError && h.captureServerErrorIssue) {
-		title := "HTTP server error response"
-		if panicked {
-			title = "HTTP server panic"
-		}
 		issueAttributes := IssueAttributes{
-			Title:    title,
+			Title:    "HTTP server error response",
 			Level:    "error",
 			Metadata: metadata,
 		}
 		if panicked {
-			mechanism := &IssueExceptionMechanism{
-				Type:    "net_http.middleware",
-				Handled: false,
-			}
-			issueAttributes.Exception = &IssueException{
-				Type:      panicType,
-				Mechanism: mechanism,
-			}
-			issueAttributes.StackFrames = panicFrames
-			chain, chainErr := CreateIssueExceptionChain(IssueExceptionChainInput{
-				Value:       panicValue,
-				Exception:   issueAttributes.Exception,
-				StackFrames: panicFrames,
-			})
-			if chainErr != nil {
-				h.report(chainErr)
+			panicAttributes, panicErr := IssueAttributesFromPanic(panicValue, "HTTP server panic", "net_http.middleware", false, panicFrames)
+			if panicErr != nil {
+				h.report(panicErr)
 			} else {
-				issueAttributes.ExceptionChain = chain
+				issueAttributes = panicAttributes
 			}
+			issueAttributes.Metadata = metadata
 		}
 		issue := IssueAttributesWithTrace(request.Context(), issueAttributes)
 		if err := h.config.Client.Issue(h.eventID("issue"), timestamp, issue); err != nil {

@@ -9,6 +9,9 @@ module_path="github.com/LogBrewCo/sdk/go/logbrew"
 gin_requested_version="${LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2}"
 gin_module_version="v${gin_requested_version#v}"
 gin_module_path="github.com/LogBrewCo/sdk/go/logbrew/gin"
+asynq_requested_version="${LOGBREW_GO_ASYNQ_MODULE_VERSION:-}"
+asynq_module_version="v${asynq_requested_version#v}"
+asynq_module_path="github.com/LogBrewCo/sdk/go/logbrew/asynq"
 tmp_dir="$(mktemp -d)"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
@@ -112,19 +115,28 @@ if [[ "$receipt_mode" == "1" ]]; then
   exit 0
 fi
 
+shared_go_mod_cache="$(go env GOMODCACHE)"
+shared_go_build_cache="$(go env GOCACHE)"
 export GOPATH="$tmp_dir/gopath"
-export GOMODCACHE="$tmp_dir/mod"
-export GOCACHE="$tmp_dir/cache"
+export GOMODCACHE="$shared_go_mod_cache"
+export GOCACHE="$shared_go_build_cache"
 export GOPROXY=https://proxy.golang.org,direct
-mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"
+mkdir -p "$GOPATH"
 
 app_dir="$tmp_dir/app"
 mkdir -p "$app_dir"
 cd "$app_dir"
 
 go mod init logbrew.public.module.smoke >/dev/null
+GOMODCACHE="$tmp_dir/verified-mod" go mod download "$module_path@$module_version" "$gin_module_path@$gin_module_version"
+if [[ -n "$asynq_requested_version" ]]; then
+  GOMODCACHE="$tmp_dir/verified-mod" go mod download "$asynq_module_path@$asynq_module_version"
+fi
 go get github.com/LogBrewCo/sdk/go/logbrew@"$module_version" >/dev/null
 go get github.com/LogBrewCo/sdk/go/logbrew/gin@"$gin_module_version" >/dev/null
+if [[ -n "$asynq_requested_version" ]]; then
+  go get "$asynq_module_path@$asynq_module_version" >/dev/null
+fi
 
 cat > main.go <<'GO'
 package main
@@ -723,61 +735,97 @@ func TestPublicGinModuleEmitsPurposeWithoutConcreteRequestData(t *testing.T) {
 }
 GO
 
+if [[ -n "$asynq_requested_version" ]]; then
+cat > asynq_public_test.go <<'GO'
+package main
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/LogBrewCo/sdk/go/logbrew"
+	logbrewasynq "github.com/LogBrewCo/sdk/go/logbrew/asynq"
+	"github.com/hibiken/asynq"
+)
+
+type publicEnqueuer struct{ task *asynq.Task }
+
+func (e *publicEnqueuer) EnqueueContext(_ context.Context, task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	e.task = task
+	return &asynq.TaskInfo{Queue: "jobs", Type: task.Type()}, nil
+}
+
+func TestPublicAsynqModuleCorrelatesTerminalJobWithoutPrivateData(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{APIKey: "key", SDKName: "asynq-public", SDKVersion: "0.1.0", DisableRuntimeContext: true})
+	must(err)
+	parent, err := logbrew.NewTraceContext(logbrew.TraceContextInput{Traceparent: "00-11111111111111111111111111111111-2222222222222222-01", SpanID: "3333333333333333"})
+	must(err)
+	queue := &publicEnqueuer{}
+	_, err = logbrewasynq.EnqueueContext(logbrew.ContextWithLogBrewTrace(context.Background(), parent), queue, "receipt:email", []byte("private payload"), logbrewasynq.EnqueueConfig{Client: client, Queue: "jobs", Headers: map[string]string{"x-private": "private header"}, SpanIDFactory: func() string { return "4444444444444444" }})
+	must(err)
+	middleware, err := logbrewasynq.NewMiddleware(logbrewasynq.Config{Client: client, SpanIDFactory: func() string { return "5555555555555555" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = middleware(asynq.HandlerFunc(func(ctx context.Context, _ *asynq.Task) error {
+		trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+		if !ok || trace.ParentSpanID != "4444444444444444" {
+			t.Fatalf("unexpected worker trace: %#v", trace)
+		}
+		return asynq.SkipRetry
+	})).ProcessTask(context.Background(), queue.task)
+	if !errors.Is(err, asynq.SkipRetry) {
+		t.Fatalf("terminal result changed: %v", err)
+	}
+	payload, err := client.PreviewJSON()
+	if !strings.Contains(payload, `"title": "Asynq task failed"`) || !strings.Contains(payload, `"queueSystem": "asynq"`) {
+		t.Fatalf("installed Asynq evidence incomplete: %v %s", err, payload)
+	}
+	for _, private := range []string{"private payload", "private header", "x-private"} {
+		if strings.Contains(payload, private) {
+			t.Fatalf("installed Asynq telemetry leaked %q", private)
+		}
+	}
+}
+GO
+fi
+
 go mod tidy
 grep -Eq "^[[:space:]]*github.com/LogBrewCo/sdk/go/logbrew[[:space:]]+$module_version([[:space:]]|$)" go.mod
 grep -Eq "^[[:space:]]*github.com/LogBrewCo/sdk/go/logbrew/gin[[:space:]]+$gin_module_version([[:space:]]|$)" go.mod
+[[ -z "$asynq_requested_version" ]] || grep -Eq "^[[:space:]]*github.com/LogBrewCo/sdk/go/logbrew/asynq[[:space:]]+$asynq_module_version([[:space:]]|$)" go.mod
 grep -q "github.com/LogBrewCo/sdk/go/logbrew $module_version" go.sum
 
 go list -m all > "$tmp_dir/go-list-modules.txt"
 grep -q "github.com/LogBrewCo/sdk/go/logbrew $module_version" "$tmp_dir/go-list-modules.txt"
 grep -q "github.com/LogBrewCo/sdk/go/logbrew/gin $gin_module_version" "$tmp_dir/go-list-modules.txt"
+[[ -z "$asynq_requested_version" ]] || grep -q "$asynq_module_path $asynq_module_version" "$tmp_dir/go-list-modules.txt"
 go list -m -json github.com/LogBrewCo/sdk/go/logbrew > "$tmp_dir/module.json"
 go mod download -json github.com/LogBrewCo/sdk/go/logbrew@"$module_version" > "$tmp_dir/download.json"
 go list -m -json "$gin_module_path" > "$tmp_dir/gin-module.json"
 go mod download -json "$gin_module_path@$gin_module_version" > "$tmp_dir/gin-download.json"
 
-python3 - "$tmp_dir/module.json" "$tmp_dir/download.json" "$module_path" "$module_version" <<'PY'
+python3 - \
+  "$tmp_dir/module.json" "$tmp_dir/download.json" "$module_path" "$module_version" \
+  "$tmp_dir/gin-module.json" "$tmp_dir/gin-download.json" "$gin_module_path" "$gin_module_version" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-module_payload = json.loads(Path(sys.argv[1]).read_text())
-download_payload = json.loads(Path(sys.argv[2]).read_text())
-module_path = sys.argv[3]
-module_version = sys.argv[4]
-
-for name, payload in (("go list", module_payload), ("go mod download", download_payload)):
-    if payload.get("Path") != module_path:
-        raise SystemExit(f"{name}: unexpected path {payload.get('Path')!r}")
-    if payload.get("Version") != module_version:
-        raise SystemExit(f"{name}: unexpected version {payload.get('Version')!r}")
-    if payload.get("Replace"):
-        raise SystemExit(f"{name}: module unexpectedly uses replace")
-for key in ("Info", "GoMod", "Zip", "Dir", "Sum", "GoModSum"):
-    if not download_payload.get(key):
-        raise SystemExit(f"go mod download: missing {key}")
-PY
-
-python3 - "$tmp_dir/gin-module.json" "$tmp_dir/gin-download.json" "$gin_module_path" "$gin_module_version" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-module_payload = json.loads(Path(sys.argv[1]).read_text())
-download_payload = json.loads(Path(sys.argv[2]).read_text())
-module_path = sys.argv[3]
-module_version = sys.argv[4]
-
-for name, payload in (("go list", module_payload), ("go mod download", download_payload)):
-    if payload.get("Path") != module_path:
-        raise SystemExit(f"{name}: unexpected path {payload.get('Path')!r}")
-    if payload.get("Version") != module_version:
-        raise SystemExit(f"{name}: unexpected version {payload.get('Version')!r}")
-    if payload.get("Replace"):
-        raise SystemExit(f"{name}: module unexpectedly uses replace")
-for key in ("Info", "GoMod", "Zip", "Dir", "Sum", "GoModSum"):
-    if not download_payload.get(key):
-        raise SystemExit(f"go mod download: missing {key}")
+for offset in (1, 5):
+    listed = json.loads(Path(sys.argv[offset]).read_text())
+    downloaded = json.loads(Path(sys.argv[offset + 1]).read_text())
+    module_path, module_version = sys.argv[offset + 2 : offset + 4]
+    for name, payload in (("go list", listed), ("go mod download", downloaded)):
+        if payload.get("Path") != module_path or payload.get("Version") != module_version:
+            raise SystemExit(f"{name}: unexpected module identity")
+        if payload.get("Replace"):
+            raise SystemExit(f"{name}: module unexpectedly uses replace")
+    for key in ("Info", "GoMod", "Zip", "Dir", "Sum", "GoModSum"):
+        if not downloaded.get(key):
+            raise SystemExit(f"go mod download: missing {key}")
 PY
 
 module_dir="$(python3 - "$tmp_dir/module.json" <<'PY'
@@ -826,6 +874,7 @@ grep -q "all modules verified" "$tmp_dir/go-mod-verify.txt"
 go list -deps -test -json ./... > "$tmp_dir/go-list-deps.json"
 grep -q '"ImportPath": "github.com/LogBrewCo/sdk/go/logbrew"' "$tmp_dir/go-list-deps.json"
 grep -q '"ImportPath": "github.com/LogBrewCo/sdk/go/logbrew/gin"' "$tmp_dir/go-list-deps.json"
+[[ -z "$asynq_requested_version" ]] || grep -q '"ImportPath": "github.com/LogBrewCo/sdk/go/logbrew/asynq"' "$tmp_dir/go-list-deps.json"
 
 run_go_doc() {
   local output_name="$1"

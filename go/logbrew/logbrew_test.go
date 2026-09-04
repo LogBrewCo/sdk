@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -33,6 +34,83 @@ func sampleClient(t *testing.T) *Client {
 		t.Fatalf("build client: %v", err)
 	}
 	return client
+}
+
+func testTrace(t *testing.T, spanID string) TraceContext {
+	t.Helper()
+	trace, err := NewTraceContext(TraceContextInput{Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01", SpanID: spanID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return trace
+}
+
+func testNow(after time.Duration) func() time.Time {
+	base := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+	first := true
+	return func() time.Time {
+		if first {
+			first = false
+			return base
+		}
+		return base.Add(after)
+	}
+}
+
+type testPreviewEvent struct {
+	Type       string         `json:"type"`
+	ID         string         `json:"id"`
+	Attributes map[string]any `json:"attributes"`
+}
+
+func previewEvents(t *testing.T, client *Client) (string, []testPreviewEvent) {
+	t.Helper()
+	payload := previewPayload(t, client)
+	var parsed struct {
+		Events []testPreviewEvent `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	return payload, parsed.Events
+}
+
+func previewEvent(t *testing.T, client *Client) (string, testPreviewEvent) {
+	t.Helper()
+	payload, events := previewEvents(t, client)
+	if len(events) != 1 {
+		t.Fatalf("unexpected event count %d: %s", len(events), payload)
+	}
+	return payload, events[0]
+}
+
+func previewPayload(t *testing.T, client *Client) string {
+	t.Helper()
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+func assertText(t *testing.T, payload string, required, forbidden []string) {
+	t.Helper()
+	for _, value := range required {
+		if !strings.Contains(payload, value) {
+			t.Fatalf("payload missing %q: %s", value, payload)
+		}
+	}
+	for _, value := range forbidden {
+		if strings.Contains(payload, value) {
+			t.Fatalf("payload exposed %q: %s", value, payload)
+		}
+	}
+}
+
+func assertSixEventExample(t *testing.T, stdout, stderr string) {
+	t.Helper()
+	assertText(t, stdout, []string{`"type": "release"`, `"type": "environment"`, `"type": "issue"`, `"type": "log"`, `"type": "span"`, `"type": "action"`}, nil)
+	assertText(t, stderr, []string{`"attempts":1`, `"events":6`, `"ok":true`, `"status":202`}, nil)
 }
 
 func capturePanic(operation func()) (recovered any) {
@@ -85,18 +163,10 @@ func TestPreviewJSONContainsAllSupportedEventTypes(t *testing.T) {
 	client := sampleClient(t)
 	enqueueAll(t, client)
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	events := parsed["events"].([]any)
+	_, events := previewEvents(t, client)
 	eventTypes := make([]string, 0, len(events))
 	for _, event := range events {
-		eventTypes = append(eventTypes, event.(map[string]any)["type"].(string))
+		eventTypes = append(eventTypes, event.Type)
 	}
 	expected := []string{"release", "environment", "issue", "log", "span", "action"}
 	for index := range expected {
@@ -235,10 +305,7 @@ func TestSeverityAliasesNormalizeBeforePreview(t *testing.T) {
 			} `json:"attributes"`
 		} `json:"events"`
 	}
-	preview, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	preview := previewPayload(t, client)
 	if err := json.Unmarshal([]byte(preview), &payload); err != nil {
 		t.Fatal(err)
 	}
@@ -300,10 +367,7 @@ func TestIssueDiagnosticsAreValidatedDetachedAndNormalized(t *testing.T) {
 			Attributes map[string]any `json:"attributes"`
 		} `json:"events"`
 	}
-	preview, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	preview := previewPayload(t, client)
 	if err := json.Unmarshal([]byte(preview), &payload); err != nil {
 		t.Fatal(err)
 	}
@@ -360,10 +424,7 @@ func TestIssueDiagnosticEvidenceIsValidatedAndDetached(t *testing.T) {
 	evidence.LikelyFixArea.File = "mutated.go"
 	evidence.CapturedFields = append(evidence.CapturedFields, "mutated")
 
-	preview, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	preview := previewPayload(t, client)
 	var payload struct {
 		Events []struct {
 			Attributes map[string]any `json:"attributes"`
@@ -401,10 +462,7 @@ func TestIssueAttributesFromErrorPreservesUnwrapEvidenceWithoutErrorText(t *test
 	if err := client.Issue("evt_issue_error_chain", "2026-08-02T08:15:31Z", attributes); err != nil {
 		t.Fatal(err)
 	}
-	preview, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	preview := previewPayload(t, client)
 	for _, privateValue := range []string{"private cause message", "private wrapper message"} {
 		if strings.Contains(preview, privateValue) {
 			t.Fatalf("error chain leaked %q: %s", privateValue, preview)
@@ -452,10 +510,7 @@ func TestIssueAttributesFromErrorPreservesUnwrapEvidenceWithoutErrorText(t *test
 	if err := joinedClient.Issue("evt_issue_joined_chain", "2026-08-02T08:15:31Z", joinedAttributes); err != nil {
 		t.Fatal(err)
 	}
-	joinedPreview, err := joinedClient.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	joinedPreview := previewPayload(t, joinedClient)
 	if strings.Count(joinedPreview, `"relationship": "aggregate_member"`) != 2 ||
 		strings.Contains(joinedPreview, "private first member") || strings.Contains(joinedPreview, "private second member") {
 		t.Fatalf("joined error evidence is incomplete or unsafe: %s", joinedPreview)
@@ -473,10 +528,7 @@ func TestIssueAttributesFromErrorPreservesUnwrapEvidenceWithoutErrorText(t *test
 	if err := deepClient.Issue("evt_issue_deep_chain", "2026-08-02T08:15:31Z", deepAttributes); err != nil {
 		t.Fatal(err)
 	}
-	deepPreview, err := deepClient.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	deepPreview := previewPayload(t, deepClient)
 	if strings.Count(deepPreview, `"relationship": "reported"`) != 1 ||
 		strings.Count(deepPreview, `"relationship": "cause"`) != 7 ||
 		!strings.Contains(deepPreview, `"truncated": true`) || strings.Contains(deepPreview, "private depth") {
@@ -520,10 +572,7 @@ func TestIssueExceptionChainManualStatesAndContradictions(t *testing.T) {
 	if err := client.Issue("evt_issue_manual_chain", "2026-08-02T08:15:31Z", attributes); err != nil {
 		t.Fatal(err)
 	}
-	preview, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	preview := previewPayload(t, client)
 	for _, expected := range []string{
 		`"message": "approved summary"`,
 		`"messageState": "truncated"`,
@@ -746,19 +795,10 @@ func TestMetricEventValidatesExplicitContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	events := parsed["events"].([]any)
-	event := events[0].(map[string]any)
-	attributes := event["attributes"].(map[string]any)
-	if event["type"] != "metric" {
-		t.Fatalf("unexpected event type: %#v", event["type"])
+	_, event := previewEvent(t, client)
+	attributes := event.Attributes
+	if event.Type != "metric" {
+		t.Fatalf("unexpected event type: %#v", event.Type)
 	}
 	expected := map[string]any{
 		"name":        "queue.depth",
@@ -916,10 +956,7 @@ func TestTraceparentHelpersParseCreateAndContinueW3CTraceContext(t *testing.T) {
 	if err := client.Span("evt_traceparent_span", "2026-06-02T10:00:04Z", attributes); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	payload := previewPayload(t, client)
 	if !strings.Contains(payload, `"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"`) ||
 		!strings.Contains(payload, `"parentSpanId": "00f067aa0ba902b7"`) ||
 		!strings.Contains(payload, `"spanId": "b7ad6b7169203331"`) {
@@ -1054,10 +1091,7 @@ func TestTimelineHelpersCreateSafeActionAttributes(t *testing.T) {
 	if err := client.Action("evt_payment_api", "2026-06-02T10:00:06Z", network); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
+	payload := previewPayload(t, client)
 	if strings.Contains(payload, "email=user@example.com") ||
 		strings.Contains(payload, "debug=true") ||
 		strings.Contains(payload, "ignoredObject") ||
@@ -1293,38 +1327,12 @@ func TestShutdownFlushesAndPreventsFutureEvents(t *testing.T) {
 
 func TestRepoCheckoutReadmeExampleRunsDirectly(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, ".", "go", "run", "./examples/readme_example")
-	if !strings.Contains(stdout, `"type": "release"`) ||
-		!strings.Contains(stdout, `"type": "environment"`) ||
-		!strings.Contains(stdout, `"type": "issue"`) ||
-		!strings.Contains(stdout, `"type": "log"`) ||
-		!strings.Contains(stdout, `"type": "span"`) ||
-		!strings.Contains(stdout, `"type": "action"`) {
-		t.Fatalf("unexpected stdout: %s", stdout)
-	}
-	if !strings.Contains(stderr, `"attempts":1`) ||
-		!strings.Contains(stderr, `"events":6`) ||
-		!strings.Contains(stderr, `"ok":true`) ||
-		!strings.Contains(stderr, `"status":202`) {
-		t.Fatalf("unexpected stderr: %s", stderr)
-	}
+	assertSixEventExample(t, stdout, stderr)
 }
 
 func TestRepoCheckoutRealUserSmokeRunsDirectly(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, ".", "go", "run", "./examples/real_user_smoke")
-	if !strings.Contains(stdout, `"type": "release"`) ||
-		!strings.Contains(stdout, `"type": "environment"`) ||
-		!strings.Contains(stdout, `"type": "issue"`) ||
-		!strings.Contains(stdout, `"type": "log"`) ||
-		!strings.Contains(stdout, `"type": "span"`) ||
-		!strings.Contains(stdout, `"type": "action"`) {
-		t.Fatalf("unexpected stdout: %s", stdout)
-	}
-	if !strings.Contains(stderr, `"attempts":1`) ||
-		!strings.Contains(stderr, `"events":6`) ||
-		!strings.Contains(stderr, `"ok":true`) ||
-		!strings.Contains(stderr, `"status":202`) {
-		t.Fatalf("unexpected stderr: %s", stderr)
-	}
+	assertSixEventExample(t, stdout, stderr)
 }
 
 func TestRepoCheckoutExamplesMakeListsCommands(t *testing.T) {
@@ -1358,19 +1366,11 @@ func TestRepoCheckoutExamplesMakeListsCommands(t *testing.T) {
 
 func TestRepoCheckoutExamplesMakeRunAgentTimelineExecutesExample(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, "./examples", "make", "run-agent-timeline")
-	if !strings.Contains(stdout, `"source": "product.action"`) ||
-		!strings.Contains(stdout, `"source": "network.milestone"`) ||
-		!strings.Contains(stdout, `"routeTemplate": "/checkout/:step"`) ||
-		!strings.Contains(stdout, `"routeTemplate": "/v1/payments/:id"`) ||
-		!strings.Contains(stdout, "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
-		t.Fatalf("unexpected stdout: %s", stdout)
-	}
-	if strings.Contains(stdout, "email=user@example.com") ||
-		strings.Contains(stdout, "debug=true") ||
-		strings.Contains(stdout, "payload") ||
-		strings.Contains(stdout, "headers") {
-		t.Fatalf("agent timeline leaked unsafe data: %s", stdout)
-	}
+	assertText(t, stdout, []string{
+		`"source": "product.action"`, `"source": "network.milestone"`,
+		`"routeTemplate": "/checkout/:step"`, `"routeTemplate": "/v1/payments/:id"`,
+		"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+	}, []string{"email=user@example.com", "debug=true", "payload", "headers"})
 	if stderr != "" {
 		t.Fatalf("unexpected stderr: %s", stderr)
 	}
@@ -1378,7 +1378,7 @@ func TestRepoCheckoutExamplesMakeRunAgentTimelineExecutesExample(t *testing.T) {
 
 func TestRepoCheckoutExamplesMakeRunFirstUsefulTelemetryExecutesExample(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, "./examples", "make", "run-first-useful-telemetry")
-	for _, needle := range []string{
+	assertText(t, stdout, []string{
 		`"type": "release"`,
 		`"type": "environment"`,
 		`"type": "log"`,
@@ -1390,12 +1390,7 @@ func TestRepoCheckoutExamplesMakeRunFirstUsefulTelemetryExecutesExample(t *testi
 		`"routeTemplate": "/payments/:payment_id"`,
 		`"parentSpanId": "00f067aa0ba902b7"`,
 		`"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"`,
-	} {
-		if !strings.Contains(stdout, needle) {
-			t.Fatalf("first-useful example missing %q in stdout: %s", needle, stdout)
-		}
-	}
-	for _, unsafe := range []string{
+	}, []string{
 		"coupon=private",
 		"card=private",
 		"authorization",
@@ -1403,23 +1398,13 @@ func TestRepoCheckoutExamplesMakeRunFirstUsefulTelemetryExecutesExample(t *testi
 		"headers",
 		"#authorize",
 		"?",
-	} {
-		if strings.Contains(stdout, unsafe) {
-			t.Fatalf("first-useful example leaked unsafe value %q: %s", unsafe, stdout)
-		}
-	}
-	if !strings.Contains(stderr, `"attempts":1`) ||
-		!strings.Contains(stderr, `"events":7`) ||
-		!strings.Contains(stderr, `"ok":true`) ||
-		!strings.Contains(stderr, `"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"`) ||
-		!strings.Contains(stderr, `"status":202`) {
-		t.Fatalf("unexpected stderr: %s", stderr)
-	}
+	})
+	assertText(t, stderr, []string{`"attempts":1`, `"events":7`, `"ok":true`, `"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"`, `"status":202`}, nil)
 }
 
 func TestRepoCheckoutExamplesMakeRunHTTPTraceCorrelationExecutesExample(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, "./examples", "make", "run-http-trace-correlation")
-	for _, needle := range []string{
+	assertText(t, stdout, []string{
 		`"type": "release"`,
 		`"type": "environment"`,
 		`"type": "log"`,
@@ -1432,83 +1417,27 @@ func TestRepoCheckoutExamplesMakeRunHTTPTraceCorrelationExecutesExample(t *testi
 		`"spanId": "b7ad6b7169203331"`,
 		`"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"`,
 		`"source": "slog"`,
-	} {
-		if !strings.Contains(stdout, needle) {
-			t.Fatalf("HTTP trace example missing %q in stdout: %s", needle, stdout)
-		}
-	}
-	for _, unsafe := range []string{
+	}, []string{
 		"coupon=sale",
 		"card",
 		"payload",
 		"#confirm",
 		"?",
-	} {
-		if strings.Contains(stdout, unsafe) {
-			t.Fatalf("HTTP trace example leaked unsafe value %q: %s", unsafe, stdout)
-		}
-	}
-	if !strings.Contains(stderr, `"appLogHasTrace":true`) ||
-		!strings.Contains(stderr, `"attempts":1`) ||
-		!strings.Contains(stderr, `"events":6`) ||
-		!strings.Contains(stderr, `"ok":true`) ||
-		!strings.Contains(stderr, `"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"`) ||
-		!strings.Contains(stderr, `"requestStatus":502`) ||
-		!strings.Contains(stderr, `"status":202`) {
-		t.Fatalf("unexpected stderr: %s", stderr)
-	}
+	})
+	assertText(t, stderr, []string{`"appLogHasTrace":true`, `"attempts":1`, `"events":6`, `"ok":true`, `"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"`, `"requestStatus":502`, `"status":202`}, nil)
 }
 
 func TestRepoCheckoutExamplesMakeRunExecutesSmoke(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, "./examples", "make", "run")
-	if !strings.Contains(stdout, `"type": "release"`) ||
-		!strings.Contains(stdout, `"type": "environment"`) ||
-		!strings.Contains(stdout, `"type": "issue"`) ||
-		!strings.Contains(stdout, `"type": "log"`) ||
-		!strings.Contains(stdout, `"type": "span"`) ||
-		!strings.Contains(stdout, `"type": "action"`) {
-		t.Fatalf("unexpected stdout: %s", stdout)
-	}
-	if !strings.Contains(stderr, `"attempts":1`) ||
-		!strings.Contains(stderr, `"events":6`) ||
-		!strings.Contains(stderr, `"ok":true`) ||
-		!strings.Contains(stderr, `"status":202`) {
-		t.Fatalf("unexpected stderr: %s", stderr)
-	}
+	assertSixEventExample(t, stdout, stderr)
 }
 
 func TestRepoCheckoutExamplesMakeRunReadmeExampleExecutesExample(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, "./examples", "make", "run-readme-example")
-	if !strings.Contains(stdout, `"type": "release"`) ||
-		!strings.Contains(stdout, `"type": "environment"`) ||
-		!strings.Contains(stdout, `"type": "issue"`) ||
-		!strings.Contains(stdout, `"type": "log"`) ||
-		!strings.Contains(stdout, `"type": "span"`) ||
-		!strings.Contains(stdout, `"type": "action"`) {
-		t.Fatalf("unexpected stdout: %s", stdout)
-	}
-	if !strings.Contains(stderr, `"attempts":1`) ||
-		!strings.Contains(stderr, `"events":6`) ||
-		!strings.Contains(stderr, `"ok":true`) ||
-		!strings.Contains(stderr, `"status":202`) {
-		t.Fatalf("unexpected stderr: %s", stderr)
-	}
+	assertSixEventExample(t, stdout, stderr)
 }
 
 func TestRepoCheckoutExamplesMakeRunRealUserSmokeExecutesExample(t *testing.T) {
 	stdout, stderr := runRepoCommand(t, "./examples", "make", "run-real-user-smoke")
-	if !strings.Contains(stdout, `"type": "release"`) ||
-		!strings.Contains(stdout, `"type": "environment"`) ||
-		!strings.Contains(stdout, `"type": "issue"`) ||
-		!strings.Contains(stdout, `"type": "log"`) ||
-		!strings.Contains(stdout, `"type": "span"`) ||
-		!strings.Contains(stdout, `"type": "action"`) {
-		t.Fatalf("unexpected stdout: %s", stdout)
-	}
-	if !strings.Contains(stderr, `"attempts":1`) ||
-		!strings.Contains(stderr, `"events":6`) ||
-		!strings.Contains(stderr, `"ok":true`) ||
-		!strings.Contains(stderr, `"status":202`) {
-		t.Fatalf("unexpected stderr: %s", stderr)
-	}
+	assertSixEventExample(t, stdout, stderr)
 }

@@ -3,7 +3,6 @@ package logbrew
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -17,13 +16,7 @@ import (
 )
 
 func TestTraceContextHelpersMergeActiveTraceMetadata(t *testing.T) {
-	trace, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "B7AD6B7169203331",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trace := testTrace(t, "B7AD6B7169203331")
 	ctx := ContextWithLogBrewTrace(context.Background(), trace)
 
 	logAttributes := LogAttributesWithTrace(ctx, LogAttributes{
@@ -77,16 +70,7 @@ func TestTraceContextHelpersMergeActiveTraceMetadata(t *testing.T) {
 func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
 	client := sampleClient(t)
 	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
-	nowCalls := 0
-	now := func() time.Time {
-		nowCalls++
-		switch nowCalls {
-		case 1:
-			return baseTime
-		default:
-			return baseTime.Add(25 * time.Millisecond)
-		}
-	}
+	now := testNow(25 * time.Millisecond)
 
 	handler, err := NewHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		trace, ok := LogBrewTraceFromContext(r.Context())
@@ -140,29 +124,17 @@ func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
 		t.Fatalf("unexpected status code: %d", recorder.Code)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed struct {
-		Events []struct {
-			Type       string         `json:"type"`
-			Attributes map[string]any `json:"attributes"`
-		} `json:"events"`
-	}
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(parsed.Events), 4; got != want {
+	payload, events := previewEvents(t, client)
+	if got, want := len(events), 4; got != want {
 		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
 	}
-	if got := []string{parsed.Events[0].Type, parsed.Events[1].Type, parsed.Events[2].Type, parsed.Events[3].Type}; !reflect.DeepEqual(got, []string{"log", "issue", "span", "metric"}) {
+	if got := []string{events[0].Type, events[1].Type, events[2].Type, events[3].Type}; !reflect.DeepEqual(got, []string{"log", "issue", "span", "metric"}) {
 		t.Fatalf("unexpected event order: %#v", got)
 	}
-	logMetadata := parsed.Events[0].Attributes["metadata"].(map[string]any)
-	issueMetadata := parsed.Events[1].Attributes["metadata"].(map[string]any)
-	spanMetadata := parsed.Events[2].Attributes["metadata"].(map[string]any)
-	metricMetadata := parsed.Events[3].Attributes["metadata"].(map[string]any)
+	logMetadata := events[0].Attributes["metadata"].(map[string]any)
+	issueMetadata := events[1].Attributes["metadata"].(map[string]any)
+	spanMetadata := events[2].Attributes["metadata"].(map[string]any)
+	metricMetadata := events[3].Attributes["metadata"].(map[string]any)
 	for name, metadata := range map[string]map[string]any{
 		"log":    logMetadata,
 		"issue":  issueMetadata,
@@ -181,21 +153,19 @@ func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
 	if spanMetadata["routeTemplate"] != "/checkout/:cart_id" || spanMetadata["statusCode"] != float64(http.StatusBadGateway) {
 		t.Fatalf("unexpected span metadata: %#v", spanMetadata)
 	}
-	if parsed.Events[2].Attributes["traceId"] != "4bf92f3577b34da6a3ce929d0e0e4736" ||
-		parsed.Events[2].Attributes["spanId"] != "b7ad6b7169203331" ||
-		parsed.Events[2].Attributes["parentSpanId"] != "00f067aa0ba902b7" ||
-		parsed.Events[2].Attributes["status"] != "error" {
-		t.Fatalf("request span is not correlated: %#v", parsed.Events[2].Attributes)
+	if events[2].Attributes["traceId"] != "4bf92f3577b34da6a3ce929d0e0e4736" ||
+		events[2].Attributes["spanId"] != "b7ad6b7169203331" ||
+		events[2].Attributes["parentSpanId"] != "00f067aa0ba902b7" ||
+		events[2].Attributes["status"] != "error" {
+		t.Fatalf("request span is not correlated: %#v", events[2].Attributes)
 	}
-	if parsed.Events[3].Attributes["name"] != "http.server.duration" ||
-		parsed.Events[3].Attributes["description"] != "Duration of one completed server request." ||
-		parsed.Events[3].Attributes["kind"] != "histogram" ||
-		parsed.Events[3].Attributes["unit"] != "ms" {
-		t.Fatalf("unexpected request duration metric: %#v", parsed.Events[3].Attributes)
+	if events[3].Attributes["name"] != "http.server.duration" ||
+		events[3].Attributes["description"] != "Duration of one completed server request." ||
+		events[3].Attributes["kind"] != "histogram" ||
+		events[3].Attributes["unit"] != "ms" {
+		t.Fatalf("unexpected request duration metric: %#v", events[3].Attributes)
 	}
-	if strings.Contains(payload, "coupon=sale") || strings.Contains(payload, "fragment") {
-		t.Fatalf("HTTP trace payload leaked query or fragment: %s", payload)
-	}
+	assertText(t, payload, nil, []string{"coupon=sale", "fragment"})
 }
 
 func TestHTTPHandlerFallsBackWhenTraceparentIsMalformed(t *testing.T) {
@@ -220,32 +190,13 @@ func TestHTTPHandlerFallsBackWhenTraceparentIsMalformed(t *testing.T) {
 	request.Header.Set("traceparent", "malformed-propagation-value")
 	handler.ServeHTTP(httptest.NewRecorder(), request)
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(payload, "malformed-propagation-value") {
-		t.Fatalf("malformed traceparent leaked into payload: %s", payload)
-	}
-	if !strings.Contains(payload, `"spanId": "b7ad6b7169203331"`) ||
-		!strings.Contains(payload, `"name": "POST /checkout/:cart_id"`) {
-		t.Fatalf("expected fallback request span, got: %s", payload)
-	}
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{`"spanId": "b7ad6b7169203331"`, `"name": "POST /checkout/:cart_id"`}, []string{"malformed-propagation-value"})
 }
 
 func TestHTTPHandlerCapturesPanicSpanAndRepanicsWithoutLeakingValue(t *testing.T) {
 	client := sampleClient(t)
-	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
-	nowCalls := 0
-	now := func() time.Time {
-		nowCalls++
-		switch nowCalls {
-		case 1:
-			return baseTime
-		default:
-			return baseTime.Add(17 * time.Millisecond)
-		}
-	}
+	now := testNow(17 * time.Millisecond)
 	handler, err := NewHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := LogBrewTraceFromContext(r.Context()); !ok {
 			t.Fatalf("expected active trace context before panic")
@@ -277,46 +228,17 @@ func TestHTTPHandlerCapturesPanicSpanAndRepanicsWithoutLeakingValue(t *testing.T
 		t.Fatalf("expected original panic value, got %#v", recovered)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(payload, `"id": "go_http_panic_span_1"`) ||
-		!strings.Contains(payload, `"status": "error"`) ||
-		!strings.Contains(payload, `"durationMs": 17`) ||
-		!strings.Contains(payload, `"statusCode": 500`) ||
-		!strings.Contains(payload, `"panic": true`) ||
-		!strings.Contains(payload, `"panicType": "string"`) ||
-		!strings.Contains(payload, `"component": "checkout"`) {
-		t.Fatalf("missing panic span metadata: %s", payload)
-	}
-	for _, unsafe := range []string{"private checkout panic value", "private request body", "coupon=sale", "traceparent"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("panic span leaked %q: %s", unsafe, payload)
-		}
-	}
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{
+		`"id": "go_http_panic_span_1"`, `"status": "error"`, `"durationMs": 17`,
+		`"statusCode": 500`, `"panic": true`, `"panicType": "string"`, `"component": "checkout"`,
+	}, []string{"private checkout panic value", "private request body", "coupon=sale", "traceparent"})
 }
 
 func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 	client := sampleClient(t)
-	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
-	nowCalls := 0
-	now := func() time.Time {
-		nowCalls++
-		switch nowCalls {
-		case 1:
-			return baseTime
-		default:
-			return baseTime.Add(43 * time.Millisecond)
-		}
-	}
-	parentTrace, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	now := testNow(43 * time.Millisecond)
+	parentTrace := testTrace(t, "A7AD6B7169203330")
 	ctx := ContextWithLogBrewTrace(context.Background(), parentTrace)
 	request, err := http.NewRequestWithContext(
 		ctx,
@@ -387,24 +309,7 @@ func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 		t.Fatalf("unexpected active outbound trace: %#v", activeTrace)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed struct {
-		Events []struct {
-			Type       string         `json:"type"`
-			ID         string         `json:"id"`
-			Attributes map[string]any `json:"attributes"`
-		} `json:"events"`
-	}
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(parsed.Events), 1; got != want {
-		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
-	}
-	event := parsed.Events[0]
+	payload, event := previewEvent(t, client)
 	metadata := event.Attributes["metadata"].(map[string]any)
 	if event.Type != "span" ||
 		event.ID != "go_http_client_test_span_1" ||
@@ -423,11 +328,7 @@ func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 		metadata["sampled"] != true {
 		t.Fatalf("unexpected outbound metadata: %#v", metadata)
 	}
-	for _, unsafe := range []string{"coupon=summer", "receipt", "authorization", "traceparent", "spoofed"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("outbound span payload leaked %q: %s", unsafe, payload)
-		}
-	}
+	assertText(t, payload, nil, []string{"coupon=summer", "receipt", "authorization", "traceparent", "spoofed"})
 }
 
 func TestHTTPClientTransportIgnoresLegacyPhaseTimingsAndPreservesCallerTrace(t *testing.T) {
@@ -453,13 +354,7 @@ func TestHTTPClientTransportIgnoresLegacyPhaseTimingsAndPreservesCallerTrace(t *
 		timestamps = timestamps[1:]
 		return current
 	}
-	parentTrace, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	parentTrace := testTrace(t, "A7AD6B7169203330")
 	var callerTraceCalls []string
 	callerTrace := &httptrace.ClientTrace{
 		DNSStart: func(info httptrace.DNSStartInfo) {
@@ -517,54 +412,20 @@ func TestHTTPClientTransportIgnoresLegacyPhaseTimingsAndPreservesCallerTrace(t *
 		t.Fatalf("caller httptrace hooks were not preserved: %#v", callerTraceCalls)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed struct {
-		Events []struct {
-			Attributes map[string]any `json:"attributes"`
-		} `json:"events"`
-	}
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(parsed.Events), 1; got != want {
-		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
-	}
-	attributes := parsed.Events[0].Attributes
+	payload, event := previewEvent(t, client)
+	attributes := event.Attributes
 	metadata := attributes["metadata"].(map[string]any)
 	if attributes["durationMs"] != float64(2) || metadata["host"] != "api.example.test" {
 		t.Fatalf("unexpected phase timing metadata: attributes=%#v metadata=%#v", attributes, metadata)
 	}
-	for _, unsafe := range []string{"dnsMs", "connectMs", "tlsMs", "wroteRequestMs", "timeToFirstByteMs", "connectionReused", "203.0.113.10", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("phase timing span leaked %q: %s", unsafe, payload)
-		}
-	}
+	assertText(t, payload, nil, []string{"dnsMs", "connectMs", "tlsMs", "wroteRequestMs", "timeToFirstByteMs", "connectionReused", "203.0.113.10", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"})
 }
 
 func TestHTTPClientTransportCanFinishSpanOnResponseBodyEOF(t *testing.T) {
 	client := sampleClient(t)
-	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
-	nowCalls := 0
-	now := func() time.Time {
-		nowCalls++
-		switch nowCalls {
-		case 1:
-			return baseTime
-		default:
-			return baseTime.Add(80 * time.Millisecond)
-		}
-	}
+	now := testNow(80 * time.Millisecond)
 
-	parentTrace, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "A7AD6B7169203330",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	parentTrace := testTrace(t, "A7AD6B7169203330")
 	ctx := ContextWithLogBrewTrace(context.Background(), parentTrace)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example.test/payments/123?coupon=summer#receipt", nil)
 	if err != nil {
@@ -612,48 +473,20 @@ func TestHTTPClientTransportCanFinishSpanOnResponseBodyEOF(t *testing.T) {
 		t.Fatalf("response body was not preserved: %q", body)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed struct {
-		Events []struct {
-			Attributes map[string]any `json:"attributes"`
-		} `json:"events"`
-	}
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(parsed.Events), 1; got != want {
-		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
-	}
-	attributes := parsed.Events[0].Attributes
+	payload, event := previewEvent(t, client)
+	attributes := event.Attributes
 	metadata := attributes["metadata"].(map[string]any)
 	if attributes["durationMs"] != float64(80) ||
 		attributes["status"] != "ok" ||
 		metadata["statusCode"] != float64(http.StatusOK) {
 		t.Fatalf("unexpected body completion span: attributes=%#v metadata=%#v", attributes, metadata)
 	}
-	for _, unsafe := range []string{"private response body", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"} {
-		if strings.Contains(payload, unsafe) {
-			t.Fatalf("body completion span leaked %q: %s", unsafe, payload)
-		}
-	}
+	assertText(t, payload, nil, []string{"private response body", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"})
 }
 
 func TestHTTPClientTransportCanFinishSpanOnResponseBodyClose(t *testing.T) {
 	client := sampleClient(t)
-	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
-	nowCalls := 0
-	now := func() time.Time {
-		nowCalls++
-		switch nowCalls {
-		case 1:
-			return baseTime
-		default:
-			return baseTime.Add(35 * time.Millisecond)
-		}
-	}
+	now := testNow(35 * time.Millisecond)
 
 	request := mustHTTPClientRequest(t, http.MethodGet, "https://api.example.test/payments/123", "a7ad6b7169203330")
 	transport, err := NewHTTPClientTransport(HTTPClientTransportConfig{
@@ -691,15 +524,8 @@ func TestHTTPClientTransportCanFinishSpanOnResponseBodyClose(t *testing.T) {
 		t.Fatalf("expected one span after close, queued %d events", got)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(payload, "responseBodyCompletion") ||
-		!strings.Contains(payload, `"durationMs": 35`) ||
-		strings.Contains(payload, "body not read") {
-		t.Fatalf("unexpected close-completion span payload: %s", payload)
-	}
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{`"durationMs": 35`}, []string{"responseBodyCompletion", "body not read"})
 }
 
 func TestHTTPClientTransportPreservesHTTPFailuresAndCaptureFailures(t *testing.T) {
@@ -728,16 +554,8 @@ func TestHTTPClientTransportPreservesHTTPFailuresAndCaptureFailures(t *testing.T
 		t.Fatalf("expected original transport error, got response=%#v error=%v", response, err)
 	}
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(payload, `"status": "error"`) ||
-		!strings.Contains(payload, `"errorType": "transport"`) ||
-		strings.Contains(payload, "coupon=summer") ||
-		strings.Contains(payload, "temporary outage") {
-		t.Fatalf("unexpected error span payload: %s", payload)
-	}
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{`"status": "error"`, `"errorType": "transport"`}, []string{"coupon=summer", "temporary outage"})
 
 	closedClient := sampleClient(t)
 	if _, err := closedClient.Shutdown(AlwaysAcceptTransport()); err != nil {
@@ -806,16 +624,8 @@ func TestHTTPClientTransportMarksHTTPClientFailureStatusAsError(t *testing.T) {
 	}
 	defer response.Body.Close()
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(payload, `"status": "error"`) ||
-		!strings.Contains(payload, `"statusCode": 429`) ||
-		strings.Contains(payload, "debug=true") ||
-		strings.Contains(payload, "quota exceeded") {
-		t.Fatalf("unexpected HTTP client status error payload: %s", payload)
-	}
+	payload := previewPayload(t, client)
+	assertText(t, payload, []string{`"status": "error"`, `"statusCode": 429`}, []string{"debug=true", "quota exceeded"})
 }
 
 func TestHTTPClientTransportPassesThroughWhenActiveTraceIsInvalid(t *testing.T) {
@@ -872,13 +682,7 @@ func TestHTTPClientTransportPassesThroughWhenActiveTraceIsInvalid(t *testing.T) 
 
 func TestSlogHandlerCorrelatesActiveTraceAndPreservesWrappedHandler(t *testing.T) {
 	client := sampleClient(t)
-	trace, err := NewTraceContext(TraceContextInput{
-		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-		SpanID:      "B7AD6B7169203331",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trace := testTrace(t, "B7AD6B7169203331")
 	ctx := ContextWithLogBrewTrace(context.Background(), trace)
 	var appLog bytes.Buffer
 	handler, err := NewSlogHandler(SlogHandlerConfig{
@@ -896,29 +700,14 @@ func TestSlogHandlerCorrelatesActiveTraceAndPreservesWrappedHandler(t *testing.T
 	logger := slog.New(handler)
 	logger.WarnContext(ctx, "payment retry", slog.String("cartId", "cart_123"), slog.Any("nested", map[string]any{"drop": true}))
 
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed struct {
-		Events []struct {
-			Type       string         `json:"type"`
-			Attributes map[string]any `json:"attributes"`
-		} `json:"events"`
-	}
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(parsed.Events), 1; got != want {
-		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
-	}
-	attributes := parsed.Events[0].Attributes
+	_, event := previewEvent(t, client)
+	attributes := event.Attributes
 	metadata := attributes["metadata"].(map[string]any)
-	if parsed.Events[0].Type != "log" ||
+	if event.Type != "log" ||
 		attributes["message"] != "payment retry" ||
 		attributes["level"] != "warning" ||
 		attributes["logger"] != "checkout-service" {
-		t.Fatalf("unexpected slog event: %#v", parsed.Events[0])
+		t.Fatalf("unexpected slog event: %#v", event)
 	}
 	if metadata["source"] != "slog" ||
 		metadata["cartId"] != "cart_123" ||
