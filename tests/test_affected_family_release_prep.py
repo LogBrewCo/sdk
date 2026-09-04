@@ -57,7 +57,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((project["name"], project["version"]), expected)
 
         rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
-        self.assertEqual(rust["package"]["version"], "0.1.4")
+        self.assertEqual(rust["package"]["version"], "0.1.5")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
         self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.7")
@@ -252,7 +252,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
-        self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.4")
+        self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.5")
         self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.14")
         self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.10")
         self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.7")
