@@ -233,7 +233,7 @@ public final class LogBrewOperationTracing {
             try {
                 links.add(SpanLinkSummary
                     .fromTraceparent(link.traceparent)
-                    .metadata(safeOperationMetadata(link.metadata)));
+                    .metadata(Validation.copySafeDependencyMetadata(link.metadata)));
             } catch (SdkException error) {
                 reportCaptureError(config.onError, error);
             }
@@ -256,6 +256,7 @@ public final class LogBrewOperationTracing {
         Consumer<SdkException> onError
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>(baseMetadata);
+        metadata.put("operation", spanName.substring(spanName.indexOf(':') + 1));
         metadata.put("source", source);
         metadata.put("sampled", Boolean.valueOf(trace.sampled()));
         if (operationError != null) {
@@ -287,7 +288,7 @@ public final class LogBrewOperationTracing {
     }
 
     private static Map<String, Object> databaseMetadata(String operationName, DatabaseOperation config) {
-        Map<String, Object> metadata = safeOperationMetadata(config.metadata);
+        Map<String, Object> metadata = Validation.copySafeDependencyMetadata(config.metadata);
         addString(metadata, "dbSystem", config.system);
         addString(metadata, "dbOperation", operationName);
         addString(metadata, "dbOperationKind", config.operationKind);
@@ -298,7 +299,7 @@ public final class LogBrewOperationTracing {
     }
 
     private static Map<String, Object> cacheMetadata(String operationName, CacheOperation config) {
-        Map<String, Object> metadata = safeOperationMetadata(config.metadata);
+        Map<String, Object> metadata = Validation.copySafeDependencyMetadata(config.metadata);
         addString(metadata, "cacheSystem", config.system);
         addString(metadata, "cacheOperation", operationName);
         addString(metadata, "cacheOperationKind", config.operationKind);
@@ -316,7 +317,7 @@ public final class LogBrewOperationTracing {
         QueueOperation config,
         Instant startedAt
     ) {
-        Map<String, Object> metadata = safeOperationMetadata(config.metadata);
+        Map<String, Object> metadata = Validation.copySafeDependencyMetadata(config.metadata);
         addString(metadata, "queueSystem", config.system);
         addString(metadata, "queueOperation", operationName);
         addString(metadata, "queueOperationKind", config.operationKind);
@@ -379,10 +380,6 @@ public final class LogBrewOperationTracing {
             )));
         }
         return safeEvents;
-    }
-
-    private static Map<String, Object> safeOperationMetadata(Map<String, ?> input) {
-        return Validation.copySafeDependencyMetadata(input);
     }
 
     private static void addString(Map<String, Object> metadata, String key, String value) {

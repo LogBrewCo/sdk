@@ -226,6 +226,7 @@ public final class LogBrewOperationTracingTest {
         String payload = client.previewJson();
         assertContains(payload, "\"id\": \"java_queue_header_span_b7ad6b7169203337\"");
         assertContains(payload, "\"name\": \"queue:publish invoice\"");
+        assertContains(payload, "\"operation\": \"publish invoice\"");
         assertContains(payload, "\"queueSystem\": \"kafka\"");
         assertContains(payload, "\"queueOperationKind\": \"publish\"");
         assertContains(payload, "\"queueName\": \"billing-events\"");
