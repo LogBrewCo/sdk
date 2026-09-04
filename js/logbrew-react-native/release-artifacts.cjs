@@ -169,9 +169,8 @@ function artifactForBundle(report, relativeBundlePath) {
 }
 
 function sourceWithSourceMappingUrl(source, reference) {
-  const comment = `//# sourceMappingURL=${reference}`;
   const sourceWithoutMapComments = source.replace(SOURCE_MAPPING_COMMENT_RE, "").replace(/[ \t\r\n]*$/u, "");
-  return `${sourceWithoutMapComments}${sourceWithoutMapComments === "" ? "" : "\n"}${comment}\n`;
+  return `${sourceWithoutMapComments}${sourceWithoutMapComments === "" ? "" : "\n"}//# sourceMappingURL=${reference}\n`;
 }
 
 function applyExplicitSourceMapReference(bundlePath, sourcemapPath) {
