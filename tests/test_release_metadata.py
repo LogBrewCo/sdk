@@ -646,7 +646,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 """
 [package]
 name = "logbrew"
-version = "0.1.6"
+version = "0.1.7"
 license = "MIT"
 repository = "https://github.com/LogBrewCo/sdk"
 readme = "README.md"

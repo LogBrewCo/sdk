@@ -6,16 +6,11 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
-UPSTREAM_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
-UPSTREAM_PARENT_SPAN_ID = "00f067aa0ba902b7"
-INCOMING_TRACEPARENT = (
-    f"00-{UPSTREAM_TRACE_ID}-{UPSTREAM_PARENT_SPAN_ID}-01"
-)
-
-
-def load_json(path: str) -> object:
-    return json.loads(Path(path).read_text())
+TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
+UPSTREAM_SPAN_ID = "00f067aa0ba902b7"
+TRACEPARENT = f"00-{TRACE_ID}-{UPSTREAM_SPAN_ID}-01"
 
 
 def require(condition: bool, message: str) -> None:
@@ -23,99 +18,114 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(message)
 
 
+def expect(value: Any, **fields: Any) -> None:
+    for path, expected in fields.items():
+        actual = value
+        for part in path.split("__"):
+            require(isinstance(actual, dict) and part in actual, f"missing {path}")
+            actual = actual[part]
+        require(actual == expected, f"unexpected {path}: {actual!r}")
+
+
+def expect_trace(attributes: dict[str, Any], span_id: str, parent_id: str | None) -> None:
+    flat = attributes if "traceId" in attributes else attributes["metadata"]
+    expect(flat, traceId=TRACE_ID, spanId=span_id)
+    expect(attributes, context__trace__traceId=TRACE_ID, context__trace__spanId=span_id)
+    for value in (flat, attributes["context"]["trace"]):
+        require(value.get("parentSpanId") == parent_id, "unexpected parent span")
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         raise SystemExit("usage: check_rust_tracing_payload.py STDOUT_JSON STDERR_JSON")
 
-    payload = load_json(sys.argv[1])
-    stderr = load_json(sys.argv[2])
+    payload = json.loads(Path(sys.argv[1]).read_text())
+    stderr = json.loads(Path(sys.argv[2]).read_text())
     require(isinstance(payload, dict), "stdout payload must be an object")
     events = payload.get("events")
     require(isinstance(events, list), "stdout events must be a list")
     require(
         [event.get("type") for event in events]
-        == ["release", "environment", "log", "log", "span", "span"],
+        == ["release", "environment", "log", "log", "issue", "span", "span"],
         "unexpected events",
     )
 
     log = events[2]["attributes"]
-    require(log["message"] == "checkout tracing event accepted", "unexpected tracing log message")
-    require(log["level"] == "info", "tracing info should normalize to canonical info")
-    require(log["logger"] == "checkout", "tracing logger should use app-owned logger override")
-    metadata = log["metadata"]
-    require(metadata["tracingTarget"] == "checkout", "missing tracing target")
-    require(metadata["tracingLevel"] == "INFO", "missing original tracing level")
-    require(metadata["routeTemplate"] == "/checkout/{cart_id}", "routeTemplate was not sanitized")
-    require(metadata["statusCode"] == 202, "missing status code")
-    require(metadata["sampled"] is True, "missing sampled flag")
-    require(metadata["cartTier"] == "gold", "missing allowed app field")
-    require(metadata["traceId"] == UPSTREAM_TRACE_ID, "missing log trace correlation")
-    require(metadata["spanId"] == "0000000000000001", "missing log span correlation")
-    require(
-        metadata["parentSpanId"] == UPSTREAM_PARENT_SPAN_ID,
-        "missing upstream parent span correlation",
+    expect(
+        log,
+        message="checkout tracing event accepted",
+        level="info",
+        logger="checkout",
+        metadata__tracingTarget="checkout",
+        metadata__tracingLevel="INFO",
+        metadata__routeTemplate="/checkout/{cart_id}",
+        metadata__statusCode=202,
+        metadata__sampled=True,
+        metadata__cartTier="gold",
+        context__resource__service__name="checkout-service",
+        context__resource__framework__name="tracing",
     )
-    require("unsafeDebug" not in metadata, "non-primitive debug field should not be captured")
-    context = log.get("context", {})
-    require(context.get("schemaVersion") == 1, "tracing log is missing typed context")
-    require(context.get("resource", {}).get("service", {}).get("name") == "checkout-service", "tracing log is missing typed service")
-    require(context.get("resource", {}).get("framework", {}).get("name") == "tracing", "tracing log is missing typed framework")
-    require(context.get("trace", {}).get("traceId") == UPSTREAM_TRACE_ID, "tracing log typed trace id is wrong")
-    require(context.get("trace", {}).get("spanId") == "0000000000000001", "tracing log typed span id is wrong")
-    require(context.get("trace", {}).get("parentSpanId") == UPSTREAM_PARENT_SPAN_ID, "tracing log typed parent is wrong")
-    require(context.get("trace", {}).get("sampled") is True, "tracing log typed sampled state is missing")
+    expect_trace(log, "0000000000000001", UPSTREAM_SPAN_ID)
+    require("unsafeDebug" not in log["metadata"], "captured non-primitive debug field")
 
     error_log = events[3]["attributes"]
-    require(error_log["message"] == "cart validation failed", "unexpected tracing error message")
-    require(error_log["level"] == "error", "tracing error should stay canonical error")
-    require(error_log["metadata"]["traceId"] == UPSTREAM_TRACE_ID, "missing error trace correlation")
-    require(error_log["metadata"]["spanId"] == "0000000000000002", "missing error span correlation")
-    require(error_log["metadata"]["parentSpanId"] == "0000000000000001", "missing error parent span correlation")
-    require(error_log["metadata"]["sampled"] is True, "missing inherited sampled flag")
+    expect(error_log, message="cart validation failed", level="error", metadata__sampled=True)
+    expect_trace(error_log, "0000000000000002", "0000000000000001")
 
-    child_span = events[4]["attributes"]
-    require(child_span["name"] == "checkout.validate", "unexpected child span name")
-    require(child_span["traceId"] == UPSTREAM_TRACE_ID, "unexpected child trace id")
-    require(child_span["spanId"] == "0000000000000002", "unexpected child span id")
-    require(child_span["parentSpanId"] == "0000000000000001", "unexpected child parent span id")
-    require(child_span["status"] == "error", "error event should mark current child span")
-    require(child_span["durationMs"] >= 0, "child span duration should be non-negative")
-    require(child_span["metadata"]["sampled"] is True, "missing child sampled metadata")
-    require(child_span["metadata"]["tracingSpanEventCount"] == 1, "missing child span event count")
-    require(child_span["metadata"]["tracingSpanErrorEventCount"] == 1, "missing child span error count")
-    require(child_span["metadata"]["tracingLastErrorLevel"] == "ERROR", "missing child last error level")
-    require(child_span["metadata"]["tracingLastErrorTarget"] == "checkout", "missing child last error target")
-    require(child_span.get("context", {}).get("trace", {}).get("traceId") == child_span["traceId"], "child span typed trace id is wrong")
-    require(child_span.get("context", {}).get("trace", {}).get("spanId") == child_span["spanId"], "child span typed span id is wrong")
-    require(child_span.get("context", {}).get("resource", {}).get("framework", {}).get("name") == "tracing", "child span is missing typed tracing framework")
-    require(
-        "cart validation failed" not in json.dumps(child_span["metadata"]),
-        "span metadata should not duplicate error messages",
+    issue = events[4]["attributes"]
+    expect(
+        issue,
+        title="cart validation failed",
+        message="cart validation failed",
+        level="error",
+        metadata__mechanism="tracing.event",
+        metadata__handled=True,
+        metadata__sourceFileName="main.rs",
+        metadata__sourceModule="tracing_app",
+        metadata__issueGroupingSource="tracing_callsite",
+        metadata__issueEvidenceCompleteness="partial",
+        metadata__issueMissingEvidence="exception,stackFrames",
+        metadata__issueRedactedEvidence="unallowlistedEventFields",
     )
+    expect_trace(issue, "0000000000000002", "0000000000000001")
+    grouping_key = issue["metadata"]["issueGroupingKey"]
+    require(grouping_key.startswith("rust.tracing.event:checkout:main.rs:"), "bad grouping key")
+    require(isinstance(issue["metadata"].get("sourceLineNumber"), int), "missing source line")
+    require("stackFrames" not in issue and "exception" not in issue, "invented issue evidence")
 
-    root_span = events[5]["attributes"]
-    require(root_span["name"] == "checkout.request", "unexpected root span name")
-    require(root_span["traceId"] == UPSTREAM_TRACE_ID, "unexpected root trace id")
-    require(root_span["spanId"] == "0000000000000001", "unexpected root span id")
-    require(
-        root_span["parentSpanId"] == UPSTREAM_PARENT_SPAN_ID,
-        "unexpected root upstream parent span id",
+    child = events[5]["attributes"]
+    expect(
+        child,
+        name="checkout.validate",
+        status="error",
+        metadata__sampled=True,
+        metadata__tracingSpanEventCount=1,
+        metadata__tracingSpanErrorEventCount=1,
+        metadata__tracingLastErrorLevel="ERROR",
+        metadata__tracingLastErrorTarget="checkout",
+        context__resource__framework__name="tracing",
     )
-    require(root_span["status"] == "ok", "root span should not inherit child error status")
-    require(root_span["durationMs"] >= 0, "root span duration should be non-negative")
-    span_metadata = root_span["metadata"]
-    require(span_metadata["routeTemplate"] == "/checkout/{cart_id}", "span routeTemplate was not sanitized")
-    require(span_metadata["cartTier"] == "gold", "missing span app field")
-    require(span_metadata["sampled"] is True, "missing root sampled metadata")
-    require(span_metadata["tracingSpanEventCount"] == 1, "missing root span event count")
-    require("tracingSpanErrorEventCount" not in span_metadata, "root span should not inherit child errors")
-    require("traceparent" not in span_metadata, "raw traceparent should not be captured")
-    require("unsafeDebug" not in span_metadata, "span non-primitive debug field should not be captured")
-    blocked_header_field = "auth" + "orization"
-    require(blocked_header_field not in span_metadata, "span should not capture unallowlisted sensitive fields")
+    expect_trace(child, "0000000000000002", "0000000000000001")
+    require(child["durationMs"] >= 0, "child span duration must be non-negative")
+    require("cart validation failed" not in json.dumps(child["metadata"]), "message leaked to span")
+
+    root = events[6]["attributes"]
+    expect(
+        root,
+        name="checkout.request",
+        status="ok",
+        metadata__routeTemplate="/checkout/{cart_id}",
+        metadata__cartTier="gold",
+        metadata__sampled=True,
+        metadata__tracingSpanEventCount=1,
+    )
+    expect_trace(root, "0000000000000001", UPSTREAM_SPAN_ID)
+    require(root["durationMs"] >= 0, "root span duration must be non-negative")
+    for key in ("tracingSpanErrorEventCount", "traceparent", "unsafeDebug", "authorization"):
+        require(key not in root["metadata"], f"unsafe root metadata: {key}")
 
     text = Path(sys.argv[1]).read_text().lower()
-    for forbidden in [
+    for forbidden in (
         "coupon=sample",
         "#review",
         "authorization",
@@ -123,15 +133,11 @@ def main() -> int:
         "requestbody",
         "card=sample",
         "debug-value",
-        INCOMING_TRACEPARENT,
+        TRACEPARENT,
         "traceparent",
-    ]:
+    ):
         require(forbidden not in text, f"unsafe text leaked: {forbidden}")
-
-    require(stderr["ok"] is True, "stderr ok must be true")
-    require(stderr["status"] == 202, "transport status must be 202")
-    require(stderr["attempts"] == 1, "transport attempts must be 1")
-    require(stderr["events"] == 6, "stderr event count must be 6")
+    require(stderr == {"ok": True, "status": 202, "attempts": 1, "events": 7}, "bad receipt")
     print("ok")
     return 0
 

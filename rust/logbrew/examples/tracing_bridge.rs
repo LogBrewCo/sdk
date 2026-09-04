@@ -40,6 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let layer =
         LogBrewTracingLayer::new(Arc::clone(&client), || "2026-06-02T10:00:02Z".to_string())
             .with_span_events()
+            .with_error_issues()
             .with_allowed_fields([
                 "routeTemplate",
                 "statusCode",
@@ -85,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut transport = RecordingTransport::always_accept();
     let response = client.shutdown(&mut transport)?;
     eprintln!(
-        "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":6}}",
+        "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":7}}",
         response.status_code, response.attempts
     );
     Ok(())

@@ -841,7 +841,7 @@ fn require_coordinate(label: &str, value: u32) -> Result<u32, SdkError> {
     Ok(value)
 }
 
-fn sanitize_filename(value: &str) -> Result<String, SdkError> {
+pub(crate) fn sanitize_filename(value: &str) -> Result<String, SdkError> {
     let mut end = value.len();
     if let Some(index) = value.find('?') {
         end = end.min(index);

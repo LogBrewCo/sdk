@@ -732,7 +732,7 @@ Attach the fairings with `rocket::build().manage(app_state).attach(logbrew_reque
 
 ## Tracing Bridge
 
-For Rust services that already use the `tracing` ecosystem, enable the optional bridge to convert app log events into LogBrew log events without replacing your subscriber stack or capturing arbitrary structured fields by default. Closed `tracing` spans are only converted when your app explicitly calls `with_span_events()`.
+For Rust services that already use the `tracing` ecosystem, enable the optional bridge to convert app log events into LogBrew log events without replacing your subscriber stack or capturing arbitrary structured fields by default. Closed spans and error-level Issues remain separate opt-ins.
 
 ```bash
 cargo add logbrew --features tracing
@@ -767,6 +767,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "2026-06-02T10:00:02Z".to_string()
     })
     .with_span_events()
+    .with_error_issues()
     .with_allowed_fields(["routeTemplate", "statusCode", "sampled"])
     .with_logger("checkout");
 
@@ -795,7 +796,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. Every converted log and span carries typed `tracing` framework identity plus configured service/deployment context. Work inside a span also carries exact typed trace, span, parent, and sampled identity, while the existing primitive correlation fields remain for wire compatibility. A configured fallback trace applies only outside a captured span and cannot replace that span's identity. The layer records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. With `with_span_events()`, the layer continues a valid `traceparent` or `trace_parent` field on a root span, generates W3C-shaped child span IDs, records parent/child links, marks the current span as `error` when an error-level event is emitted inside it, and adds privacy-bounded event summaries such as `tracingSpanEventCount`, `tracingSpanErrorEventCount`, `tracingLastErrorLevel`, and `tracingLastErrorTarget` to the closed span. Malformed trace context is ignored non-fatally and the raw propagation field is not emitted as metadata. Span event summaries intentionally do not copy error messages, stacks, payloads, headers, or arbitrary event fields. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
+`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. Every converted signal carries typed `tracing` framework identity plus configured service/deployment context. Work inside a span also carries exact typed trace, span, parent, and sampled identity, while the existing primitive correlation fields remain for wire compatibility. A configured fallback trace applies only outside a captured span and cannot replace that span's identity. The layer records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments.
+
+`with_error_issues()` keeps each error Log and also creates one message-based Issue at the same timestamp and trace/span. The Issue groups by static target plus callsite, includes the basename, exact line, and module when `tracing` provides them, and reports exception and stack frames as missing because a `tracing::Event` does not expose a concrete Rust error or a source column. It never invents that evidence or formats an `error` field. Leave it off when another integration already owns the same failure.
+
+With `with_span_events()`, the layer continues a valid `traceparent` or `trace_parent` field on a root span, generates W3C-shaped child span IDs, records parent/child links, marks the current span as `error` when an error-level event is emitted inside it, and adds privacy-bounded event summaries such as `tracingSpanEventCount`, `tracingSpanErrorEventCount`, `tracingLastErrorLevel`, and `tracingLastErrorTarget` to the closed span. Malformed trace context is ignored non-fatally and the raw propagation field is not emitted as metadata. Span event summaries intentionally do not copy error messages, stacks, payloads, headers, or arbitrary event fields. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
 
 If your service already installs `tracing-opentelemetry`, enable `logbrew`'s `tracing-opentelemetry` feature and call `opentelemetry_span_context_from_current_tracing_span()` inside an entered span. The helper returns `None` when no valid OTel span is active; otherwise pass the copied context to `Traceparent::span_attributes_from_opentelemetry_context(...)` or `Traceparent::create_headers_from_opentelemetry_context(...)`. This is an opt-in copy bridge, not a LogBrew OpenTelemetry exporter or processor, and it does not read tracestate, baggage, span attributes, event arrays, links, payloads, headers, or raw URLs.
 

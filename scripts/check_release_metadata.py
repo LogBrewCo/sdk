@@ -18,7 +18,7 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_pac
 
 
 PUBLIC_VERSION = "0.1.0"
-RUST_VERSION = "0.1.6"
+RUST_VERSION = "0.1.7"
 RUBYGEMS_VERSION = "0.1.14"
 PACKAGIST_VERSION = "0.1.10"
 DOTNET_VERSION = "0.1.7"
