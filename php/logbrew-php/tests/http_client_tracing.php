@@ -32,13 +32,6 @@ final class HttpTracingTestClient implements ClientInterface
     }
 }
 
-function httpTracingAssert(bool $condition, string $message): void
-{
-    if (!$condition) {
-        throw new RuntimeException($message);
-    }
-}
-
 function httpTracingClient(): LogBrewClient
 {
     return LogBrewClient::create('lb_test_http_tracing', 'logbrew-php', '0.1.0');
@@ -47,38 +40,10 @@ function httpTracingClient(): LogBrewClient
 /** @return list<array<string, mixed>> */
 function httpTracingEvents(LogBrewClient $client): array
 {
-    $payload = json_decode($client->previewJson(), true, 512, JSON_THROW_ON_ERROR);
-    if (!is_array($payload)) {
-        throw new RuntimeException('expected HTTP tracing payload');
-    }
-    $events = $payload['events'] ?? null;
-    if (!is_array($events)) {
-        throw new RuntimeException('expected HTTP tracing events');
-    }
-
-    $typed = [];
-    foreach ($events as $event) {
-        if (!is_array($event)) {
-            throw new RuntimeException('expected HTTP tracing event object');
-        }
-        $typed[] = httpTracingStringMap($event, 'expected HTTP tracing event string keys');
-    }
-
-    return $typed;
-}
-
-/**
- * @param array<string, mixed> $event
- * @return array<string, mixed>
- */
-function httpTracingAttributes(array $event): array
-{
-    $attributes = $event['attributes'] ?? null;
-    if (!is_array($attributes)) {
-        throw new RuntimeException('expected HTTP tracing span attributes');
-    }
-
-    return httpTracingStringMap($attributes, 'expected HTTP tracing attribute string keys');
+    return testEvents(
+        testStringMap(json_decode($client->previewJson(), true, 512, JSON_THROW_ON_ERROR), 'HTTP tracing payload'),
+        'HTTP tracing events'
+    );
 }
 
 /**
@@ -87,29 +52,7 @@ function httpTracingAttributes(array $event): array
  */
 function httpTracingMetadata(array $attributes): array
 {
-    $metadata = $attributes['metadata'] ?? null;
-    if (!is_array($metadata)) {
-        throw new RuntimeException('expected HTTP tracing span metadata');
-    }
-
-    return httpTracingStringMap($metadata, 'expected HTTP tracing metadata string keys');
-}
-
-/**
- * @param array<mixed, mixed> $values
- * @return array<string, mixed>
- */
-function httpTracingStringMap(array $values, string $message): array
-{
-    $mapped = [];
-    foreach ($values as $key => $value) {
-        if (!is_string($key)) {
-            throw new RuntimeException($message);
-        }
-        $mapped[$key] = $value;
-    }
-
-    return $mapped;
+    return testStringMap($attributes['metadata'] ?? null, 'HTTP tracing metadata');
 }
 
 function httpTracingParent(string $spanId): LogBrewTraceContext
@@ -157,11 +100,11 @@ function httpTracingTests(): array
                 throw new RuntimeException('expected Composer dependency sections');
             }
             foreach (['guzzlehttp/promises', 'psr/http-client', 'psr/http-message'] as $optional) {
-                httpTracingAssert(!array_key_exists($optional, $requires), 'expected optional HTTP dependency outside require');
+                assertTrue(!array_key_exists($optional, $requires), 'expected optional HTTP dependency outside require');
             }
-            httpTracingAssert(array_key_exists('guzzlehttp/guzzle', $devRequires), 'expected Guzzle test dependency');
+            assertTrue(array_key_exists('guzzlehttp/guzzle', $devRequires), 'expected Guzzle test dependency');
             foreach (['guzzlehttp/guzzle', 'psr/http-client', 'psr/http-message'] as $suggested) {
-                httpTracingAssert(array_key_exists($suggested, $suggests), 'expected optional HTTP dependency suggestion');
+                assertTrue(array_key_exists($suggested, $suggests), 'expected optional HTTP dependency suggestion');
             }
         },
 
@@ -192,27 +135,27 @@ function httpTracingTests(): array
             $scope = LogBrewTrace::activate($parent);
             try {
                 $result = $traced->sendRequest($request);
-                httpTracingAssert(LogBrewTrace::current() === $parent, 'expected PSR-18 parent restoration');
+                assertTrue(LogBrewTrace::current() === $parent, 'expected PSR-18 parent restoration');
             } finally {
                 $scope->close();
             }
 
-            httpTracingAssert($result === $response, 'expected exact PSR-18 response identity');
+            assertTrue($result === $response, 'expected exact PSR-18 response identity');
             if (!$sentRequest instanceof RequestInterface || !$activeDuringSend instanceof LogBrewTraceContext) {
                 throw new RuntimeException('expected traced PSR-18 delegate call');
             }
-            httpTracingAssert($activeDuringSend->parentSpanId === $parent->spanId, 'expected outbound child parent');
-            httpTracingAssert($sentRequest->getHeaderLine('traceparent') === $activeDuringSend->traceparent(), 'expected exact child traceparent');
-            httpTracingAssert($request->getHeaderLine('traceparent') !== $sentRequest->getHeaderLine('traceparent'), 'expected immutable traceparent replacement');
+            assertTrue($activeDuringSend->parentSpanId === $parent->spanId, 'expected outbound child parent');
+            assertTrue($sentRequest->getHeaderLine('traceparent') === $activeDuringSend->traceparent(), 'expected exact child traceparent');
+            assertTrue($request->getHeaderLine('traceparent') !== $sentRequest->getHeaderLine('traceparent'), 'expected immutable traceparent replacement');
 
             $events = httpTracingEvents($client);
-            httpTracingAssert(count($events) === 1, 'expected one PSR-18 span');
-            $attributes = httpTracingAttributes($events[0]);
+            assertTrue(count($events) === 1, 'expected one PSR-18 span');
+            $attributes = testAttributes($events[0]);
             $metadata = httpTracingMetadata($attributes);
-            httpTracingAssert(($attributes['traceId'] ?? null) === $parent->traceId, 'expected matching trace id');
-            httpTracingAssert(($attributes['parentSpanId'] ?? null) === $parent->spanId, 'expected matching parent span id');
-            httpTracingAssert(($attributes['status'] ?? null) === 'ok', 'expected successful PSR-18 span');
-            httpTracingAssert(
+            assertTrue(($attributes['traceId'] ?? null) === $parent->traceId, 'expected matching trace id');
+            assertTrue(($attributes['parentSpanId'] ?? null) === $parent->spanId, 'expected matching parent span id');
+            assertTrue(($attributes['status'] ?? null) === 'ok', 'expected successful PSR-18 span');
+            assertTrue(
                 $metadata === [
                     'method' => 'POST',
                     'host' => 'example.com',
@@ -224,12 +167,12 @@ function httpTracingTests(): array
             );
             $preview = $client->previewJson();
             foreach (['/private/path', 'auth=do-not-record', 'fragment', 'Bearer do-not-record', 'body-do-not-record', 'tenant=do-not-record', 'vendor=do-not-record'] as $sensitive) {
-                httpTracingAssert(!str_contains($preview, $sensitive), 'expected sensitive outbound data omission');
+                assertTrue(!str_contains($preview, $sensitive), 'expected sensitive outbound data omission');
             }
         },
 
         'PSR-18 leaves the request untouched when no parent is active' => static function (): void {
-            httpTracingAssert(LogBrewTrace::current() === null, 'expected no active trace before pass-through test');
+            assertTrue(LogBrewTrace::current() === null, 'expected no active trace before pass-through test');
             $client = httpTracingClient();
             $captureErrors = 0;
             $active = null;
@@ -253,14 +196,14 @@ function httpTracingTests(): array
                 }
             )->sendRequest($request);
 
-            httpTracingAssert($sent === $request, 'expected exact PSR-18 request pass-through');
-            httpTracingAssert($active === null && LogBrewTrace::current() === null, 'expected no PSR-18 trace activation');
-            httpTracingAssert(count(httpTracingEvents($client)) === 0, 'expected no PSR-18 span without parent');
-            httpTracingAssert($captureErrors === 0, 'expected no PSR-18 capture callback without parent');
+            assertTrue($sent === $request, 'expected exact PSR-18 request pass-through');
+            assertTrue($active === null && LogBrewTrace::current() === null, 'expected no PSR-18 trace activation');
+            assertTrue(count(httpTracingEvents($client)) === 0, 'expected no PSR-18 span without parent');
+            assertTrue($captureErrors === 0, 'expected no PSR-18 capture callback without parent');
         },
 
         'Guzzle leaves the request untouched when no parent is active' => static function (): void {
-            httpTracingAssert(LogBrewTrace::current() === null, 'expected no active trace before Guzzle pass-through test');
+            assertTrue(LogBrewTrace::current() === null, 'expected no active trace before Guzzle pass-through test');
             $client = httpTracingClient();
             $captureErrors = 0;
             $active = null;
@@ -284,10 +227,10 @@ function httpTracingTests(): array
 
             $middleware($handler)($request, [])->wait();
 
-            httpTracingAssert($sent === $request, 'expected exact Guzzle request pass-through');
-            httpTracingAssert($active === null && LogBrewTrace::current() === null, 'expected no Guzzle trace activation');
-            httpTracingAssert(count(httpTracingEvents($client)) === 0, 'expected no Guzzle span without parent');
-            httpTracingAssert($captureErrors === 0, 'expected no Guzzle capture callback without parent');
+            assertTrue($sent === $request, 'expected exact Guzzle request pass-through');
+            assertTrue($active === null && LogBrewTrace::current() === null, 'expected no Guzzle trace activation');
+            assertTrue(count(httpTracingEvents($client)) === 0, 'expected no Guzzle span without parent');
+            assertTrue($captureErrors === 0, 'expected no Guzzle capture callback without parent');
         },
 
         'PSR-18 preserves the exact application exception and records only its type' => static function (): void {
@@ -312,15 +255,15 @@ function httpTracingTests(): array
                 $scope->close();
             }
 
-            httpTracingAssert($caught === $failure, 'expected exact PSR-18 exception identity');
+            assertTrue($caught === $failure, 'expected exact PSR-18 exception identity');
             $events = httpTracingEvents($client);
-            $attributes = httpTracingAttributes($events[0]);
+            $attributes = testAttributes($events[0]);
             $metadata = httpTracingMetadata($attributes);
-            httpTracingAssert(($attributes['status'] ?? null) === 'error', 'expected PSR-18 error status');
-            httpTracingAssert(($metadata['exceptionType'] ?? null) === RuntimeException::class, 'expected exception type');
-            httpTracingAssert(!array_key_exists('statusCode', $metadata), 'expected no response status on transport failure');
-            httpTracingAssert(!str_contains($client->previewJson(), $failure->getMessage()), 'expected exception message omission');
-            httpTracingAssert(!str_contains($client->previewJson(), '/private'), 'expected failed URL omission');
+            assertTrue(($attributes['status'] ?? null) === 'error', 'expected PSR-18 error status');
+            assertTrue(($metadata['exceptionType'] ?? null) === RuntimeException::class, 'expected exception type');
+            assertTrue(!array_key_exists('statusCode', $metadata), 'expected no response status on transport failure');
+            assertTrue(!str_contains($client->previewJson(), $failure->getMessage()), 'expected exception message omission');
+            assertTrue(!str_contains($client->previewJson(), '/private'), 'expected failed URL omission');
         },
 
         'PSR-18 wrapping is idempotent' => static function (): void {
@@ -328,14 +271,14 @@ function httpTracingTests(): array
             $delegate = new HttpTracingTestClient(static fn (): ResponseInterface => new Response(202));
             $first = LogBrewHttpClientTracing::wrapPsr18($delegate, $client);
             $second = LogBrewHttpClientTracing::wrapPsr18($first, $client);
-            httpTracingAssert($first === $second, 'expected duplicate PSR-18 wrapping prevention');
+            assertTrue($first === $second, 'expected duplicate PSR-18 wrapping prevention');
             $scope = LogBrewTrace::activate(httpTracingParent('8888888888888888'));
             try {
                 $second->sendRequest(new Request('GET', 'https://example.com'));
             } finally {
                 $scope->close();
             }
-            httpTracingAssert(count(httpTracingEvents($client)) === 1, 'expected one span after duplicate PSR-18 wrapping');
+            assertTrue(count(httpTracingEvents($client)) === 1, 'expected one span after duplicate PSR-18 wrapping');
         },
 
         'capture failures remain advisory for PSR-18 results and callbacks' => static function (): void {
@@ -355,11 +298,11 @@ function httpTracingTests(): array
 
             $scope = LogBrewTrace::activate(httpTracingParent('9999999999999999'));
             try {
-                httpTracingAssert($traced->sendRequest(new Request('GET', 'https://example.com')) === $response, 'expected result despite capture failure');
+                assertTrue($traced->sendRequest(new Request('GET', 'https://example.com')) === $response, 'expected result despite capture failure');
             } finally {
                 $scope->close();
             }
-            httpTracingAssert($captureErrors === 1, 'expected one advisory capture callback');
+            assertTrue($captureErrors === 1, 'expected one advisory capture callback');
         },
 
         'capture callbacks observe the reinstated parent after synchronous failure' => static function (): void {
@@ -384,14 +327,14 @@ function httpTracingTests(): array
                 try {
                     $traced->sendRequest(new Request('GET', 'https://example.com'));
                 } catch (Throwable $error) {
-                    httpTracingAssert($error === $failure, 'expected original synchronous failure');
+                    assertTrue($error === $failure, 'expected original synchronous failure');
                 }
-                httpTracingAssert(LogBrewTrace::current() === $parent, 'expected parent after synchronous failure');
+                assertTrue(LogBrewTrace::current() === $parent, 'expected parent after synchronous failure');
             } finally {
                 $scope->close();
             }
 
-            httpTracingAssert($callbackTrace === $parent, 'expected advisory callback under reinstated parent');
+            assertTrue($callbackTrace === $parent, 'expected advisory callback under reinstated parent');
         },
 
         'Guzzle fulfillment preserves response identity and reinstates the parent before settlement' => static function (): void {
@@ -411,24 +354,24 @@ function httpTracingTests(): array
             $scope = LogBrewTrace::activate($parent);
             try {
                 $promise = $traced(new Request('PATCH', 'https://Async.Example/private?auth=value'), []);
-                httpTracingAssert(LogBrewTrace::current() === $parent, 'expected Guzzle parent restoration after handler');
+                assertTrue(LogBrewTrace::current() === $parent, 'expected Guzzle parent restoration after handler');
             } finally {
                 $scope->close();
             }
             $result = $promise->wait();
 
-            httpTracingAssert($result === $response, 'expected exact Guzzle response identity');
+            assertTrue($result === $response, 'expected exact Guzzle response identity');
             if (!$activeDuringSend instanceof LogBrewTraceContext || !$sentRequest instanceof RequestInterface) {
                 throw new RuntimeException('expected traced Guzzle delegate call');
             }
-            httpTracingAssert($activeDuringSend->parentSpanId === $parent->spanId, 'expected Guzzle parent link');
-            httpTracingAssert($sentRequest->getHeaderLine('traceparent') === $activeDuringSend->traceparent(), 'expected Guzzle traceparent');
+            assertTrue($activeDuringSend->parentSpanId === $parent->spanId, 'expected Guzzle parent link');
+            assertTrue($sentRequest->getHeaderLine('traceparent') === $activeDuringSend->traceparent(), 'expected Guzzle traceparent');
             $events = httpTracingEvents($client);
-            httpTracingAssert(count($events) === 1, 'expected one Guzzle fulfillment span');
-            $metadata = httpTracingMetadata(httpTracingAttributes($events[0]));
-            httpTracingAssert(($metadata['source'] ?? null) === 'guzzle', 'expected Guzzle source');
-            httpTracingAssert(($metadata['statusCode'] ?? null) === 201, 'expected Guzzle status');
-            httpTracingAssert(!str_contains($client->previewJson(), '/private'), 'expected Guzzle URL omission');
+            assertTrue(count($events) === 1, 'expected one Guzzle fulfillment span');
+            $metadata = httpTracingMetadata(testAttributes($events[0]));
+            assertTrue(($metadata['source'] ?? null) === 'guzzle', 'expected Guzzle source');
+            assertTrue(($metadata['statusCode'] ?? null) === 201, 'expected Guzzle status');
+            assertTrue(!str_contains($client->previewJson(), '/private'), 'expected Guzzle URL omission');
         },
 
         'Guzzle rejection preserves the exact reason and completes once' => static function (): void {
@@ -454,9 +397,9 @@ function httpTracingTests(): array
                 $caught = $error;
             }
 
-            httpTracingAssert($caught === $failure, 'expected exact Guzzle rejection identity');
-            httpTracingAssert(count(httpTracingEvents($client)) === 1, 'expected one rejected Guzzle span');
-            httpTracingAssert(!str_contains($client->previewJson(), $failure->getMessage()), 'expected Guzzle error message omission');
+            assertTrue($caught === $failure, 'expected exact Guzzle rejection identity');
+            assertTrue(count(httpTracingEvents($client)) === 1, 'expected one rejected Guzzle span');
+            assertTrue(!str_contains($client->previewJson(), $failure->getMessage()), 'expected Guzzle error message omission');
         },
 
         'Guzzle cancellation completes once without changing cancellation semantics' => static function (): void {
@@ -487,12 +430,12 @@ function httpTracingTests(): array
             if (!$caught instanceof CancellationException) {
                 throw new RuntimeException('expected Guzzle cancellation result');
             }
-            httpTracingAssert(
+            assertTrue(
                 $caught->getMessage() === 'The promise was rejected with reason: Promise has been cancelled',
                 'expected unchanged cancellation message'
             );
-            httpTracingAssert(count(httpTracingEvents($client)) === 1, 'expected one cancellation span');
-            httpTracingAssert(!str_contains($client->previewJson(), 'cancel detail'), 'expected cancellation detail omission');
+            assertTrue(count(httpTracingEvents($client)) === 1, 'expected one cancellation span');
+            assertTrue(!str_contains($client->previewJson(), 'cancel detail'), 'expected cancellation detail omission');
         },
 
         'Guzzle cancellation after then completes exactly once' => static function (): void {
@@ -519,11 +462,11 @@ function httpTracingTests(): array
             if (!$caught instanceof CancellationException) {
                 throw new RuntimeException('expected then cancellation exception');
             }
-            httpTracingAssert(
+            assertTrue(
                 $caught->getMessage() === 'The promise was rejected with reason: Promise has been cancelled',
                 'expected unchanged then cancellation message'
             );
-            httpTracingAssert(count(httpTracingEvents($client)) === 1, 'expected one cancellation span after then');
+            assertTrue(count(httpTracingEvents($client)) === 1, 'expected one cancellation span after then');
         },
 
         'Guzzle cancellation after otherwise completes exactly once' => static function (): void {
@@ -550,11 +493,11 @@ function httpTracingTests(): array
             if (!$caught instanceof CancellationException) {
                 throw new RuntimeException('expected otherwise cancellation exception');
             }
-            httpTracingAssert(
+            assertTrue(
                 $caught->getMessage() === 'The promise was rejected with reason: Promise has been cancelled',
                 'expected unchanged otherwise cancellation message'
             );
-            httpTracingAssert(count(httpTracingEvents($client)) === 1, 'expected one cancellation span after otherwise');
+            assertTrue(count(httpTracingEvents($client)) === 1, 'expected one cancellation span after otherwise');
         },
 
         'Guzzle explicit resolve reject and wait preserve semantics and complete once' => static function (): void {
@@ -570,7 +513,7 @@ function httpTracingTests(): array
             }
             $response = new Response(206);
             $resolved->resolve($response);
-            httpTracingAssert($resolved->wait() === $response, 'expected explicit resolve value');
+            assertTrue($resolved->wait() === $response, 'expected explicit resolve value');
             $resolvedSource->cancel();
 
             $rejectedSource = new Promise();
@@ -590,10 +533,10 @@ function httpTracingTests(): array
             } catch (Throwable $error) {
                 $caught = $error;
             }
-            httpTracingAssert($caught === $failure, 'expected explicit rejection identity');
+            assertTrue($caught === $failure, 'expected explicit rejection identity');
             $rejectedSource->cancel();
 
-            httpTracingAssert(count(httpTracingEvents($client)) === 2, 'expected explicit settlement spans exactly once');
+            assertTrue(count(httpTracingEvents($client)) === 2, 'expected explicit settlement spans exactly once');
         },
 
         'duplicate Guzzle middleware emits one child span' => static function (): void {
@@ -615,8 +558,8 @@ function httpTracingTests(): array
                 $scope->close();
             }
 
-            httpTracingAssert($handlerCalls === 1, 'expected one Guzzle handler call');
-            httpTracingAssert(count(httpTracingEvents($client)) === 1, 'expected one span after duplicate Guzzle middleware');
+            assertTrue($handlerCalls === 1, 'expected one Guzzle handler call');
+            assertTrue(count(httpTracingEvents($client)) === 1, 'expected one span after duplicate Guzzle middleware');
         },
 
         'concurrent Guzzle requests retain independent parents and completion order' => static function (): void {
@@ -647,22 +590,22 @@ function httpTracingTests(): array
                 $scopeTwo->close();
             }
 
-            httpTracingAssert(count(httpTracingEvents($client)) === 0, 'expected no span before async completion');
+            assertTrue(count(httpTracingEvents($client)) === 0, 'expected no span before async completion');
             $responseTwo = new Response(202);
             $responseOne = new Response(203);
             $pending['two']->resolve($responseTwo);
             $pending['one']->resolve($responseOne);
-            httpTracingAssert($second->wait() === $responseTwo, 'expected second response identity');
-            httpTracingAssert($first->wait() === $responseOne, 'expected first response identity');
+            assertTrue($second->wait() === $responseTwo, 'expected second response identity');
+            assertTrue($first->wait() === $responseOne, 'expected first response identity');
 
             $events = httpTracingEvents($client);
-            httpTracingAssert(count($events) === 2, 'expected two concurrent spans');
+            assertTrue(count($events) === 2, 'expected two concurrent spans');
             $parentIds = array_map(
-                static fn (array $event): mixed => httpTracingAttributes($event)['parentSpanId'] ?? null,
+                static fn (array $event): mixed => testAttributes($event)['parentSpanId'] ?? null,
                 $events
             );
             sort($parentIds);
-            httpTracingAssert($parentIds === [$parentOne->spanId, $parentTwo->spanId], 'expected independent concurrent parents');
+            assertTrue($parentIds === [$parentOne->spanId, $parentTwo->spanId], 'expected independent concurrent parents');
         },
     ];
 }

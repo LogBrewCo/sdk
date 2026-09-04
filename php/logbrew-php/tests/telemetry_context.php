@@ -8,89 +8,16 @@ use LogBrew\LogBrewTrace;
 use LogBrew\LogBrewTraceContext;
 use LogBrew\EncryptedFileEventStore;
 use LogBrew\IssueDiagnostics;
-use LogBrew\SdkError;
 use LogBrew\TelemetryContext;
 use LogBrew\TelemetryResource;
 
 /** @return list<array<string, mixed>> */
 function telemetryContextEvents(LogBrewClient $client): array
 {
-    $payload = json_decode($client->previewJson(), true, flags: JSON_THROW_ON_ERROR);
-    if (!is_array($payload)) {
-        throw new RuntimeException('expected telemetry context payload object');
-    }
-    $events = $payload['events'] ?? null;
-    if (!is_array($events)) {
-        throw new RuntimeException('expected telemetry context event list');
-    }
-
-    $copied = [];
-    foreach ($events as $event) {
-        if (!is_array($event)) {
-            throw new RuntimeException('expected telemetry context event object');
-        }
-        $copiedEvent = [];
-        foreach ($event as $key => $value) {
-            if (!is_string($key)) {
-                throw new RuntimeException('expected telemetry context event string keys');
-            }
-            $copiedEvent[$key] = $value;
-        }
-        $copied[] = $copiedEvent;
-    }
-    return $copied;
-}
-
-/**
- * @param array<string, mixed> $event
- * @return array<string, mixed>
- */
-function telemetryContextAttributes(array $event): array
-{
-    $attributes = $event['attributes'] ?? null;
-    if (!is_array($attributes)) {
-        throw new RuntimeException('expected telemetry context attributes');
-    }
-
-    /** @var array<string, mixed> $attributes */
-    return $attributes;
-}
-
-/**
- * @param array<string, mixed> $event
- * @return array<string, mixed>
- */
-function telemetryContextValue(array $event): array
-{
-    $context = telemetryContextAttributes($event)['context'] ?? null;
-    if (!is_array($context)) {
-        throw new RuntimeException('expected shared telemetry context');
-    }
-
-    $copied = [];
-    foreach ($context as $key => $value) {
-        if (!is_string($key)) {
-            throw new RuntimeException('expected shared telemetry context string keys');
-        }
-        $copied[$key] = $value;
-    }
-    return $copied;
-}
-
-/**
- * @param array<string, mixed> $value
- * @param non-empty-list<string> $path
- */
-function telemetryContextAt(array $value, array $path): mixed
-{
-    $current = $value;
-    foreach ($path as $key) {
-        if (!is_array($current) || !array_key_exists($key, $current)) {
-            throw new RuntimeException('missing telemetry context path: ' . implode('.', $path));
-        }
-        $current = $current[$key];
-    }
-    return $current;
+    return testEvents(
+        testStringMap(json_decode($client->previewJson(), true, 512, JSON_THROW_ON_ERROR), 'telemetry context payload'),
+        'telemetry context events'
+    );
 }
 
 /**
@@ -111,15 +38,7 @@ function telemetryContextHas(array $value, array $path): bool
 
 function expectTelemetryContextError(string $needle, callable $callback): void
 {
-    try {
-        $callback();
-    } catch (SdkError $error) {
-        assertTrue($error->codeName === 'validation_error', 'expected telemetry context validation_error');
-        assertTrue(str_contains($error->getMessage(), $needle), "expected telemetry context error containing: {$needle}");
-        return;
-    }
-
-    throw new RuntimeException("expected telemetry context error containing: {$needle}");
+    expectSdkError($callback, 'validation_error', $needle);
 }
 
 $clientResource = TelemetryResource::create()
@@ -172,13 +91,13 @@ foreach ($baseAttributes as $signal => $attributes) {
 $events = telemetryContextEvents($client);
 assertTrue(count($events) === 7, 'expected shared context on all seven PHP signals');
 foreach ($events as $event) {
-    $context = telemetryContextValue($event);
+    $context = testContext($event);
     assertTrue(($context['schemaVersion'] ?? null) === 1, 'expected context schema version 1');
-    assertTrue(telemetryContextAt($context, ['resource', 'service', 'name']) === 'checkout-worker', 'expected client service context');
-    assertTrue(telemetryContextAt($context, ['resource', 'deployment', 'release']) === 'checkout@1.4.0', 'expected deployment release context');
-    assertTrue(telemetryContextAt($context, ['session', 'id']) === 'session_client', 'expected session context');
-    assertTrue(telemetryContextAt($context, ['subject', 'id']) === 'subject_client', 'expected subject context');
-    assertTrue(telemetryContextAt($context, ['tags', 'journey']) === 'checkout', 'expected detached client tags');
+    assertTrue(testValueAt($context, ['resource', 'service', 'name']) === 'checkout-worker', 'expected client service context');
+    assertTrue(testValueAt($context, ['resource', 'deployment', 'release']) === 'checkout@1.4.0', 'expected deployment release context');
+    assertTrue(testValueAt($context, ['session', 'id']) === 'session_client', 'expected session context');
+    assertTrue(testValueAt($context, ['subject', 'id']) === 'subject_client', 'expected subject context');
+    assertTrue(testValueAt($context, ['tags', 'journey']) === 'checkout', 'expected detached client tags');
 }
 
 $activeTrace = LogBrewTraceContext::fromTraceparent(
@@ -233,19 +152,19 @@ unset($automaticScope);
 assertTrue(LogBrewTelemetry::currentContext() === null, 'expected abandoned ambient PHP scope to unwind');
 
 $events = telemetryContextEvents($client);
-$overrideContext = telemetryContextValue($events[7]);
-assertTrue(telemetryContextAt($overrideContext, ['trace', 'traceId']) === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'expected event trace to win last');
-assertTrue(telemetryContextAt($overrideContext, ['trace', 'spanId']) === 'bbbbbbbbbbbbbbbb', 'expected event span to win last');
-assertTrue(telemetryContextAt($overrideContext, ['trace', 'sampled']) === false, 'expected explicit event sampling decision');
-assertTrue(telemetryContextAt($overrideContext, ['session', 'id']) === 'session_ambient', 'expected ambient session to override client session');
-assertTrue(telemetryContextAt($overrideContext, ['subject', 'id']) === 'subject_user', 'expected ambient subject');
-assertTrue(telemetryContextAt($overrideContext, ['tags', 'journey']) === 'event-override', 'expected event tag to win last');
-assertTrue(telemetryContextAt($overrideContext, ['tags', 'step']) === 'confirm', 'expected nested ambient tag');
+$overrideContext = testContext($events[7]);
+assertTrue(testValueAt($overrideContext, ['trace', 'traceId']) === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'expected event trace to win last');
+assertTrue(testValueAt($overrideContext, ['trace', 'spanId']) === 'bbbbbbbbbbbbbbbb', 'expected event span to win last');
+assertTrue(testValueAt($overrideContext, ['trace', 'sampled']) === false, 'expected explicit event sampling decision');
+assertTrue(testValueAt($overrideContext, ['session', 'id']) === 'session_ambient', 'expected ambient session to override client session');
+assertTrue(testValueAt($overrideContext, ['subject', 'id']) === 'subject_user', 'expected ambient subject');
+assertTrue(testValueAt($overrideContext, ['tags', 'journey']) === 'event-override', 'expected event tag to win last');
+assertTrue(testValueAt($overrideContext, ['tags', 'step']) === 'confirm', 'expected nested ambient tag');
 
-$ambientContext = telemetryContextValue($events[8]);
-assertTrue(telemetryContextAt($ambientContext, ['trace', 'traceId']) === '11111111111111111111111111111111', 'expected active trace on direct capture');
-assertTrue(telemetryContextAt($ambientContext, ['trace', 'spanId']) === '3333333333333333', 'expected active span on direct capture');
-assertTrue(telemetryContextAt($ambientContext, ['trace', 'parentSpanId']) === '2222222222222222', 'expected active parent span');
+$ambientContext = testContext($events[8]);
+assertTrue(testValueAt($ambientContext, ['trace', 'traceId']) === '11111111111111111111111111111111', 'expected active trace on direct capture');
+assertTrue(testValueAt($ambientContext, ['trace', 'spanId']) === '3333333333333333', 'expected active span on direct capture');
+assertTrue(testValueAt($ambientContext, ['trace', 'parentSpanId']) === '2222222222222222', 'expected active parent span');
 assertTrue(!telemetryContextHas($ambientContext, ['tags', 'step']), 'expected nested context to unwind exactly');
 
 $traceSignalClient = LogBrewClient::create(
@@ -275,24 +194,24 @@ LogBrewTrace::withTrace($activeTrace, static function () use (
     }
 });
 foreach (telemetryContextEvents($traceSignalClient) as $event) {
-    $context = telemetryContextValue($event);
+    $context = testContext($event);
     assertTrue(
-        telemetryContextAt($context, ['trace', 'traceId']) === $activeTrace->traceId
-            && telemetryContextAt($context, ['trace', 'spanId']) === $activeTrace->spanId,
+        testValueAt($context, ['trace', 'traceId']) === $activeTrace->traceId
+            && testValueAt($context, ['trace', 'spanId']) === $activeTrace->spanId,
         'expected active trace context on every PHP signal type'
     );
 }
 
 $runtimeClient = LogBrewClient::create('LOGBREW_API_KEY', 'logbrew-php', '0.1.0');
 $runtimeClient->log('runtime_default', $timestamp, ['message' => 'runtime', 'level' => 'info']);
-$runtime = telemetryContextAt(
-    telemetryContextValue(telemetryContextEvents($runtimeClient)[0]),
+$runtime = testValueAt(
+    testContext(telemetryContextEvents($runtimeClient)[0]),
     ['resource', 'runtime']
 );
 assertTrue(is_array($runtime), 'expected safe PHP runtime context by default');
-$runtimeContext = telemetryContextValue(telemetryContextEvents($runtimeClient)[0]);
-assertTrue(telemetryContextAt($runtimeContext, ['resource', 'runtime', 'name']) === 'php', 'expected PHP runtime name');
-assertTrue(telemetryContextAt($runtimeContext, ['resource', 'runtime', 'version']) === PHP_VERSION, 'expected PHP runtime version');
+$runtimeContext = testContext(telemetryContextEvents($runtimeClient)[0]);
+assertTrue(testValueAt($runtimeContext, ['resource', 'runtime', 'name']) === 'php', 'expected PHP runtime name');
+assertTrue(testValueAt($runtimeContext, ['resource', 'runtime', 'version']) === PHP_VERSION, 'expected PHP runtime version');
 
 $optOutClient = LogBrewClient::create(
     'LOGBREW_API_KEY',
@@ -302,7 +221,7 @@ $optOutClient = LogBrewClient::create(
 );
 $optOutClient->log('runtime_opt_out', $timestamp, ['message' => 'no runtime', 'level' => 'info']);
 assertTrue(
-    !array_key_exists('context', telemetryContextAttributes(telemetryContextEvents($optOutClient)[0])),
+    !array_key_exists('context', testAttributes(telemetryContextEvents($optOutClient)[0])),
     'expected explicit runtime context opt-out'
 );
 
@@ -353,9 +272,9 @@ $contextualIssueClient->issue('context_issue_helper', $timestamp, IssueDiagnosti
     new RuntimeException('message remains omitted'),
     context: TelemetryContext::create()->withSession('issue_session')->withTag('journey', 'recovery')->build()
 ));
-$contextualIssue = telemetryContextValue(telemetryContextEvents($contextualIssueClient)[0]);
-assertTrue(telemetryContextAt($contextualIssue, ['session', 'id']) === 'issue_session', 'expected issue helper context');
-assertTrue(telemetryContextAt($contextualIssue, ['tags', 'journey']) === 'recovery', 'expected issue helper tag');
+$contextualIssue = testContext(telemetryContextEvents($contextualIssueClient)[0]);
+assertTrue(testValueAt($contextualIssue, ['session', 'id']) === 'issue_session', 'expected issue helper context');
+assertTrue(testValueAt($contextualIssue, ['tags', 'journey']) === 'recovery', 'expected issue helper tag');
 
 $persistentDirectory = persistentDeliveryDirectory();
 $persistentKey = random_bytes(32);
@@ -384,8 +303,8 @@ $reopenedClient = LogBrewClient::create(
     eventStore: $reopenedStore
 );
 assertTrue($reopenedClient->previewJson() === $beforeRestart, 'expected byte-stable shared context after queue restart');
-$recoveredContext = telemetryContextValue(telemetryContextEvents($reopenedClient)[0]);
-assertTrue(telemetryContextAt($recoveredContext, ['session', 'id']) === 'persisted_session', 'expected persisted session context');
+$recoveredContext = testContext(telemetryContextEvents($reopenedClient)[0]);
+assertTrue(testValueAt($recoveredContext, ['session', 'id']) === 'persisted_session', 'expected persisted session context');
 assertTrue(!telemetryContextHas($recoveredContext, ['resource', 'runtime']), 'expected restart not to rewrite admitted context');
 $reopenedClient->purgePersistedEvents();
 $reopenedStore->close();

@@ -17,51 +17,12 @@ use Psr\Log\LogLevel;
  */
 function phpTraceEvent(array $payload, string $eventId): array
 {
-    $events = $payload['events'] ?? null;
-    if (!is_array($events)) {
-        fwrite(STDERR, 'expected trace payload events array' . PHP_EOL);
-        exit(1);
-    }
-
-    foreach ($events as $event) {
-        if (!is_array($event) || ($event['id'] ?? null) !== $eventId) {
-            continue;
+    foreach (testEvents($payload, 'trace events') as $event) {
+        if (($event['id'] ?? null) === $eventId) {
+            return $event;
         }
-
-        return phpTraceStringKeyed($event);
     }
-
-    fwrite(STDERR, "missing trace event {$eventId}" . PHP_EOL);
-    exit(1);
-}
-
-/**
- * @param array<string, mixed> $event
- * @return array<string, mixed>
- */
-function phpTraceMetadata(array $event): array
-{
-    $attributes = phpTraceAttributes($event);
-    $metadata = $attributes['metadata'] ?? null;
-    if (!is_array($metadata)) {
-        fwrite(STDERR, 'expected trace metadata object' . PHP_EOL);
-        exit(1);
-    }
-    return phpTraceStringKeyed($metadata);
-}
-
-/**
- * @param array<string, mixed> $event
- * @return array<string, mixed>
- */
-function phpTraceAttributes(array $event): array
-{
-    $attributes = $event['attributes'] ?? null;
-    if (!is_array($attributes)) {
-        fwrite(STDERR, 'expected trace attributes object' . PHP_EOL);
-        exit(1);
-    }
-    return phpTraceStringKeyed($attributes);
+    throw new RuntimeException("missing trace event {$eventId}");
 }
 
 /**
@@ -73,22 +34,6 @@ function phpTraceAssertCorrelation(array $metadata, string $traceId, string $spa
     assertTrue(($metadata['spanId'] ?? null) === $spanId, 'expected correlated span id');
     assertTrue(($metadata['traceFlags'] ?? null) === '01', 'expected trace flags metadata');
     assertTrue(($metadata['traceSampled'] ?? null) === true, 'expected sampled trace metadata');
-}
-
-/**
- * @param array<mixed> $values
- * @return array<string, mixed>
- */
-function phpTraceStringKeyed(array $values): array
-{
-    $copied = [];
-    foreach ($values as $key => $value) {
-        if (is_string($key)) {
-            $copied[$key] = $value;
-        }
-    }
-
-    return $copied;
 }
 
 $incomingTraceparent = '00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01';
@@ -183,7 +128,7 @@ if (!is_array($decodedPayload)) {
     fwrite(STDERR, 'expected PHP trace payload object' . PHP_EOL);
     exit(1);
 }
-$payload = phpTraceStringKeyed($decodedPayload);
+$payload = testStringMap($decodedPayload, 'trace payload');
 assertTrue(stripos($preview, 'traceparent') === false, 'expected raw traceparent to be omitted from PHP trace telemetry');
 assertTrue(!str_contains($preview, 'coupon=sample'), 'expected PHP trace query text to be omitted');
 assertTrue(!str_contains($preview, 'spoofed'), 'expected active trace metadata to overwrite spoofed trace id');
@@ -203,20 +148,20 @@ $logEvent = phpTraceEvent($payload, 'php_trace_psr_1');
 $issueEvent = phpTraceEvent($payload, 'evt_issue_php_trace');
 $spanEvent = phpTraceEvent($payload, 'evt_span_php_trace');
 $metricEvent = phpTraceEvent($payload, 'evt_metric_php_trace');
-$spanAttributes = phpTraceAttributes($spanEvent);
-$metricAttributes = phpTraceAttributes($metricEvent);
-phpTraceAssertCorrelation(phpTraceMetadata($logEvent), $traceId, $spanId);
-phpTraceAssertCorrelation(phpTraceMetadata($issueEvent), $traceId, $spanId);
-phpTraceAssertCorrelation(phpTraceMetadata($spanEvent), $traceId, $spanId);
-phpTraceAssertCorrelation(phpTraceMetadata($metricEvent), $traceId, $spanId);
+$spanAttributes = testAttributes($spanEvent);
+$metricAttributes = testAttributes($metricEvent);
+phpTraceAssertCorrelation(testMetadata($logEvent), $traceId, $spanId);
+phpTraceAssertCorrelation(testMetadata($issueEvent), $traceId, $spanId);
+phpTraceAssertCorrelation(testMetadata($spanEvent), $traceId, $spanId);
+phpTraceAssertCorrelation(testMetadata($metricEvent), $traceId, $spanId);
 assertTrue(($spanAttributes['parentSpanId'] ?? null) === '00f067aa0ba902b7', 'expected PHP request span parent');
 assertTrue(($spanAttributes['name'] ?? null) === 'POST /checkout/:cart_id', 'expected sanitized PHP request span name');
 assertTrue(($spanAttributes['status'] ?? null) === 'error', 'expected 5xx request span error status');
 assertTrue(($metricAttributes['name'] ?? null) === 'http.server.duration', 'expected PHP request duration metric');
 assertTrue(($metricAttributes['description'] ?? null) === 'Duration of one completed server request.', 'expected PHP request duration description');
-assertTrue((phpTraceMetadata($metricEvent)['statusCode'] ?? null) === 503, 'expected PHP metric status code metadata');
-assertTrue((phpTraceMetadata($logEvent)['context.cartId'] ?? null) === 'cart_123', 'expected PHP PSR context metadata');
-assertTrue((phpTraceMetadata($issueEvent)['exceptionMessage'] ?? null) === 'payment provider failed', 'expected PHP issue metadata');
+assertTrue((testMetadata($metricEvent)['statusCode'] ?? null) === 503, 'expected PHP metric status code metadata');
+assertTrue((testMetadata($logEvent)['context.cartId'] ?? null) === 'cart_123', 'expected PHP PSR context metadata');
+assertTrue((testMetadata($issueEvent)['exceptionMessage'] ?? null) === 'payment provider failed', 'expected PHP issue metadata');
 
 $client = sampleClient();
 $monologTrace = LogBrewTraceContext::fromTraceparent($incomingTraceparent, '1111111111111111');
@@ -237,11 +182,11 @@ if (!is_array($decodedPayload)) {
     fwrite(STDERR, 'expected PHP Monolog trace payload object' . PHP_EOL);
     exit(1);
 }
-$payload = phpTraceStringKeyed($decodedPayload);
+$payload = testStringMap($decodedPayload, 'Monolog trace payload');
 $monologEvent = phpTraceEvent($payload, 'php_trace_monolog_1');
-phpTraceAssertCorrelation(phpTraceMetadata($monologEvent), $traceId, '1111111111111111');
-assertTrue((phpTraceMetadata($monologEvent)['monologChannel'] ?? null) === 'checkout.monolog.trace', 'expected PHP Monolog channel metadata');
-assertTrue((phpTraceMetadata($monologEvent)['context.cartId'] ?? null) === 'cart_123', 'expected PHP Monolog context metadata');
+phpTraceAssertCorrelation(testMetadata($monologEvent), $traceId, '1111111111111111');
+assertTrue((testMetadata($monologEvent)['monologChannel'] ?? null) === 'checkout.monolog.trace', 'expected PHP Monolog channel metadata');
+assertTrue((testMetadata($monologEvent)['context.cartId'] ?? null) === 'cart_123', 'expected PHP Monolog context metadata');
 
 expectThrows(
     fn () => LogBrewHttpRequestTelemetry::start(sampleClient(), 'GET /bad', '/health'),

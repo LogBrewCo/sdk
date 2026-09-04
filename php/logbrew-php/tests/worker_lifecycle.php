@@ -12,14 +12,6 @@ use LogBrew\Transport;
 use LogBrew\TransportResponse;
 use LogBrew\WorkerDeliveryFailure;
 
-function assertWorkerLifecycle(bool $condition, string $message): void
-{
-    if (!$condition) {
-        fwrite(STDERR, $message . PHP_EOL);
-        exit(1);
-    }
-}
-
 /**
  * @return array{executed: bool, code: ?string, shutdownCode: ?string, messageSafe: bool}
  */
@@ -121,9 +113,9 @@ $result = $lifecycle->run(static function () use ($client): string {
     return 'app-result';
 });
 
-assertWorkerLifecycle($result === 'app-result', 'work boundary must preserve the application result');
-assertWorkerLifecycle($client->pendingEvents() === 0, 'work boundary must flush queued telemetry');
-assertWorkerLifecycle(count($transport->sentBodies) === 1, 'work boundary must send exactly once');
+assertTrue($result === 'app-result', 'work boundary must preserve the application result');
+assertTrue($client->pendingEvents() === 0, 'work boundary must flush queued telemetry');
+assertTrue(count($transport->sentBodies) === 1, 'work boundary must send exactly once');
 
 $client = LogBrewClient::create('LOGBREW_API_KEY', 'logbrew-php', '0.1.0');
 $transport = RecordingTransport::alwaysAccept();
@@ -144,9 +136,9 @@ try {
     $caughtAppError = $error;
 }
 
-assertWorkerLifecycle($caughtAppError === $appError, 'work boundary must rethrow the original application error');
-assertWorkerLifecycle($client->pendingEvents() === 0, 'failed work must still flush queued telemetry');
-assertWorkerLifecycle(count($transport->sentBodies) === 1, 'failed work must flush exactly once');
+assertTrue($caughtAppError === $appError, 'work boundary must rethrow the original application error');
+assertTrue($client->pendingEvents() === 0, 'failed work must still flush queued telemetry');
+assertTrue(count($transport->sentBodies) === 1, 'failed work must flush exactly once');
 
 $client = LogBrewClient::create(
     'LOGBREW_API_KEY',
@@ -174,15 +166,15 @@ $result = $lifecycle->run(static function () use ($client): string {
     return 'delivery-isolated';
 });
 
-assertWorkerLifecycle($result === 'delivery-isolated', 'delivery failure must not change the application result');
-assertWorkerLifecycle($client->pendingEvents() === 1, 'delivery failure must retain queued telemetry');
-assertWorkerLifecycle(count($deliveryFailures) === 1, 'delivery failure callback must run once');
+assertTrue($result === 'delivery-isolated', 'delivery failure must not change the application result');
+assertTrue($client->pendingEvents() === 1, 'delivery failure must retain queued telemetry');
+assertTrue(count($deliveryFailures) === 1, 'delivery failure callback must run once');
 $failure = $deliveryFailures[0];
-assertWorkerLifecycle($failure->stage === 'work_boundary', 'delivery failure must identify the work boundary');
-assertWorkerLifecycle($failure->codeName === 'transport_error', 'delivery failure must expose a stable code');
-assertWorkerLifecycle($failure->pendingEvents === 1, 'delivery failure must expose retained count');
-assertWorkerLifecycle($failure->pendingEventBytes > 0, 'delivery failure must expose retained bytes');
-assertWorkerLifecycle(
+assertTrue($failure->stage === 'work_boundary', 'delivery failure must identify the work boundary');
+assertTrue($failure->codeName === 'transport_error', 'delivery failure must expose a stable code');
+assertTrue($failure->pendingEvents === 1, 'delivery failure must expose retained count');
+assertTrue($failure->pendingEventBytes > 0, 'delivery failure must expose retained bytes');
+assertTrue(
     array_keys(get_object_vars($failure)) === ['stage', 'codeName', 'pendingEvents', 'pendingEventBytes'],
     'delivery failure must expose only content-free fields'
 );
@@ -195,11 +187,11 @@ $retryResult = $lifecycle->run(static function () use ($client): string {
 
     return 'retry-result';
 });
-assertWorkerLifecycle($retryResult === 'retry-result', 'later boundary must preserve its application result');
-assertWorkerLifecycle($client->pendingEvents() === 0, 'later boundary must retry retained telemetry');
-assertWorkerLifecycle(count($transport->sentBodies) === 3, 'retained telemetry must retry before the new boundary');
-assertWorkerLifecycle($transport->sentBodies[0] === $transport->sentBodies[1], 'boundary retry body must be byte-identical');
-assertWorkerLifecycle(
+assertTrue($retryResult === 'retry-result', 'later boundary must preserve its application result');
+assertTrue($client->pendingEvents() === 0, 'later boundary must retry retained telemetry');
+assertTrue(count($transport->sentBodies) === 3, 'retained telemetry must retry before the new boundary');
+assertTrue($transport->sentBodies[0] === $transport->sentBodies[1], 'boundary retry body must be byte-identical');
+assertTrue(
     array_map('workerLifecycleEventIds', $transport->sentBodies) === [
         ['evt_worker_retry'],
         ['evt_worker_retry'],
@@ -207,7 +199,7 @@ assertWorkerLifecycle(
     ],
     'new work must not change a retained retry body'
 );
-assertWorkerLifecycle(count($deliveryFailures) === 1, 'successful retry must not report another failure');
+assertTrue(count($deliveryFailures) === 1, 'successful retry must not report another failure');
 
 $client = LogBrewClient::create('LOGBREW_API_KEY', 'logbrew-php', '0.1.0');
 $client->log('evt_worker_untrusted_code', '2026-07-12T14:00:03Z', [
@@ -218,8 +210,8 @@ $unsafeTransport = new class implements Transport {
     public function send(string $apiKey, string $body): TransportResponse
     {
         throw new SdkError(
-            'authorization=Bearer private-transport-value',
-            'private transport message'
+            'authorization=Bearer unsafe',
+            'unsafe transport message'
         );
     }
 };
@@ -232,11 +224,11 @@ $lifecycle = LogBrewWorkerLifecycle::create(
     }
 );
 $unsafeResult = $lifecycle->run(static fn (): string => 'unsafe-code-isolated');
-assertWorkerLifecycle($unsafeResult === 'unsafe-code-isolated', 'untrusted transport code must not change app results');
-assertWorkerLifecycle(count($unsafeFailures) === 1, 'untrusted transport failure must report once');
-assertWorkerLifecycle($unsafeFailures[0]->codeName === 'delivery_error', 'untrusted transport code must be normalized');
-assertWorkerLifecycle(
-    !str_contains(json_encode($unsafeFailures[0], JSON_THROW_ON_ERROR), 'private-transport-value'),
+assertTrue($unsafeResult === 'unsafe-code-isolated', 'untrusted transport code must not change app results');
+assertTrue(count($unsafeFailures) === 1, 'untrusted transport failure must report once');
+assertTrue($unsafeFailures[0]->codeName === 'delivery_error', 'untrusted transport code must be normalized');
+assertTrue(
+    !str_contains(json_encode($unsafeFailures[0], JSON_THROW_ON_ERROR), 'Bearer unsafe'),
     'delivery failure must not expose an untrusted code value'
 );
 
@@ -273,11 +265,11 @@ $result = $lifecycle->run(static function () use (
     return 'outer-result';
 });
 
-assertWorkerLifecycle($result === 'outer-result', 'outer work must complete normally');
-assertWorkerLifecycle(!$nestedRunExecuted, 'nested work callback must not execute');
-assertWorkerLifecycle($nestedRunError?->codeName === 'worker_lifecycle_error', 'nested run must use a stable code');
-assertWorkerLifecycle($nestedShutdownError?->codeName === 'worker_lifecycle_error', 'shutdown during work must use a stable code');
-assertWorkerLifecycle(count($transport->sentBodies) === 1, 'outer boundary must remain the only send');
+assertTrue($result === 'outer-result', 'outer work must complete normally');
+assertTrue(!$nestedRunExecuted, 'nested work callback must not execute');
+assertTrue($nestedRunError?->codeName === 'worker_lifecycle_error', 'nested run must use a stable code');
+assertTrue($nestedShutdownError?->codeName === 'worker_lifecycle_error', 'shutdown during work must use a stable code');
+assertTrue(count($transport->sentBodies) === 1, 'outer boundary must remain the only send');
 
 $client = LogBrewClient::create(
     'LOGBREW_API_KEY',
@@ -307,11 +299,11 @@ try {
 } catch (Throwable $error) {
     $caughtCombinedError = $error;
 }
-assertWorkerLifecycle($caughtCombinedError === $combinedAppError, 'delivery failure must never mask an application error');
-assertWorkerLifecycle($client->pendingEvents() === 1, 'combined failure must retain telemetry');
-assertWorkerLifecycle(count($combinedFailures) === 1, 'combined failure must report delivery once');
+assertTrue($caughtCombinedError === $combinedAppError, 'delivery failure must never mask an application error');
+assertTrue($client->pendingEvents() === 1, 'combined failure must retain telemetry');
+assertTrue(count($combinedFailures) === 1, 'combined failure must report delivery once');
 $lifecycle->shutdown();
-assertWorkerLifecycle($client->pendingEvents() === 0, 'shutdown must retry telemetry after combined failure');
+assertTrue($client->pendingEvents() === 0, 'shutdown must retry telemetry after combined failure');
 
 $client = LogBrewClient::create('LOGBREW_API_KEY', 'logbrew-php', '0.1.0');
 $client->log('evt_worker_shutdown', '2026-07-12T14:00:03Z', [
@@ -323,10 +315,10 @@ $lifecycle = LogBrewWorkerLifecycle::create($client, $transport);
 $firstShutdown = $lifecycle->shutdown();
 $secondShutdown = $lifecycle->shutdown();
 
-assertWorkerLifecycle($firstShutdown->statusCode === 202, 'shutdown must return the accepted response');
-assertWorkerLifecycle($secondShutdown === $firstShutdown, 'successful shutdown must be terminal-idempotent');
-assertWorkerLifecycle($client->pendingEvents() === 0, 'shutdown must drain queued telemetry');
-assertWorkerLifecycle(count($transport->sentBodies) === 1, 'repeated shutdown must not send twice');
+assertTrue($firstShutdown->statusCode === 202, 'shutdown must return the accepted response');
+assertTrue($secondShutdown === $firstShutdown, 'successful shutdown must be terminal-idempotent');
+assertTrue($client->pendingEvents() === 0, 'shutdown must drain queued telemetry');
+assertTrue(count($transport->sentBodies) === 1, 'repeated shutdown must not send twice');
 $ranAfterShutdown = false;
 $postShutdownError = null;
 try {
@@ -336,8 +328,8 @@ try {
 } catch (SdkError $error) {
     $postShutdownError = $error;
 }
-assertWorkerLifecycle($postShutdownError?->codeName === 'shutdown_error', 'work after shutdown must fail with a stable code');
-assertWorkerLifecycle(!$ranAfterShutdown, 'work after shutdown must not execute the application callback');
+assertTrue($postShutdownError?->codeName === 'shutdown_error', 'work after shutdown must fail with a stable code');
+assertTrue(!$ranAfterShutdown, 'work after shutdown must not execute the application callback');
 
 $client = LogBrewClient::create(
     'LOGBREW_API_KEY',
@@ -366,19 +358,19 @@ try {
     $shutdownError = $error;
 }
 
-assertWorkerLifecycle($shutdownError?->codeName === 'transport_error', 'failed shutdown must rethrow its delivery error');
-assertWorkerLifecycle($client->pendingEvents() === 1, 'failed shutdown must retain telemetry');
-assertWorkerLifecycle(count($shutdownFailures) === 1, 'failed shutdown must report once');
-assertWorkerLifecycle($shutdownFailures[0]->stage === 'shutdown', 'failed shutdown must identify its stage');
-assertWorkerLifecycle($shutdownFailures[0]->pendingEvents === 1, 'failed shutdown must report retained count');
+assertTrue($shutdownError?->codeName === 'transport_error', 'failed shutdown must rethrow its delivery error');
+assertTrue($client->pendingEvents() === 1, 'failed shutdown must retain telemetry');
+assertTrue(count($shutdownFailures) === 1, 'failed shutdown must report once');
+assertTrue($shutdownFailures[0]->stage === 'shutdown', 'failed shutdown must identify its stage');
+assertTrue($shutdownFailures[0]->pendingEvents === 1, 'failed shutdown must report retained count');
 
 $retriedShutdown = $lifecycle->shutdown();
 $cachedShutdown = $lifecycle->shutdown();
-assertWorkerLifecycle($retriedShutdown->statusCode === 202, 'later shutdown must retry retained telemetry');
-assertWorkerLifecycle($cachedShutdown === $retriedShutdown, 'retried success must become terminal-idempotent');
-assertWorkerLifecycle($client->pendingEvents() === 0, 'successful retry must drain telemetry');
-assertWorkerLifecycle(count($transport->sentBodies) === 2, 'failed shutdown must make only one later retry');
-assertWorkerLifecycle($transport->sentBodies[0] === $transport->sentBodies[1], 'shutdown retry body must be byte-identical');
+assertTrue($retriedShutdown->statusCode === 202, 'later shutdown must retry retained telemetry');
+assertTrue($cachedShutdown === $retriedShutdown, 'retried success must become terminal-idempotent');
+assertTrue($client->pendingEvents() === 0, 'successful retry must drain telemetry');
+assertTrue(count($transport->sentBodies) === 2, 'failed shutdown must make only one later retry');
+assertTrue($transport->sentBodies[0] === $transport->sentBodies[1], 'shutdown retry body must be byte-identical');
 
 if (function_exists('pcntl_fork')) {
     $client = LogBrewClient::create('LOGBREW_API_KEY', 'logbrew-php', '0.1.0');
@@ -390,10 +382,10 @@ if (function_exists('pcntl_fork')) {
     $lifecycle = LogBrewWorkerLifecycle::create($client, $transport);
     $parentProcessId = getmypid();
     $resultFile = tempnam(sys_get_temp_dir(), 'logbrew-worker-fork-');
-    assertWorkerLifecycle(is_string($resultFile), 'fork test must allocate a result file');
+    assertTrue(is_string($resultFile), 'fork test must allocate a result file');
 
     $childPid = pcntl_fork();
-    assertWorkerLifecycle($childPid !== -1, 'fork test must create a child process');
+    assertTrue($childPid !== -1, 'fork test must create a child process');
     if ($childPid === 0) {
         $childWorkExecuted = false;
         $childErrorCode = null;
@@ -428,8 +420,8 @@ if (function_exists('pcntl_fork')) {
     }
 
     $childStatus = waitForWorkerLifecycleChild($childPid);
-    assertWorkerLifecycle(pcntl_wifexited($childStatus), 'fork test child must exit normally');
-    assertWorkerLifecycle(pcntl_wexitstatus($childStatus) === 0, 'fork test child must report its result');
+    assertTrue(pcntl_wifexited($childStatus), 'fork test child must exit normally');
+    assertTrue(pcntl_wexitstatus($childStatus) === 0, 'fork test child must report its result');
     $childResultJson = file_get_contents($resultFile);
     if (!is_string($childResultJson)) {
         fwrite(STDERR, 'fork test result must be readable' . PHP_EOL);
@@ -437,10 +429,10 @@ if (function_exists('pcntl_fork')) {
     }
     $childResult = decodeWorkerLifecycleChildResult($childResultJson);
     unlink($resultFile);
-    assertWorkerLifecycle($childResult['code'] === 'process_ownership_error', 'inherited lifecycle must reject child use');
-    assertWorkerLifecycle($childResult['shutdownCode'] === 'process_ownership_error', 'inherited lifecycle must reject child shutdown');
-    assertWorkerLifecycle($childResult['executed'] === false, 'inherited lifecycle must reject before application work');
-    assertWorkerLifecycle($childResult['messageSafe'] === true, 'process ownership errors must not expose process IDs');
+    assertTrue($childResult['code'] === 'process_ownership_error', 'inherited lifecycle must reject child use');
+    assertTrue($childResult['shutdownCode'] === 'process_ownership_error', 'inherited lifecycle must reject child shutdown');
+    assertTrue($childResult['executed'] === false, 'inherited lifecycle must reject before application work');
+    assertTrue($childResult['messageSafe'] === true, 'process ownership errors must not expose process IDs');
 
     $parentResult = $lifecycle->run(static function () use ($client): string {
         $client->log('evt_parent_after_fork', '2026-07-12T14:00:07Z', [
@@ -450,10 +442,10 @@ if (function_exists('pcntl_fork')) {
 
         return 'parent-result';
     });
-    assertWorkerLifecycle($parentResult === 'parent-result', 'owner process must keep using its lifecycle');
-    assertWorkerLifecycle(count($transport->sentBodies) === 1, 'owner process must send one boundary');
+    assertTrue($parentResult === 'parent-result', 'owner process must keep using its lifecycle');
+    assertTrue(count($transport->sentBodies) === 1, 'owner process must send one boundary');
     $parentIds = workerLifecycleEventIds($transport->sentBodies[0]);
-    assertWorkerLifecycle(
+    assertTrue(
         $parentIds === ['evt_parent_before_fork', 'evt_parent_after_fork'],
         'owner process must never inherit child telemetry'
     );
@@ -462,7 +454,7 @@ if (function_exists('pcntl_fork')) {
     $transport = RecordingTransport::alwaysAccept();
     $lifecycle = LogBrewWorkerLifecycle::create($client, $transport);
     $innerForkResultFile = tempnam(sys_get_temp_dir(), 'logbrew-worker-inner-fork-');
-    assertWorkerLifecycle(is_string($innerForkResultFile), 'inner fork test must allocate a result file');
+    assertTrue(is_string($innerForkResultFile), 'inner fork test must allocate a result file');
     $forkBranch = null;
     $innerForkResult = null;
     $innerForkError = null;
@@ -496,8 +488,8 @@ if (function_exists('pcntl_fork')) {
         exit(1);
     }
     $innerForkStatus = waitForWorkerLifecycleChild($forkBranch);
-    assertWorkerLifecycle(pcntl_wifexited($innerForkStatus), 'inner fork child must exit normally');
-    assertWorkerLifecycle(pcntl_wexitstatus($innerForkStatus) === 0, 'inner fork child must report its result');
+    assertTrue(pcntl_wifexited($innerForkStatus), 'inner fork child must exit normally');
+    assertTrue(pcntl_wexitstatus($innerForkStatus) === 0, 'inner fork child must report its result');
     $innerForkJson = file_get_contents($innerForkResultFile);
     if (!is_string($innerForkJson)) {
         fwrite(STDERR, 'inner fork result must be readable' . PHP_EOL);
@@ -505,13 +497,13 @@ if (function_exists('pcntl_fork')) {
     }
     $childInnerFork = decodeWorkerLifecycleInnerForkResult($innerForkJson);
     unlink($innerForkResultFile);
-    assertWorkerLifecycle($childInnerFork['code'] === 'process_ownership_error', 'inner fork child must reject delivery');
-    assertWorkerLifecycle($childInnerFork['result'] === null, 'inner fork child must not return a successful boundary result');
-    assertWorkerLifecycle($childInnerFork['sends'] === 0, 'inner fork child must not send a copied queue');
-    assertWorkerLifecycle($innerForkError === null, 'inner fork parent must not receive a lifecycle error');
-    assertWorkerLifecycle($innerForkResult === 'parent-result', 'inner fork parent must preserve its work result');
-    assertWorkerLifecycle(count($transport->sentBodies) === 1, 'inner fork parent must remain the only sender');
-    assertWorkerLifecycle(
+    assertTrue($childInnerFork['code'] === 'process_ownership_error', 'inner fork child must reject delivery');
+    assertTrue($childInnerFork['result'] === null, 'inner fork child must not return a successful boundary result');
+    assertTrue($childInnerFork['sends'] === 0, 'inner fork child must not send a copied queue');
+    assertTrue($innerForkError === null, 'inner fork parent must not receive a lifecycle error');
+    assertTrue($innerForkResult === 'parent-result', 'inner fork parent must preserve its work result');
+    assertTrue(count($transport->sentBodies) === 1, 'inner fork parent must remain the only sender');
+    assertTrue(
         workerLifecycleEventIds($transport->sentBodies[0]) === ['evt_fork_inside_work'],
         'inner fork parent must deliver its original boundary'
     );

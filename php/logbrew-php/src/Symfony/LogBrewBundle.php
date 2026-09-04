@@ -13,6 +13,7 @@ use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
+use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 
 /**
  * Native, optional Symfony integration for logbrew/sdk.
@@ -139,6 +140,14 @@ final class LogBrewBundle extends AbstractBundle
         $subscriber->setPublic(false);
         $container->setDefinition('logbrew.symfony.request_subscriber', $subscriber);
         $container->setAlias(SymfonyRequestSubscriber::class, 'logbrew.symfony.request_subscriber')->setPublic(false);
+
+        if (interface_exists(MiddlewareInterface::class)) {
+            $messenger = new Definition(SymfonyMessengerTelemetry::class);
+            $messenger->setFactory([new Reference('logbrew.symfony.telemetry'), 'messengerTelemetry']);
+            $messenger->addTag('kernel.event_subscriber');
+            $messenger->setPublic(false);
+            $container->setDefinition('logbrew.symfony.messenger', $messenger);
+        }
 
         if (class_exists(Command::class)) {
             $statusCommand = new Definition(SymfonyStatusCommand::class, [

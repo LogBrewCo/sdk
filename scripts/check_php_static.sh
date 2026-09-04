@@ -22,6 +22,7 @@ cat > "$tmp_dir/composer.json" <<'EOF'
     "psr/log": "3.0.2",
     "symfony/console": "8.1.2",
     "symfony/framework-bundle": "8.1.2",
+    "symfony/messenger": "8.1.2",
     "symfony/monolog-bundle": "4.0.2"
   }
 }

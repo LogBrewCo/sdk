@@ -18,6 +18,7 @@ use Throwable;
  *   system?: string,
  *   operation?: string,
  *   target?: string,
+ *   incomingTraceparent?: string,
  *   onCaptureError?: callable(Throwable): void
  * }
  */
@@ -87,7 +88,9 @@ final class LogBrewOperationTracing
     ): mixed {
         LogBrewClient::requireNonEmpty('operation span name', $name);
         $parent = LogBrewTrace::current();
-        $trace = $parent === null ? LogBrewTraceContext::createRoot() : LogBrewTraceContext::createChild($parent);
+        $trace = isset($options['incomingTraceparent'])
+            ? LogBrewTraceContext::fromIncomingTraceparentOrCreateRoot($options['incomingTraceparent'])
+            : ($parent === null ? LogBrewTraceContext::createRoot() : LogBrewTraceContext::createChild($parent));
         $startedAt = hrtime(true);
 
         try {

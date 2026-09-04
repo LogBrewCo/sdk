@@ -42,6 +42,18 @@ function expectThrows(callable $callback, string $needle): void
     exit(1);
 }
 
+function expectSdkError(callable $callback, string $code, ?string $message = null): SdkError
+{
+    try {
+        $callback();
+    } catch (SdkError $error) {
+        assertTrue($error->codeName === $code, "expected {$code}, received {$error->codeName}");
+        assertTrue($message === null || str_contains($error->getMessage(), $message), "expected error containing: {$message}");
+        return $error;
+    }
+    throw new RuntimeException("expected {$code} error");
+}
+
 /** @return array<string, mixed> */
 function testStringMap(mixed $value, string $label): array
 {
@@ -83,6 +95,55 @@ function testValueAt(array $value, array $path): mixed
     return $current;
 }
 
+/** @return array<string, mixed> */
+function testTransportPayload(RecordingTransport $transport, string $label): array
+{
+    $body = $transport->lastBody();
+    if ($body === null) {
+        throw new RuntimeException("expected {$label} transport body");
+    }
+    return testStringMap(json_decode($body, true, 512, JSON_THROW_ON_ERROR), $label);
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return list<array<string, mixed>>
+ */
+function testEvents(array $payload, string $label): array
+{
+    return array_map(
+        static fn (mixed $event): array => testStringMap($event, $label),
+        testList($payload['events'] ?? null, $label)
+    );
+}
+
+/**
+ * @param array<string, mixed> $event
+ * @return array<string, mixed>
+ */
+function testAttributes(array $event, string $label = 'event attributes'): array
+{
+    return testStringMap($event['attributes'] ?? null, $label);
+}
+
+/**
+ * @param array<string, mixed> $event
+ * @return array<string, mixed>
+ */
+function testMetadata(array $event, string $label = 'event metadata'): array
+{
+    return testStringMap(testAttributes($event, $label)['metadata'] ?? null, $label);
+}
+
+/**
+ * @param array<string, mixed> $event
+ * @return array<string, mixed>
+ */
+function testContext(array $event, string $label = 'event context'): array
+{
+    return testStringMap(testAttributes($event, $label)['context'] ?? null, $label);
+}
+
 /**
  * @param list<string> $command
  * @return array{stdout: string, stderr: string}
@@ -114,6 +175,21 @@ function runCommand(string $cwd, array $command): array
         'stdout' => $stdout === false ? '' : $stdout,
         'stderr' => $stderr === false ? '' : $stderr,
     ];
+}
+
+/**
+ * @param array{stdout:string,stderr:string} $result
+ * @param list<string> $types
+ */
+function assertExampleResult(array $result, array $types, int $count, string $label): void
+{
+    $payload = testStringMap(json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR), "{$label} payload");
+    $actualTypes = array_column(testEvents($payload, "{$label} events"), 'type');
+    foreach ($types as $type) {
+        assertTrue(in_array($type, $actualTypes, true), "expected {$type} event in {$label}");
+    }
+    $status = testStringMap(json_decode($result['stderr'], true, 512, JSON_THROW_ON_ERROR), "{$label} status");
+    assertTrue(($status['ok'] ?? null) === true && ($status['events'] ?? null) === $count, "expected successful {$label} status");
 }
 
 final class LocalHttpIntake
@@ -1219,24 +1295,10 @@ if ($packageRoot === false) {
 }
 
 $readmeExample = runCommand($packageRoot, [PHP_BINARY, 'examples/readme_example.php']);
-assertTrue(str_contains($readmeExample['stdout'], '"type":"release"') || str_contains($readmeExample['stdout'], '"type": "release"'), 'expected release event in PHP README example output');
-assertTrue(str_contains($readmeExample['stdout'], '"type":"environment"') || str_contains($readmeExample['stdout'], '"type": "environment"'), 'expected environment event in PHP README example output');
-assertTrue(str_contains($readmeExample['stdout'], '"type":"issue"') || str_contains($readmeExample['stdout'], '"type": "issue"'), 'expected issue event in PHP README example output');
-assertTrue(str_contains($readmeExample['stdout'], '"type":"log"') || str_contains($readmeExample['stdout'], '"type": "log"'), 'expected log event in PHP README example output');
-assertTrue(str_contains($readmeExample['stdout'], '"type":"span"') || str_contains($readmeExample['stdout'], '"type": "span"'), 'expected span event in PHP README example output');
-assertTrue(str_contains($readmeExample['stdout'], '"type":"action"') || str_contains($readmeExample['stdout'], '"type": "action"'), 'expected action event in PHP README example output');
-assertTrue(str_contains($readmeExample['stderr'], '"ok":true') || str_contains($readmeExample['stderr'], '"ok": true'), 'expected success status in PHP README example stderr');
-assertTrue(str_contains($readmeExample['stderr'], '"events":6') || str_contains($readmeExample['stderr'], '"events": 6'), 'expected event count in PHP README example stderr');
+assertExampleResult($readmeExample, ['release', 'environment', 'issue', 'log', 'span', 'action'], 6, 'PHP README example');
 
 $realUserSmoke = runCommand($packageRoot, [PHP_BINARY, 'examples/real_user_smoke.php']);
-assertTrue(str_contains($realUserSmoke['stdout'], '"type":"release"') || str_contains($realUserSmoke['stdout'], '"type": "release"'), 'expected release event in PHP real-user smoke output');
-assertTrue(str_contains($realUserSmoke['stdout'], '"type":"environment"') || str_contains($realUserSmoke['stdout'], '"type": "environment"'), 'expected environment event in PHP real-user smoke output');
-assertTrue(str_contains($realUserSmoke['stdout'], '"type":"issue"') || str_contains($realUserSmoke['stdout'], '"type": "issue"'), 'expected issue event in PHP real-user smoke output');
-assertTrue(str_contains($realUserSmoke['stdout'], '"type":"log"') || str_contains($realUserSmoke['stdout'], '"type": "log"'), 'expected log event in PHP real-user smoke output');
-assertTrue(str_contains($realUserSmoke['stdout'], '"type":"span"') || str_contains($realUserSmoke['stdout'], '"type": "span"'), 'expected span event in PHP real-user smoke output');
-assertTrue(str_contains($realUserSmoke['stdout'], '"type":"action"') || str_contains($realUserSmoke['stdout'], '"type": "action"'), 'expected action event in PHP real-user smoke output');
-assertTrue(str_contains($realUserSmoke['stderr'], '"ok":true') || str_contains($realUserSmoke['stderr'], '"ok": true'), 'expected success status in PHP real-user smoke stderr');
-assertTrue(str_contains($realUserSmoke['stderr'], '"events":6') || str_contains($realUserSmoke['stderr'], '"events": 6'), 'expected event count in PHP real-user smoke stderr');
+assertExampleResult($realUserSmoke, ['release', 'environment', 'issue', 'log', 'span', 'action'], 6, 'PHP real-user smoke');
 
 $examplesDir = $packageRoot . '/examples';
 $makeHelp = runCommand($examplesDir, ['make']);
@@ -1254,34 +1316,13 @@ assertTrue($helpLines === [
 assertTrue($makeHelp['stderr'] === '', 'expected empty stderr from PHP examples make help');
 
 $makeRun = runCommand($examplesDir, ['make', 'run']);
-assertTrue(str_contains($makeRun['stdout'], '"type":"release"') || str_contains($makeRun['stdout'], '"type": "release"'), 'expected release event in PHP make run output');
-assertTrue(str_contains($makeRun['stdout'], '"type":"environment"') || str_contains($makeRun['stdout'], '"type": "environment"'), 'expected environment event in PHP make run output');
-assertTrue(str_contains($makeRun['stdout'], '"type":"issue"') || str_contains($makeRun['stdout'], '"type": "issue"'), 'expected issue event in PHP make run output');
-assertTrue(str_contains($makeRun['stdout'], '"type":"log"') || str_contains($makeRun['stdout'], '"type": "log"'), 'expected log event in PHP make run output');
-assertTrue(str_contains($makeRun['stdout'], '"type":"span"') || str_contains($makeRun['stdout'], '"type": "span"'), 'expected span event in PHP make run output');
-assertTrue(str_contains($makeRun['stdout'], '"type":"action"') || str_contains($makeRun['stdout'], '"type": "action"'), 'expected action event in PHP make run output');
-assertTrue(str_contains($makeRun['stderr'], '"ok":true') || str_contains($makeRun['stderr'], '"ok": true'), 'expected success status in PHP make run stderr');
-assertTrue(str_contains($makeRun['stderr'], '"events":6') || str_contains($makeRun['stderr'], '"events": 6'), 'expected event count in PHP make run stderr');
+assertExampleResult($makeRun, ['release', 'environment', 'issue', 'log', 'span', 'action'], 6, 'PHP make run');
 
 $makeReadme = runCommand($examplesDir, ['make', 'run-readme-example']);
-assertTrue(str_contains($makeReadme['stdout'], '"type":"release"') || str_contains($makeReadme['stdout'], '"type": "release"'), 'expected release event in PHP make run-readme-example output');
-assertTrue(str_contains($makeReadme['stdout'], '"type":"environment"') || str_contains($makeReadme['stdout'], '"type": "environment"'), 'expected environment event in PHP make run-readme-example output');
-assertTrue(str_contains($makeReadme['stdout'], '"type":"issue"') || str_contains($makeReadme['stdout'], '"type": "issue"'), 'expected issue event in PHP make run-readme-example output');
-assertTrue(str_contains($makeReadme['stdout'], '"type":"log"') || str_contains($makeReadme['stdout'], '"type": "log"'), 'expected log event in PHP make run-readme-example output');
-assertTrue(str_contains($makeReadme['stdout'], '"type":"span"') || str_contains($makeReadme['stdout'], '"type": "span"'), 'expected span event in PHP make run-readme-example output');
-assertTrue(str_contains($makeReadme['stdout'], '"type":"action"') || str_contains($makeReadme['stdout'], '"type": "action"'), 'expected action event in PHP make run-readme-example output');
-assertTrue(str_contains($makeReadme['stderr'], '"ok":true') || str_contains($makeReadme['stderr'], '"ok": true'), 'expected success status in PHP make run-readme-example stderr');
-assertTrue(str_contains($makeReadme['stderr'], '"events":6') || str_contains($makeReadme['stderr'], '"events": 6'), 'expected event count in PHP make run-readme-example stderr');
+assertExampleResult($makeReadme, ['release', 'environment', 'issue', 'log', 'span', 'action'], 6, 'PHP make README example');
 
 $makeRealUser = runCommand($examplesDir, ['make', 'run-real-user-smoke']);
-assertTrue(str_contains($makeRealUser['stdout'], '"type":"release"') || str_contains($makeRealUser['stdout'], '"type": "release"'), 'expected release event in PHP make run-real-user-smoke output');
-assertTrue(str_contains($makeRealUser['stdout'], '"type":"environment"') || str_contains($makeRealUser['stdout'], '"type": "environment"'), 'expected environment event in PHP make run-real-user-smoke output');
-assertTrue(str_contains($makeRealUser['stdout'], '"type":"issue"') || str_contains($makeRealUser['stdout'], '"type": "issue"'), 'expected issue event in PHP make run-real-user-smoke output');
-assertTrue(str_contains($makeRealUser['stdout'], '"type":"log"') || str_contains($makeRealUser['stdout'], '"type": "log"'), 'expected log event in PHP make run-real-user-smoke output');
-assertTrue(str_contains($makeRealUser['stdout'], '"type":"span"') || str_contains($makeRealUser['stdout'], '"type": "span"'), 'expected span event in PHP make run-real-user-smoke output');
-assertTrue(str_contains($makeRealUser['stdout'], '"type":"action"') || str_contains($makeRealUser['stdout'], '"type": "action"'), 'expected action event in PHP make run-real-user-smoke output');
-assertTrue(str_contains($makeRealUser['stderr'], '"ok":true') || str_contains($makeRealUser['stderr'], '"ok": true'), 'expected success status in PHP make run-real-user-smoke stderr');
-assertTrue(str_contains($makeRealUser['stderr'], '"events":6') || str_contains($makeRealUser['stderr'], '"events": 6'), 'expected event count in PHP make run-real-user-smoke stderr');
+assertExampleResult($makeRealUser, ['release', 'environment', 'issue', 'log', 'span', 'action'], 6, 'PHP make real-user smoke');
 
 $firstUseful = runCommand($packageRoot, [PHP_BINARY, 'examples/first_useful_telemetry.php']);
 foreach (['"type":"release"', '"type":"environment"', '"type":"log"', '"type":"action"', '"type":"metric"', '"type":"span"'] as $needle) {
@@ -1368,6 +1409,7 @@ require __DIR__ . '/http_client_tracing.php';
 require __DIR__ . '/worker_lifecycle.php';
 require __DIR__ . '/persistent_delivery.php';
 require __DIR__ . '/symfony_integration.php';
+require __DIR__ . '/symfony_messenger.php';
 require __DIR__ . '/telemetry_context.php';
 
 fwrite(STDOUT, "php sdk checks passed\n");

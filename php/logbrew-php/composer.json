@@ -12,6 +12,7 @@
     "monolog/monolog": "^3.0",
     "symfony/console": "^6.4 || ^7.0 || ^8.0",
     "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
+    "symfony/messenger": "^6.4 || ^7.0 || ^8.0",
     "symfony/monolog-bundle": "^3.10 || ^4.0"
   },
   "suggest": {
@@ -22,6 +23,7 @@
     "psr/http-client": "Required to wrap an app-owned PSR-18 client.",
     "psr/http-message": "Required for outbound HTTP request and response interfaces.",
     "symfony/framework-bundle": "Required for the native Symfony bundle and request telemetry.",
+    "symfony/messenger": "Required for automatic Symfony message trace correlation.",
     "symfony/monolog-bundle": "Required for automatic Symfony Monolog capture."
   },
   "autoload": {
