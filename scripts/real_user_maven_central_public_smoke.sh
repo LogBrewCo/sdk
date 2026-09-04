@@ -69,7 +69,7 @@ elif [[ -n "$release_plan_path" ]]; then
     kotlin_version="$(plan_version "logbrew-kotlin")"
     okhttp_version="$(plan_version "logbrew-kotlin-okhttp")"
 else
-    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.6}}"
+    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.7}}"
     kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.2}}"
     okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"
 fi
@@ -146,8 +146,6 @@ on_error() {
 
 trap 'rm -rf "$tmp_dir"' EXIT
 trap on_error ERR
-
-cd "$repo_root"
 
 repository_url="$central_url"
 if [[ -n "$bundle_path" ]]; then
