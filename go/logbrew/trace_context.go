@@ -135,42 +135,57 @@ func TraceMetadataFromContext(ctx context.Context) map[string]any {
 	return trace.Metadata()
 }
 
+// LogContext queues a log with request-local trace correlation from ctx.
+func (c *Client) LogContext(ctx context.Context, id, timestamp string, attributes LogAttributes) error {
+	return c.Log(id, timestamp, LogAttributesWithTrace(ctx, attributes))
+}
+
+// IssueContext queues an issue with request-local trace correlation from ctx.
+func (c *Client) IssueContext(ctx context.Context, id, timestamp string, attributes IssueAttributes) error {
+	return c.Issue(id, timestamp, IssueAttributesWithTrace(ctx, attributes))
+}
+
+// ActionContext queues an action with request-local trace correlation from ctx.
+func (c *Client) ActionContext(ctx context.Context, id, timestamp string, attributes ActionAttributes) error {
+	return c.Action(id, timestamp, ActionAttributesWithTrace(ctx, attributes))
+}
+
+// MetricContext queues a metric with request-local trace correlation from ctx.
+func (c *Client) MetricContext(ctx context.Context, id, timestamp string, attributes MetricAttributes) error {
+	return c.Metric(id, timestamp, MetricAttributesWithTrace(ctx, attributes))
+}
+
 // LogAttributesWithTrace merges active trace metadata into log attributes.
 func LogAttributesWithTrace(ctx context.Context, attributes LogAttributes) LogAttributes {
-	if trace, ok := LogBrewTraceFromContext(ctx); ok {
-		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
-		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
-	}
+	attributes.Context, attributes.Metadata = signalContextWithTrace(ctx, attributes.Context, attributes.Metadata)
 	return attributes
 }
 
 // IssueAttributesWithTrace merges active trace metadata into issue attributes.
 func IssueAttributesWithTrace(ctx context.Context, attributes IssueAttributes) IssueAttributes {
-	if trace, ok := LogBrewTraceFromContext(ctx); ok {
-		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
-		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
-	}
+	attributes.Context, attributes.Metadata = signalContextWithTrace(ctx, attributes.Context, attributes.Metadata)
 	return attributes
 }
 
 // ActionAttributesWithTrace adds exact active trace/span context while keeping
 // legacy primitive metadata for compatible readers.
 func ActionAttributesWithTrace(ctx context.Context, attributes ActionAttributes) ActionAttributes {
-	if trace, ok := LogBrewTraceFromContext(ctx); ok {
-		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
-		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
-	}
+	attributes.Context, attributes.Metadata = signalContextWithTrace(ctx, attributes.Context, attributes.Metadata)
 	return attributes
 }
 
 // MetricAttributesWithTrace adds exact active trace/span context while keeping
 // legacy primitive metadata for compatible readers.
 func MetricAttributesWithTrace(ctx context.Context, attributes MetricAttributes) MetricAttributes {
-	if trace, ok := LogBrewTraceFromContext(ctx); ok {
-		attributes.Metadata = mergeMetadata(attributes.Metadata, trace.Metadata())
-		attributes.Context = telemetryContextWithTrace(attributes.Context, trace)
-	}
+	attributes.Context, attributes.Metadata = signalContextWithTrace(ctx, attributes.Context, attributes.Metadata)
 	return attributes
+}
+
+func signalContextWithTrace(ctx context.Context, current *TelemetryContext, metadata map[string]any) (*TelemetryContext, map[string]any) {
+	if trace, ok := LogBrewTraceFromContext(ctx); ok {
+		return telemetryContextWithTrace(current, trace), mergeMetadata(metadata, trace.Metadata())
+	}
+	return current, metadata
 }
 
 // SpanAttributesFromTraceContext returns LogBrew span attributes from

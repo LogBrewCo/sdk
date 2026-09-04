@@ -268,74 +268,64 @@ func TestTelemetryContextValidationRejectsUnsafeOrAmbiguousValues(t *testing.T) 
 	}
 }
 
-func TestTraceHelpersPromoteActiveTraceIntoFirstClassContext(t *testing.T) {
+func TestContextCapturePromotesActiveTraceIntoFirstClassContext(t *testing.T) {
 	trace := testTrace(t, "B7AD6B7169203331")
 	ctx := ContextWithLogBrewTrace(t.Context(), trace)
-	logAttributes := LogAttributesWithTrace(ctx, LogAttributes{
-		Message: "checkout failed", Level: "error",
-	})
-	issueAttributes := IssueAttributesWithTrace(ctx, IssueAttributes{
-		Title: "Checkout failed", Level: "error",
-		Context: &TelemetryContext{SchemaVersion: 1, Tags: map[string]string{"operation": "checkout"}},
-	})
-	actionAttributes := ActionAttributesWithTrace(ctx, ActionAttributes{
-		Name: "checkout.submitted",
-	})
-	metricAttributes := MetricAttributesWithTrace(ctx, MetricAttributes{
-		Name: "checkout.duration", Kind: "histogram", Value: 42, Unit: "ms", Temporality: "delta",
-	})
-	spanAttributes, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
-		Trace: trace, Name: "checkout", Status: "error",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, context := range map[string]*TelemetryContext{
-		"log":    logAttributes.Context,
-		"issue":  issueAttributes.Context,
-		"action": actionAttributes.Context,
-		"metric": metricAttributes.Context,
-		"span":   spanAttributes.Context,
-	} {
-		if context == nil || context.Trace == nil {
-			t.Fatalf("%s trace was not promoted into typed context: %#v", name, context)
-		}
-		if context.Trace.TraceID != trace.TraceID ||
-			context.Trace.SpanID != trace.SpanID ||
-			context.Trace.ParentSpanID != trace.ParentSpanID ||
-			context.Trace.Sampled == nil || !*context.Trace.Sampled {
-			t.Fatalf("unexpected %s trace context: %#v", name, context.Trace)
-		}
-	}
-	if issueAttributes.Context.Tags["operation"] != "checkout" {
-		t.Fatalf("trace promotion dropped event context: %#v", issueAttributes.Context)
-	}
-
 	client, err := NewClient(Config{
 		APIKey: "LOGBREW_API_KEY", SDKName: "logbrew-go", SDKVersion: "0.1.0",
 		DisableRuntimeContext: true,
-		Context: &TelemetryContext{
-			SchemaVersion: 1,
-			Tags:          map[string]string{"plan": "team"},
-		},
+		Context:               &TelemetryContext{SchemaVersion: 1, Tags: map[string]string{"plan": "team"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Issue("evt_traced", "2026-08-03T00:00:00Z", issueAttributes); err != nil {
-		t.Fatal(err)
+	timestamp := "2026-08-03T00:00:00Z"
+	captures := []struct {
+		name string
+		run  func() error
+	}{
+		{"log", func() error {
+			return client.LogContext(ctx, "evt_log", timestamp, LogAttributes{Message: "checkout failed", Level: "error"})
+		}},
+		{"issue", func() error {
+			return client.IssueContext(ctx, "evt_issue", timestamp, IssueAttributes{
+				Title: "Checkout failed", Level: "error",
+				Context: &TelemetryContext{SchemaVersion: 1, Tags: map[string]string{"operation": "checkout"}},
+			})
+		}},
+		{"action", func() error {
+			return client.ActionContext(ctx, "evt_action", timestamp, ActionAttributes{Name: "checkout.submitted", Status: "success"})
+		}},
+		{"metric", func() error {
+			return client.MetricContext(ctx, "evt_metric", timestamp, MetricAttributes{
+				Name: "checkout.duration", Kind: "histogram", Value: 42, Unit: "ms", Temporality: "delta",
+			})
+		}},
 	}
-	context := previewEventContext(t, client)
-	if !reflect.DeepEqual(context["trace"], map[string]any{
+	for _, capture := range captures {
+		if err := capture.run(); err != nil {
+			t.Fatalf("capture %s: %v", capture.name, err)
+		}
+	}
+	_, events := previewEvents(t, client)
+	if len(events) != len(captures) {
+		t.Fatalf("unexpected captured event count: %d", len(events))
+	}
+	wantTrace := map[string]any{
 		"traceId":      trace.TraceID,
 		"spanId":       trace.SpanID,
 		"parentSpanId": trace.ParentSpanID,
 		"sampled":      true,
-	}) {
-		t.Fatalf("queued issue missing exact span correlation: %#v", context)
 	}
-	if !reflect.DeepEqual(context["tags"], map[string]any{"operation": "checkout", "plan": "team"}) {
-		t.Fatalf("queued issue missing merged tags: %#v", context)
+	for index, event := range events {
+		context := event.Attributes["context"].(map[string]any)
+		if event.Type != captures[index].name || !reflect.DeepEqual(context["trace"], wantTrace) {
+			t.Fatalf("unexpected %s trace context: %#v", event.Type, context)
+		}
+	}
+	issueContext := events[1].Attributes["context"].(map[string]any)
+	if !reflect.DeepEqual(issueContext["tags"], map[string]any{"operation": "checkout", "plan": "team"}) {
+		t.Fatalf("queued issue missing merged tags: %#v", issueContext)
 	}
 }
 

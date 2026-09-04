@@ -184,14 +184,15 @@ func TestInstalledGinMiddlewareRequestTracePanicAndPrivacy(t *testing.T) {
 			trace.ParentSpanID != "00f067aa0ba902b7" || trace.SpanID != "b7ad6b7169203331" {
 			t.Fatalf("unexpected installed request trace: %#v", trace)
 		}
-		if err := client.Log(
+		if err := client.LogContext(
+			c.Request.Context(),
 			"evt_installed_handler_log",
 			"2026-08-01T10:00:00Z",
-			logbrew.LogAttributesWithTrace(c.Request.Context(), logbrew.LogAttributes{
+			logbrew.LogAttributes{
 				Message: "handler reached",
 				Level:   "info",
 				Logger:  "gin-installed-smoke",
-			}),
+			},
 		); err != nil {
 			t.Fatal(err)
 		}

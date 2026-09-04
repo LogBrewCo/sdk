@@ -65,6 +65,9 @@ func TestTraceContextHelpersMergeActiveTraceMetadata(t *testing.T) {
 		spanAttributes.ParentSpanID != trace.ParentSpanID {
 		t.Fatalf("span attributes missing active trace: %#v", spanAttributes)
 	}
+	if spanAttributes.Context == nil || spanAttributes.Context.Trace == nil {
+		t.Fatalf("span attributes missing typed trace context: %#v", spanAttributes.Context)
+	}
 }
 
 func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
@@ -83,7 +86,7 @@ func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
 			!trace.Sampled {
 			t.Fatalf("unexpected request trace: %#v", trace)
 		}
-		if err := client.Log("evt_go_http_log", baseTime.Format(time.RFC3339Nano), LogAttributesWithTrace(r.Context(), LogAttributes{
+		if err := client.LogContext(r.Context(), "evt_go_http_log", baseTime.Format(time.RFC3339Nano), LogAttributes{
 			Message: "checkout handler reached",
 			Level:   "info",
 			Logger:  "checkout-service",
@@ -91,14 +94,14 @@ func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
 				"routeTemplate": "/checkout/:cart_id",
 				"nested":        map[string]any{"drop": true},
 			},
-		})); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := client.Issue("evt_go_http_issue", baseTime.Format(time.RFC3339Nano), IssueAttributesWithTrace(r.Context(), IssueAttributes{
+		if err := client.IssueContext(r.Context(), "evt_go_http_issue", baseTime.Format(time.RFC3339Nano), IssueAttributes{
 			Title:   "checkout upstream failed",
 			Level:   "error",
 			Message: "upstream timeout",
-		})); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 		http.Error(w, "upstream failed", http.StatusBadGateway)
