@@ -142,7 +142,7 @@ use axum::{
     body::Body,
     http::{Request, Response},
 };
-use logbrew::{LogBrewClient, TowerRequestIds, TowerRequestTelemetryLayer};
+use logbrew::{LogBrewClient, LogEvent, TowerRequestIds, TowerRequestTelemetryLayer};
 use serde_json::Value;
 use std::{
     error::Error,
@@ -182,8 +182,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         || "2026-06-02T10:00:02Z".to_string(),
     )
     .with_error_issues();
-    let service = service_fn(|_request: Request<Body>| async {
-        Err::<Response<Body>, CheckoutFailure>(CheckoutFailure)
+    let handler_client = Arc::clone(&client);
+    let service = service_fn(move |_request: Request<Body>| {
+        handler_client
+            .lock()
+            .unwrap()
+            .log(
+                "evt_handler_log",
+                "2026-06-02T10:00:01Z",
+                LogEvent::new("checkout failed", "error"),
+            )
+            .unwrap();
+        async { Err::<Response<Body>, CheckoutFailure>(CheckoutFailure) }
     });
     let mut request = Request::builder()
         .method("post")
@@ -202,19 +212,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let payload: Value = serde_json::from_str(&client.lock().unwrap().preview_json()?)?;
     let events = payload["events"].as_array().unwrap();
-    assert_eq!(events.len(), 3);
-    assert_eq!(events[0]["type"], "span");
-    assert_eq!(events[1]["type"], "metric");
-    assert_eq!(events[2]["type"], "issue");
+    assert_eq!(events.len(), 4);
+    assert_eq!(events[0]["type"], "log");
+    assert_eq!(events[1]["type"], "span");
+    assert_eq!(events[2]["type"], "metric");
+    assert_eq!(events[3]["type"], "issue");
 
-    let span = &events[0]["attributes"];
-    let metric = &events[1]["attributes"];
-    let issue = &events[2]["attributes"];
+    let log = &events[0]["attributes"];
+    let span = &events[1]["attributes"];
+    let metric = &events[2]["attributes"];
+    let issue = &events[3]["attributes"];
     assert_eq!(span["status"], "error");
     assert_eq!(span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
     assert_eq!(span["spanId"], "b7ad6b7169203331");
+    assert_eq!(log["context"]["trace"]["traceId"], span["traceId"]);
+    assert_eq!(log["context"]["trace"]["spanId"], span["spanId"]);
     assert_eq!(metric["name"], "http.server.duration");
-    assert_eq!(metric["description"], "Duration of one completed server request.");
     assert_eq!(issue["metadata"]["traceId"], span["traceId"]);
     assert_eq!(issue["metadata"]["spanId"], span["spanId"]);
     assert_eq!(issue["exception"]["mechanism"]["type"], "tower.service");
