@@ -262,10 +262,7 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     }:
         return True
 
-    if relative_text in {
-        "python/logbrew_py/tests/test_arq_client.py",
-        "python/logbrew_py/tests/test_rq_client.py",
-    } and terms == {"cleanup"}:
+    if "/tests/" in relative_text and relative_text.endswith(".py") and terms == {"cleanup"}:
         return ".addCleanup(" in line
 
     if relative_text.endswith((".c", ".h", ".cpp", ".hpp")) and "curl_easy_cleanup" in line:

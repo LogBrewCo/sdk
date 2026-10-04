@@ -9,17 +9,19 @@ import uuid
 
 # Runtime lookup supports get_type_hints on the public config and callables.
 # Reviewed 2026-09-05; public annotation resolution is covered by contract tests.
-from collections.abc import Callable  # noqa: TC003
-from contextlib import ExitStack
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from importlib.metadata import version
+from typing import cast
 
 from flask import Flask, Response, has_request_context, request
 from flask.signals import got_request_exception, request_finished, request_started
 from logbrew_sdk import (
     HttpTransport,
+    IssueAttributes,
     LogBrewClient,
     LogBrewTraceContext,
     Metadata,
@@ -28,6 +30,7 @@ from logbrew_sdk import (
     SpanAttributes,
     TelemetryDeployment,
     TelemetryResource,
+    TelemetryTraceContext,
     Transport,
     TransportError,
     create_issue_attributes_from_exception,
@@ -52,8 +55,92 @@ class _RequestState:
     started_at: float
     timestamp: str
     activation: ExitStack
+    name: str
+    metadata: Metadata
     exception_captured: bool = False
     completed: bool = False
+    failed: bool = False
+    deferred: bool = False
+
+
+class _StreamingResponse(Iterator[str | bytes]):
+    """Complete request capture when the WSGI body finishes or closes."""
+
+    def __init__(
+        self,
+        body: Iterable[str | bytes],
+        config: LogBrewFlaskConfig,
+        state: _RequestState,
+        status_code: int,
+        environ: dict[str, object],
+    ) -> None:
+        self._body = body
+        self._iterator: Iterator[str | bytes] | None = None
+        self._config = config
+        self._state = state
+        self._status_code = status_code
+        self._closed = False
+        self._environ = environ
+
+    @contextmanager
+    def _activate(self) -> Iterator[None]:
+        previous = self._environ.get(_REQUEST_STATE_KEY)
+        self._environ[_REQUEST_STATE_KEY] = self._state
+        try:
+            with use_logbrew_trace(self._state.trace):
+                yield
+        finally:
+            if previous is None:
+                self._environ.pop(_REQUEST_STATE_KEY, None)
+            else:
+                self._environ[_REQUEST_STATE_KEY] = previous
+
+    def __next__(self) -> str | bytes:
+        if self._closed:
+            raise StopIteration
+        with self._activate():
+            try:
+                if self._iterator is None:
+                    self._iterator = iter(self._body)
+                return next(self._iterator)
+            except StopIteration:
+                self.close()
+                raise
+            except Exception as exc:
+                self._finish(exc)
+                raise
+
+    def close(self) -> None:
+        """Close the original body once, including a body never iterated."""
+        self._finish()
+
+    def _finish(self, error: Exception | None = None) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        with self._activate():
+            try:
+                close = getattr(self._body, "close", None)
+                if close is not None:
+                    close()
+            except Exception as exc:
+                self._capture_completion(error or exc)
+                if error is not None:
+                    raise error from None
+                raise
+            self._capture_completion(error)
+            if error is not None:
+                raise error
+
+    def _capture_completion(self, error: Exception | None) -> None:
+        if error is not None:
+            self._state.failed = True
+            _capture_request_exception(self._config, error, self._state)
+        try:
+            _capture_completed_request(self._config, self._status_code, self._state)
+        except (SdkError, TransportError):
+            if error is None:
+                raise
 
 
 def _request_state() -> _RequestState | None:
@@ -296,22 +383,45 @@ def create_request_metric_attributes(
         A nonnegative delta histogram in milliseconds with bounded dimensions.
 
     """
-    duration_value = max(float(duration_ms), 0.0)
-    return {
+    return _metric_attributes(
+        status_code,
+        duration_ms,
+        metric_name,
+        {"framework": "flask", "method": request.method, "routeTemplate": request_route_template()},
+        get_active_logbrew_trace(),
+    )
+
+
+def _metric_attributes(
+    status_code: int,
+    duration_ms: float,
+    metric_name: str,
+    metadata: Metadata,
+    trace: LogBrewTraceContext | None,
+) -> MetricAttributes:
+    attributes: MetricAttributes = {
         "name": metric_name,
         "description": "Duration of one completed server request.",
         "kind": "histogram",
-        "value": duration_value,
+        "value": max(float(duration_ms), 0.0),
         "unit": "ms",
         "temporality": "delta",
         "metadata": {
-            "framework": "flask",
-            "method": request.method,
-            "routeTemplate": request_route_template(),
+            **metadata,
             "statusCode": status_code,
             "statusCodeClass": status_code_class(status_code),
         },
     }
+    if trace is not None:
+        trace_context: TelemetryTraceContext = {
+            "traceId": trace.trace_id,
+            "spanId": trace.span_id,
+            "sampled": trace.sampled,
+        }
+        if trace.parent_span_id is not None:
+            trace_context["parentSpanId"] = trace.parent_span_id
+        attributes["context"] = {"schemaVersion": 1, "trace": trace_context}
+    return attributes
 
 
 def capture_request_metric(  # noqa: PLR0913
@@ -400,19 +510,22 @@ def capture_exception(
     client.issue(
         issue_event_id,
         timestamp or utc_timestamp(),
-        create_issue_attributes_from_exception(
-            exc,
-            title=f"{request_name()} failed",
-            message="Unhandled exception",
-            mechanism="flask.middleware",
-            handled=False,
-            metadata={
-                **request_metadata(status_code=500),
-                **trace_metadata(trace_context),
-            },
-        ),
+        _issue_attributes(exc, request_name(), request_metadata(status_code=500), trace_context),
     )
     return issue_event_id
+
+
+def _issue_attributes(
+    exc: BaseException, name: str, metadata: Metadata, trace: LogBrewTraceContext | None
+) -> IssueAttributes:
+    return create_issue_attributes_from_exception(
+        exc,
+        title=f"{name} failed",
+        message="Unhandled exception",
+        mechanism="flask.middleware",
+        handled=False,
+        metadata={**metadata, **trace_metadata(trace)},
+    )
 
 
 def add_logbrew_middleware(  # noqa: PLR0913
@@ -458,23 +571,39 @@ def add_logbrew_middleware(  # noqa: PLR0913
 
     def logbrew_request_started(_sender: Flask, **_: object) -> None:
         trace_context = create_request_trace_context(span_id_factory=config.span_id_factory)
-        state = _RequestState(trace_context, time.perf_counter(), utc_timestamp(), ExitStack())
+        state = _RequestState(
+            trace_context, time.perf_counter(), utc_timestamp(), ExitStack(), request_name(), request_metadata()
+        )
         state.activation.enter_context(use_logbrew_trace(trace_context))
         request.environ[_REQUEST_STATE_KEY] = state
 
     def logbrew_request_finished(_sender: Flask, response: Response, **_: object) -> None:
+        state = _request_state()
+        # Error responses are complete; only defer application bodies that are still streaming.
+        if state is not None and response.is_streamed and not state.exception_captured:
+            state.name = request_name()
+            state.metadata = request_metadata(status_code=response.status_code)
+            response.response = cast(
+                "Iterable[bytes]",
+                _StreamingResponse(response.response, config, state, response.status_code, request.environ),
+            )
+            state.deferred = True
+            request.environ.pop(_REQUEST_STATE_KEY, None)
+            state.activation.close()
+            return
         _capture_completed_request(config, response.status_code)
 
     @app.teardown_request
     def logbrew_teardown_request(exc: BaseException | None) -> None:
+        state = _request_state()
         try:
-            if exc is not None:
+            if exc is not None and (state is None or not state.deferred):
                 _capture_request_exception(config, exc)
                 _capture_completed_request(config, 500)
         finally:
             state = _request_state()
             if state is not None:
-                request.environ.pop(_REQUEST_STATE_KEY)
+                request.environ.pop(_REQUEST_STATE_KEY, None)
                 state.activation.close()
 
     def logbrew_got_request_exception(_sender: Flask, exception: BaseException, **_: object) -> None:
@@ -487,46 +616,63 @@ def add_logbrew_middleware(  # noqa: PLR0913
     return config
 
 
-def _capture_request_exception(config: LogBrewFlaskConfig, exc: BaseException) -> None:
+def _capture_request_exception(
+    config: LogBrewFlaskConfig, exc: BaseException, state: _RequestState | None = None
+) -> None:
     """Record an eligible issue once, without completing the request early."""
-    state = _request_state()
+    state = state or _request_state()
     if (
         state is not None
         and config.capture_exceptions
         and not isinstance(exc, (SdkError, TransportError))
         and not state.exception_captured
     ):
-        capture_exception(config.client, exc, trace=state.trace)
+        config.client.issue(
+            f"evt_flask_issue_{uuid.uuid4().hex}",
+            utc_timestamp(),
+            _issue_attributes(exc, state.name, {"status_code": 500, **state.metadata}, state.trace),
+        )
         state.exception_captured = True
 
 
-def _capture_completed_request(config: LogBrewFlaskConfig, status_code: int) -> None:
+def _capture_completed_request(
+    config: LogBrewFlaskConfig, status_code: int, state: _RequestState | None = None
+) -> None:
     """Record one completed request, or the teardown fallback for propagation."""
-    state = _request_state()
+    state = state or _request_state()
     if state is None or state.completed:
         return
     state.completed = True
-    duration_ms = request_duration_ms()
+    duration_ms = max(0.0, (time.perf_counter() - state.started_at) * 1000)
     capture_span = (
         config.capture_successful_requests
         or status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
         or state.exception_captured
+        or state.failed
     )
     if capture_span:
-        capture_request_span(
-            config.client,
-            status_code=status_code,
-            duration_ms=duration_ms,
-            timestamp=state.timestamp,
-            span_id_factory=config.span_id_factory,
-            trace=state.trace,
+        config.client.span(
+            f"evt_flask_span_{uuid.uuid4().hex}",
+            state.timestamp,
+            span_attributes_from_trace_context(
+                state.trace,
+                name=state.name,
+                status="error" if state.failed or status_code >= HTTPStatus.INTERNAL_SERVER_ERROR else "ok",
+                duration_ms=duration_ms,
+                metadata={**state.metadata, "status_code": status_code, "duration_ms": round(duration_ms, 3)},
+            ),
         )
     if config.capture_request_metrics:
-        capture_request_metric(
-            config.client,
-            status_code=status_code,
-            duration_ms=duration_ms,
-            metric_name=config.request_metric_name,
+        config.client.metric(
+            f"evt_flask_metric_{uuid.uuid4().hex}",
+            utc_timestamp(),
+            _metric_attributes(
+                status_code,
+                duration_ms,
+                config.request_metric_name,
+                {key: state.metadata[key] for key in ("framework", "method", "routeTemplate")},
+                state.trace,
+            ),
         )
     if capture_span or config.capture_request_metrics:
         flush_if_configured(config)
