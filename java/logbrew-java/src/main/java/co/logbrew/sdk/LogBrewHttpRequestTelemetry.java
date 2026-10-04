@@ -205,14 +205,9 @@ public final class LogBrewHttpRequestTelemetry {
         return normalized;
     }
 
-    private static String sanitizeRouteTemplate(String routeTemplate) {
+    static String sanitizeRouteTemplate(String routeTemplate) {
         Validation.requireNonEmpty("routeTemplate", routeTemplate);
         String trimmed = routeTemplate.trim();
-        int schemeIndex = trimmed.indexOf("://");
-        if (schemeIndex >= 0) {
-            int pathStart = trimmed.indexOf('/', schemeIndex + 3);
-            trimmed = pathStart >= 0 ? trimmed.substring(pathStart) : "/";
-        }
         int queryIndex = trimmed.indexOf('?');
         int hashIndex = trimmed.indexOf('#');
         int end = trimmed.length();
@@ -223,6 +218,11 @@ public final class LogBrewHttpRequestTelemetry {
             end = Math.min(end, hashIndex);
         }
         String sanitized = trimmed.substring(0, end).trim();
+        int schemeIndex = sanitized.indexOf("://");
+        if (schemeIndex >= 0) {
+            int pathStart = sanitized.indexOf('/', schemeIndex + 3);
+            sanitized = pathStart >= 0 ? sanitized.substring(pathStart) : "/";
+        }
         if (sanitized.isEmpty()) {
             throw new SdkException("validation_error", "routeTemplate must be non-empty after sanitization");
         }

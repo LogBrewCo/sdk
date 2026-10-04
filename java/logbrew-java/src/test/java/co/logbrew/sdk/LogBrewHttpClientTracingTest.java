@@ -1,8 +1,10 @@
 package co.logbrew.sdk;
 
+import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.Authenticator;
 import java.net.CookieHandler;
+import java.net.InetSocketAddress;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -16,6 +18,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
@@ -34,6 +39,7 @@ public final class LogBrewHttpClientTracingTest {
         testSendInjectsTraceparentAndQueuesSanitizedSpan();
         testSendPreservesOriginalErrorsAndRecordsTypeOnlyFailure();
         testSendAsyncRecordsCompletionSpan();
+        testRealHttpCaptureFailurePreservesResults();
         System.out.println("java http client tracing tests ok (" + testsRun + " tests)");
     }
 
@@ -193,6 +199,96 @@ public final class LogBrewHttpClientTracingTest {
         assertContains(payload, "\"statusCode\": 503");
         assertContains(payload, "\"durationMs\": 11.0");
         assertNotContains(payload, "payload should not be captured");
+        testsRun++;
+    }
+
+    private void testRealHttpCaptureFailurePreservesResults() {
+        HttpServer server;
+        try {
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        } catch (IOException error) {
+            throw new AssertionError(error);
+        }
+        AtomicReference<String> propagated = new AtomicReference<>();
+        server.createContext("/status", exchange -> {
+            propagated.set(exchange.getRequestHeaders().getFirst("traceparent"));
+            exchange.sendResponseHeaders(202, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+            HttpRequest request = HttpRequest.newBuilder(URI.create(
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/status?private=fixture"))
+                .timeout(Duration.ofSeconds(2)).build();
+            for (boolean async : new boolean[] {false, true}) {
+                for (boolean failResponse : new boolean[] {false, true}) {
+                    for (boolean failCapture : new boolean[] {false, true}) {
+                        LogBrewClient client = sampleClient();
+                        AtomicInteger ticks = new AtomicInteger();
+                        AtomicInteger captureErrors = new AtomicInteger();
+                        IllegalStateException original = new IllegalStateException("private response fixture");
+                        HttpResponse.BodyHandler<Void> handler = info -> {
+                            if (failResponse) {
+                                throw original;
+                            }
+                            return HttpResponse.BodySubscribers.discarding();
+                        };
+                        LogBrewHttpClientTracing.ClientRequest config = LogBrewHttpClientTracing.ClientRequest.create()
+                            .routeTemplate("https://route.example.invalid?private=/private-route#fragment")
+                            .now(() -> {
+                                if (ticks.getAndIncrement() > 0 && failCapture) {
+                                    throw new IllegalStateException("private clock fixture");
+                                }
+                                return Instant.now();
+                            })
+                            .onError(error -> {
+                                assertEquals("capture_error", error.code(), "advisory error code");
+                                assertNotContains(error.detailMessage(), "private clock fixture");
+                                captureErrors.incrementAndGet();
+                                throw new IllegalStateException("private advisory fixture");
+                            });
+                        LogBrewTraceContext parent = LogBrewTraceContext.create(
+                            "11111111111111111111111111111111", "2222222222222222");
+                        LogBrewTrace.Scope scope = LogBrewTrace.activate(parent);
+                        try {
+                            HttpResponse<Void> response = async
+                                ? LogBrewHttpClientTracing.sendAsync(client, http, request, handler, config)
+                                    .get(3, TimeUnit.SECONDS)
+                                : LogBrewHttpClientTracing.send(client, http, request, handler, config);
+                            assertTrue(!failResponse, "failed body handler must retain its error");
+                            assertEquals(202, response.statusCode(), "real HTTP response retained");
+                        } catch (Exception error) {
+                            assertTrue(failResponse, "successful HTTP request must not fail: " + error);
+                            Throwable cause = error;
+                            while (cause.getCause() != null && cause != original) {
+                                cause = cause.getCause();
+                            }
+                            assertTrue(cause == original, "original body handler error retained");
+                        } finally {
+                            assertTrue(LogBrewTrace.current().orElseThrow() == parent, "active parent trace survives");
+                            scope.close();
+                        }
+                        assertEquals(parent.traceId(), Traceparent.parse(propagated.get()).traceId(), "wire trace correlation");
+                        assertEquals(failCapture ? 1 : 0, captureErrors.get(), "advisory capture error count");
+                        assertEquals(failCapture ? 0 : 1, client.pendingEvents(), "complete telemetry event count");
+                        String payload = client.previewJson();
+                        if (!failCapture) {
+                            Traceparent.Context wire = Traceparent.parse(propagated.get());
+                            assertContains(payload, "\"spanId\": \"" + wire.parentSpanId() + "\"");
+                            assertContains(payload, "\"parentSpanId\": \"" + parent.spanId() + "\"");
+                            assertContains(payload, "\"status\": \"" + (failResponse ? "error" : "ok") + "\"");
+                            assertContains(payload, "\"routeTemplate\": \"/\"");
+                        }
+                        assertNotContains(payload, "private");
+                        assertNotContains(payload, "127.0.0.1");
+                    }
+                }
+            }
+        } finally {
+            server.stop(0);
+        }
+        assertTrue(LogBrewTrace.current().isEmpty(), "no context leaked after real HTTP requests");
         testsRun++;
     }
 
