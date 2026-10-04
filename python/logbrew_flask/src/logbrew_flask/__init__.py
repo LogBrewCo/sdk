@@ -511,9 +511,10 @@ def create_request_trace_context(
     if traceparent:
         try:
             parse_traceparent(traceparent)
-            return create_logbrew_trace_context(traceparent, span_id_factory=span_id_factory)
         except SdkError:
             pass
+        else:
+            return create_logbrew_trace_context(traceparent, span_id_factory=span_id_factory)
     return create_logbrew_trace_context(span_id_factory=span_id_factory)
 
 

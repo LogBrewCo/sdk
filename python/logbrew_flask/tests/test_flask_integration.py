@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import unittest
+from unittest.mock import Mock
 from collections.abc import Callable
 from importlib.metadata import version
 from pathlib import Path
@@ -13,6 +14,7 @@ from flask import Flask
 from logbrew_flask import (
     LOGBREW_FLASK_SDK_VERSION,
     add_logbrew_middleware,
+    create_request_trace_context,
     get_active_logbrew_trace,
     init_logbrew,
 )
@@ -390,3 +392,20 @@ class FlaskIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestTraceFactoryTests(unittest.TestCase):
+    """Keep valid inbound propagation separate from local factory failures."""
+
+    def test_valid_header_does_not_retry_failed_span_factory(self) -> None:
+        """Propagate the original factory failure after exactly one invocation."""
+        failure = SdkError("validation_error", "span factory failed")
+        factory = Mock(side_effect=failure)
+        app = Flask(__name__)
+        with app.test_request_context(
+            "/health",
+            headers={"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+        ), self.assertRaises(SdkError) as raised:
+            create_request_trace_context(span_id_factory=factory)
+        self.assertIs(raised.exception, failure)
+        factory.assert_called_once_with()
