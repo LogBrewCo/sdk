@@ -1,7 +1,7 @@
 "use strict";
 
 const { createReactNativeErrorEvent } = require("./index.cjs");
-const { createFatalController } = require("./fatal-replay.cjs");
+const { captureIssueWithAdmission, createFatalController } = require("./fatal-replay.cjs");
 const {
   createLogBrewReactNativePromiseRejectionHandlers,
   installLogBrewReactNativePromiseRejectionTracker
@@ -61,6 +61,7 @@ function installLogBrewReactNativeGlobalErrorHandler({
   const state = {
     active: true,
     capturedEvents: 0,
+    emittingDiagnostic: false,
     handling: false,
     lastOutcome: "idle",
     suppressedEvents: 0
@@ -70,7 +71,7 @@ function installLogBrewReactNativeGlobalErrorHandler({
     eventMessage: AUTOMATIC_ERROR_MESSAGE,
     fatalStore,
     issue,
-    onDiagnostic,
+    onDiagnostic: (diagnostic) => emitStateDiagnostic(state, onDiagnostic, diagnostic.code),
     sanitizers: FATAL_SANITIZERS
   });
   const capturedErrors = new WeakSet();
@@ -87,10 +88,16 @@ function installLogBrewReactNativeGlobalErrorHandler({
     try {
       if (isFatal === true) {
         if (fatal.available) {
-          state.lastOutcome = fatal.store(error) ? "fatal_stored" : "fatal_store_failed";
+          if (fatal.store(error)) {
+            state.lastOutcome = "fatal_stored";
+          } else {
+            state.lastOutcome = fatal.health().lastOutcome === "admission_unavailable"
+              ? "admission_unavailable"
+              : "fatal_store_failed";
+          }
         } else {
           state.lastOutcome = "fatal_unsupported";
-          emitDiagnostic(onDiagnostic, "fatal_capture_requires_sync_store");
+          emitStateDiagnostic(state, onDiagnostic, "fatal_capture_requires_sync_store");
         }
       } else if (isObjectLike(error) && capturedErrors.has(error)) {
         recordSuppression(state, onDiagnostic, "duplicate_capture_suppressed");
@@ -173,7 +180,19 @@ function captureNonfatalError(client, issue, error, capturedErrors, state, onDia
   }
   try {
     const event = createAutomaticErrorEvent(error);
-    issue.call(client, event.id, event.timestamp, event.attributes);
+    const admission = captureIssueWithAdmission(client, issue, event.id, event.timestamp, event.attributes);
+    if (admission !== "admitted") {
+      if (tracksIdentity) {
+        capturedErrors.delete(error);
+      }
+      state.lastOutcome = admission === "unavailable"
+        ? "admission_unavailable"
+        : admission === "filtered" ? "filtered" : "capture_failed";
+      emitStateDiagnostic(state, onDiagnostic, admission === "unavailable"
+        ? "capture_admission_unavailable"
+        : admission === "filtered" ? "capture_filtered" : "capture_failed");
+      return;
+    }
     state.capturedEvents = incrementBounded(state.capturedEvents);
     state.lastOutcome = "captured";
   } catch {
@@ -181,7 +200,7 @@ function captureNonfatalError(client, issue, error, capturedErrors, state, onDia
       capturedErrors.delete(error);
     }
     state.lastOutcome = "capture_failed";
-    emitDiagnostic(onDiagnostic, "capture_failed");
+    emitStateDiagnostic(state, onDiagnostic, "capture_failed");
   }
 }
 
@@ -362,7 +381,19 @@ function incrementBounded(value) {
 function recordSuppression(state, onDiagnostic, code) {
   state.suppressedEvents = incrementBounded(state.suppressedEvents);
   state.lastOutcome = code === "recursive_capture_suppressed" ? "recursive_suppressed" : "duplicate_suppressed";
-  emitDiagnostic(onDiagnostic, code);
+  emitStateDiagnostic(state, onDiagnostic, code);
+}
+
+function emitStateDiagnostic(state, onDiagnostic, code) {
+  if (state.emittingDiagnostic) {
+    return;
+  }
+  state.emittingDiagnostic = true;
+  try {
+    emitDiagnostic(onDiagnostic, code);
+  } finally {
+    state.emittingDiagnostic = false;
+  }
 }
 
 function emitDiagnostic(onDiagnostic, code) {

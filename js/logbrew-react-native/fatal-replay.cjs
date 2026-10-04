@@ -73,15 +73,22 @@ function createFatalController({
 
 function admitFatalError({ client, error, eventMessage, issue, onDiagnostic, sanitizers, state }) {
   const record = createFatalRecord(error, sanitizers);
-  const before = admissionSnapshot(client);
+  let admission;
   try {
-    issue.call(client, record.id, record.timestamp, fatalEventAttributes(record, eventMessage));
+    admission = captureIssueWithAdmission(
+      client, issue, record.id, record.timestamp, fatalEventAttributes(record, eventMessage)
+    );
   } catch {
     state.lastOutcome = "storage_error";
     emitDiagnostic(onDiagnostic, "fatal_store_failed");
     return false;
   }
-  if (!wasAdmitted(before, admissionSnapshot(client))) {
+  if (admission === "unavailable") {
+    state.lastOutcome = "admission_unavailable";
+    emitDiagnostic(onDiagnostic, "fatal_admission_unavailable");
+    return false;
+  }
+  if (admission !== "admitted") {
     state.lastOutcome = "storage_error";
     emitDiagnostic(onDiagnostic, "fatal_store_failed");
     return false;
@@ -218,16 +225,22 @@ function replayPendingFatal({
     return;
   }
 
-  const before = admissionSnapshot(client);
+  let admission;
   try {
-    issue.call(client, record.id, record.timestamp, fatalEventAttributes(record, eventMessage));
+    admission = captureIssueWithAdmission(
+      client, issue, record.id, record.timestamp, fatalEventAttributes(record, eventMessage)
+    );
   } catch {
     state.lastOutcome = "replay_failed";
     emitDiagnostic(onDiagnostic, "fatal_replay_failed");
     return;
   }
-  const after = admissionSnapshot(client);
-  if (!wasAdmitted(before, after)) {
+  if (admission === "unavailable") {
+    state.lastOutcome = "admission_unavailable";
+    emitDiagnostic(onDiagnostic, "fatal_replay_admission_unavailable");
+    return;
+  }
+  if (admission !== "admitted") {
     state.lastOutcome = "replay_not_admitted";
     emitDiagnostic(onDiagnostic, "fatal_replay_not_admitted");
     return;
@@ -255,28 +268,16 @@ function acknowledgeFatalRecord(fatalStore, methods, recordId, state, onDiagnost
   emitDiagnostic(onDiagnostic, "fatal_acknowledge_failed");
 }
 
-function admissionSnapshot(client) {
-  const pendingEvents = safeFunction(client, "pendingEvents");
-  const droppedEvents = safeFunction(client, "droppedEvents");
-  if (!pendingEvents || !droppedEvents) {
-    return undefined;
+function captureIssueWithAdmission(client, issue, id, timestamp, attributes) {
+  const capture = safeFunction(client, "issueWithAdmission");
+  if (!capture) {
+    issue.call(client, id, timestamp, attributes);
+    return "unavailable";
   }
-  try {
-    const pending = pendingEvents.call(client);
-    const dropped = droppedEvents.call(client);
-    return isBoundedCounter(pending) && isBoundedCounter(dropped)
-      ? { dropped, pending }
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function wasAdmitted(before, after) {
-  return before !== undefined
-    && after !== undefined
-    && after.pending === before.pending + 1
-    && after.dropped === before.dropped;
+  const status = resultStatus(capture.call(client, id, timestamp, attributes));
+  return status === "admitted" || status === "filtered" || status === "dropped"
+    ? status
+    : "unavailable";
 }
 
 function wasAdmittedInRuntime(client, recordId) {
@@ -571,4 +572,4 @@ function isObjectLike(value) {
   return value !== null && (typeof value === "object" || typeof value === "function");
 }
 
-module.exports = { createFatalController };
+module.exports = { captureIssueWithAdmission, createFatalController };

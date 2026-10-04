@@ -97,6 +97,10 @@ export function createClient({ drop = false, fail = false } = {}) {
       }
       issues.push({ attributes, id, timestamp });
     },
+    issueWithAdmission(id, timestamp, attributes) {
+      this.issue(id, timestamp, attributes);
+      return Object.freeze(drop ? { status: "dropped", reason: "queue_overflow" } : { status: "admitted" });
+    },
     pendingEvents() {
       return issues.length;
     },
