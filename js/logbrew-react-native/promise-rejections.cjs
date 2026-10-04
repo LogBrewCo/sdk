@@ -1,6 +1,7 @@
 "use strict";
 
 const { createReactNativeErrorEvent } = require("./index.cjs");
+const { captureIssueWithAdmission } = require("./fatal-replay.cjs");
 
 const AUTOMATIC_MESSAGE = "Unhandled Promise rejection";
 const DEFAULT_MAX_TRACKED_REJECTIONS = 128;
@@ -101,7 +102,16 @@ function createPromiseRejectionHandlers(options, mechanism) {
           emitStateDiagnostic(state, onDiagnostic, "promise_rejection_id_unavailable");
         }
         const event = createEvent(mechanism);
-        issue.call(client, event.id, event.timestamp, event.attributes);
+        const admission = captureIssueWithAdmission(client, issue, event.id, event.timestamp, event.attributes);
+        if (admission !== "admitted") {
+          state.lastOutcome = admission === "unavailable"
+            ? "admission_unavailable"
+            : admission === "filtered" ? "filtered" : "capture_failed";
+          emitStateDiagnostic(state, onDiagnostic, admission === "unavailable"
+            ? "promise_rejection_admission_unavailable"
+            : admission === "filtered" ? "promise_rejection_filtered" : "promise_rejection_capture_failed");
+          return;
+        }
         state.capturedEvents = incrementBounded(state.capturedEvents);
 
         if (key === undefined) {

@@ -7,10 +7,17 @@ export type ReactNativeErrorUtilsLike = {
   setGlobalHandler(handler: ReactNativeGlobalErrorHandler | undefined): void;
 };
 
+export type ReactNativeIssueCaptureClient = Pick<LogBrewClient, "issue"> & {
+  /** Optional synchronous receipt for this call. Older clients remain supported. */
+  issueWithAdmission?: (...args: Parameters<LogBrewClient["issue"]>) => unknown;
+};
+
 export type ReactNativePromiseRejectionDiagnosticCode =
+  | "promise_rejection_admission_unavailable"
   | "promise_rejection_capture_failed"
   | "promise_rejection_configuration_invalid"
   | "promise_rejection_duplicate_suppressed"
+  | "promise_rejection_filtered"
   | "promise_rejection_handler_unavailable"
   | "promise_rejection_id_unavailable"
   | "promise_rejection_recursive_capture_suppressed"
@@ -24,13 +31,17 @@ export type ReactNativePromiseRejectionDiagnostic = Readonly<{
 }>;
 
 export type ReactNativeGlobalErrorDiagnosticCode =
+  | "capture_admission_unavailable"
   | "capture_failed"
+  | "capture_filtered"
   | "duplicate_capture_suppressed"
   | "fatal_acknowledge_failed"
+  | "fatal_admission_unavailable"
   | "fatal_capture_requires_sync_store"
   | "fatal_corrupt_record_discarded"
   | "fatal_discard_failed"
   | "fatal_record_dropped"
+  | "fatal_replay_admission_unavailable"
   | "fatal_replay_failed"
   | "fatal_replay_not_admitted"
   | "fatal_store_failed"
@@ -45,12 +56,14 @@ export type ReactNativeGlobalErrorHealth = Readonly<{
   active: boolean;
   capturedEvents: number;
   lastOutcome:
+    | "admission_unavailable"
     | "capture_failed"
     | "captured"
     | "duplicate_suppressed"
     | "fatal_stored"
     | "fatal_store_failed"
     | "fatal_unsupported"
+    | "filtered"
     | "handler_replaced"
     | "idle"
     | "recursive_suppressed"
@@ -66,11 +79,13 @@ export type ReactNativePromiseRejectionHealth = Readonly<{
   evictedRejections: number;
   handledLaterEvents: number;
   lastOutcome:
+    | "admission_unavailable"
     | "capture_failed"
     | "captured"
     | "captured_untracked"
     | "captured_with_eviction"
     | "duplicate_suppressed"
+    | "filtered"
     | "handled_later"
     | "handled_unknown"
     | "idle"
@@ -84,7 +99,7 @@ export type ReactNativePromiseRejectionHealth = Readonly<{
 }>;
 
 export type CreateLogBrewReactNativePromiseRejectionHandlersOptions = {
-  client: Pick<LogBrewClient, "issue">;
+  client: ReactNativeIssueCaptureClient;
   /**
    * Maximum number of safe runtime rejection identifiers retained for duplicate
    * suppression and later-handled health. Defaults to 128 and must be 1-1024.
@@ -108,7 +123,7 @@ export type ReactNativePromiseRejectionTrackerLike = {
 };
 
 export type InstallLogBrewReactNativePromiseRejectionTrackerOptions = {
-  client: Pick<LogBrewClient, "issue">;
+  client: ReactNativeIssueCaptureClient;
   /**
    * Confirms that LogBrew may claim the runtime's single Promise rejection
    * tracker slot. Do not install another tracker owner at the same time.
@@ -184,6 +199,7 @@ export type ReactNativeFatalReplayHealth = Readonly<{
   lastOutcome:
     | "acknowledge_failed"
     | "acknowledged"
+    | "admission_unavailable"
     | "corrupt_discarded"
     | "discard_failed"
     | "discarded"
@@ -201,7 +217,7 @@ export type ReactNativeFatalReplayHealth = Readonly<{
 }>;
 
 export type InstallLogBrewReactNativeGlobalErrorHandlerOptions = {
-  client: Pick<LogBrewClient, "issue">
+  client: ReactNativeIssueCaptureClient
     & Partial<Pick<LogBrewClient, "droppedEvents" | "pendingEvents">>;
   errorUtils?: ReactNativeErrorUtilsLike;
   fatalStore?: ReactNativeFatalStoreLike;
@@ -221,6 +237,8 @@ export type LogBrewReactNativeGlobalErrorHandlerInstallation = Readonly<{
  * The callbacks do not install or patch Promise, Hermes, JavaScriptCore, or globals.
  * Automatic reports never inspect or emit the rejection value or runtime identifier.
  * Tracking is bounded and suppresses duplicate callbacks only while an identifier is retained.
+ * Capture counts and tracking require an admitted receipt. Without a receipt, each report
+ * calls issue once, reports admission_unavailable, and remains eligible for a later report.
  */
 export declare function createLogBrewReactNativePromiseRejectionHandlers(
   options: CreateLogBrewReactNativePromiseRejectionHandlersOptions
@@ -243,6 +261,8 @@ export declare function installLogBrewReactNativePromiseRejectionTracker(
  * The React Native conditional export admits fatal reports into its persistent event queue
  * before the previous handler runs. Direct Node ESM/CJS callers can inject a compatible
  * fatal store explicitly.
+ * Capture counts, duplicate suppression, and fatal acknowledgement require an admitted receipt.
+ * Older clients receive each report once and report admission_unavailable.
  * This helper does not claim local exactly-once delivery or install Promise rejection handling.
  */
 export declare function installLogBrewReactNativeGlobalErrorHandler(
