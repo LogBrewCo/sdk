@@ -45,6 +45,12 @@ func TestMain(m *testing.M) {
 		os.Exit(runFixture(strings.TrimPrefix(os.Args[1], "fixture:")))
 	}
 
+	// Child timeout fixtures must not include the race detector's exit sleep.
+	// The parent retains its settings; children retain race detection and all
+	// supplied options, with only their post-execution sleep set to zero.
+	if err := os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0")); err != nil {
+		panic(err)
+	}
 	m.Run()
 }
 

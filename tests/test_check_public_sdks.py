@@ -138,6 +138,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
                 self.script = project / "scripts" / SCRIPT.name
                 self.script.parent.mkdir(parents=True)
                 self.script.write_text(SCRIPT.read_text())
+                (self.script.parent / "native_verifier.sh").write_text(
+                    (ROOT / "scripts" / "native_verifier.sh").read_text()
+                )
                 probe = project / "tools" / "toolchain-probe"
                 if state != "missing-directory":
                     probe.mkdir(parents=True)
