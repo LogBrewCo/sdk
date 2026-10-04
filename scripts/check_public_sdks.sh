@@ -4,22 +4,9 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-run_toolchain_probe() {
-  if [[ -n "${LOGBREW_TOOLCHAIN_PROBE_BIN:-}" ]]; then
-    [[ "$LOGBREW_TOOLCHAIN_PROBE_BIN" == /* && -f "$LOGBREW_TOOLCHAIN_PROBE_BIN" &&
-      ! -L "$LOGBREW_TOOLCHAIN_PROBE_BIN" && -x "$LOGBREW_TOOLCHAIN_PROBE_BIN" ]] || return
-    "$LOGBREW_TOOLCHAIN_PROBE_BIN" "$@"
-    return
-  fi
-  (
-    cd "$repo_root/tools/toolchain-probe" || return
-    IFS= read -r toolchain_version < .go-version || return
-    [[ "$(GOTOOLCHAIN=local go version)" == "go version go$toolchain_version "* ]] || return
-    GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go run . "$@"
-  )
-}
+source "$repo_root/scripts/native_verifier.sh"
 
-if ! run_started_ns="$(run_toolchain_probe clock)"; then
+if ! run_started_ns="$(run_native_verifier clock)"; then
   printf '%s\n' "native toolchain clock unavailable" >&2
   exit 1
 fi
@@ -159,14 +146,14 @@ write_summary_json() {
   local failure_reason="${5:-}"
   local exit_code="${6:-}"
   local toolchain_versions_json_payload
-  if ! toolchain_versions_json_payload="$(run_toolchain_probe)"; then
+  if ! toolchain_versions_json_payload="$(run_native_verifier)"; then
     printf '%s\n' "native toolchain inventory unavailable" >&2
     return 1
   fi
 
   local json_payload
   if ! json_payload="$(
-    run_toolchain_probe summary \
+    run_native_verifier summary \
       "$ok" "$steps_completed" "$steps_total" "$message" "$failed_step_number" \
       "$failed_step_label" "$toolchain_versions_json_payload" "$run_started_ns" \
       "$failure_reason" "$exit_code" "$schema_version" "${STEP_LABELS[@]}"
