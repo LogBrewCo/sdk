@@ -6,11 +6,13 @@ import re
 import unittest
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from unittest.mock import Mock
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from logbrew_fastapi import (
     add_logbrew_middleware,
+    create_request_trace_context,
     get_active_logbrew_trace,
     init_logbrew,
 )
@@ -446,6 +448,23 @@ class FastAPIIntegrationTests(unittest.TestCase):
 
         with TestClient(app) as http, self.assertRaises(SdkError):
             http.get("/health")
+
+
+class RequestTraceFactoryTests(unittest.TestCase):
+    """Keep valid inbound propagation separate from local factory failures."""
+
+    def test_valid_header_does_not_retry_failed_span_factory(self) -> None:
+        """Preserve the factory failure instead of silently creating another trace."""
+        failure = SdkError("validation_error", "span factory failed")
+        factory = Mock(side_effect=[failure, "b7ad6b7169203331"])
+        request = Request({
+            "type": "http",
+            "headers": [(b"traceparent", b"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")],
+        })
+        with self.assertRaises(SdkError) as raised:
+            create_request_trace_context(request, span_id_factory=factory)
+        self.assertIs(raised.exception, failure)
+        factory.assert_called_once_with()
 
 
 if __name__ == "__main__":
