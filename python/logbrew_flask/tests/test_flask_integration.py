@@ -16,12 +16,21 @@ from inspect import signature
 from io import StringIO
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_type_hints
+from typing import TYPE_CHECKING, Any, Protocol, cast, get_type_hints
 from unittest.mock import Mock, patch
 
-from flask import Flask, Response, abort
-from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, LogBrewTraceContext, RecordingTransport, SdkError
+from flask import Flask, Response, abort, stream_with_context
+from logbrew_sdk import (
+    LogBrewClient,
+    LogBrewLoggingHandler,
+    LogBrewTraceContext,
+    RecordingTransport,
+    SdkError,
+    create_logbrew_trace_context,
+    use_logbrew_trace,
+)
 from typing_extensions import override
+from werkzeug.test import EnvironBuilder
 
 import logbrew_flask
 from logbrew_flask import (
@@ -34,7 +43,7 @@ from logbrew_flask import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from unittest.mock import MagicMock
 
 _ORDER_FAILURE = "private order failure"
@@ -97,8 +106,8 @@ def configure_lifecycle_hooks(app: Flask, mode: str, status: int, clock: MagicMo
         )
 
 
-class FlaskIntegrationTests(unittest.TestCase):
-    """Exercise capture through Flask's dispatch and app-owned integrations."""
+class _FlaskTestCase(unittest.TestCase):
+    """Create an isolated application and check recorded delivery."""
 
     @override
     def setUp(self) -> None:
@@ -121,6 +130,10 @@ class FlaskIntegrationTests(unittest.TestCase):
             self.fail("recorded batch must be an object")
         self.assertEqual([event["type"] for event in payload["events"]], list(kinds))
         return payload
+
+
+class FlaskIntegrationTests(_FlaskTestCase):
+    """Exercise capture through Flask's dispatch and app-owned integrations."""
 
     def test_readme_requires_hosted_readback_for_end_to_end_confirmation(self) -> None:
         """Require a hosted investigation after local capture is demonstrated."""
@@ -405,7 +418,7 @@ class FlaskIntegrationTests(unittest.TestCase):
         """Use a fixed unmatched name instead of a private concrete path."""
         add_logbrew_middleware(self.app, client=self.sdk_client, transport=self.transport)
 
-        response = self.app.test_client().get("/accounts/example-person@example.test?debug_marker=drop")
+        response = self.app.test_client().get("/accounts/example-person@example.test?debug_marker=drop", buffered=True)
 
         self.assertEqual(response.status_code, 404)
         payload = self._recorded_batch("span")
@@ -475,7 +488,7 @@ class FlaskIntegrationTests(unittest.TestCase):
             message = f"broken order {order_id}"
             raise RuntimeError(message)
 
-        response = self.app.test_client().get("/orders/42/boom?debug=true")
+        response = self.app.test_client().get("/orders/42/boom?debug=true", buffered=True)
 
         self.assertEqual(response.status_code, 500)
         payload = self._recorded_batch("issue", "span", "metric")
@@ -534,7 +547,7 @@ class FlaskIntegrationTests(unittest.TestCase):
         def outer(status: int) -> Response:
             observed.append(request_logbrew_trace())
             logger.info("outer operation started")
-            self.app.test_client().get(f"/inner/{status}")
+            self.app.test_client().get(f"/inner/{status}", buffered=True)
             observed.extend((request_logbrew_trace(), get_active_logbrew_trace()))
             logger.info("outer operation completed")
             return Response(status=200)
@@ -549,7 +562,7 @@ class FlaskIntegrationTests(unittest.TestCase):
                     ),
                     patch("logbrew_flask._middleware.time.perf_counter", side_effect=(1.0, 2.0, 3.0, 4.0)),
                 ):
-                    response = self.app.test_client().get(f"/outer/{status}")
+                    response = self.app.test_client().get(f"/outer/{status}", buffered=True)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(observed[2:], [observed[0], observed[0]])
                 self.assertIsNotNone(observed[1])
@@ -636,9 +649,11 @@ class FlaskIntegrationTests(unittest.TestCase):
                 )
                 if mode == "propagated":
                     with self.assertRaisesRegex(RuntimeError, _ORDER_FAILURE):
-                        app.test_client().get("/orders/42?private_query=drop")
+                        app.test_client().get("/orders/42?private_query=drop", buffered=True)
                 else:
-                    self.assertEqual(app.test_client().get("/orders/42?private_query=drop").status_code, status)
+                    self.assertEqual(
+                        app.test_client().get("/orders/42?private_query=drop", buffered=True).status_code, status
+                    )
 
                 events = [event for body in transport.sent_bodies for event in json.loads(body)["events"]]
                 self.assertEqual(sdk_client.pending_events(), 0)
@@ -680,6 +695,358 @@ class FlaskIntegrationTests(unittest.TestCase):
         self.assertEqual(self.sdk_client.pending_events(), 1)
         self.assertEqual(self.sdk_client.events[0]["type"], "span")
         self.assertIsNone(get_active_logbrew_trace())
+
+
+class FlaskStreamingTests(_FlaskTestCase):
+    """Check capture while WSGI consumes or closes the response body."""
+
+    def test_error_page_completes_without_waiting_for_body_close(self) -> None:
+        """Deliver an unhandled error at once, although Werkzeug streams its error page."""
+
+        def boom() -> str:
+            raise RuntimeError(_RESPONSE_FAILURE)
+
+        self.app.add_url_rule("/boom", view_func=boom)
+        add_logbrew_middleware(self.app, client=self.sdk_client, transport=self.transport)
+        self.assertEqual(self.app.test_client().get("/boom").status_code, 500)
+        self._recorded_batch("issue", "span")
+
+    def test_stream_failure_finishes_capture_after_body_iteration(self) -> None:
+        """Keep body logs and an unhandled stream error on the request trace."""
+        observed: list[LogBrewTraceContext | None] = []
+        logger = logging.getLogger("logbrew.flask.stream")
+        handler = LogBrewLoggingHandler(self.sdk_client)
+        logger.addHandler(handler)
+        self.addCleanup(logger.removeHandler, handler)
+        self.addCleanup(logger.setLevel, logger.level)
+        logger.setLevel(logging.INFO)
+        add_logbrew_middleware(self.app, client=self.sdk_client, transport=self.transport, capture_request_metrics=True)
+        with patch("logbrew_flask._middleware.time.perf_counter", return_value=1.0) as clock:
+
+            @self.app.get("/stream/<int:order_id>")
+            def streamed_order(**_: int) -> Response:
+                def body() -> Iterator[str]:
+                    observed.append(get_active_logbrew_trace())
+                    self.assertEqual(request_logbrew_trace(), observed[-1])
+                    logger.info("stream started")
+                    yield "first\n"
+                    clock.return_value = 3.0
+                    observed.append(get_active_logbrew_trace())
+                    self.assertEqual(request_logbrew_trace(), observed[-1])
+                    logger.info("stream continued")
+                    raise RuntimeError(_RESPONSE_FAILURE)
+
+                return Response(stream_with_context(body()))
+
+            response = self.app.test_client().get("/stream/42?private_query=drop")
+            self.addCleanup(response.close)
+            self.assertEqual(response.status_code, HTTPStatus.OK)
+            self.assertEqual(self.transport.sent_bodies, [])
+            self.assertIsNone(get_active_logbrew_trace())
+            with self.assertRaisesRegex(RuntimeError, _RESPONSE_FAILURE):
+                list(response.response)
+        response.close()
+        events = self._recorded_batch("log", "log", "issue", "span", "metric")["events"]
+        span = events[-2]["attributes"]
+        self.assertEqual(span["status"], "error")
+        self.assertEqual(span["durationMs"], 2000)
+        self.assertEqual(span["metadata"]["status_code"], HTTPStatus.OK)
+        self.assertEqual(span["name"], "GET /stream/<int:order_id>")
+        self.assertEqual(events[-1]["attributes"]["value"], 2000)
+        self.assertEqual(events[-1]["attributes"]["metadata"]["statusCode"], HTTPStatus.OK)
+        self.assertIsNotNone(observed[0])
+        self.assertEqual(observed[0], observed[1])
+        for event in events[:3]:
+            self.assertEqual(event["attributes"]["metadata"]["traceId"], span["traceId"])
+        self.assertEqual(events[2]["attributes"]["metadata"]["status_code"], HTTPStatus.OK)
+        self.assertIsNone(get_active_logbrew_trace())
+        for private_value in ("private response", "private_query", "/stream/42"):
+            self.assertNotIn(private_value, json.dumps(events))
+
+    def test_stream_policies_preserve_sent_status_and_body_trace(self) -> None:
+        """Check normal and failing bodies with and without Flask context."""
+        for failing, context, successful, exceptions in product((False, True), repeat=4):
+            with (
+                self.subTest(failing=failing, context=context, successful=successful, exceptions=exceptions),
+                patch("logbrew_flask._middleware.time.perf_counter", return_value=1.0) as clock,
+            ):
+                self._check_stream_policy(
+                    failing=failing, context=context, successful=successful, exceptions=exceptions, clock=clock
+                )
+
+    def _check_stream_policy(
+        self, *, failing: bool, context: bool, successful: bool, exceptions: bool, clock: MagicMock
+    ) -> None:
+        app = Flask(__name__)
+        sdk_client = _make_client()
+        transport = RecordingTransport.always_accept()
+        observed: list[LogBrewTraceContext | None] = []
+        failure = RuntimeError(_RESPONSE_FAILURE)
+
+        @app.get("/stream")
+        def streamed() -> Response:
+            def body() -> Iterator[bytes]:
+                observed.append(get_active_logbrew_trace())
+                if context:
+                    self.assertEqual(request_logbrew_trace(), observed[-1])
+                yield b"first\n"
+                clock.return_value = 3.0
+                observed.append(get_active_logbrew_trace())
+                if failing:
+                    raise failure
+                yield b"last\n"
+
+            return Response(stream_with_context(body()) if context else body(), status=206)
+
+        add_logbrew_middleware(
+            app,
+            client=sdk_client,
+            transport=transport,
+            capture_request_metrics=True,
+            capture_successful_requests=successful,
+            capture_exceptions=exceptions,
+        )
+        with app.test_client().get("/stream") as response:
+            self.assertEqual(transport.sent_bodies, [])
+            self.assertIsNone(get_active_logbrew_trace())
+            if failing:
+                with self.assertRaises(RuntimeError) as raised:
+                    list(response.response)
+                self.assertIs(raised.exception, failure)
+            else:
+                self.assertEqual(list(response.response), [b"first\n", b"last\n"])
+        self.assertEqual(sdk_client.pending_events(), 0)
+        self.assertEqual(len(transport.sent_bodies), 1)
+        events = json.loads(transport.sent_bodies[0])["events"]
+        span_expected = failing or successful
+        self.assertEqual(
+            [event["type"] for event in events],
+            (["issue"] if failing and exceptions else []) + (["span"] if span_expected else []) + ["metric"],
+        )
+        metric = events[-1]["attributes"]
+        self.assertEqual(metric["value"], 2000)
+        self.assertEqual(metric["metadata"]["statusCode"], 206)
+        self.assertIsNotNone(observed[0])
+        self.assertEqual(observed[0], observed[1])
+        self.assertIsNone(get_active_logbrew_trace())
+        if span_expected:
+            span = events[-2]["attributes"]
+            self.assertEqual(span["status"], "error" if failing else "ok")
+            self.assertEqual(span["metadata"]["status_code"], 206)
+            self.assertEqual(metric["context"]["trace"]["traceId"], span["traceId"])
+
+    def test_wsgi_close_completes_an_unconsumed_or_partial_body_once(self) -> None:
+        """Keep close behavior for ordinary, direct, and HEAD responses."""
+        for mode, direct in product(("unconsumed", "partial", "exhausted", "head", "close_failure"), (False, True)):
+            with (
+                self.subTest(mode=mode, direct=direct),
+                patch("logbrew_flask._middleware.time.perf_counter", return_value=1.0) as clock,
+            ):
+                self._check_wsgi_close(mode, direct=direct, clock=clock)
+
+    def _check_wsgi_close(self, mode: str, *, direct: bool, clock: MagicMock) -> None:
+        app = Flask(__name__)
+        sdk_client = _make_client()
+        transport = RecordingTransport.always_accept()
+        close_calls: list[LogBrewTraceContext | None] = []
+        body = _ClosableBody(close_calls, RuntimeError(_RESPONSE_FAILURE) if mode == "close_failure" else None)
+        app.add_url_rule("/stream", view_func=lambda: Response(body, direct_passthrough=direct))
+        add_logbrew_middleware(app, client=sdk_client, transport=transport, capture_request_metrics=True)
+        builder = EnvironBuilder(path="/stream", method="HEAD" if mode == "head" else "GET")
+        self.addCleanup(builder.close)
+        statuses: list[str] = []
+
+        def start_response(
+            status: str, _headers: list[tuple[str, str]], _exc_info: object = None
+        ) -> Callable[[bytes], None]:
+            statuses.append(status)
+            return lambda _chunk: None
+
+        response = cast("_WSGIBody", app.wsgi_app(builder.get_environ(), start_response))
+        self.assertEqual(statuses, ["200 OK"])
+        self.assertEqual(body.iterations, 0)
+        self.assertEqual(transport.sent_bodies, [])
+        self.assertIsNone(get_active_logbrew_trace())
+        clock.return_value = 3.0
+        if mode == "partial":
+            self.assertEqual(next(iter(response)), b"chunk\n")
+        elif mode in {"exhausted", "head"}:
+            self.assertEqual(list(response), [] if mode == "head" else [b"chunk\n"])
+        if mode == "close_failure":
+            with self.assertRaisesRegex(RuntimeError, _RESPONSE_FAILURE):
+                response.close()
+        else:
+            response.close()
+        response.close()
+        self.assertEqual(len(close_calls), 1)
+        self.assertIsNotNone(close_calls[0])
+        self.assertEqual(sdk_client.pending_events(), 0)
+        self.assertEqual(len(transport.sent_bodies), 1)
+        events = json.loads(transport.sent_bodies[0])["events"]
+        self.assertEqual(
+            [event["type"] for event in events],
+            (["issue"] if mode == "close_failure" else []) + ["span", "metric"],
+        )
+        span = events[-2]["attributes"]
+        self.assertEqual(span["durationMs"], 2000)
+        self.assertEqual(span["status"], "error" if mode == "close_failure" else "ok")
+        self.assertEqual(span["metadata"]["status_code"], 200)
+        self.assertIsNone(get_active_logbrew_trace())
+
+    def test_stream_failure_preserves_the_application_error_during_close(self) -> None:
+        """Retain the first body error when close or opted-in delivery fails."""
+        failure = RuntimeError(_RESPONSE_FAILURE)
+        close_calls: list[LogBrewTraceContext | None] = []
+        body = _FailingBody(close_calls, RuntimeError(_PREPARATION_FAILURE), failure)
+        self.app.add_url_rule("/stream", endpoint="stream", view_func=lambda: Response(body))
+        self.transport = RecordingTransport([{"status_code": 401}])
+        add_logbrew_middleware(
+            self.app,
+            client=self.sdk_client,
+            transport=self.transport,
+            capture_request_metrics=True,
+            raise_flush_errors=True,
+        )
+        with self.app.test_client().get("/stream") as response, self.assertRaises(RuntimeError) as raised:
+            list(response.response)
+        self.assertIs(raised.exception, failure)
+        self.assertEqual(len(close_calls), 1)
+        self.assertIsNotNone(close_calls[0])
+        self.assertEqual(self.sdk_client.pending_events(), 3)
+        self.assertEqual(len(self.transport.sent_bodies), 1)
+        events = json.loads(self.transport.sent_bodies[0])["events"]
+        self.assertEqual([event["type"] for event in events], ["issue", "span", "metric"])
+        self.assertEqual(events[1]["attributes"]["status"], "error")
+        self.assertEqual(events[1]["attributes"]["metadata"]["status_code"], 200)
+        self.assertIsNone(get_active_logbrew_trace())
+        for private_value in ("private response", "private preparation"):
+            self.assertNotIn(private_value, json.dumps(events))
+
+    def test_normal_stream_completion_preserves_opted_in_delivery_errors(self) -> None:
+        """Propagate a requested flush error after closing a successful body."""
+        close_calls: list[LogBrewTraceContext | None] = []
+        body = _ClosableBody(close_calls, None)
+        self.app.add_url_rule("/stream", endpoint="stream", view_func=lambda: Response(body))
+        self.transport = RecordingTransport([{"status_code": 401}])
+        add_logbrew_middleware(self.app, client=self.sdk_client, transport=self.transport, raise_flush_errors=True)
+        with self.app.test_client().get("/stream") as response, self.assertRaises(SdkError):
+            list(response.response)
+        self.assertEqual(len(close_calls), 1)
+        self.assertEqual(self.sdk_client.pending_events(), 1)
+        self.assertEqual(len(self.transport.sent_bodies), 1)
+        self.assertIsNone(get_active_logbrew_trace())
+
+    def test_interleaved_bodies_reinstate_the_callers_trace_between_chunks(self) -> None:
+        """Keep each body on its own trace while restoring the active caller."""
+        observed: list[LogBrewTraceContext | None] = []
+
+        @self.app.get("/stream")
+        def streamed() -> Response:
+            def body() -> Iterator[bytes]:
+                observed.append(get_active_logbrew_trace())
+                yield b"first\n"
+                observed.append(get_active_logbrew_trace())
+                yield b"last\n"
+
+            return Response(body())
+
+        add_logbrew_middleware(self.app, client=self.sdk_client, transport=self.transport, capture_request_metrics=True)
+        parent = create_logbrew_trace_context()
+        with use_logbrew_trace(parent):
+            first = self.app.test_client().get("/stream")
+            self.addCleanup(first.close)
+            self.assertEqual(get_active_logbrew_trace(), parent)
+            second = self.app.test_client().get("/stream")
+            self.addCleanup(second.close)
+            self.assertEqual(get_active_logbrew_trace(), parent)
+            self.assertEqual(list(first.response), [b"first\n", b"last\n"])
+            first.close()
+            self.assertEqual(get_active_logbrew_trace(), parent)
+            self.assertEqual(list(second.response), [b"first\n", b"last\n"])
+            second.close()
+            self.assertEqual(get_active_logbrew_trace(), parent)
+        self.assertIsNone(get_active_logbrew_trace())
+        self.assertIsNotNone(observed[0])
+        self.assertIsNotNone(observed[1])
+        self.assertNotEqual(observed[0], observed[1])
+        self.assertEqual(observed[:2], observed[2:])
+        self.assertEqual(self.sdk_client.pending_events(), 0)
+        self.assertEqual(len(self.transport.sent_bodies), 2)
+        for encoded, trace in zip(self.transport.sent_bodies, observed[:2], strict=True):
+            events = json.loads(encoded)["events"]
+            self.assertEqual([event["type"] for event in events], ["span", "metric"])
+            self.assertEqual(events[0]["attributes"]["traceId"], trace.trace_id if trace else None)
+            self.assertEqual(events[1]["attributes"]["context"]["trace"]["traceId"], trace.trace_id if trace else None)
+
+
+class MetricTraceFactoryTests(_FlaskTestCase):
+    """Keep metric trace attributes independent of implicit core capture."""
+
+    def test_public_factory_uses_the_active_trace_without_retaining_it(self) -> None:
+        """Attach bounded trace context only while a request trace is active."""
+        trace = create_logbrew_trace_context(
+            traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+            span_id_factory=lambda: "b7ad6b7169203331",
+        )
+        with self.app.test_request_context("/health?debug=true"):
+            plain = logbrew_flask.create_request_metric_attributes(status_code=200, duration_ms=1.0)
+            self.assertNotIn("context", plain)
+            with use_logbrew_trace(trace):
+                correlated = logbrew_flask.create_request_metric_attributes(status_code=200, duration_ms=1.0)
+            self.assertEqual(
+                correlated["context"]["trace"],
+                {
+                    "traceId": trace.trace_id,
+                    "spanId": trace.span_id,
+                    "parentSpanId": trace.parent_span_id,
+                    "sampled": False,
+                },
+            )
+            self.assertEqual(correlated["context"]["schemaVersion"], 1)
+            self.assertIsNone(get_active_logbrew_trace())
+            self.assertNotIn("debug=true", json.dumps(correlated))
+
+
+class _WSGIBody(Protocol):
+    """WSGI response iterable that also exposes the PEP 3333 close hook."""
+
+    def __iter__(self) -> Iterator[bytes]: ...
+
+    def close(self) -> None: ...
+
+
+class _ClosableBody:
+    """Expose WSGI iteration and close calls without buffering the body."""
+
+    def __init__(self, close_calls: list[LogBrewTraceContext | None], failure: RuntimeError | None) -> None:
+        self.iterations = 0
+        self.close_calls = close_calls
+        self.failure = failure
+
+    def __iter__(self) -> Iterator[bytes]:
+        self.iterations += 1
+        return iter((b"chunk\n",))
+
+    def close(self) -> None:
+        """Record the active trace and optionally raise a close failure."""
+        self.close_calls.append(get_active_logbrew_trace())
+        if self.failure is not None:
+            raise self.failure
+
+
+class _FailingBody(_ClosableBody):
+    """Raise a body failure independently of the original close behavior."""
+
+    def __init__(
+        self, close_calls: list[LogBrewTraceContext | None], close_failure: RuntimeError, body_failure: RuntimeError
+    ) -> None:
+        super().__init__(close_calls, close_failure)
+        self.body_failure = body_failure
+
+    @override
+    def __iter__(self) -> Iterator[bytes]:
+        yield from super().__iter__()
+        raise self.body_failure
 
 
 if __name__ == "__main__":
