@@ -1,6 +1,10 @@
 package co.logbrew.sdk;
 
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.AsyncEvent;
+import jakarta.servlet.AsyncListener;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
@@ -15,6 +19,10 @@ import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.List;
+import org.springframework.mock.web.MockAsyncContext;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 
 /**
  * Jakarta Servlet request tracing test runner for the Java SDK.
@@ -33,6 +41,13 @@ public final class LogBrewServletFilterTest {
         testServletFilterCorrelatesLogsSpanAndMetric();
         testServletFilterRethrowsAndRecordsUnhandledIssue();
         testServletFilterDoesNotInventIssueForStatusOnlyServerError();
+        testAsyncCompletionCapturesFinalStatus();
+        testAsyncErrorWaitsForCompletionAndKeepsPrivacy(false);
+        testAsyncErrorWaitsForCompletionAndKeepsPrivacy(true);
+        testAsyncTimeoutWaitsForFinalResponse();
+        testAsyncRedispatchKeepsOneTraceAndOneCompletion();
+        testIndependentFiltersKeepTheirOwnClients();
+        testRoutePrivacyAcrossRequestLifecycles();
         System.out.println("java servlet filter tests ok (" + testsRun + " tests)");
     }
 
@@ -154,6 +169,237 @@ public final class LogBrewServletFilterTest {
         assertNotContains(payload, "\"stackFrames\"");
         assertNotContains(payload, "reports/private");
         testsRun++;
+    }
+
+    private void testAsyncCompletionCapturesFinalStatus() throws Exception {
+        LogBrewClient client = sampleClient();
+        MockHttpServletRequest request = asyncRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new LogBrewServletFilter(client).doFilter(request, response, (incoming, outgoing) ->
+            request.startAsync(incoming, outgoing));
+
+        assertTrue(client.pendingEvents() == 0, "async request stays unfinished after chain returns");
+        assertTrue(LogBrewTrace.current().isEmpty(), "initial dispatch releases its trace");
+        response.setStatus(503);
+        MockAsyncContext context = (MockAsyncContext) request.getAsyncContext();
+        context.complete();
+        for (AsyncListener listener : context.getListeners()) {
+            listener.onComplete(new AsyncEvent(context, request, response));
+        }
+
+        assertTrue(client.pendingEvents() == 2, "exactly one span and metric at completion");
+        assertContains(client.previewJson(), "\"statusCode\": 503");
+        assertNotContains(client.previewJson(), "\"statusCode\": 200");
+        assertNotContains(client.previewJson(), "private");
+        testsRun++;
+    }
+
+    private void testAsyncErrorWaitsForCompletionAndKeepsPrivacy(boolean containerAttribute) throws Exception {
+        LogBrewClient client = sampleClient();
+        MockHttpServletRequest request = asyncRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new LogBrewServletFilter(client).doFilter(request, response, (incoming, outgoing) ->
+            request.startAsync(incoming, outgoing));
+        MockAsyncContext context = (MockAsyncContext) request.getAsyncContext();
+        IOException error = new IOException("private async failure");
+        if (containerAttribute) {
+            request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, error);
+        } else {
+            for (AsyncListener listener : context.getListeners()) {
+                listener.onError(new AsyncEvent(context, request, response, error));
+            }
+        }
+        assertTrue(client.pendingEvents() == 0, "async error does not finish before container response");
+        response.setStatus(502);
+        context.complete();
+
+        String payload = client.previewJson();
+        assertTrue(client.pendingEvents() == 3, "async failure records one issue span and metric");
+        assertContains(payload, "\"statusCode\": 502");
+        assertContains(payload, "\"type\": \"IOException\"");
+        assertContains(payload, "\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"");
+        assertNotContains(payload, "private");
+        assertTrue(LogBrewTrace.current().isEmpty(), "async listener leaves thread trace untouched");
+        testsRun++;
+    }
+
+    private void testAsyncTimeoutWaitsForFinalResponse() throws Exception {
+        LogBrewClient client = sampleClient();
+        MockHttpServletRequest request = asyncRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new LogBrewServletFilter(client).doFilter(request, response, (incoming, outgoing) ->
+            request.startAsync(incoming, outgoing));
+        MockAsyncContext context = (MockAsyncContext) request.getAsyncContext();
+        for (AsyncListener listener : context.getListeners()) {
+            listener.onTimeout(new AsyncEvent(context, request, response));
+        }
+        assertTrue(client.pendingEvents() == 0, "timeout handler retains response ownership");
+        response.setStatus(504);
+        context.complete();
+        assertTrue(client.pendingEvents() == 2, "timeout completion captures span and metric");
+        assertContains(client.previewJson(), "\"statusCode\": 504");
+        assertNotContains(client.previewJson(), "\"type\": \"issue\"");
+        testsRun++;
+    }
+
+    private void testAsyncRedispatchKeepsOneTraceAndOneCompletion() throws Exception {
+        LogBrewClient client = sampleClient();
+        LogBrewServletFilter filter = new LogBrewServletFilter(client);
+        MockHttpServletRequest request = asyncRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        LogBrewTraceContext[] originalTrace = new LogBrewTraceContext[1];
+        filter.doFilter(request, response, (incoming, outgoing) -> {
+            originalTrace[0] = LogBrewTrace.current().orElseThrow();
+            request.startAsync(incoming, outgoing);
+        });
+        MockAsyncContext first = (MockAsyncContext) request.getAsyncContext();
+        List<AsyncListener> listeners = List.copyOf(first.getListeners());
+        request.setAsyncStarted(false);
+        request.setDispatcherType(DispatcherType.ASYNC);
+        LogBrewTraceContext caller = LogBrewTraceContext.create(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(caller);
+        try {
+            filter.doFilter(request, response, (incoming, outgoing) -> {
+                assertSame(originalTrace[0], LogBrewTrace.current().orElseThrow(), "redispatch trace identity");
+                request.startAsync(incoming, outgoing);
+                MockAsyncContext next = (MockAsyncContext) request.getAsyncContext();
+                for (AsyncListener listener : listeners) {
+                    listener.onStartAsync(new AsyncEvent(next, request, response));
+                }
+            });
+            assertSame(caller, LogBrewTrace.current().orElseThrow(), "dispatch preserves previous trace");
+            assertTrue(client.pendingEvents() == 0, "restarted async cycle remains unfinished");
+            response.setStatus(201);
+            request.getAsyncContext().complete();
+            assertSame(caller, LogBrewTrace.current().orElseThrow(), "completion preserves previous trace");
+        } finally {
+            scope.close();
+        }
+        assertTrue(client.pendingEvents() == 2, "redispatch queues one span and metric");
+        assertContains(client.previewJson(), "\"spanId\": \"" + originalTrace[0].spanId() + "\"");
+        assertContains(client.previewJson(), "\"statusCode\": 201");
+        testsRun++;
+    }
+
+    private void testIndependentFiltersKeepTheirOwnClients() throws Exception {
+        LogBrewClient first = sampleClient();
+        LogBrewClient second = sampleClient();
+        LogBrewServletFilter outer = new LogBrewServletFilter(first);
+        LogBrewServletFilter inner = new LogBrewServletFilter(second);
+        MockHttpServletRequest request = asyncRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        outer.doFilter(request, response, (incoming, outgoing) ->
+            inner.doFilter(incoming, outgoing, (handledRequest, handledResponse) -> response.setStatus(201)));
+        assertTrue(first.pendingEvents() == 2, "first client captures its request");
+        assertTrue(second.pendingEvents() == 2, "second client captures its request");
+        assertTrue(LogBrewTrace.current().isEmpty(), "independent filters close their scopes");
+        testsRun++;
+    }
+
+    private void testRoutePrivacyAcrossRequestLifecycles() throws Exception {
+        Map<String, String> routes = Map.of(
+            "https://route.example.invalid/orders/{id}?private=query#private-fragment", "/orders/{id}",
+            "/orders/{id}?private=query", "/orders/{id}",
+            "/orders/{id}#private-fragment", "/orders/{id}",
+            "?private=query", "/",
+            "#private-fragment", "/",
+            " ", "/",
+            "/**?private=query", "/",
+            "https://route.example.invalid?private=/query#private-fragment", "/",
+            "https://route.example.invalid", "/"
+        );
+        for (String attribute : List.of(LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE,
+                LogBrewServletFilter.SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE)) {
+            for (Map.Entry<String, String> route : routes.entrySet()) {
+                for (boolean async : new boolean[] {false, true}) {
+                    for (String outcome : List.of("healthy", "servlet_failure", "spring_failure")) {
+                        assertPrivateRouteCase(attribute, route.getKey(), route.getValue(), async, outcome);
+                    }
+                }
+            }
+        }
+        testsRun++;
+    }
+
+    private void assertPrivateRouteCase(String attribute, String route, String expected, boolean async, String outcome)
+        throws Exception {
+        LogBrewClient client = sampleClient();
+        LogBrewServletFilter filter = new LogBrewServletFilter(client);
+        MockHttpServletRequest request = asyncRequest();
+        request.removeAttribute(LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE);
+        request.setAttribute(attribute, route);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        IOException failure = new IOException("private failure detail");
+        failure.setStackTrace(new StackTraceElement[0]);
+        LogBrewTraceContext[] trace = new LogBrewTraceContext[1];
+        Runnable[] completion = new Runnable[1];
+        try {
+            filter.doFilter(request, response, (incoming, outgoing) -> {
+                trace[0] = LogBrewTrace.current().orElseThrow();
+                if (async) {
+                    request.startAsync(incoming, outgoing);
+                    completion[0] = LogBrewTrace.wrapCurrent((Runnable) () -> {
+                        try {
+                            applyRouteOutcome(client, request, response, outcome, failure, true);
+                            request.getAsyncContext().complete();
+                        } catch (IOException error) {
+                            throw new AssertionError(error);
+                        }
+                    });
+                } else {
+                    applyRouteOutcome(client, request, response, outcome, failure, false);
+                }
+            });
+        } catch (IOException error) {
+            assertSame(failure, error, "application error identity");
+        }
+        if (async) {
+            assertTrue(client.pendingEvents() == 0, "route telemetry waits for async completion");
+            completion[0].run();
+        }
+        boolean failed = !"healthy".equals(outcome);
+        String payload = client.previewJson();
+        assertTrue(client.pendingEvents() == (failed ? 3 : 2), "route capture keeps all signals");
+        assertContains(payload, "\"routeTemplate\": \"" + expected + "\"");
+        assertContains(payload, "\"name\": \"GET " + expected + "\"");
+        if (failed) {
+            assertContains(payload, "\"title\": \"GET " + expected + " failed\"");
+            assertContains(payload, "\"type\": \"IOException\"");
+        }
+        assertContains(payload, "\"spanId\": \"" + trace[0].spanId() + "\"");
+        assertContains(payload, "\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"");
+        assertNotContains(payload, "private");
+        assertNotContains(payload, "route.example.invalid");
+        assertNotContains(payload, "query");
+        assertNotContains(payload, "fragment");
+        assertTrue(LogBrewTrace.current().isEmpty(), "route capture closes request scope");
+    }
+
+    private static void applyRouteOutcome(LogBrewClient client, MockHttpServletRequest request,
+        MockHttpServletResponse response, String outcome, IOException failure, boolean async) throws IOException {
+        response.setStatus("healthy".equals(outcome) ? 201 : 500);
+        if ("spring_failure".equals(outcome)) {
+            assertTrue(new LogBrewSpringExceptionResolver(client).resolveException(request, response, null, failure) == null,
+                "Spring keeps exception resolution ownership");
+        } else if ("servlet_failure".equals(outcome)) {
+            if (!async) {
+                throw failure;
+            }
+            MockAsyncContext context = (MockAsyncContext) request.getAsyncContext();
+            for (AsyncListener listener : context.getListeners()) {
+                listener.onError(new AsyncEvent(context, request, response, failure));
+            }
+        }
+    }
+
+    private static MockHttpServletRequest asyncRequest() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/orders/private");
+        request.setAsyncSupported(true);
+        request.addHeader("traceparent", TRACEPARENT);
+        request.setQueryString("debug=private");
+        request.setAttribute(LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE, "/orders/{orderId}");
+        return request;
     }
 
     private static LogBrewClient sampleClient() {

@@ -1,6 +1,9 @@
 package co.logbrew.sdk;
 
 import jakarta.servlet.Filter;
+import jakarta.servlet.AsyncEvent;
+import jakarta.servlet.AsyncListener;
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
@@ -14,13 +17,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * App-owned Jakarta Servlet filter for request trace, log, span, and metric correlation.
  *
  * <p>The filter reads only W3C {@code traceparent}, activates the request trace while the
  * downstream filter chain runs, then records one request span and one
- * {@code http.server.duration} metric. An exception that escapes the chain also records one
+ * {@code http.server.duration} metric. Asynchronous requests finish at completion and reuse
+ * the same trace during redispatch. An exception that escapes the chain also records one
  * correlated, type-only issue with bounded structured frames. The filter does not capture
  * exception messages, raw stack text, request bodies, response bodies, arbitrary headers,
  * cookies, query strings, full URLs, baggage, or tracestate.</p>
@@ -41,11 +46,14 @@ public final class LogBrewServletFilter implements Filter {
 
     private static final String TRACEPARENT_HEADER = "traceparent";
     private static final String DEFAULT_EVENT_ID_PREFIX = "servlet_request";
+    private static final String REQUEST_STATE_ATTRIBUTE = "co.logbrew.servletRequestState";
+    private static final AtomicLong nextFilterNumber = new AtomicLong();
 
     private final LogBrewClient client;
     private final String eventIdPrefix;
     private final Map<String, Object> baseMetadata;
     private final AtomicLong nextEventNumber = new AtomicLong();
+    private final String requestStateAttribute = REQUEST_STATE_ATTRIBUTE + "_" + nextFilterNumber.incrementAndGet();
 
     /**
      * Creates a filter that queues request spans and duration metrics on the provided client.
@@ -82,27 +90,99 @@ public final class LogBrewServletFilter implements Filter {
 
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
-        LogBrewTraceContext traceContext = traceContextFromIncomingHeader(httpRequest.getHeader(TRACEPARENT_HEADER));
-        LogBrewTrace.Scope traceScope = LogBrewTrace.activate(traceContext);
-        long startedNanos = System.nanoTime();
-        Throwable failure = null;
+        Object existing = httpRequest.getAttribute(requestStateAttribute);
+        RequestState state;
+        if (existing instanceof RequestState) {
+            state = (RequestState) existing;
+        } else {
+            state = new RequestState(httpRequest, httpResponse);
+            httpRequest.setAttribute(requestStateAttribute, state);
+        }
+        state.request = httpRequest;
+        state.response = httpResponse;
+        LogBrewTrace.Scope traceScope = LogBrewTrace.activate(state.traceContext);
 
         try {
             chain.doFilter(request, response);
         } catch (IOException | ServletException | RuntimeException | Error error) {
-            failure = error;
+            state.failure = error;
             throw error;
         } finally {
-            if (traceScope != null) {
-                traceScope.close();
+            traceScope.close();
+            state.afterDispatch();
+        }
+    }
+
+    private final class RequestState implements AsyncListener {
+        private final LogBrewTraceContext traceContext;
+        private final long startedNanos = System.nanoTime();
+        private final AtomicBoolean completed = new AtomicBoolean();
+        private final AtomicBoolean listening = new AtomicBoolean();
+        private volatile HttpServletRequest request;
+        private volatile HttpServletResponse response;
+        private volatile Throwable failure;
+
+        private RequestState(HttpServletRequest request, HttpServletResponse response) {
+            this.request = request;
+            this.response = response;
+            traceContext = traceContextFromIncomingHeader(request.getHeader(TRACEPARENT_HEADER));
+        }
+
+        private void afterDispatch() {
+            try {
+                if (request.isAsyncStarted()) {
+                    if (listening.compareAndSet(false, true)) {
+                        request.getAsyncContext().addListener(this, request, response);
+                    }
+                } else if (!listening.get()) {
+                    finish();
+                }
+            } catch (IllegalStateException error) {
+                // Completion may win the race with listener registration.
+                finish();
             }
-            finishTelemetry(
-                httpRequest,
-                traceContext,
-                responseStatus(httpResponse, failure),
-                elapsedMs(startedNanos),
-                failure
-            );
+        }
+
+        private void finish() {
+            if (completed.compareAndSet(false, true)) {
+                finishTelemetry(request, traceContext, responseStatus(response, failure), elapsedMs(startedNanos), failure);
+            }
+        }
+
+        @Override
+        public void onComplete(AsyncEvent event) {
+            if (failure == null) {
+                try {
+                    Object containerError = request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
+                    if (containerError instanceof Throwable) {
+                        failure = (Throwable) containerError;
+                    }
+                } catch (RuntimeException ignored) {
+                    // Capture the completed response even when error attributes are unavailable.
+                }
+            }
+            finish();
+        }
+
+        @Override
+        public void onError(AsyncEvent event) {
+            if (event.getThrowable() != null) {
+                failure = event.getThrowable();
+            }
+        }
+
+        @Override
+        public void onTimeout(AsyncEvent event) {
+            // The container or app may still resolve the timeout and change the response.
+        }
+
+        @Override
+        public void onStartAsync(AsyncEvent event) {
+            try {
+                event.getAsyncContext().addListener(this, request, response);
+            } catch (RuntimeException ignored) {
+                // Listener registration must never alter the app's async lifecycle.
+            }
         }
     }
 
@@ -200,11 +280,9 @@ public final class LogBrewServletFilter implements Filter {
     }
 
     static String routeSource(HttpServletRequest request) {
-        if (isUsableRoute(request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE))) {
-            return "logbrew_attribute";
-        }
-        if (isUsableRoute(request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE))) {
-            return "spring_best_matching_pattern";
+        String resolvedSource = resolvedRouteSource(request);
+        if (resolvedSource != null) {
+            return resolvedSource;
         }
         if (request.getServletPath() != null && !request.getServletPath().trim().isEmpty()) {
             return "servlet_path";
@@ -218,13 +296,8 @@ public final class LogBrewServletFilter implements Filter {
     }
 
     static String exceptionRouteSource(HttpServletRequest request) {
-        if (isUsableRoute(request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE))) {
-            return "logbrew_attribute";
-        }
-        if (isUsableRoute(request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE))) {
-            return "spring_best_matching_pattern";
-        }
-        return "unmatched";
+        String resolvedSource = resolvedRouteSource(request);
+        return resolvedSource == null ? "unmatched" : resolvedSource;
     }
 
     static String requestMethod(HttpServletRequest request) {
@@ -237,23 +310,39 @@ public final class LogBrewServletFilter implements Filter {
     }
 
     private static String resolvedRouteTemplate(HttpServletRequest request) {
-        Object explicitRoute = request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE);
-        if (isUsableRoute(explicitRoute)) {
-            return explicitRoute.toString().trim();
+        Object value = request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE);
+        if (value == null) {
+            value = request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE);
         }
-        Object springRoute = request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE);
-        if (isUsableRoute(springRoute)) {
-            return springRoute.toString().trim();
+        if (value == null) {
+            return null;
+        }
+        String route = sanitizedRoute(value);
+        return route == null ? "/" : route;
+    }
+
+    private static String resolvedRouteSource(HttpServletRequest request) {
+        Object value = request.getAttribute(ROUTE_TEMPLATE_ATTRIBUTE);
+        if (value != null) {
+            return sanitizedRoute(value) == null ? "unmatched" : "logbrew_attribute";
+        }
+        value = request.getAttribute(SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if (value != null) {
+            return sanitizedRoute(value) == null ? "unmatched" : "spring_best_matching_pattern";
         }
         return null;
     }
 
-    private static boolean isUsableRoute(Object value) {
+    private static String sanitizedRoute(Object value) {
         if (value == null) {
-            return false;
+            return null;
         }
-        String route = value.toString().trim();
-        return !route.isEmpty() && !"/**".equals(route);
+        try {
+            String route = LogBrewHttpRequestTelemetry.sanitizeRouteTemplate(value.toString());
+            return "/**".equals(route) ? null : route;
+        } catch (RuntimeException error) {
+            return null;
+        }
     }
 
     private static int responseStatus(HttpServletResponse response, Throwable failure) {
