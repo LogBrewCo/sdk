@@ -36,6 +36,7 @@ public final class LogBrewSpringExceptionResolverTest {
         testUnmatchedRouteDoesNotLeakRawRequestPath();
         testTelemetryFailureDoesNotChangeSpringBehavior();
         testSpringBootAutoConfigurationFactoryAndImport();
+        testResolverSanitizesRouteAttributes();
         System.out.println("java Spring exception resolver tests ok (" + testsRun + " tests)");
     }
 
@@ -158,6 +159,24 @@ public final class LogBrewSpringExceptionResolverTest {
             resourceText("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports"),
             "co.logbrew.sdk.LogBrewSpringBootExceptionAutoConfiguration"
         );
+        testsRun++;
+    }
+
+    private void testResolverSanitizesRouteAttributes() {
+        for (String attribute : new String[] {LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE,
+                LogBrewServletFilter.SPRING_BEST_MATCHING_PATTERN_ATTRIBUTE}) {
+            LogBrewClient client = sampleClient();
+            FakeHttpServletRequest request = new FakeHttpServletRequest("GET", "/orders/private")
+                .attribute(attribute, "https://route.example.invalid/orders/{id}?private=query#private-fragment");
+            new LogBrewSpringExceptionResolver(client).resolveException(
+                request.proxy(), fakeResponse(), null, new IOException("private failure detail"));
+            String payload = client.previewJson();
+            assertContains(payload, "\"title\": \"GET /orders/{id} failed\"");
+            assertContains(payload, "\"routeTemplate\": \"/orders/{id}\"");
+            assertOccurrenceCount(payload, "\"type\": \"issue\"", 1);
+            assertNotContains(payload, "private");
+            assertNotContains(payload, "route.example.invalid");
+        }
         testsRun++;
     }
 

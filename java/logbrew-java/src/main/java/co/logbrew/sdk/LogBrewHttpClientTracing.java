@@ -196,6 +196,8 @@ public final class LogBrewHttpClientTracing {
             );
         } catch (SdkException error) {
             reportCaptureError(config.onError, error);
+        } catch (RuntimeException error) {
+            reportCaptureError(config.onError, new SdkException("capture_error", "HTTP client telemetry capture failed"));
         }
     }
 
@@ -260,25 +262,11 @@ public final class LogBrewHttpClientTracing {
 
     private static String sanitizeRouteTemplate(String routeTemplate) {
         String candidate = routeTemplate == null || routeTemplate.trim().isEmpty() ? "/" : routeTemplate.trim();
-        int schemeIndex = candidate.indexOf("://");
-        if (schemeIndex >= 0) {
-            int pathStart = candidate.indexOf('/', schemeIndex + 3);
-            candidate = pathStart >= 0 ? candidate.substring(pathStart) : "/";
-        }
-        int queryIndex = candidate.indexOf('?');
-        int hashIndex = candidate.indexOf('#');
-        int end = candidate.length();
-        if (queryIndex >= 0) {
-            end = Math.min(end, queryIndex);
-        }
-        if (hashIndex >= 0) {
-            end = Math.min(end, hashIndex);
-        }
-        String sanitized = candidate.substring(0, end).trim();
-        if (sanitized.isEmpty()) {
+        try {
+            return LogBrewHttpRequestTelemetry.sanitizeRouteTemplate(candidate);
+        } catch (SdkException error) {
             return "/";
         }
-        return sanitized;
     }
 
     private static String spanStatus(int statusCode, Throwable requestError) {
