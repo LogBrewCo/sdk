@@ -59,6 +59,9 @@ class PersistentEventQueue:
         except Exception:
             self._close_handles()
             raise SdkError("persistent_queue_error", "persistent queue is unavailable") from None
+        except BaseException:
+            self._close_handles()
+            raise
 
     @property
     def count(self) -> int:
@@ -105,14 +108,14 @@ class PersistentEventQueue:
                 pending=("append", sequence),
                 message="persistent event admission could not be confirmed",
             )
-        except SdkError:
-            with suppress(sqlite3.Error):
-                connection.rollback()
-            raise
         except sqlite3.Error:
             with suppress(sqlite3.Error):
                 connection.rollback()
             raise SdkError("persistent_queue_error", "persistent event admission failed") from None
+        except BaseException:
+            with suppress(sqlite3.Error):
+                connection.rollback()
+            raise
         return event
 
     def snapshot(self, *, through_sequence: int | None = None) -> tuple[QueuedEvent, ...]:
@@ -157,14 +160,14 @@ class PersistentEventQueue:
                 pending=("ack", through_sequence),
                 message="accepted event prefix could not be confirmed",
             )
-        except SdkError:
-            with suppress(sqlite3.Error):
-                connection.rollback()
-            raise
         except sqlite3.Error:
             with suppress(sqlite3.Error):
                 connection.rollback()
             raise SdkError("persistent_queue_error", "accepted event prefix could not be stored") from None
+        except BaseException:
+            with suppress(sqlite3.Error):
+                connection.rollback()
+            raise
         return len(accepted)
 
     def purge(self) -> int:
@@ -186,14 +189,14 @@ class PersistentEventQueue:
                 pending=("purge", state.last_admitted),
                 message="persistent queue purge could not be confirmed",
             )
-        except SdkError:
-            with suppress(sqlite3.Error):
-                connection.rollback()
-            raise
         except sqlite3.Error:
             with suppress(sqlite3.Error):
                 connection.rollback()
             raise SdkError("persistent_queue_error", "persistent queue purge failed") from None
+        except BaseException:
+            with suppress(sqlite3.Error):
+                connection.rollback()
+            raise
         return removed
 
     def recover(self) -> int:
@@ -296,7 +299,7 @@ class PersistentEventQueue:
             connection.execute("PRAGMA secure_delete=ON")
             connection.execute("PRAGMA busy_timeout=0")
             connection.execute("PRAGMA trusted_schema=OFF")
-        except Exception:
+        except BaseException:
             connection.close()
             raise
         return connection
@@ -515,6 +518,10 @@ class PersistentEventQueue:
             self._pending_confirmation = pending
             self._discard_connection()
             raise SdkError("persistence_commit_error", message) from None
+        except BaseException:
+            self._pending_confirmation = pending
+            self._discard_connection()
+            raise
 
     def _assert_owner(self) -> None:
         if os.getpid() != self._owner_pid:

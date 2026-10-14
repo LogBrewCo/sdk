@@ -413,6 +413,12 @@ class HttpTransport:
         require_non_empty("endpoint", endpoint)
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise SdkError("configuration_error", "HttpTransport timeout must be positive")
+        try:
+            timeout_seconds = float(timeout)
+        except OverflowError:
+            raise SdkError("configuration_error", "HttpTransport timeout must be finite and positive") from None
+        if not math.isfinite(timeout_seconds):
+            raise SdkError("configuration_error", "HttpTransport timeout must be finite and positive")
         self.endpoint = endpoint
         self.headers = validate_headers(headers)
         self._default_user_agent = (
@@ -420,7 +426,7 @@ class HttpTransport:
             if any(name.lower() == "user-agent" for name in self.headers)
             else _default_http_user_agent()
         )
-        self.timeout = float(timeout)
+        self.timeout = timeout_seconds
         self.open_url = open_url or partial(
             urlopen,
             context=_default_http_ssl_context(),
@@ -458,11 +464,14 @@ class HttpTransport:
                 if callable(close_response):
                     close_response()
         except HTTPError as error:
-            return TransportResponse(
-                status_code=int(error.code),
-                attempts=1,
-                retry_after_ms=parse_retry_after_ms(error.headers),
-            )
+            try:
+                return TransportResponse(
+                    status_code=int(error.code),
+                    attempts=1,
+                    retry_after_ms=parse_retry_after_ms(error.headers),
+                )
+            finally:
+                error.close()
         except OSError as error:
             raise TransportError.network(f"http transport failed: {error}") from error
 
@@ -713,9 +722,14 @@ class LogBrewClient:
             self._automatic_delivery.manual_delivery_started()
             try:
                 response = self._flush_internal(selected_transport)
-            except Exception as error:
-                with self._state_lock:
-                    pending_events = self._queue.count
+            except BaseException as error:
+                # Failure statistics must not replace the original delivery error.
+                pending_events: int | None
+                try:
+                    with self._state_lock:
+                        pending_events = self._queue.count
+                except BaseException:
+                    pending_events = None
                 self._automatic_delivery.manual_delivery_failed(
                     error,
                     pending_events=pending_events,
@@ -745,11 +759,10 @@ class LogBrewClient:
         with self._state_lock:
             self._require_open_for_delivery(thread_id)
             self._closing = True
-        scheduler = self._automatic_delivery.begin_shutdown()
-        if scheduler is not None and scheduler.ident != thread_id:
-            scheduler.join()
-
         try:
+            scheduler = self._automatic_delivery.begin_shutdown()
+            if scheduler is not None and scheduler.ident != thread_id:
+                scheduler.join()
             with self._flush_lock:
                 with self._state_lock:
                     self._flush_owner_thread_id = thread_id
@@ -757,7 +770,7 @@ class LogBrewClient:
                 try:
                     response = self._flush_internal(selected_transport)
                     self._queue.close()
-                except Exception as error:
+                except BaseException as error:
                     with self._state_lock:
                         pending_events = self._queue.count
                     self._automatic_delivery.manual_delivery_failed(
@@ -776,7 +789,7 @@ class LogBrewClient:
                     with self._state_lock:
                         self._flush_owner_thread_id = None
                     self._automatic_delivery.manual_delivery_finished()
-        except Exception:
+        except BaseException:
             with self._state_lock:
                 self._closing = False
                 pending_events = self._queue.count
