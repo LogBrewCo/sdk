@@ -24,6 +24,22 @@ fun main() {
     val parent = LogBrewTrace.continueOrCreate("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
     val capturedTraceparent = AtomicReference<String?>()
     val callbackTraceSpanId = AtomicReference<String?>()
+    val nextEventId = AtomicInteger(1)
+    val okHttp =
+        OkHttpClient
+            .Builder()
+            .addInterceptor(
+                LogBrewOkHttpInterceptor(
+                    client = client,
+                    finishSpanOnResponseBodyClose = true,
+                    eventIdProvider =
+                        LogBrewOkHttpEventIdProvider {
+                            "evt_okhttp_installed_%03d".format(nextEventId.getAndIncrement())
+                        },
+                    timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:35Z" },
+                ),
+            ).eventListenerFactory(LogBrewOkHttpPhaseTimings.eventListenerFactory())
+            .build()
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/api/orders") { exchange ->
         capturedTraceparent.set(exchange.requestHeaders.getFirst("traceparent"))
@@ -36,26 +52,9 @@ fun main() {
         exchange.sendResponseHeaders(302, -1)
         exchange.close()
     }
-    server.start()
-
     try {
+        server.start()
         val port = server.address.port
-        val nextEventId = AtomicInteger(1)
-        val okHttp =
-            OkHttpClient
-                .Builder()
-                .addInterceptor(
-                    LogBrewOkHttpInterceptor(
-                        client = client,
-                        finishSpanOnResponseBodyClose = true,
-                        eventIdProvider =
-                            LogBrewOkHttpEventIdProvider {
-                                "evt_okhttp_installed_%03d".format(nextEventId.getAndIncrement())
-                            },
-                        timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:35Z" },
-                    ),
-                ).eventListenerFactory(LogBrewOkHttpPhaseTimings.eventListenerFactory())
-                .build()
         val tracedCalls = LogBrewOkHttpCallFactory(okHttp)
         val latch = CountDownLatch(1)
 
@@ -126,8 +125,12 @@ fun main() {
             check(LogBrewTrace.currentTraceContext() == parent)
         }
     } finally {
+        okHttp.dispatcher.cancelAll()
+        okHttp.dispatcher.executorService.shutdown()
+        okHttp.connectionPool.evictAll()
         server.stop(0)
     }
+    check(okHttp.dispatcher.executorService.awaitTermination(5, TimeUnit.SECONDS))
 
     val body = client.previewJson()
     check(capturedTraceparent.get()?.startsWith("00-${parent.traceId}-") == true)

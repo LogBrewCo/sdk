@@ -74,7 +74,11 @@ private fun okHttpInterceptorCapturesResponse() {
         LogBrewOkHttpInterceptor(
             client = client,
             eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_request_001" },
-            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:33Z" },
+            timestampProvider =
+                LogBrewOkHttpTimestampProvider {
+                    check(chain.proceededRequest == null)
+                    "2026-06-02T10:00:33Z"
+                },
         )
 
     LogBrewTrace.use(parent).use {
@@ -120,7 +124,11 @@ private fun okHttpInterceptorCapturesFailure() {
             client = client,
             routeTemplate = "/api/fail/{id}",
             eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_request_002" },
-            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:34Z" },
+            timestampProvider =
+                LogBrewOkHttpTimestampProvider {
+                    check(chain.proceededRequest == null)
+                    "2026-06-02T10:00:34Z"
+                },
         )
 
     LogBrewTrace.use(parent).use {
@@ -265,6 +273,16 @@ private fun okHttpInterceptorReportsCaptureFailure() {
     val response = interceptor.intercept(chain)
     check(response.code == 204)
     check(capturedFailure is SdkException)
+
+    val clockFailure = IllegalStateException("clock unavailable")
+    val failedClockInterceptor =
+        LogBrewOkHttpInterceptor(
+            client = newClient(),
+            timestampProvider = LogBrewOkHttpTimestampProvider { throw clockFailure },
+            captureFailureHandler = LogBrewOkHttpCaptureFailureHandler { capturedFailure = it },
+        )
+    check(failedClockInterceptor.intercept(chain).code == 204)
+    check(capturedFailure === clockFailure)
 }
 
 private fun okHttpCallbackWrapperReactivatesTrace() {
@@ -517,7 +535,11 @@ private fun okHttpInterceptorCanFinishSpanOnResponseBodyClose() {
             client = client,
             finishSpanOnResponseBodyClose = true,
             eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_body_close_001" },
-            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:40Z" },
+            timestampProvider =
+                LogBrewOkHttpTimestampProvider {
+                    check(chain.proceededRequest == null)
+                    "2026-06-02T10:00:40Z"
+                },
         )
 
     val response =

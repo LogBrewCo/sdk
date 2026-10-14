@@ -8,6 +8,7 @@ import co.logbrew.sdk.QueueOperation
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.SdkException
 import co.logbrew.sdk.SpanEventSummary
+import java.time.Instant
 
 object OperationTracingTests {
     fun runAll() {
@@ -36,6 +37,7 @@ object OperationTracingTests {
             )
         val client = newClient()
         var activeContext: LogBrewTraceContext? = null
+        var enteredAt = Instant.EPOCH
 
         val result =
             LogBrewTrace.use(parent).use {
@@ -60,6 +62,7 @@ object OperationTracingTests {
                                 ),
                         ),
                 ) {
+                    enteredAt = Instant.now()
                     activeContext = LogBrewTrace.currentTraceContext()
                     "order-123"
                 }
@@ -73,6 +76,7 @@ object OperationTracingTests {
         check(LogBrewTrace.currentTraceContext() == null)
 
         val body = client.previewJson()
+        check(!spanTimestamps(body).single().isAfter(enteredAt))
         check("\"type\": \"span\"" in body)
         check("\"name\": \"database:select checkout\"" in body)
         check("\"traceId\": \"${parent.traceId}\"" in body)
@@ -158,6 +162,7 @@ object OperationTracingTests {
 
     private fun dependencySpansPreserveOriginalErrors() {
         val client = newClient()
+        val enteredAt = mutableListOf<Instant>()
         val original = IllegalStateException("broker payload contained private order")
 
         val cacheError =
@@ -179,6 +184,7 @@ object OperationTracingTests {
                                 ),
                         ),
                 ) {
+                    enteredAt += Instant.now()
                     throw original
                 }
             }
@@ -204,12 +210,15 @@ object OperationTracingTests {
                                 ),
                         ),
                 ) {
+                    enteredAt += Instant.now()
                     throw original
                 }
             }
         check(queueError === original)
 
         val body = client.previewJson()
+        check(spanTimestamps(body).size == enteredAt.size)
+        check(spanTimestamps(body).zip(enteredAt).all { (started, entered) -> !started.isAfter(entered) })
         check("\"source\": \"cache.operation\"" in body)
         check("\"cacheSystem\": \"redis\"" in body)
         check("\"cacheOperation\": \"get cart\"" in body)
@@ -249,6 +258,9 @@ object OperationTracingTests {
         check(captureFailure.code == "shutdown_error")
         check((captureFailure.message ?: "").contains("client is already shut down"))
     }
+
+    private fun spanTimestamps(body: String): List<Instant> =
+        Regex("\"timestamp\": \"([^\"]+)\"").findAll(body).map { Instant.parse(it.groupValues[1]) }.toList()
 
     private fun newClient(): LogBrewClient =
         LogBrewClient.create(

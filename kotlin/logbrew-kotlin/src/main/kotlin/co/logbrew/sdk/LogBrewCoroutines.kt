@@ -17,7 +17,10 @@ object LogBrewCoroutines {
             .newProxyInstance(
                 threadContextElementClass.classLoader,
                 arrayOf(CoroutineContext.Element::class.java, threadContextElementClass),
-                LogBrewTraceCoroutineElementHandler(context),
+                LogBrewCoroutineElementHandler(
+                    LogBrewTraceCoroutineKey,
+                    "LogBrewCoroutines.traceContextElement(${context.traceId}/${context.spanId})",
+                ) { LogBrewTrace.use(context) },
             ) as CoroutineContext.Element
     }
 
@@ -33,7 +36,10 @@ object LogBrewCoroutines {
             .newProxyInstance(
                 threadContextElementClass.classLoader,
                 arrayOf(CoroutineContext.Element::class.java, threadContextElementClass),
-                LogBrewTelemetryCoroutineElementHandler(normalized),
+                LogBrewCoroutineElementHandler(
+                    LogBrewTelemetryCoroutineKey,
+                    "LogBrewCoroutines.telemetryContextElement(schemaVersion=${context.schemaVersion})",
+                ) { LogBrewTelemetry.use(normalized) },
             ) as CoroutineContext.Element
     }
 
@@ -53,8 +59,10 @@ private object LogBrewTraceCoroutineKey : CoroutineContext.Key<CoroutineContext.
 
 private object LogBrewTelemetryCoroutineKey : CoroutineContext.Key<CoroutineContext.Element>
 
-private class LogBrewTraceCoroutineElementHandler(
-    private val context: LogBrewTraceContext,
+private class LogBrewCoroutineElementHandler(
+    private val key: CoroutineContext.Key<CoroutineContext.Element>,
+    private val description: String,
+    private val enter: () -> AutoCloseable,
 ) : InvocationHandler {
     override fun invoke(
         proxy: Any,
@@ -67,11 +75,11 @@ private class LogBrewTraceCoroutineElementHandler(
 
         return when (method.name) {
             "getKey" -> {
-                LogBrewTraceCoroutineKey
+                key
             }
 
             "updateThreadContext" -> {
-                LogBrewTrace.use(context)
+                enter()
             }
 
             "restoreThreadContext" -> {
@@ -84,11 +92,11 @@ private class LogBrewTraceCoroutineElementHandler(
             }
 
             "get" -> {
-                if (args?.firstOrNull() == LogBrewTraceCoroutineKey) proxy else null
+                if (args?.firstOrNull() == key) proxy else null
             }
 
             "minusKey" -> {
-                if (args?.firstOrNull() == LogBrewTraceCoroutineKey) EmptyCoroutineContext else proxy
+                if (args?.firstOrNull() == key) EmptyCoroutineContext else proxy
             }
 
             "plus" -> {
@@ -109,7 +117,7 @@ private class LogBrewTraceCoroutineElementHandler(
         when (method.name) {
             "equals" -> proxy === args?.firstOrNull()
             "hashCode" -> System.identityHashCode(proxy)
-            "toString" -> "LogBrewCoroutines.traceContextElement(${context.traceId}/${context.spanId})"
+            "toString" -> description
             else -> throw UnsupportedOperationException("Unsupported LogBrew coroutine object method: ${method.name}")
         }
 
@@ -127,88 +135,7 @@ private class LogBrewTraceCoroutineElementHandler(
         args: Array<out Any?>?,
     ): CoroutineContext {
         val contextToAdd = args?.firstOrNull() as? CoroutineContext ?: EmptyCoroutineContext
-        if (contextToAdd[LogBrewTraceCoroutineKey] != null) {
-            return contextToAdd
-        }
-        return contextToAdd + (proxy as CoroutineContext.Element)
-    }
-}
-
-private class LogBrewTelemetryCoroutineElementHandler(
-    private val context: TelemetryContext,
-) : InvocationHandler {
-    override fun invoke(
-        proxy: Any,
-        method: Method,
-        args: Array<out Any?>?,
-    ): Any? {
-        if (method.declaringClass == Any::class.java) {
-            return invokeAnyMethod(proxy, method, args)
-        }
-
-        return when (method.name) {
-            "getKey" -> {
-                LogBrewTelemetryCoroutineKey
-            }
-
-            "updateThreadContext" -> {
-                LogBrewTelemetry.use(context)
-            }
-
-            "restoreThreadContext" -> {
-                (args?.getOrNull(1) as? AutoCloseable)?.close()
-                Unit
-            }
-
-            "fold" -> {
-                fold(proxy, args)
-            }
-
-            "get" -> {
-                if (args?.firstOrNull() == LogBrewTelemetryCoroutineKey) proxy else null
-            }
-
-            "minusKey" -> {
-                if (args?.firstOrNull() == LogBrewTelemetryCoroutineKey) EmptyCoroutineContext else proxy
-            }
-
-            "plus" -> {
-                plus(proxy, args)
-            }
-
-            else -> {
-                throw UnsupportedOperationException("Unsupported LogBrew coroutine context method: ${method.name}")
-            }
-        }
-    }
-
-    private fun invokeAnyMethod(
-        proxy: Any,
-        method: Method,
-        args: Array<out Any?>?,
-    ): Any =
-        when (method.name) {
-            "equals" -> proxy === args?.firstOrNull()
-            "hashCode" -> System.identityHashCode(proxy)
-            "toString" -> "LogBrewCoroutines.telemetryContextElement(schemaVersion=${context.schemaVersion})"
-            else -> throw UnsupportedOperationException("Unsupported LogBrew coroutine object method: ${method.name}")
-        }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun fold(
-        proxy: Any,
-        args: Array<out Any?>?,
-    ): Any? {
-        val operation = args?.getOrNull(1) as? (Any?, CoroutineContext.Element) -> Any?
-        return operation?.invoke(args.getOrNull(0), proxy as CoroutineContext.Element)
-    }
-
-    private fun plus(
-        proxy: Any,
-        args: Array<out Any?>?,
-    ): CoroutineContext {
-        val contextToAdd = args?.firstOrNull() as? CoroutineContext ?: EmptyCoroutineContext
-        if (contextToAdd[LogBrewTelemetryCoroutineKey] != null) {
+        if (contextToAdd[key] != null) {
             return contextToAdd
         }
         return contextToAdd + (proxy as CoroutineContext.Element)

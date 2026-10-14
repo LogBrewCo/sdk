@@ -143,6 +143,7 @@ object LogBrewOperationTracing {
         Validation.requireNonEmpty("operation name", operationName)
         val safeOperationName = operationName.trim()
         val traceContext = LogBrewTrace.childContext(LogBrewTrace.currentTraceContext())
+        val startedAt = Instant.now().toString()
         val startedAtMs = monotonicTimeMs()
         var operationError: Throwable? = null
 
@@ -158,6 +159,7 @@ object LogBrewOperationTracing {
                 spanName = "$spanNamePrefix:$safeOperationName",
                 source = source,
                 traceContext = traceContext,
+                startedAt = startedAt,
                 durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
                 metadata = metadata,
                 events = events,
@@ -173,6 +175,7 @@ object LogBrewOperationTracing {
         spanName: String,
         source: String,
         traceContext: LogBrewTraceContext,
+        startedAt: String,
         durationMs: Double,
         metadata: Map<String, Any?>,
         events: List<SpanEventSummary>,
@@ -199,7 +202,7 @@ object LogBrewOperationTracing {
         try {
             client.span(
                 "${eventIdPrefix}_span_${traceContext.spanId}",
-                Instant.now().toString(),
+                startedAt,
                 attributes,
             )
         } catch (error: SdkException) {
