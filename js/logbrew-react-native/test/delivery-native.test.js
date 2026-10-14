@@ -167,6 +167,86 @@ test("durable fatal reports survive rejected delivery and restart until accepted
   });
 });
 
+test("a Hermes fatal crash replays once per stable ID with correlation after a kill during replay", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+    const debugId = "11111111-2222-4333-8444-555555555555";
+    const registry = Symbol.for("@logbrew/react-native/debug-ids");
+    globalThis[registry] = { "Error\n    at global (address at index.android.bundle:1:1)": debugId };
+    const context = {
+      schemaVersion: 1,
+      resource: { deployment: { environment: "production", release: "com.example.app@1.2.3+45" } },
+      session: { id: "session_123" }
+    };
+    try {
+      const crashed = await importRuntime("fatal-crash", true, "android");
+      const client = nativeClient(crashed, { context });
+      crashed.captureDefaultScreenView(client, "Checkout");
+      let handler = () => {};
+      const terminated = [];
+      crashed.installLogBrewReactNativeGlobalErrorHandler({
+        client,
+        errorUtils: { getGlobalHandler: () => handler, setGlobalHandler(value) { handler = value; } }
+      });
+      handler = ((capture) => (error, isFatal) => {
+        capture(error, isFatal);
+        terminated.push(nativeStore.records(CLIENT_KEY).length);
+      })(handler);
+      const error = new TypeError("card 4111 1111 1111 1111 rejected");
+      error.stack = [
+        "TypeError: card 4111 1111 1111 1111 rejected",
+        "    at submitOrder (address at /data/user/0/com.example.app/files/index.android.bundle:1:53210)",
+        "    at onPress (address at index.android.bundle:1:9001)"
+      ].join("\n");
+      handler(error, true);
+
+      assert.deepEqual(terminated, [2]);
+      const stored = nativeStore.records(CLIENT_KEY)[1].serializedEvent;
+      // The Android module recognizes persisted JavaScript fatal reports by this prefix.
+      assert.ok(stored.startsWith("{\"type\":\"issue\",\"id\":\"evt_rn_fatal_"));
+      const fatal = JSON.parse(stored);
+      assert.equal(fatal.attributes.level, "critical");
+      assert.deepEqual(fatal.attributes.exception.mechanism, { type: "react_native_error_utils", handled: false });
+      assert.deepEqual(fatal.attributes.stackFrames, [
+        { filename: "index.android.bundle", line: 1, column: 53211, function: "submitOrder", debugId },
+        { filename: "index.android.bundle", line: 1, column: 9002, function: "onPress", debugId }
+      ]);
+      assert.equal(fatal.attributes.exceptionChain.entries[0].messageState, "redacted");
+      assert.equal(fatal.attributes.metadata.lastRoute, "screen:Checkout");
+      assert.equal(fatal.attributes.breadcrumbs.at(-1).message, "screen:Checkout");
+      assert.deepEqual(fatal.attributes.context.session, { id: "session_123" });
+      assert.equal(fatal.attributes.context.resource.deployment.release, "com.example.app@1.2.3+45");
+      for (const forbidden of ["4111", "rejected", "/data/", "com.example.app/files"]) {
+        assert.equal(stored.includes(forbidden), false, forbidden);
+      }
+
+      const killedBodies = [];
+      const killed = nativeClient(await importRuntime("replay-killed", true, "android"));
+      void killed.flush({ send(_key, body) {
+        killedBodies.push(body);
+        return new Promise(() => {});
+      } });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(killedBodies.length, 1);
+      assert.equal(nativeStore.records(CLIENT_KEY).length, 2);
+
+      const acceptedBodies = [];
+      const relaunched = nativeClient(await importRuntime("replay-relaunched", true, "android"));
+      await relaunched.flush({ async send(_key, body) {
+        acceptedBodies.push(body);
+        return { attempts: 1, statusCode: 202 };
+      } });
+      const ids = (body) => JSON.parse(body).events.map(({ id }) => id);
+      assert.deepEqual(ids(acceptedBodies[0]), ids(killedBodies[0]));
+      assert.equal(ids(acceptedBodies[0])[1], fatal.id);
+      assert.equal(JSON.parse(acceptedBodies[0]).events[1].attributes.stackFrames[0].debugId, debugId);
+      assert.equal(nativeStore.records(CLIENT_KEY).length, 0);
+      assert.equal(nativeClient(await importRuntime("replay-empty", true, "android")).pendingEvents(), 0);
+    } finally {
+      delete globalThis[registry];
+    }
+  });
+});
+
 test("an older linked native binary falls back in auto mode and fails clearly when required", async () => {
   await withNativeRuntimes(async ({ importRuntime }) => {
     const autoRuntime = await importRuntime("legacy-auto", "legacy");

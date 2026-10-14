@@ -22,6 +22,7 @@ const NATIVE_RANDOM_HEX = Symbol.for("co.logbrew.react-native.secure-random-hex"
 const MAX_ACTION_NAME_LENGTH = 64;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 const SCREEN_ACTION_PREFIX = "screen:";
+const LAST_ROUTE = Symbol.for("co.logbrew.react-native.last-route");
 const BACKGROUND_APP_STATES = new Set(["background", "inactive"]);
 const LogBrewNativeContext = React.createContext(null);
 const activeTraceScopes = [];
@@ -904,6 +905,10 @@ function recordIssueBreadcrumb(client, event, category, type) {
     ...(message === undefined ? {} : { message }),
     ...(status === undefined ? {} : { data: { status } })
   }, event.timestamp);
+  if (category === "navigation" && message !== undefined) {
+    // Global error reports keep the last route even after breadcrumb eviction.
+    client[LAST_ROUTE] = message;
+  }
 }
 
 function boundedBreadcrumbMessage(value) {

@@ -85,6 +85,11 @@ final class AndroidNativeDiagnostics {
   private static final int MAX_FRAMES = 32;
   static final long WATCHDOG_POLL_MS = 500;
   private static final AtomicLong SEQUENCE = new AtomicLong();
+  private static final String JAVASCRIPT_FATAL_RECORD = "{\"type\":\"issue\",\"id\":\"evt_rn_fatal_";
+  private static final String JAVASCRIPT_EXCEPTION = "com.facebook.react.common.JavascriptException";
+  private static final long JAVASCRIPT_FATAL_WINDOW_NANOS = 10_000_000_000L;
+  private static long javaScriptFatalPersistedAtNanos;
+  private static boolean javaScriptFatalUnclaimed;
 
   final EventRecordStore eventStore;
   final AndroidNativeSignalStore signalStore;
@@ -138,7 +143,9 @@ final class AndroidNativeDiagnostics {
 
   void handleUncaught(Thread thread, Throwable error) {
     try {
-      append(javaCrashEvent(error));
+      if (!claimPersistedJavaScriptFatal(error, System.nanoTime())) {
+        append(javaCrashEvent(error));
+      }
     } finally {
       previousHandler.uncaughtException(thread, error);
     }
@@ -151,6 +158,32 @@ final class AndroidNativeDiagnostics {
     long boundedDuration =
         Math.max(configuration.anrThresholdMs, Math.min(durationMs, 300_000));
     append(hangEvent(mainFrames.get(), boundedDuration));
+  }
+
+  /** Notes a JavaScript fatal report that this process just persisted to the shared queue. */
+  static synchronized void notePersistedRecord(String serializedEvent, long nowNanos) {
+    if (serializedEvent != null
+        && serializedEvent.startsWith(JAVASCRIPT_FATAL_RECORD)
+        && !serializedEvent.contains("\"replayed\":true")) {
+      javaScriptFatalPersistedAtNanos = nowNanos;
+      javaScriptFatalUnclaimed = true;
+    }
+  }
+
+  // React Native ends a JavaScript fatal by throwing JavascriptException right after
+  // the global handler runs. Skip that copy once, and only shortly after a persisted
+  // report, so a stale report can never hide a later crash.
+  static synchronized boolean claimPersistedJavaScriptFatal(Throwable error, long nowNanos) {
+    Throwable cause = error;
+    for (int depth = 0; cause != null && depth < 8; depth++, cause = cause.getCause()) {
+      if (JAVASCRIPT_EXCEPTION.equals(cause.getClass().getName())) {
+        boolean claimed = javaScriptFatalUnclaimed
+            && nowNanos - javaScriptFatalPersistedAtNanos <= JAVASCRIPT_FATAL_WINDOW_NANOS;
+        javaScriptFatalUnclaimed = false;
+        return claimed;
+      }
+    }
+    return false;
   }
 
   static boolean shouldReportHang(

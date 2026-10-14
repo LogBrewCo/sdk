@@ -164,6 +164,39 @@ test("redacts error content and local or remote stack locations", async () => {
   });
 });
 
+test("keeps only frame basenames when paths contain spaces or the message changed after capture", async () => {
+  await withInstalledPackage(async ({ installLogBrewReactNativeGlobalErrorHandler }) => {
+    const errorUtils = createErrorUtils();
+    const client = createClient();
+    installLogBrewReactNativeGlobalErrorHandler({ client, errorUtils });
+    const error = new Error("changed");
+    error.stack = [
+      "Error: original private-message at /home/jd/x.js:1:2",
+      "    at private-function (index.bundle:3:4)",
+      "    at render (/var/containers/Bundle/Application/ID/Acme Health Beta.app/main.jsbundle:5:6)",
+      "    at fn (/home/John Doe/private-project/app/index.js:7:8)",
+      "    at fn (/home/jd/My (Private) Proj/screen.js:9:10)",
+      "    at fn (assets://index.android.bundle:11:12)"
+    ].join("\n");
+
+    errorUtils.currentHandler()(error, false);
+
+    const { metadata, stackFrames } = client.issues[0].attributes;
+    assert.deepEqual(stackFrames.map(({ filename }) => filename), [
+      "index.bundle",
+      "main.jsbundle",
+      "index.js",
+      "screen.js",
+      "index.android.bundle"
+    ]);
+    assert.equal(metadata.errorFrameFile, "index.bundle");
+    const serialized = JSON.stringify(client.issues);
+    for (const forbidden of ["private-message", "Acme", "John", "private-project", "Private", "assets:"]) {
+      assert.equal(serialized.includes(forbidden), false, forbidden);
+    }
+  });
+});
+
 test("fatal errors remain unsupported without a synchronous native store and still chain", async () => {
   await withInstalledPackage(async ({ installLogBrewReactNativeGlobalErrorHandler }) => {
     const previousCalls = [];
