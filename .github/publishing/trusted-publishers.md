@@ -92,13 +92,13 @@ Create GitHub trusted publishers for these PyPI projects:
 
 ## crates.io
 
-The `logbrew` crate exists and has a crates.io GitHub Actions trusted publisher for `LogBrewCo/sdk`, workflow `publish-packages.yml`, environment `release`. The workflow job uses `rust-lang/crates-io-auth-action@v1` and `cargo publish`.
+The `logbrew` crate exists and has a crates.io GitHub Actions trusted publisher for `LogBrewCo/sdk`, workflow `publish-packages.yml`, environment `release`. The workflow job uses `rust-lang/crates-io-auth-action` v1.0.5, pinned to its commit SHA, and `cargo publish`.
 
 The workflow always runs `cargo publish --dry-run`; real crates.io upload only runs when `include_crates_publish=true`.
 
 ## RubyGems
 
-Create a trusted publisher or pending trusted publisher for gem `logbrew-sdk`. The workflow uses `rubygems/configure-rubygems-credentials@v2.0.0` and then `gem push`.
+Create a trusted publisher or pending trusted publisher for gem `logbrew-sdk`. The workflow uses `rubygems/configure-rubygems-credentials` v2.1.0, pinned to its commit SHA, and then `gem push`.
 
 ## NuGet
 
