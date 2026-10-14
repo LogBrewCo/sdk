@@ -849,6 +849,14 @@ export declare class RecordingTransport {
   send(apiKey: string, body: string): Promise<TransportResponse>;
 }
 
+/** Synchronous queue admission only; this result does not report delivery or retention. */
+export type IssueAdmission = Readonly<
+  | { status: "admitted" }
+  | { status: "filtered" }
+  | { status: "dropped"; reason: DroppedEvent["reason"] }
+  | { status: "unavailable" }
+>;
+
 /** Buffered public client for validating, previewing, and flushing LogBrew events. */
 export declare class LogBrewClient {
   /** Create a client from public SDK identity, retry, and API key settings. */
@@ -899,6 +907,8 @@ export declare class LogBrewClient {
   release(id: string, timestamp: string, attributes: ReleaseAttributes): void;
   environment(id: string, timestamp: string, attributes: EnvironmentAttributes): void;
   issue(id: string, timestamp: string, attributes: IssueAttributes): void;
+  /** Capture once and report queue admission. Custom issue overrides run once and return unavailable. */
+  issueWithAdmission(id: string, timestamp: string, attributes: IssueAttributes): IssueAdmission;
   log(id: string, timestamp: string, attributes: LogAttributes): void;
   span(id: string, timestamp: string, attributes: SpanAttributes): void;
   action(id: string, timestamp: string, attributes: ActionAttributes): void;

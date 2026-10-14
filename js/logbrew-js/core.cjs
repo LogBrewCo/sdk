@@ -17,6 +17,14 @@ const SEVERITY_ALIASES = new Map([
   ["critical", "critical"]
 ]);
 const SEVERITY_VALUES = new Set(SEVERITY_ALIASES.keys());
+const EVENT_ADMISSIONS = Object.freeze({
+  admitted: Object.freeze({ status: "admitted" }),
+  filtered: Object.freeze({ status: "filtered" }),
+  unavailable: Object.freeze({ status: "unavailable" }),
+  event_too_large: Object.freeze({ status: "dropped", reason: "event_too_large" }),
+  queue_overflow: Object.freeze({ status: "dropped", reason: "queue_overflow" }),
+  queue_bytes_overflow: Object.freeze({ status: "dropped", reason: "queue_bytes_overflow" })
+});
 const SPAN_STATUSES = new Set(["ok", "error"]);
 const ACTION_STATUSES = new Set(["queued", "running", "success", "failure"]);
 const PRODUCT_ANALYTICS_SCHEMA_VERSION = 1;
@@ -197,6 +205,8 @@ class RecordingTransport {
 }
 
 class LogBrewClient {
+  static #issueCapture = LogBrewClient.prototype.issue;
+
   static create({
     apiKey,
     sdkName,
@@ -517,18 +527,16 @@ class LogBrewClient {
   }
 
   issue(id, timestamp, attributes) {
-    const withBreadcrumbs = attributes.breadcrumbs !== undefined || this.issueBreadcrumbs.length === 0
-      ? attributes
-      : {
-          ...attributes,
-          breadcrumbs: this.issueBreadcrumbs,
-          ...(
-            attributes.breadcrumbsTruncated === true || this.issueBreadcrumbsTruncated
-              ? { breadcrumbsTruncated: true }
-              : {}
-          )
-        };
-    this.#pushEvent("issue", id, timestamp, validateIssue(withBreadcrumbs));
+    this.#pushIssue(id, timestamp, attributes);
+  }
+
+  issueWithAdmission(id, timestamp, attributes) {
+    const issue = this.issue;
+    if (issue !== LogBrewClient.#issueCapture) {
+      issue.call(this, id, timestamp, attributes);
+      return EVENT_ADMISSIONS.unavailable;
+    }
+    return this.#pushIssue(id, timestamp, attributes);
   }
 
   log(id, timestamp, attributes) {
@@ -617,6 +625,21 @@ class LogBrewClient {
     }
   }
 
+  #pushIssue(id, timestamp, attributes) {
+    const withBreadcrumbs = attributes.breadcrumbs !== undefined || this.issueBreadcrumbs.length === 0
+      ? attributes
+      : {
+          ...attributes,
+          breadcrumbs: this.issueBreadcrumbs,
+          ...(
+            attributes.breadcrumbsTruncated === true || this.issueBreadcrumbsTruncated
+              ? { breadcrumbsTruncated: true }
+              : {}
+          )
+        };
+    return this.#pushEvent("issue", id, timestamp, validateIssue(withBreadcrumbs));
+  }
+
   #pushEvent(eventType, id, timestamp, attributes) {
     if (this.closed) {
       throw new SdkError("shutdown_error", "client is already shut down");
@@ -635,21 +658,21 @@ class LogBrewClient {
       : { ...attributes, context };
     const event = { type: eventType, id, timestamp, attributes: eventAttributes };
     if (this.eventFilter && this.eventFilter(cloneEvent(event)) === false) {
-      return;
+      return EVENT_ADMISSIONS.filtered;
     }
     const serializedEvent = JSON.stringify(event);
     const eventBytes = utf8ByteLength(serializedEvent);
     if (this.batchPrefixBytes + eventBytes + this.batchSuffixBytes > this.maxBatchBytes) {
       this.#recordDroppedEvent(event, "event_too_large");
-      return;
+      return EVENT_ADMISSIONS.event_too_large;
     }
     if (this.events.length >= this.maxQueueSize) {
       this.#recordDroppedEvent(event, "queue_overflow");
-      return;
+      return EVENT_ADMISSIONS.queue_overflow;
     }
     if (this.queuedEventBytes + eventBytes > this.maxQueueBytes) {
       this.#recordDroppedEvent(event, "queue_bytes_overflow");
-      return;
+      return EVENT_ADMISSIONS.queue_bytes_overflow;
     }
     if (this.eventStore) {
       requireSynchronousStoreResult("append", this.eventStore.append({
@@ -663,6 +686,7 @@ class LogBrewClient {
     this.serializedEventBytes.push(eventBytes);
     this.queuedEventBytes += eventBytes;
     this.#scheduleAutomaticDelivery();
+    return EVENT_ADMISSIONS.admitted;
   }
 
   #recordDroppedEvent(event, reason) {
