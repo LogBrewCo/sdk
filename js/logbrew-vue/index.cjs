@@ -10,7 +10,7 @@ const {
 } = require("@logbrew/sdk");
 
 const DEFAULT_SDK_NAME = "logbrew-vue";
-const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_SDK_VERSION = "0.1.1";
 const LOG_BREW_VUE_KEY = Symbol.for("logbrew.vue");
 
 function createLogBrewVueClient({

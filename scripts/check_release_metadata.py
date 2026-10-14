@@ -19,16 +19,16 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_pac
 
 PUBLIC_VERSION = "0.1.0"
 RUST_VERSION = "0.1.7"
-RUBYGEMS_VERSION = "0.1.14"
-PACKAGIST_VERSION = "0.1.10"
+RUBYGEMS_VERSION = "0.1.15"
+PACKAGIST_VERSION = "0.1.20"
 DOTNET_VERSION = "0.1.7"
 DOTNET_ASPNETCORE_VERSION = "0.1.2"
 DOTNET_OTEL_VERSION = "0.1.1"
 DOTNET_HTTPCLIENT_VERSION = "0.1.2"
 DOTNET_HANGFIRE_VERSION = "0.1.0"
 UNITY_VERSION = "0.2.2"
-MAVEN_VERSION = "0.2.2"
-JAVA_MAVEN_VERSION = "0.1.8"
+MAVEN_VERSION = "0.2.3"
+JAVA_MAVEN_VERSION = "0.1.9"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
@@ -74,7 +74,7 @@ PYTHON_PACKAGES = {
         "dependencies": {"Django>=4.2.30,<6", "logbrew-sdk>=0.1.12,<0.2.0"},
         "package": "logbrew_django",
         "requires_python": ">=3.10",
-        "version": "0.1.6",
+        "version": "0.1.7",
     },
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
@@ -83,7 +83,7 @@ PYTHON_PACKAGES = {
         "optional_dependencies": {"celery": {"logbrew-sdk[celery]>=0.1.12,<0.2.0"}},
         "package": "logbrew_fastapi",
         "requires_python": ">=3.10",
-        "version": "0.1.10",
+        "version": "0.1.11",
     },
     "python/logbrew_flask": {
         "name": "logbrew-flask",
@@ -91,7 +91,7 @@ PYTHON_PACKAGES = {
         "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.12,<0.2.0"},
         "package": "logbrew_flask",
         "requires_python": ">=3.10",
-        "version": "0.1.5",
+        "version": "0.1.6",
     },
     "python/logbrew_py": {
         "name": "logbrew-sdk",
@@ -110,7 +110,7 @@ PYTHON_PACKAGES = {
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.16",
+        "version": "0.1.17",
     },
 }
 

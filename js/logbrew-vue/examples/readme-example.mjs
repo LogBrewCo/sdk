@@ -12,7 +12,7 @@ const transport = RecordingTransport.alwaysAccept();
 const client = createLogBrewVueClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "vue-readme-example",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.1"
 });
 
 const App = defineComponent({
