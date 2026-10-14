@@ -5,6 +5,8 @@ const MAX_ADMITTED_FATAL_IDS = 256;
 const MAX_FATAL_FILENAME_BYTES = 512;
 const MAX_FATAL_STACK_BYTES = 16 * 1024;
 const MAX_FATAL_STACK_FRAMES = 24;
+const MAX_FATAL_ID_LENGTH = 128;
+const MAX_FATAL_RECORD_BYTES = 16 * 1024;
 const DURABLE_QUEUE = Symbol.for("co.logbrew.react-native.durable-event-queue");
 
 const admittedFatalIdsByClient = new WeakMap();
@@ -303,7 +305,7 @@ function rememberAdmittedFatalId(client, recordId) {
 }
 
 function createFatalRecord(error, sanitizers) {
-  return Object.freeze({
+  const record = {
     corruptRecords: 0,
     droppedRecords: 0,
     errorName: sanitizers.errorName(error),
@@ -311,7 +313,11 @@ function createFatalRecord(error, sanitizers) {
     schemaVersion: FATAL_RECORD_SCHEMA_VERSION,
     stackFrames: fatalStackFrames(error, sanitizers.stackFrame),
     timestamp: new Date().toISOString()
-  });
+  };
+  while (record.stackFrames.length > 0 && utf8ByteLength(JSON.stringify(record)) > MAX_FATAL_RECORD_BYTES) {
+    record.stackFrames = Object.freeze(record.stackFrames.slice(0, -1));
+  }
+  return Object.freeze(record);
 }
 
 function fatalStackFrames(error, stackFrame) {
@@ -376,31 +382,41 @@ function validatedFatalRecord(value, sanitizers) {
         "schemaVersion",
         "stackFrames",
         "timestamp"
-      ])
-      || value.schemaVersion !== FATAL_RECORD_SCHEMA_VERSION
-      || typeof value.id !== "string"
-      || !/^evt_rn_fatal_[a-z0-9]+(?:_[a-z0-9]+)*$/u.test(value.id)
-      || !sanitizers.isErrorName(value.errorName)
-      || !isBoundedCounter(value.corruptRecords)
-      || !isBoundedCounter(value.droppedRecords)
-      || !validFatalTimestamp(value.timestamp)
-      || !Array.isArray(value.stackFrames)
-      || value.stackFrames.length > MAX_FATAL_STACK_FRAMES) {
+      ])) {
       return undefined;
     }
-    const frames = value.stackFrames.map(validatedFatalFrame);
-    if (frames.some((frame) => frame === undefined)) {
+    const { corruptRecords, droppedRecords, errorName, id, schemaVersion, stackFrames, timestamp } = value;
+    const frameCount = Array.isArray(stackFrames) ? stackFrames.length : undefined;
+    if (schemaVersion !== FATAL_RECORD_SCHEMA_VERSION
+      || typeof id !== "string"
+      || id.length > MAX_FATAL_ID_LENGTH
+      || !/^evt_rn_fatal_[a-z0-9]+(?:_[a-z0-9]+)*$/u.test(id)
+      || !sanitizers.isErrorName(errorName)
+      || !isBoundedCounter(corruptRecords)
+      || !isBoundedCounter(droppedRecords)
+      || !validFatalTimestamp(timestamp)
+      || !isBoundedCounter(frameCount)
+      || frameCount > MAX_FATAL_STACK_FRAMES) {
       return undefined;
     }
-    return {
-      corruptRecords: value.corruptRecords,
-      droppedRecords: value.droppedRecords,
-      errorName: value.errorName,
-      id: value.id,
+    const frames = [];
+    for (let index = 0; index < frameCount; index += 1) {
+      const frame = validatedFatalFrame(stackFrames[index]);
+      if (!frame) {
+        return undefined;
+      }
+      frames.push(frame);
+    }
+    const record = {
+      corruptRecords,
+      droppedRecords,
+      errorName,
+      id,
       schemaVersion: FATAL_RECORD_SCHEMA_VERSION,
       stackFrames: frames,
-      timestamp: value.timestamp
+      timestamp
     };
+    return utf8ByteLength(JSON.stringify(record)) <= MAX_FATAL_RECORD_BYTES ? record : undefined;
   } catch {
     return undefined;
   }
@@ -409,16 +425,19 @@ function validatedFatalRecord(value, sanitizers) {
 function validatedFatalFrame(value) {
   try {
     if (!isPlainObject(value)
-      || !hasExactKeys(value, ["column", "filename", "line"])
-      || !validFatalFilename(value.filename)
-      || positiveInteger(value.line) === undefined
-      || positiveInteger(value.column) === undefined) {
+      || !hasExactKeys(value, ["column", "filename", "line"])) {
+      return undefined;
+    }
+    const { column, filename, line } = value;
+    if (!validFatalFilename(filename)
+      || positiveInteger(line) === undefined
+      || positiveInteger(column) === undefined) {
       return undefined;
     }
     return {
-      column: value.column,
-      filename: value.filename,
-      line: value.line
+      column,
+      filename,
+      line
     };
   } catch {
     return undefined;
@@ -457,9 +476,8 @@ function validFatalTimestamp(value) {
 
 function resultStatus(result) {
   try {
-    return isPlainObject(result) && typeof result.status === "string"
-      ? result.status
-      : undefined;
+    const status = isPlainObject(result) ? result.status : undefined;
+    return typeof status === "string" ? status : undefined;
   } catch {
     return undefined;
   }
@@ -520,11 +538,7 @@ function hasControlCharacter(value) {
 }
 
 function positiveInteger(value) {
-  if (!/^[1-9][0-9]*$/u.test(String(value))) {
-    return undefined;
-  }
-  const number = Number(value);
-  return Number.isSafeInteger(number) && number <= 2147483647 ? number : undefined;
+  return Number.isSafeInteger(value) && value > 0 && value <= 2147483647 ? value : undefined;
 }
 
 function nextFatalEventId() {
