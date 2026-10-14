@@ -48,7 +48,7 @@ without printing the one-time key:
 
 ```bash
 install -d -m 700 "$HOME/.logbrew"
-logbrew projects keys create <project_id> \
+logbrew projects keys create '<project_id>' \
   --kind server \
   --label "Flask server" \
   --ingest-key-file "$HOME/.logbrew/flask-app.ingest" \
@@ -66,14 +66,14 @@ captured evidence:
 
 ```bash
 logbrew read traces \
-  --project <project_id> \
+  --project '<project_id>' \
   --service flask-app \
   --environment production \
   --release flask-app@1.0.0 \
   --since 1h \
   --json
 
-logbrew explain trace <trace_id> --json
+logbrew explain trace '<trace_id>' --json
 ```
 
 The complete first-event flow, including new-project creation, correlated logs,

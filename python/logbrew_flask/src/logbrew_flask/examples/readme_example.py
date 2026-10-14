@@ -1,29 +1,23 @@
+# Copyright (c) 2026 LogBrew
+"""Capture a healthy request with an app-owned recording transport."""
+
 from __future__ import annotations
 
-import json
-import sys
+from logbrew_flask.examples._support import example_app, recorded_events, write_result
 
-from flask import Flask
-from logbrew_sdk import RecordingTransport
-
-from logbrew_flask import init_logbrew
-
-transport = RecordingTransport.always_accept()
-app = Flask(__name__)
-config = init_logbrew(
-    app,
-    api_key="LOGBREW_API_KEY",
-    transport=transport,
-    flush_on_response=True,
-)
-client = config.client
+app, client, transport = example_app(__name__)
 
 
 @app.get("/health")
 def health() -> dict[str, bool]:
+    """Return the application's health response.
+
+    Returns:
+        A successful health result.
+
+    """
     return {"ok": True}
 
 
 response = app.test_client().get("/health")
-print(json.dumps({"status": response.status_code, "events": client.pending_events()}), file=sys.stderr)
-print(transport.sent_bodies[-1])
+write_result(client, recorded_events(transport), {"status": response.status_code, "events": client.pending_events()})
