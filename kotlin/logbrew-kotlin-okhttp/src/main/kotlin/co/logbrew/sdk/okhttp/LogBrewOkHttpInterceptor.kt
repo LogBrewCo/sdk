@@ -77,6 +77,7 @@ class LogBrewOkHttpInterceptor
                         requestSpan.applyHeadersTo { name, value -> builder.header(name, value) }
                     }.build()
 
+            val startedAt = runCatching { timestampProvider.timestamp(originalRequest) }
             val startedAtMs = monotonicTimeMs()
             var statusCode: Int? = null
             var error: Throwable? = null
@@ -96,7 +97,7 @@ class LogBrewOkHttpInterceptor
                 LogBrewAndroid.captureRequestSpan(
                     client = client,
                     id = eventIdProvider.eventId(originalRequest),
-                    timestamp = timestampProvider.timestamp(originalRequest),
+                    timestamp = startedAt.getOrThrow(),
                     requestSpan = requestSpan,
                     statusCode = statusCode,
                     durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
