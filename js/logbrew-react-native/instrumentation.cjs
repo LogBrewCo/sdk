@@ -52,67 +52,70 @@ function createLogBrewReactNativeInstrumentation(client, {
   const activeTrace = resolveInstrumentationTrace({ randomValues, trace, traceFlags });
   const removers = [];
   const resolvedNavigation = navigationContainer ?? navigation;
-
-  if (appState?.addEventListener) {
-    removers.push(createAppStateLifecycleSpanListener(client, appState, {
-      captureInitialState: captureInitialLifecycleState,
-      metadata,
-      now,
-      nowMs,
-      onError,
-      platform,
-      screen,
-      sessionId,
-      trace: activeTrace
-    }));
-  }
-
-  if (resolvedNavigation) {
-    removers.push(createReactNavigationSpanListener(client, resolvedNavigation, {
-      appState,
-      captureInitialRoute: captureInitialNavigationRoute,
-      includeRouteKey,
-      metadata,
-      now,
-      nowMs,
-      onError,
-      platform,
-      trace: activeTrace
-    }));
-  }
-
-  if (nativeBridge) {
-    syncLogBrewNativeBridgeScope(nativeBridge, {
-      logger,
-      metadata,
-      screen,
-      sessionId,
-      source: "react-native.instrumentation",
-      trace: activeTrace
-    });
-  }
-
-  const resourceFetch = createReactNativeResourceFetch(client, {
-    appState,
-    fetchImpl,
-    measureResponseBodySize: measureFetchResponseBodySize,
-    metadata,
-    metadataFactory,
-    now,
-    nowMs,
-    platform,
-    randomValues,
-    routeTemplate,
-    routeTemplateFactory,
-    screen,
-    sessionId,
-    trace: activeTrace,
-    traceFlags,
-    tracePropagationTargets
-  });
+  let nativeScopeApplied = false;
+  let resourceFetch;
   let globalFetch;
   let globalXMLHttpRequest;
+
   try {
+    if (appState?.addEventListener) {
+      removers.push(createAppStateLifecycleSpanListener(client, appState, {
+        captureInitialState: captureInitialLifecycleState,
+        metadata,
+        now,
+        nowMs,
+        onError,
+        platform,
+        screen,
+        sessionId,
+        trace: activeTrace
+      }));
+    }
+
+    if (resolvedNavigation) {
+      removers.push(createReactNavigationSpanListener(client, resolvedNavigation, {
+        appState,
+        captureInitialRoute: captureInitialNavigationRoute,
+        includeRouteKey,
+        metadata,
+        now,
+        nowMs,
+        onError,
+        platform,
+        trace: activeTrace
+      }));
+    }
+
+    if (nativeBridge) {
+      syncLogBrewNativeBridgeScope(nativeBridge, {
+        logger,
+        metadata,
+        screen,
+        sessionId,
+        source: "react-native.instrumentation",
+        trace: activeTrace
+      });
+      nativeScopeApplied = true;
+    }
+
+    resourceFetch = createReactNativeResourceFetch(client, {
+      appState,
+      fetchImpl,
+      measureResponseBodySize: measureFetchResponseBodySize,
+      metadata,
+      metadataFactory,
+      now,
+      nowMs,
+      platform,
+      randomValues,
+      routeTemplate,
+      routeTemplateFactory,
+      screen,
+      sessionId,
+      trace: activeTrace,
+      traceFlags,
+      tracePropagationTargets
+    });
     globalFetch = instrumentGlobalFetch ? installGlobalFetchInstrumentation(client, {
       appState,
       globalObject,
@@ -154,7 +157,14 @@ function createLogBrewReactNativeInstrumentation(client, {
       removers.push(globalXMLHttpRequest.remove);
     }
   } catch (error) {
-    removeConfiguredInstrumentation({ nativeBridge, removers });
+    try {
+      removeConfiguredInstrumentation({
+        nativeBridge: nativeScopeApplied ? nativeBridge : undefined,
+        removers
+      });
+    } catch {
+      // Preserve the setup error after attempting every removal.
+    }
     throw error;
   }
 
@@ -163,8 +173,8 @@ function createLogBrewReactNativeInstrumentation(client, {
     if (removed) {
       return;
     }
-    removed = true;
     removeConfiguredInstrumentation({ nativeBridge, removers });
+    removed = true;
   };
 
   const handle = {
@@ -230,11 +240,26 @@ function requireClient(client) {
 }
 
 function removeConfiguredInstrumentation({ nativeBridge, removers }) {
+  const failures = [];
+  const failedRemovers = [];
   if (nativeBridge) {
-    clearLogBrewNativeBridgeScope(nativeBridge);
+    try {
+      clearLogBrewNativeBridgeScope(nativeBridge);
+    } catch (error) {
+      failures.push(error);
+    }
   }
   for (const removeListener of removers.splice(0).reverse()) {
-    removeListener();
+    try {
+      removeListener();
+    } catch (error) {
+      failedRemovers.unshift(removeListener);
+      failures.push(error);
+    }
+  }
+  removers.push(...failedRemovers);
+  if (failures.length > 0) {
+    throw failures[0];
   }
 }
 

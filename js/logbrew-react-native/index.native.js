@@ -106,9 +106,10 @@ function bindAndroidNativeDelivery(client, durable) {
     "logbrewAndroidDiagnosticPersisted", () => void client.flush().catch(() => {})
   );
   const shutdown = client.shutdown.bind(client);
-  client.shutdown = (...args) => shutdown(...args).then((result) => {
-    subscription?.remove?.();
-    return result;
+  client.shutdown = (...args) => shutdown(...args).finally(() => {
+    if (client.deliveryHealth().lifecycle === "closed") {
+      subscription?.remove?.();
+    }
   });
   return client;
 }

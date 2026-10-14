@@ -86,7 +86,9 @@ test("linked native queue replays restart and same-process native records", asyn
       level: "info", message: "main thread recovered"
     });
     nativeWakeup();
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
     assert.deepEqual(JSON.parse(sentBodies[1]).events.map(({ id }) => id), [
       "evt_native_anr", "evt_after_anr"
     ]);
@@ -123,6 +125,45 @@ test("native queue auto fallback is observable and required mode fails closed", 
         && /requires the linked LogBrew native module/u.test(error.message)
         && !error.message.includes("DO_NOT_EXPOSE_THIS_KEY")
     );
+  });
+});
+
+test("durable fatal reports survive rejected delivery and restart until accepted delivery removes them", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+    const firstRuntime = await importRuntime("fatal-delivery-first", true);
+    const first = nativeClient(firstRuntime);
+    let handler = () => {};
+    const errorUtils = {
+      getGlobalHandler() { return handler; },
+      setGlobalHandler(value) { handler = value; }
+    };
+    const installation = firstRuntime.installLogBrewReactNativeGlobalErrorHandler({ client: first, errorUtils });
+    handler(new TypeError("private application detail"), true);
+    const saved = nativeStore.records(CLIENT_KEY);
+    assert.equal(saved.length, 1);
+    const id = JSON.parse(saved[0].serializedEvent).id;
+    assert.match(id, /^evt_rn_fatal_/u);
+    const rejectedBodies = [];
+    await assert.rejects(first.flush({ async send(_key, body) {
+      rejectedBodies.push(body);
+      return { attempts: 1, statusCode: 503 };
+    } }));
+    assert.equal(nativeStore.records(CLIENT_KEY).length, 1);
+    assert.equal(JSON.parse(rejectedBodies[0]).events[0].id, id);
+    installation.remove();
+    const restartedRuntime = await importRuntime("fatal-delivery-restart", true);
+    const restarted = nativeClient(restartedRuntime);
+    const acceptedBodies = [];
+    await restarted.flush({ async send(_key, body) {
+      acceptedBodies.push(body);
+      assert.equal(nativeStore.records(CLIENT_KEY).length, 1);
+      return { attempts: 1, statusCode: 202 };
+    } });
+    assert.equal(JSON.parse(acceptedBodies[0]).events[0].id, id);
+    assert.equal(nativeStore.records(CLIENT_KEY).length, 0);
+    assert.equal(JSON.stringify(acceptedBodies).includes("private application detail"), false);
+    const finalRuntime = await importRuntime("fatal-delivery-empty", true);
+    assert.equal(nativeClient(finalRuntime).pendingEvents(), 0);
   });
 });
 
@@ -297,6 +338,52 @@ test("public documentation distinguishes durable, fallback, recovery, and duplic
   assert.match(readme, /never falls back to `Math\.random`/u);
 });
 
+test("terminal native close failure removes the Android delivery subscription", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore, listenerCount }) => {
+    const runtime = await importRuntime("android-close-failure", true, "android");
+    const client = nativeClient(runtime, {
+      transport: { async send() { return { attempts: 1, statusCode: 202 }; } }
+    });
+    addOfflineLog(client);
+    assert.equal(listenerCount(), 1);
+    nativeStore.closeEventStore = () => ({ status: "storage_error" });
+    await assert.rejects(client.shutdown(), (error) => error.code === "persistence_error");
+    assert.equal(client.deliveryHealth().lifecycle, "closed");
+    assert.equal(listenerCount(), 0);
+    assert.equal(nativeStore.records(CLIENT_KEY).length, 0);
+  });
+});
+
+test("retryable shutdown failure retains Android wakeups until recovery", async () => {
+  await withNativeRuntimes(async ({ importRuntime, listenerCount, nativeWakeup }) => {
+    let offline = true;
+    const bodies = [];
+    const runtime = await importRuntime("android-shutdown-retry", true, "android");
+    const client = nativeClient(runtime, {
+      transport: {
+        async send(_key, body) {
+          if (offline) {
+            throw new Error("offline");
+          }
+          bodies.push(JSON.parse(body));
+          return { attempts: 1, statusCode: 202 };
+        }
+      }
+    });
+    addOfflineLog(client);
+    await assert.rejects(client.shutdown(), /offline/u);
+    assert.equal(client.deliveryHealth().lifecycle, "active");
+    assert.equal(listenerCount(), 1);
+    offline = false;
+    nativeWakeup();
+    await new Promise((resolve) => { setImmediate(resolve); });
+    assert.equal(bodies.length, 1);
+    assert.equal(bodies[0].events[0].id, "evt_rn_offline_restart");
+    await client.shutdown();
+    assert.equal(listenerCount(), 0);
+  });
+});
+
 function nativeClient(runtime, overrides = {}) {
   return runtime.createLogBrewReactNativeClient({
     automaticDelivery: false,
@@ -346,7 +433,14 @@ async function withNativeRuntimes(callback) {
   try {
     await callback({
       nativeStore,
-      nativeWakeup() { for (const listener of listeners) listener(); },
+      listenerCount() {
+        return listeners.size;
+      },
+      nativeWakeup() {
+        for (const listener of listeners) {
+          listener();
+        }
+      },
       async importRuntime(name, linked, platform = "ios") {
         const packageDir = installRuntime(root, name, linked, platform);
         return import(pathToFileURL(path.join(packageDir, "index.native.js")));

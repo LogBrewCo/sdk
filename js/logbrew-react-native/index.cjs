@@ -571,27 +571,47 @@ function createReactNavigationSpanListener(client, navigationContainer, {
     }
   };
 
-  const actionSubscription = safeNavigationListener(container, "__unsafe_action__", (event) => {
-    pendingNavigation = {
-      actionType: navigationActionType(event),
-      startedAtMs: nowMs(),
-      timestamp: now()
-    };
-  });
-  if (actionSubscription) {
-    removers.push(actionSubscription);
-  }
-  removers.push(addNavigationListener(container, "state", captureCurrentRoute));
-
-  if (captureInitialRoute) {
-    captureCurrentRoute();
-  }
-
-  return () => {
+  const removeListeners = () => {
+    const failures = [];
+    const failedRemovers = [];
     for (const remove of removers.splice(0).reverse()) {
-      remove();
+      try {
+        remove();
+      } catch (error) {
+        failedRemovers.unshift(remove);
+        failures.push(error);
+      }
+    }
+    removers.push(...failedRemovers);
+    if (failures.length > 0) {
+      throw failures[0];
     }
   };
+
+  try {
+    const actionSubscription = safeNavigationListener(container, "__unsafe_action__", (event) => {
+      pendingNavigation = {
+        actionType: navigationActionType(event),
+        startedAtMs: nowMs(),
+        timestamp: now()
+      };
+    });
+    if (actionSubscription) {
+      removers.push(actionSubscription);
+    }
+    removers.push(addNavigationListener(container, "state", captureCurrentRoute));
+    if (captureInitialRoute) {
+      captureCurrentRoute();
+    }
+  } catch (error) {
+    try {
+      removeListeners();
+    } catch {
+      // Preserve the setup failure after attempting both listener removals.
+    }
+    throw error;
+  }
+  return removeListeners;
 }
 
 function createReactNativeErrorEvent(error, {

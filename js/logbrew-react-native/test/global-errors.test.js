@@ -9,6 +9,53 @@ import {
   withInstalledPackage
 } from "./global-errors-test-support.js";
 
+test("a dropped global error can be captured after queue space becomes available", async () => {
+  await withInstalledPackage(async ({ installLogBrewReactNativeGlobalErrorHandler }, _packageDir, { LogBrewClient }) => {
+    const bodies = [];
+    const client = LogBrewClient.create({
+      apiKey: "LOGBREW_CLIENT_KEY",
+      sdkName: "react-native-global-error-test",
+      sdkVersion: "0.1.0",
+      automaticDelivery: false,
+      maxQueueSize: 1,
+      transport: {
+        async send(_key, body) {
+          bodies.push(JSON.parse(body));
+          return { attempts: 1, statusCode: 202 };
+        }
+      }
+    });
+    client.log("evt_queue_filler", "2026-07-31T08:30:00.000Z", {
+      message: "queue filler", level: "info"
+    });
+    let delegated = 0;
+    const errorUtils = createErrorUtils(() => {
+      delegated += 1;
+    });
+    const diagnostics = [];
+    const installation = installLogBrewReactNativeGlobalErrorHandler({
+      client, errorUtils, onDiagnostic: (value) => diagnostics.push(value)
+    });
+    const error = new Error("private application detail");
+    errorUtils.currentHandler()(error, false);
+    assert.equal(client.droppedEvents(), 1);
+    assert.equal(installation.health().capturedEvents, 0);
+    assert.equal(installation.health().lastOutcome, "capture_failed");
+    assert.deepEqual(diagnostics, [{ code: "capture_failed" }]);
+    await client.flush();
+    errorUtils.currentHandler()(error, false);
+    errorUtils.currentHandler()(error, false);
+    assert.equal(installation.health().capturedEvents, 1);
+    assert.equal(installation.health().suppressedEvents, 1);
+    assert.equal(delegated, 3);
+    await client.shutdown();
+    assert.equal(bodies[1].events.length, 1);
+    assert.equal(bodies[1].events[0].type, "issue");
+    assert.equal(JSON.stringify(bodies).includes("private application detail"), false);
+    installation.remove();
+  });
+});
+
 test("captures nonfatal global reports before root registration and after mount", async () => {
   await withInstalledPackage(async ({ installLogBrewReactNativeGlobalErrorHandler }) => {
     const previousCalls = [];
