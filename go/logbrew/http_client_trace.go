@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+const (
+	httpCaptureErrorCode = "capture_error"
+	httpErrorOutcome     = "error"
+	httpHostLengthLimit  = 253
+	httpHostLabelLimit   = 63
+)
+
 // HTTPClientTransportConfig configures dependency-free outbound net/http client spans.
 type HTTPClientTransportConfig struct {
 	Client *Client
@@ -74,6 +81,13 @@ type httpClientTraceTransport struct {
 	counter atomic.Uint64
 }
 
+// CloseIdleConnections forwards idle connection closure to the app-owned base.
+func (t *httpClientTraceTransport) CloseIdleConnections() {
+	if base, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		base.CloseIdleConnections()
+	}
+}
+
 type httpClientTraceContextKey uint8
 
 const (
@@ -83,6 +97,7 @@ const (
 
 type httpClientTraceOperation struct {
 	request *http.Request
+	active  *atomic.Bool
 	trace   TraceContext
 	method  string
 	host    string
@@ -93,10 +108,14 @@ func (t *httpClientTraceTransport) RoundTrip(request *http.Request) (*http.Respo
 	if request == nil {
 		return t.base.RoundTrip(request)
 	}
+
 	requestContext := request.Context()
-	if requestContext.Value(httpClientTraceSDKDeliveryKey) != nil || requestContext.Value(httpClientTraceActiveKey) != nil {
+
+	active, _ := requestContext.Value(httpClientTraceActiveKey).(*atomic.Bool)
+	if requestContext.Value(httpClientTraceSDKDeliveryKey) != nil || (active != nil && active.Load()) {
 		return t.base.RoundTrip(request)
 	}
+
 	parent, ok := LogBrewTraceFromContext(requestContext)
 	if !ok || validateTraceContext(parent) != nil {
 		return t.base.RoundTrip(request)
@@ -105,17 +124,32 @@ func (t *httpClientTraceTransport) RoundTrip(request *http.Request) (*http.Respo
 	operation, err := t.startOperation(request, parent)
 	if err != nil {
 		t.report(err)
+
 		return t.base.RoundTrip(request)
 	}
+	defer func() {
+		operation.active.Store(false)
+
+		if recovered := recover(); recovered != nil {
+			t.complete(operation, nil, &SdkError{Code: httpCaptureErrorCode, Message: "HTTP client transport panicked"})
+			panic(recovered)
+		}
+	}()
+
 	response, roundTripErr := t.base.RoundTrip(operation.request)
+	operation.active.Store(false)
 	operation.request = nil
+
 	if t.shouldFinishOnResponseBody(response, roundTripErr) {
-		response.Body = newHTTPClientTraceResponseBody(response.Body, func(bodyErr error) {
+		response.Body = newHTTPClientTraceResponseBody(response.Body, requestContext.Err, func(bodyErr error) {
 			t.complete(operation, response, bodyErr)
 		})
+
 		return response, nil
 	}
+
 	t.complete(operation, response, roundTripErr)
+
 	return response, roundTripErr
 }
 
@@ -152,17 +186,24 @@ func (t *httpClientTraceTransport) startOperation(request *http.Request, parent 
 	if err != nil {
 		return nil, httpClientTraceAdvisoryError("setup")
 	}
+
 	clonedContext := ContextWithLogBrewTrace(request.Context(), trace)
-	clonedContext = context.WithValue(clonedContext, httpClientTraceActiveKey, true)
+	active := &atomic.Bool{}
+	active.Store(true)
+	clonedContext = context.WithValue(clonedContext, httpClientTraceActiveKey, active)
 	cloned := request.Clone(clonedContext)
+
 	cloned.Header = request.Header.Clone()
 	if cloned.Header == nil {
 		cloned.Header = make(http.Header)
 	}
+
 	cloned.Header.Del("traceparent")
 	cloned.Header.Set("traceparent", traceparent)
+
 	return &httpClientTraceOperation{
 		request: cloned,
+		active:  active,
 		trace:   trace,
 		method:  safeHTTPServerMethod(request.Method),
 		host:    normalizedHTTPClientHost(request),
@@ -192,8 +233,12 @@ func (t *httpClientTraceTransport) shouldFinishOnResponseBody(response *http.Res
 		response.Body != http.NoBody
 }
 
-func newHTTPClientTraceResponseBody(body io.ReadCloser, finish func(error)) io.ReadCloser {
-	wrapped := &httpClientTraceResponseBody{body: body, finish: finish}
+func newHTTPClientTraceResponseBody(body io.ReadCloser, requestError func() error, finish func(error)) io.ReadCloser {
+	wrapped := &httpClientTraceResponseBody{
+		body:         body,
+		requestError: requestError,
+		finish:       finish,
+	}
 	if writer, ok := body.(io.Writer); ok {
 		return &httpClientTraceReadWriteCloser{httpClientTraceResponseBody: wrapped, writer: writer}
 	}
@@ -201,12 +246,15 @@ func newHTTPClientTraceResponseBody(body io.ReadCloser, finish func(error)) io.R
 }
 
 type httpClientTraceResponseBody struct {
-	body   io.ReadCloser
-	finish func(error)
-	once   sync.Once
+	body         io.ReadCloser
+	requestError func() error
+	finish       func(error)
+	once         sync.Once
 }
 
 func (b *httpClientTraceResponseBody) Read(p []byte) (int, error) {
+	defer b.finishOnPanic()
+
 	n, err := b.body.Read(p)
 	if err == io.EOF {
 		b.finishOnce(nil)
@@ -217,13 +265,29 @@ func (b *httpClientTraceResponseBody) Read(p []byte) (int, error) {
 }
 
 func (b *httpClientTraceResponseBody) Close() error {
+	defer b.finishOnPanic()
+
 	err := b.body.Close()
-	b.finishOnce(err)
+
+	spanErr := err
+	if spanErr == nil {
+		spanErr = b.requestError()
+	}
+
+	b.finishOnce(spanErr)
+
 	return err
 }
 
 func (b *httpClientTraceResponseBody) finishOnce(err error) {
 	b.once.Do(func() { b.finish(err) })
+}
+
+func (b *httpClientTraceResponseBody) finishOnPanic() {
+	if recovered := recover(); recovered != nil {
+		b.finishOnce(&SdkError{Code: httpCaptureErrorCode, Message: "HTTP client response body panicked"})
+		panic(recovered)
+	}
 }
 
 type httpClientTraceReadWriteCloser struct {
@@ -232,6 +296,8 @@ type httpClientTraceReadWriteCloser struct {
 }
 
 func (b *httpClientTraceReadWriteCloser) Write(p []byte) (int, error) {
+	defer b.finishOnPanic()
+
 	n, err := b.writer.Write(p)
 	if err != nil {
 		b.finishOnce(err)
@@ -303,33 +369,51 @@ func normalizedHTTPClientHost(request *http.Request) string {
 	if request.URL == nil {
 		return ""
 	}
+
 	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(request.URL.Hostname()), "."))
-	if host == "" || len(host) > 253 || net.ParseIP(host) != nil || strings.Contains(host, ":") {
+	if host == "" || len(host) > httpHostLengthLimit || net.ParseIP(host) != nil || strings.Contains(host, ":") {
 		return ""
 	}
-	onlyDigitsAndDots := true
+
+	if isNumericHTTPClientHost(host) {
+		return ""
+	}
+
+	for label := range strings.SplitSeq(host, ".") {
+		if !validHTTPClientHostLabel(label) {
+			return ""
+		}
+	}
+
+	return host
+}
+
+func isNumericHTTPClientHost(host string) bool {
 	for _, char := range host {
 		if (char < '0' || char > '9') && char != '.' {
-			onlyDigitsAndDots = false
-		}
-		if char > 127 {
-			return ""
+			return false
 		}
 	}
-	if onlyDigitsAndDots {
-		return ""
+
+	return true
+}
+
+func validHTTPClientHostLabel(label string) bool {
+	if len(label) == 0 || len(label) > httpHostLabelLimit || label[0] == '-' || label[len(label)-1] == '-' {
+		return false
 	}
-	for _, label := range strings.Split(host, ".") {
-		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return ""
-		}
-		for _, char := range label {
-			if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-') {
-				return ""
-			}
+
+	for _, char := range label {
+		if !validHTTPClientHostCharacter(char) {
+			return false
 		}
 	}
-	return host
+
+	return true
+}
+
+func validHTTPClientHostCharacter(char rune) bool {
+	return (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-'
 }
 
 func isSafeHTTPClientLabel(label string) bool {
@@ -382,13 +466,14 @@ func (t *httpClientTraceTransport) report(err error) {
 
 func spanStatusFromHTTPClientResult(statusCode int, err error) string {
 	if err != nil || statusCode >= 400 {
-		return "error"
+		return httpErrorOutcome
 	}
+
 	return "ok"
 }
 
 func httpClientTraceAdvisoryError(stage string) error {
-	return &SdkError{Code: "capture_error", Message: "HTTP client tracing " + stage + " failed"}
+	return &SdkError{Code: httpCaptureErrorCode, Message: "HTTP client tracing " + stage + " failed"}
 }
 
 func markLogBrewHTTPDelivery(request *http.Request) *http.Request {

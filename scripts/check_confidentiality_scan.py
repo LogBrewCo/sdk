@@ -235,6 +235,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text.startswith("scripts/") and terms == {"cleanup"}:
         return True
 
+    if relative_text.endswith("_test.go") and terms == {"cleanup"} and "t.Cleanup(" in line:
+        return True
+
     if is_sdk_instrumentation_restore_reference(relative_text, terms):
         return True
 

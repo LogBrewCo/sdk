@@ -2,6 +2,7 @@ package logbrew
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -182,11 +183,13 @@ func (h *httpTraceHandler) initializeRequestTelemetry(r *http.Request) (
 		if recover() != nil {
 			start = time.Time{}
 			trace = TraceContext{}
-			err = &SdkError{Code: "capture_error", Message: "HTTP request telemetry skipped"}
+			err = &SdkError{Code: httpCaptureErrorCode, Message: "HTTP request telemetry skipped"}
 		}
 	}()
+
 	start = h.now()
 	trace, err = h.requestTrace(r)
+
 	return start, trace, err
 }
 
@@ -202,9 +205,10 @@ func (h *httpTraceHandler) captureRequestTelemetrySafely(
 ) {
 	defer func() {
 		if recover() != nil {
-			h.report(&SdkError{Code: "capture_error", Message: "HTTP request telemetry skipped"})
+			h.report(&SdkError{Code: httpCaptureErrorCode, Message: "HTTP request telemetry skipped"})
 		}
 	}()
+
 	h.captureRequestTelemetry(request, trace, start, statusCode, extraMetadata, panicValue, panicType, panicFrames)
 }
 
@@ -233,11 +237,8 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 		"statusCode":    statusCode,
 	})
 	metadata = mergeMetadata(metadata, extraMetadata)
-	metricMetadata := mergeMetadata(metadata, trace.Metadata())
-	spanStatus := spanStatusFromHTTPStatus(statusCode)
-	if panicked {
-		spanStatus = "error"
-	}
+	spanStatus := httpServerSpanStatus(request.Context(), statusCode, panicked, metadata)
+
 	span, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
 		Trace:      trace,
 		Name:       fmt.Sprintf("%s %s", method, routeTemplate),
@@ -253,39 +254,94 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 	if err := h.config.Client.Span(h.eventID("span"), timestamp, span); err != nil {
 		h.report(err)
 	}
-	if panicked || (statusCode >= http.StatusInternalServerError && h.captureServerErrorIssue) {
-		issueAttributes := IssueAttributes{
-			Title:    "HTTP server error response",
-			Level:    "error",
-			Metadata: metadata,
+
+	h.captureRequestIssue(request, statusCode, metadata, timestamp, panicValue, panicType, panicFrames)
+	h.captureRequestMetric(request.Context(), trace, metadata, timestamp, durationMs)
+}
+
+func httpServerSpanStatus(ctx context.Context, statusCode int, panicked bool, metadata map[string]any) string {
+	status := spanStatusFromHTTPStatus(statusCode)
+
+	requestErr := ctx.Err()
+	if errors.Is(requestErr, context.Canceled) || errors.Is(requestErr, context.DeadlineExceeded) {
+		metadata["errorType"] = classifyHTTPClientError(requestErr)
+		if errors.Is(requestErr, context.Canceled) {
+			metadata["cancelled"] = true
 		}
-		if panicked {
-			panicAttributes, panicErr := IssueAttributesFromPanic(panicValue, "HTTP server panic", "net_http.middleware", false, panicFrames)
-			if panicErr != nil {
-				h.report(panicErr)
-			} else {
-				issueAttributes = panicAttributes
-			}
-			issueAttributes.Metadata = metadata
-		}
-		issue := IssueAttributesWithTrace(request.Context(), issueAttributes)
-		if err := h.config.Client.Issue(h.eventID("issue"), timestamp, issue); err != nil {
-			h.report(err)
-		}
+
+		status = httpErrorOutcome
 	}
-	if h.config.CaptureRequestMetric {
-		metric := MetricAttributesWithTrace(request.Context(), MetricAttributes{
-			Name:        "http.server.duration",
-			Description: "Duration of one completed server request.",
-			Kind:        "histogram",
-			Value:       durationMs,
-			Unit:        "ms",
-			Temporality: "delta",
-			Metadata:    metricMetadata,
-		})
-		if err := h.config.Client.Metric(h.eventID("metric"), timestamp, metric); err != nil {
-			h.report(err)
+
+	if panicked {
+		status = httpErrorOutcome
+	}
+
+	return status
+}
+
+func (h *httpTraceHandler) captureRequestIssue(
+	request *http.Request,
+	statusCode int,
+	metadata map[string]any,
+	timestamp string,
+	panicValue any,
+	panicType string,
+	panicFrames []IssueStackFrame,
+) {
+	panicked := panicType != ""
+	if !panicked && (statusCode < http.StatusInternalServerError || !h.captureServerErrorIssue) {
+		return
+	}
+
+	issueAttributes := IssueAttributes{
+		Title:    "HTTP server error response",
+		Level:    httpErrorOutcome,
+		Metadata: metadata,
+	}
+
+	if panicked {
+		panicAttributes, panicErr := IssueAttributesFromPanic(
+			panicValue, "HTTP server panic", "net_http.middleware", false, panicFrames,
+		)
+		if panicErr != nil {
+			h.report(panicErr)
+		} else {
+			issueAttributes = panicAttributes
 		}
+
+		issueAttributes.Metadata = metadata
+	}
+
+	issue := IssueAttributesWithTrace(request.Context(), issueAttributes)
+	if err := h.config.Client.Issue(h.eventID("issue"), timestamp, issue); err != nil {
+		h.report(err)
+	}
+}
+
+func (h *httpTraceHandler) captureRequestMetric(
+	ctx context.Context,
+	trace TraceContext,
+	metadata map[string]any,
+	timestamp string,
+	durationMs float64,
+) {
+	if !h.config.CaptureRequestMetric {
+		return
+	}
+
+	metricMetadata := mergeMetadata(metadata, trace.Metadata())
+
+	metric := MetricAttributesWithTrace(ctx, MetricAttributes{
+		Name:        "http.server.duration",
+		Description: "Duration of one completed server request.",
+		Kind:        "histogram",
+		Value:       durationMs,
+		Unit:        "ms",
+		Temporality: "delta",
+		Metadata:    metricMetadata,
+	})
+	if err := h.config.Client.Metric(h.eventID("metric"), timestamp, metric); err != nil {
+		h.report(err)
 	}
 }
 
@@ -332,7 +388,8 @@ func (h *httpTraceHandler) requestTrace(r *http.Request) (TraceContext, error) {
 	if fallbackErr != nil {
 		return TraceContext{}, fallbackErr
 	}
-	return fallback, &SdkError{Code: "capture_error", Message: "HTTP traceparent skipped"}
+
+	return fallback, &SdkError{Code: httpCaptureErrorCode, Message: "HTTP traceparent skipped"}
 }
 
 func strictHTTPTraceparent(value string) (TraceparentContext, bool) {
@@ -419,7 +476,8 @@ func safeHTTPRoutePattern(pattern string) string {
 
 func spanStatusFromHTTPStatus(statusCode int) string {
 	if statusCode >= 500 {
-		return "error"
+		return httpErrorOutcome
 	}
+
 	return "ok"
 }
