@@ -56,10 +56,7 @@ public final class LogBrewHttpClientTracing {
         try {
             response = httpClient.send(prepared.request, body.observe(responseBodyHandler));
             return response;
-        } catch (IOException | InterruptedException error) {
-            requestError = error;
-            throw error;
-        } catch (RuntimeException error) {
+        } catch (IOException | InterruptedException | RuntimeException | Error error) {
             requestError = error;
             throw error;
         } finally {
@@ -85,7 +82,7 @@ public final class LogBrewHttpClientTracing {
         CompletableFuture<HttpResponse<T>> future;
         try {
             future = httpClient.sendAsync(prepared.request, body.observe(responseBodyHandler));
-        } catch (RuntimeException error) {
+        } catch (RuntimeException | Error error) {
             body.responseComplete(null, error);
             throw error;
         }

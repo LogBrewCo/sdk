@@ -4,8 +4,8 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
-spotbugs_version="${SPOTBUGS_VERSION:-4.9.8}"
-spotbugs_base_url="https://repo.maven.apache.org/maven2/com/github/spotbugs/spotbugs/$spotbugs_version"
+spotbugs_version="4.10.5"
+spotbugs_sha256="cce3244900cc215ccd9f5a8db29ed9468fc47824faf662f4fad005343d96007e"
 
 # shellcheck source=scripts/java_logback_deps.sh
 source "$repo_root/scripts/java_logback_deps.sh"
@@ -24,9 +24,8 @@ download() {
 
 verify_sha256() {
   local artifact="$1"
-  local checksum_file="$2"
-  local expected actual
-  expected="$(awk 'NR == 1 { print $1 }' "$checksum_file")"
+  local expected="$2"
+  local actual
   actual="$(shasum -a 256 "$artifact" | awk '{ print $1 }')"
   [[ "$actual" == "$expected" ]] || {
     printf 'checksum mismatch for %s: expected %s, got %s\n' \
@@ -38,7 +37,6 @@ verify_sha256() {
 main_sources="$tmp_dir/main-sources.txt"
 classes_dir="$tmp_dir/classes"
 spotbugs_tgz="$tmp_dir/spotbugs-$spotbugs_version.tgz"
-spotbugs_sha256="$tmp_dir/spotbugs-$spotbugs_version.tgz.sha256"
 spotbugs_report="$tmp_dir/spotbugs.xml"
 
 find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
@@ -57,9 +55,7 @@ fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps" > "$tmp_dir/sprin
 dependency_jobs+=("$!")
 fetch_java_spring_web_deps "$tmp_dir/java-spring-web-deps" > "$tmp_dir/spring-web.classpath" &
 dependency_jobs+=("$!")
-download "$spotbugs_base_url/spotbugs-$spotbugs_version.tgz" "$spotbugs_tgz" &
-dependency_jobs+=("$!")
-download "$spotbugs_base_url/spotbugs-$spotbugs_version.tgz.sha256" "$spotbugs_sha256" &
+download "https://github.com/spotbugs/spotbugs/releases/download/$spotbugs_version/spotbugs-$spotbugs_version.tgz" "$spotbugs_tgz" &
 dependency_jobs+=("$!")
 for dependency_job in "${dependency_jobs[@]}"; do
   wait "$dependency_job"

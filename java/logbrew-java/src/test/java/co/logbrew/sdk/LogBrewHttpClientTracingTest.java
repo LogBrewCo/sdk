@@ -39,6 +39,7 @@ public final class LogBrewHttpClientTracingTest {
         testSendInjectsTraceparentAndQueuesSanitizedSpan();
         testSendPreservesOriginalErrorsAndRecordsTypeOnlyFailure();
         testSendAsyncRecordsCompletionSpan();
+        testDispatchErrorsAreRethrownAndRecorded();
         testRealHttpCaptureFailurePreservesResults();
         LogBrewHttpClientStreamingTest.run();
         System.out.println("java http client tracing tests ok (" + testsRun + " tests)");
@@ -205,6 +206,34 @@ public final class LogBrewHttpClientTracingTest {
         testsRun++;
     }
 
+    private void testDispatchErrorsAreRethrownAndRecorded() {
+        for (boolean async : new boolean[] {false, true}) {
+            LogBrewClient client = sampleClient();
+            Error original = new Error("private dispatch fixture");
+            FakeHttpClient httpClient = FakeHttpClient.failingDispatch(original);
+            HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.example.invalid/dispatch")).build();
+            LogBrewHttpClientTracing.ClientRequest config = LogBrewHttpClientTracing.ClientRequest.create()
+                .routeTemplate("/dispatch");
+
+            Error error = expectException(Error.class, () -> {
+                if (async) {
+                    LogBrewHttpClientTracing.sendAsync(
+                        client, httpClient, request, HttpResponse.BodyHandlers.discarding(), config);
+                } else {
+                    LogBrewHttpClientTracing.send(
+                        client, httpClient, request, HttpResponse.BodyHandlers.discarding(), config);
+                }
+            });
+
+            assertTrue(error == original, "original dispatch error identity");
+            String payload = client.previewJson();
+            assertContains(payload, "\"status\": \"error\"");
+            assertContains(payload, "\"exceptionType\": \"Error\"");
+            assertNotContains(payload, "private dispatch fixture");
+        }
+        testsRun++;
+    }
+
     private void testRealHttpCaptureFailurePreservesResults() {
         HttpServer server;
         try {
@@ -348,21 +377,27 @@ public final class LogBrewHttpClientTracingTest {
         private final int statusCode;
         private final String body;
         private final IOException error;
+        private final Error dispatchError;
         private HttpRequest lastRequest;
         private HttpResponse<?> lastResponse;
 
-        private FakeHttpClient(int statusCode, String body, IOException error) {
+        private FakeHttpClient(int statusCode, String body, IOException error, Error dispatchError) {
             this.statusCode = statusCode;
             this.body = body;
             this.error = error;
+            this.dispatchError = dispatchError;
         }
 
         static FakeHttpClient responding(int statusCode, String body) {
-            return new FakeHttpClient(statusCode, body, null);
+            return new FakeHttpClient(statusCode, body, null, null);
         }
 
         static FakeHttpClient throwing(IOException error) {
-            return new FakeHttpClient(0, null, error);
+            return new FakeHttpClient(0, null, error, null);
+        }
+
+        static FakeHttpClient failingDispatch(Error dispatchError) {
+            return new FakeHttpClient(0, null, null, dispatchError);
         }
 
         @Override
@@ -416,6 +451,9 @@ public final class LogBrewHttpClientTracingTest {
             HttpResponse.BodyHandler<T> responseBodyHandler
         ) throws IOException {
             lastRequest = request;
+            if (dispatchError != null) {
+                throw dispatchError;
+            }
             if (error != null) {
                 throw error;
             }
@@ -430,6 +468,9 @@ public final class LogBrewHttpClientTracingTest {
             HttpResponse.BodyHandler<T> responseBodyHandler
         ) {
             lastRequest = request;
+            if (dispatchError != null) {
+                throw dispatchError;
+            }
             if (error != null) {
                 CompletableFuture<HttpResponse<T>> future = new CompletableFuture<>();
                 future.completeExceptionally(error);

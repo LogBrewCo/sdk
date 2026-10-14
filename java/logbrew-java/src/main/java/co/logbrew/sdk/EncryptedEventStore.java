@@ -20,6 +20,7 @@ import java.util.Objects;
  * after delivery.</p>
  */
 public final class EncryptedEventStore implements AutoCloseable {
+    private final Object monitor = new Object();
     private final PersistenceFiles files;
     private final PersistenceCrypto crypto;
     private final PersistenceTransaction transaction;
@@ -121,187 +122,201 @@ public final class EncryptedEventStore implements AutoCloseable {
         this.recordCodec = new PersistenceRecordCodec(files, crypto, storeId);
     }
 
-    synchronized void attach() {
-        ensureUsable();
-        if (attached) {
-            throw new SdkException(
-                "persistence_in_use",
-                "persistence store is already attached to a client"
-            );
-        }
-        attached = true;
-    }
-
-    synchronized Snapshot recover(int maxEvents, long maxBytes, boolean finalizeAmbiguous) {
-        ensureReadable();
-        validateBounds(maxEvents, maxBytes);
-        if (finalizeAmbiguous) {
-            transaction.finalizePending();
-            failed = false;
-        } else if (failed) {
-            throw new SdkException(
-                "persistence_failed",
-                "persistence requires explicit verified recovery or purge"
-            );
-        }
-        Snapshot snapshot = inspect(maxEvents, maxBytes);
-        pruneCheckpointedRecords(snapshot.checkpointSequence, true);
-        activeRecords = new ArrayList<>(snapshot.records);
-        checkpointSequence = snapshot.checkpointSequence;
-        nextSequence = snapshot.nextSequence;
-        loaded = true;
-        return snapshot;
-    }
-
-    synchronized PersistenceStatus status(int maxEvents, long maxBytes, boolean recoveryRequired) {
-        ensureReadable();
-        validateBounds(maxEvents, maxBytes);
-        PersistenceFiles.Layout layout = files.layout();
-        if (transaction.hasAmbiguity(layout)) {
-            int ambiguous = layout.temporaryFiles.size()
-                + (layout.intentFile == null ? 0 : 1)
-                + (layout.purgeIntentFile == null ? 0 : 1);
-            return new PersistenceStatus(0, 0L, ambiguous, true);
-        }
-        Snapshot snapshot = inspect(layout, maxEvents, maxBytes);
-        return snapshot.status(recoveryRequired || failed);
-    }
-
-    synchronized Record admit(String eventId, String eventJson, int maxEvents, long maxBytes) {
-        ensureLoaded();
-        validateBounds(maxEvents, maxBytes);
-        byte[] eventBytes = eventJson.getBytes(StandardCharsets.UTF_8);
-        if (eventBytes.length > maxBytes) {
-            throw new SdkException("persistence_bounds_exceeded", "persistence bounds reject the event");
-        }
-        long currentBytes = pendingBytes(activeRecords);
-        if (activeRecords.size() >= maxEvents || eventBytes.length > maxBytes - currentBytes) {
-            throw new SdkException("persistence_bounds_exceeded", "persistence bounds reject the event");
-        }
-        if (nextSequence <= 0L || nextSequence == Long.MAX_VALUE) {
-            throw new SdkException(
-                "persistence_bounds_exceeded",
-                "persistence sequence space is exhausted"
-            );
-        }
-
-        byte[] payload = recordCodec.encodeRecordPayload(eventId, eventBytes);
-        byte[] encoded = crypto.encrypt(PersistenceCrypto.RECORD, nextSequence, payload, storeId);
-        byte[] highWaterPayload = recordCodec.encodeSequence(nextSequence);
-        byte[] highWaterEncoded = crypto.encrypt(
-            PersistenceCrypto.HIGH_WATER,
-            nextSequence,
-            highWaterPayload,
-            storeId
-        );
-        long sequence = nextSequence;
-        Path target = files.recordPath(sequence);
-        try {
-            transaction.commitAdmission(
-                sequence,
-                target,
-                encoded,
-                highWaterEncoded
-            );
-            Record record = recordCodec.readRecord(target, sequence, maxBytes);
-            activeRecords.add(record);
-            nextSequence++;
-            return record;
-        } catch (SdkException error) {
-            if ("persistence_ambiguous".equals(error.code())) {
-                failed = true;
+    void attach() {
+        synchronized (monitor) {
+            ensureUsable();
+            if (attached) {
+                throw new SdkException(
+                    "persistence_in_use",
+                    "persistence store is already attached to a client"
+                );
             }
-            throw error;
-        } finally {
-            Arrays.fill(payload, (byte) 0);
-            Arrays.fill(encoded, (byte) 0);
-            Arrays.fill(highWaterPayload, (byte) 0);
-            Arrays.fill(highWaterEncoded, (byte) 0);
-            Arrays.fill(eventBytes, (byte) 0);
+            attached = true;
         }
     }
 
-    synchronized void acknowledge(List<Record> records) {
-        ensureLoaded();
-        if (records.isEmpty()) {
-            return;
+    Snapshot recover(int maxEvents, long maxBytes, boolean finalizeAmbiguous) {
+        synchronized (monitor) {
+            ensureReadable();
+            validateBounds(maxEvents, maxBytes);
+            if (finalizeAmbiguous) {
+                transaction.finalizePending();
+                failed = false;
+            } else if (failed) {
+                throw new SdkException(
+                    "persistence_failed",
+                    "persistence requires explicit verified recovery or purge"
+                );
+            }
+            Snapshot snapshot = inspect(maxEvents, maxBytes);
+            pruneCheckpointedRecords(snapshot.checkpointSequence, true);
+            activeRecords = new ArrayList<>(snapshot.records);
+            checkpointSequence = snapshot.checkpointSequence;
+            nextSequence = snapshot.nextSequence;
+            loaded = true;
+            return snapshot;
         }
-        if (records.size() > activeRecords.size()) {
-            throw PersistenceCrypto.integrityFailure();
+    }
+
+    PersistenceStatus status(int maxEvents, long maxBytes, boolean recoveryRequired) {
+        synchronized (monitor) {
+            ensureReadable();
+            validateBounds(maxEvents, maxBytes);
+            PersistenceFiles.Layout layout = files.layout();
+            if (transaction.hasAmbiguity(layout)) {
+                int ambiguous = layout.temporaryFiles.size()
+                    + (layout.intentFile == null ? 0 : 1)
+                    + (layout.purgeIntentFile == null ? 0 : 1);
+                return new PersistenceStatus(0, 0L, ambiguous, true);
+            }
+            Snapshot snapshot = inspect(layout, maxEvents, maxBytes);
+            return snapshot.status(recoveryRequired || failed);
         }
-        for (int index = 0; index < records.size(); index++) {
-            Record expected = activeRecords.get(index);
-            Record actual = records.get(index);
-            if (expected != actual) {
+    }
+
+    Record admit(String eventId, String eventJson, int maxEvents, long maxBytes) {
+        synchronized (monitor) {
+            ensureLoaded();
+            validateBounds(maxEvents, maxBytes);
+            byte[] eventBytes = eventJson.getBytes(StandardCharsets.UTF_8);
+            if (eventBytes.length > maxBytes) {
+                throw new SdkException("persistence_bounds_exceeded", "persistence bounds reject the event");
+            }
+            long currentBytes = pendingBytes(activeRecords);
+            if (activeRecords.size() >= maxEvents || eventBytes.length > maxBytes - currentBytes) {
+                throw new SdkException("persistence_bounds_exceeded", "persistence bounds reject the event");
+            }
+            if (nextSequence <= 0L || nextSequence == Long.MAX_VALUE) {
+                throw new SdkException(
+                    "persistence_bounds_exceeded",
+                    "persistence sequence space is exhausted"
+                );
+            }
+
+            byte[] payload = recordCodec.encodeRecordPayload(eventId, eventBytes);
+            byte[] encoded = crypto.encrypt(PersistenceCrypto.RECORD, nextSequence, payload, storeId);
+            byte[] highWaterPayload = recordCodec.encodeSequence(nextSequence);
+            byte[] highWaterEncoded = crypto.encrypt(
+                PersistenceCrypto.HIGH_WATER,
+                nextSequence,
+                highWaterPayload,
+                storeId
+            );
+            long sequence = nextSequence;
+            Path target = files.recordPath(sequence);
+            try {
+                transaction.commitAdmission(
+                    sequence,
+                    target,
+                    encoded,
+                    highWaterEncoded
+                );
+                Record record = recordCodec.readRecord(target, sequence, maxBytes);
+                activeRecords.add(record);
+                nextSequence++;
+                return record;
+            } catch (SdkException error) {
+                if ("persistence_ambiguous".equals(error.code())) {
+                    failed = true;
+                }
+                throw error;
+            } finally {
+                Arrays.fill(payload, (byte) 0);
+                Arrays.fill(encoded, (byte) 0);
+                Arrays.fill(highWaterPayload, (byte) 0);
+                Arrays.fill(highWaterEncoded, (byte) 0);
+                Arrays.fill(eventBytes, (byte) 0);
+            }
+        }
+    }
+
+    void acknowledge(List<Record> records) {
+        synchronized (monitor) {
+            ensureLoaded();
+            if (records.isEmpty()) {
+                return;
+            }
+            if (records.size() > activeRecords.size()) {
                 throw PersistenceCrypto.integrityFailure();
             }
-            recordCodec.verifyUnchanged(actual);
-        }
+            for (int index = 0; index < records.size(); index++) {
+                Record expected = activeRecords.get(index);
+                Record actual = records.get(index);
+                if (expected != actual) {
+                    throw PersistenceCrypto.integrityFailure();
+                }
+                recordCodec.verifyUnchanged(actual);
+            }
 
-        long acknowledgedSequence = records.get(records.size() - 1).sequence;
-        byte[] payload = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.BIG_ENDIAN)
-            .putLong(acknowledgedSequence)
-            .array();
-        byte[] encoded = crypto.encrypt(
-            PersistenceCrypto.CHECKPOINT,
-            acknowledgedSequence,
-            payload,
-            storeId
-        );
-        try {
-            transaction.commit(
+            long acknowledgedSequence = records.get(records.size() - 1).sequence;
+            byte[] payload = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.BIG_ENDIAN)
+                .putLong(acknowledgedSequence)
+                .array();
+            byte[] encoded = crypto.encrypt(
                 PersistenceCrypto.CHECKPOINT,
                 acknowledgedSequence,
-                files.path(PersistenceFiles.CHECKPOINT_NAME),
-                encoded,
-                true,
-                FailurePoint.BEFORE_CHECKPOINT_RENAME,
-                FailurePoint.AFTER_CHECKPOINT_RENAME
+                payload,
+                storeId
             );
-            checkpointSequence = acknowledgedSequence;
-            activeRecords = new ArrayList<>(
-                activeRecords.subList(records.size(), activeRecords.size())
-            );
-            pruneCheckpointedRecords(checkpointSequence, false);
-        } catch (SdkException error) {
-            if ("persistence_ambiguous".equals(error.code())) {
-                failed = true;
+            try {
+                transaction.commit(
+                    PersistenceCrypto.CHECKPOINT,
+                    acknowledgedSequence,
+                    files.path(PersistenceFiles.CHECKPOINT_NAME),
+                    encoded,
+                    true,
+                    FailurePoint.BEFORE_CHECKPOINT_RENAME,
+                    FailurePoint.AFTER_CHECKPOINT_RENAME
+                );
+                checkpointSequence = acknowledgedSequence;
+                activeRecords = new ArrayList<>(
+                    activeRecords.subList(records.size(), activeRecords.size())
+                );
+                pruneCheckpointedRecords(checkpointSequence, false);
+            } catch (SdkException error) {
+                if ("persistence_ambiguous".equals(error.code())) {
+                    failed = true;
+                }
+                throw error;
+            } finally {
+                Arrays.fill(payload, (byte) 0);
+                Arrays.fill(encoded, (byte) 0);
             }
-            throw error;
-        } finally {
-            Arrays.fill(payload, (byte) 0);
-            Arrays.fill(encoded, (byte) 0);
         }
     }
 
-    synchronized void purge() {
-        ensureReadable();
-        try {
-            transaction.purge();
-            activeRecords = new ArrayList<>();
-            checkpointSequence = 0L;
-            nextSequence = 1L;
-            loaded = true;
-            failed = false;
-        } catch (IOException error) {
-            failed = true;
-            throw new SdkException(
-                "persistence_ambiguous",
-                "persistence purge did not complete durably"
-            );
+    void purge() {
+        synchronized (monitor) {
+            ensureReadable();
+            try {
+                transaction.purge();
+                activeRecords = new ArrayList<>();
+                checkpointSequence = 0L;
+                nextSequence = 1L;
+                loaded = true;
+                failed = false;
+            } catch (IOException error) {
+                failed = true;
+                throw new SdkException(
+                    "persistence_ambiguous",
+                    "persistence purge did not complete durably"
+                );
+            }
         }
     }
 
     @Override
-    public synchronized void close() {
-        if (closed) {
-            return;
+    public void close() {
+        synchronized (monitor) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            activeRecords.clear();
+            Arrays.fill(storeId, (byte) 0);
+            crypto.close();
+            files.close();
         }
-        closed = true;
-        activeRecords.clear();
-        Arrays.fill(storeId, (byte) 0);
-        crypto.close();
-        files.close();
     }
 
     private Snapshot inspect(int maxEvents, long maxBytes) {

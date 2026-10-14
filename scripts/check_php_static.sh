@@ -16,14 +16,14 @@ cat > "$tmp_dir/composer.json" <<'EOF'
   "version": "1.0.0",
   "type": "project",
   "require-dev": {
-    "guzzlehttp/guzzle": "7.15.3",
-    "phpstan/phpstan": "2.2.1",
-    "monolog/monolog": "3.9.0",
+    "guzzlehttp/guzzle": "7.15.5",
+    "phpstan/phpstan": "2.3.1",
+    "monolog/monolog": "3.12.1",
     "psr/log": "3.0.2",
-    "symfony/console": "8.1.2",
-    "symfony/framework-bundle": "8.1.2",
-    "symfony/messenger": "8.1.2",
-    "symfony/monolog-bundle": "4.0.2"
+    "symfony/console": "8.1.9",
+    "symfony/framework-bundle": "8.1.9",
+    "symfony/messenger": "8.1.9",
+    "symfony/monolog-bundle": "4.1.0"
   }
 }
 EOF

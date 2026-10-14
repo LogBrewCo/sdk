@@ -14,6 +14,7 @@ final class LogBrewHttpBodyTracing {
         void finish(HttpResponse<?> response, int statusCode, Throwable error, boolean cancelled);
     }
 
+    private final Object monitor = new Object();
     private final CompletionHandler handler;
     private boolean bodyStarted;
     private boolean bodyFinished;
@@ -30,7 +31,7 @@ final class LogBrewHttpBodyTracing {
 
     <T> HttpResponse.BodyHandler<T> observe(HttpResponse.BodyHandler<T> downstream) {
         return info -> {
-            synchronized (this) {
+            synchronized (monitor) {
                 bodyStarted = true;
                 statusCode = info.statusCode();
             }
@@ -40,7 +41,7 @@ final class LogBrewHttpBodyTracing {
 
     void responseComplete(HttpResponse<?> value, Throwable failure) {
         Completion completion;
-        synchronized (this) {
+        synchronized (monitor) {
             response = value;
             responseFinished = true;
             if (failure != null) {
@@ -53,7 +54,7 @@ final class LogBrewHttpBodyTracing {
 
     private void bodyComplete(Throwable failure) {
         Completion completion;
-        synchronized (this) {
+        synchronized (monitor) {
             bodyFinished = true;
             if (failure != null) {
                 error = cancelling ? new CancellationException() : failure;
@@ -114,7 +115,7 @@ final class LogBrewHttpBodyTracing {
 
                     @Override
                     public void cancel() {
-                        synchronized (LogBrewHttpBodyTracing.this) {
+                        synchronized (monitor) {
                             cancelling = true;
                         }
                         try {

@@ -99,15 +99,19 @@ use Monolog\Logger as MonologLogger;
                 $assert($client->pendingEvents() === ($stage === 'delivery' ? 1 : 0), "{$label}: preserve admission and retention");
                 $assert(count($transport->sentBodies) === ($stage === 'delivery' ? 1 : 0), "{$label}: callback must not cause extra delivery attempts");
                 if ($stage === 'delivery') {
-                    $retained = json_decode($client->previewJson(), true, flags: JSON_THROW_ON_ERROR);
-                    $assert($retained['events'][0]['id'] === $prefix . '_1', "{$label}: failed delivery must retain the original explicit ID");
+                    $retained = testEvents(
+                        testStringMap(json_decode($client->previewJson(), true, flags: JSON_THROW_ON_ERROR), "{$label}: retained payload"),
+                        "{$label}: retained events"
+                    );
+                    $assert($retained[0]['id'] === $prefix . '_1', "{$label}: failed delivery must retain the original explicit ID");
                 }
 
                 $logger->warning('healthy record', ['attempt' => 2]);
                 $assert($client->pendingEvents() === 0, "{$label}: subsequent healthy logging must drain admitted records");
                 $assert(count($reported) === $reportedCount, "{$label}: healthy recovery must not report another failure");
                 $assert(count($local->records) === ($strict ? 1 : 2), "{$label}: subsequent healthy logging must reach the local handler");
-                $assert($local->records[array_key_last($local->records)]->message === 'healthy record', "{$label}: preserve the application record");
+                $lastRecord = end($local->records);
+                $assert($lastRecord !== false && $lastRecord->message === 'healthy record', "{$label}: preserve the application record");
 
                 $attempts = $stage === 'delivery' ? 3 : 1;
                 $assert(count($transport->sentBodies) === $attempts, "{$label}: recovery must make only the required attempts");
@@ -115,14 +119,20 @@ use Monolog\Logger as MonologLogger;
                     $assert($transport->sentBodies[0] === $transport->sentBodies[1], "{$label}: retained retry bytes must not change");
                 }
                 $lastBody = $transport->lastBody();
-                $assert(is_string($lastBody), "{$label}: healthy event must have a recorded request");
-                $accepted = json_decode($lastBody, true, flags: JSON_THROW_ON_ERROR);
-                $assert(count($accepted['events']) === 1, "{$label}: healthy record must be sent once");
-                $attributes = $accepted['events'][0]['attributes'];
-                $assert($accepted['events'][0]['id'] === $prefix . '_2', "{$label}: preserve the explicit prefix and counter");
+                if (!is_string($lastBody)) {
+                    throw new RuntimeException("{$label}: healthy event must have a recorded request");
+                }
+                $accepted = testEvents(
+                    testStringMap(json_decode($lastBody, true, flags: JSON_THROW_ON_ERROR), "{$label}: accepted payload"),
+                    "{$label}: accepted events"
+                );
+                $assert(count($accepted) === 1, "{$label}: healthy record must be sent once");
+                $attributes = testAttributes($accepted[0], "{$label}: accepted attributes");
+                $metadata = testStringMap($attributes['metadata'] ?? null, "{$label}: accepted metadata");
+                $assert($accepted[0]['id'] === $prefix . '_2', "{$label}: preserve the explicit prefix and counter");
                 $assert($attributes['message'] === 'healthy record', "{$label}: preserve the captured message");
                 $assert($attributes['level'] === 'warning', "{$label}: preserve severity");
-                $assert($attributes['metadata']['context.attempt'] === 2, "{$label}: preserve structured log context");
+                $assert($metadata['context.attempt'] === 2, "{$label}: preserve structured log context");
                 $client->shutdown($transport);
                 $cases++;
             }
