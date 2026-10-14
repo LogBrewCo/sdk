@@ -254,6 +254,38 @@ test("native client mirrors its validated breadcrumb history into Apple crash ca
   });
 });
 
+test("a stored JavaScript fatal marks Apple crash capture before the previous handler runs", async () => {
+  const order = [];
+  const nativeModule = {
+    setNativeDiagnosticsBreadcrumbs(snapshot) {
+      order.push(snapshot?.breadcrumbs.at(-1).category ?? "cleared");
+      return { status: snapshot === null ? "cleared" : "updated" };
+    }
+  };
+  await withRuntime({ entry: "index.native.js", nativeModule }, async (runtime) => {
+    const client = runtime.createLogBrewReactNativeClient({
+      clientKey: "LOGBREW_CLIENT_KEY",
+      persistentQueue: "disabled"
+    });
+    let handler = () => order.push("previous");
+    let stored = 0;
+    runtime.installLogBrewReactNativeGlobalErrorHandler({
+      client,
+      errorUtils: { getGlobalHandler: () => handler, setGlobalHandler(value) { handler = value; } },
+      fatalStore: {
+        acknowledgeFatalRecord: () => ({ status: "empty" }),
+        discardFatalRecord: () => ({ status: "empty" }),
+        readFatalRecord: () => ({ status: "empty" }),
+        writeFatalRecord: () => ({ recordId: `stored_${++stored}`, status: "stored" })
+      }
+    });
+    handler(new TypeError("private"), false);
+    handler(new TypeError("private"), true);
+
+    assert.deepEqual(order, ["cleared", "previous", "react-native.fatal", "previous"]);
+  });
+});
+
 test("missing or not-installed Apple diagnostics do not break normal breadcrumbs", async () => {
   for (const nativeModule of [
     undefined,

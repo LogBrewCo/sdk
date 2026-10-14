@@ -103,6 +103,8 @@ struct NativeCrashBreadcrumbSnapshot: Codable, Equatable {
 
 enum NativeCrashBreadcrumbs {
     static let reportKey = "logbrew_native_breadcrumbs"
+    /// The React Native package records this category after it persists a JavaScript fatal report.
+    static let javaScriptFatalCategory = "react-native.fatal"
     static let maximumBytes = 64 * 1024
 
     static func encoded(_ values: [IssueBreadcrumb]?, truncated: Bool) throws -> String? {

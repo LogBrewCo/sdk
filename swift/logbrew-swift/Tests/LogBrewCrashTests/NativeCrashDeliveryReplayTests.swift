@@ -52,6 +52,50 @@ extension NativeCrashDeliveryTests {
         #expect(try fixture.hangStore.read() == nil)
     }
 
+    @Test("a React Native fatal exception is discarded only after its JavaScript report persisted")
+    func reactNativeFatalExceptionRepeatsPersistedJavaScriptReport() throws {
+        func report(_ id: String, lastCategory: String) throws -> [String: Any] {
+            var value = rawReport(
+                id: id,
+                timestamp: "2026-07-17T09:10:11Z",
+                mechanism: "nsexception",
+                privateMarker: "private",
+            )
+            var crash = try #require(value["crash"] as? [String: Any])
+            crash["error"] = [
+                "type": "nsexception",
+                "nsexception": ["name": "RCTFatalException: Unhandled JS Exception: private"],
+            ]
+            value["crash"] = crash
+            let breadcrumbs = try #require(try NativeCrashBreadcrumbs.encoded(
+                [IssueBreadcrumb(timestamp: "2026-07-17T09:10:10Z", category: lastCategory)],
+                truncated: false,
+            ))
+            value["user"] = [NativeCrashBreadcrumbs.reportKey: breadcrumbs]
+            return value
+        }
+        let deliveredID = "9f12b746-0c79-4cc6-a077-98ed62f094b3"
+        let store = try FakeCrashReportStore(reports: [
+            1: report(
+                "8F12B746-0C79-4CC6-A077-98ED62F094B2",
+                lastCategory: NativeCrashBreadcrumbs.javaScriptFatalCategory,
+            ),
+            2: report(deliveredID.uppercased(), lastCategory: "navigation"),
+        ])
+        let capture = try makeCapture(driver: FakeCrashEngineDriver(store: store))
+        try capture.install()
+
+        var delivered: [String] = []
+        let result = try capture.replayPendingReports { record in
+            delivered.append(record.eventID)
+            return true
+        }
+
+        #expect(result.discarded == 1)
+        #expect(delivered == [deliveredID])
+        #expect(store.reportIDs.isEmpty)
+    }
+
     @Test("sub-millisecond engine reports replay by exact chronology before report sequence")
     func subMillisecondEngineReportsUseExactChronology() throws {
         let laterID = "ffffffff-ffff-4fff-bfff-ffffffffffff"
