@@ -54,20 +54,14 @@ This public guide applies to the whole repository.
   unrelated packages unless they are in scope. Follow the public release docs
   and tear down only resources created by the check.
 
-## Continuous simplification gate
+## Simplicity
 
-- Every commit must reduce net maintained handwritten production and test LOC
-  in this repository. A zero or positive delta is not complete.
-- Freeze and record one reproducible measurement scope before editing. Use the
-  same command afterward and report the baseline, final count, and signed delta.
-- Offset necessary additions by removing more duplication, obsolete branches,
-  wrappers, helpers, compatibility scaffolding, or parallel implementations.
-  Prefer one canonical flow and fewer concepts.
-- Preserve required behavior, valuable tests, type safety, coverage,
-  compatibility, documentation, validation, security, observability, and error
-  handling.
-- Never manufacture a reduction through line packing, formatting, minification,
-  generated-code moves, or deletion of valuable tests or documentation.
+- Write the least code that fully meets the requirement. Prefer deleting,
+  reusing, or extending the canonical owner over adding wrappers, helpers, or
+  parallel implementations.
+- Report each change's net handwritten line count. Never trade required
+  behavior, tests, validation, or security for fewer lines, and never
+  manufacture reductions through formatting or generated-code moves.
 
 ## Code Review Rules
 
@@ -89,9 +83,10 @@ This public guide applies to the whole repository.
 - Never commit access values, real user or project data, machine-specific paths,
   non-public links, unpublished research, task context, planning artifacts, or
   non-public release evidence.
-- Keep telemetry conservative: no authorization values, payload bodies, query
-  strings, raw stack text, local paths, or unbounded/high-cardinality metadata
-  unless a documented public opt-in contract requires and tests it.
+- Capture structured stack frames and sanitized route and query context by
+  default. Never capture authorization values, secrets, payload bodies, local
+  paths, or unbounded or high-cardinality metadata unless a documented public
+  opt-in contract requires and tests it.
 - Review the full proposed commit range, changed paths, staged content, and
   final diff before publishing. Remove generated artifacts before the final
   confidentiality scan.
