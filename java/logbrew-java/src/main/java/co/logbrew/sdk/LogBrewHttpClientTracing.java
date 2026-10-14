@@ -1,7 +1,6 @@
 package co.logbrew.sdk;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -15,7 +14,6 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -28,6 +26,9 @@ import java.util.regex.Pattern;
  * {@code http.client} span. They do not install a Java agent, set global
  * OpenTelemetry state, patch clients, or capture payloads, arbitrary headers,
  * full URLs, query strings, baggage, or tracestate.</p>
+ *
+ * <p>Streaming handlers can return a response before its body finishes. The span waits for
+ * body completion, failure, or cancellation without replacing the response or body.</p>
  */
 public final class LogBrewHttpClientTracing {
     private static final Pattern METHOD_PATTERN = Pattern.compile("^[A-Za-z]+$");
@@ -47,27 +48,22 @@ public final class LogBrewHttpClientTracing {
     ) throws IOException, InterruptedException {
         Objects.requireNonNull(httpClient, "httpClient");
         Objects.requireNonNull(responseBodyHandler, "responseBodyHandler");
-        ClientRequest safeConfig = config == null ? ClientRequest.create() : config;
+        ClientRequest safeConfig = config == null ? ClientRequest.create() : config.snapshot();
         PreparedRequest prepared = prepare(client, request, safeConfig);
+        LogBrewHttpBodyTracing body = bodyTracing(client, prepared, safeConfig);
         Throwable requestError = null;
         HttpResponse<T> response = null;
         try {
-            response = httpClient.send(prepared.request, responseBodyHandler);
+            response = httpClient.send(prepared.request, body.observe(responseBodyHandler));
             return response;
         } catch (IOException | InterruptedException error) {
             requestError = error;
             throw error;
-        } catch (IllegalArgumentException error) {
-            requestError = error;
-            throw error;
-        } catch (SecurityException error) {
-            requestError = error;
-            throw error;
-        } catch (UncheckedIOException error) {
+        } catch (RuntimeException error) {
             requestError = error;
             throw error;
         } finally {
-            captureSpan(client, prepared, response, requestError, safeConfig);
+            body.responseComplete(response, requestError);
         }
     }
 
@@ -83,26 +79,25 @@ public final class LogBrewHttpClientTracing {
     ) {
         Objects.requireNonNull(httpClient, "httpClient");
         Objects.requireNonNull(responseBodyHandler, "responseBodyHandler");
-        ClientRequest safeConfig = config == null ? ClientRequest.create() : config;
+        ClientRequest safeConfig = config == null ? ClientRequest.create() : config.snapshot();
         PreparedRequest prepared = prepare(client, request, safeConfig);
+        LogBrewHttpBodyTracing body = bodyTracing(client, prepared, safeConfig);
         CompletableFuture<HttpResponse<T>> future;
         try {
-            future = httpClient.sendAsync(prepared.request, responseBodyHandler);
-        } catch (IllegalArgumentException error) {
-            captureSpan(client, prepared, null, error, safeConfig);
-            throw error;
-        } catch (SecurityException error) {
-            captureSpan(client, prepared, null, error, safeConfig);
-            throw error;
-        } catch (RejectedExecutionException error) {
-            captureSpan(client, prepared, null, error, safeConfig);
-            throw error;
-        } catch (UncheckedIOException error) {
-            captureSpan(client, prepared, null, error, safeConfig);
+            future = httpClient.sendAsync(prepared.request, body.observe(responseBodyHandler));
+        } catch (RuntimeException error) {
+            body.responseComplete(null, error);
             throw error;
         }
         return future.whenComplete((response, error) ->
-            captureSpan(client, prepared, response, unwrapCompletionError(error), safeConfig));
+            body.responseComplete(response, unwrapCompletionError(error)));
+    }
+
+    private static LogBrewHttpBodyTracing bodyTracing(
+        LogBrewClient client, PreparedRequest prepared, ClientRequest config
+    ) {
+        return new LogBrewHttpBodyTracing((response, statusCode, error, cancelled) ->
+            captureSpan(client, prepared, response, statusCode, error, cancelled, config));
     }
 
     private static PreparedRequest prepare(LogBrewClient client, HttpRequest request, ClientRequest config) {
@@ -164,14 +159,16 @@ public final class LogBrewHttpClientTracing {
         LogBrewClient client,
         PreparedRequest prepared,
         HttpResponse<?> response,
+        int responseStatusCode,
         Throwable requestError,
+        boolean bodyCancelled,
         ClientRequest config
     ) {
         try {
             Instant finishedAt = config.currentInstant();
             double durationMs = Duration.between(prepared.startedAt, finishedAt).toNanos() / 1_000_000.0;
-            int statusCode = response == null ? 0 : response.statusCode();
-            Map<String, Object> metadata = httpMetadata(prepared, statusCode, requestError, config);
+            int statusCode = response == null ? responseStatusCode : response.statusCode();
+            Map<String, Object> metadata = httpMetadata(prepared, statusCode, requestError, bodyCancelled, config);
             SpanAttributes attributes = SpanAttributes
                 .create(
                     "http.client:" + prepared.method + " " + prepared.routeTemplate,
@@ -185,7 +182,7 @@ public final class LogBrewHttpClientTracing {
             if (prepared.trace.parentSpanId() != null) {
                 attributes.parentSpanId(prepared.trace.parentSpanId());
             }
-            List<SpanEventSummary> spanEvents = spanEventsWithException(config.spanEvents, requestError);
+            List<SpanEventSummary> spanEvents = spanEventsWithException(config.spanEvents, requestError, bodyCancelled);
             if (!spanEvents.isEmpty()) {
                 attributes.events(spanEvents);
             }
@@ -205,6 +202,7 @@ public final class LogBrewHttpClientTracing {
         PreparedRequest prepared,
         int statusCode,
         Throwable requestError,
+        boolean bodyCancelled,
         ClientRequest config
     ) {
         Map<String, Object> metadata = Validation.copySafeDependencyMetadata(config.metadata);
@@ -221,12 +219,16 @@ public final class LogBrewHttpClientTracing {
         if (requestError != null) {
             metadata.put("errorType", requestError.getClass().getSimpleName());
         }
+        if (bodyCancelled) {
+            metadata.put("cancelled", Boolean.TRUE);
+        }
         return LogBrewTrace.metadataWithTrace(prepared.trace, metadata);
     }
 
     private static List<SpanEventSummary> spanEventsWithException(
         List<SpanEventSummary> configuredEvents,
-        Throwable requestError
+        Throwable requestError,
+        boolean bodyCancelled
     ) {
         List<SpanEventSummary> safeEvents = new ArrayList<>();
         if (configuredEvents != null) {
@@ -238,7 +240,7 @@ public final class LogBrewHttpClientTracing {
         if (unwrappedError != null && safeEvents.size() < SpanEventSummary.MAX_EVENTS) {
             safeEvents.add(SpanEventSummary.create("exception").metadata(Map.of(
                 "exceptionType", unwrappedError.getClass().getSimpleName(),
-                "exceptionEscaped", Boolean.TRUE
+                "exceptionEscaped", Boolean.valueOf(!bodyCancelled)
             )));
         }
         return safeEvents;
@@ -395,6 +397,23 @@ public final class LogBrewHttpClientTracing {
 
         private Instant currentInstant() {
             return now.get();
+        }
+
+        private ClientRequest snapshot() {
+            ClientRequest copy = new ClientRequest();
+            copy.routeTemplate = routeTemplate;
+            copy.eventIdPrefix = eventIdPrefix;
+            copy.spanId = spanId;
+            copy.metadata = Validation.copyMetadata(metadata);
+            copy.onError = onError;
+            copy.now = now;
+            if (spanEvents != null) {
+                copy.spanEvents = new ArrayList<>();
+                for (SpanEventSummary event : spanEvents) {
+                    copy.spanEvents.add(event.filterMetadataKeys(key -> !Validation.blockedDependencyMetadataKey(key)));
+                }
+            }
+            return copy;
         }
 
         private String resolvedEventIdPrefix(String fallback) {
