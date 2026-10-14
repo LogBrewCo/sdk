@@ -2,6 +2,7 @@ package co.logbrew.reactnative;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableMapKeySetIterator;
 import com.facebook.react.bridge.ReadableType;
@@ -92,6 +93,27 @@ final class FatalStoreModuleImpl {
       return eventStore == null || recordCount == null
           ? status("storage_error")
           : eventResultMap(eventStore.acknowledge(recordCount));
+    } catch (RuntimeException error) {
+      return status("storage_error");
+    }
+  }
+
+  WritableMap removeEventRecords(String queueKey, ReadableArray indexes) {
+    try {
+      EventRecordStore eventStore = eventStore(queueKey);
+      int[] recordIndexes = new int[indexes == null ? 0 : indexes.size()];
+      for (int position = 0; position < recordIndexes.length; position += 1) {
+        Integer index = indexes.getType(position) == ReadableType.Number
+            ? integer(indexes.getDouble(position))
+            : null;
+        if (index == null) {
+          return status("storage_error");
+        }
+        recordIndexes[position] = index;
+      }
+      return eventStore == null || indexes == null
+          ? status("storage_error")
+          : eventResultMap(eventStore.remove(recordIndexes));
     } catch (RuntimeException error) {
       return status("storage_error");
     }

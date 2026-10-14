@@ -148,6 +148,49 @@ static const NSInteger LBRNEventFileSchemaVersion = 1;
     }
 }
 
+- (NSDictionary *)removeRecordsAtIndexes:(NSArray *)indexes
+{
+    @synchronized(self) {
+        if (self.poisoned || ![indexes isKindOfClass:[NSArray class]]) {
+            return [self storageError];
+        }
+        int directoryFD = [self openPreparedDirectory];
+        if (directoryFD < 0) {
+            return [self storageError];
+        }
+        @try {
+            NSArray *records = [self snapshotFromDirectory:directoryFD][@"records"];
+            NSMutableArray<NSString *> *filenames = [NSMutableArray array];
+            NSInteger previous = -1;
+            for (id index in indexes) {
+                NSUInteger recordIndex = 0;
+                if (records == nil || ![index isKindOfClass:[NSNumber class]]
+                    || ![self nonnegativeInteger:index output:&recordIndex]
+                    || recordIndex >= records.count || (NSInteger)recordIndex <= previous) {
+                    return [self storageError];
+                }
+                previous = (NSInteger)recordIndex;
+                [filenames addObject:[self recordFilename:[records[recordIndex][@"sequence"] unsignedLongLongValue]]];
+            }
+            for (NSString *filename in filenames) {
+                if (![self safeRegularFilename:filename directoryFD:directoryFD]
+                    || unlinkat(directoryFD, filename.UTF8String, 0) != 0) {
+                    // Earlier deletions may have committed; fail closed instead of diverging.
+                    self.poisoned = YES;
+                    return [self storageError];
+                }
+            }
+            if (![self synchronizeDirectory:directoryFD]) {
+                self.poisoned = YES;
+                return [self storageError];
+            }
+            return @{ @"status" : @"removed" };
+        } @finally {
+            close(directoryFD);
+        }
+    }
+}
+
 - (NSDictionary *)purgeRecords
 {
     @synchronized(self) {

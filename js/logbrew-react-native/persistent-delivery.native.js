@@ -122,7 +122,7 @@ export function purgeReactNativePersistentQueue({ apiKey, clientKey } = {}) {
 }
 
 function createNativeEventStore(nativeStore, authKey, release) {
-  return {
+  const eventStore = {
     load() {
       const result = requireStatus(
         "load",
@@ -193,6 +193,15 @@ function createNativeEventStore(nativeStore, authKey, release) {
       }
     }
   };
+  // Older native binaries lack removal; the core then drops a fatal at a full queue.
+  if (typeof nativeStore.removeEventRecords === "function") {
+    eventStore.remove = (indexes) => requireStatus(
+      "remove",
+      callNative(nativeStore, "removeEventRecords", authKey, indexes),
+      "removed"
+    );
+  }
+  return eventStore;
 }
 
 function defaultNativeStore() {
@@ -266,6 +275,8 @@ function methodName(method) {
       return "append";
     case "acknowledgeEventRecords":
       return "acknowledge";
+    case "removeEventRecords":
+      return "remove";
     case "purgeEventRecords":
       return "purge";
     case "closeEventStore":

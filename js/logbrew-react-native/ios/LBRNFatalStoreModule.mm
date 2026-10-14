@@ -177,6 +177,20 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(acknowledgeEventRecords:(NSString *)queue
     }
 }
 
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(removeEventRecords:(NSString *)queueKey
+                                                indexes:(NSArray *)indexes)
+{
+    LBRNEventRecordStore *eventStore = [self eventStoreForQueueKey:queueKey];
+    if (eventStore == nil) {
+        return LBRNStorageError();
+    }
+    @try {
+        return [eventStore removeRecordsAtIndexes:indexes];
+    } @catch (__unused NSException *exception) {
+        return LBRNStorageError();
+    }
+}
+
 RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(purgeEventRecords:(NSString *)queueKey)
 {
     LBRNEventRecordStore *eventStore = [self eventStoreForQueueKey:queueKey];

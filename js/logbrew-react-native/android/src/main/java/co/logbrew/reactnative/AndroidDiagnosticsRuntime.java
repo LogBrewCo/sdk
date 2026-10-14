@@ -35,6 +35,8 @@ final class AndroidDiagnosticsRuntime implements Thread.UncaughtExceptionHandler
         new AndroidNativeDiagnostics(
             eventStore,
             signalStore,
+            new EventRecordStore(
+                new File(storageRoot, "logbrew-android-pending-v1"), new AndroidParentDirectorySync()),
             configuration,
             scheduler,
             afterPersist,

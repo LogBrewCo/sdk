@@ -1,6 +1,7 @@
 package co.logbrew.reactnative;
 
 import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 
@@ -36,6 +37,11 @@ final class FatalStoreModule extends NativeLogBrewFatalStoreSpec {
   @Override
   public WritableMap acknowledgeEventRecords(String queueKey, double count) {
     return implementation.acknowledgeEventRecords(queueKey, count);
+  }
+
+  @Override
+  public WritableMap removeEventRecords(String queueKey, ReadableArray indexes) {
+    return implementation.removeEventRecords(queueKey, indexes);
   }
 
   @Override

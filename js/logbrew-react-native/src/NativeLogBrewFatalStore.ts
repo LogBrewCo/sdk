@@ -10,6 +10,10 @@ export interface Spec extends TurboModule {
     eventBytes: number
   ): CodegenTypes.UnsafeObject;
   acknowledgeEventRecords(queueKey: string, count: number): CodegenTypes.UnsafeObject;
+  removeEventRecords(
+    queueKey: string,
+    indexes: ReadonlyArray<number>
+  ): CodegenTypes.UnsafeObject;
   purgeEventRecords(queueKey: string): CodegenTypes.UnsafeObject;
   closeEventStore(queueKey: string): CodegenTypes.UnsafeObject;
   installAndroidDiagnostics(

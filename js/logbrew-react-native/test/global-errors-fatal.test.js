@@ -413,7 +413,7 @@ test("retains a fatal replay when the canonical event filter silently rejects it
   });
 });
 
-test("retains a fatal replay when the canonical bounded queue drops it", async () => {
+test("retains a fatal replay when a queue of fatal reports drops it", async () => {
   await withInstalledPackage(async (
     { installLogBrewReactNativeGlobalErrorHandler },
     _packageDir,
@@ -422,7 +422,7 @@ test("retains a fatal replay when the canonical bounded queue drops it", async (
     const diagnostics = [];
     const fatalStore = createFatalStore({ record: pendingFatalRecord });
     const client = createCanonicalClient(LogBrewClient, { maxQueueSize: 1 });
-    addExistingIssue(client);
+    client.issue("evt_existing_fatal", "2026-07-25T11:59:59.000Z", { level: "fatal", title: "Earlier crash" });
 
     const installation = installLogBrewReactNativeGlobalErrorHandler({
       client,

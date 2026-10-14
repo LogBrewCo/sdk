@@ -749,13 +749,15 @@ export type EventStore = {
   load(): StoredEvent[];
   append(record: StoredEvent): void;
   acknowledge(count: number): void;
+  /** Removes the records at ascending `load()` indexes; without it, fatal issues cannot evict queued events. */
+  remove?(indexes: number[]): void;
   purge(): void;
   close(): void;
 };
 
 /** Queue drop notification emitted when a bounded in-memory queue is full. */
 export type DroppedEvent = {
-  reason: "event_too_large" | "queue_bytes_overflow" | "queue_overflow";
+  reason: "event_too_large" | "evicted_for_fatal" | "queue_bytes_overflow" | "queue_overflow";
   eventType: Event["type"];
   eventId: string;
   droppedEvents: number;
@@ -794,10 +796,11 @@ export type DeliveryHealthSnapshot = Readonly<{
   droppedEvents: number;
   droppedByReason: Readonly<{
     event_too_large: number;
+    evicted_for_fatal: number;
     queue_bytes_overflow: number;
     queue_overflow: number;
   }>;
-  lastDropReason: "none" | "event_too_large" | "queue_bytes_overflow" | "queue_overflow";
+  lastDropReason: "none" | "event_too_large" | "evicted_for_fatal" | "queue_bytes_overflow" | "queue_overflow";
   scheduled: boolean;
   inFlight: boolean;
   coalesced: boolean;

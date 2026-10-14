@@ -487,6 +487,7 @@ test("automatic delivery arms one unref timer and flushes on its interval", asyn
     droppedEvents: 0,
     droppedByReason: {
       event_too_large: 0,
+      evicted_for_fatal: 0,
       queue_bytes_overflow: 0,
       queue_overflow: 0
     },
@@ -527,6 +528,7 @@ test("automatic delivery arms one unref timer and flushes on its interval", asyn
     droppedEvents: 0,
     droppedByReason: {
       event_too_large: 0,
+      evicted_for_fatal: 0,
       queue_bytes_overflow: 0,
       queue_overflow: 0
     },
@@ -605,6 +607,7 @@ test("delivery health snapshot reports bounded queue drops by stable reason", ()
   assert.equal(health.lastDropReason, "queue_overflow");
   assert.deepEqual(health.droppedByReason, {
     event_too_large: 0,
+    evicted_for_fatal: 0,
     queue_bytes_overflow: 0,
     queue_overflow: 1
   });

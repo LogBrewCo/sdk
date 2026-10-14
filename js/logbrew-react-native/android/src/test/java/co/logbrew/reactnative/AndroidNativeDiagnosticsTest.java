@@ -20,9 +20,10 @@ public final class AndroidNativeDiagnosticsTest {
     suite.configurationIdentityIsExact();
     suite.nativeSignalRecordReplaysExactlyOnceIntoTheCanonicalQueue();
     suite.pendingNativeSignalSurvivesQueueAdmissionFailure();
+    suite.crashAndHangReportsStayPendingUntilTheQueueHasRoom();
     suite.uninstallReinstatesThePreviousHandlerAndStopsTheWatchdog();
     suite.javaScriptFatalTerminationIsRecordedOnlyWithoutAPersistedReport();
-    System.out.println("android native diagnostics tests: 8 passed");
+    System.out.println("android native diagnostics tests: 9 passed");
   }
 
   private void uncaughtExceptionPersistsBeforeChainingWithoutMessageContent() throws Exception {
@@ -171,6 +172,37 @@ public final class AndroidNativeDiagnosticsTest {
         });
   }
 
+  private void crashAndHangReportsStayPendingUntilTheQueueHasRoom() throws Exception {
+    withDirectory(
+        directory -> {
+          List<String> order = new ArrayList<>();
+          FakeScheduler scheduler = new FakeScheduler();
+          AndroidNativeDiagnostics diagnostics = fixture(directory, order, scheduler);
+          char[] filler = new char[4 * 1024 * 1024];
+          Arrays.fill(filler, 'x');
+          assertEquals("appended", diagnostics.eventStore.append(new String(filler), filler.length).status);
+          diagnostics.install();
+
+          scheduler.advanceBy(5_000);
+          diagnostics.handleUncaught(Thread.currentThread(), new IllegalStateException());
+
+          assertEquals(Arrays.asList("chain"), order);
+          assertEquals(1, diagnostics.eventStore.load().records.size());
+          assertEquals("acknowledged", diagnostics.eventStore.acknowledge(1).status);
+          AndroidNativeDiagnostics restarted = fixture(directory, order, new FakeScheduler());
+          restarted.install();
+
+          List<EventRecordStore.Record> records = restarted.eventStore.load().records;
+          assertEquals(2, records.size());
+          assertContains(records.get(0).serializedEvent, "AndroidAppHang");
+          assertContains(records.get(1).serializedEvent, "java.lang.IllegalStateException");
+          assertEquals(Arrays.asList("chain", "persist", "persist"), order);
+          restarted.uninstall();
+          restarted.install();
+          assertEquals(2, restarted.eventStore.load().records.size());
+        });
+  }
+
   private void uninstallReinstatesThePreviousHandlerAndStopsTheWatchdog() throws Exception {
     withDirectory(
         directory -> {
@@ -194,6 +226,7 @@ public final class AndroidNativeDiagnosticsTest {
     return new AndroidNativeDiagnostics(
         new EventRecordStore(new File(directory, "events")),
         new AndroidNativeSignalStore(new File(directory, "signal.record")),
+        new EventRecordStore(new File(directory, "pending")),
         configuration("production", 5_000),
         scheduler,
         () -> order.add("persist"),

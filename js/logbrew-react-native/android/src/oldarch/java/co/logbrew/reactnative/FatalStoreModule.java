@@ -3,6 +3,7 @@ package co.logbrew.reactnative;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 
@@ -38,6 +39,11 @@ final class FatalStoreModule extends ReactContextBaseJavaModule {
   @ReactMethod(isBlockingSynchronousMethod = true)
   public WritableMap acknowledgeEventRecords(String queueKey, double count) {
     return implementation.acknowledgeEventRecords(queueKey, count);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public WritableMap removeEventRecords(String queueKey, ReadableArray indexes) {
+    return implementation.removeEventRecords(queueKey, indexes);
   }
 
   @ReactMethod(isBlockingSynchronousMethod = true)

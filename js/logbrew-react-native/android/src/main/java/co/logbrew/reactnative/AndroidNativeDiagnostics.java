@@ -93,6 +93,7 @@ final class AndroidNativeDiagnostics {
 
   final EventRecordStore eventStore;
   final AndroidNativeSignalStore signalStore;
+  final EventRecordStore pendingStore;
   final Configuration configuration;
   private final Scheduler scheduler;
   private final Runnable afterPersist;
@@ -105,6 +106,7 @@ final class AndroidNativeDiagnostics {
   AndroidNativeDiagnostics(
       EventRecordStore eventStore,
       AndroidNativeSignalStore signalStore,
+      EventRecordStore pendingStore,
       Configuration configuration,
       Scheduler scheduler,
       Runnable afterPersist,
@@ -113,6 +115,7 @@ final class AndroidNativeDiagnostics {
       String applicationPackage) {
     this.eventStore = eventStore;
     this.signalStore = signalStore;
+    this.pendingStore = pendingStore;
     this.configuration = configuration;
     this.scheduler = scheduler;
     this.afterPersist = afterPersist;
@@ -127,6 +130,7 @@ final class AndroidNativeDiagnostics {
       return "already_installed";
     }
     replaySignalRecord();
+    replayPendingRecords();
     scheduler.start(configuration.anrThresholdMs, this::reportHang);
     installed = true;
     return "installed";
@@ -144,7 +148,7 @@ final class AndroidNativeDiagnostics {
   void handleUncaught(Thread thread, Throwable error) {
     try {
       if (!claimPersistedJavaScriptFatal(error, System.nanoTime())) {
-        append(javaCrashEvent(error));
+        appendOrKeepPending(javaCrashEvent(error));
       }
     } finally {
       previousHandler.uncaughtException(thread, error);
@@ -157,7 +161,7 @@ final class AndroidNativeDiagnostics {
     }
     long boundedDuration =
         Math.max(configuration.anrThresholdMs, Math.min(durationMs, 300_000));
-    append(hangEvent(mainFrames.get(), boundedDuration));
+    appendOrKeepPending(hangEvent(mainFrames.get(), boundedDuration));
   }
 
   /** Notes a JavaScript fatal report that this process just persisted to the shared queue. */
@@ -196,6 +200,23 @@ final class AndroidNativeDiagnostics {
     if (record != null && append(nativeCrashEvent(record))) {
       signalStore.clear();
     }
+  }
+
+  // A full or failing queue keeps the report in the pending store; the next install appends it.
+  private void appendOrKeepPending(String serializedEvent) {
+    if (!append(serializedEvent)) {
+      pendingStore.append(serializedEvent, serializedEvent.getBytes(StandardCharsets.UTF_8).length);
+    }
+  }
+
+  private void replayPendingRecords() {
+    EventRecordStore.Result pending = pendingStore.load();
+    int appended = 0;
+    while (appended < pending.records.size()
+        && append(pending.records.get(appended).serializedEvent)) {
+      appended += 1;
+    }
+    pendingStore.acknowledge(appended);
   }
 
   private boolean append(String serializedEvent) {

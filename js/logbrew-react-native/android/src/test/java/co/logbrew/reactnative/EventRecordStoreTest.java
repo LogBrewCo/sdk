@@ -18,6 +18,7 @@ public final class EventRecordStoreTest {
     }
     EventRecordStoreTest suite = new EventRecordStoreTest();
     suite.restartLoadsOldestFirstAndAcknowledgesAcceptedPrefix();
+    suite.removeDeletesSelectedRecordsAcrossRestart();
     suite.purgeRecoversFromCorruptionWithoutFollowingSymlinks();
     suite.interruptedTemporaryWriteDoesNotHideCommittedRecords();
     suite.enforcesByteCountQueueLimitsAndPrivateModes();
@@ -54,6 +55,26 @@ public final class EventRecordStoreTest {
               new EventRecordStore(directory)
                   .append(event("evt_after_empty"), bytes(event("evt_after_empty"))));
           assertEquals(3L, new EventRecordStore(directory).load().records.get(0).sequence);
+        });
+    passed += 1;
+  }
+
+  private void removeDeletesSelectedRecordsAcrossRestart() throws Exception {
+    withDirectory(
+        directory -> {
+          EventRecordStore store = new EventRecordStore(directory);
+          for (String id : new String[] {"evt_first", "evt_second", "evt_third"}) {
+            assertStatus("appended", store.append(event(id), bytes(event(id))));
+          }
+          assertStatus("storage_error", store.remove(new int[] {0, 3}));
+          assertStatus("storage_error", store.remove(new int[] {1, 0}));
+          assertStatus("removed", store.remove(new int[] {0, 2}));
+
+          List<EventRecordStore.Record> records = new EventRecordStore(directory).load().records;
+          assertEquals(1, records.size());
+          assertEquals(event("evt_second"), records.get(0).serializedEvent);
+          assertStatus("acknowledged", store.acknowledge(1));
+          assertEquals(0, new EventRecordStore(directory).load().records.size());
         });
     passed += 1;
   }
