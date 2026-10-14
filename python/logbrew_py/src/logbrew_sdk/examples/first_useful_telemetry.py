@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 
 from logbrew_sdk import (
@@ -186,7 +187,7 @@ def assert_first_useful_payload(payload: dict[str, object], *, trace_id: str) ->
     if (
         not isinstance(log_event, dict)
         or log_event.get("type") != "log"
-        or not str(log_event.get("id", "")).startswith("evt_log_checkout_api_")
+        or re.fullmatch(r"evt_log_[0-9a-f]{32}", str(log_event.get("id", ""))) is None
     ):
         raise RuntimeError(f"unexpected log event: {log_event}")
 
