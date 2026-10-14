@@ -139,7 +139,6 @@ function createMongooseModelMethodWrapper(mongooseModel, originalMethod, methodN
 }
 
 function createMongooseDocumentMethodWrapper(mongooseModel, originalMethod, methodName, options, isInstalled) {
-  /* eslint-disable no-invalid-this */
   return function logBrewMongooseDocumentMethod(...args) {
     if (!isInstalled()) {
       return originalMethod.apply(this, args);
@@ -170,7 +169,6 @@ function createMongooseDocumentMethodWrapper(mongooseModel, originalMethod, meth
     }
     return traceMongooseDirectOperation(mongooseModel, () => result, options, operationKind, "mongoose.document");
   };
-  /* eslint-enable no-invalid-this */
 }
 
 function instrumentMongooseExecutable(executable, options, span) {

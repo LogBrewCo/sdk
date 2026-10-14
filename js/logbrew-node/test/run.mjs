@@ -55,7 +55,9 @@ try {
     try {
       rmdirSync(scopeDirectory);
       rmdirSync(dirname(scopeDirectory));
-    } catch {}
+    } catch {
+      // Another package link can still use the scope directory.
+    }
   }
 }
 

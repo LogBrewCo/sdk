@@ -123,6 +123,7 @@ export function createLogBrewVuePlugin(options = {}) {
           if (typeof previousErrorHandler === "function") {
             return previousErrorHandler(error, instance, info);
           }
+          return undefined;
         };
       }
     }
