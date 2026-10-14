@@ -14,6 +14,7 @@ export type {
   Event,
   EventFilter,
   EventStore,
+  IssueAdmission,
   IssueAttributes,
   IssueStackFrame,
   JavaScriptErrorIssueOptions,
