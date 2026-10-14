@@ -187,6 +187,14 @@ jobs:
         if: ${{ needs.changed-areas.outputs.swift == 'true' }}
         run: bash scripts/check_swift_style.sh
 
+      - name: Run Java static analysis
+        if: ${{ needs.changed-areas.outputs.java == 'true' }}
+        run: bash scripts/check_java_static.sh
+
+      - name: Run PHP static analysis
+        if: ${{ needs.changed-areas.outputs.php == 'true' }}
+        run: bash scripts/check_php_static.sh
+
       - name: Run focused unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all != 'true' }}
         run: python3 -m unittest ${{ needs.changed-areas.outputs.unit_test_modules }}

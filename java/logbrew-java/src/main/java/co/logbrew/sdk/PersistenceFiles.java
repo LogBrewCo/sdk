@@ -56,6 +56,7 @@ final class PersistenceFiles implements AutoCloseable {
             PosixFilePermission.OWNER_WRITE
         )));
 
+    private final Object monitor = new Object();
     private final Path directory;
     private final Object directoryKey;
     private final FileChannel lockChannel;
@@ -150,252 +151,280 @@ final class PersistenceFiles implements AutoCloseable {
         this.readOperation = readOperation;
     }
 
-    synchronized Layout layout() {
-        verifyBoundary();
-        List<Path> records = new ArrayList<>();
-        List<Path> temporary = new ArrayList<>();
-        List<Path> purgeable = new ArrayList<>();
-        Path checkpoint = null;
-        Path highWater = null;
-        Path intent = null;
-        Path purgeIntent = null;
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
-            for (Path path : stream) {
-                String name = name(path);
-                if (LOCK_NAME.equals(name) || KEY_CHECK_NAME.equals(name)) {
-                    verifyRegularFile(path);
-                } else if (CHECKPOINT_NAME.equals(name)) {
-                    verifyRegularFile(path);
-                    checkpoint = path;
-                    purgeable.add(path);
-                } else if (HIGH_WATER_NAME.equals(name)) {
-                    verifyRegularFile(path);
-                    highWater = path;
-                    purgeable.add(path);
-                } else if (INTENT_NAME.equals(name)) {
-                    verifyRegularFile(path);
-                    intent = path;
-                    purgeable.add(path);
-                } else if (PURGE_INTENT_NAME.equals(name)) {
-                    verifyRegularFile(path);
-                    purgeIntent = path;
-                } else if (RECORD_NAME.matcher(name).matches()) {
-                    verifyRegularFile(path);
-                    records.add(path);
-                    purgeable.add(path);
-                } else if (TEMP_NAME.matcher(name).matches()) {
-                    verifyRegularFile(path);
-                    temporary.add(path);
-                    purgeable.add(path);
-                } else {
-                    throw new SdkException(
-                        "persistence_layout_error",
-                        "persistence directory contains an unknown entry"
-                    );
+    Layout layout() {
+        synchronized (monitor) {
+            verifyBoundary();
+            List<Path> records = new ArrayList<>();
+            List<Path> temporary = new ArrayList<>();
+            List<Path> purgeable = new ArrayList<>();
+            Path checkpoint = null;
+            Path highWater = null;
+            Path intent = null;
+            Path purgeIntent = null;
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+                for (Path path : stream) {
+                    String name = name(path);
+                    if (LOCK_NAME.equals(name) || KEY_CHECK_NAME.equals(name)) {
+                        verifyRegularFile(path);
+                    } else if (CHECKPOINT_NAME.equals(name)) {
+                        verifyRegularFile(path);
+                        checkpoint = path;
+                        purgeable.add(path);
+                    } else if (HIGH_WATER_NAME.equals(name)) {
+                        verifyRegularFile(path);
+                        highWater = path;
+                        purgeable.add(path);
+                    } else if (INTENT_NAME.equals(name)) {
+                        verifyRegularFile(path);
+                        intent = path;
+                        purgeable.add(path);
+                    } else if (PURGE_INTENT_NAME.equals(name)) {
+                        verifyRegularFile(path);
+                        purgeIntent = path;
+                    } else if (RECORD_NAME.matcher(name).matches()) {
+                        verifyRegularFile(path);
+                        records.add(path);
+                        purgeable.add(path);
+                    } else if (TEMP_NAME.matcher(name).matches()) {
+                        verifyRegularFile(path);
+                        temporary.add(path);
+                        purgeable.add(path);
+                    } else {
+                        throw new SdkException(
+                            "persistence_layout_error",
+                            "persistence directory contains an unknown entry"
+                        );
+                    }
                 }
+            } catch (IOException error) {
+                throw new SdkException(
+                    "persistence_error",
+                    "persistence directory could not be inspected"
+                );
             }
-        } catch (IOException error) {
-            throw new SdkException(
-                "persistence_error",
-                "persistence directory could not be inspected"
-            );
+            records.sort(Comparator.comparingLong(PersistenceFiles::recordSequence));
+            return new Layout(records, temporary, purgeable, checkpoint, highWater, intent, purgeIntent);
         }
-        records.sort(Comparator.comparingLong(PersistenceFiles::recordSequence));
-        return new Layout(records, temporary, purgeable, checkpoint, highWater, intent, purgeIntent);
     }
 
-    synchronized Path path(String name) {
-        verifyName(name);
-        return directory.resolve(name);
+    Path path(String name) {
+        synchronized (monitor) {
+            verifyName(name);
+            return directory.resolve(name);
+        }
     }
 
-    synchronized Path recordPath(long sequence) {
-        if (sequence <= 0L) {
-            throw PersistenceCrypto.integrityFailure();
-        }
-        return path(String.format(Locale.ROOT, "%020d.lbe", Long.valueOf(sequence)));
-    }
-
-    synchronized OwnedFile createTemporary(String role) throws IOException {
-        String name = "." + role + "-" + UUID.randomUUID().toString().replace("-", "") + ".tmp";
-        if (!TEMP_NAME.matcher(name).matches()) {
-            throw new IllegalArgumentException("unsupported persistence temporary role");
-        }
-        Path target = path(name);
-        return createAtomicOwnerFile(target);
-    }
-
-    synchronized FileIdentity writeAndForce(OwnedFile file, byte[] bytes) throws IOException {
-        verifyBoundary();
-        verifyOwnedPath(file);
-        ByteBuffer buffer = ByteBuffer.wrap(bytes);
-        while (buffer.hasRemaining()) {
-            if (writeOperation.write(file.channel, buffer) <= 0) {
-                throw new IOException("persistence write made no progress");
-            }
-        }
-        file.channel.force(true);
-        verifyOwnedPath(file);
-        return verifyExact(file.path, bytes.length, PersistenceCrypto.digest(bytes), file.fileKey);
-    }
-
-    synchronized FileData read(Path path, long maxBytes) {
-        verifyBoundary();
-        if (maxBytes <= 0L || maxBytes > Integer.MAX_VALUE) {
-            throw new SdkException("persistence_bounds_exceeded", "persistence read bound is invalid");
-        }
-        verifyRegularFile(path);
-        BasicFileAttributes before = readAttributes(path);
-        Object beforeKey = fileKey(before, false);
-        long size = before.size();
-        if (size <= 0L || size > maxBytes) {
-            throw PersistenceCrypto.integrityFailure();
-        }
-
-        byte[] bytes = new byte[(int) size];
-        try (FileChannel channel = FileChannel.open(
-            path,
-            StandardOpenOption.READ,
-            LinkOption.NOFOLLOW_LINKS
-        )) {
-            if (channel.size() != size) {
+    Path recordPath(long sequence) {
+        synchronized (monitor) {
+            if (sequence <= 0L) {
                 throw PersistenceCrypto.integrityFailure();
             }
-            ByteBuffer target = ByteBuffer.wrap(bytes);
-            while (target.hasRemaining()) {
-                int read = readOperation.read(channel, target);
-                if (read < 0) {
+            return path(String.format(Locale.ROOT, "%020d.lbe", Long.valueOf(sequence)));
+        }
+    }
+
+    OwnedFile createTemporary(String role) throws IOException {
+        synchronized (monitor) {
+            String name = "." + role + "-" + UUID.randomUUID().toString().replace("-", "") + ".tmp";
+            if (!TEMP_NAME.matcher(name).matches()) {
+                throw new IllegalArgumentException("unsupported persistence temporary role");
+            }
+            Path target = path(name);
+            return createAtomicOwnerFile(target);
+        }
+    }
+
+    FileIdentity writeAndForce(OwnedFile file, byte[] bytes) throws IOException {
+        synchronized (monitor) {
+            verifyBoundary();
+            verifyOwnedPath(file);
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            while (buffer.hasRemaining()) {
+                if (writeOperation.write(file.channel, buffer) <= 0) {
+                    throw new IOException("persistence write made no progress");
+                }
+            }
+            file.channel.force(true);
+            verifyOwnedPath(file);
+            return verifyExact(file.path, bytes.length, PersistenceCrypto.digest(bytes), file.fileKey);
+        }
+    }
+
+    FileData read(Path path, long maxBytes) {
+        synchronized (monitor) {
+            verifyBoundary();
+            if (maxBytes <= 0L || maxBytes > Integer.MAX_VALUE) {
+                throw new SdkException("persistence_bounds_exceeded", "persistence read bound is invalid");
+            }
+            verifyRegularFile(path);
+            BasicFileAttributes before = readAttributes(path);
+            Object beforeKey = fileKey(before, false);
+            long size = before.size();
+            if (size <= 0L || size > maxBytes) {
+                throw PersistenceCrypto.integrityFailure();
+            }
+
+            byte[] bytes = new byte[(int) size];
+            try (FileChannel channel = FileChannel.open(
+                path,
+                StandardOpenOption.READ,
+                LinkOption.NOFOLLOW_LINKS
+            )) {
+                if (channel.size() != size) {
                     throw PersistenceCrypto.integrityFailure();
                 }
-                if (read == 0) {
-                    throw new SdkException(
-                        "persistence_integrity_error",
-                        "persistence read made no progress"
-                    );
+                ByteBuffer target = ByteBuffer.wrap(bytes);
+                while (target.hasRemaining()) {
+                    int read = readOperation.read(channel, target);
+                    if (read < 0) {
+                        throw PersistenceCrypto.integrityFailure();
+                    }
+                    if (read == 0) {
+                        throw new SdkException(
+                            "persistence_integrity_error",
+                            "persistence read made no progress"
+                        );
+                    }
                 }
+                if (readOperation.read(channel, ByteBuffer.allocate(1)) != -1) {
+                    throw PersistenceCrypto.integrityFailure();
+                }
+            } catch (IOException error) {
+                Arrays.fill(bytes, (byte) 0);
+                throw new SdkException("persistence_error", "persistence file could not be read safely");
             }
-            if (readOperation.read(channel, ByteBuffer.allocate(1)) != -1) {
+
+            verifyRegularFile(path);
+            BasicFileAttributes after = readAttributes(path);
+            Object afterKey = fileKey(after, false);
+            if (!beforeKey.equals(afterKey) || after.size() != size) {
+                Arrays.fill(bytes, (byte) 0);
                 throw PersistenceCrypto.integrityFailure();
             }
-        } catch (IOException error) {
-            Arrays.fill(bytes, (byte) 0);
-            throw new SdkException("persistence_error", "persistence file could not be read safely");
+            return new FileData(bytes, new FileIdentity(
+                beforeKey,
+                size,
+                PersistenceCrypto.digest(bytes)
+            ));
         }
-
-        verifyRegularFile(path);
-        BasicFileAttributes after = readAttributes(path);
-        Object afterKey = fileKey(after, false);
-        if (!beforeKey.equals(afterKey) || after.size() != size) {
-            Arrays.fill(bytes, (byte) 0);
-            throw PersistenceCrypto.integrityFailure();
-        }
-        return new FileData(bytes, new FileIdentity(
-            beforeKey,
-            size,
-            PersistenceCrypto.digest(bytes)
-        ));
     }
 
-    synchronized FileIdentity verifyExact(
+    FileIdentity verifyExact(
         Path path,
         long expectedSize,
         byte[] expectedDigest,
         Object expectedFileKey
     ) {
-        FileData data = read(path, expectedSize);
-        try {
-            if (data.identity.size != expectedSize
-                || !java.security.MessageDigest.isEqual(data.identity.digest, expectedDigest)
-                || (expectedFileKey != null && !expectedFileKey.equals(data.identity.fileKey))) {
-                throw PersistenceCrypto.integrityFailure();
+        synchronized (monitor) {
+            FileData data = read(path, expectedSize);
+            try {
+                if (data.identity.size != expectedSize
+                    || !java.security.MessageDigest.isEqual(data.identity.digest, expectedDigest)
+                    || (expectedFileKey != null && !expectedFileKey.equals(data.identity.fileKey))) {
+                    throw PersistenceCrypto.integrityFailure();
+                }
+                return data.identity;
+            } finally {
+                Arrays.fill(data.bytes, (byte) 0);
             }
-            return data.identity;
-        } finally {
-            Arrays.fill(data.bytes, (byte) 0);
         }
     }
 
-    synchronized void move(OwnedFile source, Path target, boolean replace) throws IOException {
-        verifyBoundary();
-        verifyOwnedPath(source);
-        source.close();
-        verifyOwnedPath(source);
-        moveExisting(source.path, target, replace);
+    void move(OwnedFile source, Path target, boolean replace) throws IOException {
+        synchronized (monitor) {
+            verifyBoundary();
+            verifyOwnedPath(source);
+            source.close();
+            verifyOwnedPath(source);
+            moveExisting(source.path, target, replace);
+        }
     }
 
-    synchronized void moveExisting(Path source, Path target, boolean replace) throws IOException {
-        verifyBoundary();
-        verifyRegularFile(source);
-        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-            verifyRegularFile(target);
-        }
-        try {
-            if (replace) {
-                Files.move(
-                    source,
-                    target,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING
+    void moveExisting(Path source, Path target, boolean replace) throws IOException {
+        synchronized (monitor) {
+            verifyBoundary();
+            verifyRegularFile(source);
+            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                verifyRegularFile(target);
+            }
+            try {
+                if (replace) {
+                    Files.move(
+                        source,
+                        target,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING
+                    );
+                } else {
+                    Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+                }
+            } catch (AtomicMoveNotSupportedException error) {
+                throw new SdkException(
+                    "persistence_unsupported",
+                    "atomic persistence replacement is unavailable"
                 );
-            } else {
-                Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
             }
-        } catch (AtomicMoveNotSupportedException error) {
-            throw new SdkException(
-                "persistence_unsupported",
-                "atomic persistence replacement is unavailable"
-            );
         }
     }
 
-    synchronized void delete(Path path) throws IOException {
-        verifyBoundary();
-        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-            verifyRegularFile(path);
-            Files.delete(path);
+    void delete(Path path) throws IOException {
+        synchronized (monitor) {
+            verifyBoundary();
+            if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                verifyRegularFile(path);
+                Files.delete(path);
+            }
         }
     }
 
-    synchronized void syncDirectory() throws IOException {
-        verifyBoundary();
-        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
-            channel.force(true);
+    void syncDirectory() throws IOException {
+        synchronized (monitor) {
+            verifyBoundary();
+            try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+                channel.force(true);
+            }
         }
     }
 
-    synchronized boolean exists(Path path) {
-        verifyBoundary();
-        return Files.exists(path, LinkOption.NOFOLLOW_LINKS);
+    boolean exists(Path path) {
+        synchronized (monitor) {
+            verifyBoundary();
+            return Files.exists(path, LinkOption.NOFOLLOW_LINKS);
+        }
     }
 
-    synchronized void verifyBoundary() {
-        ensureOpen();
-        BasicFileAttributes directoryAttributes = readAttributes(directory);
-        if (!directoryAttributes.isDirectory()
-            || !directoryKey.equals(fileKey(directoryAttributes, true))) {
-            throw new SdkException(
-                "persistence_replaced",
-                "persistence directory ownership changed"
-            );
-        }
-        verifyOwnerOnly(directory, true);
-        if (!lock.isValid()) {
-            throw new SdkException("persistence_in_use", "persistence ownership lock is no longer valid");
-        }
-        Path lockPath = directory.resolve(LOCK_NAME);
-        verifyRegularFile(lockPath);
-        if (!lockKey.equals(fileKey(readAttributes(lockPath), false))) {
-            throw new SdkException("persistence_replaced", "persistence lock ownership changed");
+    void verifyBoundary() {
+        synchronized (monitor) {
+            ensureOpen();
+            BasicFileAttributes directoryAttributes = readAttributes(directory);
+            if (!directoryAttributes.isDirectory()
+                || !directoryKey.equals(fileKey(directoryAttributes, true))) {
+                throw new SdkException(
+                    "persistence_replaced",
+                    "persistence directory ownership changed"
+                );
+            }
+            verifyOwnerOnly(directory, true);
+            if (!lock.isValid()) {
+                throw new SdkException("persistence_in_use", "persistence ownership lock is no longer valid");
+            }
+            Path lockPath = directory.resolve(LOCK_NAME);
+            verifyRegularFile(lockPath);
+            if (!lockKey.equals(fileKey(readAttributes(lockPath), false))) {
+                throw new SdkException("persistence_replaced", "persistence lock ownership changed");
+            }
         }
     }
 
     @Override
-    public synchronized void close() {
-        if (closed) {
-            return;
+    public void close() {
+        synchronized (monitor) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            releaseQuietly(lock, lockChannel);
         }
-        closed = true;
-        releaseQuietly(lock, lockChannel);
     }
 
     static long recordSequence(Path path) {
