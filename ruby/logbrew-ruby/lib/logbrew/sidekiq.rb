@@ -230,7 +230,9 @@ module LogBrew
         end
         return yield if operation.nil?
 
-        terminal = terminal_failure?(job["retry"], retry_count)
+        terminal = terminal_failure?(
+          job["retry"], retry_count, initial_attempt: !job.key?("retry_count")
+        )
         operation.around(terminal_failure: terminal) { yield }
       end
 
@@ -364,13 +366,14 @@ module LogBrew
         value
       end
 
-      def terminal_failure?(retry_setting, retry_count)
+      def terminal_failure?(retry_setting, retry_count, initial_attempt:)
         return false if retry_count.nil?
         return true if retry_setting == false || retry_setting == 0
         return false unless retry_setting.nil? || retry_setting == true || retry_setting.is_a?(Integer)
 
         limit = retry_setting.is_a?(Integer) ? retry_setting : @max_retries
         return false if limit.negative?
+        return false if initial_attempt && limit.positive?
 
         retry_count >= [limit - 1, 0].max
       end

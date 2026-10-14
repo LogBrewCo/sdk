@@ -53,7 +53,15 @@ module LogBrew
     def capture_safely
       yield
     rescue StandardError => error
-      @on_error.call(error) if @on_error.respond_to?(:call)
+      handle_logbrew_error(error)
+    end
+
+    def handle_logbrew_error(error)
+      begin
+        @on_error.call(error) if @on_error.respond_to?(:call)
+      rescue StandardError
+        nil
+      end
       raise error if @raise_errors
     end
   end
@@ -326,11 +334,6 @@ module LogBrew
         metadata: logbrew_metadata(severity, message, progname)
       )
       flush_logbrew if @flush_on_log
-    end
-
-    def handle_logbrew_error(error)
-      @on_error.call(error) if @on_error.respond_to?(:call)
-      raise error if @raise_errors
     end
 
     def logbrew_message(message)

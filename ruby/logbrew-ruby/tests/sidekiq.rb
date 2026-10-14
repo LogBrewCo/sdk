@@ -2,6 +2,7 @@
 
 require "json"
 require "open3"
+require "stringio"
 require_relative "../lib/logbrew/sidekiq"
 require_relative "test_helpers"
 include SdkTestHelpers
@@ -307,6 +308,105 @@ end
 issues = sidekiq_events(client).select { |event| event.fetch("type") == "issue" }
 assert(issues.length == 1, "terminal failure issue was not deduplicated")
 sidekiq_tests += 1
+
+[[1, 25], [true, 1]].each do |retry_setting, max_retries|
+  [:recovered, :terminal].each do |outcome|
+    client = sidekiq_client
+    instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: client, max_retries: max_retries)
+    client_middleware = LogBrew::Sidekiq::ClientMiddleware.new(instrumentation)
+    server_middleware = LogBrew::Sidekiq::ServerMiddleware.new(instrumentation)
+    job = sidekiq_job("retry" => retry_setting)
+    LogBrew::Trace.with_context(sidekiq_parent) { client_middleware.call(nil, job, nil, nil) { true } }
+    carrier = Marshal.load(Marshal.dump(job.fetch("logbrew")))
+    output = StringIO.new
+    application_logger = LogBrew::Logger.new(client: client, logdev: output, level: ::Logger::WARN)
+    suppressed_calls = 0
+    initial_error = IOError.new("opaque initial failure detail")
+    outer_context = LogBrew::Trace.create_root
+
+    raised = LogBrew::Trace.with_context(outer_context) do
+      failure = capture_exception do
+        server_middleware.call(nil, job, nil) do
+          application_logger.info { suppressed_calls += 1; "suppressed application log" }
+          application_logger.warn("worker started")
+          raise initial_error
+        end
+      end
+      assert(LogBrew::Trace.current.equal?(outer_context), "initial failure changed the caller trace")
+      failure
+    end
+    assert(raised.equal?(initial_error), "initial retryable exception identity changed")
+    assert(!job.key?("retry_count"), "middleware changed the job retry count")
+    assert(job.fetch("logbrew") == carrier, "initial failure changed the queue carrier")
+    assert(suppressed_calls.zero?, "filtered logger block was evaluated")
+    initial_events = sidekiq_events(client)
+    assert(initial_events.none? { |event| event.fetch("type") == "issue" }, "initial failure exhausted the single retry early")
+    initial_logs = initial_events.select { |event| event.fetch("type") == "log" }
+    assert(initial_logs.length == 1 && output.string.include?("worker started"), "emitted initial application log was lost")
+    initial_span = initial_events.reverse.find { |event| event.fetch("type") == "span" }.fetch("attributes")
+    assert(initial_span.fetch("status") == "error", "initial retryable failure lost its error span")
+    assert(initial_logs.fetch(0).dig("attributes", "context", "trace", "spanId") == initial_span.fetch("spanId"), "initial log lost the worker span")
+
+    job["retry_count"] = 0
+    terminal_error = ArgumentError.new("opaque terminal failure detail")
+    recovery_result = Object.new
+    result = LogBrew::Trace.with_context(outer_context) do
+      value = capture_exception do
+        server_middleware.call(nil, job, nil) do
+          application_logger.warn("worker stopped")
+          raise terminal_error if outcome == :terminal
+
+          recovery_result
+        end
+      end
+      assert(LogBrew::Trace.current.equal?(outer_context), "retry result changed the caller trace")
+      value
+    end
+    expected_result = outcome == :terminal ? terminal_error : recovery_result
+    assert(result.equal?(expected_result), "single retry changed the app result or exception identity")
+    assert(LogBrew::Trace.current.nil?, "single retry leaked its trace into the caller")
+    assert(job.fetch("logbrew") == carrier, "single retry changed the queue carrier")
+    events = sidekiq_events(client)
+    spans = events.select { |event| event.fetch("type") == "span" }
+    issues = events.select { |event| event.fetch("type") == "issue" }
+    logs = events.select { |event| event.fetch("type") == "log" }
+    retry_span = spans.last.fetch("attributes")
+    assert(spans.length == 3, "single retry changed the producer or worker span count")
+    assert(logs.length == 2 && output.string.include?("worker stopped"), "emitted retry application log was lost")
+    assert(logs.last.dig("attributes", "context", "trace", "spanId") == retry_span.fetch("spanId"), "retry log lost the worker span")
+    assert(spans.all? { |event| event.dig("attributes", "traceId") == sidekiq_parent.trace_id }, "single retry broke the producer trace")
+    assert(retry_span.fetch("status") == (outcome == :terminal ? "error" : "ok"), "single retry span status changed")
+    assert(issues.length == (outcome == :terminal ? 1 : 0), "single retry terminal issue count changed")
+    serialized = JSON.generate(events)
+    ["opaque initial failure detail", "opaque terminal failure detail"].each do |forbidden|
+      assert(!serialized.include?(forbidden), "single retry leaked exception text")
+    end
+    if outcome == :terminal
+      issue = issues.fetch(0).fetch("attributes")
+      assert(issue.fetch("title") == "ArgumentError", "terminal issue kept the initial failure type")
+      assert(issue.dig("metadata", "spanId") == retry_span.fetch("spanId"), "terminal issue kept the initial worker span")
+      assert(issue.dig("exception", "mechanism", "handled") == false, "terminal issue lost unhandled evidence")
+      assert(!issue.fetch("stackFrames").empty?, "terminal issue lost structured frames")
+      raised = capture_exception { server_middleware.call(nil, job, nil) { raise terminal_error } }
+      assert(raised.equal?(terminal_error), "duplicate terminal failure changed exception identity")
+      assert(sidekiq_events(client).count { |event| event.fetch("type") == "issue" } == 1, "single retry terminal issue was not deduplicated")
+    end
+    response = client.flush(LogBrew::RecordingTransport.always_accept)
+    assert(response.status_code == 202 && client.pending_events.zero?, "single retry evidence did not drain locally")
+    sidekiq_tests += 1
+  end
+end
+
+[[false, 25], [0, 25], [true, 0]].each do |retry_setting, max_retries|
+  client = sidekiq_client
+  instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: client, max_retries: max_retries)
+  job = sidekiq_job("retry" => retry_setting)
+  error = RuntimeError.new("opaque no-retry failure detail")
+  raised = capture_exception { LogBrew::Sidekiq::ServerMiddleware.new(instrumentation).call(nil, job, nil) { raise error } }
+  assert(raised.equal?(error), "no-retry initial failure changed exception identity")
+  assert(sidekiq_events(client).count { |event| event.fetch("type") == "issue" } == 1, "no-retry initial failure lost its terminal issue")
+  sidekiq_tests += 1
+end
 
 client = sidekiq_client
 instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: client)
