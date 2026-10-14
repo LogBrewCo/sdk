@@ -882,4 +882,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.std
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
+cp "$repo_root"/js/logbrew-express/test/*.test.js "$app_dir/"
+node --test "$app_dir"/*.test.js >/dev/null
+
 echo "express real-user smoke passed with express@$express_version @types/express@$types_express_version"

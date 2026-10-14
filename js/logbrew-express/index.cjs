@@ -1,3 +1,5 @@
+"use strict";
+
 const {
   createIssueAttributesFromError,
   SdkError
@@ -66,10 +68,99 @@ function logbrewMiddleware(options = {}) {
 
     if (capturesOnFinish) {
       ensureFinishFinalizer(lifecycle);
+      ensureCloseFinalizer(lifecycle);
     }
 
     runWithLogBrewTrace(trace, next);
   };
+}
+
+function withLogBrewExpressHandler(handler) {
+  if (typeof handler !== "function" || handler.length > 3) {
+    throw new SdkError("configuration_error", "withLogBrewExpressHandler requires a request handler");
+  }
+
+  /** @this {*} */
+  return function logBrewExpressHandler(req, res, next) {
+    const lifecycle = requestLifecycles.get(req);
+    if (lifecycle && !lifecycle.released) {
+      lifecycle.wrapped = true;
+      lifecycle.activeHandlers += 1;
+    }
+    const ownedLifecycle = lifecycle && !lifecycle.released ? lifecycle : undefined;
+    const trace = getRequestTraceContext(req) ?? getActiveLogBrewTrace();
+
+    return runWithLogBrewTrace(trace, () => {
+      try {
+        const result = Reflect.apply(handler, this, [req, res, next]);
+        if (result !== null && (typeof result === "object" || typeof result === "function")
+          && typeof result.then === "function") {
+          return Promise.resolve(result).then(
+            (value) => {
+              settleWrappedHandler(ownedLifecycle);
+              return value;
+            },
+            (error) => {
+              try {
+                next(error || new Error("Rejected promise"));
+              } finally {
+                settleWrappedHandler(ownedLifecycle);
+              }
+            }
+          );
+        }
+        settleWrappedHandler(ownedLifecycle);
+        return result;
+      } catch (error) {
+        settleWrappedHandler(ownedLifecycle);
+        throw error;
+      }
+    });
+  };
+}
+
+function settleWrappedHandler(lifecycle) {
+  if (!lifecycle) {
+    return;
+  }
+  lifecycle.activeHandlers -= 1;
+  scheduleWrappedShutdown(lifecycle);
+}
+
+function scheduleWrappedShutdown(lifecycle) {
+  if (!lifecycle.finalized || !lifecycle.deferredShutdown || lifecycle.activeHandlers !== 0
+    || lifecycle.shutdownScheduled) {
+    return;
+  }
+  lifecycle.shutdownScheduled = true;
+  void runWithLogBrewTrace(getRequestTraceContext(lifecycle.req), () => shutdownWrappedLifecycle(lifecycle));
+}
+
+async function shutdownWrappedLifecycle(lifecycle) {
+  await lifecycle.deliverySettled;
+  if (lifecycle.activeHandlers > 0) {
+    lifecycle.shutdownScheduled = false;
+    return;
+  }
+  releaseRequestLifecycle(lifecycle);
+  const { client, observers, req, res, transport } = lifecycle;
+  const context = { req, res, client, trace: getRequestTraceContext(req) };
+  try {
+    const hasTail = client.pendingEvents() > 0;
+    const response = await client.shutdown(transport);
+    if (hasTail) {
+      await notifyLifecycleFlush([...observers], response, context);
+    }
+  } catch (error) {
+    await notifyLifecycleFailure([...observers], error, context);
+  }
+}
+
+function releaseRequestLifecycle(lifecycle) {
+  lifecycle.released = true;
+  if (requestLifecycles.get(lifecycle.req) === lifecycle) {
+    requestLifecycles.delete(lifecycle.req);
+  }
 }
 
 function logbrewErrorHandler(options = {}) {
@@ -81,31 +172,46 @@ function logbrewErrorHandler(options = {}) {
     const client = existing?.client ?? resolveClient(options, req, res);
     const transport = existing?.transport ?? resolveTransport(options, req, res, client, defaultTransport);
     const trace = existing?.trace ?? getActiveLogBrewTrace();
-    const event = typeof options.errorEvent === "function"
-      ? options.errorEvent(error, { req, res, client, trace })
-      : createErrorEvent(error, req, { ...options, trace });
+    const context = { req, res, client, trace };
 
-    try {
-      addErrorBreadcrumb(client, req);
-      client.issue(event.id, event.timestamp, event.attributes);
+    return runWithLogBrewTrace(trace, () => {
       const lifecycle = requestLifecycles.get(req);
-      if (lifecycle && !lifecycle.finalized && lifecycle.client === client && lifecycle.transport === transport) {
-        if (!lifecycle.observers.includes(options)) {
-          lifecycle.observers.push(options);
+      const requestOwnsDelivery = lifecycle && !lifecycle.released
+        && lifecycle.client === client && lifecycle.transport === transport;
+      try {
+        const event = typeof options.errorEvent === "function"
+          ? options.errorEvent(error, context)
+          : createErrorEvent(error, req, { ...options, trace });
+        addErrorBreadcrumb(client, req);
+        client.issue(event.id, event.timestamp, event.attributes);
+        if (requestOwnsDelivery) {
+          if (!lifecycle.observers.includes(options)) {
+            lifecycle.observers.push(options);
+          }
+          ensureFinishFinalizer(lifecycle);
+          ensureCloseFinalizer(lifecycle);
+          if (lifecycle.wrapped && (req.aborted === true || res.destroyed === true || res.writableFinished === true)) {
+            void finalizeRequestLifecycle(lifecycle);
+          }
+        } else {
+          shutdownErrorClient(options, transport, context);
         }
-        ensureFinishFinalizer(lifecycle);
-        ensureCloseFinalizer(lifecycle);
-      } else {
-        void client.shutdown(transport)
-          .then((response) => notifyFlush(options, response, { req, res, client, trace }))
-          .catch((flushError) => notifyFailure(options, flushError, { req, res, client, trace }));
+      } catch (captureError) {
+        void notifyLifecycleFailure([options], captureError, context);
+        if (!requestOwnsDelivery && client.pendingEvents() > 0) {
+          shutdownErrorClient(options, transport, context);
+        }
       }
-    } catch (captureError) {
-      void notifyFailure(options, captureError, { req, res, client, trace });
-    }
 
-    next(error);
+      next(error);
+    });
   };
+}
+
+function shutdownErrorClient(options, transport, context) {
+  void context.client.shutdown(transport)
+    .then((response) => notifyFlush(options, response, context))
+    .catch((flushError) => notifyLifecycleFailure([options], flushError, context));
 }
 
 function createRequestEvent(req, res, {
@@ -125,7 +231,7 @@ function createRequestEvent(req, res, {
       spanIdFactory,
       traceIdFactory
     }),
-    { durationMs, id, method, now, routeTemplate, statusCode }
+    { durationMs, id, method, now, routeTemplate, statusCode, responseCompleted: responseCompleted(req, res) }
   );
 }
 
@@ -181,7 +287,8 @@ function createRequestMetricEvent(req, res, {
         method,
         routeTemplate,
         statusCode,
-        statusCodeClass: statusCodeClass(statusCode)
+        statusCodeClass: statusCodeClass(statusCode),
+        ...incompleteResponseMetadata(req, res)
       }
     }
   };
@@ -202,15 +309,20 @@ function createRequestContext(client, transport, trace) {
 function createRequestLifecycle({ captureOptions, client, observers, req, res, startedAt, transport }) {
   return {
     captureOptions,
+    activeHandlers: 0,
     client,
     closeAttached: false,
+    deferredShutdown: false,
     finalized: false,
     finishAttached: false,
     observers,
+    released: false,
     req,
     res,
     startedAt,
-    transport
+    transport,
+    wrapped: false,
+    shutdownScheduled: false
   };
 }
 
@@ -219,9 +331,10 @@ function ensureFinishFinalizer(lifecycle) {
     return;
   }
   lifecycle.finishAttached = true;
-  lifecycle.res.once("finish", () => {
-    void finalizeRequestLifecycle(lifecycle);
-  });
+  lifecycle.finishListener = () => {
+    void runWithLogBrewTrace(getRequestTraceContext(lifecycle.req), () => finalizeRequestLifecycle(lifecycle));
+  };
+  lifecycle.res.once("finish", lifecycle.finishListener);
 }
 
 function ensureCloseFinalizer(lifecycle) {
@@ -229,9 +342,11 @@ function ensureCloseFinalizer(lifecycle) {
     return;
   }
   lifecycle.closeAttached = true;
-  lifecycle.res.once("close", () => {
-    void finalizeRequestLifecycle(lifecycle);
-  });
+  lifecycle.closeListener = () => {
+    void runWithLogBrewTrace(getRequestTraceContext(lifecycle.req), () => finalizeRequestLifecycle(lifecycle));
+  };
+  lifecycle.res.once("close", lifecycle.closeListener);
+  lifecycle.req.once("aborted", lifecycle.closeListener);
 }
 
 async function finalizeRequestLifecycle(lifecycle) {
@@ -239,7 +354,19 @@ async function finalizeRequestLifecycle(lifecycle) {
     return;
   }
   lifecycle.finalized = true;
-  requestLifecycles.delete(lifecycle.req);
+  lifecycle.deferredShutdown = lifecycle.activeHandlers > 0;
+  if (!lifecycle.deferredShutdown) {
+    releaseRequestLifecycle(lifecycle);
+  }
+  let resolveDelivery;
+  lifecycle.deliverySettled = new Promise((resolve) => { resolveDelivery = resolve; });
+  if (lifecycle.finishListener) {
+    lifecycle.res.removeListener("finish", lifecycle.finishListener);
+  }
+  if (lifecycle.closeListener) {
+    lifecycle.res.removeListener("close", lifecycle.closeListener);
+    lifecycle.req.removeListener("aborted", lifecycle.closeListener);
+  }
 
   const { captureOptions: options, client, observers, req, res, startedAt, transport } = lifecycle;
   const trace = getRequestTraceContext(req);
@@ -275,9 +402,14 @@ async function finalizeRequestLifecycle(lifecycle) {
   }
 
   try {
-    const response = await client.shutdown(transport);
-    await notifyLifecycleFlush(observers, response, context);
+    const deliveryObservers = [...observers];
+    const response = await (lifecycle.deferredShutdown ? client.flush(transport) : client.shutdown(transport));
+    resolveDelivery();
+    scheduleWrappedShutdown(lifecycle);
+    await notifyLifecycleFlush(deliveryObservers, response, context);
   } catch (error) {
+    resolveDelivery();
+    scheduleWrappedShutdown(lifecycle);
     await notifyLifecycleFailure(observers, error, context);
   }
 }
@@ -346,7 +478,8 @@ function defaultRequestMetricEventId(req, res) {
 function getRouteTemplate(req) {
   const routePath = req.route?.path;
   if (typeof routePath === "string") {
-    return pathOnly(routePath);
+    // Express declares a route pattern here, not a concrete request URL.
+    return routePath;
   }
   return "<unmatched>";
 }
@@ -363,15 +496,6 @@ function addErrorBreadcrumb(client, req) {
   });
 }
 
-function pathOnly(value) {
-  const rawValue = typeof value === "string" ? value : String(value);
-  try {
-    return new URL(rawValue, "http://localhost").pathname || "/";
-  } catch {
-    return rawValue.split("?")[0] || "/";
-  }
-}
-
 function getTraceparentHeader(req) {
   const value = req.headers?.traceparent;
   if (Array.isArray(value)) {
@@ -386,7 +510,8 @@ function createTraceparentRequestSpan(traceContext, {
   method,
   now,
   routeTemplate,
-  statusCode
+  statusCode,
+  responseCompleted
 }) {
   if (!traceContext) {
     return undefined;
@@ -401,14 +526,15 @@ function createTraceparentRequestSpan(traceContext, {
       traceId: traceContext.traceId,
       spanId: traceContext.spanId,
       parentSpanId: traceContext.parentSpanId,
-      status: statusCode >= 500 ? "error" : "ok",
+      status: statusCode >= 500 || !responseCompleted ? "error" : "ok",
       durationMs,
       metadata: {
         framework: "express",
         method,
         routeTemplate,
         sampled: traceContext.sampled,
-        statusCode
+        statusCode,
+        ...(!responseCompleted ? { responseCompleted: false } : {})
       }
     }
   };
@@ -431,6 +557,14 @@ function statusCodeClass(statusCode) {
     return "unknown";
   }
   return `${Math.floor(statusCode / 100)}xx`;
+}
+
+function responseCompleted(req, res) {
+  return req.aborted !== true && !(res.destroyed === true && res.writableFinished === false);
+}
+
+function incompleteResponseMetadata(req, res) {
+  return responseCompleted(req, res) ? {} : { responseCompleted: false };
 }
 
 function randomHex(byteLength) {
@@ -490,5 +624,6 @@ module.exports = {
   createRequestEvent,
   getActiveLogBrewTrace,
   logbrewErrorHandler,
-  logbrewMiddleware
+  logbrewMiddleware,
+  withLogBrewExpressHandler
 };
