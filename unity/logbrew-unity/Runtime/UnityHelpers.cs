@@ -14,7 +14,10 @@ namespace LogBrew.Unity
             string gameName,
             int maxRetries = 2,
             TelemetryContext? context = null,
-            bool includeAutomaticContext = true)
+            bool includeAutomaticContext = true,
+            int maxQueueSize = LogBrewClient.DefaultMaxQueueSize,
+            int maxQueueBytes = LogBrewClient.DefaultMaxQueueBytes,
+            Action<DroppedEvent>? onEventDropped = null)
         {
             Validation.RequireNonEmpty("game_name", gameName);
             var unityContext = UnityRuntimeContext.Create(gameName, includeAutomaticContext);
@@ -24,7 +27,10 @@ namespace LogBrew.Unity
                 SdkVersion,
                 maxRetries,
                 TelemetryContext.Merge(unityContext, context),
-                includeAutomaticContext);
+                includeAutomaticContext,
+                maxQueueSize,
+                maxQueueBytes,
+                onEventDropped);
         }
 
         public static void CaptureSceneLoaded(

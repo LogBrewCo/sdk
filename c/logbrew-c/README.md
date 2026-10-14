@@ -50,6 +50,10 @@ logbrew_recording_transport_free(&transport);
 logbrew_client_free(client);
 ```
 
+## Queue Bounds
+
+The client queue holds at most 1,000 events and 4 MiB of encoded event JSON by default. Set `max_queue_events` or `max_queue_bytes` in `LogBrewClientOptions` to change them; zero keeps the default. When a bound is full, the capture call drops the new event, keeps queued ones, and still returns `LOGBREW_OK`. `logbrew_client_dropped_events()` counts drops. The optional `on_event_dropped` callback receives a `LogBrewEventDrop` with the event ID, type, reason (`queue_overflow`, `queue_bytes_overflow`, or `event_too_large`), and total count. Drops the callback causes do not call it again.
+
 ## Rich investigation context
 
 Every signal can carry the same schema-v1 resource, trace, session, opaque subject, and tag context through `LogBrewTelemetryContext`. The default constructor adds only portable automatic facts that are safe and useful for investigation: the C language standard, operating-system family, and CPU architecture when they are available at compile time. It does not inspect ambient machine, user, process, filesystem, network, account, or device identity data.

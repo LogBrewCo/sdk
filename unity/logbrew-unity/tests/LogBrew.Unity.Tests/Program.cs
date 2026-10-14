@@ -16,6 +16,8 @@ namespace LogBrew.Unity.Tests
             Run("preview_json_contains_all_supported_event_types", PreviewJsonContainsAllSupportedEventTypes);
             Run("flush_success_clears_queue", FlushSuccessClearsQueue);
             Run("empty_flush_is_noop", EmptyFlushIsNoop);
+            Run("bounded_queue_counts_newest_drops_with_reasons", BoundedQueueCountsNewestDropsWithReasons);
+            Run("drop_callback_failures_never_reach_the_app", DropCallbackFailuresNeverReachTheApp);
             Run("invalid_timestamp_fails_validation", InvalidTimestampFailsValidation);
             Run("invalid_issue_level_fails_validation", InvalidIssueLevelFailsValidation);
             Run("negative_span_duration_fails_validation", NegativeSpanDurationFailsValidation);
@@ -49,7 +51,7 @@ namespace LogBrew.Unity.Tests
             Run("manual_exception_chain_validates_root_evidence", ManualExceptionChainValidatesRootEvidence);
             Run("breadcrumb_buffer_is_bounded_and_clearable", BreadcrumbBufferIsBoundedAndClearable);
             Run("unity_stack_trace_parser_emits_typed_frames", UnityStackTraceParserEmitsTypedFrames);
-            Console.WriteLine("unity package tests ok (36 tests)");
+            Console.WriteLine("unity package tests ok (38 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -67,6 +69,24 @@ namespace LogBrew.Unity.Tests
         private static LogBrewClient NewClient(int maxRetries = 2)
         {
             return LogBrewUnity.CreateClient("LOGBREW_API_KEY", "logbrew-unity-tests", maxRetries);
+        }
+
+        private static LogBrewClient BoundedClient(Action<DroppedEvent> onEventDropped, int maxQueueSize = LogBrewClient.DefaultMaxQueueSize, int maxQueueBytes = LogBrewClient.DefaultMaxQueueBytes)
+        {
+            return LogBrewUnity.CreateClient("LOGBREW_API_KEY", "logbrew-unity-tests", maxQueueSize: maxQueueSize, maxQueueBytes: maxQueueBytes, onEventDropped: onEventDropped);
+        }
+
+        private static void LogEvent(LogBrewClient client, string id)
+        {
+            client.Log(id, "2026-06-02T10:00:03Z", LogAttributes.Create("same size", "info"));
+        }
+
+        private static void AssertDrop(DroppedEvent drop, string eventId, string reason, int droppedEvents)
+        {
+            AssertEqual(eventId, drop.EventId);
+            AssertEqual("log", drop.EventType);
+            AssertEqual(reason, drop.Reason);
+            AssertEqual(droppedEvents, drop.DroppedEvents);
         }
 
         private static void EnqueueAll(LogBrewClient client)
@@ -131,6 +151,59 @@ namespace LogBrew.Unity.Tests
             AssertEqual(1, response.Attempts);
             AssertEqual(0, client.PendingEvents());
             AssertEqual(1, transport.SentBodies.Count);
+        }
+
+        private static void BoundedQueueCountsNewestDropsWithReasons()
+        {
+            var drops = new List<DroppedEvent>();
+            var defaults = BoundedClient(drops.Add);
+            for (var index = 0; index <= LogBrewClient.DefaultMaxQueueSize; index++)
+            {
+                LogEvent(defaults, "evt_" + index.ToString(CultureInfo.InvariantCulture));
+            }
+
+            AssertEqual(1000, defaults.PendingEvents());
+            AssertEqual(1, defaults.DroppedEvents());
+            AssertEqual(1, drops.Count);
+            AssertDrop(drops[0], "evt_1000", "queue_overflow", 1);
+
+            var probe = NewClient();
+            LogEvent(probe, "evt_a");
+            var eventBytes = probe.PendingEventBytes();
+            foreach (var (reason, maxQueueBytes) in new[] { ("queue_bytes_overflow", eventBytes), ("event_too_large", eventBytes - 1) })
+            {
+                drops.Clear();
+                var client = BoundedClient(drops.Add, maxQueueBytes: maxQueueBytes);
+                LogEvent(client, "evt_a");
+                LogEvent(client, "evt_b");
+                AssertDrop(drops[drops.Count - 1], "evt_b", reason, client.DroppedEvents());
+            }
+
+            defaults.Flush(RecordingTransport.AlwaysAccept());
+            AssertEqual(0, defaults.PendingEventBytes());
+            AssertEqual(1, defaults.DroppedEvents());
+            Expect("validation_error", () => BoundedClient(drops.Add, maxQueueSize: 0));
+            Expect("validation_error", () => BoundedClient(drops.Add, maxQueueBytes: 0));
+        }
+
+        private static void DropCallbackFailuresNeverReachTheApp()
+        {
+            var calls = new List<DroppedEvent>();
+            LogBrewClient? client = null;
+            client = BoundedClient(
+                drop =>
+                {
+                    calls.Add(drop);
+                    LogEvent(client!, "evt_nested");
+                    throw new InvalidOperationException("callback failed");
+                },
+                maxQueueSize: 1);
+            LogEvent(client, "evt_a");
+            LogEvent(client, "evt_b");
+            AssertEqual(1, calls.Count);
+            AssertEqual("evt_b", calls[0].EventId);
+            AssertEqual(2, client.DroppedEvents());
+            AssertEqual(1, client.PendingEvents());
         }
 
         private static void EmptyFlushIsNoop()

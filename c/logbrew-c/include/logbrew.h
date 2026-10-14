@@ -291,9 +291,30 @@ typedef struct {
 #define LOGBREW_EVENT_OPTIONS_NONE ((LogBrewEventOptions){{NULL, 0U}, NULL})
 #endif
 
+#define LOGBREW_DEFAULT_MAX_QUEUE_EVENTS 1000U
+#define LOGBREW_DEFAULT_MAX_QUEUE_BYTES (4U * 1024U * 1024U)
+
+/** Content-free description of one event the bounded queue rejected. */
+typedef struct {
+  const char *event_id;
+  const char *event_type;
+  /** `queue_overflow`, `queue_bytes_overflow`, or `event_too_large`. */
+  const char *reason;
+  size_t dropped_events;
+} LogBrewEventDrop;
+
+/** Runs before the capture call returns; the drop strings live only for the call. */
+typedef void (*LogBrewEventDroppedFn)(void *user_data, const LogBrewEventDrop *drop);
+
 typedef struct {
   const LogBrewTelemetryContext *context;
   bool disable_automatic_context;
+  /** Zero uses LOGBREW_DEFAULT_MAX_QUEUE_EVENTS. */
+  size_t max_queue_events;
+  /** Encoded event JSON bytes; zero uses LOGBREW_DEFAULT_MAX_QUEUE_BYTES. */
+  size_t max_queue_bytes;
+  LogBrewEventDroppedFn on_event_dropped;
+  void *event_dropped_user_data;
 } LogBrewClientOptions;
 
 typedef struct {
@@ -484,6 +505,8 @@ LogBrewStatus logbrew_client_new_with_options(
     LogBrewError *error);
 void logbrew_client_free(LogBrewClient *client);
 size_t logbrew_client_pending_events(const LogBrewClient *client);
+size_t logbrew_client_pending_event_bytes(const LogBrewClient *client);
+size_t logbrew_client_dropped_events(const LogBrewClient *client);
 void logbrew_free_string(char *value);
 
 LogBrewStatus logbrew_telemetry_context_validate(

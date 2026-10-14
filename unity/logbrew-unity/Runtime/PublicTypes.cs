@@ -90,6 +90,26 @@ namespace LogBrew.Unity
         public int Attempts { get; }
     }
 
+    /// <summary>Content-free description of one event the bounded queue rejected.</summary>
+    public sealed class DroppedEvent
+    {
+        internal DroppedEvent(string eventId, string eventType, string reason, int droppedEvents)
+        {
+            EventId = eventId;
+            EventType = eventType;
+            Reason = reason;
+            DroppedEvents = droppedEvents;
+        }
+
+        public string EventId { get; }
+
+        public string EventType { get; }
+
+        public string Reason { get; }
+
+        public int DroppedEvents { get; }
+    }
+
     public interface ITransport
     {
         TransportResponse Send(string apiKey, string body);

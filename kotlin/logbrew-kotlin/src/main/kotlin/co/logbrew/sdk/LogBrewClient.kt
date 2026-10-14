@@ -6,6 +6,9 @@ class LogBrewClient private constructor(
     sdkVersion: String,
     private val maxRetries: Int,
     private val context: TelemetryContext?,
+    private val maxQueueEvents: Int,
+    private val maxQueueBytes: Long,
+    private val onEventDropped: ((EventDrop) -> Unit)?,
 ) {
     private val sdk =
         OrderedJsonObject()
@@ -15,9 +18,18 @@ class LogBrewClient private constructor(
     private val stateLock = Any()
     private val events = mutableListOf<Event>()
     private val breadcrumbStore = IssueBreadcrumbStore()
+    private val reportingDrop = ThreadLocal<Boolean>()
+    private var pendingEventBytes = 0L
+    private var droppedEvents = 0
     private var closed = false
 
     fun pendingEvents(): Int = synchronized(stateLock) { events.size }
+
+    /** Returns the encoded UTF-8 bytes of the queued events. */
+    fun pendingEventBytes(): Long = synchronized(stateLock) { pendingEventBytes }
+
+    /** Returns how many events the bounded queue rejected since the client was created. */
+    fun droppedEvents(): Int = synchronized(stateLock) { droppedEvents }
 
     fun previewJson(): String = synchronized(stateLock) { previewJsonLocked() }
 
@@ -151,9 +163,39 @@ class LogBrewClient private constructor(
     ) {
         Validation.requireNonEmpty("event id", id)
         Validation.requireTimestamp(timestamp)
-        synchronized(stateLock) {
-            requireOpen()
-            events += Event(type, timestamp, id, attributes)
+        val event = Event(type, timestamp, id, attributes)
+        val eventBytes = JsonWriter.write(event.toJsonObject()).toByteArray(Charsets.UTF_8).size
+        val drop =
+            synchronized(stateLock) {
+                requireOpen()
+                val reason =
+                    when {
+                        eventBytes > maxQueueBytes -> "event_too_large"
+                        events.size >= maxQueueEvents -> "queue_overflow"
+                        eventBytes > maxQueueBytes - pendingEventBytes -> "queue_bytes_overflow"
+                        else -> null
+                    }
+                if (reason == null) {
+                    events += event
+                    pendingEventBytes += eventBytes
+                    return
+                }
+                if (droppedEvents < Int.MAX_VALUE) {
+                    droppedEvents++
+                }
+                EventDrop(id, type, reason, droppedEvents)
+            }
+        val handler = onEventDropped ?: return
+        if (reportingDrop.get() == true) {
+            return
+        }
+        reportingDrop.set(true)
+        try {
+            handler(drop)
+        } catch (_: Exception) {
+            // Drop callbacks are advisory and must never interrupt app telemetry.
+        } finally {
+            reportingDrop.set(false)
         }
     }
 
@@ -197,6 +239,7 @@ class LogBrewClient private constructor(
                 }
                 if (response.statusCode in 200..299) {
                     events.clear()
+                    pendingEventBytes = 0
                     return response.copy(attempts = attempt)
                 }
                 if (response.statusCode >= 500 && attempt < maxAttempts) {
@@ -221,6 +264,8 @@ class LogBrewClient private constructor(
         internal val metricKinds = setOf("counter", "gauge", "histogram")
         internal val instantTemporality = setOf("instant")
         internal val deltaCumulativeTemporalities = setOf("delta", "cumulative")
+        const val DEFAULT_MAX_QUEUE_EVENTS = 1_000
+        const val DEFAULT_MAX_QUEUE_BYTES = 4L * 1024 * 1024
 
         @JvmOverloads
         fun create(
@@ -230,6 +275,9 @@ class LogBrewClient private constructor(
             maxRetries: Int = 2,
             context: TelemetryContext? = null,
             includeAutomaticContext: Boolean = true,
+            maxQueueEvents: Int = DEFAULT_MAX_QUEUE_EVENTS,
+            maxQueueBytes: Long = DEFAULT_MAX_QUEUE_BYTES,
+            onEventDropped: ((EventDrop) -> Unit)? = null,
         ): LogBrewClient {
             Validation.requireNonEmpty("api_key", apiKey)
             Validation.requireNonEmpty("sdk_name", sdkName)
@@ -237,12 +285,15 @@ class LogBrewClient private constructor(
             if (maxRetries < 0) {
                 throw SdkException("validation_error", "max_retries must be non-negative")
             }
+            if (maxQueueEvents <= 0 || maxQueueBytes <= 0) {
+                throw SdkException("validation_error", "queue bounds must be positive")
+            }
             val baseContext =
                 TelemetryContext.merge(
                     if (includeAutomaticContext) automaticTelemetryContext() else null,
                     context,
                 )
-            return LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries, baseContext)
+            return LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries, baseContext, maxQueueEvents, maxQueueBytes, onEventDropped)
         }
     }
 }

@@ -1777,8 +1777,13 @@ LogBrewClient::LogBrewClient(Config config) : LogBrewClient(std::move(config), C
 
 LogBrewClient::LogBrewClient(Config config, ClientOptions options)
     : api_key_(std::move(config.api_key)), sdk_name_(std::move(config.sdk_name)),
-      sdk_version_(std::move(config.sdk_version)), max_retries_(config.max_retries == 0U ? 2U : config.max_retries) {
+      sdk_version_(std::move(config.sdk_version)), max_retries_(config.max_retries == 0U ? 2U : config.max_retries),
+      max_queue_events_(options.max_queue_events), max_queue_bytes_(options.max_queue_bytes),
+      on_event_dropped_(std::move(options.on_event_dropped)) {
   require_non_empty("api_key", api_key_);
+  if (max_queue_events_ == 0U || max_queue_bytes_ == 0U) {
+    throw SdkException("validation_error", "queue bounds must be positive");
+  }
   require_non_empty("sdk_name", sdk_name_);
   require_non_empty("sdk_version", sdk_version_);
   if (!options.disable_automatic_context) {
@@ -1797,6 +1802,10 @@ LogBrewClient::LogBrewClient(Config config, ClientOptions options)
 
 std::size_t LogBrewClient::pending_events() const noexcept { return events_.size(); }
 
+std::size_t LogBrewClient::pending_event_bytes() const noexcept { return pending_event_bytes_; }
+
+std::size_t LogBrewClient::dropped_events() const noexcept { return dropped_events_; }
+
 std::string LogBrewClient::preview_json() const {
   std::ostringstream output;
   output << "{\"sdk\":{\"name\":" << json_string(sdk_name_)
@@ -1805,7 +1814,7 @@ std::string LogBrewClient::preview_json() const {
     if (index > 0U) {
       output << ',';
     }
-    output << event_json(events_[index]);
+    output << events_[index];
   }
   output << "]}";
   return output.str();
@@ -2088,7 +2097,30 @@ void LogBrewClient::push_event(std::string type, std::string id, std::string tim
     }
     attributes_json += "\"context\":" + telemetry_context_json(*context) + '}';
   }
-  events_.push_back(Event{std::move(type), std::move(timestamp), std::move(id), std::move(attributes_json)});
+  const Event event{std::move(type), std::move(timestamp), std::move(id), std::move(attributes_json)};
+  std::string json = event_json(event);
+  const char *reason = json.size() > max_queue_bytes_                        ? "event_too_large"
+                       : events_.size() >= max_queue_events_                 ? "queue_overflow"
+                       : json.size() > max_queue_bytes_ - pending_event_bytes_ ? "queue_bytes_overflow"
+                                                                             : nullptr;
+  if (reason == nullptr) {
+    pending_event_bytes_ += json.size();
+    events_.push_back(std::move(json));
+    return;
+  }
+  if (dropped_events_ < SIZE_MAX) {
+    dropped_events_++;
+  }
+  if (!on_event_dropped_ || reporting_drop_) {
+    return;
+  }
+  reporting_drop_ = true;
+  try {
+    on_event_dropped_(EventDrop{event.id, event.type, reason, dropped_events_});
+  } catch (...) {
+    // Drop callbacks are advisory and must never interrupt app telemetry.
+  }
+  reporting_drop_ = false;
 }
 
 TransportResponse LogBrewClient::flush_internal(Transport &transport) {
@@ -2106,6 +2138,7 @@ TransportResponse LogBrewClient::flush_internal(Transport &transport) {
       }
       if (response.status_code >= 200 && response.status_code < 300) {
         events_.clear();
+        pending_event_bytes_ = 0;
         return response;
       }
       if (response.status_code >= 500 && attempt < max_attempts) {

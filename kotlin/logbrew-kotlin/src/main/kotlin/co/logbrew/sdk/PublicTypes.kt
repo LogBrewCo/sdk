@@ -21,6 +21,14 @@ class TransportException(
     }
 }
 
+/** Content-free description of one event the bounded queue rejected. */
+data class EventDrop(
+    val eventId: String,
+    val eventType: String,
+    val reason: String,
+    val droppedEvents: Int,
+)
+
 data class TransportResponse(
     val statusCode: Int,
     val attempts: Int,

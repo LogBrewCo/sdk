@@ -10,12 +10,13 @@ import re
 import ssl
 import sys
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
-from threading import Lock, RLock, get_ident
+from threading import Lock, RLock, get_ident, local
 from typing import Annotated, Any, Literal, Protocol, TypeAlias, TypedDict, cast
 
 if sys.version_info >= (3, 11):
@@ -351,6 +352,19 @@ class TransportResponse:
     )
 
 
+EventDropReason: TypeAlias = Literal["queue_overflow", "queue_bytes_overflow", "event_too_large"]
+
+
+@dataclass(frozen=True, slots=True)
+class EventDrop:
+    """Content-free description of one event the local queue rejected."""
+
+    event_id: str
+    event_type: str
+    reason: EventDropReason
+    dropped_events: Annotated[int, "Total events this client has dropped, including this one."]
+
+
 @dataclass(frozen=True, slots=True)
 class TraceparentContext:
     """Parsed W3C traceparent context."""
@@ -500,6 +514,7 @@ class LogBrewClient:
         max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
         persistent_queue_directory: str | os.PathLike[str] | None = None,
         persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
+        on_event_dropped: Callable[[EventDrop], None] | None = None,
     ) -> LogBrewClient:
         """Create a client from public SDK identity, retry, and API key settings."""
         require_non_empty("api_key", api_key)
@@ -521,6 +536,7 @@ class LogBrewClient:
             max_batch_bytes=max_batch_bytes,
             persistent_queue_directory=persistent_queue_directory,
             persistent_queue_encryption_key=persistent_queue_encryption_key,
+            on_event_dropped=on_event_dropped,
         )
 
     def __init__(
@@ -541,6 +557,7 @@ class LogBrewClient:
         max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
         persistent_queue_directory: str | os.PathLike[str] | None = None,
         persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
+        on_event_dropped: Callable[[EventDrop], None] | None = None,
     ) -> None:
         if not isinstance(capture_runtime_context, bool):
             raise SdkError("configuration_error", "capture_runtime_context must be a boolean")
@@ -579,6 +596,9 @@ class LogBrewClient:
         self.max_batch_events = max_batch_events
         self.max_batch_bytes = max_batch_bytes
         self._dropped_events = 0
+        self._dropped_events_by_reason: dict[EventDropReason, int] = {}
+        self._on_event_dropped = on_event_dropped
+        self._drop_callback_state = local()
         self._owner_pid = os.getpid()
         self._state_lock = RLock()
         self._flush_lock = Lock()
@@ -639,6 +659,12 @@ class LogBrewClient:
         self._assert_owner()
         with self._state_lock:
             return self._dropped_events
+
+    def dropped_events_by_reason(self) -> dict[EventDropReason, int]:
+        """Return dropped event counts keyed by drop reason."""
+        self._assert_owner()
+        with self._state_lock:
+            return dict(self._dropped_events_by_reason)
 
     def delivery_health(self) -> DeliveryHealthSnapshot:
         """Return a fixed content-free snapshot of local delivery state."""
@@ -832,23 +858,43 @@ class LogBrewClient:
         event_bytes = len(event_json.encode("utf-8"))
         request_bytes = len(f'{{"sdk":{self._sdk_json},"events":[{event_json}]}}'.encode())
 
+        reason: EventDropReason | None = None
         with self._state_lock:
             if self.closed or self._closing:
                 raise SdkError("shutdown_error", "client is already shut down")
-            if (
-                self._queue.count >= self.max_queue_size
-                or self._queue.byte_count + event_bytes > self.max_queue_bytes
-                or request_bytes > self.max_batch_bytes
-            ):
+            if event_bytes > self.max_queue_bytes or request_bytes > self.max_batch_bytes:
+                reason = "event_too_large"
+            elif self._queue.count >= self.max_queue_size:
+                reason = "queue_overflow"
+            elif self._queue.byte_count + event_bytes > self.max_queue_bytes:
+                reason = "queue_bytes_overflow"
+            if reason is not None:
                 self._dropped_events += 1
-                return
-            self._queue.append(
-                record_id=uuid4().hex,
-                event_json=event_json,
-                byte_count=event_bytes,
-            )
-            pending_events = self._queue.count
-        self._automatic_delivery.event_retained(pending_events)
+                self._dropped_events_by_reason[reason] = self._dropped_events_by_reason.get(reason, 0) + 1
+                drop = EventDrop(event_id, event_type, reason, self._dropped_events)
+            else:
+                self._queue.append(
+                    record_id=uuid4().hex,
+                    event_json=event_json,
+                    byte_count=event_bytes,
+                )
+                pending_events = self._queue.count
+        if reason is None:
+            self._automatic_delivery.event_retained(pending_events)
+        else:
+            self._report_drop(drop)
+
+    def _report_drop(self, drop: EventDrop) -> None:
+        # Drop callbacks are advisory: failures and nested drops never reach the application.
+        state = self._drop_callback_state
+        if self._on_event_dropped is None or getattr(state, "active", False):
+            return
+        state.active = True
+        try:
+            with suppress(Exception):
+                self._on_event_dropped(drop)
+        finally:
+            state.active = False
 
     def _flush_internal(self, transport: Transport) -> TransportResponse:
         self._assert_owner()
@@ -1783,6 +1829,8 @@ from logbrew_sdk._opentelemetry_processor import (  # noqa: E402
 __all__ = [
     "ActionAttributes",
     "EnvironmentAttributes",
+    "EventDrop",
+    "EventDropReason",
     "HttpTransport",
     "IssueAttributes",
     "IssueBreadcrumb",

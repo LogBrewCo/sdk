@@ -27,6 +27,13 @@ struct LogBrewClient {
   LogBrewEvent *events;
   size_t event_count;
   size_t event_capacity;
+  size_t max_queue_events;
+  size_t max_queue_bytes;
+  size_t pending_event_bytes;
+  size_t dropped_events;
+  LogBrewEventDroppedFn on_event_dropped;
+  void *event_dropped_user_data;
+  bool reporting_drop;
   LogBrewContextStorage *base_context;
   char *breadcrumbs[LOGBREW_MAX_BREADCRUMBS];
   size_t breadcrumb_count;
@@ -455,6 +462,24 @@ static void clear_events(LogBrewClient *client) {
     client->events[index].json = NULL;
   }
   client->event_count = 0U;
+  client->pending_event_bytes = 0U;
+}
+
+static void report_drop(LogBrewClient *client, const char *event_type, const char *id, const char *reason) {
+  LogBrewEventDrop drop;
+  if (client->dropped_events < (size_t)-1) {
+    client->dropped_events++;
+  }
+  if (client->on_event_dropped == NULL || client->reporting_drop) {
+    return;
+  }
+  drop.event_id = id;
+  drop.event_type = event_type;
+  drop.reason = reason;
+  drop.dropped_events = client->dropped_events;
+  client->reporting_drop = true;
+  client->on_event_dropped(client->event_dropped_user_data, &drop);
+  client->reporting_drop = false;
 }
 
 static LogBrewStatus inject_context(
@@ -528,6 +553,8 @@ static LogBrewStatus push_event_with_context(
     LogBrewError *error) {
   char *event_json = NULL;
   char *contextual_attributes_json = NULL;
+  const char *drop_reason = NULL;
+  size_t event_bytes;
   LogBrewStatus status;
   if (client == NULL) {
     free(attributes_json);
@@ -555,6 +582,19 @@ static LogBrewStatus push_event_with_context(
   if (status != LOGBREW_OK) {
     return status;
   }
+  event_bytes = strlen(event_json);
+  if (event_bytes > client->max_queue_bytes) {
+    drop_reason = "event_too_large";
+  } else if (client->event_count >= client->max_queue_events) {
+    drop_reason = "queue_overflow";
+  } else if (event_bytes > client->max_queue_bytes - client->pending_event_bytes) {
+    drop_reason = "queue_bytes_overflow";
+  }
+  if (drop_reason != NULL) {
+    free(event_json);
+    report_drop(client, event_type, id, drop_reason);
+    return LOGBREW_OK;
+  }
   status = ensure_event_capacity(client, error);
   if (status != LOGBREW_OK) {
     free(event_json);
@@ -562,6 +602,7 @@ static LogBrewStatus push_event_with_context(
   }
   client->events[client->event_count].json = event_json;
   client->event_count++;
+  client->pending_event_bytes += event_bytes;
   return LOGBREW_OK;
 }
 
@@ -639,6 +680,12 @@ LogBrewStatus logbrew_client_new_with_options(
     return LOGBREW_ALLOCATION_ERROR;
   }
   client->max_retries = config.max_retries == 0U ? 2U : config.max_retries;
+  client->max_queue_events =
+      options.max_queue_events == 0U ? LOGBREW_DEFAULT_MAX_QUEUE_EVENTS : options.max_queue_events;
+  client->max_queue_bytes =
+      options.max_queue_bytes == 0U ? LOGBREW_DEFAULT_MAX_QUEUE_BYTES : options.max_queue_bytes;
+  client->on_event_dropped = options.on_event_dropped;
+  client->event_dropped_user_data = options.event_dropped_user_data;
   status = logbrew_context_storage_create(
       options.context, !options.disable_automatic_context, &client->base_context, error);
   if (status != LOGBREW_OK) {
@@ -668,6 +715,14 @@ void logbrew_client_free(LogBrewClient *client) {
 
 size_t logbrew_client_pending_events(const LogBrewClient *client) {
   return client == NULL ? 0U : client->event_count;
+}
+
+size_t logbrew_client_pending_event_bytes(const LogBrewClient *client) {
+  return client == NULL ? 0U : client->pending_event_bytes;
+}
+
+size_t logbrew_client_dropped_events(const LogBrewClient *client) {
+  return client == NULL ? 0U : client->dropped_events;
 }
 
 void logbrew_free_string(char *value) {
