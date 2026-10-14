@@ -11,7 +11,7 @@ run_native_verifier() {
     return
   fi
   (
-    native_root="$repo_root/tools/toolchain-probe"
+    native_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/toolchain-probe"
     if [[ ! -d "$native_root" || -L "$native_root" || -L "${native_root%/*}" ]]; then
       printf '%s\n' "native SDK verifier source is unavailable" >&2
       return 1
@@ -30,12 +30,12 @@ run_native_verifier() {
       printf '%s\n' "native SDK verifier compiler pin is invalid" >&2
       return 1
     fi
-    export GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOPROXY=off GOSUMDB=off
-    if [[ "$(go version)" != "go version go$toolchain_version "* ]]; then
+    go_env=(GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOPROXY=off GOSUMDB=off)
+    if [[ "$(env "${go_env[@]}" go version)" != "go version go$toolchain_version "* ]]; then
       printf '%s\n' "native SDK verifier requires Go $toolchain_version" >&2
       return 1
     fi
     cd "$native_root" || return
-    go run . "$@"
+    env "${go_env[@]}" go run . "$@"
   )
 }
