@@ -170,6 +170,7 @@ export type LogBrewRouteMetricEvent = {
 };
 
 export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewNextClientConfig & NodeFetchTransportConfig & {
+  /** A fixed client stays caller-owned and is flushed, not shut down. A factory must return a fresh client per request. */
   client?: LogBrewClient | LogBrewClientFactory<TContext>;
   /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory<TContext>;
@@ -178,6 +179,7 @@ export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewN
   captureErrors?: boolean;
   includeSearchParams?: boolean;
   metricName?: string;
+  /** Supply a stable route template. Missing or invalid templates use "/" without reading the request pathname. */
   routeTemplate?: string | ((request: Request, context: TContext) => string | null | undefined);
   now?: () => string;
   nowMs?: () => number;

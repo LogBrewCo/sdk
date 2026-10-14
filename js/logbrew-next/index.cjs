@@ -49,11 +49,14 @@ function createLogBrewNextRequestErrorHandler(options = {}) {
       const client = resolvedClient.client;
       const transport = resolveTransport(options, { ...runtime, client }, defaultTransport);
       runtime = { ...runtime, client, transport };
-      const event = typeof options.errorEvent === "function"
-        ? options.errorEvent(error, runtime)
-        : createNextRequestErrorEvent(error, request, context, options);
-
-      client.issue(event.id, event.timestamp, event.attributes);
+      try {
+        const event = typeof options.errorEvent === "function"
+          ? options.errorEvent(error, runtime)
+          : createNextRequestErrorEvent(error, request, context, options);
+        client.issue(event.id, event.timestamp, event.attributes);
+      } catch (captureError) {
+        await notifyFailure(options, captureError, runtime);
+      }
       const response = resolvedClient.owned
         ? await client.shutdown(transport)
         : await client.flush(transport);
@@ -93,6 +96,7 @@ function createNextRequestErrorEvent(error, request = {}, context = {}, {
         ...nextCategoricalMetadata("renderSource", context?.renderSource, NEXT_RENDER_SOURCES),
         ...nextCategoricalMetadata("revalidateReason", context?.revalidateReason, NEXT_REVALIDATE_REASONS),
         ...nextCategoricalMetadata("renderType", context?.renderType, NEXT_RENDER_TYPES),
+        ...nextRequestTraceMetadata(request),
         ...(errorDigest ? { errorDigest } : {}),
         ...(pathname ? { pathname } : {})
       }
@@ -110,7 +114,7 @@ function withLogBrewRouteHandler(handler, options = {}) {
     : undefined;
 
   return async function logBrewRouteHandler(request, context = {}) {
-    const client = resolveClient(options, request, context);
+    const { client, owned } = resolveClient(options, request, context);
     const transport = resolveTransport(options, { request, context, client }, defaultTransport);
     const trace = createRouteTraceContext(request, undefined, options);
     const helpers = createRouteHelpers(client, transport, trace);
@@ -120,10 +124,10 @@ function withLogBrewRouteHandler(handler, options = {}) {
       try {
         const response = await handler(request, context, helpers);
         ensureResponse(response);
-        await captureRouteSuccess(options, { request, response, context, client, transport, startedAt, trace });
+        await captureRouteSuccess(options, { request, response, context, client, owned, transport, startedAt, trace });
         return response;
       } catch (error) {
-        await recordRouteError(options, error, { request, context, client, transport, trace });
+        await recordRouteError(options, error, { request, context, client, owned, transport, trace });
         throw error;
       }
     });
@@ -142,7 +146,7 @@ function createRouteRequestEvent(request, response, {
   spanIdFactory = defaultSpanIdFactory,
   trace
 } = {}) {
-  const routePath = routeTemplateOnly(routeTemplate ?? safeUrl(request).pathname);
+  const routePath = routeTemplateOnly(routeTemplate);
   const method = request?.method ?? "GET";
   const statusCode = Number(response?.status ?? 0);
   const id = idFactory(request, response, routePath);
@@ -187,7 +191,7 @@ function createRouteErrorEvent(error, request, {
   trace
 } = {}) {
   const url = safeUrl(request);
-  const routePath = routeTemplateOnly(routeTemplate ?? url.pathname);
+  const routePath = routeTemplateOnly(routeTemplate);
   const method = request?.method ?? "GET";
   const message = error instanceof Error ? error.message : String(error);
   const routeTrace = trace ?? getActiveLogBrewTrace();
@@ -218,7 +222,7 @@ function createRequestMetricEvent(request, response, {
   routeTemplate
 } = {}) {
   const method = request?.method ?? "GET";
-  const resolvedRouteTemplate = routeTemplateOnly(routeTemplate ?? safeUrl(request).pathname);
+  const resolvedRouteTemplate = routeTemplateOnly(routeTemplate);
   const statusCode = Number(response?.status ?? 0);
   return {
     id: idFactory(request, response, resolvedRouteTemplate),
@@ -243,12 +247,12 @@ function createRequestMetricEvent(request, response, {
 
 function resolveClient(options, request, context) {
   if (typeof options.client === "function") {
-    return options.client({ request, context });
+    return { client: options.client({ request, context }), owned: true };
   }
   if (options.client) {
-    return options.client;
+    return { client: options.client, owned: false };
   }
-  return createLogBrewNextClient(options);
+  return { client: createLogBrewNextClient(options), owned: true };
 }
 
 function resolveTransport(options, runtime, defaultTransport) {
@@ -293,11 +297,16 @@ async function notifyFlush(options, flushResponse, context) {
 
 async function notifyFailure(options, error, context) {
   if (typeof options.onCaptureError === "function") {
-    await options.onCaptureError(error, context);
+    try {
+      await options.onCaptureError(error, context);
+    } catch {
+      // A capture callback must not change the application's response or error.
+    }
   }
 }
 
-async function captureRouteSuccess(options, { request, response, context, client, transport, startedAt, trace }) {
+async function captureRouteSuccess(options, runtime) {
+  const { request, response, context, client, startedAt, trace } = runtime;
   try {
     const durationMs = (options.captureRequests !== false || options.captureRequestMetrics === true)
       ? routeDurationMs(options, startedAt)
@@ -308,7 +317,17 @@ async function captureRouteSuccess(options, { request, response, context, client
     if (options.captureRequestMetrics === true) {
       recordRouteMetric(options, { request, response, context, client, durationMs, trace });
     }
-    const flushResponse = await client.shutdown(transport);
+  } catch (error) {
+    await notifyFailure(options, error, { request, context, client, trace });
+  }
+  await finalizeRouteCapture(options, runtime);
+}
+
+async function finalizeRouteCapture(options, { request, context, client, owned, transport, trace }) {
+  try {
+    const flushResponse = owned
+      ? await client.shutdown(transport)
+      : await client.flush(transport);
     await notifyFlush(options, flushResponse, { request, context, client, trace });
   } catch (error) {
     await notifyFailure(options, error, { request, context, client, trace });
@@ -341,25 +360,24 @@ function recordRouteMetric(options, { request, response, context, client, durati
   captureRouteMetricEvent(client, event);
 }
 
-async function recordRouteError(options, error, { request, context, client, transport, trace }) {
-  if (options.captureErrors === false) {
-    return;
-  }
+async function recordRouteError(options, error, runtime) {
+  const { request, context, client, trace } = runtime;
   const routeTrace = trace ?? getActiveLogBrewTrace();
-  const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { request, context, client, trace: routeTrace })
-    : createRouteErrorEvent(error, request, {
-      ...options,
-      routeTemplate: resolveRouteTemplate(options, request, context),
-      trace: routeTrace
-    });
   try {
-    client.issue(event.id, event.timestamp, event.attributes);
-    const flushResponse = await client.shutdown(transport);
-    await notifyFlush(options, flushResponse, { request, context, client, trace: routeTrace });
+    if (options.captureErrors !== false) {
+      const event = typeof options.errorEvent === "function"
+        ? options.errorEvent(error, { request, context, client, trace: routeTrace })
+        : createRouteErrorEvent(error, request, {
+          ...options,
+          routeTemplate: resolveRouteTemplate(options, request, context),
+          trace: routeTrace
+        });
+      client.issue(event.id, event.timestamp, event.attributes);
+    }
   } catch (captureError) {
     await notifyFailure(options, captureError, { request, context, client, trace: routeTrace });
   }
+  await finalizeRouteCapture(options, { ...runtime, trace: routeTrace });
 }
 
 function captureRouteRequestEvent(client, event) {
@@ -415,7 +433,7 @@ function nextRoutePath(value) {
   try {
     pathname = new URL(value, "http://localhost").pathname;
   } catch {
-    pathname = value.split(/[?#]/u)[0];
+    return "/";
   }
   if (typeof pathname !== "string" || pathname === "") {
     return "/";
@@ -451,11 +469,35 @@ function nextErrorMessage(error) {
     : `${normalized.slice(0, MAX_REQUEST_ERROR_MESSAGE_LENGTH - 1)}…`;
 }
 
+function nextRequestTraceMetadata(request) {
+  try {
+    const traceparent = getTraceparentHeader(request);
+    if (!traceparent) {
+      return {};
+    }
+    const trace = parseTraceparent(traceparent);
+    return {
+      traceId: trace.traceId,
+      parentSpanId: trace.parentSpanId,
+      sampled: trace.sampled
+    };
+  } catch {
+    return {};
+  }
+}
+
 function getTraceparentHeader(request) {
-  if (!request?.headers || typeof request.headers.get !== "function") {
+  const headers = request?.headers;
+  if (!headers) {
     return undefined;
   }
-  const value = request.headers.get("traceparent");
+  let value;
+  if (typeof headers.get === "function") {
+    value = headers.get("traceparent");
+  } else {
+    const names = Object.keys(headers).filter(name => name.toLowerCase() === "traceparent");
+    value = names.length === 1 ? headers[names[0]] : undefined;
+  }
   return typeof value === "string" ? value : undefined;
 }
 
@@ -463,18 +505,11 @@ function resolveRouteTemplate(options, request, context) {
   const value = typeof options.routeTemplate === "function"
     ? options.routeTemplate(request, context)
     : options.routeTemplate;
-  return routeTemplateOnly(value ?? safeUrl(request).pathname);
+  return routeTemplateOnly(value);
 }
 
 function routeTemplateOnly(value) {
-  if (typeof value !== "string" || value.trim() === "") {
-    return "/";
-  }
-  try {
-    return new URL(value, "http://localhost").pathname || "/";
-  } catch {
-    return value.split(/[?#]/)[0] || "/";
-  }
+  return nextRoutePath(value);
 }
 
 function statusCodeClass(statusCode) {

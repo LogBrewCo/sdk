@@ -3,15 +3,13 @@ let nodeHandlerPromise;
 function createLogBrewNextRequestErrorHandler(options = {}) {
   let handler;
   return async function logBrewNextRequestErrorHandler(error, request, context) {
-    if (globalThis.process?.env?.NEXT_RUNTIME === "edge") {
-      return;
-    }
-
     try {
-      nodeHandlerPromise ??= Promise.resolve().then(() => require("./index.cjs"));
-      const module = await nodeHandlerPromise;
-      handler ??= module.createLogBrewNextRequestErrorHandler(options);
-      await handler(error, request, context);
+      if (process.env.NEXT_RUNTIME !== "edge") {
+        nodeHandlerPromise ??= Promise.resolve().then(() => require("./index.cjs"));
+        const nodeModule = await nodeHandlerPromise;
+        handler ??= nodeModule.createLogBrewNextRequestErrorHandler(options);
+        await handler(error, request, context);
+      }
     } catch (captureError) {
       if (typeof options.onCaptureError === "function") {
         try {
