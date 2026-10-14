@@ -1212,6 +1212,8 @@ $monolog->warning('this should not interrupt app logging');
 assertTrue(count($capturedErrors) === 1, 'expected Monolog handler to report capture failure');
 assertTrue(str_contains($capturedErrors[0], 'client is already shut down'), 'expected Monolog handler capture failure message');
 
+require __DIR__ . '/monolog_onerror.php';
+
 $laravelConfig = LaravelLoggerFactory::configuration(
     apiKey: 'LOGBREW_SERVER_API_KEY',
     service: 'pterodactyl-panel',

@@ -73,7 +73,11 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
             }
         } catch (Throwable $error) {
             if (is_callable($this->onError)) {
-                ($this->onError)($error);
+                try {
+                    ($this->onError)($error);
+                } catch (Throwable) {
+                    // Diagnostic callbacks must not replace the original capture or delivery error.
+                }
             }
             if ($this->raiseErrors) {
                 throw $error;
