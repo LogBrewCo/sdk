@@ -15,6 +15,8 @@ const (
 	canonicalSchemaPath = "../../spec/event-batch.schema.json"
 	canonicalValidBatch = "../../fixtures/valid-batch.json"
 	validBatchFixture   = "valid-batch.json"
+	clientReportFixture = "valid-batch-client-report.json"
+	clientReportReasons = 16
 	longDescriptionSize = 1025
 	overflowIntegerSize = 400
 )
@@ -22,7 +24,7 @@ const (
 func TestSchemaCanonicalContract(t *testing.T) {
 	t.Parallel()
 	checker := canonicalEventSchema(t)
-	for _, name := range []string{validBatchFixture, "invalid-batch.json", "malformed-batch.json"} {
+	for _, name := range []string{validBatchFixture, clientReportFixture, "invalid-batch.json", "malformed-batch.json"} {
 		data, readable := readCheckFile(filepath.Join("..", "..", "fixtures", name))
 		if !readable {
 			t.Fatal("fixture unavailable")
@@ -32,8 +34,43 @@ func TestSchemaCanonicalContract(t *testing.T) {
 		if name == "malformed-batch.json" {
 			expectedError = errCheckInput
 		}
-		if valid != (name == validBatchFixture) || !errors.Is(validationError, expectedError) {
+		if valid != (name == validBatchFixture || name == clientReportFixture) ||
+			!errors.Is(validationError, expectedError) {
 			t.Fatalf("fixture %s: valid=%v, error=%v", name, valid, validationError)
+		}
+	}
+}
+
+func TestSchemaClientReportBounds(t *testing.T) {
+	t.Parallel()
+	checker := canonicalEventSchema(t)
+	const batch = `{"sdk":{"name":"test","language":"go","version":"1.0.0"},"events":[{"type":"log",` +
+		`"id":"log_001","timestamp":"2026-06-02T10:00:00Z","attributes":{"message":"m","level":"info"}}],` +
+		`"client_report":REPORT}`
+	reasons := make([]string, 0, clientReportReasons+1)
+	for index := range clientReportReasons + 1 {
+		reasons = append(reasons, `"reason_`+strconv.Itoa(index)+`":1`)
+	}
+	for _, item := range []struct {
+		report string
+		valid  bool
+	}{
+		{`{"dropped_events":{"queue_overflow":1000000000}}`, true},
+		{`{"dropped_events":{` + strings.Join(reasons[:clientReportReasons], ",") + `}}`, true},
+		{`{"dropped_events":{"a` + strings.Repeat("b", 63) + `":1}}`, true},
+		{`{"dropped_events":{` + strings.Join(reasons, ",") + `}}`, false},
+		{`{"dropped_events":{"a` + strings.Repeat("b", 64) + `":1}}`, false},
+		{`{"dropped_events":{}}`, false},
+		{`{}`, false},
+		{`{"dropped_events":{"queue_overflow":0}}`, false},
+		{`{"dropped_events":{"queue_overflow":1000000001}}`, false},
+		{`{"dropped_events":{"queue_overflow":1.5}}`, false},
+		{`{"dropped_events":{"Queue_overflow":1}}`, false},
+		{`{"dropped_events":{"queue_overflow":1},"extra":1}`, false},
+	} {
+		data := []byte(strings.Replace(batch, "REPORT", item.report, 1))
+		if valid, validationError := checker.validate(data); valid != item.valid || validationError != nil {
+			t.Fatalf("client report %s: valid=%v, error=%v", item.report, valid, validationError)
 		}
 	}
 }
