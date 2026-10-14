@@ -360,11 +360,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Set up Go deadline tool
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: tools/toolchain-probe/.go-version
-          cache: false
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Read Python package versions
         id: pypi-version
