@@ -476,20 +476,6 @@ function captureRequestMetricEvent(client, event) {
   client.metric(event.id, event.timestamp, event.attributes);
 }
 
-function randomHex(byteLength) {
-  const bytes = new Uint8Array(byteLength);
-  if (typeof globalThis.crypto?.getRandomValues === "function") {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return hex === "0000000000000000" ? "0000000000000001" : hex;
-}
-
 function createRequestTraceContext(request, reply, {
   spanIdFactory,
   traceIdFactory

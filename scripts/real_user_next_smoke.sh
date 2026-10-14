@@ -576,7 +576,7 @@ grep -q 'POST /api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/capture-check.stderr.json"
 grep -q 'http.server.duration' "$tmp_dir/capture-check.stderr.json"
 grep -q '/api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
-grep -q 'GET /api/bad 200' "$tmp_dir/capture-check.stderr.json"
+grep -q '"GET / 200"' "$tmp_dir/capture-check.stderr.json"
 
 cat > default-delivery.mjs <<'EOF'
 import { createServer } from "node:http";

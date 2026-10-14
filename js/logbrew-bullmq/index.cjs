@@ -311,7 +311,7 @@ function processWithLogBrewBullMqSpan(job, operation, options = {}) {
   const spanOptions = options ?? {};
   const queueName = resolveQueueName(job?.queue, spanOptions.queueName ?? job?.queueName);
   const taskName = normalizeName(job?.name, "job");
-  return queueOperationWithLogBrewSpan("process", {
+  const operationOptions = {
     ...spanOptions,
     operation,
     operationKind: "process",
@@ -319,7 +319,27 @@ function processWithLogBrewBullMqSpan(job, operation, options = {}) {
     system: DEFAULT_SYSTEM,
     taskName,
     traceparent: extractLogBrewBullMqTraceparent(job)
-  });
+  };
+  operationOptions.metadata = createBullMqProcessorMetadata(job, operationOptions.metadata);
+  return queueOperationWithLogBrewSpan("process", operationOptions);
+}
+
+function createBullMqProcessorMetadata(job, metadata) {
+  let nextMetadata;
+  try {
+    nextMetadata = cloneObject(metadata);
+  } catch {
+    return undefined;
+  }
+  try {
+    const attemptsMade = job?.attemptsMade;
+    if (Number.isSafeInteger(attemptsMade) && attemptsMade >= 0) {
+      nextMetadata["bullmq.job.attempts.made"] = attemptsMade;
+    }
+  } catch {
+    // Unavailable attempt evidence must not replace the processor's outcome.
+  }
+  return nextMetadata;
 }
 
 function mergeLogBrewTraceparentMetadata(existingMetadata, traceparent) {

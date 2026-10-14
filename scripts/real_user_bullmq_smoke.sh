@@ -688,5 +688,7 @@ function nextTraceId(values) {
 EOF
 
 node smoke.mjs
+cp "$repo_root"/js/logbrew-bullmq/test/*.test.js "$app_dir/"
+bun test "$app_dir" >/dev/null
 
 printf '%s\n' "BullMQ real-user smoke passed"

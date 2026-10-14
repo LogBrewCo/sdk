@@ -120,9 +120,9 @@ function createLogBrewVuePlugin(options = {}) {
       if (options.captureErrors !== false) {
         const previousErrorHandler = app.config.errorHandler;
         app.config.errorHandler = (error, instance, info) => {
-          void captureVueError(error, instance, info, context, options);
+          void captureVueError(error, instance, info, context, options).catch(() => undefined);
           if (typeof previousErrorHandler === "function") {
-            previousErrorHandler(error, instance, info);
+            return previousErrorHandler(error, instance, info);
           }
         };
       }
@@ -191,7 +191,7 @@ async function captureVueError(error, instance, info, context, options = {}) {
 
   try {
     context.client.issue(event.id, event.timestamp, event.attributes);
-    const response = await context.client.shutdown(context.transport);
+    const response = await context.client.flush(context.transport);
     await notifyFlush(options, response, { context, info, instance });
     return response;
   } catch (captureError) {
