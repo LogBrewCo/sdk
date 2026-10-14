@@ -251,7 +251,7 @@ test("a Hermes fatal crash replays once per stable ID with correlation after a k
         killedBodies.push(body);
         return new Promise(() => {});
       } });
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => { setImmediate(resolve); });
       assert.equal(killedBodies.length, 1);
       assert.equal(nativeStore.records(CLIENT_KEY).length, 2);
 

@@ -82,6 +82,10 @@ jobs:
           "$LOGBREW_PYTHON_STATIC_ENV/bin/python" -m pip install --disable-pip-version-check --quiet --requirement scripts/python_static_tools.txt
           bash scripts/check_python_static.sh
 
+      - name: Run JavaScript lint
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: bash scripts/check_js_lint.sh
+
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
 

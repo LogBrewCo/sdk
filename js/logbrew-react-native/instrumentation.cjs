@@ -332,7 +332,6 @@ function installGlobalFetchInstrumentation(client, {
   });
 }
 
-/* eslint-disable no-invalid-this */
 function installGlobalXMLHttpRequestInstrumentation(client, {
   appState,
   globalObject,
@@ -654,7 +653,6 @@ function utf8ByteLength(value) {
 function errorName(error) {
   return typeof error?.name === "string" && error.name.trim() !== "" ? error.name : "Error";
 }
-/* eslint-enable no-invalid-this */
 
 module.exports = {
   createLogBrewReactNativeInstrumentation,

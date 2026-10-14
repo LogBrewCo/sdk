@@ -68,7 +68,6 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
   }
 
   let installed = true;
-  /* eslint-disable no-invalid-this */
   function logBrewInstrumentedRedisSendCommand(...args) {
     if (!installed) {
       return originalSendCommand.apply(this, args);
@@ -82,7 +81,6 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
     }
     return traceRedisConnect(this, originalConnect, args, options);
   }
-  /* eslint-enable no-invalid-this */
 
   Object.defineProperty(logBrewInstrumentedRedisSendCommand, INSTRUMENTED_REDIS_SEND_COMMAND, {
     value: true
@@ -243,7 +241,6 @@ function redisPipelineMethodEntries(redisClient) {
 }
 
 function createInstrumentedRedisPipelineMethod(originalMethod, methodName, options, isInstalled) {
-  /* eslint-disable no-invalid-this */
   function logBrewInstrumentedRedisPipelineMethod(...args) {
     const pipeline = originalMethod.apply(this, args);
     if (!isInstalled() || !pipeline || typeof pipeline !== "object") {
@@ -254,7 +251,6 @@ function createInstrumentedRedisPipelineMethod(originalMethod, methodName, optio
       options
     });
   }
-  /* eslint-enable no-invalid-this */
 
   Object.defineProperty(logBrewInstrumentedRedisPipelineMethod, INSTRUMENTED_REDIS_PIPELINE_METHOD, {
     value: true
@@ -278,12 +274,10 @@ function wrapRedisPipelineAddCommand(pipeline, commandNames) {
     return;
   }
   const originalAddCommand = pipeline.addCommand;
-  /* eslint-disable no-invalid-this */
   function logBrewInstrumentedRedisPipelineAddCommand(...args) {
     recordRedisPipelineCommand(commandNames, redisPipelineCommandNameFromAddCommandArgs(args));
     return originalAddCommand.apply(this, args);
   }
-  /* eslint-enable no-invalid-this */
   Object.defineProperty(logBrewInstrumentedRedisPipelineAddCommand, INSTRUMENTED_REDIS_PIPELINE_COMMAND, {
     value: true
   });
@@ -295,7 +289,6 @@ function wrapRedisPipelineCommandMethod(pipeline, methodName, commandNames) {
     return;
   }
   const originalMethod = pipeline[methodName];
-  /* eslint-disable no-invalid-this */
   function logBrewInstrumentedRedisPipelineCommand(...args) {
     const countBefore = commandNames.length;
     const result = originalMethod.apply(this, args);
@@ -304,7 +297,6 @@ function wrapRedisPipelineCommandMethod(pipeline, methodName, commandNames) {
     }
     return result;
   }
-  /* eslint-enable no-invalid-this */
   Object.defineProperty(logBrewInstrumentedRedisPipelineCommand, INSTRUMENTED_REDIS_PIPELINE_COMMAND, {
     value: true
   });
@@ -319,7 +311,6 @@ function wrapRedisPipelineExec(pipeline, methodName, defaultOperationKind, comma
   const operationKind = defaultOperationKind === "PIPELINE" || methodName === "execAsPipeline" ? "PIPELINE" : "MULTI";
   const operationName = operationKind === "PIPELINE" ? "redis.pipeline" : "redis.multi";
 
-  /* eslint-disable no-invalid-this */
   function logBrewInstrumentedRedisPipelineExec(...args) {
     if (!options.client) {
       throw new SdkError("configuration_error", "instrumentLogBrewRedisClient requires client");
@@ -364,7 +355,6 @@ function wrapRedisPipelineExec(pipeline, methodName, defaultOperationKind, comma
       throw error;
     }
   }
-  /* eslint-enable no-invalid-this */
 
   Object.defineProperty(logBrewInstrumentedRedisPipelineExec, INSTRUMENTED_REDIS_PIPELINE_EXEC, {
     value: true

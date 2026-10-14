@@ -41,7 +41,7 @@ async function waitFor(predicate) {
     if (Date.now() >= deadline) {
       throw new Error("capture completion was not observed");
     }
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => { setTimeout(resolve, 0); });
   }
 }
 
@@ -51,8 +51,8 @@ async function noDetachedRejections(run) {
   process.on("unhandledRejection", observe);
   try {
     await run();
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => { setImmediate(resolve); });
+    await new Promise((resolve) => { setImmediate(resolve); });
     assert.deepEqual(detached, []);
   } finally {
     process.off("unhandledRejection", observe);
@@ -135,8 +135,7 @@ for (const format of ["esm", "cjs"]) {
     await noDetachedRejections(async () => {
       let delegated = 0;
       let flushed = 0;
-      let state;
-      state = makeApp(adapter, (error, instance, info) => {
+      const state = makeApp(adapter, (error, instance, info) => {
         delegated += 1;
         if (info === "outer") {
           state.app.config.errorHandler(new Error("nested component failed"), null, "nested");

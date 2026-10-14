@@ -126,7 +126,7 @@ test("a fatal issue never evicts events in a batch that is being sent or retried
       return sent.length === 1 ? new Promise((resolve) => { release = resolve; }) : { statusCode: 202 };
     }
   });
-  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => { setImmediate(resolve); });
 
   client.issue("evt_fatal_001", timestamp, fatal);
   assert.deepEqual(drops.map(({ eventId }) => eventId), ["evt_log_003"]);

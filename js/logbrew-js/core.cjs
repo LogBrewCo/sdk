@@ -704,7 +704,9 @@ class LogBrewClient {
   }
 
   #overflowReason(count, bytes) {
-    if (count >= this.maxQueueSize) return "queue_overflow";
+    if (count >= this.maxQueueSize) {
+      return "queue_overflow";
+    }
     return bytes > this.maxQueueBytes ? "queue_bytes_overflow" : undefined;
   }
 
@@ -927,10 +929,13 @@ class LogBrewClient {
   }
 
   #synchronizeEventStore() {
-    if (!this.eventStore) return;
+    if (!this.eventStore) {
+      return;
+    }
     const recovered = loadStoredEvents(this);
-    if (!isOrderedSubsequence(this.serializedEvents, recovered.serializedEvents))
+    if (!isOrderedSubsequence(this.serializedEvents, recovered.serializedEvents)) {
       throw new SdkError("persistence_error", "event store lost a queued record");
+    }
     this.events = recovered.events;
     this.serializedEvents = recovered.serializedEvents;
     this.serializedEventBytes = recovered.serializedEventBytes;

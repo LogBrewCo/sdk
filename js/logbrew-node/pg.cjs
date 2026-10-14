@@ -20,14 +20,12 @@ function instrumentLogBrewPgClient(pgClient, options = {}) {
   }
 
   let installed = true;
-  /* eslint-disable no-invalid-this */
   function logBrewInstrumentedPgQuery(...args) {
     if (!installed) {
       return originalQuery.apply(this, args);
     }
     return tracePgQuery(this, originalQuery, args, options);
   }
-  /* eslint-enable no-invalid-this */
 
   Object.defineProperty(logBrewInstrumentedPgQuery, INSTRUMENTED_PG_QUERY, {
     value: true

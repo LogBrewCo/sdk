@@ -46,7 +46,9 @@ for (const [format, adapter] of [["ESM", esm], ["CommonJS", cjs]]) {
         expect(currentJob).toBe(job);
         expect(getActiveLogBrewTrace().traceId).toBe(traceId);
         calls++;
-        if (calls === 1) throw failure;
+        if (calls === 1) {
+          throw failure;
+        }
         return result;
       }, recordingOptions(events));
 
@@ -127,7 +129,9 @@ for (const [format, adapter] of [["ESM", esm], ["CommonJS", cjs]]) {
       let releaseFirst;
       const firstReleased = new Promise((resolve) => { releaseFirst = resolve; });
       const processor = adapter.withLogBrewBullMqProcessor(async (job) => {
-        if (job.attemptsMade === 0) await firstReleased;
+        if (job.attemptsMade === 0) {
+          await firstReleased;
+        }
         return job.attemptsMade;
       }, options);
       const first = processor(makeJob(0));

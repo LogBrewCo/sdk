@@ -81,7 +81,6 @@ export function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
   const originalSend = prototype.send;
   const states = new WeakMap();
 
-  /* eslint-disable no-invalid-this */
   const wrappedOpen = function logbrewXhrOpen(method, url, ...args) {
     states.set(this, {
       method: xhrMethod(method),
@@ -141,7 +140,6 @@ export function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
       throw error;
     }
   };
-  /* eslint-enable no-invalid-this */
   prototype.send = wrappedSend;
 
   return {
