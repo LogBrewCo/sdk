@@ -8,8 +8,8 @@ import multiprocessing
 import unittest
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing.connection import Connection
 from threading import Barrier, Event, Thread
-from typing import Any
 
 from logbrew_sdk import (
     LogBrewClient,
@@ -36,13 +36,14 @@ def make_client() -> LogBrewClient:
 
 
 class EqualRecord(logging.LogRecord):
-    __hash__ = None
-
     def __eq__(self, other: object) -> bool:
         return isinstance(other, logging.LogRecord)
 
+    def __hash__(self) -> int:
+        raise TypeError("unhashable type: 'EqualRecord'")
 
-def child_identity(record: logging.LogRecord, connection: Any) -> None:
+
+def child_identity(record: logging.LogRecord, connection: Connection[str, object]) -> None:
     try:
         connection.send(default_log_record_event_id(record))
     finally:
