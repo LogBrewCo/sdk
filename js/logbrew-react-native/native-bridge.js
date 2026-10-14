@@ -4,7 +4,8 @@ export const {
   clearLogBrewNativeBridgeScope,
   createLogBrewNativeBridgeScope,
   syncLogBrewNativeBridgeScope,
-  withLogBrewNativeBridgeScope
+  withLogBrewNativeBridgeScope,
+  withLogBrewNativeBridgeScopeAsync
 } = runtime;
 
 export default runtime.default;
