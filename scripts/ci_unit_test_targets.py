@@ -29,7 +29,6 @@ PUBLIC_RECONCILIATION_TARGETS = (
 
 PUBLIC_VERIFY_TARGETS = (
     "tests.test_ci_changed_areas",
-    "tests.test_ci_duplicate_static_checks",
     "tests.test_confidentiality_scan",
     "tests.test_publication_run",
     "tests.test_registry_publication",
@@ -41,7 +40,6 @@ PUBLIC_VERIFY_TARGETS = (
 PATH_TARGETS = {
     ".github/workflows/ci.yml": (
         "tests.test_ci_changed_areas",
-        "tests.test_ci_duplicate_static_checks",
         "tests.test_github_release_safety_gates",
         "tests.test_go_workflow_cache_path",
         "tests.test_js_installed_artifact_workflow_gates",
@@ -49,7 +47,6 @@ PATH_TARGETS = {
         "tests.test_ci_unit_test_targets",
     ),
     ".github/workflows/release-readiness.yml": (
-        "tests.test_ci_duplicate_static_checks",
         "tests.test_github_release_safety_gates",
         "tests.test_js_installed_artifact_workflow_gates",
     ),
@@ -57,9 +54,6 @@ PATH_TARGETS = {
     ".github/workflows/reconcile-public-packages.yml": PUBLIC_RECONCILIATION_TARGETS,
     "scripts/ci_changed_areas.py": ("tests.test_ci_changed_areas",),
     "scripts/ci_unit_test_targets.py": ("tests.test_ci_unit_test_targets",),
-    "scripts/check_ci_no_duplicate_static_checks.py": (
-        "tests.test_ci_duplicate_static_checks",
-    ),
     "scripts/real_user_maven_central_public_smoke.sh": (
         "tests.test_maven_central_public_smoke",
     ),

@@ -71,6 +71,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Run shell static analysis
+        run: bash scripts/check_shell_static.sh
+
+      - name: Run Python static analysis
+        env:
+          LOGBREW_PYTHON_STATIC_ENV: ${{ runner.temp }}/python-static
+        run: |
+          python3 -m venv "$LOGBREW_PYTHON_STATIC_ENV"
+          "$LOGBREW_PYTHON_STATIC_ENV/bin/python" -m pip install --disable-pip-version-check --quiet --requirement scripts/python_static_tools.txt
+          bash scripts/check_python_static.sh
+
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
 

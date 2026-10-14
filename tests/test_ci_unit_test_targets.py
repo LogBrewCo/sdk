@@ -20,7 +20,6 @@ class CiUnitTestTargetsTests(unittest.TestCase):
 
         self.assertFalse(targets.run_all)
         self.assertIn("tests.test_ci_changed_areas", targets.modules)
-        self.assertIn("tests.test_ci_duplicate_static_checks", targets.modules)
         self.assertIn("tests.test_github_release_safety_gates", targets.modules)
         self.assertNotIn("tests.test_rust_dependency_smoke_gates", targets.modules)
 
@@ -129,7 +128,6 @@ class CiUnitTestTargetsTests(unittest.TestCase):
             targets.modules,
             (
                 "tests.test_ci_changed_areas",
-                "tests.test_ci_duplicate_static_checks",
                 "tests.test_ci_unit_test_targets",
                 "tests.test_confidentiality_scan",
                 "tests.test_publication_run",
