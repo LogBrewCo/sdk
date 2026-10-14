@@ -116,6 +116,11 @@ simulated successful response.
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request, metric, and error capture records the matched leaf `req.route.path`; it does not copy `originalUrl`, the concrete router mount value, or the query. Unmatched requests use the explicit `<unmatched>` label.
 
+String routes retain their declared Express pattern, including optional
+parameters, groups, and quoted parameter names. The SDK does not parse that
+pattern as a URL. Routes declared with an array or regular expression keep the
+existing `<unmatched>` label.
+
 `RecordingTransport` remains available from `@logbrew/sdk` when you want to
 inspect serialized events locally. It does not send data to LogBrew; use the
 default Node fetch transport for production telemetry:
@@ -164,6 +169,39 @@ app.get("/checkout/:cartId", async (req, res) => {
 });
 ```
 
+## Returned Handler Work
+
+Use `withLogBrewExpressHandler()` for request handlers that return a promise.
+Register `logbrewMiddleware()` before these handlers and `logbrewErrorHandler()`
+after them:
+
+```js
+import { withLogBrewExpressHandler } from "@logbrew/express";
+
+app.get("/jobs/:id", withLogBrewExpressHandler(async (req, res) => {
+  const job = await loadJob(req.params.id);
+  res.json({ status: job.status });
+  await recordJobRead(job);
+  req.logbrew.client.log("evt_job_read", new Date().toISOString(), {
+    message: "job read recorded",
+    level: "info"
+  });
+}));
+```
+
+`loadJob()` and `recordJobRead()` are app-owned functions. The middleware flushes
+request telemetry when the response finishes or aborts. If a wrapped handler is
+still pending, it keeps the same request client open. After all wrapped handlers
+settle, it sends their pending events and shuts down the client. Request trace
+context also remains available during that work.
+
+The wrapper forwards a promise rejection to `next(error)` once on Express 4 and
+5. Synchronous return values, receiver binding, and thrown errors keep their
+normal behavior. Return or await the work that needs the request client; the
+wrapper does not track work detached from the returned promise. Disabling both
+automatic request and metric capture keeps successful requests under manual
+delivery. Registering the wrapper does not change unwrapped handlers.
+
 ## Request Metrics
 
 Request metrics are opt-in. Enable `captureRequestMetrics` when you want the middleware to send an explicit `http.server.duration` histogram for each completed request:
@@ -193,7 +231,11 @@ if (logbrewServerApiKey) {
   }));
 }
 
-app.use((err, _req, res, _next) => {
+app.use((err, _req, res, next) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
   res.status(500).json({ error: err.message });
 });
 ```
@@ -205,3 +247,10 @@ When the failing request passed through `logbrewMiddleware()`, the issue stays o
 ## Example Source
 
 The package includes example source for request middleware, error middleware, and app-owned response handling. The packaged examples use an explicit `RecordingTransport` so they can run offline and print serialized event batches without sending them. Use the default network-delivery snippets above as the starting point for wiring LogBrew into your Express application.
+
+The `handler-wrapper` example sends a response, waits for its request event to
+flush, and then records a log from the handler's remaining work:
+
+```bash
+bun node_modules/@logbrew/express/examples/index.mjs handler-wrapper
+```

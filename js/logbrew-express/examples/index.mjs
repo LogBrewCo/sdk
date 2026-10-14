@@ -2,6 +2,7 @@
 
 const commands = new Map([
   ["readme-example", new URL("./readme-example.mjs", import.meta.url)],
+  ["handler-wrapper", new URL("./handler-wrapper.mjs", import.meta.url)],
   ["real-user-smoke", new URL("./real-user-smoke.mjs", import.meta.url)]
 ]);
 
@@ -23,6 +24,7 @@ function printHelp() {
   console.log("LogBrew Express examples");
   console.log("node node_modules/@logbrew/express/examples/index.mjs --list");
   console.log("node node_modules/@logbrew/express/examples/index.mjs readme-example");
+  console.log("bun node_modules/@logbrew/express/examples/index.mjs handler-wrapper");
   console.log("node node_modules/@logbrew/express/examples/index.mjs real-user-smoke");
   console.log("node node_modules/@logbrew/express/examples/index.mjs");
   console.log("npm --prefix node_modules/@logbrew/express/examples run list");
@@ -32,5 +34,6 @@ function printHelp() {
 
 function printList() {
   console.log("readme-example -> node node_modules/@logbrew/express/examples/index.mjs readme-example");
+  console.log("handler-wrapper -> bun node_modules/@logbrew/express/examples/index.mjs handler-wrapper");
   console.log("real-user-smoke -> node node_modules/@logbrew/express/examples/index.mjs real-user-smoke");
 }

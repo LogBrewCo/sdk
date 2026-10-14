@@ -104,6 +104,16 @@ export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & NodeFetch
 export declare function createLogBrewExpressClient(config?: CreateLogBrewExpressClientConfig): LogBrewClient;
 export declare function logbrewMiddleware(options?: LogBrewExpressOptions): RequestHandler;
 export declare function logbrewErrorHandler(options?: LogBrewExpressOptions): ErrorRequestHandler;
+export type LogBrewExpressHandler<Result = unknown, Receiver = unknown> = (
+  this: Receiver,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => Result;
+/** Track returned handler work; forward promise rejections to next once on Express 4 and 5. */
+export declare function withLogBrewExpressHandler<Receiver, Result>(
+  handler: LogBrewExpressHandler<Result, Receiver>
+): LogBrewExpressHandler<Result extends PromiseLike<unknown> ? Promise<Awaited<Result> | void> : Result, Receiver>;
 export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
 export declare function createRequestEvent(
   req: Request,
@@ -154,6 +164,7 @@ declare const defaultExport: {
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   logbrewErrorHandler: typeof logbrewErrorHandler;
   logbrewMiddleware: typeof logbrewMiddleware;
+  withLogBrewExpressHandler: typeof withLogBrewExpressHandler;
 };
 
 export default defaultExport;

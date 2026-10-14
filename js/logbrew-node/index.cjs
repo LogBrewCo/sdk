@@ -207,29 +207,67 @@ function withLogBrewHttpHandler(handler, options = {}) {
     const trace = createRequestTraceContext(req, res, options);
     const context = createLogBrewNodeContext(client, transport, trace);
     let errorCaptured = false;
+    let handlerSettled = false;
+    let finalized = false;
+    let requestShutdown = false;
+    let requestFlush;
 
     req.logbrew = context;
 
     if (options.captureRequests !== false) {
-      res.once("finish", () => {
-        if (!errorCaptured) {
-          void captureHttpRequestFinish(options, { req, res, client, transport, startedAt });
+      const finalize = () => {
+        if (finalized) {
+          return;
         }
-      });
+        finalized = true;
+        res.removeListener("finish", finalize);
+        res.removeListener("close", finalize);
+        req.removeListener("aborted", finalize);
+        if (!errorCaptured) {
+          requestShutdown = handlerSettled;
+          requestFlush = activeTraceContext.run(trace, () => (
+            captureHttpRequestFinish(options, { req, res, client, transport, startedAt, shutdown: requestShutdown })
+          )).catch(() => undefined);
+        }
+      };
+      res.once("finish", finalize);
+      res.once("close", finalize);
+      req.once("aborted", finalize);
+    }
+
+    async function settleHandler() {
+      handlerSettled = true;
+      if (!finalized || requestShutdown || errorCaptured) {
+        return;
+      }
+      await requestFlush;
+      try {
+        const hasTail = client.pendingEvents() > 0;
+        const response = await client.shutdown(transport);
+        if (hasTail) {
+          await notifyFlush(options, response, { req, res, client, trace });
+        }
+      } catch (error) {
+        await notifyFailure(options, error, { req, res, client, trace });
+      }
+    }
+
+    function rejectHandler(error) {
+      handlerSettled = true;
+      errorCaptured = true;
+      return handleHttpHandlerError(options, { error, req, res, context });
     }
 
     activeTraceContext.run(trace, () => {
       try {
         const result = handler(req, res, context);
         if (isPromiseLike(result)) {
-          void result.catch((error) => {
-            errorCaptured = true;
-            return handleHttpHandlerError(options, { error, req, res, context });
-          });
+          void Promise.resolve(result).then(settleHandler, rejectHandler).catch(() => undefined);
+        } else {
+          void settleHandler().catch(() => undefined);
         }
       } catch (error) {
-        errorCaptured = true;
-        void handleHttpHandlerError(options, { error, req, res, context });
+        void rejectHandler(error).catch(() => undefined);
       }
     });
   };
@@ -712,7 +750,8 @@ function createHttpRequestEvent(req, res, {
     method,
     now,
     path,
-    statusCode
+    statusCode,
+    responseCompleted: req.aborted !== true && !(res.destroyed === true && res.writableFinished === false)
   });
 }
 
@@ -757,7 +796,7 @@ async function captureHttpError(error, req, res, context, options = {}) {
   }
 }
 
-async function captureHttpRequestFinish(options, { req, res, client, transport, startedAt }) {
+async function captureHttpRequestFinish(options, { req, res, client, transport, startedAt, shutdown = true }) {
   const trace = getRequestTraceContext(req);
   try {
     const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
@@ -765,7 +804,7 @@ async function captureHttpRequestFinish(options, { req, res, client, transport, 
       ? options.requestEvent(req, res, { client, durationMs, trace })
       : createHttpRequestEvent(req, res, { ...options, durationMs, trace });
     captureRequestEvent(client, event);
-    const response = await client.shutdown(transport);
+    const response = await (shutdown ? client.shutdown(transport) : client.flush(transport));
     await notifyFlush(options, response, { req, res, client, trace });
   } catch (error) {
     await notifyFailure(options, error, { req, res, client, trace });
@@ -1931,7 +1970,8 @@ function createTraceparentRequestSpan(traceContext, {
   method,
   now,
   path,
-  statusCode
+  statusCode,
+  responseCompleted
 }) {
   return {
     id,
@@ -1942,7 +1982,7 @@ function createTraceparentRequestSpan(traceContext, {
       traceId: traceContext.traceId,
       spanId: traceContext.spanId,
       parentSpanId: traceContext.parentSpanId,
-      status: statusCode >= 500 ? "error" : "ok",
+      status: statusCode >= 500 || !responseCompleted ? "error" : "ok",
       durationMs,
       metadata: {
         framework: "node:http",
@@ -1950,7 +1990,8 @@ function createTraceparentRequestSpan(traceContext, {
         "http.response.status_code": statusCode,
         method, path,
         sampled: traceContext.sampled,
-        statusCode, "url.path": path
+        statusCode, "url.path": path,
+        ...(!responseCompleted ? { responseCompleted: false } : {})
       }
     }
   };

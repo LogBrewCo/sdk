@@ -3,7 +3,8 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   getActiveLogBrewTrace,
   logbrewErrorHandler,
-  logbrewMiddleware
+  logbrewMiddleware,
+  withLogBrewExpressHandler
 } from "@logbrew/express";
 
 const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
@@ -34,12 +35,12 @@ app.use("/fail", logbrewMiddleware({
 }));
 
 let activeTraceFromAsync;
-app.get("/fail", async () => {
+app.get("/fail", withLogBrewExpressHandler(async () => {
   await Promise.resolve().then(() => {
     activeTraceFromAsync = getActiveLogBrewTrace();
   });
   throw new Error("route exploded");
-});
+}));
 
 app.use(logbrewErrorHandler({
   serverApiKey: "LOGBREW_SERVER_API_KEY",

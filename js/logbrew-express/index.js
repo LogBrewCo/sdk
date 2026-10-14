@@ -7,7 +7,8 @@ export const {
   createRequestEvent,
   getActiveLogBrewTrace,
   logbrewErrorHandler,
-  logbrewMiddleware
+  logbrewMiddleware,
+  withLogBrewExpressHandler
 } = express;
 
 export default express;
