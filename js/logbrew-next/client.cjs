@@ -13,7 +13,7 @@ function createLogBrewNextBrowserClient({
   context,
   eventFilter,
   sdkName = "logbrew-next-client",
-  sdkVersion = "0.1.7",
+  sdkVersion = "0.1.8",
   maxQueueSize,
   maxRetries = 2,
   onEventDropped

@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/vue",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vue plugin and composable helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",

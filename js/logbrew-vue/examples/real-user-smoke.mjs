@@ -19,7 +19,7 @@ const manualErrorTransport = RecordingTransport.alwaysAccept();
 const client = createLogBrewVueClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "vue-smoke-app",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   maxRetries: 1
 });
 
@@ -54,7 +54,7 @@ await client.shutdown(requestTransport);
 const errorClient = createLogBrewVueClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "vue-error-smoke",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.1"
 });
 const ErrorComponent = defineComponent({
   name: "ExplodingVueComponent",
@@ -86,7 +86,7 @@ const manualContext = {
   client: createLogBrewVueClient({
     clientKey: "LOGBREW_CLIENT_KEY",
     sdkName: "vue-manual-error-smoke",
-    sdkVersion: "0.1.0"
+    sdkVersion: "0.1.1"
   }),
   logbrew: null,
   transport: manualErrorTransport,
