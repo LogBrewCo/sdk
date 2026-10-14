@@ -77,7 +77,7 @@ final class FatalStoreModuleImpl {
       }
       EventRecordStore.Result result = eventStore.append(serializedEvent, byteCount);
       if ("appended".equals(result.status)) {
-        AndroidNativeDiagnostics.notePersistedRecord(serializedEvent);
+        AndroidNativeDiagnostics.notePersistedRecord(serializedEvent, System.nanoTime());
       }
       return eventResultMap(result);
     } catch (RuntimeException error) {

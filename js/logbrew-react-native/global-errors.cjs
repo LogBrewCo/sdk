@@ -19,8 +19,6 @@ const SAFE_ERROR_NAMES = new Set([
   "URIError"
 ]);
 const LAST_ROUTE = Symbol.for("co.logbrew.react-native.last-route");
-const LOCATION_DIRECTORIES =
-  /(?:[a-z][a-z0-9+.-]*:\/\/[^/\s()]*)?(?:[a-z]:)?[\\/](?:[^\\/\s():]*[\\/])*/giu;
 const installations = new WeakMap();
 let nextEventSequence = 0;
 
@@ -214,14 +212,31 @@ function createAutomaticErrorEvent(error, client, fatal = false) {
     level: fatal ? "fatal" : "error",
     mechanism: "react_native_error_utils"
   });
+  const { exceptionChain, metadata, stackFrames } = event.attributes;
+  // Frames keep file basenames only; Debug IDs were already matched on the full path.
   return {
     ...event,
     attributes: {
       ...event.attributes,
+      exceptionChain: {
+        ...exceptionChain,
+        entries: exceptionChain.entries.map((entry) => ({
+          ...entry,
+          ...(entry.stackFrames ? { stackFrames: basenameFrames(entry.stackFrames) } : {})
+        }))
+      },
+      ...(stackFrames ? { stackFrames: basenameFrames(stackFrames) } : {}),
       title: AUTOMATIC_ERROR_MESSAGE,
       message: AUTOMATIC_ERROR_MESSAGE,
       metadata: {
-        ...event.attributes.metadata,
+        ...metadata,
+        ...(metadata.errorFrameFile ? { errorFrameFile: basename(metadata.errorFrameFile) } : {}),
+        ...(metadata.releaseArtifactCodeFile
+          ? { releaseArtifactCodeFile: basename(metadata.releaseArtifactCodeFile) }
+          : {}),
+        ...(typeof metadata.issueGroupingKey === "string"
+          ? { issueGroupingKey: metadata.issueGroupingKey.replace(/^([^:]+:[^:]+:).*[\\/]/u, "$1") }
+          : {}),
         automatic: true,
         fatal,
         handled: !fatal,
@@ -233,20 +248,24 @@ function createAutomaticErrorEvent(error, client, fatal = false) {
   };
 }
 
-// Removes the message header, remote hosts, and local directories before the
-// canonical parser reads frames, so only file basenames, lines, columns, and
-// function names remain.
+// Hermes and V8 put the message before the frames. Keep only frame lines so
+// message text cannot become a frame, even when the message changed later.
 function automaticStack(error) {
   const stack = safeReadProperty(error, "stack");
   if (typeof stack !== "string") {
     return "";
   }
-  const name = safeReadProperty(error, "name");
-  const message = safeReadProperty(error, "message");
-  const header = `${typeof name === "string" ? name : "Error"}: ${typeof message === "string" ? message : ""}`;
-  return (stack.startsWith(header) ? stack.slice(header.length) : stack)
-    .slice(0, MAX_STACK_BYTES)
-    .replace(LOCATION_DIRECTORIES, "");
+  const lines = stack.slice(0, MAX_STACK_BYTES).split(/\r?\n/u);
+  const frames = lines.filter((line) => line.trimStart().startsWith("at "));
+  return (frames.length > 0 ? frames : lines).join("\n");
+}
+
+function basenameFrames(frames) {
+  return frames?.map((frame) => ({ ...frame, filename: basename(frame.filename) }));
+}
+
+function basename(value) {
+  return typeof value === "string" ? value.replace(/^.*[\\/]/u, "") : value;
 }
 
 function safeErrorName(error) {

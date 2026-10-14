@@ -57,23 +57,25 @@ public final class AndroidNativeDiagnosticsTest {
           AndroidNativeDiagnostics diagnostics =
               fixture(directory, order, new FakeScheduler());
           diagnostics.install();
-          AndroidNativeDiagnostics.notePersistedRecord("{\"type\":\"issue\",\"id\":\"evt_android_java_1\"}");
-          diagnostics.handleUncaught(
-              Thread.currentThread(),
-              new RuntimeException(new com.facebook.react.common.JavascriptException("first")));
+          AndroidNativeDiagnostics.notePersistedRecord("{\"type\":\"issue\",\"id\":\"evt_android_java_1\"}", 0);
+          diagnostics.handleUncaught(Thread.currentThread(), new RuntimeException(javaScriptException()));
           assertEquals(Arrays.asList("persist", "chain"), order);
           assertContains(onlyQueuedEvent(directory), "java.lang.RuntimeException");
-
-          AndroidNativeDiagnostics.notePersistedRecord("{\"type\":\"issue\",\"id\":\"evt_rn_fatal_1\"}");
-          diagnostics.handleUncaught(
-              Thread.currentThread(),
-              new RuntimeException(new com.facebook.react.common.JavascriptException("second")));
-          assertEquals(Arrays.asList("persist", "chain", "chain"), order);
-          diagnostics.handleUncaught(
-              Thread.currentThread(), new com.facebook.react.common.JavascriptException("third"));
-          assertEquals(Arrays.asList("persist", "chain", "chain", "persist", "chain"), order);
-          assertEquals(2, new EventRecordStore(new File(directory, "events")).load().records.size());
         });
+    long now = System.nanoTime();
+    String fatal = "{\"type\":\"issue\",\"id\":\"evt_rn_fatal_1\",\"attributes\":{}}";
+    AndroidNativeDiagnostics.notePersistedRecord(fatal, now);
+    assertEquals(false, AndroidNativeDiagnostics.claimPersistedJavaScriptFatal(new IllegalStateException(), now));
+    assertEquals(true, AndroidNativeDiagnostics.claimPersistedJavaScriptFatal(new RuntimeException(javaScriptException()), now));
+    assertEquals(false, AndroidNativeDiagnostics.claimPersistedJavaScriptFatal(javaScriptException(), now));
+    AndroidNativeDiagnostics.notePersistedRecord(fatal.replace("{}", "{\"metadata\":{\"replayed\":true}}"), now);
+    assertEquals(false, AndroidNativeDiagnostics.claimPersistedJavaScriptFatal(javaScriptException(), now));
+    AndroidNativeDiagnostics.notePersistedRecord(fatal, now);
+    assertEquals(false, AndroidNativeDiagnostics.claimPersistedJavaScriptFatal(javaScriptException(), now + 10_000_000_001L));
+  }
+
+  private static RuntimeException javaScriptException() {
+    return new com.facebook.react.common.JavascriptException("synthetic");
   }
 
   private void anrPersistsOneBoundedMainThreadReport() throws Exception {

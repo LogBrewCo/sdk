@@ -290,7 +290,9 @@ breadcrumbs and context (such as release and session), and the last route that
 the screen or navigation helpers recorded, as `metadata.lastRoute`. They
 exclude the original error message, raw stack text, arbitrary metadata, full
 URLs, hosts, query strings, local directories, payloads, and native error text.
-The exception chain marks the removed message as `redacted`. `onDiagnostic` receives only a fixed code. This error-handler integration does not claim mathematically exactly-once delivery, native crash capture, ANR or hang detection, or symbolication. The client-level persistent queue owns restart delivery.
+The exception chain marks the removed message as `redacted`. Records replayed
+from an injected `fatalStore` keep only the file basename, line, and column of
+each frame. `onDiagnostic` receives only a fixed code. This error-handler integration does not claim mathematically exactly-once delivery, native crash capture, ANR or hang detection, or symbolication. The client-level persistent queue owns restart delivery.
 
 ### Apple native crash and app-hang diagnostics
 
@@ -338,10 +340,10 @@ request data, authentication values, device identifiers, and raw tombstones. Jav
 hang reports keep at most 32 frames; NDK reports keep one build ID and offset.
 
 React Native ends a fatal JavaScript error on Android with a
-`JavascriptException` crash. When the global error handler already persisted
-that fatal report in the same process, Android diagnostics skip the crash, so
-one JavaScript fatal produces one issue. Without a persisted report, the crash
-is recorded as usual.
+`JavascriptException` crash. When the global error handler persisted that
+fatal report in the same process less than 10 seconds earlier, Android
+diagnostics skip the crash once, so one JavaScript fatal produces one issue.
+Otherwise the crash is recorded as usual.
 
 `uninstallLogBrewAndroidNativeDiagnostics()` reinstates prior
 handlers, stops the watchdog, and leaves queued events available. After closing
