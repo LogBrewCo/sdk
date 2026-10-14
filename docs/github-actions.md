@@ -41,9 +41,13 @@ If the Go probe cannot start, the verifier fails without a JSON summary and
 identifies whether the native clock or toolchain inventory was unavailable.
 
 `scripts/check_go_tests.sh` and `scripts/check_go_static.sh` cover the probe
-alongside the Go packages. Install Staticcheck 2026.2.1 on `PATH` before local
+alongside the Go packages. Install Staticcheck 2026.2.2 on `PATH` before local
 checks; the timed check validates the version and does not download tools. CI
 installs Go before root contract tests as well.
+
+```bash
+go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
+```
 
 Provision the pinned Python static-analysis environment once before local
 checks; the timed check validates every direct package version and does not

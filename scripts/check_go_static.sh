@@ -3,12 +3,12 @@ set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
-version="2026.2.1"
+version="2026.2.2"
 trap 'find "$tmp_dir" -depth -delete' EXIT
 
 staticcheck_bin="$(command -v staticcheck || true)"
 if [[ -z "$staticcheck_bin" ]] || \
-	[[ "$("$staticcheck_bin" -version)" != "staticcheck $version (0.8.1)" ]]; then
+	[[ "$("$staticcheck_bin" -version)" != "staticcheck $version (0.8.2)" ]]; then
 	printf '%s\n' "Staticcheck $version is required on PATH" >&2
 	exit 1
 fi

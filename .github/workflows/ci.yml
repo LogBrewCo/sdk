@@ -117,7 +117,8 @@ jobs:
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: stable
+          toolchain: 1.99.0
+          components: clippy, rustfmt
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -165,6 +166,26 @@ jobs:
         with:
           php-version: "8.4"
           tools: composer
+
+      - name: Run Rust static analysis
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
+        run: bash scripts/check_rust_static.sh
+
+      - name: Run Go static analysis
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
+        env:
+          LOGBREW_STATICCHECK_BIN: ${{ runner.temp }}/staticcheck
+        run: |
+          GOBIN="$LOGBREW_STATICCHECK_BIN" go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
+          PATH="$LOGBREW_STATICCHECK_BIN:$PATH" bash scripts/check_go_static.sh
+
+      - name: Run Kotlin style checks
+        if: ${{ needs.changed-areas.outputs.kotlin == 'true' }}
+        run: bash scripts/check_kotlin_style.sh
+
+      - name: Run Swift style checks
+        if: ${{ needs.changed-areas.outputs.swift == 'true' }}
+        run: bash scripts/check_swift_style.sh
 
       - name: Run focused unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all != 'true' }}
