@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out immutable release source
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
@@ -91,7 +91,7 @@ jobs:
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
 
       - name: Check out protected release control
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.workflow_sha }}
@@ -160,7 +160,7 @@ jobs:
             --source-sha "$RELEASE_SOURCE_SHA"
 
       - name: Download authenticated Python release manifest
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: python-release-manifest
           path: ${{ runner.temp }}/python-publication
@@ -199,7 +199,7 @@ jobs:
             --python-version "logbrew-django=$DJANGO_VERSION"
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
@@ -288,7 +288,7 @@ jobs:
           echo "Python public artifact execution ok"
 
       - name: Upload Python reconciliation receipt
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-public-reconciliation
           path: |
@@ -303,7 +303,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out immutable release source
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
@@ -326,7 +326,7 @@ jobs:
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
 
       - name: Check out protected release control
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.workflow_sha }}
@@ -403,12 +403,12 @@ jobs:
             --source-sha "$RELEASE_SOURCE_SHA"
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
@@ -478,7 +478,7 @@ jobs:
             --artifact-root "$RUNNER_TEMP/nuget-public-artifacts"
 
       - name: Upload NuGet reconciliation receipt
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nuget-public-reconciliation
           path: ${{ runner.temp }}/nuget-public-reconciliation.json

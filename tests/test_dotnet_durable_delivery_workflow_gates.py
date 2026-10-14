@@ -1330,7 +1330,7 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
         ]
         setup = """      - name: Set up .NET for Windows native contracts
         if: ${{ matrix.os == 'windows' }}
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
 """
