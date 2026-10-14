@@ -84,7 +84,7 @@ This public guide applies to the whole repository.
   non-public links, unpublished research, task context, planning artifacts, or
   non-public release evidence.
 - Capture structured stack frames and sanitized route and query context by
-  default. Never capture authorization values, secrets, payload bodies, local
+  default. Never capture authorization or access values, payload bodies, local
   paths, or unbounded or high-cardinality metadata unless a documented public
   opt-in contract requires and tests it.
 - Review the full proposed commit range, changed paths, staged content, and
