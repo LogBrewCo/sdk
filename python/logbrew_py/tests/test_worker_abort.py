@@ -25,7 +25,8 @@ class WorkerAbortTests(unittest.TestCase):
                 raise error
 
         def exception_hook(args: threading.ExceptHookArgs) -> None:
-            failures.append(args.exc_value)
+            if args.exc_value is not None:
+                failures.append(args.exc_value)
             captured.set()
 
         client = create_client(

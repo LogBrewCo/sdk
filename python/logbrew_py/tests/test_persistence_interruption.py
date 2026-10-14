@@ -3,9 +3,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from logbrew_sdk import RecordingTransport
+from logbrew_sdk._persistence_crypto import QueueState
+from logbrew_sdk._persistent_event_queue import PersistentEventQueue
 from test_persistent_delivery import HAS_PERSISTENCE_CRYPTO, capture_log, create_persistent_client
 
 
@@ -19,11 +22,11 @@ class PersistenceInterruptionTests(unittest.TestCase):
     def check_operation(self, directory: Path, operation: str) -> None:
         client = create_persistent_client(directory)
         capture_log(client, "evt_before", "before interruption")
-        queue = client._queue
+        queue = cast("PersistentEventQueue", client._queue)
         original_write = queue._write_state
         error = KeyboardInterrupt("private failure text")
 
-        def write_then_interrupt(state: object) -> None:
+        def write_then_interrupt(state: QueueState) -> None:
             original_write(state)
             raise error
 
@@ -37,7 +40,8 @@ class PersistenceInterruptionTests(unittest.TestCase):
                     else:
                         client.purge_pending_events()
                 self.assertIs(caught.exception, error)
-            self.assertFalse(queue._connection.in_transaction)
+            connection = queue._connection
+            self.assertFalse(connection is not None and connection.in_transaction)
             self.assertEqual(client.recover_pending_events(), 1)
             capture_log(client, "evt_after", "after interruption")
             self.assertEqual(client.pending_events(), 2)
@@ -51,7 +55,7 @@ class PersistenceInterruptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             client = create_persistent_client(Path(directory).resolve())
             capture_log(client, "evt_before", "before interruption")
-            queue = client._queue
+            queue = cast("PersistentEventQueue", client._queue)
             try:
                 with (
                     patch("logbrew_sdk._persistent_event_queue.os.fsync", side_effect=KeyboardInterrupt()),
