@@ -33,32 +33,62 @@ function createLogBrewBrowserFetch(context, options = {}) {
       ? fetchInitWithTraceparent(input, init, spanTraceContext)
       : init;
 
+    let response;
     try {
-      const response = await fetchImpl(input, nextInit);
-      if (shouldCapture) {
-        await captureBrowserFetchSpan({
-          ...request,
-          durationMs: durationSince(startMs, options),
-          responseBodySize: responseBodySize(response),
-          spanTraceContext,
-          statusCode: responseStatus(response),
-          tracePropagated
-        }, context, { ...options, traceContext: parentTraceContext });
-      }
-      return response;
+      response = await fetchImpl(input, nextInit);
     } catch (error) {
       if (shouldCapture) {
-        await captureBrowserFetchSpan({
-          ...request,
-          durationMs: durationSince(startMs, options),
-          errorType: errorType(error),
-          spanTraceContext,
-          tracePropagated
-        }, context, { ...options, traceContext: parentTraceContext });
+        try {
+          await captureFetchOutcome(() => ({
+            ...request,
+            durationMs: durationSince(startMs, options),
+            errorType: errorType(error),
+            spanTraceContext,
+            tracePropagated
+          }), context, { ...options, traceContext: parentTraceContext });
+        } catch {
+          // Capture failure must not replace the original fetch failure.
+        }
       }
       throw error;
     }
+
+    if (shouldCapture) {
+      await captureFetchOutcome(() => ({
+        ...request,
+        durationMs: durationSince(startMs, options),
+        responseBodySize: responseBodySize(response),
+        spanTraceContext,
+        statusCode: responseStatus(response),
+        tracePropagated
+      }), context, { ...options, traceContext: parentTraceContext });
+    }
+    return response;
   };
+}
+
+async function captureFetchOutcome(request, context, options) {
+  try {
+    return await captureBrowserFetchSpan(request(), context, {
+      ...options,
+      onCaptureError: undefined,
+      raiseCaptureErrors: true
+    });
+  } catch (error) {
+    if (typeof options.onCaptureError === "function") {
+      try {
+        await options.onCaptureError(error, context, { reason: "capture" });
+      } catch (callbackError) {
+        if (options.raiseCaptureErrors === true) {
+          throw callbackError;
+        }
+      }
+    }
+    if (options.raiseCaptureErrors === true) {
+      throw error;
+    }
+    return undefined;
+  }
 }
 
 function installLogBrewBrowserFetchInstrumentation(context, options = {}) {
