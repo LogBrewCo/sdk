@@ -4,6 +4,7 @@ import { cp, mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 
 const CLIENT_KEY = "LOGBREW_BROWSER_KEY";
 const TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
@@ -12,7 +13,7 @@ const FETCH_SPAN_ID = "8888888888888888";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
 
-async function importBrowserPackage() {
+async function importBrowserPackage(entry = "index.js") {
   const tempDir = await mkdtemp(join(tmpdir(), "logbrew-browser-fetch-test-"));
   await mkdir(join(tempDir, "node_modules", "@logbrew"), { recursive: true });
   await cp(resolve(repoRoot, "js/logbrew-js"), join(tempDir, "node_modules", "@logbrew", "sdk"), {
@@ -21,7 +22,10 @@ async function importBrowserPackage() {
   await cp(resolve(repoRoot, "js/logbrew-browser"), join(tempDir, "node_modules", "@logbrew", "browser"), {
     recursive: true
   });
-  const imported = await import(pathToFileURL(join(tempDir, "node_modules", "@logbrew", "browser", "index.js")));
+  const entryPath = join(tempDir, "node_modules", "@logbrew", "browser", entry);
+  const imported = entry === "index.cjs"
+    ? createRequire(import.meta.url)(entryPath)
+    : await import(pathToFileURL(entryPath));
   return {
     imported,
     async removeTempDir() {
@@ -206,6 +210,224 @@ test("installed browser fetch instrumentation patches only when explicitly insta
     await removeTempDir();
   }
 });
+
+for (const entry of ["index.js", "index.cjs"]) {
+  test(`browser fetch preserves success through capture failure and recovery in ${entry}`, async () => {
+    const { imported, removeTempDir } = await importBrowserPackage(entry);
+    try {
+      const captureError = new Error("capture unavailable");
+      const response = { headers: new globalThis.Headers(), status: 200 };
+      const spans = [];
+      const failures = [];
+      let sanitized = 0;
+      const context = createCaptureContext((id, timestamp, attributes) => spans.push(attributes));
+      const wrapped = imported.createLogBrewBrowserFetch(context, {
+        fetchImpl: async () => response,
+        flushOnCapture: false,
+        onCaptureError: (error) => failures.push(error),
+        randomValues: (length) => fillBytes(length, 0x88),
+        sanitizeMetadata(metadata) {
+          sanitized += 1;
+          if (sanitized === 1) {
+            throw captureError;
+          }
+          return metadata;
+        }
+      });
+
+      assert.equal(await wrapped("/api/orders?sample=hidden"), response);
+      assert.equal(sanitized, 1);
+      assert.deepEqual(failures, [captureError]);
+      assert.equal(spans.length, 0);
+      assert.equal(await wrapped("/api/orders?sample=hidden"), response);
+      assert.equal(spans.length, 1);
+      assert.equal(spans[0].status, "ok");
+      assert.equal(spans[0].metadata.errorType, undefined);
+      assert.equal(JSON.stringify(spans).includes("sample=hidden"), false);
+    } finally {
+      await removeTempDir();
+    }
+  });
+
+  test(`browser fetch preserves the network error when capture fails in ${entry}`, async () => {
+    const { imported, removeTempDir } = await importBrowserPackage(entry);
+    try {
+      for (const raiseCaptureErrors of [false, true]) {
+        const networkError = new TypeError("network unavailable");
+        const captureError = new Error("capture unavailable");
+        const failures = [];
+        let attempts = 0;
+        const context = createCaptureContext(() => {
+          attempts += 1;
+          throw captureError;
+        });
+        const wrapped = imported.createLogBrewBrowserFetch(context, {
+          fetchImpl: async () => { throw networkError; },
+          flushOnCapture: false,
+          onCaptureError: (error) => failures.push(error),
+          raiseCaptureErrors,
+          randomValues: (length) => fillBytes(length, 0x88)
+        });
+
+        await assert.rejects(wrapped("/api/orders"), (error) => error === networkError);
+        assert.equal(attempts, 1);
+        assert.deepEqual(failures, [captureError]);
+      }
+    } finally {
+      await removeTempDir();
+    }
+  });
+
+  test(`browser fetch reports delivery failure once when the callback rejects in ${entry}`, async () => {
+    const { imported, removeTempDir } = await importBrowserPackage(entry);
+    try {
+      const response = { headers: new globalThis.Headers(), status: 200 };
+      const deliveryError = new Error("delivery unavailable");
+      const callbackError = new Error("callback unavailable");
+      const spans = [];
+      const failures = [];
+      const context = createCaptureContext(
+        (id, timestamp, attributes) => spans.push(attributes),
+        async () => { throw deliveryError; }
+      );
+      const wrapped = imported.createLogBrewBrowserFetch(context, {
+        fetchImpl: async () => response,
+        onCaptureError(error) {
+          failures.push(error);
+          return Promise.reject(callbackError);
+        },
+        randomValues: (length) => fillBytes(length, 0x88)
+      });
+
+      assert.equal(await wrapped("/api/orders"), response);
+      assert.deepEqual(failures, [deliveryError]);
+      assert.equal(spans.length, 1);
+      assert.equal(spans[0].status, "ok");
+      assert.equal(spans[0].metadata.errorType, undefined);
+    } finally {
+      await removeTempDir();
+    }
+  });
+
+  test(`browser fetch honors strict capture failure without a second network span in ${entry}`, async () => {
+    const { imported, removeTempDir } = await importBrowserPackage(entry);
+    try {
+      const captureError = new Error("capture unavailable");
+      const failures = [];
+      let attempts = 0;
+      const context = createCaptureContext(() => {
+        attempts += 1;
+        throw captureError;
+      });
+      const wrapped = imported.createLogBrewBrowserFetch(context, {
+        fetchImpl: async () => ({ headers: new globalThis.Headers(), status: 200 }),
+        flushOnCapture: false,
+        onCaptureError: (error) => failures.push(error),
+        raiseCaptureErrors: true,
+        randomValues: (length) => fillBytes(length, 0x88)
+      });
+
+      await assert.rejects(wrapped("/api/orders"), (error) => error === captureError);
+      assert.equal(attempts, 1);
+      assert.deepEqual(failures, [captureError]);
+    } finally {
+      await removeTempDir();
+    }
+  });
+
+  test(`overlapping browser fetches keep outcomes and start context after teardown in ${entry}`, async () => {
+    const { imported, removeTempDir } = await importBrowserPackage(entry);
+    try {
+      const first = deferredFetch();
+      const second = deferredFetch();
+      const response = { headers: new globalThis.Headers(), status: 200 };
+      const networkError = new TypeError("network unavailable");
+      const captureError = new Error("capture closed");
+      const attempts = [];
+      const failures = [];
+      let closed = false;
+      const context = createCaptureContext((id, timestamp, attributes) => {
+        attempts.push(attributes);
+        if (closed) {
+          throw captureError;
+        }
+      });
+      const originalFetch = (input) => input === "/api/first" ? first.promise : second.promise;
+      context.browserWindow.fetch = originalFetch;
+      const instrumentation = imported.installLogBrewBrowserFetchInstrumentation(context, {
+        flushOnCapture: false,
+        onCaptureError: (error) => failures.push(error),
+        randomValues: (length) => fillBytes(length, 0x88)
+      });
+      const firstResult = context.browserWindow.fetch("/api/first");
+      const secondTraceId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const secondSpanId = "bbbbbbbbbbbbbbbb";
+      context.traceContext = { traceId: secondTraceId, spanId: secondSpanId };
+      const secondResult = context.browserWindow.fetch("/api/second");
+      context.traceContext = { traceId: "cccccccccccccccccccccccccccccccc", spanId: "dddddddddddddddd" };
+      instrumentation.uninstall();
+      instrumentation.uninstall();
+      assert.equal(context.browserWindow.fetch, originalFetch);
+      closed = true;
+
+      const failed = assert.rejects(secondResult, (error) => error === networkError);
+      second.reject(networkError);
+      await failed;
+      first.resolve(response);
+      assert.equal(await firstResult, response);
+      assert.equal(attempts.length, 2);
+      assert.equal(attempts[0].traceId, secondTraceId);
+      assert.equal(attempts[0].parentSpanId, secondSpanId);
+      assert.equal(attempts[0].metadata.errorType, "TypeError");
+      assert.equal(attempts[1].traceId, TRACE_ID);
+      assert.equal(attempts[1].parentSpanId, PARENT_SPAN_ID);
+      assert.equal(attempts[1].status, "ok");
+      assert.equal(attempts[1].metadata.errorType, undefined);
+      assert.deepEqual(failures, [captureError, captureError]);
+    } finally {
+      await removeTempDir();
+    }
+  });
+
+  test(`excluded browser fetches do not enter the capture failure path in ${entry}`, async () => {
+    const { imported, removeTempDir } = await importBrowserPackage(entry);
+    try {
+      const response = { headers: new globalThis.Headers(), status: 200 };
+      const context = createCaptureContext(() => { throw new Error("unexpected capture"); });
+      const failures = [];
+      const wrapped = imported.createLogBrewBrowserFetch(context, {
+        captureTargets: [],
+        fetchImpl: async () => response,
+        onCaptureError: (error) => failures.push(error),
+        randomValues: (length) => fillBytes(length, 0x88)
+      });
+
+      assert.equal(await wrapped("/api/orders"), response);
+      assert.deepEqual(failures, []);
+    } finally {
+      await removeTempDir();
+    }
+  });
+}
+
+function createCaptureContext(span, flush = async () => ({ statusCode: 202 })) {
+  return {
+    browserWindow: createFakeBrowserWindow("https://app.example.test/checkout"),
+    client: { flush, span },
+    traceContext: { traceId: TRACE_ID, spanId: PARENT_SPAN_ID },
+    transport: {}
+  };
+}
+
+function deferredFetch() {
+  let resolvePromise;
+  let rejectPromise;
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return { promise, reject: rejectPromise, resolve: resolvePromise };
+}
 
 function createFakeBrowserWindow(href) {
   const currentUrl = new URL(href);
