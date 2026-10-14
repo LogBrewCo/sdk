@@ -99,6 +99,31 @@ final class EventRecordStore {
     return Result.status("acknowledged");
   }
 
+  /** Deletes queued records at ascending load() positions so a fatal report can take their place. */
+  synchronized Result remove(int[] indexes) {
+    Snapshot snapshot = snapshot();
+    int previous = -1;
+    for (int index : indexes) {
+      if (snapshot == null || index <= previous || index >= snapshot.records.size()) {
+        return Result.status("storage_error");
+      }
+      previous = index;
+    }
+    for (int index : indexes) {
+      File recordFile = new File(directory, eventFileName(snapshot.records.get(index).sequence));
+      if (!isSafeRegularFile(recordFile) || !recordFile.delete()) {
+        // Earlier deletions may have committed; fail closed instead of diverging from the client.
+        poisoned = true;
+        return Result.status("storage_error");
+      }
+    }
+    if (parentDirectorySync.sync(directory) == ParentDirectorySyncResult.FAILED) {
+      poisoned = true;
+      return Result.status("storage_error");
+    }
+    return Result.status("removed");
+  }
+
   synchronized Result purge() {
     if (poisoned || !prepareDirectory() || !removeStaleTemporaryFiles()) {
       return Result.status("storage_error");

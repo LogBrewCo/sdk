@@ -105,6 +105,27 @@ static void TestRestartOrderAndAcceptedPrefix(void)
     passed += 1;
 }
 
+static void TestRemoveDeletesSelectedRecordsAcrossRestart(void)
+{
+    WithDirectory(^(NSURL *directoryURL) {
+      LBRNEventRecordStore *store = Store(directoryURL);
+      for (NSString *eventId in @[ @"evt_first", @"evt_second", @"evt_third" ]) {
+          NSString *event = Event(eventId);
+          AssertEqual(@"appended", [store appendSerializedEvent:event eventBytes:EventBytes(event)][@"status"]);
+      }
+      AssertEqual(@"storage_error", [store removeRecordsAtIndexes:@[ @0, @3 ]][@"status"]);
+      AssertEqual(@"storage_error", [store removeRecordsAtIndexes:@[ @1, @0 ]][@"status"]);
+      AssertEqual(@"removed", [store removeRecordsAtIndexes:@[ @0, @2 ]][@"status"]);
+
+      NSArray *records = [Store(directoryURL) loadRecords][@"records"];
+      AssertEqual(@1, @(records.count));
+      AssertEqual(Event(@"evt_second"), records[0][@"serializedEvent"]);
+      AssertEqual(@"acknowledged", [store acknowledgeRecordCount:@1][@"status"]);
+      AssertEqual(@0, @([[Store(directoryURL) loadRecords][@"records"] count]));
+    });
+    passed += 1;
+}
+
 static void TestCorruptionPurgeAndSymlinkSafety(void)
 {
     WithDirectory(^(NSURL *directoryURL) {
@@ -209,6 +230,7 @@ int main(int argc, const char *argv[])
                 [NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[2]] isDirectory:YES]);
         }
         TestRestartOrderAndAcceptedPrefix();
+        TestRemoveDeletesSelectedRecordsAcrossRestart();
         TestCorruptionPurgeAndSymlinkSafety();
         TestInterruptedTemporaryWriteAndPrivateMode();
         TestRejectsNonASCIISequenceNames();

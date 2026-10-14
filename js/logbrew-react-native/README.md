@@ -160,7 +160,10 @@ The native queue stores one compact event per atomic record, is limited to
 when you configure them on the client. Both platforms use app-private storage.
 The client key is not written to disk; its SHA-256 digest separates queues
 after key rotation. The queue does not provide mathematically exactly-once
-delivery.
+delivery. When the queue is full, a fatal JavaScript report removes the oldest
+events that are not fatal and are not being sent, and counts each one as
+`evicted_for_fatal` in `deliveryHealth().droppedByReason`. The fatal is dropped
+only when the rest of the queue is fatal reports or a batch being sent.
 
 A successful `shutdown()` drains and closes the queue. A failed flush or
 shutdown leaves the exact remainder available to the same client and the next
@@ -306,7 +309,9 @@ main-thread hangs.
 Android diagnostics are opt-in and require a native build. They persist Java
 crashes, one NDK fault frame, and main-thread hangs to the normal app-private
 event queue. NDK evidence enters that queue on the next launch and remains
-until queue admission succeeds. Native signal records retain the project,
+until queue admission succeeds. A Java crash or hang report that finds the
+queue full waits in a separate app-private pending store and enters the queue
+when diagnostics are next installed with room. Native signal records retain the project,
 release, environment, and service active at crash time, so an app update before
 relaunch cannot reassign the crash to a newer build.
 

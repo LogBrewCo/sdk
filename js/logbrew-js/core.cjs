@@ -366,6 +366,7 @@ class LogBrewClient {
     this.droppedEventCount = 0;
     this.droppedEventsByReason = {
       event_too_large: 0,
+      evicted_for_fatal: 0,
       queue_bytes_overflow: 0,
       queue_overflow: 0
     };
@@ -390,7 +391,7 @@ class LogBrewClient {
     this.lastAttemptAtUnixMs = 0;
     this.lastAcceptedAtUnixMs = 0;
     this.lastDroppedAtUnixMs = 0;
-    this.failedBatch = undefined;
+    this.unacknowledgedBatch = undefined;
     this.issueBreadcrumbs = [];
     this.issueBreadcrumbsTruncated = false;
     this.#scheduleAutomaticDelivery();
@@ -488,7 +489,7 @@ class LogBrewClient {
     }
     this.#clearDeliveryTimer();
     this.automaticFlushPending = false;
-    this.failedBatch = undefined;
+    this.unacknowledgedBatch = undefined;
     this.events.splice(0, this.events.length);
     this.serializedEvents.splice(0, this.serializedEvents.length);
     this.serializedEventBytes.splice(0, this.serializedEventBytes.length);
@@ -666,27 +667,76 @@ class LogBrewClient {
       this.#recordDroppedEvent(event, "event_too_large");
       return EVENT_ADMISSIONS.event_too_large;
     }
-    if (this.events.length >= this.maxQueueSize) {
-      this.#recordDroppedEvent(event, "queue_overflow");
-      return EVENT_ADMISSIONS.queue_overflow;
+    const fatal = isFatalEvent(event);
+    if (fatal) {
+      this.#synchronizeEventStore();
     }
-    if (this.queuedEventBytes + eventBytes > this.maxQueueBytes) {
-      this.#recordDroppedEvent(event, "queue_bytes_overflow");
-      return EVENT_ADMISSIONS.queue_bytes_overflow;
+    const overflow = this.#overflowReason(this.events.length, this.queuedEventBytes + eventBytes);
+    const evicted = overflow && fatal ? this.#evictForFatal(eventBytes) : [];
+    if (overflow && evicted.length === 0) {
+      this.#recordDroppedEvent(event, overflow);
+      return EVENT_ADMISSIONS[overflow];
     }
-    if (this.eventStore) {
-      requireSynchronousStoreResult("append", this.eventStore.append({
-        event: cloneEvent(event),
-        eventBytes,
-        serializedEvent
-      }));
+    try {
+      if (this.eventStore) {
+        requireSynchronousStoreResult("append", this.eventStore.append({
+          event: cloneEvent(event),
+          eventBytes,
+          serializedEvent
+        }));
+      }
+      this.events.push(event);
+      this.serializedEvents.push(serializedEvent);
+      this.serializedEventBytes.push(eventBytes);
+      this.queuedEventBytes += eventBytes;
+    } finally {
+      // Report evictions only after admission so drop callbacks cannot refill the freed room.
+      for (const evictedEvent of evicted) {
+        this.#recordDroppedEvent(evictedEvent, "evicted_for_fatal");
+      }
     }
-    this.events.push(event);
-    this.serializedEvents.push(serializedEvent);
-    this.serializedEventBytes.push(eventBytes);
-    this.queuedEventBytes += eventBytes;
     this.#scheduleAutomaticDelivery();
     return EVENT_ADMISSIONS.admitted;
+  }
+
+  #overflowReason(count, bytes) {
+    if (count >= this.maxQueueSize) return "queue_overflow";
+    return bytes > this.maxQueueBytes ? "queue_bytes_overflow" : undefined;
+  }
+
+  // Evicts the oldest non-fatal events outside the unacknowledged batch, only when that makes room.
+  #evictForFatal(eventBytes) {
+    if (this.eventStore && typeof this.eventStore.remove !== "function") {
+      return [];
+    }
+    const indexes = [];
+    let count = this.events.length;
+    let bytes = this.queuedEventBytes + eventBytes;
+    for (
+      let index = this.unacknowledgedBatch?.eventsCount ?? 0;
+      index < this.events.length && this.#overflowReason(count, bytes);
+      index += 1
+    ) {
+      if (!isFatalEvent(this.events[index])) {
+        indexes.push(index);
+        count -= 1;
+        bytes -= this.serializedEventBytes[index];
+      }
+    }
+    if (this.#overflowReason(count, bytes)) {
+      return [];
+    }
+    if (this.eventStore) {
+      requireSynchronousStoreResult("remove", this.eventStore.remove(indexes));
+    }
+    const evicted = indexes.map((index) => this.events[index]);
+    for (let position = indexes.length - 1; position >= 0; position -= 1) {
+      const index = indexes[position];
+      this.events.splice(index, 1);
+      this.serializedEvents.splice(index, 1);
+      this.queuedEventBytes -= this.serializedEventBytes.splice(index, 1)[0];
+    }
+    return evicted;
   }
 
   #recordDroppedEvent(event, reason) {
@@ -849,15 +899,13 @@ class LogBrewClient {
     let batches = 0;
     let statusCode = 204;
     while (remainingEvents > 0) {
-      const batch = this.failedBatch ?? this.#nextBatch(Math.min(remainingEvents, this.maxBatchEvents));
-      let response;
-      try {
-        response = await this.#sendBatch(transport, batch.body);
-      } catch (error) {
-        this.failedBatch ??= Object.freeze({ body: batch.body, eventsCount: batch.eventsCount });
-        throw error;
-      }
-      this.failedBatch = undefined;
+      // Eviction for a fatal event can shrink the snapshot while a batch is in flight.
+      this.unacknowledgedBatch ??= Object.freeze(
+        this.#nextBatch(Math.min(remainingEvents, this.events.length, this.maxBatchEvents))
+      );
+      const batch = this.unacknowledgedBatch;
+      const response = await this.#sendBatch(transport, batch.body);
+      this.unacknowledgedBatch = undefined;
       this.#acknowledge(batch.eventsCount);
       this.acceptedBatchCount = incrementBounded(this.acceptedBatchCount);
       remainingEvents -= batch.eventsCount;
@@ -1076,6 +1124,11 @@ function utf8ByteLength(value) {
     }
   }
   return bytes;
+}
+
+// Fatal input severity is stored as critical; a critical issue is a crash report.
+function isFatalEvent(event) {
+  return event.type === "issue" && event.attributes.level === "critical";
 }
 
 function incrementBounded(value) {

@@ -167,6 +167,32 @@ test("durable fatal reports survive rejected delivery and restart until accepted
   });
 });
 
+test("a fatal at a full durable queue evicts the oldest non-fatal record across restart", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+    const runtime = await importRuntime("fatal-eviction-first", true, "android");
+    const client = nativeClient(runtime, { maxQueueSize: 2 });
+    addOfflineLog(client);
+    client.log("evt_rn_kept", "2026-07-31T08:30:01.000Z", { level: "info", message: "kept" });
+    let handler = () => {};
+    const installation = runtime.installLogBrewReactNativeGlobalErrorHandler({
+      client,
+      errorUtils: { getGlobalHandler() { return handler; }, setGlobalHandler(value) { handler = value; } }
+    });
+
+    handler(new TypeError("private application detail"), true);
+
+    assert.equal(installation.fatalHealth().lastOutcome, "stored");
+    assert.equal(client.deliveryHealth().droppedByReason.evicted_for_fatal, 1);
+    const ids = nativeStore.records(CLIENT_KEY).map(({ serializedEvent }) => JSON.parse(serializedEvent).id);
+    assert.equal(ids[0], "evt_rn_kept");
+    assert.match(ids[1], /^evt_rn_fatal_/u);
+    assert.deepEqual(nativeStore.calls.filter(([name]) => name === "remove"), [["remove", CLIENT_KEY, [0]]]);
+    installation.remove();
+    const restarted = nativeClient(await importRuntime("fatal-eviction-restart", true), { maxQueueSize: 2 });
+    assert.deepEqual(JSON.parse(restarted.previewJson()).events.map(({ id }) => id), ids);
+  });
+});
+
 test("a Hermes fatal crash replays once per stable ID with correlation after a kill during replay", async () => {
   await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
     const debugId = "11111111-2222-4333-8444-555555555555";
@@ -618,6 +644,11 @@ function createNativeStore() {
       }
       queue(key).splice(0, count);
       return { status: "acknowledged" };
+    },
+    removeEventRecords(key, indexes) {
+      calls.push(["remove", key, indexes]);
+      queues.set(key, queue(key).filter((_, index) => !indexes.includes(index)));
+      return { status: "removed" };
     },
     purgeEventRecords(key) {
       calls.push(["purge", key]);

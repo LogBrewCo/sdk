@@ -21,6 +21,7 @@ typedef BOOL (^LBRNEventDirectoryPreparation)(NSURL *directoryURL);
 - (NSDictionary *)appendSerializedEvent:(NSString *)serializedEvent
                               eventBytes:(NSNumber *)eventBytes;
 - (NSDictionary *)acknowledgeRecordCount:(NSNumber *)count;
+- (NSDictionary *)removeRecordsAtIndexes:(NSArray *)indexes;
 - (NSDictionary *)purgeRecords;
 - (NSDictionary *)closeStore;
 
