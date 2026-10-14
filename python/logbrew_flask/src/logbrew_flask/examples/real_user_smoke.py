@@ -1,32 +1,30 @@
+# Copyright (c) 2026 LogBrew
+"""Capture a healthy logged request and a redacted unhandled exception."""
+
 from __future__ import annotations
 
-import json
 import logging
-import sys
-from typing import Any, cast
 
-from flask import Flask
-from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
+from logbrew_sdk import LogBrewLoggingHandler
 
-from logbrew_flask import add_logbrew_middleware, get_active_logbrew_trace
+from logbrew_flask import get_active_logbrew_trace
+from logbrew_flask.examples._support import example_app, named_spans, recorded_events, write_result
 
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-flask",
-    sdk_version="0.1.0",
-)
-transport = RecordingTransport.always_accept()
-logger = logging.getLogger("flask.checkout.example")
-logger.handlers = []
-logger.propagate = False
-logger.setLevel(logging.INFO)
+app, client, transport = example_app(__name__)
+# This example must not change an embedding application's registered logger.
+# Reviewed 2026-09-05; the package test checks its handlers, level, propagation.
+logger = logging.Logger("flask.checkout.example", logging.INFO)  # noqa: LOG001
 logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout"}))
-app = Flask(__name__)
-add_logbrew_middleware(app, client=client, transport=transport, span_id_factory=lambda: "b7ad6b7169203331")
 
 
 @app.get("/health")
 def health() -> dict[str, object]:
+    """Log one operation inside the healthy request.
+
+    Returns:
+        The health result and active request correlation IDs.
+
+    """
     trace = get_active_logbrew_trace()
     logger.info("health request", extra={"route_template": "/health"})
     return {
@@ -38,7 +36,14 @@ def health() -> dict[str, object]:
 
 @app.get("/boom")
 def boom() -> dict[str, bool]:
-    raise RuntimeError("broken handler")
+    """Raise the synthetic application failure.
+
+    Raises:
+        RuntimeError: Always, to demonstrate unhandled exception capture.
+
+    """
+    message = "broken handler"
+    raise RuntimeError(message)
 
 
 http = app.test_client()
@@ -48,27 +53,19 @@ health_response = http.get(
 )
 boom_response = http.get("/boom")
 
-events: list[dict[str, Any]] = []
-for body in transport.sent_bodies:
-    payload = cast(dict[str, Any], json.loads(body))
-    events.extend(cast(list[dict[str, Any]], payload["events"]))
-health_payload = cast(dict[str, Any], health_response.get_json())
-first_span_attributes = cast(dict[str, Any], events[1]["attributes"])
-first_span_metadata = cast(dict[str, Any], first_span_attributes["metadata"])
+events = recorded_events(transport)
+first_span_attributes = named_spans(events)["GET /health"]
 
-print(json.dumps({"sdk": client.sdk, "events": events}, indent=2))
-print(
-    json.dumps(
-        {
-            "healthStatus": health_response.status_code,
-            "boomStatus": boom_response.status_code,
-            "events": len(events),
-            "traceId": health_payload["traceId"],
-            "spanId": health_payload["spanId"],
-            "parentSpanId": first_span_attributes["parentSpanId"],
-            "routeTemplate": first_span_metadata["routeTemplate"],
-        },
-        indent=2,
-    ),
-    file=sys.stderr,
+write_result(
+    client,
+    events,
+    {
+        "healthStatus": health_response.status_code,
+        "boomStatus": boom_response.status_code,
+        "events": len(events),
+        "traceId": health_response.get_json()["traceId"],
+        "spanId": health_response.get_json()["spanId"],
+        "parentSpanId": first_span_attributes["parentSpanId"],
+        "routeTemplate": first_span_attributes["metadata"]["routeTemplate"],
+    },
 )

@@ -39,13 +39,16 @@ RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check \
   python/logbrew_fastapi/src \
   python/logbrew_fastapi/examples \
   python/logbrew_fastapi/tests \
-  python/logbrew_flask/src \
-  python/logbrew_flask/examples \
-  python/logbrew_flask/tests \
   python/logbrew_django/src \
   python/logbrew_django/examples \
   python/logbrew_django/tests \
   scripts/check_python_sources.py
+
+# Flask uses its package's all-rules policy and reviewed compatibility exceptions.
+(
+  cd "$repo_root/python/logbrew_flask"
+  RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check src examples tests
+)
 
 MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src" "$tool_python" -m mypy \
   --strict \

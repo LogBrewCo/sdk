@@ -1,29 +1,21 @@
+# Copyright (c) 2026 LogBrew
+"""Connect local database, cache, and queue work to one Flask request."""
+
 from __future__ import annotations
 
-import json
 import sqlite3
-import sys
-from typing import Any, cast
+from typing import cast
 
-from flask import Flask
 from logbrew_sdk import (
-    LogBrewClient,
-    RecordingTransport,
     cache_operation_with_logbrew_span,
     database_operation_with_logbrew_span,
     queue_operation_with_logbrew_span,
 )
 
-from logbrew_flask import add_logbrew_middleware, get_active_logbrew_trace
+from logbrew_flask import get_active_logbrew_trace
+from logbrew_flask.examples._support import example_app, named_spans, recorded_events, write_result
 
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-flask",
-    sdk_version="0.1.0",
-)
-transport = RecordingTransport.always_accept()
-app = Flask(__name__)
-add_logbrew_middleware(app, client=client, transport=transport, span_id_factory=lambda: "b7ad6b7169203331")
+app, client, transport = example_app(__name__)
 
 database = sqlite3.connect(":memory:", check_same_thread=False)
 database.execute("CREATE TABLE inventory (sku TEXT PRIMARY KEY, quantity INTEGER NOT NULL)")
@@ -33,24 +25,38 @@ cache: dict[str, int] = {"sku_123": 4}
 queue: list[str] = []
 
 
-def select_inventory() -> sqlite3.Row | tuple[Any, ...] | None:
+def select_inventory() -> tuple[int] | None:
+    """Read the local example inventory.
+
+    Returns:
+        The stock count row, or None when the SKU is absent.
+
+    """
     return cast(
-        sqlite3.Row | tuple[Any, ...] | None,
+        "tuple[int] | None",
         database.execute("SELECT quantity FROM inventory WHERE sku = ?", ("sku_123",)).fetchone(),
     )
 
 
-def read_inventory_cache() -> int:
-    return cache["sku_123"]
-
-
 def publish_checkout_event() -> int:
+    """Append a synthetic checkout event to the local queue.
+
+    Returns:
+        The queue length after publication.
+
+    """
     queue.append("checkout.completed")
     return len(queue)
 
 
 @app.post("/checkout/<order_id>")
 def checkout(order_id: str) -> dict[str, object]:
+    """Run local dependency operations under the active request trace.
+
+    Returns:
+        The inventory result and request correlation IDs.
+
+    """
     trace = get_active_logbrew_trace()
     inventory_row = database_operation_with_logbrew_span(
         "SELECT inventory",
@@ -69,7 +75,7 @@ def checkout(order_id: str) -> dict[str, object]:
         "GET inventory",
         client=client,
         event_id="evt_flask_dependency_cache",
-        operation=read_inventory_cache,
+        operation=lambda: cache["sku_123"],
         system="memory-cache",
         cache_name="inventory-cache",
         cache_hit=True,
@@ -99,41 +105,34 @@ def checkout(order_id: str) -> dict[str, object]:
 
 
 http = app.test_client()
-checkout_response = http.post(
-    "/checkout/order_123?debug=true",
-    headers={"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
-)
+try:
+    checkout_response = http.post(
+        "/checkout/order_123?debug=true",
+        headers={"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+    )
+finally:
+    database.close()
 
-events: list[dict[str, Any]] = []
-for body in transport.sent_bodies:
-    payload = cast(dict[str, Any], json.loads(body))
-    events.extend(cast(list[dict[str, Any]], payload["events"]))
-spans = {
-    cast(str, event["attributes"]["name"]): cast(dict[str, Any], event["attributes"])
-    for event in events
-    if event["type"] == "span"
-}
+events = recorded_events(transport)
+spans = named_spans(events)
 request_span = spans["POST /checkout/<order_id>"]
 database_span = spans["sqlite SELECT inventory"]
 cache_span = spans["memory-cache GET inventory"]
 queue_span = spans["memory-queue PUBLISH checkout.completed"]
 
-print(json.dumps({"sdk": client.sdk, "events": events}, indent=2))
-print(
-    json.dumps(
-        {
-            "checkoutStatus": checkout_response.status_code,
-            "events": len(events),
-            "requestSpanId": request_span["spanId"],
-            "databaseParentSpanId": database_span["parentSpanId"],
-            "databaseSpanId": database_span["spanId"],
-            "cacheParentSpanId": cache_span["parentSpanId"],
-            "cacheSpanId": cache_span["spanId"],
-            "queueParentSpanId": queue_span["parentSpanId"],
-            "queueSpanId": queue_span["spanId"],
-            "dependencySpanNames": [database_span["name"], cache_span["name"], queue_span["name"]],
-        },
-        indent=2,
-    ),
-    file=sys.stderr,
+write_result(
+    client,
+    events,
+    {
+        "checkoutStatus": checkout_response.status_code,
+        "events": len(events),
+        "requestSpanId": request_span["spanId"],
+        "databaseParentSpanId": database_span["parentSpanId"],
+        "databaseSpanId": database_span["spanId"],
+        "cacheParentSpanId": cache_span["parentSpanId"],
+        "cacheSpanId": cache_span["spanId"],
+        "queueParentSpanId": queue_span["parentSpanId"],
+        "queueSpanId": queue_span["spanId"],
+        "dependencySpanNames": [database_span["name"], cache_span["name"], queue_span["name"]],
+    },
 )

@@ -22,7 +22,7 @@ check_json() {
 trap remove_tmp_dir EXIT
 
 python3 -m venv "$tmp_dir/venv"
-"$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check build twine >/dev/null
+"$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check build twine typing-extensions==4.16.0 >/dev/null
 
 "$tmp_dir/venv/bin/python" -m build --wheel --outdir "$tmp_dir/core-dist" "$core_dir" >/dev/null
 "$tmp_dir/venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/flask-dist" "$package_dir" >/dev/null

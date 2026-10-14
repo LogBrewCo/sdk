@@ -1,7 +1,11 @@
+# Copyright (c) 2026 LogBrew
+"""Run or list the installed Flask examples."""
+
 from __future__ import annotations
 
 import argparse
 import runpy
+import sys
 
 EXAMPLES = {
     "readme-example": "logbrew_flask.examples.readme_example",
@@ -12,17 +16,16 @@ EXAMPLES = {
 
 
 def main() -> None:
+    """Select one example, or print the available commands without running it."""
     parser = argparse.ArgumentParser(description="Run packaged logbrew-flask examples.")
     parser.add_argument("example", nargs="?", default="real-user-smoke", choices=sorted(EXAMPLES))
     parser.add_argument("--list", action="store_true", help="List available examples and exit.")
     args = parser.parse_args()
 
     if args.list:
-        print("readme-example -> python -m logbrew_flask.examples readme-example")
-        print("real-user-smoke -> python -m logbrew_flask.examples real-user-smoke")
-        print("outbound-http -> python -m logbrew_flask.examples outbound-http")
-        print("dependency-spans -> python -m logbrew_flask.examples dependency-spans")
-        print("default (real-user-smoke) -> python -m logbrew_flask.examples")
+        for name in EXAMPLES:
+            sys.stdout.write(f"{name} -> python -m logbrew_flask.examples {name}\n")
+        sys.stdout.write("default (real-user-smoke) -> python -m logbrew_flask.examples\n")
         return
 
     runpy.run_module(EXAMPLES[args.example], run_name="__main__")

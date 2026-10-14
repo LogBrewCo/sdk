@@ -1,39 +1,36 @@
+# Copyright (c) 2026 LogBrew
+"""Continue a Flask request trace through a caller-owned HTTP client."""
+
 from __future__ import annotations
 
-import json
-import sys
 from dataclasses import dataclass
-from typing import Any, cast
 
-from flask import Flask
 from logbrew_sdk import (
-    LogBrewClient,
-    RecordingTransport,
     requests_request_with_logbrew_span,
 )
 
-from logbrew_flask import add_logbrew_middleware, get_active_logbrew_trace
+from logbrew_flask import get_active_logbrew_trace
+from logbrew_flask.examples._support import example_app, named_spans, recorded_events, write_result
 
 
 @dataclass(slots=True)
 class FakePaymentResponse:
+    """Return only the status needed by the local payment example."""
+
     status_code: int
 
 
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-flask",
-    sdk_version="0.1.0",
-)
-transport = RecordingTransport.always_accept()
-app = Flask(__name__)
-add_logbrew_middleware(app, client=client, transport=transport, span_id_factory=lambda: "b7ad6b7169203331")
+app, client, transport = example_app(__name__)
 captured_outbound_headers: dict[str, str] = {}
 
 
-def fake_payment_request(method: str, url: str, **kwargs: Any) -> FakePaymentResponse:
-    """Caller-owned request seam used by the example instead of making a network call."""
+def fake_payment_request(_method: str, _url: str, **kwargs: object) -> FakePaymentResponse:
+    """Record outbound headers without making a network call.
 
+    Returns:
+        A synthetic accepted payment response.
+
+    """
     headers = kwargs.get("headers")
     if isinstance(headers, dict):
         captured_outbound_headers.update({str(name): str(value) for name, value in headers.items()})
@@ -42,6 +39,12 @@ def fake_payment_request(method: str, url: str, **kwargs: Any) -> FakePaymentRes
 
 @app.post("/checkout/<order_id>")
 def checkout(order_id: str) -> dict[str, object]:
+    """Issue a synthetic payment request under the active Flask trace.
+
+    Returns:
+        The payment status and inbound and outbound correlation IDs.
+
+    """
     trace = get_active_logbrew_trace()
     response = requests_request_with_logbrew_span(
         "POST",
@@ -69,34 +72,23 @@ checkout_response = http.post(
     headers={"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
 )
 
-events: list[dict[str, Any]] = []
-for body in transport.sent_bodies:
-    payload = cast(dict[str, Any], json.loads(body))
-    events.extend(cast(list[dict[str, Any]], payload["events"]))
-checkout_payload = cast(dict[str, Any], checkout_response.get_json())
-spans = {
-    cast(str, event["attributes"]["name"]): cast(dict[str, Any], event["attributes"])
-    for event in events
-    if event["type"] == "span"
-}
+events = recorded_events(transport)
+spans = named_spans(events)
 request_span = spans["POST /checkout/<order_id>"]
 outbound_span = spans["POST /payments/authorize"]
-outbound_metadata = cast(dict[str, Any], outbound_span["metadata"])
+outbound_metadata = outbound_span["metadata"]
 
-print(json.dumps({"sdk": client.sdk, "events": events}, indent=2))
-print(
-    json.dumps(
-        {
-            "checkoutStatus": checkout_response.status_code,
-            "events": len(events),
-            "requestSpanId": request_span["spanId"],
-            "outboundParentSpanId": outbound_span["parentSpanId"],
-            "outboundSpanId": outbound_span["spanId"],
-            "outboundTraceparent": checkout_payload["outboundTraceparent"],
-            "outboundRoute": outbound_metadata["routeTemplate"],
-            "outboundSource": outbound_metadata["source"],
-        },
-        indent=2,
-    ),
-    file=sys.stderr,
+write_result(
+    client,
+    events,
+    {
+        "checkoutStatus": checkout_response.status_code,
+        "events": len(events),
+        "requestSpanId": request_span["spanId"],
+        "outboundParentSpanId": outbound_span["parentSpanId"],
+        "outboundSpanId": outbound_span["spanId"],
+        "outboundTraceparent": checkout_response.get_json()["outboundTraceparent"],
+        "outboundRoute": outbound_metadata["routeTemplate"],
+        "outboundSource": outbound_metadata["source"],
+    },
 )

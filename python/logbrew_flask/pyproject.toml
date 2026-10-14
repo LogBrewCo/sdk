@@ -36,6 +36,31 @@ Documentation = "https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_flask
 Repository = "https://github.com/LogBrewCo/sdk"
 Issues = "https://github.com/LogBrewCo/sdk/issues"
 
+[dependency-groups]
+dev = ["typing-extensions==4.16.0"]
+
+[tool.ruff]
+required-version = "==0.15.15"
+target-version = "py310"
+line-length = 120
+preview = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+# Ruff declares D203/D211 and D212/D213 mutually exclusive. Keep D211/D212.
+# Its formatter owns trailing commas; Ruff documents COM812 as conflicting.
+ignore = ["COM812", "D203", "D213"]
+
+[tool.ruff.lint.per-file-ignores]
+# Reviewed 2026-09-05; revisit when the test runner changes.
+# This file runs with stdlib unittest, including Python -O. Keep its assertions
+# and exception checks active without pytest assertion rewriting or pytest.raises.
+# Compensating proof: run the complete installed suite normally and with -O.
+# PT009/PT027 recommend pytest style, not stronger runtime validation:
+# https://docs.astral.sh/ruff/rules/pytest-unittest-assertion/
+# https://docs.astral.sh/ruff/rules/pytest-unittest-raises-assertion/
+"tests/test_flask_integration.py" = ["PT009", "PT027"]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
