@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/swift/logbrew-swift"
 [[ ! -e "$repo_root/Package.resolved" && ! -e "$package_dir/Package.resolved" ]] || { echo "Swift smoke requires a clean package-resolution boundary" >&2; exit 1; }
 tmp_dir="$(mktemp -d)"
@@ -21,14 +22,14 @@ trap 'echo "swift real-user smoke failed near line $LINENO" >&2' ERR
 
 echo "swift real-user smoke: packaged README example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/example-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 grep -q '"events":6' "$tmp_dir/readme.stderr.json"
 
 echo "swift real-user smoke: packaged real-user example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/example-build" RealUserSmoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/smoke.stderr.json"
@@ -673,7 +674,7 @@ if ! wait "$intake_pid"; then
   exit 1
 fi
 intake_pid=""
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/consumer.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/consumer.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" "$tmp_dir/consumer.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/consumer.stderr.json"
 grep -q '"attempts":1' "$tmp_dir/consumer.stderr.json"

@@ -49,7 +49,7 @@ validate_issue_diagnostics_output() {
   payload_file="$(mktemp)"
   printf '%s\n' "$stdout_part" >"$payload_file"
   PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" "$payload_file" >/dev/null
-  PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/validate_fixtures.py" "$payload_file" >/dev/null
+  "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check "$repo_root/spec/event-batch.schema.json" "$payload_file" >/dev/null
   rm -f "$payload_file"
   assert_contains "$stderr_part" '"ok":true' 'expected success status in Rust issue diagnostics stderr'
   assert_contains "$stderr_part" '"issues":2' 'expected issue count in Rust issue diagnostics stderr'

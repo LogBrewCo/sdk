@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 source "$repo_root/scripts/python_package_version.sh"
 
 core_dir="$repo_root/python/logbrew_py"
@@ -16,7 +17,7 @@ remove_tmp_dir() {
 }
 
 check_json() {
-  python3 "$repo_root/scripts/check_python_package_json.py" "$@"
+  run_native_verifier package-json "$@"
 }
 
 trap remove_tmp_dir EXIT
@@ -171,7 +172,7 @@ if payload["routeTemplate"] != "/health":
     raise SystemExit(f"unexpected route template: {payload['routeTemplate']}")
 Path(sys.argv[2]).write_text(json.dumps(payload["body"], indent=2), encoding="utf-8")
 PY
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/body.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/body.json" >/dev/null
 
 cat > "$app_dir/typecheck.py" <<'PY'
 from __future__ import annotations
@@ -265,7 +266,7 @@ if outbound_metadata["source"] != "requests":
     raise SystemExit(f"unexpected outbound source: {outbound_metadata}")
 Path(sys.argv[3]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 PY
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/outbound-body.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/outbound-body.json" >/dev/null
 
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples dependency-spans > "$tmp_dir/dependency.stdout.json" 2> "$tmp_dir/dependency.stderr.json"
 check_json event-kinds span "$tmp_dir/dependency.stdout.json"
@@ -282,7 +283,7 @@ check_json fields \
   'queueParentSpanId="b7ad6b7169203331"' \
   'queueSpanId="e0ad6b7169203334"' \
   "$tmp_dir/dependency.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/dependency.stdout.json" >/dev/null
 
 printf 'flask real-user smoke passed with %s\n' "$("$tmp_dir/app/bin/python" - <<'PY'
 from importlib.metadata import version

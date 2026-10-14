@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_version() {
   node -e '
 const version = require(process.argv[1]).version;
@@ -1016,7 +1017,7 @@ if ! node smoke.mjs > "$tmp_dir/react-smoke.stdout.json" 2> "$tmp_dir/react-smok
   cat "$tmp_dir/react-smoke.stderr.json" >&2
   exit 1
 fi
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/react-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/react-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/react-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/react-smoke.stderr.json"
@@ -1289,16 +1290,16 @@ node node_modules/@logbrew/react/examples/index.mjs --list > "$tmp_dir/launcher-
 grep -q 'react-router-route-spans -> node node_modules/@logbrew/react/examples/index.mjs react-router-route-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/react/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/react/examples/index.mjs react-router-route-spans > "$tmp_dir/example-router.stdout.json" 2> "$tmp_dir/example-router.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-router.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-router.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/example-router.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/example-router.stderr.json"
 grep -q '"routeTemplate":"/projects/:projectId/settings"' "$tmp_dir/example-router.stderr.json"
 node node_modules/@logbrew/react/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"rendered":true' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/react/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"manualErrorAttempts":2' "$tmp_dir/example-default.stderr.json"
@@ -1311,11 +1312,11 @@ npm --prefix node_modules/@logbrew/react/examples run help > "$tmp_dir/npm-helpe
 grep -q 'npm --prefix node_modules/@logbrew/react/examples run react-router-route-spans' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/react/examples run --silent react-router-route-spans > "$tmp_dir/npm-helper-router.stdout.json" 2> "$tmp_dir/npm-helper-router.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-router.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-router.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/npm-helper-router.stderr.json"
 grep -q '"routeTemplate":"/projects/:projectId/settings"' "$tmp_dir/npm-helper-router.stderr.json"
 npm --prefix node_modules/@logbrew/react/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"manualErrorAttempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"

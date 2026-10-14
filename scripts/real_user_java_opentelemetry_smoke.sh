@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
 
@@ -232,7 +233,7 @@ java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/app/classes:$java_opentelemetr
   > "$tmp_dir/java-otel.stdout.json" \
   2> "$tmp_dir/java-otel.stderr.json"
 
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/java-otel.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/java-otel.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/java-otel.stderr.json"
 grep -q '"events":1' "$tmp_dir/java-otel.stderr.json"
 echo "Java OpenTelemetry installed-artifact smoke passed"

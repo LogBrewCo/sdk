@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/dotnet/logbrew-dotnet"
 tmp_dir="$(mktemp -d)"
 tmp_dir="$(cd "$tmp_dir" && pwd -P)"
@@ -208,46 +209,46 @@ EOF
 }
 
 run_example ReadmeExample.cs ReadmeExample "$tmp_dir/readme-example.stdout.json" "$tmp_dir/readme-example.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-example.stderr.json"
 
 run_example RealUserSmoke.cs RealUserSmoke "$tmp_dir/real-user-smoke.stdout.json" "$tmp_dir/real-user-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/real-user-smoke.stderr.json"
 
 run_example IssueDiagnostics.cs IssueDiagnostics "$tmp_dir/issue-diagnostics.stdout.json" "$tmp_dir/issue-diagnostics.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/issue-diagnostics.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/issue-diagnostics.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_issue_diagnostics_payload.py" "$tmp_dir/issue-diagnostics.stdout.json" "$tmp_dir/issue-diagnostics.stderr.json" >/dev/null
 
 run_example FirstUsefulTelemetry.cs FirstUsefulTelemetry "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/first-useful.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_first_useful_payload.py" "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json" >/dev/null
 
 run_example HttpTraceCorrelation.cs HttpTraceCorrelation "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-trace.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json" >/dev/null
 
 run_example ActivityTraceCorrelation.cs ActivityTraceCorrelation "$tmp_dir/activity-trace.stdout.json" "$tmp_dir/activity-trace.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/activity-trace.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/activity-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_activity_trace_payload.py" "$tmp_dir/activity-trace.stdout.json" "$tmp_dir/activity-trace.stderr.json" >/dev/null
 
 run_example ActivitySourceListenerTelemetry.cs ActivitySourceListenerTelemetry "$tmp_dir/activity-source-listener.stdout.json" "$tmp_dir/activity-source-listener.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/activity-source-listener.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/activity-source-listener.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_activity_source_listener_payload.py" "$tmp_dir/activity-source-listener.stdout.json" "$tmp_dir/activity-source-listener.stderr.json" >/dev/null
 
 run_example DependencySpansTelemetry.cs DependencySpansTelemetry "$tmp_dir/dependency-spans.stdout.json" "$tmp_dir/dependency-spans.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_dependency_spans_payload.py" "$tmp_dir/dependency-spans.stdout.json" "$tmp_dir/dependency-spans.stderr.json" >/dev/null
 
 run_example DbCommandTelemetry.cs DbCommandTelemetry "$tmp_dir/db-command.stdout.json" "$tmp_dir/db-command.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/db-command.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/db-command.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_db_command_payload.py" "$tmp_dir/db-command.stdout.json" "$tmp_dir/db-command.stderr.json" >/dev/null
 
 run_example HttpClientOutboundTelemetry.cs HttpClientOutboundTelemetry "$tmp_dir/http-client.stdout.json" "$tmp_dir/http-client.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-client.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/http-client.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_client_payload.py" "$tmp_dir/http-client.stdout.json" "$tmp_dir/http-client.stderr.json" >/dev/null
 
 run_integration_example() {
@@ -269,11 +270,11 @@ test ! -s "$tmp_dir/efcore.stdout.json"
 grep -q '"example":"EntityFrameworkCoreCommandTelemetry"' "$tmp_dir/efcore.stderr.json"
 
 run_integration_example LogBrew.StackExchangeRedis StackExchangeRedisCommandTelemetry stackexchange-redis
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/stackexchange-redis.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/stackexchange-redis.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_payload.py" "$tmp_dir/stackexchange-redis.stdout.json" "$tmp_dir/stackexchange-redis.stderr.json" >/dev/null
 
 run_integration_example LogBrew.OpenTelemetry OpenTelemetrySpanProcessorTelemetry opentelemetry
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/opentelemetry.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/opentelemetry.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_opentelemetry_payload.py" "$tmp_dir/opentelemetry.stdout.json" "$tmp_dir/opentelemetry.stderr.json" >/dev/null
 
 web_dir="$tmp_dir/AspNetCoreRequestTelemetry"

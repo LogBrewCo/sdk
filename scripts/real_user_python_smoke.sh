@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 python_package_version="$(
     python3 - "$repo_root/python/logbrew_py/pyproject.toml" <<'PY'
@@ -91,7 +92,7 @@ run_readme_example() {
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
     check_json event-kinds release environment issue log span action \
         "$tmp_dir/$output_prefix.stdout.json"
-    python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
     check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
     check_json fields 'events=6' 'ok=true' "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -125,7 +126,7 @@ run_first_useful_telemetry_example() {
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
     check_json event-kinds release environment log action metric span \
         "$tmp_dir/$output_prefix.stdout.json"
-    python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
     check_json fields 'events=7' 'ok=true' 'requestSpan="evt_span_checkout_request"' \
         "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -185,7 +186,7 @@ check_makefile_help() {
 }
 
 check_json() {
-    python3 "$repo_root/scripts/check_python_package_json.py" "$@"
+    run_native_verifier package-json "$@"
 }
 
 run_json_smoke() {

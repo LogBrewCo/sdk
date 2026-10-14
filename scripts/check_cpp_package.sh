@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/cpp/logbrew-cpp"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -36,7 +37,7 @@ cmake --install "$tmp_dir/build"
 "$tmp_dir/build/logbrew_real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 "$tmp_dir/build/logbrew_trace_correlation" > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
 for fixture in readme smoke trace; do
-  python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$fixture.stdout.json" >/dev/null
+  run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/$fixture.stdout.json" >/dev/null
 done
 python3 "$repo_root/scripts/check_sdk_parity.py" \
   --allow-additive-context \
@@ -78,7 +79,7 @@ cmake --build "$consumer_dir/build" --parallel
 "$consumer_dir/build/installed_consumer" \
   > "$tmp_dir/installed.stdout.json" \
   2> "$tmp_dir/installed.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/installed.stderr.json"
 
 archive="$tmp_dir/logbrew-cpp-0.2.3.tar.gz"

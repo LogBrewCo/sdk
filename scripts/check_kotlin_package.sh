@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/kotlin/logbrew-kotlin"
 okhttp_package_dir="$repo_root/kotlin/logbrew-kotlin-okhttp"
 tmp_dir="$(mktemp -d)"
@@ -369,7 +370,7 @@ run_example \
   "$tmp_dir/readme-example.stdout.json" \
   "$tmp_dir/readme-example.stderr.json" \
   "$package_dir/examples/readme_example/ReadmeExample.kt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
   "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-example.stderr.json"
@@ -381,7 +382,7 @@ run_example \
   "$tmp_dir/real-user-smoke.stderr.json" \
   "$package_dir/examples/readme_example/ReadmeExample.kt" \
   "$package_dir/examples/real_user_smoke/RealUserSmoke.kt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
   "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
@@ -404,7 +405,7 @@ run_example \
   "$tmp_dir/dependency-spans.stdout.json" \
   "$tmp_dir/dependency-spans.stderr.json" \
   "$package_dir/examples/dependency_spans/DependencySpans.kt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
 grep -q '"dependencySpans":3' "$tmp_dir/dependency-spans.stderr.json"
 
 run_example \
@@ -413,7 +414,7 @@ run_example \
   "$tmp_dir/rich-investigation.stdout.json" \
   "$tmp_dir/rich-investigation.stderr.json" \
   "$package_dir/examples/rich_investigation/RichInvestigation.kt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/rich-investigation.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/rich-investigation.stdout.json" >/dev/null
 grep -q '"richIssueEvents":1' "$tmp_dir/rich-investigation.stderr.json"
 grep -q '"linkedSpanEvents":1' "$tmp_dir/rich-investigation.stderr.json"
 grep -q '"privateThrowableTextOmitted":true' "$tmp_dir/rich-investigation.stderr.json"

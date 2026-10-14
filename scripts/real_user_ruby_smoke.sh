@@ -5,6 +5,7 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
 ruby_smoke_create_tmp_dir
 ruby_smoke_prepare_package
+source "$repo_root/scripts/native_verifier.sh"
 export LOGBREW_RUBY_PACKAGE_VERSION="$package_version"
 
 package_paths=(
@@ -53,7 +54,7 @@ grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_d
 grep -qx 'run-issue-diagnostics -> make run-issue-diagnostics' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/unpacked-examples-help.txt"
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-readme-example) > "$tmp_dir/unpacked-readme.stdout.json" 2> "$tmp_dir/unpacked-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/unpacked-readme.stderr.json"
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-first-useful-telemetry) > "$tmp_dir/unpacked-first-useful.stdout.json" 2> "$tmp_dir/unpacked-first-useful.stderr.json"
@@ -63,7 +64,7 @@ python3 "$repo_root/scripts/check_ruby_issue_diagnostics_payload.py" "$tmp_dir/u
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-http-trace-correlation) > "$tmp_dir/unpacked-http-trace.stdout.json" 2> "$tmp_dir/unpacked-http-trace.stderr.json"
 python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/unpacked-http-trace.stdout.json" "$tmp_dir/unpacked-http-trace.stderr.json" >/dev/null
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run) > "$tmp_dir/unpacked-smoke.stdout.json" 2> "$tmp_dir/unpacked-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/unpacked-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/unpacked-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/unpacked-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/unpacked-smoke.stderr.json"
 
@@ -98,7 +99,7 @@ gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"
 check_package_tree "$gem_dir"
 
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/readme_example.rb" > "$tmp_dir/installed-readme.stdout.json" 2> "$tmp_dir/installed-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/first_useful_telemetry.rb" > "$tmp_dir/installed-first-useful.stdout.json" 2> "$tmp_dir/installed-first-useful.stderr.json"
@@ -108,7 +109,7 @@ python3 "$repo_root/scripts/check_ruby_issue_diagnostics_payload.py" "$tmp_dir/i
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/http_trace_correlation.rb" > "$tmp_dir/installed-http-trace.stdout.json" 2> "$tmp_dir/installed-http-trace.stderr.json"
 python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/installed-http-trace.stdout.json" "$tmp_dir/installed-http-trace.stderr.json" >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/real_user_smoke.rb" > "$tmp_dir/installed-smoke.stdout.json" 2> "$tmp_dir/installed-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/installed-smoke.stderr.json"
@@ -656,7 +657,7 @@ $stderr.puts JSON.generate(
 RUBY
 LOGBREW_TEST_INTAKE="$package_dir/tests/local_http_intake" \
   GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$app_dir/main.rb" > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"loggerEvents":2' "$tmp_dir/smoke-app.stderr.json"

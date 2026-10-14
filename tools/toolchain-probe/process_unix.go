@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -16,6 +17,17 @@ const (
 	processExists        syscall.Signal = 0
 	limitedArgumentCount                = 2
 )
+
+func openCheckInput(path string) (*os.File, error) {
+	// Reviewed 2026-09-05: the local checker intentionally reads its input path.
+	// Its descriptor must be regular, bounded, nonblocking, and never echoed.
+	//nolint:gosec // G304: file-limit, FIFO, and non-reflection tests cover this boundary.
+	input, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open package input: %w", err)
+	}
+	return input, nil
+}
 
 func configureProcess(command *exec.Cmd) (func() error, error) {
 	command.SysProcAttr = new(syscall.SysProcAttr)

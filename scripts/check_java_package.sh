@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
 
@@ -431,23 +432,23 @@ grep -q 'This SDK does not automatically collect JVM, runtime, or framework metr
 
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$java_optional_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
 java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" ReadmeExample > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-example.stderr.json"
 grep -q '"status":202' "$tmp_dir/readme-example.stderr.json"
 
 java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" RealUserSmoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 
 java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" FirstUsefulTelemetry > "$tmp_dir/first-useful.stdout.json" 2> "$tmp_dir/first-useful.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/first-useful.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json" >/dev/null
 
 java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" HttpTraceCorrelation > "$tmp_dir/http-trace.stdout.json" 2> "$tmp_dir/http-trace.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-trace.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json" >/dev/null
 
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"

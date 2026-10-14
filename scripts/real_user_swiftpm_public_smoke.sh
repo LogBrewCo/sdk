@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.15}}"
 package_url="${LOGBREW_SWIFTPM_URL:-https://github.com/LogBrewCo/sdk.git}"
 package_identity="${LOGBREW_SWIFTPM_PACKAGE_IDENTITY:-sdk}"
@@ -358,7 +359,7 @@ grep -q '"name": "logbrew-swift"' "$tmp_dir/dependencies.json"
 grep -q "\"version\": \"$package_version\"" "$tmp_dir/dependencies.json"
 
 swift run --scratch-path "$tmp_dir/run-build" SmokeApp > "$tmp_dir/run.stdout.json" 2> "$tmp_dir/run.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/run.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/run.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/run.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/run.stderr.json"
 grep -q '"events":6' "$tmp_dir/run.stderr.json"

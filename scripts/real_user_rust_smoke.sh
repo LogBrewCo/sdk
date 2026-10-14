@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 trap 'echo "rust real-user smoke failed near line $LINENO" >&2' ERR
@@ -300,7 +301,7 @@ grep -q '"type": "issue"' "$tmp_dir/packaged-readme-example.stdout.json"
 grep -q '"type": "log"' "$tmp_dir/packaged-readme-example.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-readme-example.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-readme-example.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-readme-example.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme-example.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-readme-example.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-readme-example.stderr.json"
@@ -312,7 +313,7 @@ grep -q '"type": "issue"' "$tmp_dir/packaged-example.stdout.json"
 grep -q '"type": "log"' "$tmp_dir/packaged-example.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-example.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-example.stderr.json"
@@ -336,7 +337,7 @@ grep -q '"type": "issue"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "log"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-readme-example-make.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-readme-example-make.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-readme-example-make.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme-example-make.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-readme-example-make.stderr.json"
@@ -347,7 +348,7 @@ grep -q '"type": "issue"' "$tmp_dir/packaged-example-make.stdout.json"
 grep -q '"type": "log"' "$tmp_dir/packaged-example-make.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example-make.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example-make.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-example-make.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-example-make.stderr.json"
@@ -358,7 +359,7 @@ grep -q '"type": "issue"' "$tmp_dir/packaged-example-make-run.stdout.json"
 grep -q '"type": "log"' "$tmp_dir/packaged-example-make-run.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-example-make-run.stdout.json"
 grep -q '"type": "action"' "$tmp_dir/packaged-example-make-run.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example-make-run.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-example-make-run.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make-run.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-example-make-run.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-example-make-run.stderr.json"
@@ -373,12 +374,12 @@ python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/package
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/packaged-http-server-make.stdout.json" "$tmp_dir/packaged-http-server-make.stderr.json" >/dev/null
 cargo run --quiet --manifest-path Cargo.toml --example issue_diagnostics > "$tmp_dir/packaged-issue-diagnostics.stdout.json" 2> "$tmp_dir/packaged-issue-diagnostics.stderr.json"
 PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" "$tmp_dir/packaged-issue-diagnostics.stdout.json" >/dev/null
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-issue-diagnostics.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-issue-diagnostics.stdout.json" >/dev/null
 grep -q '"issues":2' "$tmp_dir/packaged-issue-diagnostics.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-issue-diagnostics.stderr.json"
 (cd "$crate_dir/examples" && make run-issue-diagnostics) > "$tmp_dir/packaged-issue-diagnostics-make.stdout.json" 2> "$tmp_dir/packaged-issue-diagnostics-make.stderr.json"
 PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" "$tmp_dir/packaged-issue-diagnostics-make.stdout.json" >/dev/null
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-issue-diagnostics-make.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-issue-diagnostics-make.stdout.json" >/dev/null
 grep -q '"issues":2' "$tmp_dir/packaged-issue-diagnostics-make.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-issue-diagnostics-make.stderr.json"
 cd "$tmp_dir"
@@ -978,7 +979,7 @@ grep -q '"type": "issue"' smoke.stdout.json
 grep -q '"type": "log"' smoke.stdout.json
 grep -q '"type": "span"' smoke.stdout.json
 grep -q '"type": "action"' smoke.stdout.json
-python3 "$repo_root/scripts/validate_fixtures.py" smoke.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" smoke.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
 grep -q '"events":6' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json
@@ -990,7 +991,7 @@ grep -q '"type": "issue"' readme-example.stdout.json
 grep -q '"type": "log"' readme-example.stdout.json
 grep -q '"type": "span"' readme-example.stdout.json
 grep -q '"type": "action"' readme-example.stdout.json
-python3 "$repo_root/scripts/validate_fixtures.py" readme-example.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
 grep -q '"events":6' readme-example.stderr.json
 grep -q '"ok":true' readme-example.stderr.json
@@ -1005,7 +1006,7 @@ cargo smoke-http-server > http-server.stdout.json 2> http-server.stderr.json
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" http-server.stdout.json http-server.stderr.json >/dev/null
 cargo smoke-issue-diagnostics > issue-diagnostics.stdout.json 2> issue-diagnostics.stderr.json
 PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/check_rust_issue_diagnostics_payload.py" issue-diagnostics.stdout.json >/dev/null
-python3 "$repo_root/scripts/validate_fixtures.py" issue-diagnostics.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" issue-diagnostics.stdout.json >/dev/null
 grep -q '"issues":2' issue-diagnostics.stderr.json
 grep -q '"ok":true' issue-diagnostics.stderr.json
 

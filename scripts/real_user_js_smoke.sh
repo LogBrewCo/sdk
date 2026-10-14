@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 sdk_package_tgz="logbrew-sdk-${sdk_package_version}.tgz"
 smoke_typescript_version="6.0.3"
@@ -24,7 +25,7 @@ grep -q '"type": "issue"' "$output_prefix.stdout.json"
 grep -q '"type": "log"' "$output_prefix.stdout.json"
 grep -q '"type": "span"' "$output_prefix.stdout.json"
 grep -q '"type": "action"' "$output_prefix.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$output_prefix.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$output_prefix.stdout.json" >/dev/null
 grep -q '"events":6' "$output_prefix.stderr.json"
 grep -q '"ok":true' "$output_prefix.stderr.json"
@@ -45,7 +46,7 @@ grep -q '"type": "issue"' "$output_prefix.stdout.json"
 grep -q '"type": "log"' "$output_prefix.stdout.json"
 grep -q '"type": "span"' "$output_prefix.stdout.json"
 grep -q '"type": "action"' "$output_prefix.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$output_prefix.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$output_prefix.stdout.json" >/dev/null
 grep -q '"events":6' "$output_prefix.stderr.json"
 grep -q '"ok":true' "$output_prefix.stderr.json"
@@ -72,7 +73,7 @@ if grep -Eq 'card=private|coupon=private|#payment|debug heartbeat' "$output_pref
   echo "agent timeline example leaked private or dropped metadata" >&2
   exit 1
 fi
-python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$output_prefix.stdout.json" >/dev/null
 }
 
 run_installed_agent_timeline_example_script() {
@@ -162,7 +163,7 @@ grep -q '"type": "issue"' "$output_prefix.stdout.json"
 grep -q '"type": "log"' "$output_prefix.stdout.json"
 grep -q '"type": "span"' "$output_prefix.stdout.json"
 grep -q '"type": "action"' "$output_prefix.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$output_prefix.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$output_prefix.stdout.json" >/dev/null
 grep -q '"events":6' "$output_prefix.stderr.json"
 grep -q '"ok":true' "$output_prefix.stderr.json"
@@ -2655,7 +2656,7 @@ grep -q '"type": "issue"' readme-example.stdout.json
 grep -q '"type": "log"' readme-example.stdout.json
 grep -q '"type": "span"' readme-example.stdout.json
 grep -q '"type": "action"' readme-example.stdout.json
-python3 "$repo_root/scripts/validate_fixtures.py" readme-example.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
 grep -q '"events":6' readme-example.stderr.json
 grep -q '"ok":true' readme-example.stderr.json
@@ -2667,7 +2668,7 @@ grep -q '"type": "issue"' readme-example-reinstall.stdout.json
 grep -q '"type": "log"' readme-example-reinstall.stdout.json
 grep -q '"type": "span"' readme-example-reinstall.stdout.json
 grep -q '"type": "action"' readme-example-reinstall.stdout.json
-python3 "$repo_root/scripts/validate_fixtures.py" readme-example-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" readme-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' readme-example-reinstall.stderr.json
 grep -q '"ok":true' readme-example-reinstall.stderr.json
@@ -2786,7 +2787,7 @@ grep -q '"type": "issue"' smoke.stdout.json
 grep -q '"type": "log"' smoke.stdout.json
 grep -q '"type": "span"' smoke.stdout.json
 grep -q '"type": "action"' smoke.stdout.json
-python3 "$repo_root/scripts/validate_fixtures.py" smoke.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" smoke.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
 grep -q '"events":6' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json
@@ -2854,7 +2855,7 @@ grep -q '"type": "issue"' smoke-require.stdout.json
 grep -q '"type": "log"' smoke-require.stdout.json
 grep -q '"type": "span"' smoke-require.stdout.json
 grep -q '"type": "action"' smoke-require.stdout.json
-python3 "$repo_root/scripts/validate_fixtures.py" smoke-require.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" smoke-require.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-investigation-evidence "$repo_root/fixtures/valid-batch.json" smoke-require.stdout.json >/dev/null
 grep -q '"events":6' smoke-require.stderr.json
 grep -q '"ok":true' smoke-require.stderr.json

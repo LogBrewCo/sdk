@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 source "$repo_root/scripts/python_package_version.sh"
 
 core_dir="$repo_root/python/logbrew_py"
@@ -363,7 +364,7 @@ if __name__ == "__main__":
 PY
 
 "$python_bin" "$tmp_dir/flask_high_load_smoke.py" "$tmp_dir/flushed-body.json" > "$tmp_dir/high-load.stdout.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/flushed-body.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/flushed-body.json" >/dev/null
 grep -q '"ok": true' "$tmp_dir/high-load.stdout.json"
 grep -q '"highVolumeFlaskRequests": 600' "$tmp_dir/high-load.stdout.json"
 grep -q '"maxQueueSize": 1000' "$tmp_dir/high-load.stdout.json"

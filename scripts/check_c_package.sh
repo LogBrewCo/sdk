@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/c/logbrew-c"
 tmp_dir="$(mktemp -d)"
 
@@ -74,7 +75,7 @@ CPP
 
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/tests/test_rich_telemetry.c" -o "$tmp_dir/build/test_rich_telemetry"
 "$tmp_dir/build/test_rich_telemetry" > "$tmp_dir/rich.stdout.json" 2> "$tmp_dir/rich.stderr.txt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/rich.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/rich.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_c_rich_telemetry_payload.py" "$tmp_dir/rich.stdout.json" >/dev/null
 grep -q 'c rich telemetry tests passed' "$tmp_dir/rich.stderr.txt"
 
@@ -97,19 +98,19 @@ fi
 
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/readme_example.c" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/real_user_smoke.c" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/trace_correlation.c" -o "$tmp_dir/build/trace_correlation"
 "$tmp_dir/build/trace_correlation" > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_c_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" "$tmp_dir/trace.stderr.json" >/dev/null
 
 run_examples_make > "$tmp_dir/examples-help.txt"

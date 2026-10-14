@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.10}}"
 module_version="v${requested_version#v}"
 export LOGBREW_GO_MODULE_VERSION="$module_version"
@@ -902,7 +903,7 @@ run_go_doc go-doc-gin-config.txt "$gin_module_path" Config
 run_go_doc go-doc-gin-trace-from-context.txt "$gin_module_path" TraceFromContext
 
 go run . > "$tmp_dir/run.stdout.json" 2> "$tmp_dir/run.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/run.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/run.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/run.stderr.json"
 grep -q '"events":6' "$tmp_dir/run.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/run.stderr.json"
@@ -913,7 +914,7 @@ go build -mod=readonly -o "$tmp_dir/go-public-module-smoke" .
 go version -m "$tmp_dir/go-public-module-smoke" > "$tmp_dir/version-m.txt"
 grep -q "dep[[:space:]]*${module_path}[[:space:]]*${module_version}" "$tmp_dir/version-m.txt"
 go run -mod=readonly . > "$tmp_dir/run-readonly.stdout.json" 2> "$tmp_dir/run-readonly.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/run-readonly.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/run-readonly.stdout.json" >/dev/null
 grep -q '"httpAttempts":2' "$tmp_dir/run-readonly.stderr.json"
 
 printf 'go public module install smoke passed for %s %s and %s %s\n' \

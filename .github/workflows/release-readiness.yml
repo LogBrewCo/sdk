@@ -135,6 +135,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
+      - name: Test native SDK verifier
+        run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go -C tools/toolchain-probe test -race ./...
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -148,9 +154,9 @@ jobs:
 
       - name: Validate fixtures
         run: |
-          python3 scripts/validate_fixtures.py fixtures/valid-batch.json
-          python3 scripts/validate_fixtures.py fixtures/invalid-batch.json --expect-invalid
-          python3 scripts/validate_fixtures.py fixtures/valid-batch.json --json
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/invalid-batch.json --expect-invalid
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
 
       - name: Check release metadata
         run: python3 scripts/check_release_metadata.py
@@ -202,6 +208,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -362,6 +371,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -434,6 +446,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -482,6 +497,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -518,6 +536,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -541,6 +562,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -566,6 +590,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -589,6 +616,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -633,6 +663,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -660,6 +693,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -683,6 +719,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -715,6 +754,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
@@ -738,6 +780,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -788,6 +833,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up Python
         uses: actions/setup-python@v6

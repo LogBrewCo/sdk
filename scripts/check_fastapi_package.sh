@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 source "$repo_root/scripts/python_package_version.sh"
 
 package_dir="$repo_root/python/logbrew_fastapi"
@@ -16,7 +17,7 @@ remove_tmp_dir() {
 }
 
 check_json() {
-  "$tmp_dir/venv/bin/python" "$repo_root/scripts/check_python_package_json.py" "$@"
+  run_native_verifier package-json "$@"
 }
 
 trap remove_tmp_dir EXIT
@@ -76,7 +77,7 @@ check_json fields \
   'path="/health"' \
   'events=3' \
   "$tmp_dir/smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_fastapi.examples --list > "$tmp_dir/examples-list.txt"
 grep -qx 'readme-example -> python -m logbrew_fastapi.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")

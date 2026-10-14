@@ -5,6 +5,7 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_smoke_package.sh"
 ruby_smoke_create_tmp_dir
 ruby_smoke_prepare_package
+source "$repo_root/scripts/native_verifier.sh"
 
 find "$package_dir" -name '*.rb' -not -path '*/.bundle/*' -print0 | while IFS= read -r -d '' file; do
   ruby -w -c "$file" >/dev/null
@@ -103,13 +104,13 @@ ruby -I "$unpacked_dir/lib" -e '
 ' "$package_version"
 
 ruby -I "$package_dir/lib" "$package_dir/examples/readme_example.rb" > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-example.stderr.json"
 grep -q '"events":6' "$tmp_dir/readme-example.stderr.json"
 
 ruby -I "$package_dir/lib" "$package_dir/examples/real_user_smoke.rb" > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/real-user-smoke.stderr.json"

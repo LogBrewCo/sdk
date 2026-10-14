@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
 next_package_version="$(
@@ -333,7 +334,7 @@ grep -q 'POST /app/orders/\[orderId\]/page failed' "$tmp_dir/instrumentation-che
 grep -q '"routeType":"render"' "$tmp_dir/instrumentation-check.json"
 
 node invoke-route.mjs > "$tmp_dir/next-route.stdout.json" 2> "$tmp_dir/next-route.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/next-route.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/next-route.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/next-route.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/next-route.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/next-route.stderr.json"
@@ -1167,15 +1168,15 @@ grep -q 'client-route-spans -> node node_modules/@logbrew/next/examples/index.mj
 grep -q 'request-errors -> node node_modules/@logbrew/next/examples/index.mjs request-errors' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/next/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/next/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"attempts":1' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/next/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 node node_modules/@logbrew/next/examples/index.mjs request-errors > "$tmp_dir/example-request-errors.stdout.json" 2> "$tmp_dir/example-request-errors.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-request-errors.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-request-errors.stdout.json" >/dev/null
 grep -q 'POST /app/orders/\[orderId\]/page failed' "$tmp_dir/example-request-errors.stdout.json"
 grep -q '"ok":true' "$tmp_dir/example-request-errors.stderr.json"
 npm --prefix node_modules/@logbrew/next/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -1199,11 +1200,11 @@ if payload.get("pendingEvents") != 1:
 PY
 grep -q '"ok":true' "$tmp_dir/npm-helper-client.stderr.json"
 npm --prefix node_modules/@logbrew/next/examples run --silent request-errors > "$tmp_dir/npm-helper-request-errors.stdout.json" 2> "$tmp_dir/npm-helper-request-errors.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-request-errors.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-request-errors.stdout.json" >/dev/null
 grep -q 'POST /app/orders/\[orderId\]/page failed' "$tmp_dir/npm-helper-request-errors.stdout.json"
 grep -q '"ok":true' "$tmp_dir/npm-helper-request-errors.stderr.json"
 npm --prefix node_modules/@logbrew/next/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
