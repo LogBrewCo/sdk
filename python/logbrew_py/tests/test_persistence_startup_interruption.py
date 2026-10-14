@@ -17,8 +17,12 @@ class PersistenceStartupInterruptionTests(unittest.TestCase):
         connect = sqlite3.connect
         connections: list[sqlite3.Connection] = []
 
-        def tracked_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
-            connection = connect(*args, **kwargs)
+        def tracked_connect(
+            database: Path, *, timeout: float, isolation_level: None, check_same_thread: bool
+        ) -> sqlite3.Connection:
+            connection = connect(
+                database, timeout=timeout, isolation_level=isolation_level, check_same_thread=check_same_thread
+            )
             connections.append(connection)
             return connection
 

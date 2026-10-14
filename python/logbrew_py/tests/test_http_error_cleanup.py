@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import unittest
+from email.message import Message
 from urllib.error import HTTPError
 from urllib.request import Request
 
@@ -17,11 +18,11 @@ class HttpErrorResponseTests(unittest.TestCase):
 
     def check_error(self, status: int) -> None:
         class UnreadableBody(io.BytesIO):
-            def read(self, size: int = -1) -> bytes:
+            def read(self, size: int | None = -1) -> bytes:
                 raise AssertionError("error response body must not be read")
 
         body = UnreadableBody(b"private response body")
-        error = HTTPError("https://example.com/events", status, "private reason", {}, body)
+        error = HTTPError("https://example.com/events", status, "private reason", Message(), body)
 
         def open_url(request: Request, *, timeout: float) -> object:
             raise error
@@ -33,13 +34,13 @@ class HttpErrorResponseTests(unittest.TestCase):
 
     def test_retry_closes_each_error_and_preserves_exact_event_body(self) -> None:
         failures: list[io.BytesIO] = []
-        requests: list[bytes | None] = []
+        requests: list[object] = []
 
         def open_url(request: Request, *, timeout: float) -> object:
             requests.append(request.data)
             body = io.BytesIO(b"private response body")
             failures.append(body)
-            raise HTTPError("https://example.com/events", 503, "private reason", {}, body)
+            raise HTTPError("https://example.com/events", 503, "private reason", Message(), body)
 
         client = create_client(max_retries=1)
         capture_log(client, "evt_before", "before failure")
