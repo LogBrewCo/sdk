@@ -40,6 +40,7 @@ public final class LogBrewHttpClientTracingTest {
         testSendPreservesOriginalErrorsAndRecordsTypeOnlyFailure();
         testSendAsyncRecordsCompletionSpan();
         testRealHttpCaptureFailurePreservesResults();
+        LogBrewHttpClientStreamingTest.run();
         System.out.println("java http client tracing tests ok (" + testsRun + " tests)");
     }
 
@@ -92,6 +93,7 @@ public final class LogBrewHttpClientTracingTest {
         }
 
         assertEquals(202, response.statusCode(), "response status");
+        assertTrue(response == httpClient.lastResponse, "original response object returned");
         HttpRequest captured = httpClient.lastRequest;
         assertEquals(parent.traceId(), Traceparent.parse(firstHeader(captured, "traceparent")).traceId(), "trace id");
         assertEquals("b7ad6b7169203331", Traceparent.parse(firstHeader(captured, "traceparent")).parentSpanId(), "span id");
@@ -187,6 +189,7 @@ public final class LogBrewHttpClientTracingTest {
         ).join();
 
         assertEquals(503, response.statusCode(), "async response status");
+        assertTrue(response == httpClient.lastResponse, "original async response object returned");
         assertEquals("traceparent", httpClient.lastRequest.headers().map().keySet().stream()
             .filter(name -> "traceparent".equalsIgnoreCase(name))
             .findFirst()
@@ -346,6 +349,7 @@ public final class LogBrewHttpClientTracingTest {
         private final String body;
         private final IOException error;
         private HttpRequest lastRequest;
+        private HttpResponse<?> lastResponse;
 
         private FakeHttpClient(int statusCode, String body, IOException error) {
             this.statusCode = statusCode;
@@ -415,7 +419,9 @@ public final class LogBrewHttpClientTracingTest {
             if (error != null) {
                 throw error;
             }
-            return new FakeHttpResponse<>(request, statusCode, body);
+            HttpResponse<T> response = new FakeHttpResponse<>(request, statusCode, body);
+            lastResponse = response;
+            return response;
         }
 
         @Override
@@ -429,7 +435,9 @@ public final class LogBrewHttpClientTracingTest {
                 future.completeExceptionally(error);
                 return future;
             }
-            return CompletableFuture.completedFuture(new FakeHttpResponse<>(request, statusCode, body));
+            HttpResponse<T> response = new FakeHttpResponse<>(request, statusCode, body);
+            lastResponse = response;
+            return CompletableFuture.completedFuture(response);
         }
 
         @Override
