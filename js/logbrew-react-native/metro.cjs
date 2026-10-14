@@ -1,7 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
-const { Buffer } = require("node:buffer");
+const { Buffer: NodeBuffer } = require("node:buffer");
 const { createRequire } = require("node:module");
 const path = require("node:path");
 
@@ -44,7 +44,7 @@ function createDebugIdModule(debugId = DEBUG_ID_PLACEHOLDER) {
   const code = runtimeDebugIdSnippet(debugId);
   return {
     dependencies: new Map(),
-    getSource: () => Buffer.from(code),
+    getSource: () => NodeBuffer.from(code),
     inverseDependencies: new Set(),
     path: DEBUG_ID_MODULE_PATH,
     output: [
@@ -64,7 +64,7 @@ function prependDebugIdModule(preModules, debugId = DEBUG_ID_PLACEHOLDER) {
   if (!Array.isArray(preModules)) {
     throw configurationError("LogBrew Metro serializer expected preModules to be an array");
   }
-  if (preModules.some((module) => module?.path === DEBUG_ID_MODULE_PATH)) {
+  if (preModules.some((bundleModule) => bundleModule?.path === DEBUG_ID_MODULE_PATH)) {
     return preModules;
   }
   const debugIdModule = createDebugIdModule(debugId);
@@ -104,7 +104,7 @@ function canonicalSourceMap(sourceMap) {
 }
 
 function formatDebugId(bytes) {
-  const value = Buffer.from(bytes.subarray(0, 16));
+  const value = NodeBuffer.from(bytes.subarray(0, 16));
   value[6] = (value[6] & 0x0f) | 0x50;
   value[8] = (value[8] & 0x3f) | 0x80;
   const hex = value.toString("hex");
@@ -311,7 +311,7 @@ function createMetroSourceMapSerializer() {
     const modules = [...preModules, ...sortedModules(graph, options)]
       .filter(isJsModule)
       .filter(sourceMapOptions.processModuleFilter)
-      .map((module) => getSourceMapInfo(module, sourceMapOptions));
+      .map((bundleModule) => getSourceMapInfo(bundleModule, sourceMapOptions));
     return fromRawMappings(modules).toString(undefined, sourceMapOptions);
   };
 }

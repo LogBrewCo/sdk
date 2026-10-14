@@ -1,0 +1,387 @@
+{
+  "optimized": false,
+  "shutdown_status": 202,
+  "shutdown_attempts": 1,
+  "shutdown_accepted_events": 1,
+  "shutdown_recorded_bodies": 1,
+  "shutdown_closed": true,
+  "body": {
+    "sdk": {
+      "name": "python-public-pypi-smoke",
+      "version": "0.1.16",
+      "language": "python"
+    },
+    "events": [
+      {
+        "type": "log",
+        "id": "evt_public_pypi_smoke",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "message": "public PyPI smoke",
+          "level": "info"
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_public_pypi_trace_context",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "public-pypi.trace-context",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "00f067aa0ba902b7",
+          "status": "ok",
+          "durationMs": 1,
+          "metadata": {
+            "source": "public-pypi-smoke"
+          }
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_public_pypi_span_links",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "public-pypi.span-links",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "b7ad6b7169203331",
+          "status": "ok",
+          "links": [
+            {
+              "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "spanId": "bbbbbbbbbbbbbbbb",
+              "sampled": true,
+              "metadata": {
+                "relation": "fan_in"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_python_dbapi_3",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "sqlite CONNECT",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "aaaaaaaaaaaaaaa4",
+          "status": "ok",
+          "parentSpanId": "00f067aa0ba902b7",
+          "durationMs": 1,
+          "metadata": {
+            "safe": "public-pypi",
+            "framework": "dbapi",
+            "dbMethod": "connect",
+            "source": "database",
+            "dbSystem": "sqlite",
+            "dbOperation": "CONNECT",
+            "sampled": true,
+            "dbName": "public-smoke"
+          }
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_python_dbapi_4",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "sqlite CREATE",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "aaaaaaaaaaaaaaa5",
+          "status": "ok",
+          "parentSpanId": "00f067aa0ba902b7",
+          "durationMs": 1,
+          "metadata": {
+            "safe": "public-pypi",
+            "framework": "dbapi",
+            "dbMethod": "execute",
+            "source": "database",
+            "dbSystem": "sqlite",
+            "dbOperation": "CREATE",
+            "sampled": true,
+            "dbName": "public-smoke"
+          }
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_python_dbapi_5",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "sqlite INSERT",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "aaaaaaaaaaaaaaa6",
+          "status": "ok",
+          "parentSpanId": "00f067aa0ba902b7",
+          "durationMs": 1,
+          "metadata": {
+            "safe": "public-pypi",
+            "framework": "dbapi",
+            "dbMethod": "execute",
+            "source": "database",
+            "dbSystem": "sqlite",
+            "dbOperation": "INSERT",
+            "sampled": true,
+            "dbName": "public-smoke",
+            "rowCount": 1
+          }
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_python_dbapi_6",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "sqlite COMMIT",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "aaaaaaaaaaaaaaa7",
+          "status": "ok",
+          "parentSpanId": "00f067aa0ba902b7",
+          "durationMs": 1,
+          "metadata": {
+            "safe": "public-pypi",
+            "framework": "dbapi",
+            "dbMethod": "commit",
+            "source": "database",
+            "dbSystem": "sqlite",
+            "dbOperation": "COMMIT",
+            "sampled": true,
+            "dbName": "public-smoke"
+          }
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_python_dbapi_7",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "sqlite SELECT",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "aaaaaaaaaaaaaaa8",
+          "status": "ok",
+          "parentSpanId": "00f067aa0ba902b7",
+          "durationMs": 1,
+          "metadata": {
+            "safe": "public-pypi",
+            "framework": "dbapi",
+            "dbMethod": "execute",
+            "source": "database",
+            "dbSystem": "sqlite",
+            "dbOperation": "SELECT",
+            "sampled": true,
+            "dbName": "public-smoke"
+          }
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_python_dbapi_8",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "sqlite FETCHALL",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "aaaaaaaaaaaaaaa9",
+          "status": "ok",
+          "parentSpanId": "00f067aa0ba902b7",
+          "durationMs": 1,
+          "metadata": {
+            "safe": "public-pypi",
+            "framework": "dbapi",
+            "dbMethod": "fetchall",
+            "source": "database",
+            "dbSystem": "sqlite",
+            "dbOperation": "FETCHALL",
+            "sampled": true,
+            "dbName": "public-smoke",
+            "rowCount": 1
+          }
+        }
+      }
+    ]
+  },
+  "db_rows": [
+    [
+      "checkout"
+    ]
+  ],
+  "django_config_type": "LogBrewDjangoConfig",
+  "fastapi_middleware_count": 1,
+  "flask_body": {
+    "sdk": {
+      "name": "python-public-flask-smoke",
+      "version": "0.1.5",
+      "language": "python"
+    },
+    "events": [
+      {
+        "type": "span",
+        "id": "evt_flask_span_request",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "GET /orders/<int:order_id>",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+          "spanId": "b7ad6b7169203331",
+          "status": "ok",
+          "durationMs": 1,
+          "metadata": {
+            "framework": "flask",
+            "method": "GET",
+            "routeTemplate": "/orders/<int:order_id>",
+            "route": "/orders/<int:order_id>",
+            "endpoint": "flask_order",
+            "status_code": 200,
+            "duration_ms": 1
+          }
+        }
+      },
+      {
+        "type": "metric",
+        "id": "evt_flask_metric_request",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "context": {"schemaVersion": 1, "trace": {"traceId": "4bf92f3577b34da6a3ce929d0e0e4736", "spanId": "b7ad6b7169203331"}},
+          "name": "http.server.duration",
+          "kind": "histogram",
+          "value": 1,
+          "unit": "ms",
+          "temporality": "delta",
+          "metadata": {
+            "statusCode": 200,
+            "routeTemplate": "/orders/<int:order_id>"
+          }
+        }
+      }
+    ]
+  },
+  "flask_error_body": {
+    "sdk": {
+      "name": "python-public-flask-smoke",
+      "version": "0.1.5",
+      "language": "python"
+    },
+    "events": [
+      {
+        "type": "issue",
+        "id": "evt_flask_issue_failure",
+        "timestamp": "2026-07-01T00:00:04Z",
+        "attributes": {
+          "title": "GET /failure failed",
+          "level": "error",
+          "message": "Unhandled exception",
+          "metadata": {
+            "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "spanId": "b7ad6b7169203331"
+          }
+        }
+      },
+      {
+        "type": "span",
+        "id": "evt_flask_span_failure",
+        "timestamp": "2026-07-01T00:00:04Z",
+        "attributes": {
+          "name": "GET /failure",
+          "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spanId": "b7ad6b7169203331",
+          "status": "error",
+          "durationMs": 1,
+          "metadata": {"status_code": 500}
+        }
+      },
+      {
+        "type": "metric",
+        "id": "evt_flask_metric_failure",
+        "timestamp": "2026-07-01T00:00:04Z",
+        "attributes": {
+          "context": {"schemaVersion": 1, "trace": {"traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "spanId": "b7ad6b7169203331"}},
+          "name": "http.server.duration",
+          "kind": "histogram",
+          "value": 1,
+          "unit": "ms",
+          "temporality": "delta",
+          "metadata": {"statusCode": 500, "routeTemplate": "/failure"}
+        }
+      }
+    ]
+  },
+  "flask_blocked_body": {
+    "sdk": {
+      "name": "python-public-flask-smoke",
+      "version": "0.1.5",
+      "language": "python"
+    },
+    "events": [
+      {
+        "type": "span",
+        "id": "evt_flask_span_blocked",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "name": "GET /orders/<int:order_id>",
+          "traceId": "cccccccccccccccccccccccccccccccc",
+          "spanId": "b7ad6b7169203331",
+          "status": "ok",
+          "durationMs": 1,
+          "metadata": {"status_code": 403}
+        }
+      },
+      {
+        "type": "metric",
+        "id": "evt_flask_metric_blocked",
+        "timestamp": "2026-07-01T00:00:03Z",
+        "attributes": {
+          "context": {"schemaVersion": 1, "trace": {"traceId": "cccccccccccccccccccccccccccccccc", "spanId": "b7ad6b7169203331"}},
+          "name": "http.server.duration",
+          "kind": "histogram",
+          "value": 1,
+          "unit": "ms",
+          "temporality": "delta",
+          "metadata": {
+            "statusCode": 403,
+            "routeTemplate": "/orders/<int:order_id>"
+          }
+        }
+      }
+    ]
+  },
+  "flask_blocked_status": 403,
+  "flask_order_calls": [42],
+  "flask_recorded_bodies": 3,
+  "flask_error_status": 500,
+  "flask_closed": true,
+  "flask_pending_events": 0,
+  "flask_response": {
+    "orderId": 42
+  },
+  "flask_status": 200,
+  "flush_attempts": 1,
+  "flush_status": 202,
+  "otel_exporter_result": "SUCCESS",
+  "pending_events": 0,
+  "recorded_bodies": 1,
+  "requirements": {
+    "logbrew-fastapi": [
+      "fastapi>=0.111.1",
+      "logbrew-sdk<0.2.0,>=0.1.12",
+      "logbrew-sdk[celery]<0.2.0,>=0.1.12; extra == \"celery\""
+    ],
+    "logbrew-sdk": [
+      "certifi>=2026.7.22",
+      "truststore<1,>=0.10.4",
+      "typing-extensions>=4.1; python_version < \"3.11\"",
+      "arq<1,>=0.28; extra == \"arq\"",
+      "celery<6,>=5; extra == \"celery\"",
+      "dramatiq<3,>=2.2.1; extra == \"dramatiq\"",
+      "cryptography<50,>=49; extra == \"persistence\"",
+      "rq<3,>=2; extra == \"rq\""
+    ]
+  },
+  "versions": {
+    "arq": "0.28.0",
+    "celery": "5.6.3",
+    "dramatiq": "2.2.1",
+    "logbrew-django": "0.1.6",
+    "logbrew-fastapi": "0.1.10",
+    "logbrew-flask": "0.1.5",
+    "logbrew-sdk": "0.1.16",
+    "rq": "2.12.0"
+  }
+}

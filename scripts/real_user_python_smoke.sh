@@ -90,11 +90,11 @@ run_readme_example() {
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    check_json event-kinds release environment issue log span action \
+    run_native_verifier package-json event-kinds release environment issue log span action \
         "$tmp_dir/$output_prefix.stdout.json"
     run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
     check_base_event_parity "$tmp_dir/$output_prefix.stdout.json"
-    check_json fields 'events=6' 'ok=true' "$tmp_dir/$output_prefix.stderr.json"
+    run_native_verifier package-json fields 'events=6' 'ok=true' "$tmp_dir/$output_prefix.stderr.json"
 }
 
 run_agent_timeline_example() {
@@ -102,8 +102,8 @@ run_agent_timeline_example() {
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    check_json event-kinds action "$tmp_dir/$output_prefix.stdout.json"
-    check_json event-fields 'attributes.metadata.source="product.action"' \
+    run_native_verifier package-json event-kinds action "$tmp_dir/$output_prefix.stdout.json"
+    run_native_verifier package-json event-fields 'attributes.metadata.source="product.action"' \
         'attributes.metadata.source="network.milestone"' 'attributes.metadata.routeTemplate="/checkout/:step"' \
         'attributes.metadata.routeTemplate="/payments/:id"' 'attributes.metadata.method="POST"' \
         'attributes.metadata.statusCode=202' 'attributes.metadata.durationMs=94.0' \
@@ -114,7 +114,7 @@ run_agent_timeline_example() {
             exit 1
         fi
     done
-    check_json fields 'events=2' 'ok=true' \
+    run_native_verifier package-json fields 'events=2' 'ok=true' \
         'traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' \
         "$tmp_dir/$output_prefix.stderr.json"
 }
@@ -124,10 +124,10 @@ run_first_useful_telemetry_example() {
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
-    check_json event-kinds release environment log action metric span \
+    run_native_verifier package-json event-kinds release environment log action metric span \
         "$tmp_dir/$output_prefix.stdout.json"
     run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
-    check_json fields 'events=7' 'ok=true' 'requestSpan="evt_span_checkout_request"' \
+    run_native_verifier package-json fields 'events=7' 'ok=true' 'requestSpan="evt_span_checkout_request"' \
         "$tmp_dir/$output_prefix.stderr.json"
 }
 
@@ -185,17 +185,13 @@ check_makefile_help() {
     test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "12"
 }
 
-check_json() {
-    run_native_verifier package-json "$@"
-}
-
 run_json_smoke() {
     local script_path="$1"
     local output_prefix="$2"
     shift 2
 
     python "$script_path" > "$tmp_dir/$output_prefix.stdout.json"
-    check_json fields "$@" "$tmp_dir/$output_prefix.stdout.json"
+    run_native_verifier package-json fields "$@" "$tmp_dir/$output_prefix.stdout.json"
 }
 
 run_runtime_context_smoke() {

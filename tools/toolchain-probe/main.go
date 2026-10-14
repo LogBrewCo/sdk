@@ -71,10 +71,15 @@ type boundedOutput struct {
 	cancel  context.CancelFunc
 	data    []byte
 	limited bool
+	limit   int
 }
 
 func (output *boundedOutput) Write(data []byte) (int, error) {
-	count := min(len(data), outputLimit-len(output.data))
+	limit := output.limit
+	if limit <= 0 {
+		limit = outputLimit
+	}
+	count := min(len(data), limit-len(output.data))
 
 	output.data = append(output.data, data[:count]...)
 	if count != len(data) {
@@ -246,12 +251,44 @@ func run() int {
 	if os.Args[1] == "package-json" {
 		return checkPackageJSON(os.Args[2:], os.Stderr)
 	}
+	handlers := map[string]func([]string, io.Writer, io.Writer) int{
+		pythonConsumerMode: runPythonConsumer, pythonSmokeMode: runPythonSmoke,
+		pythonArchiveMode: runPythonArchive, releaseMetadataMode: runReleaseMetadata,
+		repoWideVersionsMode:   runRepoWideVersions,
+		nugetPlanCommand:       runNugetPlan,
+		nugetProvenanceCommand: runNugetProvenance,
+		nugetPublicCommand:     runNugetPublic,
+		registryCommand:        runRegistryPublication,
+		markdownCheckMode:      runMarkdownLinks,
+		githubSafetyMode:       runGitHubSafety,
+		generatedArtifactMode:  runGeneratedArtifacts,
+		backendReportsMode:     runBackendReports,
+		publicationRunMode:     runPublicationRun,
+		ciStaticMode:           runCIStaticDuplication,
+		brandMode:              runBrandAssets,
+		brandGeneratedMode:     runBrandGenerated,
+		brandExportMode:        runBrandExport,
+		brandWriteMode:         runBrandWrite,
+		jsSyntaxMode:           runJSSyntax,
+		jsParserInstallMode:    runJSParserInstall,
+		jsParserBootstrapMode:  runJSParserBootstrap,
+		"ci-selection":         runCISelection, confidentialityMode: runConfidentiality,
+	}
+	if handler, present := handlers[os.Args[1]]; present {
+		return handler(os.Args[2:], os.Stdout, os.Stderr)
+	}
 	if os.Args[1] == schemaCheckMode || os.Args[1] == eventBatchCheckMode {
 		return checkSchema(os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
 	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, or event-batch-check mode\n", exitUsage)
+			"schema-check, event-batch-check, python-consumer, python-public-consumer, python-archive, "+
+			"release-metadata, repo-wide-versions, nuget-plan, nuget-provenance, nuget-public, "+
+			"ci-selection, registry-publication, markdown-links, github-release-safety, "+
+			"generated-artifacts, backend-reports, publication-run, ci-static-duplication, "+
+			"brand-assets, brand-generated, brand-export, brand-write, js-syntax, js-parser-install, "+
+			"js-parser-bootstrap, or confidentiality-check mode\n",
+		exitUsage)
 }
 
 func runDeadline(arguments []string) int {

@@ -126,7 +126,9 @@ def require_path(root: Path, relative: str, failures: list[str]) -> Path:
     return path
 
 
-def require_equal(failures: list[str], location: str, field: str, actual: Any, expected: Any) -> None:
+def require_equal(
+    failures: list[str], location: str, field: str, actual: Any, expected: Any
+) -> None:
     require(
         actual == expected,
         failures,
@@ -134,7 +136,9 @@ def require_equal(failures: list[str], location: str, field: str, actual: Any, e
     )
 
 
-def require_contains(failures: list[str], location: str, field: str, actual: str | None, needle: str) -> None:
+def require_contains(
+    failures: list[str], location: str, field: str, actual: str | None, needle: str
+) -> None:
     require(
         actual is not None and needle in actual,
         failures,
@@ -271,28 +275,68 @@ def validate_js_package(
     actual_version = manifest.get("version")
     if expected_version is None:
         require(
-            isinstance(actual_version, str) and PUBLIC_SEMVER_RE.match(actual_version) is not None,
+            isinstance(actual_version, str)
+            and PUBLIC_SEMVER_RE.match(actual_version) is not None,
             failures,
             f"{location}: expected version to be a public semver, got {actual_version!r}",
         )
     else:
         require_equal(failures, location, "version", actual_version, expected_version)
-    require_equal(failures, location, "license", manifest.get("license"), PUBLIC_LICENSE)
-    require(manifest.get("private") is not True, failures, f"{location}: public SDK package must not be private")
-    require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
-    require_equal(failures, location, "repository.type", manifest.get("repository", {}).get("type"), "git")
-    require_equal(failures, location, "repository.url", manifest.get("repository", {}).get("url"), NPM_REPO_URL)
-    require_equal(failures, location, "engines.node", manifest.get("engines", {}).get("node"), ">=18")
+    require_equal(
+        failures, location, "license", manifest.get("license"), PUBLIC_LICENSE
+    )
+    require(
+        manifest.get("private") is not True,
+        failures,
+        f"{location}: public SDK package must not be private",
+    )
+    require_contains(
+        failures, location, "description", manifest.get("description"), "LogBrew"
+    )
+    require_equal(
+        failures,
+        location,
+        "repository.type",
+        manifest.get("repository", {}).get("type"),
+        "git",
+    )
+    require_equal(
+        failures,
+        location,
+        "repository.url",
+        manifest.get("repository", {}).get("url"),
+        NPM_REPO_URL,
+    )
+    require_equal(
+        failures,
+        location,
+        "engines.node",
+        manifest.get("engines", {}).get("node"),
+        ">=18",
+    )
     require_equal(failures, location, "sideEffects", manifest.get("sideEffects"), False)
     require_equal(failures, location, "type", manifest.get("type"), "module")
     require_equal(failures, location, "main", manifest.get("main"), "./index.cjs")
     if manifest.get("module") is not None:
-        require_equal(failures, location, "module", manifest.get("module"), "./index.js")
+        require_equal(
+            failures, location, "module", manifest.get("module"), "./index.js"
+        )
     require_equal(failures, location, "types", manifest.get("types"), "./index.d.ts")
 
     files = set(manifest.get("files", []))
-    for expected_file in ("README.md", "examples", "index.js", "index.cjs", "index.d.ts", "index.d.cts"):
-        require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+    for expected_file in (
+        "README.md",
+        "examples",
+        "index.js",
+        "index.cjs",
+        "index.d.ts",
+        "index.d.cts",
+    ):
+        require(
+            expected_file in files,
+            failures,
+            f"{location}: files must include {expected_file!r}",
+        )
     if expected_name == "@logbrew/sdk":
         for expected_file in (
             "release-artifacts-common.js",
@@ -304,7 +348,11 @@ def validate_js_package(
             "vite-release-artifacts.d.ts",
             "vite-release-artifacts.d.cts",
         ):
-            require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+            require(
+                expected_file in files,
+                failures,
+                f"{location}: files must include {expected_file!r}",
+            )
         require_equal(
             failures,
             location,
@@ -333,7 +381,11 @@ def validate_js_package(
             "release-artifacts.d.ts",
             "release-artifacts.d.cts",
         ):
-            require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+            require(
+                expected_file in files,
+                failures,
+                f"{location}: files must include {expected_file!r}",
+            )
         require_js_export_entry(
             failures,
             location,
@@ -355,7 +407,11 @@ def validate_js_package(
             require_default="./release-artifacts.cjs",
         )
     if expected_name == "@logbrew/react-native":
-        require("index.native.js" in files, failures, f"{location}: files must include 'index.native.js'")
+        require(
+            "index.native.js" in files,
+            failures,
+            f"{location}: files must include 'index.native.js'",
+        )
         for expected_file in (
             "apple-native-diagnostics.js",
             "apple-native-diagnostics.d.ts",
@@ -370,7 +426,11 @@ def validate_js_package(
             "release-artifacts.d.ts",
             "release-artifacts.d.cts",
         ):
-            require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+            require(
+                expected_file in files,
+                failures,
+                f"{location}: files must include {expected_file!r}",
+            )
         require_js_export_entry(
             failures,
             location,
@@ -434,7 +494,9 @@ def validate_js_package(
 
     if expected_name == "@logbrew/amqplib":
         amqplib_peer = path_text_from_dict(manifest, "peerDependencies", "amqplib")
-        require_equal(failures, location, "peerDependencies.amqplib", amqplib_peer, ">=0.10")
+        require_equal(
+            failures, location, "peerDependencies.amqplib", amqplib_peer, ">=0.10"
+        )
     require_js_export_entry(
         failures,
         location,
@@ -468,7 +530,11 @@ def require_js_export_entry(
     require_default: str,
 ) -> None:
     exports = manifest.get("exports", {}).get(export_name)
-    require(isinstance(exports, dict), failures, f"{location}: exports[{export_name!r}] must be an object")
+    require(
+        isinstance(exports, dict),
+        failures,
+        f"{location}: exports[{export_name!r}] must be an object",
+    )
     if not isinstance(exports, dict):
         return
 
@@ -479,10 +545,18 @@ def require_js_export_entry(
         "require.default": require_default,
     }
     for field, expected in expected_paths.items():
-        require_equal(failures, location, f"exports[{export_name!r}].{field}", path_text_from_dict(exports, *field.split(".")), expected)
+        require_equal(
+            failures,
+            location,
+            f"exports[{export_name!r}].{field}",
+            path_text_from_dict(exports, *field.split(".")),
+            expected,
+        )
 
 
-def validate_js_packages(root: Path, failures: list[str], npm_versions: dict[str, str] | None = None) -> None:
+def validate_js_packages(
+    root: Path, failures: list[str], npm_versions: dict[str, str] | None = None
+) -> None:
     npm_versions = npm_versions or {}
     actual_public_packages = {
         str(path.parent.relative_to(root))
@@ -497,7 +571,9 @@ def validate_js_packages(root: Path, failures: list[str], npm_versions: dict[str
         set(JS_PACKAGES),
     )
     for relative_dir, expected_name in JS_PACKAGES.items():
-        validate_js_package(root, relative_dir, expected_name, failures, npm_versions.get(expected_name))
+        validate_js_package(
+            root, relative_dir, expected_name, failures, npm_versions.get(expected_name)
+        )
 
 
 def validate_rust(root: Path, failures: list[str]) -> None:
@@ -508,12 +584,26 @@ def validate_rust(root: Path, failures: list[str]) -> None:
     package = read_toml(manifest_path, failures).get("package", {})
     location = "rust/logbrew/Cargo.toml"
     require_equal(failures, location, "package.name", package.get("name"), "logbrew")
-    require_equal(failures, location, "package.version", package.get("version"), RUST_VERSION)
-    require_equal(failures, location, "package.license", package.get("license"), PUBLIC_LICENSE)
-    require_equal(failures, location, "package.repository", package.get("repository"), REPO_URL)
-    require_equal(failures, location, "package.readme", package.get("readme"), "README.md")
-    require_contains(failures, location, "package.description", package.get("description"), "LogBrew")
-    require("logbrew" in package.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
+    require_equal(
+        failures, location, "package.version", package.get("version"), RUST_VERSION
+    )
+    require_equal(
+        failures, location, "package.license", package.get("license"), PUBLIC_LICENSE
+    )
+    require_equal(
+        failures, location, "package.repository", package.get("repository"), REPO_URL
+    )
+    require_equal(
+        failures, location, "package.readme", package.get("readme"), "README.md"
+    )
+    require_contains(
+        failures, location, "package.description", package.get("description"), "LogBrew"
+    )
+    require(
+        "logbrew" in package.get("keywords", []),
+        failures,
+        f"{location}: keywords must include 'logbrew'",
+    )
     readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
     for needle in (
         "Metrics",
@@ -523,10 +613,16 @@ def validate_rust(root: Path, failures: list[str]) -> None:
         "OpenTelemetry Span Exporter",
         "opentelemetry-exporter",
     ):
-        require(needle in readme, failures, f"rust/logbrew/README.md: missing guidance {needle}")
+        require(
+            needle in readme,
+            failures,
+            f"rust/logbrew/README.md: missing guidance {needle}",
+        )
 
 
-def validate_python_package(root: Path, relative_dir: str, expected: dict[str, Any], failures: list[str]) -> None:
+def validate_python_package(
+    root: Path, relative_dir: str, expected: dict[str, Any], failures: list[str]
+) -> None:
     manifest_path = require_path(root, f"{relative_dir}/pyproject.toml", failures)
     require_path(root, f"{relative_dir}/README.md", failures)
     if not manifest_path.exists():
@@ -534,10 +630,22 @@ def validate_python_package(root: Path, relative_dir: str, expected: dict[str, A
     project = read_toml(manifest_path, failures).get("project", {})
     package_name = expected["package"]
     location = f"{relative_dir}/pyproject.toml"
-    require_equal(failures, location, "project.name", project.get("name"), expected["name"])
-    require_equal(failures, location, "project.version", project.get("version"), expected.get("version", PUBLIC_VERSION))
-    require_equal(failures, location, "project.license", project.get("license"), PUBLIC_LICENSE)
-    require_equal(failures, location, "project.readme", project.get("readme"), "README.md")
+    require_equal(
+        failures, location, "project.name", project.get("name"), expected["name"]
+    )
+    require_equal(
+        failures,
+        location,
+        "project.version",
+        project.get("version"),
+        expected.get("version", PUBLIC_VERSION),
+    )
+    require_equal(
+        failures, location, "project.license", project.get("license"), PUBLIC_LICENSE
+    )
+    require_equal(
+        failures, location, "project.readme", project.get("readme"), "README.md"
+    )
     require_equal(
         failures,
         location,
@@ -545,11 +653,31 @@ def validate_python_package(root: Path, relative_dir: str, expected: dict[str, A
         project.get("requires-python"),
         expected["requires_python"],
     )
-    require_contains(failures, location, "project.description", project.get("description"), expected["description"])
+    require_contains(
+        failures,
+        location,
+        "project.description",
+        project.get("description"),
+        expected["description"],
+    )
     authors = project.get("authors", [])
-    require({"name": "LogBrew"} in authors, failures, f"{location}: authors must include LogBrew")
-    require("logbrew" in project.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
-    require_equal(failures, location, "project.dependencies", set(project.get("dependencies", [])), expected["dependencies"])
+    require(
+        {"name": "LogBrew"} in authors,
+        failures,
+        f"{location}: authors must include LogBrew",
+    )
+    require(
+        "logbrew" in project.get("keywords", []),
+        failures,
+        f"{location}: keywords must include 'logbrew'",
+    )
+    require_equal(
+        failures,
+        location,
+        "project.dependencies",
+        set(project.get("dependencies", [])),
+        expected["dependencies"],
+    )
     expected_optional_dependencies = expected.get("optional_dependencies")
     if expected_optional_dependencies is not None:
         actual_optional_dependencies = {
@@ -565,9 +693,17 @@ def validate_python_package(root: Path, relative_dir: str, expected: dict[str, A
         )
     urls = project.get("urls", {})
     if urls:
-        require_equal(failures, location, "project.urls.Repository", urls.get("Repository"), REPO_URL)
+        require_equal(
+            failures,
+            location,
+            "project.urls.Repository",
+            urls.get("Repository"),
+            REPO_URL,
+        )
     require_path(root, f"{relative_dir}/src/{package_name}/py.typed", failures)
-    require_path(root, f"{relative_dir}/src/{package_name}/examples/__main__.py", failures)
+    require_path(
+        root, f"{relative_dir}/src/{package_name}/examples/__main__.py", failures
+    )
 
 
 def validate_python(root: Path, failures: list[str]) -> None:
@@ -593,7 +729,10 @@ def validate_go(root: Path, failures: list[str]) -> None:
         return
     content = go_mod_path.read_text(encoding="utf-8")
     require(
-        re.search(r"^module github\.com/LogBrewCo/sdk/go/logbrew$", content, re.MULTILINE) is not None,
+        re.search(
+            r"^module github\.com/LogBrewCo/sdk/go/logbrew$", content, re.MULTILINE
+        )
+        is not None,
         failures,
         "go/logbrew/go.mod: unexpected module path",
     )
@@ -622,7 +761,11 @@ def validate_go(root: Path, failures: list[str]) -> None:
             "expected framework requirement": re.escape(dependency),
         }
         for message, pattern in checks.items():
-            require(re.search(pattern, module, re.MULTILINE) is not None, failures, f"{location}/go.mod: {message}")
+            require(
+                re.search(pattern, module, re.MULTILINE) is not None,
+                failures,
+                f"{location}/go.mod: {message}",
+            )
 
 
 def validate_c(root: Path, failures: list[str]) -> None:
@@ -660,7 +803,11 @@ def validate_c(root: Path, failures: list[str]) -> None:
         "logbrew_client_issue_with_details",
         "logbrew_client_span_with_evidence",
     ):
-        require(needle in header, failures, f"{location}: missing public C SDK symbol {needle}")
+        require(
+            needle in header,
+            failures,
+            f"{location}: missing public C SDK symbol {needle}",
+        )
     for needle in (
         "Public C99 SDK",
         "LOGBREW_API_KEY",
@@ -675,7 +822,11 @@ def validate_c(root: Path, failures: list[str]) -> None:
         "logbrew_client_span_with_evidence",
         "copy into your own native application",
     ):
-        require(needle in readme, failures, f"c/logbrew-c/README.md: missing guidance {needle}")
+        require(
+            needle in readme,
+            failures,
+            f"c/logbrew-c/README.md: missing guidance {needle}",
+        )
 
 
 def validate_cpp(root: Path, failures: list[str]) -> None:
@@ -689,7 +840,9 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     require_path(root, "cpp/logbrew-cpp/examples/Makefile", failures)
     require_path(root, "cpp/logbrew-cpp/examples/readme_example.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/examples/real_user_smoke.cpp", failures)
-    trace_example_path = require_path(root, "cpp/logbrew-cpp/examples/trace_correlation.cpp", failures)
+    trace_example_path = require_path(
+        root, "cpp/logbrew-cpp/examples/trace_correlation.cpp", failures
+    )
     require_path(root, "cpp/logbrew-cpp/examples/http_transport.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/tests/test_logbrew.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/tests/test_rich_context.cpp", failures)
@@ -731,7 +884,11 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
         "http_transport_default_endpoint",
         "class SdkException",
     ):
-        require(needle in header, failures, f"{location}: missing public C++ SDK symbol {needle}")
+        require(
+            needle in header,
+            failures,
+            f"{location}: missing public C++ SDK symbol {needle}",
+        )
     for needle in (
         "Public C++17 SDK",
         "LOGBREW_API_KEY",
@@ -766,7 +923,11 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
         "client.flush",
         "copy into your own native application",
     ):
-        require(needle in readme, failures, f"cpp/logbrew-cpp/README.md: missing guidance {needle}")
+        require(
+            needle in readme,
+            failures,
+            f"cpp/logbrew-cpp/README.md: missing guidance {needle}",
+        )
     if trace_example_path.exists():
         trace_example = trace_example_path.read_text(encoding="utf-8")
         for needle in (
@@ -774,7 +935,11 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
             "open_telemetry_span_context",
             "trace_context_from_opentelemetry_span_context",
         ):
-            require(needle in trace_example, failures, f"cpp/logbrew-cpp/examples/trace_correlation.cpp: missing {needle}")
+            require(
+                needle in trace_example,
+                failures,
+                f"cpp/logbrew-cpp/examples/trace_correlation.cpp: missing {needle}",
+            )
 
 
 def validate_objc(root: Path, failures: list[str]) -> None:
@@ -798,7 +963,9 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     require_path(root, "objc/logbrew-objc/examples/real_user_smoke.m", failures)
     require_path(root, "objc/logbrew-objc/tests/test_logbrew.m", failures)
     require_path(root, "objc/logbrew-objc/tests/test_durable_delivery.m", failures)
-    require_path(root, "objc/logbrew-objc/tests/test_durable_delivery_recovery.m", failures)
+    require_path(
+        root, "objc/logbrew-objc/tests/test_durable_delivery_recovery.m", failures
+    )
     require_path(root, "objc/logbrew-objc/tests/test_rich_telemetry.m", failures)
     if not header_path.exists() or not source_path.exists():
         return
@@ -835,7 +1002,11 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "recoverAutomaticDeliveryWithError",
         "shutdownOwnedTransportWithError",
     ):
-        require(needle in header, failures, f"{location}: missing public Objective-C SDK symbol {needle}")
+        require(
+            needle in header,
+            failures,
+            f"{location}: missing public Objective-C SDK symbol {needle}",
+        )
     for needle in (
         "Shared Telemetry Context",
         "Issue Diagnostics",
@@ -854,7 +1025,11 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "enableDurableDeliveryWithOptions",
         "deliveryHealth",
     ):
-        require(needle in readme, failures, f"objc/logbrew-objc/README.md: missing guidance {needle}")
+        require(
+            needle in readme,
+            failures,
+            f"objc/logbrew-objc/README.md: missing guidance {needle}",
+        )
 
 
 def validate_maven_pom(
@@ -874,19 +1049,69 @@ def validate_maven_pom(
     if project is None:
         return
 
-    require_equal(failures, relative_path, "groupId", child_text(project, "groupId"), "co.logbrew")
-    require_equal(failures, relative_path, "artifactId", child_text(project, "artifactId"), expected_artifact)
-    require_equal(failures, relative_path, "version", child_text(project, "version"), expected_version)
-    require_equal(failures, relative_path, "packaging", child_text(project, "packaging"), "jar")
-    require_equal(failures, relative_path, "name", child_text(project, "name"), expected_name)
+    require_equal(
+        failures, relative_path, "groupId", child_text(project, "groupId"), "co.logbrew"
+    )
+    require_equal(
+        failures,
+        relative_path,
+        "artifactId",
+        child_text(project, "artifactId"),
+        expected_artifact,
+    )
+    require_equal(
+        failures,
+        relative_path,
+        "version",
+        child_text(project, "version"),
+        expected_version,
+    )
+    require_equal(
+        failures, relative_path, "packaging", child_text(project, "packaging"), "jar"
+    )
+    require_equal(
+        failures, relative_path, "name", child_text(project, "name"), expected_name
+    )
     require_equal(failures, relative_path, "url", child_text(project, "url"), REPO_URL)
-    require_contains(failures, relative_path, "description", child_text(project, "description"), "LogBrew")
-    require_equal(failures, relative_path, "licenses.license.name", path_text(project, "licenses", "license", "name"), PUBLIC_LICENSE)
-    require_equal(failures, relative_path, "licenses.license.url", path_text(project, "licenses", "license", "url"), MIT_LICENSE_URL)
-    require_equal(failures, relative_path, "developers.developer.name", path_text(project, "developers", "developer", "name"), "LogBrew")
-    require_equal(failures, relative_path, "scm.url", path_text(project, "scm", "url"), REPO_URL)
+    require_contains(
+        failures,
+        relative_path,
+        "description",
+        child_text(project, "description"),
+        "LogBrew",
+    )
+    require_equal(
+        failures,
+        relative_path,
+        "licenses.license.name",
+        path_text(project, "licenses", "license", "name"),
+        PUBLIC_LICENSE,
+    )
+    require_equal(
+        failures,
+        relative_path,
+        "licenses.license.url",
+        path_text(project, "licenses", "license", "url"),
+        MIT_LICENSE_URL,
+    )
+    require_equal(
+        failures,
+        relative_path,
+        "developers.developer.name",
+        path_text(project, "developers", "developer", "name"),
+        "LogBrew",
+    )
+    require_equal(
+        failures, relative_path, "scm.url", path_text(project, "scm", "url"), REPO_URL
+    )
     if require_compiler_release:
-        require_equal(failures, relative_path, "properties.maven.compiler.release", path_text(project, "properties", "maven.compiler.release"), "11")
+        require_equal(
+            failures,
+            relative_path,
+            "properties.maven.compiler.release",
+            path_text(project, "properties", "maven.compiler.release"),
+            "11",
+        )
     if expected_artifact == "logbrew-kotlin":
         dependencies_node = child(project, "dependencies")
         dependency_nodes = [] if dependencies_node is None else list(dependencies_node)
@@ -922,12 +1147,40 @@ def validate_unity(root: Path, failures: list[str]) -> None:
     }
     for field, value in expected.items():
         require_equal(failures, location, field, manifest.get(field), value)
-    require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
-    require_equal(failures, location, "author.name", manifest.get("author", {}).get("name"), "LogBrew")
-    require_equal(failures, location, "repository.type", manifest.get("repository", {}).get("type"), "git")
-    require_equal(failures, location, "repository.url", manifest.get("repository", {}).get("url"), NPM_REPO_URL)
-    require("logbrew" in manifest.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
-    samples = {sample.get("path") for sample in manifest.get("samples", []) if isinstance(sample, dict)}
+    require_contains(
+        failures, location, "description", manifest.get("description"), "LogBrew"
+    )
+    require_equal(
+        failures,
+        location,
+        "author.name",
+        manifest.get("author", {}).get("name"),
+        "LogBrew",
+    )
+    require_equal(
+        failures,
+        location,
+        "repository.type",
+        manifest.get("repository", {}).get("type"),
+        "git",
+    )
+    require_equal(
+        failures,
+        location,
+        "repository.url",
+        manifest.get("repository", {}).get("url"),
+        NPM_REPO_URL,
+    )
+    require(
+        "logbrew" in manifest.get("keywords", []),
+        failures,
+        f"{location}: keywords must include 'logbrew'",
+    )
+    samples = {
+        sample.get("path")
+        for sample in manifest.get("samples", [])
+        if isinstance(sample, dict)
+    }
     require_equal(
         failures,
         location,
@@ -938,7 +1191,9 @@ def validate_unity(root: Path, failures: list[str]) -> None:
     validate_unity_openupm(manifest, openupm_path, failures)
 
 
-def validate_unity_openupm(manifest: dict[str, Any], openupm_path: Path, failures: list[str]) -> None:
+def validate_unity_openupm(
+    manifest: dict[str, Any], openupm_path: Path, failures: list[str]
+) -> None:
     if not openupm_path.exists():
         return
     metadata = read_simple_yaml(openupm_path, failures)
@@ -984,7 +1239,9 @@ def validate_ruby(root: Path, failures: list[str]) -> None:
     gemspec_path = require_path(root, "ruby/logbrew-ruby/logbrew-sdk.gemspec", failures)
     readme_path = require_path(root, "ruby/logbrew-ruby/README.md", failures)
     require_path(root, "ruby/logbrew-ruby/lib/logbrew-sdk.rb", failures)
-    version_path = require_path(root, "ruby/logbrew-ruby/lib/logbrew/version.rb", failures)
+    version_path = require_path(
+        root, "ruby/logbrew-ruby/lib/logbrew/version.rb", failures
+    )
     require_path(root, "ruby/logbrew-ruby/lib/logbrew/rails.rb", failures)
     require_path(root, "ruby/logbrew-ruby/lib/logbrew/rails_integration.rb", failures)
     require_path(root, "ruby/logbrew-ruby/tests/rails_integration.rb", failures)
@@ -1002,9 +1259,17 @@ def validate_ruby(root: Path, failures: list[str]) -> None:
         "required_ruby_version": r'spec\.required_ruby_version\s*=\s*">= 2\.6"',
     }
     for field, pattern in required_patterns.items():
-        require(re.search(pattern, text) is not None, failures, f"{location}: missing {field} metadata")
+        require(
+            re.search(pattern, text) is not None,
+            failures,
+            f"{location}: missing {field} metadata",
+        )
     require("README.md" in text, failures, f"{location}: files must include README.md")
-    require("examples/Makefile" in text, failures, f"{location}: files must include examples/Makefile")
+    require(
+        "examples/Makefile" in text,
+        failures,
+        f"{location}: files must include examples/Makefile",
+    )
     if version_path.exists():
         version_text = version_path.read_text(encoding="utf-8")
         require(
@@ -1021,7 +1286,11 @@ def validate_ruby(root: Path, failures: list[str]) -> None:
             "logbrew doctor --project",
             "logbrew traces --project",
         ):
-            require(needle in readme, failures, f"ruby/logbrew-ruby/README.md: missing guidance {needle}")
+            require(
+                needle in readme,
+                failures,
+                f"ruby/logbrew-ruby/README.md: missing guidance {needle}",
+            )
 
 
 def validate_php_manifest(
@@ -1039,9 +1308,23 @@ def validate_php_manifest(
     location = relative_path
     require_equal(failures, location, "name", manifest.get("name"), "logbrew/sdk")
     require_equal(failures, location, "type", manifest.get("type"), "library")
-    require_equal(failures, location, "license", manifest.get("license"), PUBLIC_LICENSE)
-    require_equal(failures, location, "require.php", manifest.get("require", {}).get("php"), "^8.2")
-    require_equal(failures, location, "require.psr/log", manifest.get("require", {}).get("psr/log"), "^3.0")
+    require_equal(
+        failures, location, "license", manifest.get("license"), PUBLIC_LICENSE
+    )
+    require_equal(
+        failures,
+        location,
+        "require.php",
+        manifest.get("require", {}).get("php"),
+        "^8.2",
+    )
+    require_equal(
+        failures,
+        location,
+        "require.psr/log",
+        manifest.get("require", {}).get("psr/log"),
+        "^3.0",
+    )
     require_equal(
         failures,
         location,
@@ -1049,7 +1332,9 @@ def validate_php_manifest(
         manifest.get("autoload", {}).get("psr-4", {}).get("LogBrew\\"),
         autoload_path,
     )
-    require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
+    require_contains(
+        failures, location, "description", manifest.get("description"), "LogBrew"
+    )
     return manifest
 
 
@@ -1069,28 +1354,100 @@ def validate_php(root: Path, failures: list[str]) -> None:
         failures,
     )
     location = "composer.json"
-    require_equal(failures, location, "readme", root_manifest.get("readme"), "php/logbrew-php/README.md")
-    require_equal(failures, location, "homepage", root_manifest.get("homepage"), f"{REPO_URL}/tree/main/php/logbrew-php")
-    require_equal(failures, location, "support.issues", root_manifest.get("support", {}).get("issues"), f"{REPO_URL}/issues")
-    require_equal(failures, location, "support.source", root_manifest.get("support", {}).get("source"), f"{REPO_URL}/tree/main/php/logbrew-php")
-    require("logbrew" in root_manifest.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
+    require_equal(
+        failures,
+        location,
+        "readme",
+        root_manifest.get("readme"),
+        "php/logbrew-php/README.md",
+    )
+    require_equal(
+        failures,
+        location,
+        "homepage",
+        root_manifest.get("homepage"),
+        f"{REPO_URL}/tree/main/php/logbrew-php",
+    )
+    require_equal(
+        failures,
+        location,
+        "support.issues",
+        root_manifest.get("support", {}).get("issues"),
+        f"{REPO_URL}/issues",
+    )
+    require_equal(
+        failures,
+        location,
+        "support.source",
+        root_manifest.get("support", {}).get("source"),
+        f"{REPO_URL}/tree/main/php/logbrew-php",
+    )
+    require(
+        "logbrew" in root_manifest.get("keywords", []),
+        failures,
+        f"{location}: keywords must include 'logbrew'",
+    )
 
 
 def validate_swift(root: Path, failures: list[str]) -> None:
     readme_path = require_path(root, "swift/logbrew-swift/README.md", failures)
-    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStore.swift", failures)
-    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift", failures)
-    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngine.swift", failures)
-    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineDurable.swift", failures)
-    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineAutomatic.swift", failures)
-    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineQueue.swift", failures)
-    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryLifecycle.swift", failures)
-    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTests.swift", failures)
-    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift", failures)
-    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift", failures)
-    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift", failures)
-    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryFailureTests.swift", failures)
-    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryRecoveryTests.swift", failures)
+    require_path(
+        root, "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStore.swift", failures
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift",
+        failures,
+    )
+    require_path(
+        root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngine.swift", failures
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineDurable.swift",
+        failures,
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineAutomatic.swift",
+        failures,
+    )
+    require_path(
+        root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineQueue.swift", failures
+    )
+    require_path(
+        root, "swift/logbrew-swift/Sources/LogBrew/DeliveryLifecycle.swift", failures
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTests.swift",
+        failures,
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift",
+        failures,
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift",
+        failures,
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift",
+        failures,
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryFailureTests.swift",
+        failures,
+    )
+    require_path(
+        root,
+        "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryRecoveryTests.swift",
+        failures,
+    )
     if readme_path.exists():
         readme = readme_path.read_text(encoding="utf-8")
         for needle in (
@@ -1102,12 +1459,16 @@ def validate_swift(root: Path, failures: list[str]) -> None:
             "purgeDurableDelivery",
             "deliveryHealth",
         ):
-            require(needle in readme, failures, f"swift/logbrew-swift/README.md: missing guidance {needle}")
+            require(
+                needle in readme,
+                failures,
+                f"swift/logbrew-swift/README.md: missing guidance {needle}",
+            )
     manifest_expectations = {
         "swift/logbrew-swift/Package.swift": (
             'name: "logbrew-swift"',
-            '.macOS(.v13)',
-            '.iOS(.v15)',
+            ".macOS(.v13)",
+            ".iOS(.v15)",
             '.library(name: "LogBrew", targets: ["LogBrew"])',
             '.executable(name: "ReadmeExample", targets: ["ReadmeExample"])',
             '.executable(name: "RealUserSmoke", targets: ["RealUserSmoke"])',
@@ -1116,8 +1477,8 @@ def validate_swift(root: Path, failures: list[str]) -> None:
         ),
         "Package.swift": (
             'name: "logbrew-swift"',
-            '.macOS(.v13)',
-            '.iOS(.v15)',
+            ".macOS(.v13)",
+            ".iOS(.v15)",
             '.library(name: "LogBrew", targets: ["LogBrew"])',
             '.library(name: "LogBrewCrash", targets: ["LogBrewCrash"])',
             'path: "swift/logbrew-swift/Sources/LogBrew"',
@@ -1131,18 +1492,30 @@ def validate_swift(root: Path, failures: list[str]) -> None:
         if manifest_path.exists():
             text = manifest_path.read_text(encoding="utf-8")
             for needle in required_entries:
-                require(needle in text, failures, f"{relative_path}: missing manifest entry {needle}")
+                require(
+                    needle in text,
+                    failures,
+                    f"{relative_path}: missing manifest entry {needle}",
+                )
 
 
 def validate_root(root: Path, failures: list[str]) -> None:
     require_path(root, "README.md", failures)
     require_path(root, "LICENSE", failures)
-    license_text = (root / "LICENSE").read_text(encoding="utf-8") if (root / "LICENSE").exists() else ""
-    require("MIT License" in license_text, failures, "LICENSE: expected MIT License text")
+    license_text = (
+        (root / "LICENSE").read_text(encoding="utf-8")
+        if (root / "LICENSE").exists()
+        else ""
+    )
+    require(
+        "MIT License" in license_text, failures, "LICENSE: expected MIT License text"
+    )
 
 
 def validate_release_workflows(root: Path, failures: list[str]) -> None:
-    require_path(root, "scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh", failures)
+    require_path(
+        root, "scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh", failures
+    )
     reconcile_path = require_path(root, RECONCILE_PUBLIC_WORKFLOW, failures)
     if reconcile_path.exists():
         reconcile = reconcile_path.read_text(encoding="utf-8")
@@ -1156,15 +1529,14 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "protected control input": "ref: ${{ github.workflow_sha }}",
             "protected branch binding": '[[ "$CONTROL_REF" != "refs/heads/main"',
             "discarded checkout authentication state": checkout_auth_setting,
-            "publication boundary authentication": "check_publication_run.py",
-            "Python artifact reconciliation": "check_python_release_artifacts.py",
-            "protected Python artifact creation": 'python3 "$control_script" create',
-            "NuGet artifact reconciliation": "check_nuget_public_artifacts.py",
-            "NuGet provenance verification": (
-                "check_nuget_release_receipt_provenance.py"
-            ),
+            "publication boundary authentication": '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" publication-run',
+            "Python artifact reconciliation": "python-archive resolve-public",
+            "protected Python artifact creation": "uses: ./.release-control/tools/toolchain-probe",
+            "Python artifact creation": "python-archive create-manifest",
+            "NuGet artifact reconciliation": '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-public',
+            "NuGet native provenance bootstrap": "uses: ./.release-control/tools/toolchain-probe",
             "NuGet immutable source binding": '--source-root "$GITHUB_WORKSPACE"',
-            "Python exact-byte install": "real_user_python_public_pypi_smoke.sh",
+            "Python exact-byte install": '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-public-consumer',
             "NuGet exact-byte install": (
                 "real_user_dotnet_selected_public_nuget_smoke.sh"
             ),
@@ -1197,9 +1569,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "scoped GitHub Release publish disable": 'publish_packages="false"',
             "repo-wide SemVer release gate": (
                 'elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+'
-                '(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$ ]]; then'
+                "(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$ ]]; then"
             ),
-            "repo-wide version guard": "python3 scripts/check_repo_wide_release_versions.py \"$REF\"",
+            "repo-wide version guard": '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" repo-wide-versions "$REF" "$GITHUB_WORKSPACE"',
             "publish dispatch output guard": "if: ${{ steps.release.outputs.publish_packages == 'true' }}",
             "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
             "Maven selected-artifact release input": "maven_artifacts:",
@@ -1219,13 +1591,17 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet release selector environment binding": (
                 "INPUT_NUGET_PACKAGES: ${{ inputs.nuget_packages }}"
             ),
-            "NuGet release selector canonicalization": "nuget_release_plan.py canonicalize",
+            "NuGet release selector canonicalization": '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan canonicalize',
             "NuGet release canonical output": (
                 "printf 'nuget_packages=%s\\n' \"$nuget_packages\""
             ),
         }
         for description, needle in required_needles.items():
-            require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
+            require(
+                needle in text,
+                failures,
+                f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}",
+            )
         resolve_step = text.split("name: Resolve release publish inputs", 1)[-1]
         resolve_script = resolve_step.split(
             "- name: Guard repo-wide release package versions",
@@ -1256,7 +1632,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
     publish_packages_path = require_path(root, PUBLISH_PACKAGES_WORKFLOW, failures)
     if publish_packages_path.exists():
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
-        npm_publisher_path = require_path(root, "tools/npm-publish/publish.mjs", failures)
+        npm_publisher_path = require_path(
+            root, "tools/npm-publish/publish.mjs", failures
+        )
         npm_publisher_text = (
             npm_publisher_path.read_text(encoding="utf-8")
             if npm_publisher_path.exists()
@@ -1270,13 +1648,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "verify-control repository binding": (
                 "repository: ${{ github.repository }}"
             ),
-            "verify-control workflow SHA binding": (
-                "ref: ${{ github.workflow_sha }}"
-            ),
+            "verify-control workflow SHA binding": ("ref: ${{ github.workflow_sha }}"),
             "verify-control isolated path": "path: .release-control",
-            "verify-control runtime binding": (
-                "- name: Bind protected verify control"
-            ),
+            "verify-control runtime binding": ("- name: Bind protected verify control"),
             "verify-control expected SHA": (
                 "RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}"
             ),
@@ -1341,7 +1715,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                     f"{PUBLISH_NUGET_WORKFLOW}: missing {description}",
                 )
             checkout_auth_setting = (
-                "persist-" + bytes.fromhex("63726564656e7469616c73").decode() + ": false"
+                "persist-"
+                + bytes.fromhex("63726564656e7469616c73").decode()
+                + ": false"
             )
             require(
                 publish_nuget_text.count(checkout_auth_setting) >= 2,
@@ -1360,9 +1736,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
             "NuGet HttpClient pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
-            "NuGet selected package plan": "nuget_release_plan.py create",
-            "NuGet selected package plan validation": "nuget_release_plan.py validate",
-            "NuGet selected package iteration": '--format projects',
+            "NuGet selected package plan": '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan create',
+            "NuGet selected package plan validation": '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan validate',
+            "NuGet selected package iteration": "--format projects",
             "NuGet XML documentation pack": "-p:GenerateDocumentationFile=true",
             "NuGet HttpClient documentation pack": "httpclient_pack_args=",
             "NuGet symbol pack": "-p:SymbolPackageFormat=snupkg",
@@ -1371,7 +1747,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet artifact validation": "python3 scripts/check_dotnet_release_artifacts.py",
             "NuGet artifact digest receipt": "steps.nuget-artifacts.outputs.httpclient_content_sha256",
             "NuGet collision preflight": "--expect-absent",
-            "NuGet bounded core dependency": "--dependency-range \"LogBrew.HttpClient:LogBrew=",
+            "NuGet bounded core dependency": '--dependency-range "LogBrew.HttpClient:LogBrew=',
             "NuGet HttpClient compatibility receipt": "real_user_dotnet_httpclient_package_compatibility_smoke.sh",
             "NuGet one-package publish loop": "while IFS= read -r package_path",
             "NuGet duplicate-safe publish": "--skip-duplicate",
@@ -1380,9 +1756,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet ASP.NET Core lifecycle smoke": (
                 "bash scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh"
             ),
-            "Python artifact manifest": "check_python_release_artifacts.py create",
+            "Python artifact manifest": "python-archive create-manifest",
             "Python packed install receipt": (
-                "real_user_python_public_pypi_smoke.sh --manifest"
+                '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-public-consumer --manifest'
             ),
             "Python packed artifact root": "--artifact-root dist/pypi",
             "Python manifest receipt upload": "Upload Python release manifest",
@@ -1412,9 +1788,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "verify target Maven override include": (
                 '-n "$VERIFY_MAVEN_ARTIFACTS" || -n "$VERIFY_MAVEN_VERSIONS"'
             ),
-            "npm OIDC permission": "id-" "token: write",
+            "npm OIDC permission": "id-token: write",
             "npm OIDC audience": "npm:registry.npmjs.org",
-            "npm OIDC exchange": "/-/npm/v1/oidc/" "token/exchange/package/",
+            "npm OIDC exchange": "/-/npm/v1/oidc/token/exchange/package/",
             "npm package-page guard": "npm trusted publishing requires existing package pages",
             "npm explicit package selection": (
                 "Bun publication requires an explicit npm_packages selection"
@@ -1445,9 +1821,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Maven private deployment identifier capture": (
                 "capture --deployment-id-file"
             ),
-            "Maven authenticated deployment wait": (
-                "wait --deployment-id-file"
-            ),
+            "Maven authenticated deployment wait": ("wait --deployment-id-file"),
             "Maven bounded deployment deadline": "--timeout-seconds 3600",
             "Maven selected-artifact input": "maven_artifacts:",
             "Maven selected-artifact plan": "maven_release_plan.py create",
@@ -1464,21 +1838,26 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                 "real_user_maven_central_public_smoke.sh --plan"
             ),
         }
-        plan_step = publish_packages_text.split("- name: Plan selected Maven artifacts", 1)[-1]
-        plan_script = plan_step.split("- name: Check selected Maven version collisions", 1)[0]
+        plan_step = publish_packages_text.split(
+            "- name: Plan selected Maven artifacts", 1
+        )[-1]
+        plan_script = plan_step.split(
+            "- name: Check selected Maven version collisions", 1
+        )[0]
         require(
             "${{ inputs.maven_artifacts }}" not in plan_script.split("run: |", 1)[-1],
             failures,
             f"{PUBLISH_PACKAGES_WORKFLOW}: Maven selector must not be interpolated into shell",
         )
-        if "\n  maven:\n" in publish_packages_text and "\n  verify:\n" in publish_packages_text:
+        if (
+            "\n  maven:\n" in publish_packages_text
+            and "\n  verify:\n" in publish_packages_text
+        ):
             maven_job = publish_packages_text.split("\n  maven:\n", 1)[1].split(
                 "\n  verify:\n",
                 1,
             )[0]
-            upload_position = maven_job.find(
-                "Upload Maven Central deployment bundle"
-            )
+            upload_position = maven_job.find("Upload Maven Central deployment bundle")
             wait_position = maven_job.find("Wait for Maven Central deployment")
             metadata_position = maven_job.find("Verify Maven Central publication")
             install_position = maven_job.find("Verify public Maven Central install")
@@ -1501,9 +1880,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                 ),
             )
             require(
-                maven_job.count(
-                    "https://central.sonatype.com/api/v1/publisher/upload"
-                )
+                maven_job.count("https://central.sonatype.com/api/v1/publisher/upload")
                 == 1,
                 failures,
                 f"{PUBLISH_PACKAGES_WORKFLOW}: Maven upload must execute exactly once",
@@ -1537,14 +1914,20 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             )
         npm_release_text = publish_packages_text + "\n" + npm_publisher_text
         for description, needle in required_publish_needles.items():
-            require(needle in npm_release_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
-        nuget_plan_path = require_path(root, "scripts/nuget_release_plan.py", failures)
+            require(
+                needle in npm_release_text,
+                failures,
+                f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}",
+            )
+        nuget_plan_path = require_path(
+            root, "tools/toolchain-probe/nuget_plan.go", failures
+        )
         if nuget_plan_path.exists():
             nuget_plan_text = nuget_plan_path.read_text(encoding="utf-8")
             require(
-                "DOTNET_RELEASE_PACKAGES" in nuget_plan_text,
+                "dotnetMetadataPackages()" in nuget_plan_text,
                 failures,
-                "scripts/nuget_release_plan.py: must use the canonical NuGet release catalog",
+                "tools/toolchain-probe/nuget_plan.go: must use the canonical NuGet release catalog",
             )
         for relative_dir in JS_PACKAGES:
             require(
@@ -1566,7 +1949,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         require(
             "release tag's commit" in docs
             and "historical tags" in docs
-            and "check_repo_wide_release_versions.py" in docs,
+            and "repo-wide-versions" in docs,
             failures,
             f"{relative_path}: missing release workflow safety warning",
         )
@@ -1622,10 +2005,18 @@ def validate(
         nuget_versions.get("LogBrew.OpenTelemetry", DOTNET_OTEL_VERSION),
         PUBLIC_LICENSE,
         REPO_URL,
-        httpclient_version=nuget_versions.get("LogBrew.HttpClient", DOTNET_HTTPCLIENT_VERSION),
+        httpclient_version=nuget_versions.get(
+            "LogBrew.HttpClient", DOTNET_HTTPCLIENT_VERSION
+        ),
     )
     validate_unity(root, failures)
-    validate_maven_pom(root, "kotlin/logbrew-kotlin/pom.xml", "logbrew-kotlin", "LogBrew Kotlin SDK", failures)
+    validate_maven_pom(
+        root,
+        "kotlin/logbrew-kotlin/pom.xml",
+        "logbrew-kotlin",
+        "LogBrew Kotlin SDK",
+        failures,
+    )
     validate_maven_pom(
         root,
         "kotlin/logbrew-kotlin-okhttp/pom.xml",
@@ -1639,7 +2030,9 @@ def validate(
     return failures
 
 
-def parse_package_versions(raw_versions: list[str], allowed_packages: set[str] | None = None) -> dict[str, str]:
+def parse_package_versions(
+    raw_versions: list[str], allowed_packages: set[str] | None = None
+) -> dict[str, str]:
     versions: dict[str, str] = {}
     if allowed_packages is None:
         allowed_packages = set(JS_PACKAGES.values())
@@ -1658,9 +2051,15 @@ def parse_package_versions(raw_versions: list[str], allowed_packages: set[str] |
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate release metadata across public SDK packages.")
-    parser.add_argument("--root", default=Path(__file__).resolve().parents[1], type=Path)
-    parser.add_argument("--only-cpp", action="store_true", help="Validate only the C++ package subtree.")
+    parser = argparse.ArgumentParser(
+        description="Validate release metadata across public SDK packages."
+    )
+    parser.add_argument(
+        "--root", default=Path(__file__).resolve().parents[1], type=Path
+    )
+    parser.add_argument(
+        "--only-cpp", action="store_true", help="Validate only the C++ package subtree."
+    )
     parser.add_argument(
         "--npm-version",
         action="append",

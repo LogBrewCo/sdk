@@ -12,6 +12,10 @@ func openCheckInput(_ string) (*os.File, error) {
 	return nil, errors.New("nonblocking package input is unavailable on this platform")
 }
 
+func openRootCheckInput(_ *os.Root, _ string) (*os.File, error) {
+	return nil, errUnsupportedPlatform
+}
+
 func configureProcess(_ *exec.Cmd) (func() error, error) {
 	return nil, errors.New("process-group supervision is unavailable on this platform")
 }

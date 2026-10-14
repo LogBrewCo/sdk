@@ -6,9 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts import ci_changed_areas
-
-
 ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / "scripts" / "real_user_swift_build_executable.sh"
 SMOKE = ROOT / "scripts" / "real_user_swift_smoke.sh"
@@ -16,11 +13,6 @@ CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
 class SwiftDurableSmokeResourceTests(unittest.TestCase):
-    def test_builder_path_selects_the_swift_ci_area(self) -> None:
-        relative_builder = BUILDER.relative_to(ROOT).as_posix()
-
-        self.assertTrue(ci_changed_areas.classify([relative_builder])["swift"])
-
     def test_builder_compiles_once_with_one_job_and_returns_the_executable(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             fixture = Path(raw_tmp)

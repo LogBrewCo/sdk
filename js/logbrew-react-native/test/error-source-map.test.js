@@ -9,8 +9,11 @@ async function withDebugRegistry(registry, callback) {
   try {
     await callback();
   } finally {
-    if (previousRegistry === undefined) delete globalThis[registrySymbol];
-    else globalThis[registrySymbol] = previousRegistry;
+    if (previousRegistry === undefined) {
+      delete globalThis[registrySymbol];
+    } else {
+      globalThis[registrySymbol] = previousRegistry;
+    }
   }
 }
 

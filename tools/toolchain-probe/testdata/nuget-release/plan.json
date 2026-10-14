@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "selectionMode": "selected",
+  "selected": [
+    {
+      "packageId": "LogBrew",
+      "projectPath": "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj",
+      "version": "0.1.5",
+      "versionOutput": "core_version"
+    },
+    {
+      "packageId": "LogBrew.HttpClient",
+      "projectPath": "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
+      "version": "0.1.0",
+      "versionOutput": "httpclient_version"
+    }
+  ]
+}

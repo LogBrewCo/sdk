@@ -1,6 +1,6 @@
 "use strict";
 
-const { Buffer } = require("node:buffer");
+const { Buffer: NodeBuffer } = require("node:buffer");
 const { randomBytes } = require("node:crypto");
 const {
   closeSync,
@@ -539,7 +539,7 @@ function readRecord(path, config) {
     if (!sameIdentity(opened, identityOf(before)) || opened.size !== before.size) {
       throw new Error("record changed");
     }
-    const buffer = Buffer.alloc(opened.size + 1);
+    const buffer = NodeBuffer.alloc(opened.size + 1);
     let totalBytes = 0;
     while (totalBytes < buffer.length) {
       const bytesRead = readSync(descriptor, buffer, totalBytes, buffer.length - totalBytes, null);
@@ -565,7 +565,7 @@ function readRecord(path, config) {
     closeQuietly(descriptor);
     throw fixedError("persistent_queue_invalid", "persistent queue record is invalid");
   }
-  const byteCount = Buffer.byteLength(serialized, "utf8");
+  const byteCount = NodeBuffer.byteLength(serialized, "utf8");
   if (
     byteCount !== opened.size
     || byteCount > maxRecordBytes

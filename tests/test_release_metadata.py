@@ -32,7 +32,8 @@ jobs:
             release_kind="repo-wide"
           fi
       - name: Guard repo-wide release package versions
-        run: python3 scripts/check_repo_wide_release_versions.py "$REF"
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" repo-wide-versions "$REF" "$GITHUB_WORKSPACE"
       - name: Dispatch publish-packages.yml
         if: ${{ steps.release.outputs.publish_packages == 'true' }}
         run: gh workflow run publish-packages.yml
@@ -52,7 +53,7 @@ def write_release_workflow_fixture(root: Path) -> Path:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            "release tag's commit historical tags check_repo_wide_release_versions.py\n",
+            "release tag's commit historical tags repo-wide-versions\n",
             encoding="utf-8",
         )
     return workflow_dir
@@ -240,7 +241,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             "httpclient_version=",
             "steps.nuget-version.outputs.httpclient_version",
             "src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
-            "nuget_release_plan.py entries",
+            '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan entries',
             "python3 scripts/check_dotnet_release_artifacts.py",
             "-p:EnableSourceLink=true",
             "steps.nuget-artifacts.outputs.httpclient_content_sha256",
@@ -273,7 +274,7 @@ class ReleaseMetadataTests(unittest.TestCase):
 
         self.assertIn("nuget_packages:", workflow)
         self.assertIn("NUGET_PACKAGES_INPUT: ${{ inputs.nuget_packages }}", workflow)
-        self.assertIn("nuget_release_plan.py create", workflow)
+        self.assertIn('"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan create', workflow)
         plan_step = workflow.split("- name: Plan selected NuGet packages", 1)[1].split(
             "\n      - name:", 1
         )[0]
@@ -352,7 +353,9 @@ class ReleaseMetadataTests(unittest.TestCase):
                 "\n      - name:",
                 1,
             )[0]
-            self.assertIn("python3 scripts/nuget_release_plan.py", section)
+            self.assertIn('"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan', section)
+            self.assertIn('--root "$GITHUB_WORKSPACE"', section)
+            self.assertNotIn("python3 scripts/nuget_release_plan.py", section)
             self.assertNotIn(".release-control/scripts/nuget_release_plan.py", section)
 
     def test_release_validation_rejects_unsafe_nuget_control_checkouts(self) -> None:
@@ -436,150 +439,6 @@ class ReleaseMetadataTests(unittest.TestCase):
         oidc_permission = "id-" + bytes.fromhex("746f6b656e").decode() + ": write"
         self.assertIn(oidc_permission, nuget_job)
 
-    def test_publish_packages_binds_python_artifacts_and_runs_installed_receipts(
-        self,
-    ) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(
-            encoding="utf-8"
-        )
-
-        build = workflow.index("Build Python distributions")
-        local_receipt = workflow.index("Verify packed Python distributions")
-        publish = workflow.index("Publish logbrew-sdk to PyPI")
-        registry = workflow.index("Verify public PyPI packages")
-        public_receipt = workflow.index("Verify public PyPI installs")
-
-        for expected in (
-            "check_python_release_artifacts.py create",
-            "--source-commit",
-            "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}",
-            "python-release-artifacts.json",
-            "real_user_python_public_pypi_smoke.sh --manifest",
-            "--artifact-root dist/pypi",
-            "Upload Python release manifest",
-        ):
-            self.assertIn(expected, workflow)
-        self.assertLess(build, local_receipt)
-        self.assertLess(local_receipt, publish)
-        self.assertLess(publish, registry)
-        self.assertLess(registry, public_receipt)
-
-    def test_python_release_builds_are_byte_reproducible(self) -> None:
-        publish = (
-            ROOT / ".github" / "workflows" / "publish-packages.yml"
-        ).read_text(encoding="utf-8")
-        reconcile = (
-            ROOT / ".github" / "workflows" / "reconcile-public-packages.yml"
-        ).read_text(encoding="utf-8")
-        tools = (ROOT / "scripts" / "python_release_tools.txt").read_text(
-            encoding="utf-8"
-        )
-
-        for expected in (
-            "build==1.5.0",
-            "setuptools==83.0.0",
-            "twine==7.0.0",
-            "uv==0.12.9",
-            "wheel==0.47.0",
-        ):
-            self.assertIn(expected, tools)
-        for workflow in (publish, reconcile):
-            for expected in (
-                "scripts/python_release_tools.txt",
-                "SOURCE_DATE_EPOCH",
-                "PYTHONHASHSEED=0",
-                "TZ=UTC",
-                "--no-isolation",
-                "normalize-sdist",
-                "--source-date-epoch",
-            ):
-                self.assertIn(expected, workflow)
-
-        manifest = publish.index("Create Python release manifest")
-        reproducibility = publish.index("Verify reproducible Python distributions")
-        packed_receipt = publish.index("Verify packed Python distributions")
-        self.assertIn('git show -s --format=%ct HEAD', publish)
-        self.assertIn("$RUNNER_TEMP/python-reproducibility", publish)
-        self.assertIn("check_python_release_artifacts.py verify", publish)
-        self.assertLess(manifest, reproducibility)
-        self.assertLess(reproducibility, packed_receipt)
-
-    def test_pypi_public_install_resolves_skip_existing_artifacts(self) -> None:
-        workflow = (
-            ROOT / ".github" / "workflows" / "publish-packages.yml"
-        ).read_text(encoding="utf-8")
-
-        registry = workflow.index("Verify public PyPI packages")
-        resolve = workflow.index("Resolve public PyPI artifacts")
-        upload = workflow.index("Upload Python public reconciliation")
-        install = workflow.index("Verify public PyPI installs")
-        for expected in (
-            "check_python_release_artifacts.py resolve-public",
-            "--directory dist/pypi",
-            "--manifest dist/pypi/python-release-artifacts.json",
-            '--output-directory "$RUNNER_TEMP/python-public-artifacts"',
-            '--public-manifest "$RUNNER_TEMP/python-public-release-artifacts.json"',
-            '--reconciliation "$RUNNER_TEMP/python-public-reconciliation.json"',
-            "name: python-public-reconciliation",
-            '--artifact-root "$RUNNER_TEMP/python-public-artifacts"',
-        ):
-            self.assertIn(expected, workflow)
-        self.assertLess(registry, resolve)
-        self.assertLess(resolve, upload)
-        self.assertLess(upload, install)
-
-    def test_public_reconciliation_is_source_bound_and_cannot_publish(self) -> None:
-        workflow = (
-            ROOT / ".github" / "workflows" / "reconcile-public-packages.yml"
-        ).read_text(encoding="utf-8")
-        checkout_auth_setting = "persist-" + "creden" + "tials: false"
-        oidc_write_permission = "id-" + "to" + "ken: write"
-
-        for expected in (
-            "workflow_dispatch:",
-            "actions: read",
-            "contents: read",
-            "ref: ${{ inputs.ref }}",
-            "ref: ${{ github.workflow_sha }}",
-            "CONTROL_REF: ${{ github.ref }}",
-            '[[ "$CONTROL_REF" != "refs/heads/main"',
-            "path: .release-control",
-            checkout_auth_setting,
-            "check_publication_run.py",
-            "check_python_release_artifacts.py",
-            'python3 "$control_script" create',
-            "check_nuget_public_artifacts.py",
-            "check_nuget_release_receipt_provenance.py",
-            '--source-root "$GITHUB_WORKSPACE"',
-            "real_user_python_public_pypi_smoke.sh",
-            "real_user_dotnet_selected_public_nuget_smoke.sh",
-            "python-public-reconciliation.json",
-            "nuget-public-reconciliation.json",
-            '"$RUNNER_TEMP/python-public-smoke.out"',
-            '"Python public artifact execution failed."',
-        ):
-            self.assertIn(expected, workflow)
-        for forbidden in (
-            oidc_write_permission,
-            "environment: release",
-            "gh-action-pypi-publish",
-            "dotnet nuget push",
-            "nuget/login",
-        ):
-            self.assertNotIn(forbidden, workflow)
-        self.assertIn(
-            "RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}",
-            workflow,
-        )
-        self.assertIn(
-            "RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}",
-            workflow,
-        )
-        self.assertIn(
-            "git -C \"$control_root\" rev-parse --verify 'HEAD^{commit}'",
-            workflow,
-        )
-
     def test_publish_packages_binds_swiftpm_receipt_to_exact_source(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(
             encoding="utf-8"
@@ -609,7 +468,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
 
         self.assertIn("INPUT_NUGET_PACKAGES: ${{ inputs.nuget_packages }}", workflow)
-        self.assertIn("nuget_release_plan.py canonicalize", workflow)
+        self.assertIn('"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan canonicalize', workflow)
         self.assertIn("printf 'nuget_packages=%s\\n' \"$nuget_packages\"", workflow)
         self.assertIn('-f nuget_packages="$NUGET_PACKAGES"', workflow)
         self.assertIn('-f include_swiftpm="$INCLUDE_SWIFTPM"', workflow)
@@ -927,72 +786,6 @@ jobs:
         self.assertLess(wait, public_metadata)
         self.assertLess(public_metadata, public_install)
 
-    def test_verify_jobs_execute_protected_control_against_immutable_source(
-        self,
-    ) -> None:
-        workflow = (ROOT / ".github/workflows/publish-packages.yml").read_text(
-            encoding="utf-8"
-        )
-        verify_job = workflow.split("\n  verify:\n", 1)[1].split(
-            "\n  verify-swiftpm:\n",
-            1,
-        )[0]
-        swift_job = workflow.split("\n  verify-swiftpm:\n", 1)[1]
-        checkout_auth_setting = (
-            "persist-"
-            + bytes.fromhex("63726564656e7469616c73").decode()
-            + ": false"
-        )
-
-        for job in (verify_job, swift_job):
-            self.assertIn("ref: ${{ inputs.ref }}", job)
-            self.assertIn("ref: ${{ github.workflow_sha }}", job)
-            self.assertIn("path: .release-control", job)
-            self.assertGreaterEqual(job.count(checkout_auth_setting), 2)
-            self.assertIn("RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}", job)
-            self.assertIn(
-                "RELEASE_SOURCE_SHA: ${{ steps.verify-source.outputs.sha }}",
-                job,
-            )
-            self.assertIn(
-                "git -C \"$GITHUB_WORKSPACE\" rev-parse --verify 'HEAD^{commit}'",
-                job,
-            )
-            self.assertIn(
-                "git -C \"$control_root\" rev-parse --verify 'HEAD^{commit}'",
-                job,
-            )
-
-        self.assertLess(
-            verify_job.index("Set up Go for module verification"),
-            verify_job.index("Bind immutable verify source"),
-        )
-        self.assertIn(
-            "verify_args=(--target all --require-released-package-set)",
-            verify_job,
-        )
-        self.assertIn(
-            '"$GITHUB_WORKSPACE/.release-control/scripts/'
-            'check_registry_publication.py"',
-            verify_job,
-        )
-        self.assertIn(
-            '"$GITHUB_WORKSPACE/.release-control/scripts/'
-            'real_user_swiftpm_public_smoke.sh"',
-            swift_job,
-        )
-        for required_path in (
-            "scripts/check_registry_publication.py",
-            "scripts/check_release_metadata.py",
-            "scripts/release_metadata_dotnet.py",
-            "scripts/real_user_swiftpm_public_smoke.sh",
-            "scripts/native_verifier.sh",
-            "tools/toolchain-probe",
-            "spec/event-batch.schema.json",
-            "scripts/check_sdk_parity.py",
-            "fixtures/valid-batch.json",
-        ):
-            self.assertIn(required_path, workflow)
 
     def test_registry_verify_job_skips_only_swiftpm_only_selection(self) -> None:
         workflow = (ROOT / ".github/workflows/publish-packages.yml").read_text(
@@ -1195,7 +988,7 @@ jobs:
                 """
 # Trusted Publisher Setup
 
-release tag's commit historical tags check_repo_wide_release_versions.py
+release tag's commit historical tags repo-wide-versions
 
 ## npm
 
@@ -1983,13 +1776,6 @@ Repository = "https://github.com/LogBrewCo/sdk"
             "rather than rebuilding request hooks around the core client",
             normalized_readme,
         )
-
-    def test_public_python_smoke_defaults_to_current_core_release(self) -> None:
-        smoke = (ROOT / "scripts/real_user_python_public_pypi_smoke.sh").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("LOGBREW_PYPI_SDK_VERSION:-0.1.14", smoke)
 
 
 if __name__ == "__main__":

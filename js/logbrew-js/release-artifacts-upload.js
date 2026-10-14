@@ -135,7 +135,7 @@ function sleep(seconds) {
 }
 
 async function postMultipart(endpoint, token, body, boundary, timeoutSeconds) {
-  const controller = new AbortController();
+  const controller = new globalThis.AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
   try {
     const response = await fetch(endpoint, {
@@ -151,7 +151,7 @@ async function postMultipart(endpoint, token, body, boundary, timeoutSeconds) {
     await response.arrayBuffer();
     return response.status;
   } finally {
-    clearTimeout(timeout);
+    globalThis.clearTimeout(timeout);
   }
 }
 

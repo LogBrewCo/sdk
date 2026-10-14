@@ -6,8 +6,9 @@ This public guide applies to the whole repository.
 
 - Read the root `README.md`, affected package docs and manifest, shared
   contracts, and relevant workflow. Preserve unrelated or unmerged work.
-- Run `python3 scripts/ci_changed_areas.py <changed-path>...` to identify the
-  current family ownership. Manifests, existing scripts, and
+- Use the pinned Go compiler to run
+  `go -C tools/toolchain-probe run . ci-selection <changed-path>...` for family
+  ownership and focused contract selection. Manifests, existing scripts, and
   `.github/workflows/ci.yml` own exact build, test, lint, and format commands.
 - Prefer existing verifiers over a second implementation. Keep disposable
   installs and build output outside the repository unless a script isolates

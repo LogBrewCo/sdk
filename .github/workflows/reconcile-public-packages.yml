@@ -98,8 +98,7 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_publication_run.py
-            scripts/check_python_release_artifacts.py
+            tools/toolchain-probe/
           sparse-checkout-cone-mode: false
 
       - name: Bind protected release control
@@ -121,19 +120,9 @@ jobs:
             echo "Release checkout binding mismatch." >&2
             exit 1
           fi
-          for name in check_publication_run.py check_python_release_artifacts.py; do
-            path="$control_root/scripts/$name"
-            expected="$(
-              git -C "$control_root" show "${RELEASE_CONTROL_SHA}:scripts/$name" |
-                sha256sum | awk '{print $1}'
-            )"
-            actual="$(sha256sum "$path" | awk '{print $1}')"
-            if [[ ! -f "$path" || -L "$path" || ! "$expected" =~ ^[0-9a-f]{64}$ || "$actual" != "$expected" ]]; then
-              echo "Protected release control changed." >&2
-              exit 1
-            fi
-            printf '%s_sha256=%s\n' "${name%.py}" "$expected" >> "$GITHUB_OUTPUT"
-          done
+
+      - name: Build protected native verifier
+        uses: ./.release-control/tools/toolchain-probe
 
       - name: Authenticate PyPI publication boundary
         shell: bash
@@ -145,14 +134,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$PUBLICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_publication_run.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_publication_run.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" publication-run \
             --repository "$GITHUB_REPOSITORY" \
             --run-id "$PUBLICATION_RUN_ID" \
             --family pypi \
@@ -183,20 +165,10 @@ jobs:
             echo "Authenticated Python release manifest is invalid." >&2
             exit 1
           fi
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_python_release_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
-            check-manifest --manifest "${entries[0]}" \
-            --source-commit "$RELEASE_SOURCE_SHA" \
-            --python-version "logbrew-sdk=$SDK_VERSION" \
-            --python-version "logbrew-fastapi=$FASTAPI_VERSION" \
-            --python-version "logbrew-flask=$FLASK_VERSION" \
-            --python-version "logbrew-django=$DJANGO_VERSION"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive check-manifest \
+            "${entries[0]}" "$RELEASE_SOURCE_SHA" \
+            "logbrew-sdk=$SDK_VERSION" "logbrew-fastapi=$FASTAPI_VERSION" \
+            "logbrew-flask=$FLASK_VERSION" "logbrew-django=$DJANGO_VERSION"
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -225,9 +197,8 @@ jobs:
               --wheel \
               --outdir "$output_dir" \
               "$package_dir"
-            python3 scripts/check_python_release_artifacts.py normalize-sdist \
-              --source-date-epoch "$SOURCE_DATE_EPOCH" \
-              "$output_dir"/*.tar.gz
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive normalize-sdist \
+              "$output_dir"/*.tar.gz "$SOURCE_DATE_EPOCH"
           done
 
       - name: Bind exact-source Python distributions
@@ -240,45 +211,23 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
         run: |
           set -Eeuo pipefail
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_python_release_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" create \
-            --directory "$RUNNER_TEMP/python-source-build" \
-            --source-commit "$RELEASE_SOURCE_SHA" \
-            --python-version "logbrew-sdk=$SDK_VERSION" \
-            --python-version "logbrew-fastapi=$FASTAPI_VERSION" \
-            --python-version "logbrew-flask=$FLASK_VERSION" \
-            --python-version "logbrew-django=$DJANGO_VERSION" \
-            --manifest "$RUNNER_TEMP/python-source-build.json"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive create-manifest \
+            "$RUNNER_TEMP/python-source-build" "$RUNNER_TEMP/python-source-build.json" \
+            "$RELEASE_SOURCE_SHA" "logbrew-sdk=$SDK_VERSION" "logbrew-fastapi=$FASTAPI_VERSION" \
+            "logbrew-flask=$FLASK_VERSION" "logbrew-django=$DJANGO_VERSION"
 
       - name: Reconcile public Python artifacts
         run: |
           set -Eeuo pipefail
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_python_release_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
-            resolve-public \
-            --directory "$RUNNER_TEMP/python-source-build" \
-            --manifest "$RUNNER_TEMP/python-source-build.json" \
-            --output-directory "$RUNNER_TEMP/python-public-artifacts" \
-            --public-manifest "$RUNNER_TEMP/python-public-release-artifacts.json" \
-            --reconciliation "$RUNNER_TEMP/python-public-reconciliation.json"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive resolve-public \
+            "$RUNNER_TEMP/python-source-build" "$RUNNER_TEMP/python-source-build.json" \
+            "$RUNNER_TEMP/python-public-artifacts"
 
       - name: Execute exact public Python artifacts
         run: |
           set -Eeuo pipefail
-          if ! bash scripts/real_user_python_public_pypi_smoke.sh \
-            --manifest "$RUNNER_TEMP/python-public-release-artifacts.json" \
+          if ! "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-public-consumer \
+            --manifest "$RUNNER_TEMP/python-public-artifacts/release-artifacts.json" \
             --artifact-root "$RUNNER_TEMP/python-public-artifacts" \
             >"$RUNNER_TEMP/python-public-smoke.out" \
             2>"$RUNNER_TEMP/python-public-smoke.err"; then
@@ -292,8 +241,8 @@ jobs:
         with:
           name: python-public-reconciliation
           path: |
-            ${{ runner.temp }}/python-public-release-artifacts.json
-            ${{ runner.temp }}/python-public-reconciliation.json
+            ${{ runner.temp }}/python-public-artifacts/release-artifacts.json
+            ${{ runner.temp }}/python-public-artifacts/public-reconciliation.json
           if-no-files-found: error
           retention-days: 14
 
@@ -333,9 +282,7 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_nuget_public_artifacts.py
-            scripts/check_nuget_release_receipt_provenance.py
-            scripts/check_publication_run.py
+            tools/toolchain-probe/
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
           sparse-checkout-cone-mode: false
 
@@ -359,9 +306,6 @@ jobs:
             exit 1
           fi
           control_files=(
-            scripts/check_nuget_public_artifacts.py
-            scripts/check_nuget_release_receipt_provenance.py
-            scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
           )
           for relative_path in "${control_files[@]}"; do
@@ -378,6 +322,9 @@ jobs:
             printf '%s_sha256=%s\n' "$(basename "${relative_path%.*}")" "$expected" >> "$GITHUB_OUTPUT"
           done
 
+      - name: Build protected native NuGet verifier
+        uses: ./.release-control/tools/toolchain-probe
+
       - name: Authenticate NuGet publication boundary
         shell: bash
         env:
@@ -388,14 +335,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$PUBLICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_publication_run.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_publication_run.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" publication-run \
             --repository "$GITHUB_REPOSITORY" \
             --run-id "$PUBLICATION_RUN_ID" \
             --family nuget \
@@ -421,10 +361,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-reconciliation-plan.json"
-          python3 scripts/nuget_release_plan.py create --root "$GITHUB_WORKSPACE" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan create --root "$GITHUB_WORKSPACE" \
             --packages-env NUGET_PACKAGES_INPUT --output "$plan"
           mapfile -t versions < <(
-            python3 scripts/nuget_release_plan.py entries \
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan entries \
               --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions
           )
           expected=("LogBrew=$CORE_VERSION" "LogBrew.HttpClient=$HTTPCLIENT_VERSION")
@@ -441,25 +381,12 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
         run: |
           set -Eeuo pipefail
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_nuget_public_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_nuget_public_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          dependency_range="$(
-            python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_metadata_dotnet import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' \
-              "$CORE_VERSION"
-          )"
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-public \
             --nuget-version "LogBrew=$CORE_VERSION" \
             --nuget-version "LogBrew.HttpClient=$HTTPCLIENT_VERSION" \
             --source-commit "$RELEASE_SOURCE_SHA" \
-            --dependency-range "$dependency_range" \
             --source-root "$GITHUB_WORKSPACE" \
-            --output-directory "$RUNNER_TEMP/nuget-public-artifacts" \
-            --manifest "$RUNNER_TEMP/nuget-public-reconciliation.json"
+            --output-directory "$RUNNER_TEMP/nuget-public-artifacts"
 
       - name: Execute exact public NuGet artifacts
         env:
@@ -475,12 +402,12 @@ jobs:
           fi
           bash "$control_script" \
             --plan "$RUNNER_TEMP/logbrew-nuget-reconciliation-plan.json" \
-            --artifact-root "$RUNNER_TEMP/nuget-public-artifacts"
+            --artifact-root "$RUNNER_TEMP/nuget-public-artifacts/packages"
 
       - name: Upload NuGet reconciliation receipt
         uses: actions/upload-artifact@v6
         with:
           name: nuget-public-reconciliation
-          path: ${{ runner.temp }}/nuget-public-reconciliation.json
+          path: ${{ runner.temp }}/nuget-public-artifacts/nuget-public-reconciliation.json
           if-no-files-found: error
           retention-days: 14

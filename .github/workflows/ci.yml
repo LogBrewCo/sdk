@@ -35,8 +35,8 @@ jobs:
       objc: ${{ steps.areas.outputs.objc }}
       kotlin: ${{ steps.areas.outputs.kotlin }}
       maven: ${{ steps.areas.outputs.maven }}
-      unit_test_run_all: ${{ steps.unit-tests.outputs.run_all }}
-      unit_test_modules: ${{ steps.unit-tests.outputs.modules }}
+      unit_test_run_all: ${{ steps.areas.outputs.run_all }}
+      unit_test_modules: ${{ steps.areas.outputs.modules }}
 
     steps:
       - name: Check out repository
@@ -44,22 +44,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
+      - name: Select pinned Go
+        uses: ./tools/toolchain-probe
+
+      - name: Verify native CI selection
+        working-directory: tools/toolchain-probe
+        run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./...
 
       - name: Classify changed paths
         id: areas
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: python3 scripts/ci_changed_areas.py --github-output
-
-      - name: Select Python unit test targets
-        id: unit-tests
-        env:
-          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: python3 scripts/ci_unit_test_targets.py --github-output
+        working-directory: tools/toolchain-probe
+        run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go run . ci-selection --git >> "$GITHUB_OUTPUT"
 
   contract-checks:
     name: Contract checks
@@ -70,12 +67,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
-
-      - name: Build native SDK verifier
-        uses: ./tools/toolchain-probe
-
-      - name: Test native SDK verifier
-        run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go -C tools/toolchain-probe test -race ./...
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -102,19 +93,8 @@ jobs:
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: tools/toolchain-probe/.go-version
-          cache-dependency-path: |
-            go/logbrew/go.mod
-            go/logbrew/asynq/go.mod
-            go/logbrew/asynq/go.sum
-            go/logbrew/gin/go.mod
-            go/logbrew/gin/go.sum
-            go/logbrew/otel/go.mod
-            go/logbrew/otel/go.sum
-            tools/toolchain-probe/go.mod
+      - name: Select pinned Go
+        uses: ./tools/toolchain-probe
 
       - name: Set up Java
         if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
@@ -151,7 +131,11 @@ jobs:
 
       - name: Run focused unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all != 'true' }}
-        run: python3 -m unittest ${{ needs.changed-areas.outputs.unit_test_modules }}
+        env:
+          MODULES: ${{ needs.changed-areas.outputs.unit_test_modules }}
+        run: |
+          read -r -a modules <<< "$MODULES"
+          python3 -m unittest "${modules[@]}"
 
       - name: Run full unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all == 'true' }}
@@ -162,31 +146,28 @@ jobs:
 
       - name: Check canonical brand assets
         run: |
-          python3 scripts/check_brand_assets.py
-          python3 scripts/generate_brand_assets.py --check
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" brand-assets "$PWD"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" brand-generated "$PWD"
 
       - name: Check backend contract reports
-        run: python3 scripts/check_backend_contract_reports.py
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" backend-reports "$PWD"'
+
+      - name: Check CI static duplication
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" ci-static-duplication "$PWD"'
 
       - name: Validate happy-path fixture
-        run: |
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
+        run: '"$LOGBREW_TOOLCHAIN_PROBE_BIN" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json'
 
       - name: Validate expected failure fixture
-        run: |
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/invalid-batch.json --expect-invalid
-
-      - name: Validate JSON output shape
-        run: |
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
+        run: '"$LOGBREW_TOOLCHAIN_PROBE_BIN" event-batch-check spec/event-batch.schema.json fixtures/invalid-batch.json --expect-invalid'
 
       - name: Check release metadata
-        run: python3 scripts/check_release_metadata.py
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata all "$GITHUB_WORKSPACE"'
 
       - name: Check GitHub release safety
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" github-release-safety --allow-public-branch-summary'
 
       - name: Run Maven Central public install smoke
         if: ${{ needs.changed-areas.outputs.maven == 'true' }}
@@ -259,6 +240,10 @@ jobs:
       - name: Run Rust tracing real-user smoke test
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_tracing_smoke.sh
+
+      - name: Check JavaScript source syntax
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" js-syntax "$PWD"'
 
       - name: Run JavaScript SDK tests
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
@@ -559,7 +544,7 @@ jobs:
         run: bash scripts/real_user_php_symfony_smoke.sh
 
       - name: Leak scan
-        run: python3 scripts/check_confidentiality_scan.py
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" confidentiality-check'
 
   php-compatibility:
     name: PHP 8.2 / Symfony 6.4 compatibility
@@ -598,7 +583,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Select pinned Go
         uses: ./tools/toolchain-probe
 
       - name: Set up Python
@@ -694,7 +679,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Python
@@ -834,7 +819,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Python
@@ -859,7 +844,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Java

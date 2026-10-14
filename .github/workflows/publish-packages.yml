@@ -147,6 +147,19 @@ jobs:
         with:
           bun-version: "1.3.14"
 
+      - name: Check out protected npm metadata verifier
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: tools/toolchain-probe/
+          sparse-checkout-cone-mode: false
+
+      - name: Build protected npm metadata verifier
+        uses: ./.release-control/tools/toolchain-probe
+
       - name: Install npm publisher
         run: |
           bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts
@@ -243,7 +256,7 @@ jobs:
             fi
           done
 
-          python3 scripts/check_release_metadata.py "${metadata_args[@]}"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata all "$GITHUB_WORKSPACE" "${metadata_args[@]}"
 
           npm_publication_plan="$(mktemp)"
           publication_plan_args=(--registry "https://registry.npmjs.org")
@@ -317,7 +330,7 @@ jobs:
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             verify_args+=(--include-unity-npm)
           fi
-          python3 scripts/check_registry_publication.py "${verify_args[@]}" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication "${verify_args[@]}" \
             --require-npm-provenance --timeout 2 --retries 8 --retry-delay 1
 
           install_dir="$(mktemp -d)"
@@ -366,6 +379,18 @@ jobs:
           go-version-file: tools/toolchain-probe/.go-version
           cache: false
 
+      - name: Check out protected Python verifier
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: tools/toolchain-probe/
+          sparse-checkout-cone-mode: false
+
+      - name: Build protected native verifier
+        uses: ./.release-control/tools/toolchain-probe
+
       - name: Read Python package versions
         id: pypi-version
         shell: bash
@@ -405,16 +430,15 @@ jobs:
             echo "TZ=$TZ"
           } >> "$GITHUB_ENV"
           for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_flask python/logbrew_django; do
-            output_dir="dist/pypi/$(basename "$package_dir")"
+            output_dir="$GITHUB_WORKSPACE/dist/pypi/$(basename "$package_dir")"
             python -m build \
               --no-isolation \
               --sdist \
               --wheel \
               --outdir "$output_dir" \
               "$package_dir"
-            python3 scripts/check_python_release_artifacts.py normalize-sdist \
-              --source-date-epoch "$SOURCE_DATE_EPOCH" \
-              "$output_dir"/*.tar.gz
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive normalize-sdist \
+              "$output_dir"/*.tar.gz "$SOURCE_DATE_EPOCH"
             python -m twine check "$output_dir"/*
           done
 
@@ -422,14 +446,13 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 scripts/check_python_release_artifacts.py create \
-            --directory dist/pypi \
-            --source-commit "$(git rev-parse HEAD)" \
-            --python-version "logbrew-sdk=${{ steps.pypi-version.outputs.core_version }}" \
-            --python-version "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}" \
-            --python-version "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}" \
-            --python-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}" \
-            --manifest dist/pypi/python-release-artifacts.json
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive create-manifest \
+            "$GITHUB_WORKSPACE/dist/pypi" "$GITHUB_WORKSPACE/dist/pypi/python-release-artifacts.json" \
+            "$(git rev-parse HEAD)" \
+            "logbrew-sdk=${{ steps.pypi-version.outputs.core_version }}" \
+            "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}" \
+            "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}" \
+            "logbrew-django=${{ steps.pypi-version.outputs.django_version }}"
 
       - name: Verify reproducible Python distributions
         shell: bash
@@ -443,17 +466,15 @@ jobs:
               --wheel \
               --outdir "$output_dir" \
               "$package_dir"
-            python3 scripts/check_python_release_artifacts.py normalize-sdist \
-              --source-date-epoch "$SOURCE_DATE_EPOCH" \
-              "$output_dir"/*.tar.gz
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive normalize-sdist \
+              "$output_dir"/*.tar.gz "$SOURCE_DATE_EPOCH"
           done
-          python3 scripts/check_python_release_artifacts.py verify \
-            --directory "$RUNNER_TEMP/python-reproducibility" \
-            --manifest dist/pypi/python-release-artifacts.json
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive verify-manifest \
+            "$RUNNER_TEMP/python-reproducibility" "$GITHUB_WORKSPACE/dist/pypi/python-release-artifacts.json"
 
       - name: Verify packed Python distributions
         run: |
-          bash scripts/real_user_python_public_pypi_smoke.sh --manifest \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-public-consumer --manifest \
             dist/pypi/python-release-artifacts.json \
             --artifact-root dist/pypi
 
@@ -512,19 +533,16 @@ jobs:
             verify_args+=(--pypi-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}")
           fi
           verify_args+=(--version "${{ steps.pypi-version.outputs.version }}")
-          python3 scripts/check_registry_publication.py "${verify_args[@]}"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication "${verify_args[@]}"
 
       - name: Resolve public PyPI artifacts
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 scripts/check_python_release_artifacts.py resolve-public \
-            --directory dist/pypi \
-            --manifest dist/pypi/python-release-artifacts.json \
-            --output-directory "$RUNNER_TEMP/python-public-artifacts" \
-            --public-manifest "$RUNNER_TEMP/python-public-release-artifacts.json" \
-            --reconciliation "$RUNNER_TEMP/python-public-reconciliation.json"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-archive resolve-public \
+            "$GITHUB_WORKSPACE/dist/pypi" "$GITHUB_WORKSPACE/dist/pypi/python-release-artifacts.json" \
+            "$RUNNER_TEMP/python-public-artifacts"
 
       - name: Upload Python public reconciliation
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
@@ -532,16 +550,16 @@ jobs:
         with:
           name: python-public-reconciliation
           path: |
-            ${{ runner.temp }}/python-public-release-artifacts.json
-            ${{ runner.temp }}/python-public-reconciliation.json
+            ${{ runner.temp }}/python-public-artifacts/release-artifacts.json
+            ${{ runner.temp }}/python-public-artifacts/public-reconciliation.json
           if-no-files-found: error
           retention-days: 14
 
       - name: Verify public PyPI installs
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         run: |
-          bash scripts/real_user_python_public_pypi_smoke.sh --manifest \
-            "$RUNNER_TEMP/python-public-release-artifacts.json" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-public-consumer --manifest \
+            "$RUNNER_TEMP/python-public-artifacts/release-artifacts.json" \
             --artifact-root "$RUNNER_TEMP/python-public-artifacts"
 
   crates:
@@ -582,15 +600,23 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: cargo publish
 
-      - name: Set up Python for registry verification
-        if: ${{ ! inputs.dry_run && inputs.include_crates_publish }}
-        uses: actions/setup-python@v6
+      - name: Check out protected crates registry verifier
+        uses: actions/checkout@v6
         with:
-          python-version: "3.13"
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: tools/toolchain-probe/
+          sparse-checkout-cone-mode: false
+
+      - name: Build protected crates registry verifier
+        if: ${{ ! inputs.dry_run && inputs.include_crates_publish }}
+        uses: ./.release-control/tools/toolchain-probe
 
       - name: Verify public crates.io package
         if: ${{ ! inputs.dry_run && inputs.include_crates_publish }}
-        run: python3 scripts/check_registry_publication.py --target crates --version "${{ steps.crate-version.outputs.version }}"
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target crates --version "${{ steps.crate-version.outputs.version }}"'
 
       - name: Explain skipped crate publish
         if: ${{ ! inputs.dry_run && ! inputs.include_crates_publish && inputs.target == 'all' }}
@@ -646,15 +672,23 @@ jobs:
         if: ${{ ! inputs.dry_run }}
         run: gem push dist/rubygems/*.gem
 
-      - name: Set up Python for registry verification
-        if: ${{ ! inputs.dry_run }}
-        uses: actions/setup-python@v6
+      - name: Check out protected RubyGems registry verifier
+        uses: actions/checkout@v6
         with:
-          python-version: "3.13"
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: tools/toolchain-probe/
+          sparse-checkout-cone-mode: false
+
+      - name: Build protected RubyGems registry verifier
+        if: ${{ ! inputs.dry_run }}
+        uses: ./.release-control/tools/toolchain-probe
 
       - name: Verify public RubyGems package
         if: ${{ ! inputs.dry_run }}
-        run: python3 scripts/check_registry_publication.py --target rubygems
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target rubygems'
 
   nuget:
     name: NuGet package
@@ -711,15 +745,23 @@ jobs:
             "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_API_TOKEN}" \
             -d '{"repository":{"url":"https://github.com/LogBrewCo/sdk"}}'
 
-      - name: Set up Python for registry verification
-        if: ${{ ! inputs.dry_run }}
-        uses: actions/setup-python@v6
+      - name: Check out protected Packagist registry verifier
+        uses: actions/checkout@v6
         with:
-          python-version: "3.13"
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: tools/toolchain-probe/
+          sparse-checkout-cone-mode: false
+
+      - name: Build protected Packagist registry verifier
+        if: ${{ ! inputs.dry_run }}
+        uses: ./.release-control/tools/toolchain-probe
 
       - name: Verify public Packagist package
         if: ${{ ! inputs.dry_run }}
-        run: python3 scripts/check_registry_publication.py --target packagist --retries 20 --retry-delay 30
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target packagist --retries 20 --retry-delay 30'
 
   maven:
     name: Maven Central package
@@ -747,14 +789,15 @@ jobs:
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
 
       - name: Check out protected Maven release control
-        if: ${{ ! inputs.dry_run }}
         uses: actions/checkout@v6
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.workflow_sha }}
           path: .release-control
           persist-credentials: false
-          sparse-checkout: scripts/check_maven_central_deployment.py
+          sparse-checkout: |
+            scripts/check_maven_central_deployment.py
+            tools/toolchain-probe/
           sparse-checkout-cone-mode: false
 
       - name: Bind protected Maven release control
@@ -797,6 +840,9 @@ jobs:
           fi
           printf 'script_sha256=%s\n' "$expected_control_sha256" >> "$GITHUB_OUTPUT"
 
+      - name: Build protected Maven registry verifier
+        uses: ./.release-control/tools/toolchain-probe
+
       - name: Plan selected Maven artifacts
         env:
           MAVEN_ARTIFACTS_INPUT: ${{ inputs.maven_artifacts }}
@@ -810,9 +856,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-maven-release-plan.json"
-          python3 scripts/check_registry_publication.py --target maven --maven-plan "$plan" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target maven --maven-plan "$plan" \
             --maven-plan-scope selected --expect-absent --retries 0
-          python3 scripts/check_registry_publication.py --target maven --maven-plan "$plan" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target maven --maven-plan "$plan" \
             --maven-plan-scope dependencies --retries 6 --retry-delay 10
 
       - name: Check Maven Central auth preflight
@@ -939,7 +985,7 @@ jobs:
       - name: Verify Maven Central publication
         if: ${{ ! inputs.dry_run }}
         run: |
-          python3 scripts/check_registry_publication.py --target maven \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target maven \
             --maven-plan "$RUNNER_TEMP/logbrew-maven-release-plan.json" \
             --maven-plan-scope selected --retries 20 --retry-delay 30
 
@@ -1004,14 +1050,12 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_registry_publication.py
+            tools/toolchain-probe/
             scripts/check_release_metadata.py
             scripts/release_metadata_dotnet.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
-            tools/toolchain-probe
-            spec/event-batch.schema.json
             scripts/check_sdk_parity.py
             fixtures/valid-batch.json
           sparse-checkout-cone-mode: false
@@ -1035,14 +1079,11 @@ jobs:
             exit 1
           fi
           control_files=(
-            scripts/check_registry_publication.py
             scripts/check_release_metadata.py
             scripts/release_metadata_dotnet.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
-            tools/toolchain-probe/action.yml
-            spec/event-batch.schema.json
             scripts/check_sdk_parity.py
             fixtures/valid-batch.json
           )
@@ -1057,6 +1098,9 @@ jobs:
             echo "Protected verify control changed." >&2
             exit 1
           fi
+
+      - name: Build protected native registry verifier
+        uses: ./.release-control/tools/toolchain-probe
 
       - name: Verify public registry packages
         shell: bash
@@ -1111,7 +1155,7 @@ jobs:
           if [[ "${{ inputs.include_go_module }}" == "true" ]]; then
             verify_args+=(--include-go)
           fi
-          python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication \
             "${verify_args[@]}"
 
   verify-swiftpm:
@@ -1147,16 +1191,15 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_registry_publication.py
             scripts/check_release_metadata.py
             scripts/release_metadata_dotnet.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
-            tools/toolchain-probe
-            spec/event-batch.schema.json
             scripts/check_sdk_parity.py
             fixtures/valid-batch.json
+            spec/event-batch.schema.json
+            tools/toolchain-probe/
           sparse-checkout-cone-mode: false
 
       - name: Bind protected verify control
@@ -1178,16 +1221,19 @@ jobs:
             exit 1
           fi
           control_files=(
-            scripts/check_registry_publication.py
             scripts/check_release_metadata.py
             scripts/release_metadata_dotnet.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
-            tools/toolchain-probe/action.yml
-            spec/event-batch.schema.json
             scripts/check_sdk_parity.py
             fixtures/valid-batch.json
+            spec/event-batch.schema.json
+            tools/toolchain-probe/.go-version
+            tools/toolchain-probe/go.mod
+            tools/toolchain-probe/go.sum
+            tools/toolchain-probe/main.go
+            tools/toolchain-probe/action.yml
           )
           for relative_path in "${control_files[@]}"; do
             control_path="$control_root/$relative_path"
@@ -1201,7 +1247,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build protected native SDK verifier
+      - name: Build protected native verifier
         uses: ./.release-control/tools/toolchain-probe
 
       - name: Verify public Swift products

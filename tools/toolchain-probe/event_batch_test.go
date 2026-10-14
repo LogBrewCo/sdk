@@ -279,6 +279,15 @@ type rejectedCheckOutput struct{}
 
 func (rejectedCheckOutput) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
+func TestNativeValidatorOwnsFixtureContract(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"../../scripts/validate_fixtures.py", "../../tests/test_validate_fixtures.py"} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("superseded validator or tests remain: %s", path)
+		}
+	}
+}
+
 func FuzzEventBatchJSON(f *testing.F) {
 	checker := canonicalEventSchema(f)
 	for _, data := range []string{

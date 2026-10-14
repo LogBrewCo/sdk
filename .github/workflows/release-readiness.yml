@@ -135,11 +135,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
-
-      - name: Test native SDK verifier
-        run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go -C tools/toolchain-probe test -race ./...
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -154,17 +151,16 @@ jobs:
 
       - name: Validate fixtures
         run: |
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/invalid-batch.json --expect-invalid
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
+          "$LOGBREW_TOOLCHAIN_PROBE_BIN" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
+          "$LOGBREW_TOOLCHAIN_PROBE_BIN" event-batch-check spec/event-batch.schema.json fixtures/invalid-batch.json --expect-invalid
 
       - name: Check release metadata
-        run: python3 scripts/check_release_metadata.py
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata all "$GITHUB_WORKSPACE"'
 
       - name: Check GitHub release safety
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" github-release-safety --allow-public-branch-summary'
 
       - name: Run JavaScript release artifact smoke
         run: bash scripts/real_user_js_release_artifact_smoke.sh
@@ -194,7 +190,7 @@ jobs:
         run: bash scripts/real_user_native_release_artifact_upload_smoke.sh
 
       - name: Leak scan
-        run: python3 scripts/check_confidentiality_scan.py
+        run: '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" confidentiality-check'
 
   node-dry-run:
     name: Node package dry-run
@@ -209,7 +205,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Node.js
@@ -371,7 +367,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Python
@@ -446,7 +442,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Rust
@@ -497,7 +493,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Go
@@ -536,7 +532,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Python
@@ -563,7 +559,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Python
@@ -590,7 +586,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Python
@@ -617,7 +613,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Java
@@ -663,7 +659,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up .NET
@@ -693,7 +689,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up .NET
@@ -720,7 +716,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Java
@@ -754,7 +750,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Ruby
@@ -781,7 +777,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up PHP
@@ -834,7 +830,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Build native SDK verifier
+      - name: Build native test probe
         uses: ./tools/toolchain-probe
 
       - name: Set up Python

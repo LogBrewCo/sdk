@@ -49,7 +49,7 @@ test("ordinary HTTP requests root and correlate every signal captured in their s
     await fetchWithLogBrewSpan("https://example.invalid/dependency", undefined, {
       client,
       fetchImpl: async (_input, init) => {
-        assert.equal(new Headers(init.headers).get("traceparent"), `00-${TRACE_ID}-${FETCH_SPAN_ID}-01`);
+        assert.equal(new globalThis.Headers(init.headers).get("traceparent"), `00-${TRACE_ID}-${FETCH_SPAN_ID}-01`);
         return new Response(null, { status: 204 });
       },
       id: "dependency-span",

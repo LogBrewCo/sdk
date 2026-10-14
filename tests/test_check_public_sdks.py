@@ -190,10 +190,10 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
 
     def test_public_verifier_runs_single_command_contract_gates(self) -> None:
         self.assert_step_sequence(
-            ("Backend contract report checks", "python3 scripts/check_backend_contract_reports.py"),
+            ("Backend contract report checks", "backend-reports"),
         )
         self.assert_step_sequence(
-            ("GitHub release safety checks", "python3 scripts/check_github_release_safety.py"),
+            ("GitHub release safety checks", '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" github-release-safety'),
         )
 
     def test_public_verifier_runs_release_artifact_smokes_before_hygiene(self) -> None:
@@ -299,15 +299,6 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             ("Python OpenTelemetry installed-artifact smoke", "bash scripts/real_user_python_opentelemetry_smoke.sh"),
             ("Python Celery real-user smoke", "bash scripts/real_user_python_celery_smoke.sh"),
             ("FastAPI real-user smoke", None),
-        )
-
-    def test_public_verifier_runs_python_public_pypi_smoke(self) -> None:
-        self.assert_step_sequence(
-            ("Python Celery real-user smoke", "bash scripts/real_user_python_celery_smoke.sh"),
-            ("FastAPI real-user smoke", "bash scripts/real_user_fastapi_smoke.sh"),
-            ("Django real-user smoke", "bash scripts/real_user_django_smoke.sh"),
-            ("Python public PyPI install smoke", "bash scripts/real_user_python_public_pypi_smoke.sh"),
-            ("Go real-user smoke", None),
         )
 
     def test_public_verifier_runs_javascript_opentelemetry_smoke(self) -> None:

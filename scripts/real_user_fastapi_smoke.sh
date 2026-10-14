@@ -33,10 +33,6 @@ remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
 
-check_json() {
-  run_native_verifier package-json "$@"
-}
-
 trap remove_tmp_dir EXIT
 
 python3 -m venv "$tmp_dir/build-venv"
@@ -259,18 +255,18 @@ grep -qx 'dependency-spans -> python -m logbrew_fastapi.examples dependency-span
 grep -qx 'real-user-smoke -> python -m logbrew_fastapi.examples real-user-smoke' <(sed -n '4p' "$tmp_dir/examples-list.txt")
 grep -qx 'default (real-user-smoke) -> python -m logbrew_fastapi.examples' <(sed -n '5p' "$tmp_dir/examples-list.txt")
 "$tmp_dir/app/bin/python" -m logbrew_fastapi.examples readme-example > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
-check_json event-kinds span "$tmp_dir/readme.stdout.json"
+run_native_verifier package-json event-kinds span "$tmp_dir/readme.stdout.json"
 "$tmp_dir/app/bin/python" -m logbrew_fastapi.examples outbound-http > "$tmp_dir/outbound.stdout.json" 2> "$tmp_dir/outbound.stderr.json"
-check_json event-kinds span "$tmp_dir/outbound.stdout.json"
-check_json fields \
+run_native_verifier package-json event-kinds span "$tmp_dir/outbound.stdout.json"
+run_native_verifier package-json fields \
   'requestSpanId="b7ad6b7169203331"' \
   'outboundParentSpanId="b7ad6b7169203331"' \
   'outboundSpanId="c8ad6b7169203332"' \
   'traceparentMatchesSpan=true' \
   "$tmp_dir/outbound.stderr.json"
 "$tmp_dir/app/bin/python" -m logbrew_fastapi.examples dependency-spans > "$tmp_dir/dependency.stdout.json" 2> "$tmp_dir/dependency.stderr.json"
-check_json event-kinds span "$tmp_dir/dependency.stdout.json"
-check_json fields \
+run_native_verifier package-json event-kinds span "$tmp_dir/dependency.stdout.json"
+run_native_verifier package-json fields \
   'requestSpanId="b7ad6b7169203331"' \
   'databaseParentSpanId="b7ad6b7169203331"' \
   'databaseSpanId="c8ad6b7169203332"' \
@@ -280,8 +276,8 @@ check_json fields \
   'queueSpanId="e0ad6b7169203334"' \
   "$tmp_dir/dependency.stderr.json"
 "$tmp_dir/app/bin/python" -m logbrew_fastapi.examples real-user-smoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
-check_json event-kinds span issue "$tmp_dir/smoke.stdout.json"
-check_json fields \
+run_native_verifier package-json event-kinds span issue "$tmp_dir/smoke.stdout.json"
+run_native_verifier package-json fields \
   'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
   'parentSpanId="00f067aa0ba902b7"' \
   'spanId="b7ad6b7169203331"' \

@@ -107,7 +107,7 @@ package_root="$tmp_dir/package-root"
 extracted_dir="$package_root/cpp/logbrew-cpp"
 mkdir -p "$extracted_dir"
 tar -xzf "$archive" -C "$extracted_dir"
-python3 "$repo_root/scripts/check_release_metadata.py" --root "$package_root" --only-cpp
+"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata cpp "$package_root"
 make --no-print-directory -C "$extracted_dir" CXX="$cxx_command"
 cmake \
   -S "$extracted_dir" \

@@ -103,6 +103,21 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.release.tag_name || inputs.ref }}
+          persist-credentials: false
+
+      - name: Check out protected release control
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: tools/toolchain-probe/
+          sparse-checkout-cone-mode: false
+
+      - name: Build protected native release verifier
+        if: ${{ github.event_name != 'release' || !contains(github.event.release.tag_name, '/') }}
+        uses: ./.release-control/tools/toolchain-probe
 
       - id: release
         name: Resolve release publish inputs
@@ -179,7 +194,7 @@ jobs:
           fi
 
           if [[ "$publish_packages" == "true" ]]; then
-            nuget_packages="$(python3 scripts/nuget_release_plan.py canonicalize \
+            nuget_packages="$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan canonicalize \
               --packages-env INPUT_NUGET_PACKAGES)"
             maven_artifacts="$(python3 scripts/maven_release_plan.py canonicalize \
               --root "$GITHUB_WORKSPACE" \
@@ -212,7 +227,8 @@ jobs:
         if: ${{ steps.release.outputs.release_kind == 'repo-wide' }}
         env:
           REF: ${{ steps.release.outputs.ref }}
-        run: python3 scripts/check_repo_wide_release_versions.py "$REF"
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" repo-wide-versions "$REF" "$GITHUB_WORKSPACE"
 
       - name: Dispatch publish-packages.yml
         if: ${{ steps.release.outputs.publish_packages == 'true' }}

@@ -33,20 +33,23 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == "_exec" {
+	if len(os.Args) > 1 && os.Args[1] == limitedExecutionMode {
 		if run() != exitOK {
 			panic("limited fixture execution failed")
 		}
 		return
 	}
 	if len(os.Args) > 1 &&
-		strings.HasPrefix(os.Args[1], "fixture:") {
+		(strings.HasPrefix(os.Args[1], "fixture:") || os.Args[1] == pythonIsolatedFlag || os.Args[1] == versionFlag) {
 		// Fixture modes bypass m.Run; their exit code belongs to the fixture.
-		// Reviewed 2026-09-03; TestArgumentDiagnosticWriteFailure checks exits.
-		//nolint:revive // Fixture exit is not the redundant m.Run exit pattern.
+		// Reviewed 2026-09-05; TestArgumentDiagnosticWriteFailure checks exits.
+		//revive:disable-next-line:redundant-test-main-exit No test runner owns this fixture's exit.
 		os.Exit(runFixture(strings.TrimPrefix(os.Args[1], "fixture:")))
 	}
 
+	// Child timeout fixtures must not include the race detector's exit sleep.
+	// The parent retains its settings; children retain race detection and all
+	// supplied options, with only their post-execution sleep set to zero.
 	if err := os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0")); err != nil {
 		panic(err)
 	}
@@ -56,6 +59,8 @@ func TestMain(m *testing.M) {
 
 func runFixture(mode string) int {
 	switch mode {
+	case versionFlag, pythonIsolatedFlag:
+		return runPythonPipFixture()
 	case "stdout":
 		return writeText(os.Stdout, "fixture 1.2.3\nignored second line\n", exitOK)
 	case "stderr":
@@ -140,8 +145,17 @@ func TestArgumentDiagnosticWriteFailure(t *testing.T) {
 		output string
 		code   int
 	}{
-		{"bad-args", "toolchain-probe accepts inventory, clock, summary, deadline, package-json, " +
-			"schema-check, or event-batch-check mode\n", wantUsageExit},
+		{
+			"bad-args",
+			"toolchain-probe accepts inventory, clock, summary, deadline, package-json, " +
+				"schema-check, event-batch-check, python-consumer, python-public-consumer, python-archive, " +
+				"release-metadata, repo-wide-versions, nuget-plan, nuget-provenance, nuget-public, " +
+				"ci-selection, registry-publication, markdown-links, github-release-safety, " +
+				"generated-artifacts, backend-reports, publication-run, ci-static-duplication, " +
+				"brand-assets, brand-generated, brand-export, brand-write, js-syntax, js-parser-install, " +
+				"js-parser-bootstrap, or confidentiality-check mode\n",
+			wantUsageExit,
+		},
 		{closedArgumentFixture, "", wantWriteExit},
 	} {
 		t.Run(test.mode, func(t *testing.T) {

@@ -111,3 +111,14 @@ func TestNativeValidatorPreservesProtectedSwiftControl(t *testing.T) {
 	}
 	t.Fatal("protected Swift verifier caller is missing")
 }
+
+func TestNativeValidatorOwnsPackageContract(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"../../scripts/check_python_package_json.py", "../../tests/test_python_package_json_check.py",
+	} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("superseded package checker remains: %s", path)
+		}
+	}
+}

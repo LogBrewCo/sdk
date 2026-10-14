@@ -29,6 +29,26 @@ func openCheckInput(path string) (*os.File, error) {
 	return input, nil
 }
 
+func openRootCheckInput(root *os.Root, name string) (*os.File, error) {
+	before, err := root.Lstat(name)
+	if err != nil || !before.Mode().IsRegular() {
+		return nil, errors.Join(os.ErrInvalid, err)
+	}
+	input, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open scoped package input: %w", err)
+	}
+	// Root resolves in-tree links itself. Check the directory entry as well as
+	// the opened descriptor; O_NOFOLLOW alone does not enforce a regular leaf.
+	after, pathError := root.Lstat(name)
+	opened, statError := input.Stat()
+	if pathError != nil || statError != nil || !after.Mode().IsRegular() ||
+		!os.SameFile(before, opened) || !os.SameFile(opened, after) {
+		return nil, errors.Join(os.ErrInvalid, pathError, statError, input.Close())
+	}
+	return input, nil
+}
+
 func configureProcess(command *exec.Cmd) (func() error, error) {
 	command.SysProcAttr = new(syscall.SysProcAttr)
 	command.SysProcAttr.Setpgid = true

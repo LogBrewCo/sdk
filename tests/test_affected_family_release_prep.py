@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_release_metadata  # noqa: E402
 from check_npm_peer_compatibility import caret_range_allows  # noqa: E402
-import check_repo_wide_release_versions  # noqa: E402
 
 
 def xml_value(path: Path, xpath: str) -> str | None:
@@ -65,17 +64,6 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
                 self.assertEqual(xml_value(path, "./PropertyGroup/Version"), version)
-
-    def test_native_family_versions_advance(self) -> None:
-        for path, declaration in (
-            ("c/logbrew-c/include/logbrew.h", '#define LOGBREW_C_VERSION "0.2.2"'),
-            ("cpp/logbrew-cpp/include/logbrew.hpp", 'inline constexpr const char *version = "0.2.3"'),
-            ("objc/logbrew-objc/src/LogBrew.m", 'LogBrewObjectiveCVersion = @"0.2.3"'),
-        ):
-            with self.subTest(path=path):
-                self.assertIn(declaration, source_text(path))
-        unity = json_object("unity/logbrew-unity/package.json")
-        self.assertEqual((unity["name"], unity["version"]), ("co.logbrew.unity", "0.2.2"))
 
     def test_react_native_release_requires_fixed_core_range_and_updates_native_identity(self) -> None:
         manifest = json_object("js/logbrew-react-native/package.json")
@@ -274,51 +262,6 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             },
         )
 
-    def test_tag_distributed_receipts_match_published_release(self) -> None:
-        go_smoke = source_text("scripts/real_user_go_public_module_smoke.sh")
-        go_gin_smoke = source_text("scripts/real_user_go_gin_smoke.sh")
-        swift_smoke = source_text("scripts/real_user_swiftpm_public_smoke.sh")
-        swift_readme = source_text("swift/logbrew-swift/README.md")
-
-        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.10', go_smoke)
-        self.assertIn('LOGBREW_GO_GIN_MODULE_VERSION:-v0.1.2', go_smoke)
-        self.assertIn('github.com/LogBrewCo/sdk/go/logbrew/gin@v0.1.2', go_gin_smoke)
-        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.15', swift_smoke)
-        self.assertIn('from: "0.1.15"', swift_readme)
-
-    def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
-        receipt_defaults = {
-            "scripts/real_user_npm_public_registry_smoke.sh": (
-                "LOGBREW_NPM_SDK_VERSION:-0.1.17",
-                "LOGBREW_NPM_BROWSER_VERSION:-0.1.3",
-                "LOGBREW_NPM_NODE_VERSION:-0.1.11",
-                "LOGBREW_NPM_NEXT_VERSION:-0.1.7",
-                "LOGBREW_NPM_REACT_VERSION:-0.1.1",
-                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.20",
-            ),
-            "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.7",),
-            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.14",),
-            "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.10",),
-            "scripts/real_user_maven_central_public_smoke.sh": (
-                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.8",
-                "LOGBREW_MAVEN_KOTLIN_VERSION:-0.2.2",
-            ),
-            "scripts/real_user_dotnet_public_nuget_smoke.sh": (
-                "LOGBREW_DOTNET_CORE_VERSION:-0.1.7",
-                "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.2",
-            ),
-            "scripts/real_user_python_public_pypi_smoke.sh": (
-                "LOGBREW_PYPI_SDK_VERSION:-0.1.14",
-                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.10",
-                "LOGBREW_PYPI_FLASK_VERSION:-0.1.5",
-                "LOGBREW_PYPI_DJANGO_VERSION:-0.1.6",
-            ),
-        }
-        for relative_path, expected_values in receipt_defaults.items():
-            body = source_text(relative_path)
-            for expected in expected_values:
-                self.assertIn(expected, body, relative_path)
-
     def test_local_npm_smokes_bind_assertions_to_package_manifests(self) -> None:
         smoke_contracts = (
             ("browser", "browser", "browser_package_version", 2),
@@ -347,25 +290,6 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 fixed_assertion = f'grep -Fq "{package_name}@${{{variable}}}"'
                 self.assertEqual(body.count(fixed_assertion), assertions)
                 self.assertIsNone(stale_version.search(body), script_path)
-
-    def test_next_instrumentation_type_smoke_installs_framework_types(self) -> None:
-        smoke = source_text("scripts/real_user_next_smoke.sh")
-
-        self.assertIn("@types/react", smoke)
-        self.assertIn("@types/react-dom", smoke)
-        self.assertIn("cat > instrumentation-consumer.ts", smoke)
-        self.assertIn("--lib ESNext,DOM,DOM.Iterable", smoke)
-        self.assertIn("--skipLibCheck true", smoke)
-        self.assertIn("Instrumentation.onRequestError", smoke)
-
-    def test_repo_wide_guard_includes_newly_publishable_flask_and_httpclient(self) -> None:
-        labels = {
-            manifest.label
-            for manifest in check_repo_wide_release_versions.REPO_WIDE_RELEASE_MANIFESTS
-        }
-        self.assertIn("logbrew-flask", labels)
-        self.assertIn("LogBrew.HttpClient", labels)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,10 +23,6 @@ remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
 
-check_json() {
-  run_native_verifier package-json "$@"
-}
-
 trap remove_tmp_dir EXIT
 
 python3 -m venv "$tmp_dir/venv"
@@ -71,56 +67,6 @@ if [[ -n "$django_framework_version" ]]; then
   test "$installed_django_version" = "$django_framework_version"
 fi
 
-PYTHONPATH="" "$tmp_dir/venv/bin/python" -m unittest discover -s "$package_dir/tests" -p 'test_*.py'
-PYTHONPATH="" "$tmp_dir/venv/bin/python" "$package_dir/examples/readme_example.py" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
-check_json event-kinds span "$tmp_dir/readme.stdout.json"
-check_json fields 'status=200' "$tmp_dir/readme.stderr.json"
-
-PYTHONPATH="" "$tmp_dir/venv/bin/python" "$package_dir/examples/real_user_smoke.py" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
-check_json event-kinds span issue "$tmp_dir/smoke.stdout.json"
-check_json trailing-fields \
-  'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
-  'parentSpanId="00f067aa0ba902b7"' \
-  'spanId="b7ad6b7169203331"' \
-  'path="/health/"' \
-  'events=3' \
-  "$tmp_dir/smoke.stderr.json"
-run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke.stdout.json" >/dev/null
-
-PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples --list > "$tmp_dir/examples-list.txt"
-grep -qx 'readme-example -> python -m logbrew_django.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
-grep -qx 'outbound-http -> python -m logbrew_django.examples outbound-http' <(sed -n '2p' "$tmp_dir/examples-list.txt")
-grep -qx 'dependency-spans -> python -m logbrew_django.examples dependency-spans' <(sed -n '3p' "$tmp_dir/examples-list.txt")
-grep -qx 'real-user-smoke -> python -m logbrew_django.examples real-user-smoke' <(sed -n '4p' "$tmp_dir/examples-list.txt")
-grep -qx 'default (real-user-smoke) -> python -m logbrew_django.examples' <(sed -n '5p' "$tmp_dir/examples-list.txt")
-PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples readme-example > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
-check_json event-kinds span "$tmp_dir/packaged-readme.stdout.json"
-PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples outbound-http > "$tmp_dir/packaged-outbound.stdout.json" 2> "$tmp_dir/packaged-outbound.stderr.json"
-check_json event-kinds span "$tmp_dir/packaged-outbound.stdout.json"
-check_json fields \
-  'requestSpanId="b7ad6b7169203331"' \
-  'outboundParentSpanId="b7ad6b7169203331"' \
-  'outboundSpanId="c8ad6b7169203332"' \
-  'traceparentMatchesSpan=true' \
-  "$tmp_dir/packaged-outbound.stderr.json"
-PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples dependency-spans > "$tmp_dir/packaged-dependency.stdout.json" 2> "$tmp_dir/packaged-dependency.stderr.json"
-check_json event-kinds span "$tmp_dir/packaged-dependency.stdout.json"
-check_json fields \
-  'requestSpanId="b7ad6b7169203331"' \
-  'databaseParentSpanId="b7ad6b7169203331"' \
-  'databaseSpanId="c8ad6b7169203332"' \
-  'cacheParentSpanId="b7ad6b7169203331"' \
-  'cacheSpanId="d9ad6b7169203333"' \
-  'queueParentSpanId="b7ad6b7169203331"' \
-  'queueSpanId="e0ad6b7169203334"' \
-  "$tmp_dir/packaged-dependency.stderr.json"
-PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples real-user-smoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
-check_json trailing-fields \
-  'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
-  'parentSpanId="00f067aa0ba902b7"' \
-  'spanId="b7ad6b7169203331"' \
-  'path="/health/"' \
-  'events=3' \
-  "$tmp_dir/packaged-smoke.stderr.json"
+run_native_verifier python-consumer django "$repo_root" "$tmp_dir/venv/bin/python"
 
 printf '%s\n' "django package checks passed"

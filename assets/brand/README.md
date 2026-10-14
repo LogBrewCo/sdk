@@ -27,9 +27,9 @@ it is not another editable logo source.
 Install `rsvg-convert` from `librsvg`, then run:
 
 ```bash
-python3 scripts/generate_brand_assets.py --write
-python3 scripts/generate_brand_assets.py --check
-python3 scripts/check_brand_assets.py
+go -C tools/toolchain-probe run . brand-write "$PWD"
+go -C tools/toolchain-probe run . brand-generated "$PWD"
+go -C tools/toolchain-probe run . brand-assets "$PWD"
 ```
 
 The manifest records every approved output, its dimensions, alpha contract,

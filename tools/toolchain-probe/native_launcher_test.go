@@ -155,7 +155,9 @@ func TestNativeLauncherUsesProvidedBinary(t *testing.T) {
 
 func TestNativeLauncherRejectsInvalidBinary(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{"relative-path", "missing", "directory", "symlink", "non-executable"} {
+	for _, kind := range []string{
+		"relative-path", "missing-binary", "directory-binary", "linked-binary", "non-executable",
+	} {
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
 			fixture := newNativeLauncherFixture(t)
@@ -176,15 +178,15 @@ func invalidNativeLauncherBinary(t *testing.T, root, kind string) string {
 	switch kind {
 	case "relative-path":
 		return "./provided"
-	case "directory":
+	case "directory-binary":
 		return root
-	case "symlink":
+	case "linked-binary":
 		if err := os.Symlink(filepath.Join(root, "bin", "go"), file); err != nil {
 			t.Fatal(err)
 		}
 	case "non-executable":
 		writeNativeLauncherFile(t, root, nativeLauncherProvided, "#!/bin/sh\nexit 0\n", nativeLauncherFileMode)
-	case "missing":
+	case "missing-binary":
 	default:
 		t.Fatal("unknown invalid binary fixture")
 	}

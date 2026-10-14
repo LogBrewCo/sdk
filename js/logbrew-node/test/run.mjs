@@ -23,7 +23,7 @@ try {
     mkdirSync(scopeDirectory, { recursive: true });
     symlinkSync(sdkSource, sdkLink, "dir");
   }
-  const build = await Bun.build({
+  const build = await globalThis.Bun.build({
     entrypoints: sourceEntries(),
     naming: "[dir]/[name]-[hash].[ext]",
     packages: "external",
@@ -55,7 +55,9 @@ try {
     try {
       rmdirSync(scopeDirectory);
       rmdirSync(dirname(scopeDirectory));
-    } catch {}
+    } catch {
+      // Keep directories that contain dependencies from another test run.
+    }
   }
 }
 

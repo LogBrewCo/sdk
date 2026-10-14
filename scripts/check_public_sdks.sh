@@ -163,7 +163,7 @@ write_summary_json() {
   fi
 
   if [[ -n "$json_output_path" ]]; then
-    printf '%s' "$json_payload" > "$json_output_path"
+    printf '%s' "$json_payload" >"$json_output_path"
   else
     printf '%s\n' "$json_payload"
   fi
@@ -207,13 +207,13 @@ done
 
 acquire_lock() {
   if mkdir "$lock_dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$lock_pid_file"
+    printf '%s\n' "$$" >"$lock_pid_file"
     return 0
   fi
 
   local existing_pid=""
   if [[ -f "$lock_pid_file" ]]; then
-    existing_pid="$(tr -d '[:space:]' < "$lock_pid_file")"
+    existing_pid="$(tr -d '[:space:]' <"$lock_pid_file")"
   fi
 
   if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
@@ -222,7 +222,7 @@ acquire_lock() {
 
   rm -rf "$lock_dir"
   mkdir "$lock_dir"
-  printf '%s\n' "$$" > "$lock_pid_file"
+  printf '%s\n' "$$" >"$lock_pid_file"
 }
 
 if ! acquire_lock; then
@@ -319,7 +319,8 @@ run_shell_step "cd rust/logbrew && cargo publish --dry-run --allow-dirty"
 mark_step_complete
 
 begin_next_step "JavaScript tests"
-run_shell_step "python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
+run_native_verifier js-syntax "$repo_root"
+run_shell_step "bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
 mark_step_complete
 
 begin_next_step "JavaScript package dry-run"
@@ -543,7 +544,7 @@ run_shell_step "bash scripts/real_user_django_smoke.sh"
 mark_step_complete
 
 begin_next_step "Python public PyPI install smoke"
-run_shell_step "bash scripts/real_user_python_public_pypi_smoke.sh"
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" python-public-consumer'
 mark_step_complete
 
 begin_next_step "Go real-user smoke"
@@ -695,19 +696,20 @@ run_shell_step "bash scripts/real_user_objc_smoke.sh"
 mark_step_complete
 
 begin_next_step "Backend contract report checks"
-run_shell_step "python3 scripts/check_backend_contract_reports.py"
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" backend-reports "$PWD"'
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" ci-static-duplication "$PWD"'
 mark_step_complete
 
 begin_next_step "Release metadata checks"
-run_shell_step "python3 scripts/check_release_metadata.py"
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata all "$PWD"'
 mark_step_complete
 
 begin_next_step "GitHub release safety checks"
-run_shell_step "python3 scripts/check_github_release_safety.py"
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" github-release-safety'
 mark_step_complete
 
 begin_next_step "Markdown link checks"
-run_shell_step "python3 scripts/check_markdown_links.py"
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" markdown-links "$PWD"'
 mark_step_complete
 
 begin_next_step "Shell static analysis"
@@ -719,7 +721,7 @@ run_shell_step "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/ci
 mark_step_complete
 
 begin_next_step "Confidentiality leak scan"
-run_shell_step "python3 scripts/check_confidentiality_scan.py"
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" confidentiality-check'
 mark_step_complete
 
 begin_next_step "JavaScript release artifact smoke"
@@ -756,7 +758,7 @@ mark_step_complete
 
 begin_next_step "Generated artifact hygiene"
 cleanup_build_artifacts
-run_shell_step "PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py"
+run_shell_step '"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" generated-artifacts "$PWD"'
 mark_step_complete
 
 log_line "all public SDK checks passed"

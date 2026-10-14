@@ -119,7 +119,7 @@ CS
   run_stage consumer-execution \
     dotnet run --project "$tmp_dir/exact-app/exact-app.csproj" --no-restore
   run_stage provenance-verification \
-    python3 "$control_root/scripts/check_nuget_release_receipt_provenance.py" \
+    "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-provenance \
       --bound-dir "$bound" --source-dir "$source_dir" \
       --packages-dir "$NUGET_PACKAGES" \
       --assets "$tmp_dir/exact-app/obj/project.assets.json" \
@@ -151,7 +151,7 @@ if [[ -z "$plan" ]]; then
   exit 2
 fi
 
-python3 "$repo_root/scripts/nuget_release_plan.py" validate \
+"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan validate \
   --root "$repo_root" \
   --plan "$plan" >/dev/null
 
@@ -159,7 +159,7 @@ selected=()
 while IFS= read -r item; do
   selected+=("$item")
 done < <(
-  python3 "$repo_root/scripts/nuget_release_plan.py" entries \
+  "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan entries \
     --root "$repo_root" \
     --plan "$plan" \
     --format versions
@@ -171,7 +171,7 @@ fi
 
 if [[ -n "$artifact_root" ]]; then
   selection_mode="$(
-    python3 "$repo_root/scripts/nuget_release_plan.py" entries \
+    "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan entries \
       --root "$repo_root" --plan "$plan" --format mode
   )"
   if [[ "$selection_mode" != "selected" || -L "$artifact_root" || ! -d "$artifact_root" ]]; then
@@ -254,7 +254,7 @@ selected_ids=()
 while IFS= read -r package_id; do
   selected_ids+=("$package_id")
 done < <(
-  python3 "$repo_root/scripts/nuget_release_plan.py" entries \
+  "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" nuget-plan entries \
     --root "$repo_root" \
     --plan "$plan" \
     --format ids
