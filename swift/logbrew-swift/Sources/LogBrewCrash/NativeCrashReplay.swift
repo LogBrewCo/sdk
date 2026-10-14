@@ -178,19 +178,43 @@ private extension NativeCrashCapture {
         guard let rawReport = store.report(for: reportID) else {
             throw NativeCrashError(.reportChanged)
         }
+        if repeatsPersistedJavaScriptFatal(rawReport) {
+            return try discardEngineReport(reportID, expectedReportIDs: expectedReportIDs, store: store)
+        }
         do {
             let record = try sanitizer.makeRecord(reportID: reportID, rawReport: rawReport)
             try verifyReportIDs(expectedReportIDs, in: store)
             return .record(record)
         } catch let error as NativeCrashError where error.code == .reportCorrupt {
-            try verifyReportIDs(expectedReportIDs, in: store)
-            store.deleteReport(with: reportID)
-            guard !store.reportIDs.contains(reportID) else {
-                throw NativeCrashError(.reportDeletionFailed)
-            }
-            recordDiscardedLocked()
-            return .discarded
+            return try discardEngineReport(reportID, expectedReportIDs: expectedReportIDs, store: store)
         }
+    }
+
+    private func discardEngineReport(
+        _ reportID: Int64,
+        expectedReportIDs: [Int64],
+        store: any CrashReportStoring,
+    ) throws -> NativeCrashReplayItem {
+        try verifyReportIDs(expectedReportIDs, in: store)
+        store.deleteReport(with: reportID)
+        guard !store.reportIDs.contains(reportID) else {
+            throw NativeCrashError(.reportDeletionFailed)
+        }
+        recordDiscardedLocked()
+        return .discarded
+    }
+
+    /// React Native raises `RCTFatalException` after its JavaScript fatal handler runs.
+    /// When the React Native package persisted that JavaScript report first, its last
+    /// breadcrumb says so, and this native copy would only repeat the same crash.
+    private func repeatsPersistedJavaScriptFatal(_ rawReport: [String: Any]) -> Bool {
+        let error = (rawReport["crash"] as? [String: Any])?["error"] as? [String: Any]
+        let exception = error?["nsexception"] as? [String: Any]
+        guard (exception?["name"] as? String)?.hasPrefix("RCTFatalException") == true else {
+            return false
+        }
+        let breadcrumbs = NativeCrashBreadcrumbs.captured(in: rawReport).0?.breadcrumbs
+        return breadcrumbs?.last?.category == NativeCrashBreadcrumbs.javaScriptFatalCategory
     }
 
     func validatedReportIDs(in store: any CrashReportStoring) throws -> [Int64] {

@@ -86,6 +86,7 @@ function installLogBrewReactNativeGlobalErrorHandler({
         if (fatal.available) {
           if (fatal.store(error)) {
             state.lastOutcome = "fatal_stored";
+            markPersistedFatal(client);
           } else {
             state.lastOutcome = fatal.health().lastOutcome === "admission_unavailable"
               ? "admission_unavailable"
@@ -167,6 +168,17 @@ function installLogBrewReactNativeGlobalErrorHandler({
   installations.set(errorUtils, installation);
   fatal.replay();
   return installation;
+}
+
+// The last breadcrumb tells Apple crash capture that the JavaScript report already
+// holds this crash, so the RCTFatalException that React Native raises next is not
+// reported twice.
+function markPersistedFatal(client) {
+  try {
+    client.addBreadcrumb({ category: "react-native.fatal", level: "fatal", type: "error" });
+  } catch {
+    // The report is stored; without the marker the native copy is only a duplicate.
+  }
 }
 
 function captureNonfatalError(client, issue, error, capturedErrors, state, onDiagnostic) {

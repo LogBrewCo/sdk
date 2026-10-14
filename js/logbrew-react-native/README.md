@@ -440,6 +440,13 @@ clears both the JavaScript history and its native crash snapshot. Missing,
 corrupt, and captured breadcrumb state remains explicit on replay; corrupt
 optional context never discards the crash.
 
+React Native ends a fatal JavaScript error on iOS with an `RCTFatalException`.
+After the global error handler stores that fatal report, it adds a
+`react-native.fatal` breadcrumb. When that breadcrumb is the last one in the
+native crash report, replay discards the `RCTFatalException` report and counts
+it as `discarded`, so one JavaScript fatal produces one issue. Otherwise the
+native crash replays as usual.
+
 Installation creates app-private, data-protected storage that iOS excludes from
 device data archives. Pending reports are partitioned by project, so changing
 the configured project does not replay an earlier project's records with the
