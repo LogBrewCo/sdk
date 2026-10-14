@@ -1,0 +1,26 @@
+{
+  "sdk": {
+    "name": "logbrew-js",
+    "language": "javascript",
+    "version": "0.1.0"
+  },
+  "events": [
+    {
+      "type": "log",
+      "timestamp": "2026-06-02T10:00:00Z",
+      "id": "evt_log_001",
+      "attributes": {
+        "message": "worker started",
+        "level": "info"
+      }
+    }
+  ],
+  "client_report": {
+    "dropped_events": {
+      "event_too_large": 1,
+      "evicted_for_fatal": 2,
+      "queue_bytes_overflow": 3,
+      "queue_overflow": 4
+    }
+  }
+}

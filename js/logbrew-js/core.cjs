@@ -91,6 +91,8 @@ const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 const DEFAULT_DELIVERY_INTERVAL_MS = 5000;
 const MAX_DELIVERY_INTERVAL_MS = 60 * 1000;
 const DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50;
+const MAX_CLIENT_REPORT_REASONS = 16;
+const MAX_CLIENT_REPORT_COUNT = 1_000_000_000;
 const DELIVERY_HEALTH_SCHEMA_VERSION = 1;
 const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
 const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
@@ -370,6 +372,8 @@ class LogBrewClient {
       queue_bytes_overflow: 0,
       queue_overflow: 0
     };
+    // In memory only: counts not yet acknowledged by a 2xx are lost on restart.
+    this.unreportedDropsByReason = {};
     this.lastDropReason = "none";
     this.storage = resolvedEventStore ? "persistent" : "memory";
     this.hydratedEventCount = recovered.events.length;
@@ -742,6 +746,7 @@ class LogBrewClient {
   #recordDroppedEvent(event, reason) {
     this.droppedEventCount = incrementBounded(this.droppedEventCount);
     this.droppedEventsByReason[reason] = incrementBounded(this.droppedEventsByReason[reason]);
+    this.unreportedDropsByReason[reason] = Math.min(MAX_CLIENT_REPORT_COUNT, (this.unreportedDropsByReason[reason] ?? 0) + 1);
     this.lastDropReason = reason;
     this.lastDroppedAtUnixMs = nextBoundedTimestamp(this.lastDroppedAtUnixMs);
     if (!this.onEventDropped) {
@@ -906,6 +911,10 @@ class LogBrewClient {
       const batch = this.unacknowledgedBatch;
       const response = await this.#sendBatch(transport, batch.body);
       this.unacknowledgedBatch = undefined;
+      // Clear only what this body carried; drops recorded while it was in flight stay pending.
+      for (const [reason, count] of Object.entries(batch.droppedEvents ?? {})) {
+        this.unreportedDropsByReason[reason] -= count;
+      }
       this.#acknowledge(batch.eventsCount);
       this.acceptedBatchCount = incrementBounded(this.acceptedBatchCount);
       remainingEvents -= batch.eventsCount;
@@ -929,7 +938,25 @@ class LogBrewClient {
   }
 
   #nextBatch(maxEvents) {
-    let bodyBytes = this.batchPrefixBytes + this.batchSuffixBytes;
+    const reported = Object.entries(this.unreportedDropsByReason).filter(([, count]) => count > 0);
+    const droppedEvents = reported.length > 0
+      ? Object.fromEntries(reported.slice(0, MAX_CLIENT_REPORT_REASONS))
+      : undefined;
+    const reportSuffix = droppedEvents && `],"client_report":${JSON.stringify({ dropped_events: droppedEvents })}}`;
+    const reportedEvents = reportSuffix ? this.#batchEventCount(maxEvents, utf8ByteLength(reportSuffix)) : 0;
+    const eventsCount = reportedEvents || this.#batchEventCount(maxEvents, this.batchSuffixBytes);
+    if (eventsCount === 0) {
+      throw new SdkError("transport_error", "queued event cannot fit the configured batch byte limit");
+    }
+    return {
+      body: `${this.batchPrefix}${this.serializedEvents.slice(0, eventsCount).join(",")}${reportedEvents ? reportSuffix : this.batchSuffix}`,
+      droppedEvents: reportedEvents ? droppedEvents : undefined,
+      eventsCount
+    };
+  }
+
+  #batchEventCount(maxEvents, suffixBytes) {
+    let bodyBytes = this.batchPrefixBytes + suffixBytes;
     let eventsCount = 0;
     const eventIds = new Set();
     for (let index = 0; index < maxEvents; index += 1) {
@@ -945,13 +972,7 @@ class LogBrewClient {
       bodyBytes = nextBodyBytes;
       eventsCount += 1;
     }
-    if (eventsCount === 0) {
-      throw new SdkError("transport_error", "queued event cannot fit the configured batch byte limit");
-    }
-    return {
-      body: `${this.batchPrefix}${this.serializedEvents.slice(0, eventsCount).join(",")}${this.batchSuffix}`,
-      eventsCount
-    };
+    return eventsCount;
   }
 
   #acknowledge(eventsCount) {

@@ -136,7 +136,8 @@ if (mode === "b") {
   fs.writeFileSync(resultFile, JSON.stringify({
     acceptedIds: JSON.parse(requests[0]).events.map((event) => event.id),
     drops: drops.length,
-    failedBodyHash: digest(requests[1]),
+    failedEventsHash: eventsDigest(requests[1]),
+    reports: requests.map((body) => JSON.parse(body).client_report ?? null),
     healthSchema: failedHealth.schemaVersion,
     hydratedEvents: hydratedHealth.hydratedEvents,
     pending: client.pendingEvents(),
@@ -190,7 +191,8 @@ if (mode === "c") {
   assertHealthPrivate(closedHealth);
   fs.writeFileSync(resultFile, JSON.stringify({
     acceptedIds: acceptedBodies.flatMap((body) => JSON.parse(body).events.map((event) => event.id)),
-    firstBodyHash: digest(requests[0]),
+    firstEventsHash: eventsDigest(requests[0]),
+    firstReport: JSON.parse(requests[0]).client_report ?? null,
     healthSchema: closedHealth.schemaVersion,
     hydratedEvents: hydratedHealth.hydratedEvents,
     pending: client.pendingEvents(),
@@ -255,8 +257,8 @@ async function collectRequest(request) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function digest(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
+function eventsDigest(body) {
+  return crypto.createHash("sha256").update(JSON.stringify(JSON.parse(body).events)).digest("hex");
 }
 
 function assertHealthPrivate(health) {
@@ -322,7 +324,10 @@ assertEqual(b.pending, 900, "failed-shutdown remainder");
 assertEqual(c.pending, 0, "final queue");
 assertEqual(b.requestCount, 3, "process B requests");
 assertEqual(c.requestCount, 10, "process C requests");
-assertEqual(b.failedBodyHash, c.firstBodyHash, "cross-process stable body");
+assertEqual(b.failedEventsHash, c.firstEventsHash, "cross-process stable events");
+const report = { dropped_events: { queue_overflow: 500 } };
+assertEqual(JSON.stringify(b.reports), JSON.stringify([null, report, report]), "process B drop reports");
+assertEqual(c.firstReport, null, "in-memory drop counts end with the process");
 assertEqual(b.healthSchema, 1, "process B health schema");
 assertEqual(c.healthSchema, 1, "process C health schema");
 assertEqual(b.hydratedEvents, 900, "process B hydration");
