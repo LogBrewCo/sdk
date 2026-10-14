@@ -48,6 +48,7 @@ from logbrew_sdk._issue_diagnostics import (
     safe_issue_exception_type,
     validate_issue_diagnostics,
 )
+from logbrew_sdk._logging_identity import log_record_identity as _log_record_identity
 from logbrew_sdk._persistent_event_queue import PersistentEventQueue
 from logbrew_sdk._runtime_context import add_python_runtime_context
 from logbrew_sdk._span_events import (
@@ -1008,29 +1009,39 @@ class LogBrewLoggingHandler(logging.Handler):
         flush_on_emit: bool = False,
         include_exception_text: bool = False,
         metadata: Metadata | None = None,
+        context_provider: Callable[[logging.LogRecord], TelemetryContext | None] | None = None,
         raise_flush_errors: bool = False,
         level: int = logging.NOTSET,
     ) -> None:
+        if context_provider is not None and not callable(context_provider):
+            raise SdkError("configuration_error", "logging context_provider must be callable")
         super().__init__(level=level)
         self.client = client
         self.transport = transport
         self.flush_on_emit = flush_on_emit
         self.include_exception_text = include_exception_text
         self.metadata = dict(metadata or {})
+        self.context_provider = context_provider
         self.raise_flush_errors = raise_flush_errors
 
     def emit(self, record: logging.LogRecord) -> None:
         """Queue one LogBrew log event from a standard-library log record."""
         try:
             event_id = default_log_record_event_id(record)
+            timestamp = timestamp_from_log_record(record)
+            attributes = log_attributes_from_record(
+                record,
+                include_exception_text=self.include_exception_text,
+                metadata=self.metadata,
+            )
+            if self.context_provider is not None:
+                context = merge_telemetry_contexts(self.context_provider(record), getattr(record, "context", None))
+                if context is not None:
+                    attributes["context"] = context
             self.client.log(
                 event_id,
-                timestamp_from_log_record(record),
-                log_attributes_from_record(
-                    record,
-                    include_exception_text=self.include_exception_text,
-                    metadata=self.metadata,
-                ),
+                timestamp,
+                attributes,
             )
             if self.flush_on_emit:
                 self._flush_transport()
@@ -1124,9 +1135,8 @@ def timestamp_from_log_record(record: logging.LogRecord) -> str:
 
 
 def default_log_record_event_id(record: logging.LogRecord) -> str:
-    """Return a stable event id for a standard-library log record."""
-    millis = int(record.created * 1000)
-    return f"evt_log_{slugify(record.name)}_{millis}_{record.lineno}"
+    """Return an opaque ID stable for this record object's lifetime."""
+    return _log_record_identity(record)
 
 
 def logbrew_level(level_number: int) -> str:
