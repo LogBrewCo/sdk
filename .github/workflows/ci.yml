@@ -82,6 +82,11 @@ jobs:
           "$LOGBREW_PYTHON_STATIC_ENV/bin/python" -m pip install --disable-pip-version-check --quiet --requirement scripts/python_static_tools.txt
           bash scripts/check_python_static.sh
 
+      - name: Check Python syntax and Markdown links
+        run: |
+          python3 scripts/check_python_sources.py
+          python3 scripts/check_markdown_links.py
+
       - name: Run JavaScript lint
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/check_js_lint.sh
