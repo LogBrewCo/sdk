@@ -3,6 +3,7 @@
 require "json"
 require "stringio"
 require_relative "../lib/logbrew"
+require_relative "../lib/logbrew/sidekiq"
 require_relative "local_http_intake"
 require_relative "test_helpers"
 include SdkTestHelpers
@@ -465,6 +466,187 @@ safe_logger.info("bad timestamp should not break normal logging")
 assert(errors.length == 1, "expected logger capture error callback")
 assert(client.pending_events.zero?, "expected failed logger capture to keep queue empty")
 tests += 1
+
+[:success, :failure].each do |application_outcome|
+  client = sample_client
+  output = StringIO.new
+  callbacks = []
+  callback_error = RuntimeError.new("opaque callback failure detail")
+  capture_broken = true
+  application_error = ArgumentError.new("opaque application failure detail")
+  expected_result = Object.new
+  calls = 0
+  parent = LogBrew::Trace.create_root
+  logger = LogBrew::Logger.new(
+    client: client, logdev: output,
+    timestamp_provider: -> { capture_broken ? "not-a-timestamp" : Time.utc(2026, 6, 2, 10, 0, 7) },
+    on_error: ->(error) { callbacks << error; raise callback_error }
+  )
+  instrumentation = LogBrew::Sidekiq::Instrumentation.create(client: client)
+  producer = LogBrew::Sidekiq::ClientMiddleware.new(instrumentation)
+  job = { "class" => "InvoiceWorker", "args" => [], "retry" => false }
+  result = nil
+  raised = nil
+  LogBrew::Trace.with_context(parent) do
+    begin
+      result = producer.call(nil, job, nil, nil) do
+        calls += 1
+        begin
+          raise application_error if application_outcome == :failure
+
+          expected_result
+        ensure
+          logger.warn("worker started")
+        end
+      end
+    rescue StandardError => error
+      raised = error
+    end
+    assert(LogBrew::Trace.current.equal?(parent), "logger callback failure changed the producer caller trace")
+  end
+  if application_outcome == :success
+    assert(raised.nil? && result.equal?(expected_result), "advisory logger callback replaced the successful enqueue result")
+  else
+    assert(raised.equal?(application_error), "advisory logger callback replaced the original enqueue exception")
+  end
+  assert(calls == 1, "logger callback failure repeated application enqueue")
+  assert(callbacks.length == 1 && callbacks.first.is_a?(LogBrew::SdkError), "logger callback lost the original capture failure")
+  assert(output.string.include?("worker started"), "logger callback failure skipped native output")
+  events = JSON.parse(client.preview_json).fetch("events")
+  assert(events.none? { |event| event.fetch("type") == "log" }, "failed validation fabricated an SDK log")
+  span = events.find { |event| event.fetch("type") == "span" }.fetch("attributes")
+  assert(span.fetch("status") == (application_outcome == :success ? "ok" : "error"), "logger callback changed producer span status")
+  carrier = job.fetch("logbrew")
+  assert(LogBrew::Traceparent.parse(carrier.fetch("traceparent")).parent_span_id == span.fetch("spanId"), "logger callback changed the producer carrier")
+
+  capture_broken = false
+  recovery_job = { "class" => "InvoiceWorker", "args" => [], "retry" => false }
+  recovered = LogBrew::Trace.with_context(parent) do
+    value = producer.call(nil, recovery_job, nil, nil) { logger.warn("worker stopped"); expected_result }
+    assert(LogBrew::Trace.current.equal?(parent), "recovery changed the producer caller trace")
+    value
+  end
+  assert(recovered.equal?(expected_result) && LogBrew::Trace.current.nil?, "logger callback recovery changed the app result or leaked its trace")
+  events = JSON.parse(client.preview_json).fetch("events")
+  logs = events.select { |event| event.fetch("type") == "log" }
+  spans = events.select { |event| event.fetch("type") == "span" }
+  assert(logs.length == 1 && output.string.include?("worker stopped"), "logger capture did not recover after callback failure")
+  assert(logs.first.dig("attributes", "context", "trace", "spanId") == spans.last.dig("attributes", "spanId"), "recovered logger lost its producer link")
+  assert(callbacks.length == 1 && !JSON.generate(events).include?(callback_error.message), "callback failure leaked into recovered telemetry")
+  tests += 1
+end
+
+client = sample_client
+output = StringIO.new
+callbacks = []
+capture_broken = true
+strict_logger = LogBrew::Logger.new(
+  client: client, logdev: output, raise_errors: true,
+  timestamp_provider: -> { capture_broken ? "not-a-timestamp" : Time.utc(2026, 6, 2, 10, 0, 7) },
+  on_error: ->(error) { callbacks << error; raise "opaque callback failure detail" }
+)
+raised = nil
+begin
+  strict_logger.warn("worker started")
+rescue StandardError => error
+  raised = error
+end
+assert(raised.equal?(callbacks.first) && raised.is_a?(LogBrew::SdkError), "strict logger callback replaced the original capture exception")
+assert(output.string.empty? && client.pending_events.zero?, "strict validation failure changed native output or queued an invalid log")
+capture_broken = false
+assert(strict_logger.warn("worker stopped") == true, "strict logger did not recover after validation failure")
+assert(callbacks.length == 1 && client.pending_events == 1 && output.string.include?("worker stopped"), "strict logger recovery lost output or capture")
+tests += 1
+
+[false, true].each do |strict|
+  client = sample_client(max_retries: 0)
+  output = StringIO.new
+  callbacks = []
+  transport = LogBrew::RecordingTransport.new([503, 202])
+  logger = LogBrew::Logger.new(
+    client: client, logdev: output, raise_errors: strict, transport: transport, flush_on_log: true,
+    timestamp_provider: -> { Time.utc(2026, 6, 2, 10, 0, 7) },
+    on_error: ->(error) { callbacks << error; raise "opaque callback failure detail" }
+  )
+  result = nil
+  raised = nil
+  begin
+    result = logger.warn("worker started")
+  rescue StandardError => error
+    raised = error
+  end
+  assert(callbacks.length == 1 && callbacks.first.code == "transport_error", "delivery callback lost the original transport failure")
+  if strict
+    assert(raised.equal?(callbacks.first) && output.string.empty?, "strict delivery callback replaced its capture exception or changed native output")
+  else
+    assert(raised.nil? && result == true && output.string.include?("worker started"), "advisory delivery callback skipped native logging")
+  end
+  assert(client.pending_events == 1 && transport.sent_bodies.length == 1, "failed delivery discarded or retried captured evidence")
+  failed_body = transport.sent_bodies.first
+  assert(logger.warn("worker stopped") == true, "logger did not recover after delivery failure")
+  assert(client.pending_events.zero? && callbacks.length == 1, "delivery recovery lost or repeated its callback")
+  assert(transport.sent_bodies.fetch(1) == failed_body && output.string.include?("worker stopped"), "delivery recovery changed frozen bytes or lost native output")
+  assert(!transport.sent_bodies.join.include?("opaque callback failure detail"), "delivery callback text entered SDK evidence")
+  tests += 1
+end
+
+client = sample_client
+output = StringIO.new
+callbacks = []
+broken = true
+formatter_error = ArgumentError.new("opaque formatter failure detail")
+logger = LogBrew::Logger.new(
+  client: client, logdev: output,
+  timestamp_provider: -> { broken ? "not-a-timestamp" : Time.utc(2026, 6, 2, 10, 0, 7) },
+  formatter: ->(_severity, _time, _progname, message) { raise formatter_error if broken; message.to_s + "\n" },
+  on_error: ->(error) { callbacks << error; raise "opaque callback failure detail" }
+)
+raised = nil
+begin
+  logger.warn("worker started")
+rescue StandardError => error
+  raised = error
+end
+assert(raised.equal?(formatter_error), "advisory callback replaced the original native formatter exception")
+assert(callbacks.length == 1 && output.string.empty? && client.pending_events.zero?, "formatter failure fabricated emitted or captured log evidence")
+broken = false
+assert(logger.warn("worker stopped") == true && client.pending_events == 1, "formatter recovery failed for native and SDK logging")
+assert(output.string == "worker stopped\n" && callbacks.length == 1, "formatter recovery changed its output or repeated the callback")
+tests += 1
+
+[:success, :failure].each do |application_outcome|
+  client = sample_client
+  callbacks = []
+  capture_broken = true
+  application_broken = application_outcome == :failure
+  application_error = ArgumentError.new("opaque application failure detail")
+  expected_response = [202, {}, ["ok"]]
+  app = ->(_env) { raise application_error if application_broken; expected_response }
+  rack = LogBrew::RackMiddleware.new(
+    app, client: client, include_exception_message: false,
+    timestamp_provider: -> { capture_broken ? "not-a-timestamp" : Time.utc(2026, 6, 2, 10, 0, 7) },
+    on_error: ->(error) { callbacks << error; raise "opaque callback failure detail" }
+  )
+  result = nil
+  raised = nil
+  begin
+    result = rack.call("REQUEST_METHOD" => "GET", "PATH_INFO" => "/safe")
+  rescue StandardError => error
+    raised = error
+  end
+  if application_outcome == :success
+    assert(raised.nil? && result.equal?(expected_response), "shared capture callback replaced the successful response")
+  else
+    assert(raised.equal?(application_error), "shared capture callback replaced the original request exception")
+  end
+  assert(LogBrew::Trace.current.nil? && callbacks.length == 1, "shared callback failure leaked its trace or repeated its notification")
+  capture_broken = false
+  application_broken = false
+  assert(rack.call("REQUEST_METHOD" => "GET", "PATH_INFO" => "/safe").equal?(expected_response), "shared capture did not recover after callback failure")
+  events = JSON.parse(client.preview_json).fetch("events")
+  assert(events.length == 1 && events.first.fetch("type") == "span" && callbacks.length == 1, "shared callback recovery lost the eligible request span")
+  tests += 1
+end
 
 client = sample_client
 rack_app = lambda { |_env| [200, { "content-type" => "text/plain" }, ["ok"]] }
