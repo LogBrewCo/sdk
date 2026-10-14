@@ -53,8 +53,10 @@ export async function withInstalledPackage(callback, entry = "global-errors.js")
       ].join("\n"),
       "utf8"
     );
+    const loaded = await import(pathToFileURL(path.join(packageDir, entry)));
+    // Node exposes spread CommonJS exports only through the namespace default.
     return await callback(
-      await import(pathToFileURL(path.join(packageDir, entry))),
+      entry.endsWith(".cjs") ? loaded.default : loaded,
       packageDir,
       await import(pathToFileURL(path.join(sdkRoot, "index.js")))
     );
