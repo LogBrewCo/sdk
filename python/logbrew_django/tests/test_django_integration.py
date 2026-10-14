@@ -4,11 +4,13 @@ import json
 import logging
 import re
 import unittest
+from collections.abc import AsyncIterator, Iterator
+from typing import cast
 from unittest.mock import Mock
 
 import django
 import django.conf
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
 from django.test import Client, RequestFactory
 from django.urls import path
 from logbrew_django import configure_logbrew, create_request_trace_context, get_active_logbrew_trace
@@ -69,6 +71,16 @@ def setup_django() -> None:
     )
 
     django.setup()
+
+
+def streamed(response: object) -> Iterator[bytes]:
+    """Return the synchronous body of a streaming test-client response."""
+    return cast("Iterator[bytes]", cast("StreamingHttpResponse", response).streaming_content)
+
+
+def async_streamed(response: object) -> AsyncIterator[bytes]:
+    """Return the asynchronous body of a streaming test-client response."""
+    return cast("AsyncIterator[bytes]", cast("StreamingHttpResponse", response).streaming_content)
 
 
 def make_client() -> LogBrewClient:
