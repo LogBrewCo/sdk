@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -69,9 +68,9 @@ type SpanExporter struct {
 	metadata      map[string]any
 	now           func() time.Time
 
-	mu       sync.Mutex
-	sequence int
-	closed   bool
+	operation chan struct{}
+	sequence  int
+	closed    bool
 }
 
 var _ sdktrace.SpanExporter = (*SpanExporter)(nil)
@@ -96,6 +95,7 @@ func NewSpanExporter(client *logbrew.Client, config SpanExporterConfig) (*SpanEx
 		eventIDPrefix: prefix,
 		metadata:      compactMetadata(config.Metadata),
 		now:           config.Now,
+		operation:     make(chan struct{}, 1),
 	}, nil
 }
 
@@ -151,6 +151,11 @@ func (exporter *SpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.
 	if exporter == nil || exporter.client == nil {
 		return &logbrew.SdkError{Code: "configuration_error", Message: "OpenTelemetry span exporter requires a LogBrew client"}
 	}
+	if err := exporter.lockOperation(ctx); err != nil {
+		return err
+	}
+	defer exporter.unlockOperation()
+
 	for _, span := range spans {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -170,9 +175,9 @@ func (exporter *SpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.
 	return nil
 }
 
-// Shutdown marks the exporter as closed. It does not flush the LogBrew client;
-// callers should still use client.Flush or client.Shutdown with an app-owned
-// transport.
+// Shutdown waits for active span conversion and queueing, then closes the
+// exporter. It does not flush the LogBrew client; callers should still use
+// client.Flush or client.Shutdown with an app-owned transport.
 func (exporter *SpanExporter) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -180,18 +185,38 @@ func (exporter *SpanExporter) Shutdown(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if exporter == nil {
+	if exporter == nil || exporter.client == nil {
 		return nil
 	}
-	exporter.mu.Lock()
+	if err := exporter.lockOperation(ctx); err != nil {
+		return err
+	}
+	defer exporter.unlockOperation()
+
 	exporter.closed = true
-	exporter.mu.Unlock()
 	return nil
 }
 
+func (exporter *SpanExporter) lockOperation(ctx context.Context) error {
+	select {
+	case exporter.operation <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			exporter.unlockOperation()
+
+			return err
+		}
+
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (exporter *SpanExporter) unlockOperation() {
+	<-exporter.operation
+}
+
 func (exporter *SpanExporter) nextEvent() (string, string, error) {
-	exporter.mu.Lock()
-	defer exporter.mu.Unlock()
 	if exporter.closed {
 		return "", "", &logbrew.SdkError{Code: "shutdown_error", Message: "OpenTelemetry span exporter is already shut down"}
 	}
