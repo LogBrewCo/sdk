@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
@@ -21,8 +22,8 @@ from logbrew_sdk import (
     MetricAttributes,
     SdkError,
     SpanAttributes,
+    TelemetryTraceContext,
     Transport,
-    TransportError,
     TransportResponse,
     create_issue_attributes_from_exception,
     create_logbrew_trace_context,
@@ -31,6 +32,9 @@ from logbrew_sdk import (
     span_attributes_from_trace_context,
     trace_metadata,
     use_logbrew_trace,
+)
+from logbrew_sdk import (
+    TransportError as TransportError,
 )
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -314,7 +318,7 @@ def create_request_metric_attributes(
     duration_value = float(duration_ms)
     if duration_value < 0:
         duration_value = 0.0
-    return {
+    attributes: MetricAttributes = {
         "name": metric_name,
         "description": "Duration of one completed server request.",
         "kind": "histogram",
@@ -330,6 +334,17 @@ def create_request_metric_attributes(
             **({"service": service_name} if service_name else {}),
         },
     }
+    trace = request_logbrew_trace(request) or get_active_logbrew_trace()
+    if trace is not None:
+        metric_trace: TelemetryTraceContext = {
+            "traceId": trace.trace_id,
+            "spanId": trace.span_id,
+            "sampled": trace.sampled,
+        }
+        if trace.parent_span_id is not None:
+            metric_trace["parentSpanId"] = trace.parent_span_id
+        attributes["context"] = {"schemaVersion": 1, "trace": metric_trace}
+    return attributes
 
 
 def capture_request_metric(
@@ -371,6 +386,7 @@ def capture_request_span(
     span_id_factory: Callable[[], str] | None = None,
     trace: LogBrewTraceContext | None = None,
     service_name: str | None = None,
+    failed: bool = False,
 ) -> str:
     """Capture a FastAPI request as a LogBrew span event and return its event id."""
 
@@ -382,7 +398,7 @@ def capture_request_span(
     attributes: SpanAttributes = span_attributes_from_trace_context(
         trace_context,
         name=request_name(request),
-        status="ok" if status_code < 500 else "error",
+        status="error" if failed or status_code >= 500 else "ok",
         duration_ms=duration_ms,
         metadata=request_metadata(
             request,
@@ -408,6 +424,7 @@ def capture_exception(
     timestamp: str | None = None,
     trace: LogBrewTraceContext | None = None,
     service_name: str | None = None,
+    status_code: int = 500,
 ) -> str:
     """Capture an exception raised while handling a FastAPI request and return its event id."""
 
@@ -423,7 +440,7 @@ def capture_exception(
             mechanism="fastapi.middleware",
             handled=False,
             metadata={
-                **request_metadata(request, status_code=500, service_name=service_name),
+                **request_metadata(request, status_code=status_code, service_name=service_name),
                 **trace_metadata(trace_context),
             },
         ),
@@ -463,76 +480,139 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
             span_id_factory=span_id_factory,
         )
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive=receive)
         start = time.perf_counter()
         trace_context = create_request_trace_context(request, span_id_factory=self.config.span_id_factory)
         request.state.logbrew_trace = trace_context
-        try:
-            with use_logbrew_trace(trace_context):
+        request.state._logbrew_dispatch_owner = self
+        with use_logbrew_trace(trace_context):
+            await self._handle_request(request, receive, send, trace_context, start)
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Preserve the BaseHTTPMiddleware hook for existing dispatch subclasses."""
+
+        if getattr(request.state, "_logbrew_dispatch_owner", None) is self:
+            return await call_next(request)
+        start = time.perf_counter()
+        trace_context = create_request_trace_context(request, span_id_factory=self.config.span_id_factory)
+        request.state.logbrew_trace = trace_context
+        with use_logbrew_trace(trace_context):
+            try:
                 response = await call_next(request)
+            except Exception as exc:
+                self._complete_failed_request(request, trace_context, start, status_code=500, error=exc)
+                raise
+            self._complete_request(request, trace_context, start, status_code=response.status_code)
+        return response
+
+    async def _handle_request(
+        self,
+        request: Request,
+        receive: Receive,
+        send: Send,
+        trace_context: LogBrewTraceContext,
+        start: float,
+    ) -> None:
+        status_code = 500
+
+        async def send_with_status(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        try:
+            if type(self).dispatch is LogBrewFastAPIMiddleware.dispatch:
+                await self.app(request.scope, receive, send_with_status)
+            else:
+                downstream_error: Exception | None = None
+
+                async def observe_app(scope: Scope, receive: Receive, send: Send) -> None:
+                    nonlocal downstream_error
+                    try:
+                        await self.app(scope, receive, send)
+                    except Exception as exc:
+                        downstream_error = exc
+                        raise
+
+                await BaseHTTPMiddleware(observe_app, dispatch=self.dispatch)(request.scope, receive, send_with_status)
+                # Older Starlette can finish the response without propagating a background failure.
+                if downstream_error is not None:
+                    raise downstream_error
         except Exception as exc:
-            duration_ms = (time.perf_counter() - start) * 1000
-            if self.config.capture_exceptions:
+            self._complete_failed_request(request, trace_context, start, status_code=status_code, error=exc)
+            raise
+        self._complete_request(request, trace_context, start, status_code=status_code)
+
+    def _complete_failed_request(
+        self,
+        request: Request,
+        trace_context: LogBrewTraceContext,
+        start: float,
+        *,
+        status_code: int,
+        error: Exception,
+    ) -> None:
+        # Delivery diagnostics must not replace the application's original exception.
+        with suppress(Exception):
+            self._complete_request(request, trace_context, start, status_code=status_code, error=error)
+
+    def _complete_request(
+        self,
+        request: Request,
+        trace_context: LogBrewTraceContext,
+        start: float,
+        *,
+        status_code: int,
+        error: Exception | None = None,
+    ) -> None:
+        duration_ms = (time.perf_counter() - start) * 1000
+        if error is not None and self.config.capture_exceptions:
+            with suppress(Exception):
                 capture_exception(
-                    self.config.client,
-                    request,
-                    exc,
-                    trace=trace_context,
-                    service_name=self.config.service_name,
+                    self.config.client, request, error, trace=trace_context,
+                    service_name=self.config.service_name, status_code=status_code,
                 )
+        should_capture_request_span = (
+            self.config.capture_exceptions if error is not None
+            else self.config.capture_successful_requests or status_code >= 500
+        )
+        if should_capture_request_span:
+            with suppress(Exception):
                 capture_request_span(
                     self.config.client,
                     request,
-                    status_code=500,
+                    status_code=status_code,
                     duration_ms=duration_ms,
                     span_id_factory=self.config.span_id_factory,
                     trace=trace_context,
                     service_name=self.config.service_name,
+                    failed=error is not None,
                 )
-            if self.config.capture_request_metrics:
+        if self.config.capture_request_metrics:
+            with suppress(Exception):
                 capture_request_metric(
                     self.config.client,
                     request,
-                    status_code=500,
+                    status_code=status_code,
                     duration_ms=duration_ms,
                     metric_name=self.config.request_metric_name,
                     service_name=self.config.service_name,
                 )
-            if self.config.capture_exceptions or self.config.capture_request_metrics:
-                self._flush_if_configured()
-            raise
-
-        duration_ms = (time.perf_counter() - start) * 1000
-        should_capture_request_span = self.config.capture_successful_requests or response.status_code >= 500
-        if should_capture_request_span:
-            capture_request_span(
-                self.config.client,
-                request,
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-                span_id_factory=self.config.span_id_factory,
-                trace=trace_context,
-                service_name=self.config.service_name,
-            )
-        if self.config.capture_request_metrics:
-            capture_request_metric(
-                self.config.client,
-                request,
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-                metric_name=self.config.request_metric_name,
-                service_name=self.config.service_name,
-            )
         if should_capture_request_span or self.config.capture_request_metrics:
             self._flush_if_configured()
-        return response
 
     def _flush_if_configured(self) -> None:
         if not self.config.flush_on_response or self.config.transport is None:
             return
         try:
             self.config.client.flush(self.config.transport)
-        except (SdkError, TransportError):
+        except Exception:
             if self.config.raise_flush_errors:
                 raise
 

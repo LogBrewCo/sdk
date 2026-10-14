@@ -8,9 +8,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from unittest.mock import Mock
 
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request, Response, WebSocket
 from fastapi.testclient import TestClient
 from logbrew_fastapi import (
+    LogBrewFastAPIMiddleware,
     add_logbrew_middleware,
     create_request_trace_context,
     get_active_logbrew_trace,
@@ -22,7 +23,10 @@ from logbrew_sdk import (
     LogBrewLoggingHandler,
     RecordingTransport,
     SdkError,
+    cache_operation_with_logbrew_span,
 )
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import StreamingResponse
 
 
 def make_client() -> LogBrewClient:
@@ -42,6 +46,279 @@ def isolated_logger(name: str) -> logging.Logger:
 
 
 class FastAPIIntegrationTests(unittest.TestCase):
+    def test_existing_dispatch_subclass_keeps_its_hook_and_request_capture(self) -> None:
+        class CustomMiddleware(LogBrewFastAPIMiddleware):
+            async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+                response = await super().dispatch(request, call_next)
+                response.headers["x-custom-middleware"] = "active"
+                return response
+
+        self.assertTrue(issubclass(CustomMiddleware, BaseHTTPMiddleware))
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        app.add_middleware(CustomMiddleware, client=sdk_client, transport=transport, capture_request_metrics=True)
+
+        @app.get("/health")
+        async def health() -> dict[str, bool]:
+            return {"ok": True}
+
+        with TestClient(app) as http:
+            response = http.get("/health")
+
+        self.assertEqual(response.headers["x-custom-middleware"], "active")
+        payload = json.loads(transport.sent_bodies[0])
+        span, metric = [event["attributes"] for event in payload["events"]]
+        self.assertEqual(metric["context"]["trace"]["spanId"], span["spanId"])
+
+    def test_dispatch_override_keeps_late_background_failure_capture(self) -> None:
+        class CustomMiddleware(LogBrewFastAPIMiddleware):
+            async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+                response = await super().dispatch(request, call_next)
+                response.headers["x-custom-middleware"] = "active"
+                return response
+
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        app.add_middleware(CustomMiddleware, client=sdk_client, transport=transport, capture_request_metrics=True)
+
+        def background() -> None:
+            raise RuntimeError("private subclass background failure")
+
+        @app.get("/background")
+        async def endpoint(tasks: BackgroundTasks) -> dict[str, bool]:
+            tasks.add_task(background)
+            return {"ok": True}
+
+        with TestClient(app) as http, self.assertRaises(RuntimeError):
+            http.get("/background")
+
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["issue", "span", "metric"])
+        issue, span, metric = [event["attributes"] for event in payload["events"]]
+        self.assertEqual(span["status"], "error")
+        self.assertEqual(span["metadata"]["status_code"], 200)
+        self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
+        self.assertEqual(metric["context"]["trace"]["spanId"], span["spanId"])
+        self.assertNotIn("private subclass background failure", json.dumps(payload))
+
+    def test_dispatch_override_keeps_late_stream_failure_capture(self) -> None:
+        calls = []
+
+        class CustomMiddleware(LogBrewFastAPIMiddleware):
+            async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+                calls.append("dispatch")
+                return await super().dispatch(request, call_next)
+
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        app.add_middleware(CustomMiddleware, client=sdk_client, transport=transport)
+
+        async def body() -> AsyncIterator[bytes]:
+            yield b"first"
+            raise RuntimeError("private subclass stream failure")
+
+        @app.get("/stream")
+        async def stream() -> StreamingResponse:
+            return StreamingResponse(body())
+
+        with TestClient(app) as http, self.assertRaises(Exception) as raised:
+            http.get("/stream")
+
+        self.assertIn("private subclass stream failure", str(raised.exception) + repr(raised.exception))
+        self.assertEqual(calls, ["dispatch"])
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["issue", "span"])
+        span = payload["events"][1]["attributes"]
+        self.assertEqual(span["status"], "error")
+        self.assertEqual(span["metadata"]["status_code"], 200)
+        self.assertNotIn("private subclass stream failure", json.dumps(payload))
+
+    def test_websocket_scope_passes_through_without_http_capture(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        add_logbrew_middleware(app, client=sdk_client, transport=transport)
+
+        @app.websocket("/socket")
+        async def socket(websocket: WebSocket) -> None:
+            await websocket.accept()
+            self.assertIsNone(get_active_logbrew_trace())
+            await websocket.send_text("ready")
+            await websocket.close()
+
+        with TestClient(app) as http, http.websocket_connect("/socket") as websocket:
+            self.assertEqual(websocket.receive_text(), "ready")
+
+        self.assertEqual(sdk_client.pending_events(), 0)
+        self.assertEqual(transport.sent_bodies, [])
+
+    def test_background_failure_respects_exception_capture_opt_out(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        add_logbrew_middleware(
+            app, client=sdk_client, transport=transport,
+            capture_exceptions=False, capture_request_metrics=True,
+        )
+
+        def background() -> None:
+            raise RuntimeError("private background failure")
+
+        @app.get("/background")
+        async def endpoint(tasks: BackgroundTasks) -> dict[str, bool]:
+            tasks.add_task(background)
+            return {"ok": True}
+
+        with TestClient(app) as http, self.assertRaises(RuntimeError):
+            http.get("/background")
+
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["metric"])
+        self.assertEqual(payload["events"][0]["attributes"]["metadata"]["statusCode"], 200)
+        self.assertNotIn("private background failure", json.dumps(payload))
+
+    def test_stream_and_background_children_finish_before_request_flush(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        logger = isolated_logger("fastapi.stream")
+        handler = LogBrewLoggingHandler(sdk_client)
+        logger.addHandler(handler)
+        app = FastAPI()
+        add_logbrew_middleware(app, client=sdk_client, transport=transport)
+        traces = []
+
+        def background() -> None:
+            traces.append(get_active_logbrew_trace())
+            logger.info("background complete")
+
+        async def body() -> AsyncIterator[bytes]:
+            yield b"first "
+            traces.append(get_active_logbrew_trace())
+            cache_operation_with_logbrew_span(
+                "GET inventory",
+                client=sdk_client,
+                event_id="evt_fastapi_stream_cache",
+                operation=lambda: True,
+                system="memory-cache",
+                cache_name="inventory-cache",
+                cache_hit=True,
+            )
+            logger.info("stream complete")
+            yield b"last"
+
+        @app.get("/streams/{stream_id}")
+        async def stream(stream_id: int, tasks: BackgroundTasks) -> StreamingResponse:
+            tasks.add_task(background)
+            return StreamingResponse(body(), background=tasks)
+
+        try:
+            with TestClient(app) as http:
+                response = http.get(
+                    "/streams/42",
+                    headers={"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+                )
+        finally:
+            logger.removeHandler(handler)
+
+        self.assertEqual(response.content, b"first last")
+        self.assertEqual(len(transport.sent_bodies), 1)
+        self.assertEqual(sdk_client.pending_events(), 0)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["span", "log", "log", "span"])
+        child, stream_log, background_log, request = [event["attributes"] for event in payload["events"]]
+        self.assertEqual(request["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736")
+        self.assertEqual(request["parentSpanId"], "00f067aa0ba902b7")
+        self.assertEqual(request["status"], "ok")
+        self.assertEqual(child["parentSpanId"], request["spanId"])
+        self.assertEqual(child["traceId"], request["traceId"])
+        for log in [stream_log, background_log]:
+            self.assertEqual(log["metadata"]["spanId"], request["spanId"])
+            self.assertEqual(log["metadata"]["traceId"], request["traceId"])
+        self.assertEqual(len(traces), 2)
+        self.assertTrue(all(trace is not None and trace.span_id == request["spanId"] for trace in traces))
+        self.assertIsNone(get_active_logbrew_trace())
+
+    def test_stream_failure_captures_issue_after_response_start(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        add_logbrew_middleware(
+            app, client=sdk_client, transport=transport, capture_request_metrics=True,
+        )
+
+        async def body() -> AsyncIterator[bytes]:
+            yield b"first chunk"
+            raise RuntimeError("private stream failure")
+
+        @app.get("/streams/{stream_id}")
+        async def stream(stream_id: int) -> StreamingResponse:
+            return StreamingResponse(body())
+
+        # Older Starlette releases propagate task-group failures as ExceptionGroup.
+        with TestClient(app) as http, self.assertRaises(Exception) as raised:
+            http.get("/streams/42?private=query")
+
+        self.assertIn("private stream failure", str(raised.exception) + repr(raised.exception))
+
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["issue", "span", "metric"])
+        issue, span, metric = [event["attributes"] for event in payload["events"]]
+        self.assertEqual(span["name"], "GET /streams/{stream_id}")
+        self.assertEqual(span["status"], "error")
+        self.assertEqual(span["metadata"]["status_code"], 200)
+        self.assertEqual(metric["metadata"]["statusCode"], 200)
+        self.assertEqual(metric["context"]["trace"]["traceId"], span["traceId"])
+        self.assertEqual(metric["context"]["trace"]["spanId"], span["spanId"])
+        self.assertEqual(issue["metadata"]["status_code"], 200)
+        self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
+        self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
+        self.assertNotIn("private", json.dumps(payload))
+        self.assertNotIn("/streams/42", json.dumps(payload))
+        self.assertIsNone(get_active_logbrew_trace())
+
+    def test_background_failure_logs_flush_with_the_request(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        logger = isolated_logger("fastapi.background")
+        handler = LogBrewLoggingHandler(sdk_client)
+        logger.addHandler(handler)
+        app = FastAPI()
+        add_logbrew_middleware(app, client=sdk_client, transport=transport)
+
+        def background() -> None:
+            logger.info("background started")
+            raise RuntimeError("private background failure")
+
+        @app.get("/background")
+        async def endpoint(tasks: BackgroundTasks) -> dict[str, bool]:
+            tasks.add_task(background)
+            return {"ok": True}
+
+        try:
+            with TestClient(app) as http, self.assertRaises(RuntimeError):
+                http.get("/background")
+        finally:
+            logger.removeHandler(handler)
+
+        self.assertEqual(sdk_client.pending_events(), 0)
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["log", "issue", "span"])
+        log, issue, span = [event["attributes"] for event in payload["events"]]
+        self.assertEqual(span["status"], "error")
+        self.assertEqual(span["metadata"]["status_code"], 200)
+        self.assertEqual(log["metadata"]["spanId"], span["spanId"])
+        self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
+        self.assertNotIn("private background failure", json.dumps(payload))
+        self.assertIsNone(get_active_logbrew_trace())
+
     def test_init_logbrew_owns_capture_logging_and_shutdown_delivery(self) -> None:
         api_key = "project-key-must-not-appear"
         transport = RecordingTransport.always_accept()
