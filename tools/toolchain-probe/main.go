@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -32,6 +33,12 @@ const (
 	exitUsage             = 2
 	timedOut              = "timed out"
 	commandSeparator      = "\x00"
+	limitedExecutionMode  = "_exec"
+)
+
+var (
+	errUnsupportedPlatform = errors.New("unsupported platform")
+	errProcessCleanup      = errors.New("cleanup failed")
 )
 
 type checkSummary struct {
@@ -53,7 +60,7 @@ type checkSummary struct {
 }
 
 func writeText(output io.Writer, text string, code int) int {
-	if _, err := io.WriteString(output, text); err != nil {
+	if written, err := io.WriteString(output, text); err != nil || written != len(text) {
 		return exitFailure
 	}
 
@@ -88,22 +95,14 @@ func probe(
 	//nolint:gosec // G204: argument tests prove CLI input is rejected.
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 
-	stop, err := configureProcess(cmd)
-	if err != nil {
-		return "unsupported platform"
-	}
-
 	stdout, stderr := new(boundedOutput), new(boundedOutput)
 	stdout.cancel, stderr.cancel = cancel, cancel
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	cmd.Cancel, cmd.WaitDelay = stop, pipeWait
-	err = cmd.Run()
-
-	if stopError := stop(); stopError != nil && !errors.Is(stopError, os.ErrProcessDone) {
-		return "cleanup failed"
-	}
+	err := runManagedProcess(cmd)
 
 	switch {
+	case errors.Is(err, errUnsupportedPlatform), errors.Is(err, errProcessCleanup):
+		return err.Error()
 	case stdout.limited || stderr.limited:
 		return "output limit exceeded"
 	case ctx.Err() != nil:
@@ -115,6 +114,22 @@ func probe(
 	}
 
 	return versionLine(stdout.data, stderr.data)
+}
+
+func runManagedProcess(command *exec.Cmd) error {
+	stop, err := configureProcess(command)
+	if err != nil {
+		return errUnsupportedPlatform
+	}
+	command.Cancel, command.WaitDelay = stop, pipeWait
+	err = command.Run()
+	if stopError := stop(); stopError != nil && !errors.Is(stopError, os.ErrProcessDone) {
+		return errProcessCleanup
+	}
+	if err != nil {
+		return fmt.Errorf("run managed process: %w", err)
+	}
+	return nil
 }
 
 func versionLine(stdout, stderr []byte) string {
@@ -225,11 +240,18 @@ func run() int {
 	if os.Args[1] == "deadline" {
 		return runDeadline(os.Args[2:])
 	}
-	if os.Args[1] == "_exec" {
+	if os.Args[1] == limitedExecutionMode {
 		return executeLimited(os.Args[2:])
 	}
+	if os.Args[1] == "package-json" {
+		return checkPackageJSON(os.Args[2:], os.Stderr)
+	}
+	if os.Args[1] == schemaCheckMode || os.Args[1] == eventBatchCheckMode {
+		return checkSchema(os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
+	}
 	return writeText(os.Stderr,
-		"toolchain-probe accepts inventory, clock, summary, or deadline mode\n", exitUsage)
+		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
+			"schema-check, or event-batch-check mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {
@@ -244,21 +266,14 @@ func runDeadline(arguments []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	childArguments := append([]string{"_exec", strconv.FormatUint(fileLimit, 10), executable},
+	childArguments := append([]string{limitedExecutionMode, strconv.FormatUint(fileLimit, 10), executable},
 		arguments[deadlineArgumentCount:]...)
 	// Reviewed 2026-09-03: deadline mode intentionally executes its caller's
 	// bounded command through the isolated, limited child mode below.
 	//nolint:gosec // G204: timeout, process group, output, and file size are bounded.
 	command := exec.CommandContext(ctx, self, childArguments...)
-	stop, err := configureProcess(command)
-	if err != nil {
-		return exitFailure
-	}
-	command.Stdout, command.Stderr, command.Cancel, command.WaitDelay = os.Stdout, os.Stderr, stop, pipeWait
-	err = command.Run()
-	stopError := stop()
-	if stopError != nil && !errors.Is(stopError, os.ErrProcessDone) ||
-		ctx.Err() != nil || err != nil {
+	command.Stdout, command.Stderr = os.Stdout, os.Stderr
+	if err := runManagedProcess(command); err != nil || ctx.Err() != nil {
 		return exitFailure
 	}
 	return exitOK

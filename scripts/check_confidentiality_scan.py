@@ -238,6 +238,14 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text.endswith("_test.go") and terms == {"cleanup"} and "t.Cleanup(" in line:
         return True
 
+    # The native verifier names JSON tokens, process cleanup, and checkout credential settings.
+    if (
+        relative_text.startswith("tools/toolchain-probe/")
+        and relative_text.endswith(".go")
+        and terms <= {"token", "cleanup", "credential"}
+    ):
+        return True
+
     if is_sdk_instrumentation_restore_reference(relative_text, terms):
         return True
 

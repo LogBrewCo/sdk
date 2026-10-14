@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
 spring_boot_version="${LOGBREW_APP_SPRING_BOOT_VERSION:-3.2.5}"
@@ -567,7 +568,7 @@ else
   print_failure_diagnostics "$status"
   exit "$status"
 fi
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/spring-boot.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/spring-boot.stdout.json" >/dev/null
 grep -q '"source": "logback"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"source": "jakarta-servlet"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"springApplicationName": "checkout-service"' "$tmp_dir/spring-boot.stdout.json"

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 react_native_package_version="$(
   node -e '
@@ -1153,7 +1154,7 @@ function deterministicBytes(length) {
 EOF
 
 node smoke.mjs > "$tmp_dir/native-smoke.stdout.json" 2> "$tmp_dir/native-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/native-smoke.stdout.json" >/dev/null
 python3 - "$tmp_dir/native-smoke.stdout.json" <<'PY'
 import json
 import sys
@@ -1218,7 +1219,7 @@ grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/native-smoke.stderr.jso
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/native-smoke.stderr.json"
 
 node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans > "$tmp_dir/navigation-resource-spans.stdout.json" 2> "$tmp_dir/navigation-resource-spans.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/navigation-resource-spans.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/navigation-resource-spans.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/navigation-resource-spans.stderr.json"
 grep -q '"events":4' "$tmp_dir/navigation-resource-spans.stderr.json"
 grep -q '"navigationSpan":"navigation:CheckoutComplete"' "$tmp_dir/navigation-resource-spans.stderr.json"
@@ -1681,18 +1682,18 @@ grep -q 'real-user-smoke -> node node_modules/@logbrew/react-native/examples/ind
 grep -q 'resource-fetch-spans -> node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'trace-correlation -> node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/example-readme.stderr.json"
 grep -q '"mode":"local_recording"' "$tmp_dir/example-readme.stderr.json"
 grep -q '"hostedAccepted":false' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/react-native/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"events":8' "$tmp_dir/example-default.stderr.json"
 grep -q '"timelineEvents":3' "$tmp_dir/example-default.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/example-default.stderr.json"
 node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans > "$tmp_dir/example-lifecycle.stdout.json" 2> "$tmp_dir/example-lifecycle.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-lifecycle.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-lifecycle.stdout.json" >/dev/null
 grep -q '"events":4' "$tmp_dir/example-lifecycle.stderr.json"
 grep -q '"inactiveSpan":"app_state:active->inactive"' "$tmp_dir/example-lifecycle.stderr.json"
 grep -q '"backgroundSpan":"app_state:inactive->background"' "$tmp_dir/example-lifecycle.stderr.json"
@@ -1702,7 +1703,7 @@ python3 "$repo_root/scripts/check_react_native_native_bridge_payload.py" "$tmp_d
 node node_modules/@logbrew/react-native/examples/index.mjs instrumentation-kit > "$tmp_dir/example-instrumentation.stdout.json" 2> "$tmp_dir/example-instrumentation.stderr.json"
 python3 "$repo_root/scripts/check_react_native_instrumentation_payload.py" "$tmp_dir/example-instrumentation.stdout.json" "$tmp_dir/example-instrumentation.stderr.json"
 node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation > "$tmp_dir/example-trace.stdout.json" 2> "$tmp_dir/example-trace.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-trace.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-trace.stdout.json" >/dev/null
 python3 - "$tmp_dir/example-trace.stdout.json" <<'PY'
 import json
 import sys
@@ -1726,7 +1727,7 @@ PY
 grep -q '"events":5' "$tmp_dir/example-trace.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/example-trace.stderr.json"
 node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans > "$tmp_dir/example-resource-fetch.stdout.json" 2> "$tmp_dir/example-resource-fetch.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-resource-fetch.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-resource-fetch.stdout.json" >/dev/null
 grep -q '"events":2' "$tmp_dir/example-resource-fetch.stderr.json"
 grep -q '"successSpan":"POST /api/checkout"' "$tmp_dir/example-resource-fetch.stderr.json"
 grep -q '"failureSpan":"GET /api/fail"' "$tmp_dir/example-resource-fetch.stderr.json"
@@ -1751,7 +1752,7 @@ python3 "$repo_root/scripts/check_react_native_native_bridge_payload.py" "$tmp_d
 npm --prefix node_modules/@logbrew/react-native/examples run --silent instrumentation-kit > "$tmp_dir/npm-helper-instrumentation.stdout.json" 2> "$tmp_dir/npm-helper-instrumentation.stderr.json"
 python3 "$repo_root/scripts/check_react_native_instrumentation_payload.py" "$tmp_dir/npm-helper-instrumentation.stdout.json" "$tmp_dir/npm-helper-instrumentation.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"timelineEvents":3' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/npm-helper-smoke.stderr.json"

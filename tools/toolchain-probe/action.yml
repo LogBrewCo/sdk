@@ -1,0 +1,53 @@
+name: Build native SDK verifier
+description: Build the verifier with its colocated compiler and dependency pins.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -Eeuo pipefail
+        native_root="$GITHUB_ACTION_PATH"
+        if [[ ! -d "$native_root" || -L "$native_root" || -L "${native_root%/*}" ]]; then
+          echo "Native verifier source is unavailable." >&2
+          exit 1
+        fi
+        native_state="$(git -C "$native_root" status --porcelain=v1 --untracked-files=all --ignored -- .)"
+        if [[ -n "$native_state" ]]; then
+          echo "Native verifier source changed." >&2
+          exit 1
+        fi
+        for native_file in "$native_root"/*.go "$native_root"/.go-version "$native_root"/go.mod "$native_root"/go.sum; do
+          if [[ ! -f "$native_file" || -L "$native_file" ]]; then
+            echo "Native verifier source is incomplete." >&2
+            exit 1
+          fi
+        done
+        read -r go_version < "$native_root/.go-version"
+        if [[ ! "$go_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Native verifier compiler pin is invalid." >&2
+          exit 1
+        fi
+        export GOENV=off GOWORK=off GOFLAGS=-mod=readonly
+        if ! bootstrap_go="$(command -v go)"; then
+          case "$RUNNER_ARCH" in
+            X64) go_arch=x64 ;;
+            ARM64) go_arch=arm64 ;;
+            *) echo "Unsupported native verifier architecture." >&2; exit 1 ;;
+          esac
+          for bootstrap_go in "$RUNNER_TOOL_CACHE"/go/*/"$go_arch"/bin/go; do
+            if [[ -x "$bootstrap_go" ]]; then
+              break
+            fi
+          done
+        fi
+        if [[ ! -x "$bootstrap_go" ]]; then
+          echo "A runner Go compiler is required to provision the verifier pin." >&2
+          exit 1
+        fi
+        go_root="$(GOTOOLCHAIN="go$go_version" GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org "$bootstrap_go" env GOROOT)"
+        GOTOOLCHAIN=local GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org "$go_root/bin/go" -C "$native_root" mod download
+        git -C "$native_root" diff --exit-code -- go.mod go.sum
+        probe_path="$RUNNER_TEMP/logbrew-toolchain-probe"
+        GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off "$go_root/bin/go" -C "$native_root" build -o "$probe_path" .
+        printf '%s/bin\n' "$go_root" >> "$GITHUB_PATH"
+        printf 'LOGBREW_TOOLCHAIN_PROBE_BIN=%s\n' "$probe_path" >> "$GITHUB_ENV"

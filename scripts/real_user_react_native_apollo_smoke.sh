@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -284,12 +285,12 @@ EOF
 npx tsc --project tsconfig.json
 
 node node_modules/@logbrew/react-native/examples/index.mjs apollo-link-spans > "$tmp_dir/example-apollo.stdout.json" 2> "$tmp_dir/example-apollo.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-apollo.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-apollo.stdout.json" >/dev/null
 grep -q '"events":2' "$tmp_dir/example-apollo.stderr.json"
 grep -q '"successSpan":"graphql.mutation CheckoutSubmit"' "$tmp_dir/example-apollo.stderr.json"
 grep -q '"failureSpan":"graphql.mutation CheckoutRetry"' "$tmp_dir/example-apollo.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run --silent apollo-link-spans > "$tmp_dir/npm-example-apollo.stdout.json" 2> "$tmp_dir/npm-example-apollo.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-example-apollo.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-example-apollo.stdout.json" >/dev/null
 grep -q '"events":2' "$tmp_dir/npm-example-apollo.stderr.json"
 
 echo "React Native Apollo installed-artifact smoke passed"

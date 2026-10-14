@@ -3,6 +3,7 @@ set -euo pipefail
 trap 'printf "browser smoke failed at line %s\n" "$LINENO" >&2' ERR
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 browser_package_version="$(
   node -e '
@@ -1798,7 +1799,7 @@ if ! node smoke.mjs > "$tmp_dir/browser-smoke.stdout.json" 2> "$tmp_dir/browser-
   tail -c 4096 "$tmp_dir/browser-smoke.stderr.json" >&2
   exit 1
 fi
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/browser-valid-batch.json" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"beaconEnvelope":"evt_beacon_log_001"' "$tmp_dir/browser-smoke.stderr.json"
@@ -2286,11 +2287,11 @@ grep -q 'node node_modules/@logbrew/browser/examples/index.mjs readme-example' "
 node node_modules/@logbrew/browser/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/browser/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/browser/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"pagehideDeferredEvents":13' "$tmp_dir/example-default.stderr.json"
 grep -q '"hiddenDeferredEvents":1' "$tmp_dir/example-default.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/example-default.stderr.json"
@@ -2306,7 +2307,7 @@ grep -q 'readme-example -> node node_modules/@logbrew/browser/examples/index.mjs
 npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-helper-help.txt"
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"pagehideDeferredEvents":13' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"hiddenDeferredEvents":1' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"

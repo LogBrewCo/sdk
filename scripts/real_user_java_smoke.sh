@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
 # shellcheck source=scripts/java_logback_deps.sh
@@ -224,40 +225,40 @@ grep -Fxq 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_
 grep -Fxq 'run (real-user-smoke) -> make run' "$tmp_dir/extracted-examples-help.txt"
 grep -Fxq 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/extracted-examples-help.txt"
 (cd "$extract_dir/examples" && make run-readme-example) > "$tmp_dir/extracted-readme-default.stdout.json" 2> "$tmp_dir/extracted-readme-default.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-readme-default.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/extracted-readme-default.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-readme-default.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/extracted-readme-default.stderr.json"
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run-readme-example) > "$tmp_dir/extracted-readme.stdout.json" 2> "$tmp_dir/extracted-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/extracted-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/extracted-readme.stderr.json"
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run) > "$tmp_dir/extracted-smoke-alias.stdout.json" 2> "$tmp_dir/extracted-smoke-alias.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/extracted-smoke-alias.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/extracted-smoke-alias.stderr.json"
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run-first-useful-telemetry) > "$tmp_dir/extracted-first-useful.stdout.json" 2> "$tmp_dir/extracted-first-useful.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-first-useful.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/extracted-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/extracted-first-useful.stdout.json" "$tmp_dir/extracted-first-useful.stderr.json" >/dev/null
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run-http-trace-correlation) > "$tmp_dir/extracted-http-trace.stdout.json" 2> "$tmp_dir/extracted-http-trace.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-http-trace.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/extracted-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/extracted-http-trace.stdout.json" "$tmp_dir/extracted-http-trace.stderr.json" >/dev/null
 
 javac -Xlint:all -Werror --release 11 -cp "$java_jar:$java_optional_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
 java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" ReadmeExample > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-readme.stderr.json"
 java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" RealUserSmoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/packaged-smoke.stderr.json"
 java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
 java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" HttpTraceCorrelation > "$tmp_dir/packaged-http-trace.stdout.json" 2> "$tmp_dir/packaged-http-trace.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json" >/dev/null
 
 lifecycle_app="$tmp_dir/lifecycle-app"
@@ -1368,7 +1369,7 @@ public final class Main {
 JAVA
 javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-$java_version.jar:$java_optional_classpath" -d "$smoke_app/classes" "$smoke_app/src/Main.java"
 java -cp "$smoke_app/lib/logbrew-sdk-$java_version.jar:$smoke_app/classes:$java_optional_classpath" Main > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"issueDiagnosticEvents":2' "$tmp_dir/smoke-app.stderr.json"

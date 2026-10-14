@@ -71,6 +71,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
+      - name: Test native SDK verifier
+        run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go -C tools/toolchain-probe test -race ./...
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -109,12 +115,6 @@ jobs:
             go/logbrew/otel/go.mod
             go/logbrew/otel/go.sum
             tools/toolchain-probe/go.mod
-
-      - name: Build native test probe
-        run: |
-          probe_path="$RUNNER_TEMP/logbrew-toolchain-probe"
-          (cd tools/toolchain-probe && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go build -o "$probe_path" .)
-          printf 'LOGBREW_TOOLCHAIN_PROBE_BIN=%s\n' "$probe_path" >> "$GITHUB_ENV"
 
       - name: Set up Java
         if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
@@ -169,13 +169,16 @@ jobs:
         run: python3 scripts/check_backend_contract_reports.py
 
       - name: Validate happy-path fixture
-        run: python3 scripts/validate_fixtures.py fixtures/valid-batch.json
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
 
       - name: Validate expected failure fixture
-        run: python3 scripts/validate_fixtures.py fixtures/invalid-batch.json --expect-invalid
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/invalid-batch.json --expect-invalid
 
       - name: Validate JSON output shape
-        run: python3 scripts/validate_fixtures.py fixtures/valid-batch.json --json
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json
 
       - name: Check release metadata
         run: python3 scripts/check_release_metadata.py
@@ -595,6 +598,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -687,6 +693,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -825,6 +834,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -846,6 +858,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
 
       - name: Set up Java
         uses: actions/setup-java@v5

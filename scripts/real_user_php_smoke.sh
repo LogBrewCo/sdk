@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -509,19 +510,19 @@ if (($data["autoload"]["psr-4"]["LogBrew\\"] ?? null) !== "src/") {
 ' vendor/logbrew/sdk/composer.json
 php vendor/logbrew/sdk/examples/readme_example.php > vendor-readme-example.stdout.json 2> vendor-readme-example.stderr.json
 assert_event_types vendor-readme-example.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example.stderr.json
 grep -q '"ok":true' vendor-readme-example.stderr.json
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make.stdout.json 2> vendor-readme-example-make.stderr.json
 assert_event_types vendor-readme-example-make.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example-make.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-readme-example-make.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example-make.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example-make.stderr.json
 grep -q '"ok":true' vendor-readme-example-make.stderr.json
 php vendor/logbrew/sdk/examples/real_user_smoke.php > vendor-example.stdout.json 2> vendor-example.stderr.json
 assert_event_types vendor-example.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-example.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example.stdout.json >/dev/null
 grep -q '"events":6' vendor-example.stderr.json
 grep -q '"ok":true' vendor-example.stderr.json
@@ -538,7 +539,7 @@ grep -q '"events":6' vendor-example-make-run.stderr.json
 grep -q '"supportDraftRedacted":true' vendor-example-make-run.stderr.json
 grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make-run.stderr.json
 assert_event_types vendor-example-make.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-make.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-example-make.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-make.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-make.stderr.json
 grep -q '"ok":true' vendor-example-make.stderr.json
@@ -547,7 +548,7 @@ grep -q '"type": "metric"' vendor-first-useful.stdout.json
 grep -q '"type": "span"' vendor-first-useful.stdout.json
 grep -q '"events":7' vendor-first-useful.stderr.json
 grep -q '"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' vendor-first-useful.stderr.json
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-first-useful.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-first-useful.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful.stdout.json vendor-first-useful.stderr.json >/dev/null
 (cd vendor/logbrew/sdk/examples && make run-first-useful-telemetry) > vendor-first-useful-make.stdout.json 2> vendor-first-useful-make.stderr.json
 grep -q '"type": "metric"' vendor-first-useful-make.stdout.json
@@ -556,7 +557,7 @@ python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-usef
 php vendor/logbrew/sdk/examples/issue_diagnostics.php > vendor-issue-diagnostics.stdout.json 2> vendor-issue-diagnostics.stderr.json
 grep -q '"type": "issue"' vendor-issue-diagnostics.stdout.json
 grep -q '"events":1' vendor-issue-diagnostics.stderr.json
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-issue-diagnostics.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-issue-diagnostics.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_php_issue_diagnostics_payload.py" vendor-issue-diagnostics.stdout.json vendor-issue-diagnostics.stderr.json >/dev/null
 (cd vendor/logbrew/sdk/examples && make run-issue-diagnostics) > vendor-issue-diagnostics-make.stdout.json 2> vendor-issue-diagnostics-make.stderr.json
 grep -q '"type": "issue"' vendor-issue-diagnostics-make.stdout.json
@@ -1700,7 +1701,7 @@ grep -q '"events":7' http-trace-composer.stderr.json
 python3 "$repo_root/scripts/check_php_http_trace_payload.py" http-trace-composer.stdout.json http-trace-composer.stderr.json >/dev/null
 php readme-example.php > readme-example.stdout.json 2> readme-example.stderr.json
 assert_event_types readme-example.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" readme-example.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
 grep -q '"events":6' readme-example.stderr.json
 grep -q '"ok":true' readme-example.stderr.json
@@ -1924,19 +1925,19 @@ grep -q '"httpRequests":2' http-transport-reinstall.stderr.json
 composer run --no-interaction --quiet smoke-vendor-example >/dev/null
 php readme-example.php > readme-example-reinstall.stdout.json 2> readme-example-reinstall.stderr.json
 assert_event_types readme-example-reinstall.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" readme-example-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" readme-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' readme-example-reinstall.stderr.json
 grep -q '"ok":true' readme-example-reinstall.stderr.json
 php vendor/logbrew/sdk/examples/readme_example.php > vendor-readme-example-reinstall.stdout.json 2> vendor-readme-example-reinstall.stderr.json
 assert_event_types vendor-readme-example-reinstall.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-readme-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example-reinstall.stderr.json
 grep -q '"ok":true' vendor-readme-example-reinstall.stderr.json
 php vendor/logbrew/sdk/examples/real_user_smoke.php > vendor-example-reinstall.stdout.json 2> vendor-example-reinstall.stderr.json
 assert_event_types vendor-example-reinstall.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-reinstall.stderr.json
 grep -q '"ok":true' vendor-example-reinstall.stderr.json
@@ -1954,7 +1955,7 @@ grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery'
 test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "8"
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make-reinstall.stdout.json 2> vendor-readme-example-make-reinstall.stderr.json
 assert_event_types vendor-readme-example-make-reinstall.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-readme-example-make-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-readme-example-make-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-readme-example-make-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-readme-example-make-reinstall.stderr.json
 grep -q '"ok":true' vendor-readme-example-make-reinstall.stderr.json
@@ -1969,7 +1970,7 @@ grep -q '"events":6' vendor-example-make-reinstall-run.stderr.json
 grep -q '"supportDraftRedacted":true' vendor-example-make-reinstall-run.stderr.json
 grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make-reinstall-run.stderr.json
 assert_event_types vendor-example-make-reinstall.stdout.json release environment issue log span action
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-make-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-example-make-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-make-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-make-reinstall.stderr.json
 grep -q '"ok":true' vendor-example-make-reinstall.stderr.json
@@ -1978,7 +1979,7 @@ php vendor/logbrew/sdk/examples/first_useful_telemetry.php > vendor-first-useful
 grep -q '"type": "metric"' vendor-first-useful-reinstall.stdout.json
 grep -q '"type": "span"' vendor-first-useful-reinstall.stdout.json
 grep -q '"events":7' vendor-first-useful-reinstall.stderr.json
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-first-useful-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-first-useful-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-reinstall.stdout.json vendor-first-useful-reinstall.stderr.json >/dev/null
 (cd vendor/logbrew/sdk/examples && make run-first-useful-telemetry) > vendor-first-useful-make-reinstall.stdout.json 2> vendor-first-useful-make-reinstall.stderr.json
 grep -q '"type": "metric"' vendor-first-useful-make-reinstall.stdout.json
@@ -1987,7 +1988,7 @@ python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-usef
 php vendor/logbrew/sdk/examples/issue_diagnostics.php > vendor-issue-diagnostics-reinstall.stdout.json 2> vendor-issue-diagnostics-reinstall.stderr.json
 grep -q '"type": "issue"' vendor-issue-diagnostics-reinstall.stdout.json
 grep -q '"events":1' vendor-issue-diagnostics-reinstall.stderr.json
-python3 "$repo_root/scripts/validate_fixtures.py" vendor-issue-diagnostics-reinstall.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" vendor-issue-diagnostics-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_php_issue_diagnostics_payload.py" vendor-issue-diagnostics-reinstall.stdout.json vendor-issue-diagnostics-reinstall.stderr.json >/dev/null
 (cd vendor/logbrew/sdk/examples && make run-issue-diagnostics) > vendor-issue-diagnostics-make-reinstall.stdout.json 2> vendor-issue-diagnostics-make-reinstall.stderr.json
 grep -q '"type": "issue"' vendor-issue-diagnostics-make-reinstall.stdout.json
@@ -2544,7 +2545,7 @@ grep -q '"type": "issue"' smoke.stdout.json
 grep -q '"type": "log"' smoke.stdout.json
 grep -q '"type": "span"' smoke.stdout.json
 grep -q '"type": "action"' smoke.stdout.json
-python3 "$repo_root/scripts/validate_fixtures.py" smoke.stdout.json >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" smoke.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
 grep -q '"events":6' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json

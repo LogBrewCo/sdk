@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/unity/logbrew-unity"
 tmp_dir="$(mktemp -d)"
 lock_dir="${TMPDIR:-/tmp}/logbrewco-sdk-unity-checks.lock"
@@ -173,12 +174,12 @@ EOF
 }
 
 run_sample ReadmeSample false "$tmp_dir/readme-sample.stdout.json" "$tmp_dir/readme-sample.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-sample.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme-sample.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-sample.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-sample.stderr.json"
 
 run_sample RealUserSample true "$tmp_dir/real-user-sample.stdout.json" "$tmp_dir/real-user-sample.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-sample.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/real-user-sample.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-sample.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-sample.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/real-user-sample.stderr.json"
@@ -187,25 +188,25 @@ grep -q '"metricEvents":1' "$tmp_dir/real-user-sample.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/real-user-sample.stderr.json"
 
 make --no-print-directory -C "$package_dir/examples" run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_trace_correlation_payload.py" "$tmp_dir/trace-correlation.stdout.json" "$tmp_dir/trace-correlation.stderr.json"
 
 make --no-print-directory -C "$package_dir/examples" run-lifecycle-spans > "$tmp_dir/lifecycle-spans.stdout.json" 2> "$tmp_dir/lifecycle-spans.stderr.json"
 test ! -s "$tmp_dir/lifecycle-spans.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/lifecycle-spans.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/lifecycle-spans.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/lifecycle-spans.stdout.json"
 
 make --no-print-directory -C "$package_dir/examples" run-lifecycle-tracker > "$tmp_dir/lifecycle-tracker.stdout.json" 2> "$tmp_dir/lifecycle-tracker.stderr.json"
 test ! -s "$tmp_dir/lifecycle-tracker.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/lifecycle-tracker.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/lifecycle-tracker.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/lifecycle-tracker.stdout.json"
 
 make --no-print-directory -C "$package_dir/examples" run-request-tracker > "$tmp_dir/request-tracker.stdout.json" 2> "$tmp_dir/request-tracker.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/request-tracker.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/request-tracker.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_request_tracker_payload.py" "$tmp_dir/request-tracker.stdout.json" "$tmp_dir/request-tracker.stderr.json"
 
 make --no-print-directory -C "$package_dir/examples" run-coroutine-tracker > "$tmp_dir/coroutine-tracker.stdout.json" 2> "$tmp_dir/coroutine-tracker.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/coroutine-tracker.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/coroutine-tracker.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_coroutine_tracker_payload.py" "$tmp_dir/coroutine-tracker.stdout.json" "$tmp_dir/coroutine-tracker.stderr.json"
 
 make --no-print-directory -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"

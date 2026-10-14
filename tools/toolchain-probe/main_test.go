@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/dlclark/regexp2"
 )
 
 const (
@@ -45,12 +47,10 @@ func TestMain(m *testing.M) {
 		os.Exit(runFixture(strings.TrimPrefix(os.Args[1], "fixture:")))
 	}
 
-	// Child timeout fixtures must not include the race detector's exit sleep.
-	// The parent retains its settings; children retain race detection and all
-	// supplied options, with only their post-execution sleep set to zero.
 	if err := os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0")); err != nil {
 		panic(err)
 	}
+	defer regexp2.StopTimeoutClock()
 	m.Run()
 }
 
@@ -140,7 +140,8 @@ func TestArgumentDiagnosticWriteFailure(t *testing.T) {
 		output string
 		code   int
 	}{
-		{"bad-args", "toolchain-probe accepts inventory, clock, summary, or deadline mode\n", wantUsageExit},
+		{"bad-args", "toolchain-probe accepts inventory, clock, summary, deadline, package-json, " +
+			"schema-check, or event-batch-check mode\n", wantUsageExit},
 		{closedArgumentFixture, "", wantWriteExit},
 	} {
 		t.Run(test.mode, func(t *testing.T) {
@@ -177,8 +178,11 @@ func TestDeadlineRunsBoundsAndReaps(t *testing.T) {
 	}
 	assertChildStopped(t, pidFile)
 
-	for _, arguments := range [][]string{nil, {"0", "1", os.Args[0]},
-		{"60001", "1", os.Args[0]}} {
+	for _, arguments := range [][]string{
+		nil,
+		{"0", "1", os.Args[0]},
+		{"60001", "1", os.Args[0]},
+	} {
 		if code := runDeadline(arguments); code != exitUsage {
 			t.Errorf("invalid deadline returned %d", code)
 		}

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
 # shellcheck source=scripts/java_logback_deps.sh
@@ -310,7 +311,7 @@ JAVA
 
 javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar" -d "$smoke_app/classes" "$smoke_app/src/Main.java"
 java -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$smoke_app/classes" Main > "$tmp_dir/java-jms.stdout.json" 2> "$tmp_dir/java-jms.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/java-jms.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/java-jms.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/java-jms.stderr.json"
 grep -q '"events":6' "$tmp_dir/java-jms.stderr.json"
 grep -q '"status":202' "$tmp_dir/java-jms.stderr.json"

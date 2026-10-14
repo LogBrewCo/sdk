@@ -986,7 +986,9 @@ jobs:
             "scripts/check_release_metadata.py",
             "scripts/release_metadata_dotnet.py",
             "scripts/real_user_swiftpm_public_smoke.sh",
-            "scripts/validate_fixtures.py",
+            "scripts/native_verifier.sh",
+            "tools/toolchain-probe",
+            "spec/event-batch.schema.json",
             "scripts/check_sdk_parity.py",
             "fixtures/valid-batch.json",
         ):

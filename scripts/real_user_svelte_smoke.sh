@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(bun -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 svelte_package_version="$(bun -p "require('${repo_root}/js/logbrew-svelte/package.json').version")"
 tmp_dir="$(mktemp -d)"
@@ -99,13 +100,13 @@ grep -q 'readme-example ->' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke ->' "$tmp_dir/launcher-list.txt"
 
 node node_modules/@logbrew/svelte/examples/index.mjs readme-example > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 grep -q '"rendered":true' "$tmp_dir/readme.stderr.json"
 
 node node_modules/@logbrew/svelte/examples/index.mjs real-user-smoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/smoke.stderr.json"
@@ -120,9 +121,9 @@ grep -q 'real-user-smoke ->' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/svelte/examples --silent run help > "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/svelte/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/svelte/examples --silent run readme-example > "$tmp_dir/npm-readme.stdout.json" 2> "$tmp_dir/npm-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-readme.stdout.json" >/dev/null
 npm --prefix node_modules/@logbrew/svelte/examples --silent run real-user-smoke > "$tmp_dir/npm-smoke.stdout.json" 2> "$tmp_dir/npm-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-smoke.stdout.json" >/dev/null
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/npm-smoke.stderr.json"
 
 cat > consumer.ts <<'EOF'

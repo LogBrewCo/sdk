@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 source "$repo_root/scripts/python_package_version.sh"
 
 package_dir="$repo_root/python/logbrew_flask"
@@ -16,7 +17,7 @@ remove_tmp_dir() {
 }
 
 check_json() {
-  "$tmp_dir/venv/bin/python" "$repo_root/scripts/check_python_package_json.py" "$@"
+  run_native_verifier package-json "$@"
 }
 
 trap remove_tmp_dir EXIT
@@ -67,7 +68,7 @@ check_json trailing-fields \
   'routeTemplate="/health"' \
   'events=4' \
   "$tmp_dir/smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples --list > "$tmp_dir/examples-list.txt"
 grep -qx 'readme-example -> python -m logbrew_flask.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
@@ -103,7 +104,7 @@ if grep -q 'debug_marker=drop' "$tmp_dir/packaged-outbound.stdout.json" "$tmp_di
   echo "packaged outbound example leaked the outbound query string" >&2
   exit 1
 fi
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-outbound.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-outbound.stdout.json" >/dev/null
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples dependency-spans > "$tmp_dir/packaged-dependency.stdout.json" 2> "$tmp_dir/packaged-dependency.stderr.json"
 check_json event-kinds span "$tmp_dir/packaged-dependency.stdout.json"
@@ -120,6 +121,6 @@ check_json fields \
   'queueParentSpanId="b7ad6b7169203331"' \
   'queueSpanId="e0ad6b7169203334"' \
   "$tmp_dir/packaged-dependency.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-dependency.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/packaged-dependency.stdout.json" >/dev/null
 
 printf '%s\n' "flask package checks passed"

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 package_dir="$repo_root/kotlin/logbrew-kotlin"
 okhttp_package_dir="$repo_root/kotlin/logbrew-kotlin-okhttp"
 tmp_dir="$(mktemp -d)"
@@ -658,7 +659,7 @@ kotlinc "$extract_dir/examples/dependency_spans/DependencySpans.kt" \
 java -cp "$tmp_dir/dependency-spans.jar:$maven_dir/logbrew-kotlin-$kotlin_version.jar" DependencySpansKt \
   > "$tmp_dir/dependency-spans.stdout.json" \
   2> "$tmp_dir/dependency-spans.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
 grep -q '"dependencySpans":3' "$tmp_dir/dependency-spans.stderr.json"
 
 run_app() {
@@ -684,7 +685,7 @@ run_app \
   "$tmp_dir/installed-readme.stdout.json" \
   "$tmp_dir/installed-readme.stderr.json" \
   "$extract_dir/examples/readme_example/ReadmeExample.kt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
   "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
@@ -696,7 +697,7 @@ run_app \
   "$tmp_dir/installed-smoke.stderr.json" \
   "$extract_dir/examples/readme_example/ReadmeExample.kt" \
   "$extract_dir/examples/real_user_smoke/RealUserSmoke.kt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
   "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
@@ -720,7 +721,7 @@ run_app \
   "$tmp_dir/installed-rich-investigation.stdout.json" \
   "$tmp_dir/installed-rich-investigation.stderr.json" \
   "$extract_dir/examples/rich_investigation/RichInvestigation.kt"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-rich-investigation.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-rich-investigation.stdout.json" >/dev/null
 grep -q '"richIssueEvents":1' "$tmp_dir/installed-rich-investigation.stderr.json"
 grep -q '"linkedSpanEvents":1' "$tmp_dir/installed-rich-investigation.stderr.json"
 grep -q '"privateThrowableTextOmitted":true' "$tmp_dir/installed-rich-investigation.stderr.json"
@@ -1018,7 +1019,7 @@ run_app \
   "$smoke_app/SmokeApp.kt"
 wait "$intake_pid"
 intake_pid=""
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context \
   "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"

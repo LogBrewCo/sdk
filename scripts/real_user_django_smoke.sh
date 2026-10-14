@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 source "$repo_root/scripts/python_package_version.sh"
 
 core_dir="$repo_root/python/logbrew_py"
@@ -16,7 +17,7 @@ remove_tmp_dir() {
 }
 
 check_json() {
-  python3 "$repo_root/scripts/check_python_package_json.py" "$@"
+  run_native_verifier package-json "$@"
 }
 
 trap remove_tmp_dir EXIT
@@ -193,7 +194,7 @@ if payload["path"] != "/health/":
     raise SystemExit(f"expected path without query text: {payload['path']}")
 Path(sys.argv[2]).write_text(json.dumps(payload["body"], indent=2), encoding="utf-8")
 PY
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/body.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/body.json" >/dev/null
 
 cat > "$app_dir/typecheck.py" <<'PY'
 from __future__ import annotations

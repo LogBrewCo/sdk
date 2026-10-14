@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 version="${1:-${LOGBREW_OPENUPM_VERSION:-0.2.2}}"
 registry_url="${LOGBREW_OPENUPM_REGISTRY_URL:-https://package.openupm.com}"
 package_name="co.logbrew.unity"
@@ -224,12 +225,12 @@ EOF
 }
 
 run_installed_sample InstalledReadme false "$tmp_dir/installed-readme.stdout.json" "$tmp_dir/installed-readme.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
 
 run_installed_sample InstalledSmoke true "$tmp_dir/installed-smoke.stdout.json" "$tmp_dir/installed-smoke.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
@@ -238,25 +239,25 @@ grep -q '"metricEvents":1' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/installed-smoke.stderr.json"
 
 make --no-print-directory -C "$installed_package_dir/examples" run-trace-correlation > "$tmp_dir/installed-trace-correlation.stdout.json" 2> "$tmp_dir/installed-trace-correlation.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-trace-correlation.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_trace_correlation_payload.py" "$tmp_dir/installed-trace-correlation.stdout.json" "$tmp_dir/installed-trace-correlation.stderr.json"
 
 make --no-print-directory -C "$installed_package_dir/examples" run-lifecycle-spans > "$tmp_dir/installed-lifecycle-spans.stdout.json" 2> "$tmp_dir/installed-lifecycle-spans.stderr.json"
 test ! -s "$tmp_dir/installed-lifecycle-spans.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-lifecycle-spans.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-lifecycle-spans.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/installed-lifecycle-spans.stdout.json"
 
 make --no-print-directory -C "$installed_package_dir/examples" run-lifecycle-tracker > "$tmp_dir/installed-lifecycle-tracker.stdout.json" 2> "$tmp_dir/installed-lifecycle-tracker.stderr.json"
 test ! -s "$tmp_dir/installed-lifecycle-tracker.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-lifecycle-tracker.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-lifecycle-tracker.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/installed-lifecycle-tracker.stdout.json"
 
 make --no-print-directory -C "$installed_package_dir/examples" run-request-tracker > "$tmp_dir/installed-request-tracker.stdout.json" 2> "$tmp_dir/installed-request-tracker.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-request-tracker.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-request-tracker.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_request_tracker_payload.py" "$tmp_dir/installed-request-tracker.stdout.json" "$tmp_dir/installed-request-tracker.stderr.json"
 
 make --no-print-directory -C "$installed_package_dir/examples" run-coroutine-tracker > "$tmp_dir/installed-coroutine-tracker.stdout.json" 2> "$tmp_dir/installed-coroutine-tracker.stderr.json"
-python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-coroutine-tracker.stdout.json" >/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/installed-coroutine-tracker.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_coroutine_tracker_payload.py" "$tmp_dir/installed-coroutine-tracker.stdout.json" "$tmp_dir/installed-coroutine-tracker.stderr.json"
 
 printf 'openupm public install smoke passed for %s %s\n' "$package_name" "$version"

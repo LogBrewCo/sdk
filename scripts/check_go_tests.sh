@@ -9,12 +9,13 @@ if [[ -n "$(gofmt -l "${go_roots[@]}")" ]]; then
 	exit 1
 fi
 
+# The native verifier is tested by its own pinned-compiler, race-enabled CI step.
 while IFS= read -r dir; do
 	(
 		cd "$dir"
 		go vet ./...
 		go test ./...
 	)
-done < <(find "${go_roots[@]}" -name go.mod -exec dirname {} \; | sort -u)
+done < <(find "$repo_root/go/logbrew" -name go.mod -exec dirname {} \; | sort -u)
 
 printf '%s\n' "go tests ok"
