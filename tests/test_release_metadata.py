@@ -600,7 +600,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("uses: actions/checkout@v6", workflow)
+        self.assertIn("uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", workflow)
         self.assertNotIn("uses: actions/checkout@v4", workflow)
 
     def test_publish_release_canonicalizes_nuget_selection_before_dispatch(self) -> None:
