@@ -21,7 +21,8 @@ public final class AndroidNativeDiagnosticsTest {
     suite.nativeSignalRecordReplaysExactlyOnceIntoTheCanonicalQueue();
     suite.pendingNativeSignalSurvivesQueueAdmissionFailure();
     suite.uninstallReinstatesThePreviousHandlerAndStopsTheWatchdog();
-    System.out.println("android native diagnostics tests: 7 passed");
+    suite.javaScriptFatalTerminationIsRecordedOnlyWithoutAPersistedReport();
+    System.out.println("android native diagnostics tests: 8 passed");
   }
 
   private void uncaughtExceptionPersistsBeforeChainingWithoutMessageContent() throws Exception {
@@ -46,6 +47,32 @@ public final class AndroidNativeDiagnosticsTest {
           assertNotContains(event, "\"durationMs\"");
           assertNotContains(event, "opaque-value");
           assertNotContains(event, "hidden");
+        });
+  }
+
+  private void javaScriptFatalTerminationIsRecordedOnlyWithoutAPersistedReport() throws Exception {
+    withDirectory(
+        directory -> {
+          List<String> order = new ArrayList<>();
+          AndroidNativeDiagnostics diagnostics =
+              fixture(directory, order, new FakeScheduler());
+          diagnostics.install();
+          AndroidNativeDiagnostics.notePersistedRecord("{\"type\":\"issue\",\"id\":\"evt_android_java_1\"}");
+          diagnostics.handleUncaught(
+              Thread.currentThread(),
+              new RuntimeException(new com.facebook.react.common.JavascriptException("first")));
+          assertEquals(Arrays.asList("persist", "chain"), order);
+          assertContains(onlyQueuedEvent(directory), "java.lang.RuntimeException");
+
+          AndroidNativeDiagnostics.notePersistedRecord("{\"type\":\"issue\",\"id\":\"evt_rn_fatal_1\"}");
+          diagnostics.handleUncaught(
+              Thread.currentThread(),
+              new RuntimeException(new com.facebook.react.common.JavascriptException("second")));
+          assertEquals(Arrays.asList("persist", "chain", "chain"), order);
+          diagnostics.handleUncaught(
+              Thread.currentThread(), new com.facebook.react.common.JavascriptException("third"));
+          assertEquals(Arrays.asList("persist", "chain", "chain", "persist", "chain"), order);
+          assertEquals(2, new EventRecordStore(new File(directory, "events")).load().records.size());
         });
   }
 

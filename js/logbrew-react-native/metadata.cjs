@@ -153,7 +153,7 @@ function runtimeStackFrameFilename(rawLine) {
   } else if (location.includes("@")) {
     location = location.slice(location.lastIndexOf("@") + 1);
   }
-  const parts = location.split(":");
+  const parts = location.replace(/^address at /u, "").split(":");
   if (parts.length < 3) {
     return undefined;
   }

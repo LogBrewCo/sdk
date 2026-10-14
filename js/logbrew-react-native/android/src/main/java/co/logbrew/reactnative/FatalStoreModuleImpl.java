@@ -72,9 +72,14 @@ final class FatalStoreModuleImpl {
     try {
       EventRecordStore eventStore = eventStore(queueKey);
       Integer byteCount = integer(eventBytes);
-      return eventStore == null || byteCount == null
-          ? status("storage_error")
-          : eventResultMap(eventStore.append(serializedEvent, byteCount));
+      if (eventStore == null || byteCount == null) {
+        return status("storage_error");
+      }
+      EventRecordStore.Result result = eventStore.append(serializedEvent, byteCount);
+      if ("appended".equals(result.status)) {
+        AndroidNativeDiagnostics.notePersistedRecord(serializedEvent);
+      }
+      return eventResultMap(result);
     } catch (RuntimeException error) {
       return status("storage_error");
     }

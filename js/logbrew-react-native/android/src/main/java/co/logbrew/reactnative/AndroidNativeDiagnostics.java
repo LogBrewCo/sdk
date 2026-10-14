@@ -85,6 +85,9 @@ final class AndroidNativeDiagnostics {
   private static final int MAX_FRAMES = 32;
   static final long WATCHDOG_POLL_MS = 500;
   private static final AtomicLong SEQUENCE = new AtomicLong();
+  private static final String JAVASCRIPT_FATAL_RECORD = "{\"type\":\"issue\",\"id\":\"evt_rn_fatal_";
+  private static final String JAVASCRIPT_EXCEPTION = "com.facebook.react.common.JavascriptException";
+  private static int unclaimedJavaScriptFatals;
 
   final EventRecordStore eventStore;
   final AndroidNativeSignalStore signalStore;
@@ -138,7 +141,9 @@ final class AndroidNativeDiagnostics {
 
   void handleUncaught(Thread thread, Throwable error) {
     try {
-      append(javaCrashEvent(error));
+      if (!claimPersistedJavaScriptFatal(error)) {
+        append(javaCrashEvent(error));
+      }
     } finally {
       previousHandler.uncaughtException(thread, error);
     }
@@ -151,6 +156,29 @@ final class AndroidNativeDiagnostics {
     long boundedDuration =
         Math.max(configuration.anrThresholdMs, Math.min(durationMs, 300_000));
     append(hangEvent(mainFrames.get(), boundedDuration));
+  }
+
+  /** Counts JavaScript fatal reports that this process persisted to the shared queue. */
+  static synchronized void notePersistedRecord(String serializedEvent) {
+    if (serializedEvent != null && serializedEvent.startsWith(JAVASCRIPT_FATAL_RECORD)) {
+      unclaimedJavaScriptFatals++;
+    }
+  }
+
+  // React Native ends a JavaScript fatal by throwing JavascriptException. That copy
+  // repeats a report already in the queue, so skip it once per persisted report.
+  static synchronized boolean claimPersistedJavaScriptFatal(Throwable error) {
+    Throwable cause = error;
+    for (int depth = 0; cause != null && depth < 8; depth++, cause = cause.getCause()) {
+      if (JAVASCRIPT_EXCEPTION.equals(cause.getClass().getName())) {
+        if (unclaimedJavaScriptFatals == 0) {
+          return false;
+        }
+        unclaimedJavaScriptFatals--;
+        return true;
+      }
+    }
+    return false;
   }
 
   static boolean shouldReportHang(

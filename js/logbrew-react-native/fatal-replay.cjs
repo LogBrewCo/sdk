@@ -3,22 +3,21 @@
 const FATAL_RECORD_SCHEMA_VERSION = 1;
 const MAX_ADMITTED_FATAL_IDS = 256;
 const MAX_FATAL_FILENAME_BYTES = 512;
-const MAX_FATAL_STACK_BYTES = 16 * 1024;
 const MAX_FATAL_STACK_FRAMES = 24;
 const MAX_FATAL_ID_LENGTH = 128;
 const MAX_FATAL_RECORD_BYTES = 16 * 1024;
 const DURABLE_QUEUE = Symbol.for("co.logbrew.react-native.durable-event-queue");
 
 const admittedFatalIdsByClient = new WeakMap();
-let nextFatalSequence = 0;
 
 function createFatalController({
   client,
+  createEvent,
   eventMessage,
   fatalStore,
+  isErrorName,
   issue,
-  onDiagnostic,
-  sanitizers
+  onDiagnostic
 }) {
   const methods = fatalStoreMethods(fatalStore);
   const directAdmission = !methods && safeReadProperty(client, DURABLE_QUEUE) === true;
@@ -48,38 +47,36 @@ function createFatalController({
         client,
         eventMessage,
         fatalStore,
+        isErrorName,
         issue,
         methods,
         onDiagnostic,
-        sanitizers,
         state
       });
     },
     store(error) {
       if (!methods) {
         return directAdmission
-          ? admitFatalError({ client, error, eventMessage, issue, onDiagnostic, sanitizers, state })
+          ? admitFatalError({ client, createEvent, error, issue, onDiagnostic, state })
           : false;
       }
       return storeFatalError({
+        createEvent,
         error,
         fatalStore,
         methods,
         onDiagnostic,
-        sanitizers,
         state
       });
     }
   };
 }
 
-function admitFatalError({ client, error, eventMessage, issue, onDiagnostic, sanitizers, state }) {
-  const record = createFatalRecord(error, sanitizers);
+function admitFatalError({ client, createEvent, error, issue, onDiagnostic, state }) {
   let admission;
   try {
-    admission = captureIssueWithAdmission(
-      client, issue, record.id, record.timestamp, fatalEventAttributes(record, eventMessage)
-    );
+    const event = createEvent(error);
+    admission = captureIssueWithAdmission(client, issue, event.id, event.timestamp, event.attributes);
   } catch {
     state.lastOutcome = "storage_error";
     emitDiagnostic(onDiagnostic, "fatal_store_failed");
@@ -139,11 +136,11 @@ function discardPendingFatal(fatalStore, methods, state, onDiagnostic) {
 }
 
 function storeFatalError({
+  createEvent,
   error,
   fatalStore,
   methods,
   onDiagnostic,
-  sanitizers,
   state
 }) {
   if (!methods) {
@@ -151,7 +148,7 @@ function storeFatalError({
   }
   let result;
   try {
-    result = methods.write.call(fatalStore, createFatalRecord(error, sanitizers));
+    result = methods.write.call(fatalStore, createFatalRecord(createEvent(error)));
   } catch {
     result = undefined;
   }
@@ -181,10 +178,10 @@ function replayPendingFatal({
   client,
   eventMessage,
   fatalStore,
+  isErrorName,
   issue,
   methods,
   onDiagnostic,
-  sanitizers,
   state
 }) {
   if (!methods) {
@@ -212,7 +209,7 @@ function replayPendingFatal({
     return;
   }
   const record = status === "pending"
-    ? validatedFatalRecord(safeReadProperty(result, "record"), sanitizers)
+    ? validatedFatalRecord(safeReadProperty(result, "record"), isErrorName)
     : undefined;
   if (!record) {
     state.lastOutcome = "replay_failed";
@@ -304,43 +301,23 @@ function rememberAdmittedFatalId(client, recordId) {
   }
 }
 
-function createFatalRecord(error, sanitizers) {
+function createFatalRecord(event) {
   const record = {
     corruptRecords: 0,
     droppedRecords: 0,
-    errorName: sanitizers.errorName(error),
-    id: nextFatalEventId(),
+    errorName: event.attributes.exception.type,
+    id: event.id,
     schemaVersion: FATAL_RECORD_SCHEMA_VERSION,
-    stackFrames: fatalStackFrames(error, sanitizers.stackFrame),
-    timestamp: new Date().toISOString()
+    stackFrames: (event.attributes.stackFrames ?? []).flatMap(({ column, filename, line }) => {
+      const stored = normalizedStoredFatalFilename(filename);
+      return validFatalFilename(stored) ? [{ column, filename: stored, line }] : [];
+    }).slice(0, MAX_FATAL_STACK_FRAMES),
+    timestamp: event.timestamp
   };
   while (record.stackFrames.length > 0 && utf8ByteLength(JSON.stringify(record)) > MAX_FATAL_RECORD_BYTES) {
-    record.stackFrames = Object.freeze(record.stackFrames.slice(0, -1));
+    record.stackFrames.pop();
   }
-  return Object.freeze(record);
-}
-
-function fatalStackFrames(error, stackFrame) {
-  const stack = safeReadProperty(error, "stack");
-  const candidate = typeof stack === "string"
-    ? stack.slice(0, MAX_FATAL_STACK_BYTES)
-    : "";
-  const frames = [];
-  for (const line of candidate.split(/\r?\n/u)) {
-    const frame = stackFrame(line);
-    const filename = frame ? normalizedStoredFatalFilename(frame.filename) : undefined;
-    if (filename && validFatalFilename(filename)) {
-      frames.push(Object.freeze({
-        column: frame.column,
-        filename,
-        line: frame.line
-      }));
-      if (frames.length === MAX_FATAL_STACK_FRAMES) {
-        break;
-      }
-    }
-  }
-  return Object.freeze(frames);
+  return record;
 }
 
 function fatalEventAttributes(record, eventMessage) {
@@ -371,7 +348,7 @@ function fatalEventAttributes(record, eventMessage) {
   });
 }
 
-function validatedFatalRecord(value, sanitizers) {
+function validatedFatalRecord(value, isErrorName) {
   try {
     if (!isPlainObject(value)
       || !hasExactKeys(value, [
@@ -391,7 +368,7 @@ function validatedFatalRecord(value, sanitizers) {
       || typeof id !== "string"
       || id.length > MAX_FATAL_ID_LENGTH
       || !/^evt_rn_fatal_[a-z0-9]+(?:_[a-z0-9]+)*$/u.test(id)
-      || !sanitizers.isErrorName(errorName)
+      || !isErrorName(errorName)
       || !isBoundedCounter(corruptRecords)
       || !isBoundedCounter(droppedRecords)
       || !validFatalTimestamp(timestamp)
@@ -539,11 +516,6 @@ function hasControlCharacter(value) {
 
 function positiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0 && value <= 2147483647 ? value : undefined;
-}
-
-function nextFatalEventId() {
-  nextFatalSequence = incrementBounded(nextFatalSequence);
-  return `evt_rn_fatal_${Date.now().toString(36)}_${nextFatalSequence.toString(36)}`;
 }
 
 function incrementBounded(value) {

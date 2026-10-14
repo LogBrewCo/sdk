@@ -194,6 +194,11 @@ test("stores a privacy-bounded fatal record synchronously before chaining", asyn
         column: 34,
         filename: "index.android.bundle",
         line: 12
+      },
+      {
+        column: 78,
+        filename: "source.js",
+        line: 56
       }
     ]);
     const serialized = JSON.stringify(record);

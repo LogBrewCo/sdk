@@ -50,6 +50,7 @@ javac \
   "$package_root/android/src/main/java/co/logbrew/reactnative/AndroidNativeSignalStore.java" \
   "$package_root/android/src/main/java/co/logbrew/reactnative/AndroidNativeDiagnostics.java" \
   "$package_root/android/src/test/java/co/logbrew/reactnative/AndroidNativeDiagnosticsTest.java" \
+  "$package_root/test/android-stubs/com/facebook/react/common/JavascriptException.java" \
   "$package_root/android/src/test/java/co/logbrew/reactnative/EventRecordStoreTest.java"
 java -ea -cp "$android_classes" co.logbrew.reactnative.AndroidNativeDiagnosticsTest
 java -ea -cp "$android_classes" co.logbrew.reactnative.EventRecordStoreTest

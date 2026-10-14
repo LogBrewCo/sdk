@@ -9,7 +9,6 @@ const {
 
 const AUTOMATIC_ERROR_MESSAGE = "React Native global JavaScript report";
 const MAX_STACK_BYTES = 16 * 1024;
-const MAX_STACK_FRAMES = 32;
 const SAFE_ERROR_NAMES = new Set([
   "Error",
   "EvalError",
@@ -19,11 +18,9 @@ const SAFE_ERROR_NAMES = new Set([
   "TypeError",
   "URIError"
 ]);
-const FATAL_SANITIZERS = Object.freeze({
-  errorName: safeErrorName,
-  isErrorName: (value) => SAFE_ERROR_NAMES.has(value),
-  stackFrame: safeStackFrameParts
-});
+const LAST_ROUTE = Symbol.for("co.logbrew.react-native.last-route");
+const LOCATION_DIRECTORIES =
+  /(?:[a-z][a-z0-9+.-]*:\/\/[^/\s()]*)?(?:[a-z]:)?[\\/](?:[^\\/\s():]*[\\/])*/giu;
 const installations = new WeakMap();
 let nextEventSequence = 0;
 
@@ -68,11 +65,12 @@ function installLogBrewReactNativeGlobalErrorHandler({
   };
   const fatal = createFatalController({
     client,
+    createEvent: (error) => createAutomaticErrorEvent(error, client, true),
     eventMessage: AUTOMATIC_ERROR_MESSAGE,
     fatalStore,
+    isErrorName: (value) => SAFE_ERROR_NAMES.has(value),
     issue,
-    onDiagnostic: (diagnostic) => emitStateDiagnostic(state, onDiagnostic, diagnostic.code),
-    sanitizers: FATAL_SANITIZERS
+    onDiagnostic: (diagnostic) => emitStateDiagnostic(state, onDiagnostic, diagnostic.code)
   });
   const capturedErrors = new WeakSet();
   const handler = (error, isFatal) => {
@@ -179,7 +177,7 @@ function captureNonfatalError(client, issue, error, capturedErrors, state, onDia
     capturedErrors.add(error);
   }
   try {
-    const event = createAutomaticErrorEvent(error);
+    const event = createAutomaticErrorEvent(error, client);
     const admission = captureIssueWithAdmission(client, issue, event.id, event.timestamp, event.attributes);
     if (admission !== "admitted") {
       if (tracksIdentity) {
@@ -204,19 +202,16 @@ function captureNonfatalError(client, issue, error, capturedErrors, state, onDia
   }
 }
 
-function createAutomaticErrorEvent(error) {
+function createAutomaticErrorEvent(error, client, fatal = false) {
   const sanitizedError = new Error(AUTOMATIC_ERROR_MESSAGE);
   sanitizedError.name = safeErrorName(error);
-  const stack = safeStack(error);
-  if (stack) {
-    sanitizedError.stack = stack;
-  } else {
-    delete sanitizedError.stack;
-  }
+  sanitizedError.stack = automaticStack(error);
+  const lastRoute = safeReadProperty(client, LAST_ROUTE);
   const event = createReactNativeErrorEvent(sanitizedError, {
-    id: nextEventId(),
+    id: nextEventId(fatal ? "fatal" : "global"),
     handled: false,
     includeStack: false,
+    level: fatal ? "fatal" : "error",
     mechanism: "react_native_error_utils"
   });
   return {
@@ -228,8 +223,9 @@ function createAutomaticErrorEvent(error) {
       metadata: {
         ...event.attributes.metadata,
         automatic: true,
-        fatal: false,
-        handled: true,
+        fatal,
+        handled: !fatal,
+        ...(typeof lastRoute === "string" ? { lastRoute } : {}),
         mechanism: "react_native_error_utils",
         source: "react-native.global_error"
       }
@@ -237,99 +233,20 @@ function createAutomaticErrorEvent(error) {
   };
 }
 
-function safeStack(error) {
+// Removes the message header, remote hosts, and local directories before the
+// canonical parser reads frames, so only file basenames, lines, columns, and
+// function names remain.
+function automaticStack(error) {
   const stack = safeReadProperty(error, "stack");
-  const candidate = typeof stack === "string"
-    ? stack.slice(0, MAX_STACK_BYTES)
-    : "";
-  const frames = [];
-  for (const line of candidate.split(/\r?\n/u)) {
-    const frame = safeStackFrame(line);
-    if (frame) {
-      frames.push(`    at frame (${frame})`);
-      if (frames.length === MAX_STACK_FRAMES) {
-        break;
-      }
-    }
-  }
-  return frames.length === 0
-    ? undefined
-    : `${safeErrorName(error)}: ${AUTOMATIC_ERROR_MESSAGE}\n${frames.join("\n")}`;
-}
-
-function safeStackFrame(line) {
-  const frame = safeStackFrameParts(line);
-  return frame
-    ? `${frame.filename}:${frame.line}:${frame.column}`
-    : undefined;
-}
-
-function safeStackFrameParts(line) {
-  let location = typeof line === "string" ? line.trim() : "";
-  if (!location) {
-    return undefined;
-  }
-  if (location.startsWith("at ")) {
-    location = location.slice(3).trim();
-    if (location.endsWith(")") && location.includes("(")) {
-      location = location.slice(location.lastIndexOf("(") + 1, -1);
-    }
-  } else if (location.includes("@")) {
-    location = location.slice(location.lastIndexOf("@") + 1);
-  }
-  const parts = location.split(":");
-  if (parts.length < 3) {
-    return undefined;
-  }
-  const column = positiveInteger(parts.pop());
-  const lineNumber = positiveInteger(parts.pop());
-  const filename = safeStackFilename(parts.join(":"));
-  if (!filename || lineNumber === undefined || column === undefined) {
-    return undefined;
-  }
-  return {
-    column,
-    filename,
-    line: lineNumber
-  };
-}
-
-function safeStackFilename(value) {
-  let filename = String(value ?? "").trim().replace(/\\/gu, "/");
-  if (!filename || filename.length > 2048 || hasControlCharacter(filename)) {
-    return undefined;
-  }
-  try {
-    if (/^[a-z][a-z0-9+.-]*:/iu.test(filename)) {
-      const parsed = new URL(filename);
-      if (!["app:", "http:", "https:"].includes(parsed.protocol)
-        || parsed.username
-        || urlAuthority(filename).includes("@")) {
-        return undefined;
-      }
-      filename = parsed.pathname;
-    } else {
-      filename = filename.split(/[?#]/u, 1)[0];
-      if (filename.startsWith("/") || /^[A-Za-z]:\//u.test(filename)) {
-        return undefined;
-      }
-    }
-  } catch {
-    return undefined;
-  }
-  return filename && filename.length <= 2048 && !hasControlCharacter(filename)
-    ? filename
-    : undefined;
-}
-
-function urlAuthority(value) {
-  const schemeMarker = value.indexOf("://");
-  if (schemeMarker < 0) {
+  if (typeof stack !== "string") {
     return "";
   }
-  const start = schemeMarker + 3;
-  const end = value.indexOf("/", start);
-  return value.slice(start, end < 0 ? value.length : end);
+  const name = safeReadProperty(error, "name");
+  const message = safeReadProperty(error, "message");
+  const header = `${typeof name === "string" ? name : "Error"}: ${typeof message === "string" ? message : ""}`;
+  return (stack.startsWith(header) ? stack.slice(header.length) : stack)
+    .slice(0, MAX_STACK_BYTES)
+    .replace(LOCATION_DIRECTORIES, "");
 }
 
 function safeErrorName(error) {
@@ -354,24 +271,9 @@ function safeFunction(value, property) {
   return typeof candidate === "function" ? candidate : undefined;
 }
 
-function hasControlCharacter(value) {
-  return Array.from(value).some((character) => {
-    const code = character.codePointAt(0);
-    return code !== undefined && (code <= 31 || code === 127);
-  });
-}
-
-function positiveInteger(value) {
-  if (!/^[1-9][0-9]*$/u.test(String(value))) {
-    return undefined;
-  }
-  const number = Number(value);
-  return Number.isSafeInteger(number) && number <= 2147483647 ? number : undefined;
-}
-
-function nextEventId() {
+function nextEventId(kind) {
   nextEventSequence = incrementBounded(nextEventSequence);
-  return `evt_rn_global_${Date.now().toString(36)}_${nextEventSequence.toString(36)}`;
+  return `evt_rn_${kind}_${Date.now().toString(36)}_${nextEventSequence.toString(36)}`;
 }
 
 function incrementBounded(value) {
