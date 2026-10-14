@@ -50,7 +50,7 @@ RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check \
   RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check src examples tests
 )
 
-MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src:$repo_root/python/logbrew_django/tests" "$tool_python" -m mypy \
+MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_fastapi/tests:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src:$repo_root/python/logbrew_django/tests" "$tool_python" -m mypy \
   --strict \
   --python-version 3.10 \
   --explicit-package-bases \
