@@ -228,7 +228,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertRegex(publisher, r"\w+: \{ \w+: grants\[index\] \},")
         self.assertIn("Promise.all(manifests.map(({ name }) => exchangeGrant(name)))", publisher)
         self.assertIn("/-/npm/v1/oidc/" "token/exchange/package/", publisher)
-        self.assertEqual(publisher_manifest["dependencies"], {"libnpmpublish": "12.0.0"})
+        self.assertEqual(publisher_manifest["dependencies"], {"libnpmpublish": "12.0.1"})
         self.assertNotIn("bun publish", npm_job)
         self.assertNotIn("selected_packages<<EOF", npm_job)
         for forbidden in ("actions/setup-node", "corepack"):
