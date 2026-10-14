@@ -5,8 +5,10 @@ import copy
 import json
 import logging
 import unittest
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
+from functools import cached_property
 from threading import Barrier
 from typing import cast
 
@@ -23,11 +25,13 @@ from logbrew_sdk import (
     use_logbrew_trace,
 )
 
+ContextProvider = Callable[[logging.LogRecord], TelemetryContext | None]
 
-def make_client(**kwargs: object) -> LogBrewClient:
+
+def make_client(context: TelemetryContext | None = None) -> LogBrewClient:
     return LogBrewClient.create(
         api_key="LOGBREW_API_KEY", sdk_name="logging-context-consumer", sdk_version="1.0.0",
-        capture_runtime_context=False, **kwargs,
+        capture_runtime_context=False, context=context,
     )
 
 
@@ -40,9 +44,9 @@ def attributes(client: LogBrewClient) -> list[dict[str, object]]:
 
 
 class ObservingHandler(LogBrewLoggingHandler):
-    def __init__(self, client: LogBrewClient, **kwargs: object) -> None:
-        super().__init__(client, **kwargs)
-        self.errors: list[logging.LogRecord] = []
+    @cached_property
+    def errors(self) -> list[logging.LogRecord]:
+        return []
 
     def handleError(self, record: logging.LogRecord) -> None:
         self.errors.append(record)
@@ -178,7 +182,7 @@ class LoggingContextProviderTests(unittest.TestCase):
 
     def test_non_callable_provider_fails_during_configuration(self) -> None:
         with self.assertRaises(SdkError) as caught:
-            LogBrewLoggingHandler(make_client(), context_provider=cast(object, 7))
+            LogBrewLoggingHandler(make_client(), context_provider=cast(ContextProvider, 7))
         self.assertEqual(caught.exception.code, "configuration_error")
 
     def test_threaded_records_keep_request_context_and_preserve_outer_scope(self) -> None:
