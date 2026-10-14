@@ -233,6 +233,7 @@ The package includes sample source for creating a client, sending through `HttpT
 ## Behavior
 
 - `PreviewJson()` returns the queued batch as pretty JSON.
+- The queue holds at most 1,000 events and 4 MiB of encoded event JSON by default; pass `maxQueueSize` and `maxQueueBytes` to `LogBrewUnity.CreateClient(...)` or `LogBrewClient.Create(...)` to change them. When a bound is full, LogBrew drops the new event and keeps queued ones. `DroppedEvents()` counts drops, and the optional `onEventDropped` callback receives a `DroppedEvent` with the event ID, type, reason (`queue_overflow`, `queue_bytes_overflow`, or `event_too_large`), and total count. Callback exceptions never reach your code.
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `HttpTransport` uses `HttpClient`, supports endpoint/header/timeout settings, and maps request failures to retryable `TransportException.Network(...)` failures.

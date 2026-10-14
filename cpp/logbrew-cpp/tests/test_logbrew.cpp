@@ -4,8 +4,10 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -441,6 +443,86 @@ void flush_success_clears_queue() {
   EXPECT_TRUE(transport.last_body() != nullptr);
 }
 
+logbrew::LogBrewClient bounded_client(std::vector<logbrew::EventDrop> &drops,
+                                      std::size_t max_events = logbrew::default_max_queue_events,
+                                      std::size_t max_bytes = logbrew::default_max_queue_bytes) {
+  logbrew::ClientOptions options;
+  options.max_queue_events = max_events;
+  options.max_queue_bytes = max_bytes;
+  options.on_event_dropped = [&drops](const logbrew::EventDrop &drop) { drops.push_back(drop); };
+  return logbrew::LogBrewClient(logbrew::Config{"LOGBREW_API_KEY", "logbrew-cpp", logbrew::version, 2},
+                                std::move(options));
+}
+
+void log_event(logbrew::LogBrewClient &client, std::string id) {
+  client.log(std::move(id), "2026-06-02T10:00:03Z", logbrew::LogAttributes{"same size", "info", std::nullopt});
+}
+
+bool is_drop(const logbrew::EventDrop &drop, const std::string &event_id, const std::string &reason,
+             std::size_t dropped_events) {
+  return drop.event_id == event_id && drop.event_type == "log" && drop.reason == reason &&
+         drop.dropped_events == dropped_events;
+}
+
+void bounded_queue_counts_newest_drops_with_reasons() {
+  std::vector<logbrew::EventDrop> drops;
+  auto client = bounded_client(drops);
+  for (std::size_t index = 0U; index <= logbrew::default_max_queue_events; index++) {
+    log_event(client, "evt_" + std::to_string(index));
+  }
+  EXPECT_TRUE(client.pending_events() == logbrew::default_max_queue_events);
+  EXPECT_TRUE(client.dropped_events() == 1U);
+  EXPECT_TRUE(drops.size() == 1U && is_drop(drops.back(), "evt_1000", "queue_overflow", 1U));
+
+  logbrew::RecordingTransport transport;
+  static_cast<void>(client.flush(transport));
+  EXPECT_TRUE(client.pending_event_bytes() == 0U);
+  EXPECT_TRUE(client.dropped_events() == 1U);
+  log_event(client, "evt_a");
+  const std::size_t event_bytes = client.pending_event_bytes();
+
+  auto byte_bounded = bounded_client(drops, logbrew::default_max_queue_events, event_bytes);
+  log_event(byte_bounded, "evt_a");
+  log_event(byte_bounded, "evt_b");
+  EXPECT_TRUE(is_drop(drops.back(), "evt_b", "queue_bytes_overflow", 1U));
+
+  auto too_large = bounded_client(drops, logbrew::default_max_queue_events, event_bytes - 1U);
+  log_event(too_large, "evt_b");
+  EXPECT_TRUE(is_drop(drops.back(), "evt_b", "event_too_large", 1U));
+  EXPECT_TRUE(too_large.pending_events() == 0U);
+
+  const auto expect_invalid = [&drops](std::size_t max_events, std::size_t max_bytes) {
+    try {
+      static_cast<void>(bounded_client(drops, max_events, max_bytes));
+      EXPECT_TRUE(false);
+    } catch (const logbrew::SdkException &error) {
+      EXPECT_TRUE(error.code() == "validation_error");
+    }
+  };
+  expect_invalid(0U, 1U);
+  expect_invalid(1U, 0U);
+}
+
+void drop_callback_failures_never_reach_the_app() {
+  std::size_t calls = 0U;
+  logbrew::LogBrewClient *target = nullptr;
+  logbrew::ClientOptions options;
+  options.max_queue_events = 1U;
+  options.on_event_dropped = [&calls, &target](const logbrew::EventDrop &) {
+    calls++;
+    log_event(*target, "evt_nested");
+    throw std::runtime_error("callback failed");
+  };
+  logbrew::LogBrewClient client(logbrew::Config{"LOGBREW_API_KEY", "logbrew-cpp", logbrew::version, 2},
+                                std::move(options));
+  target = &client;
+  log_event(client, "evt_a");
+  log_event(client, "evt_b");
+  EXPECT_TRUE(calls == 1U);
+  EXPECT_TRUE(client.dropped_events() == 2U);
+  EXPECT_TRUE(client.pending_events() == 1U);
+}
+
 void empty_flush_is_no_op() {
   auto client = new_client();
   logbrew::RecordingTransport transport;
@@ -637,6 +719,8 @@ int main() {
   trace_context_helpers_validate_and_correlate();
   flush_success_clears_queue();
   empty_flush_is_no_op();
+  bounded_queue_counts_newest_drops_with_reasons();
+  drop_callback_failures_never_reach_the_app();
   validation_failures_are_stable();
   unauthenticated_response_surfaces_clean_error();
   retry_recovery_and_retry_budget_are_observable();

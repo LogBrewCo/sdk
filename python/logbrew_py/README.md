@@ -230,12 +230,20 @@ client = LogBrewClient.create(
 )
 ```
 
-When the queue is full, new events are dropped and existing queued context is preserved. Use `pending_events()` and `dropped_events()` for local diagnostics, then call `flush()` or `shutdown()` with your transport:
+When the queue is full, LogBrew drops the new event and keeps existing queued context. Each drop has a reason: `queue_overflow` (event limit), `queue_bytes_overflow` (byte limit), or `event_too_large` (one event cannot fit the queue or one request). Use `dropped_events()`, `dropped_events_by_reason()`, and the optional `on_event_dropped` callback for local diagnostics, then call `flush()` or `shutdown()` with your transport:
 
 ```python
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.4.0",
+    on_event_dropped=lambda drop: print(drop.reason, drop.dropped_events),
+)
 if client.dropped_events() > 0:
-    print({"pending": client.pending_events(), "dropped": client.dropped_events()})
+    print({"pending": client.pending_events(), "dropped": client.dropped_events_by_reason()})
 ```
+
+`EventDrop` holds only the event ID, event type, reason, and total drop count. The callback is advisory: LogBrew ignores its exceptions and skips nested drops it causes, so capture never fails because of it.
 
 This counter is local process state only. Usage, quota, and billing remain backend-owned and must not be inferred from queue size or drop counts.
 
@@ -1277,7 +1285,7 @@ The caller owns the encryption key lifecycle. LogBrew never writes or logs the k
 
 Completed admission stores encrypted compact event JSON before returning, and replacement children for the same Celery slot replay the oldest records first. The database never retains plaintext event content, API keys, endpoints, headers, process IDs, machine identity, worker names, or local paths. Filesystem observers can still see the queue directory, encrypted file size, row count, and write timing, so keep the root on app-owned protected storage and include it in your data-retention policy.
 
-The default bounds are 10,000 events, 4 MiB of compact event JSON, 100 events per request, and 256 KiB per request. Override them with `max_queue_size`, `max_queue_bytes`, `max_batch_events`, and `max_batch_bytes`. New records are dropped when either queue bound is full; a record that cannot fit one request is also dropped. `dropped_events()`, `pending_events()`, and `pending_event_bytes()` expose local pressure without reading event content. `flush()` and `shutdown()` acknowledge only accepted prefixes, reuse an identical body for retries, and leave failed or later records for the next owner. `TransportResponse.batches` and `accepted_events` report aggregate progress when one flush requires multiple requests.
+The default bounds are 10,000 events, 4 MiB of compact event JSON, 100 events per request, and 256 KiB per request. Override them with `max_queue_size`, `max_queue_bytes`, `max_batch_events`, and `max_batch_bytes`. New records are dropped when either queue bound is full; a record that cannot fit one request is also dropped. `dropped_events()`, `dropped_events_by_reason()`, `pending_events()`, and `pending_event_bytes()` expose local pressure without reading event content. `flush()` and `shutdown()` acknowledge only accepted prefixes, reuse an identical body for retries, and leave failed or later records for the next owner. `TransportResponse.batches` and `accepted_events` report aggregate progress when one flush requires multiple requests.
 
 Use `recover_pending_events()` to revalidate authenticated state explicitly and `purge_pending_events()` only for an explicit local data-deletion action. Both fail while delivery or shutdown is active. The `events` property remains available for compatibility but returns a detached decrypted snapshot; mutating it never changes the queue. A hard exit cannot run Python finalizers, so durability comes from each completed admission transaction, not from `atexit` or a terminal signal callback. Delivery remains at least once: the service should use stable public event IDs to make a replay harmless.
 

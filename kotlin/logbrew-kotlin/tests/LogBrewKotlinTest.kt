@@ -2,6 +2,7 @@ import co.logbrew.sdk.ActionAttributes
 import co.logbrew.sdk.AndroidContext
 import co.logbrew.sdk.AndroidLogPriority
 import co.logbrew.sdk.EnvironmentAttributes
+import co.logbrew.sdk.EventDrop
 import co.logbrew.sdk.HttpTransport
 import co.logbrew.sdk.HttpTransportRequest
 import co.logbrew.sdk.HttpTransportRequester
@@ -30,6 +31,8 @@ fun main() {
     run("preview_json_contains_all_supported_event_types", ::previewJsonContainsAllSupportedEventTypes)
     run("flush_success_clears_queue", ::flushSuccessClearsQueue)
     run("concurrent_logging_preserves_queue_and_flushes", ::concurrentLoggingPreservesQueueAndFlushes)
+    run("bounded_queue_counts_newest_drops_with_reasons", ::boundedQueueCountsNewestDropsWithReasons)
+    run("drop_callback_failures_never_reach_the_app", ::dropCallbackFailuresNeverReachTheApp)
     run("empty_flush_is_noop", ::emptyFlushIsNoop)
     run("invalid_timestamp_fails_validation", ::invalidTimestampFailsValidation)
     run("invalid_timestamp_shape_fails_validation", ::invalidTimestampShapeFailsValidation)
@@ -64,7 +67,7 @@ fun main() {
     AndroidRequestSpanTests.runAll()
     OperationTracingTests.runAll()
     RichInvestigationTests.runAll()
-    println("kotlin package tests ok (40 tests)")
+    println("kotlin package tests ok (42 tests)")
 }
 
 private fun run(
@@ -78,13 +81,28 @@ private fun run(
     }
 }
 
-private fun newClient(maxRetries: Int = 2): LogBrewClient =
+private fun newClient(
+    maxRetries: Int = 2,
+    maxQueueEvents: Int = LogBrewClient.DEFAULT_MAX_QUEUE_EVENTS,
+    maxQueueBytes: Long = LogBrewClient.DEFAULT_MAX_QUEUE_BYTES,
+    onEventDropped: ((EventDrop) -> Unit)? = null,
+): LogBrewClient =
     LogBrewClient.create(
         apiKey = "LOGBREW_API_KEY",
         sdkName = "logbrew-kotlin-tests",
         sdkVersion = "0.1.0",
         maxRetries = maxRetries,
+        maxQueueEvents = maxQueueEvents,
+        maxQueueBytes = maxQueueBytes,
+        onEventDropped = onEventDropped,
     )
+
+private fun logEvent(
+    client: LogBrewClient,
+    id: String,
+) {
+    client.log(id, "2026-06-02T10:00:03Z", LogAttributes.create("same size", "info"))
+}
 
 private fun enqueueAll(client: LogBrewClient) {
     client.release(
@@ -219,10 +237,10 @@ private fun flushSuccessClearsQueue() {
 }
 
 private fun concurrentLoggingPreservesQueueAndFlushes() {
-    val client = newClient()
     val workerCount = 16
     val eventsPerWorker = 1_000
     val expectedEvents = workerCount * eventsPerWorker
+    val client = newClient(maxQueueEvents = expectedEvents, maxQueueBytes = 64L * 1024 * 1024)
     val executor = Executors.newFixedThreadPool(workerCount)
     val start = CountDownLatch(1)
     val done = CountDownLatch(workerCount)
@@ -267,6 +285,46 @@ private fun concurrentLoggingPreservesQueueAndFlushes() {
     check(response.statusCode == 202)
     check(response.attempts == 1)
     check(client.pendingEvents() == 0)
+}
+
+private fun boundedQueueCountsNewestDropsWithReasons() {
+    val drops = mutableListOf<EventDrop>()
+    val defaults = newClient(onEventDropped = { drops += it })
+    repeat(LogBrewClient.DEFAULT_MAX_QUEUE_EVENTS + 1) { index -> logEvent(defaults, "evt_$index") }
+    check(defaults.pendingEvents() == 1_000)
+    check(drops == listOf(EventDrop("evt_1000", "log", "queue_overflow", 1)))
+    check(defaults.droppedEvents() == 1)
+
+    val eventBytes = newClient().also { logEvent(it, "evt_a") }.pendingEventBytes()
+    listOf("queue_bytes_overflow" to eventBytes, "event_too_large" to eventBytes - 1).forEach { (reason, maxBytes) ->
+        drops.clear()
+        val client = newClient(maxQueueBytes = maxBytes, onEventDropped = { drops += it })
+        logEvent(client, "evt_a")
+        logEvent(client, "evt_b")
+        check(drops.last() == EventDrop("evt_b", "log", reason, client.droppedEvents())) { "unexpected drops $drops" }
+    }
+
+    defaults.flush(RecordingTransport.alwaysAccept())
+    check(defaults.pendingEventBytes() == 0L)
+    check(defaults.droppedEvents() == 1)
+    expect("validation_error") { newClient(maxQueueEvents = 0) }
+    expect("validation_error") { newClient(maxQueueBytes = 0) }
+}
+
+private fun dropCallbackFailuresNeverReachTheApp() {
+    val calls = mutableListOf<EventDrop>()
+    lateinit var client: LogBrewClient
+    client =
+        newClient(maxQueueEvents = 1, onEventDropped = { drop ->
+            calls += drop
+            logEvent(client, "evt_nested")
+            throw IllegalStateException("callback failed")
+        })
+    logEvent(client, "evt_a")
+    logEvent(client, "evt_b")
+    check(calls.map { it.eventId } == listOf("evt_b"))
+    check(client.droppedEvents() == 2)
+    check(client.pendingEvents() == 1)
 }
 
 private fun emptyFlushIsNoop() {

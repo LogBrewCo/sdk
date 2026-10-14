@@ -6,7 +6,7 @@ import time
 import unittest
 from typing import Any
 
-from logbrew_sdk import LogBrewClient, SdkError, TransportResponse
+from logbrew_sdk import EventDrop, EventDropReason, LogBrewClient, SdkError, TransportResponse
 
 
 def create_client(**kwargs: Any) -> LogBrewClient:
@@ -86,6 +86,43 @@ class LogBrewDeliveryAdmissionTests(unittest.TestCase):
         self.assertEqual(request_bounded.pending_events(), 0)
         self.assertEqual(request_bounded.pending_event_bytes(), 0)
         self.assertEqual(request_bounded.dropped_events(), 1)
+
+    def test_drops_report_reason_counts_and_advisory_callback(self) -> None:
+        probe = create_client()
+        capture_log(probe, "evt_a", "same size")
+        event_bytes = probe.pending_event_bytes()
+        cases: tuple[tuple[EventDropReason, dict[str, int]], ...] = (
+            ("queue_overflow", {"max_queue_size": 1}),
+            ("queue_bytes_overflow", {"max_queue_bytes": event_bytes}),
+            ("event_too_large", {"max_queue_bytes": event_bytes - 1}),
+        )
+        for reason, limits in cases:
+            with self.subTest(reason=reason):
+                drops: list[EventDrop] = []
+                client = create_client(on_event_dropped=drops.append, **limits)
+                capture_log(client, "evt_a", "same size")
+                capture_log(client, "evt_b", "same size")
+
+                self.assertEqual(drops[-1], EventDrop("evt_b", "log", reason, len(drops)))
+                self.assertEqual(client.dropped_events(), len(drops))
+                self.assertEqual(client.dropped_events_by_reason(), {reason: len(drops)})
+
+    def test_failing_or_reentrant_drop_callback_never_reaches_the_app(self) -> None:
+        calls: list[EventDrop] = []
+
+        def fail(drop: EventDrop) -> None:
+            calls.append(drop)
+            capture_log(client, "evt_nested", "same size")
+            raise RuntimeError("callback failed")
+
+        client = create_client(max_queue_size=1, on_event_dropped=fail)
+        capture_log(client, "evt_a", "same size")
+        capture_log(client, "evt_b", "same size")
+
+        self.assertEqual([drop.event_id for drop in calls], ["evt_b"])
+        self.assertEqual(client.dropped_events(), 2)
+        self.assertEqual(client.dropped_events_by_reason(), {"queue_overflow": 2})
+        self.assertEqual(client.pending_events(), 1)
 
 
 class ScriptedTransport:

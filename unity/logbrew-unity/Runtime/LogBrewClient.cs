@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 
 namespace LogBrew.Unity
 {
@@ -16,22 +17,35 @@ namespace LogBrew.Unity
         internal static readonly string[] MetricKinds = { "counter", "gauge", "histogram" };
         internal static readonly string[] InstantTemporality = { "instant" };
         internal static readonly string[] DeltaCumulativeTemporalities = { "delta", "cumulative" };
+        public const int DefaultMaxQueueSize = 1000;
+        public const int DefaultMaxQueueBytes = 4 * 1024 * 1024;
+
+        [ThreadStatic]
+        private static bool reportingDrop;
 
         private readonly string apiKey;
         private readonly OrderedJsonObject sdk;
         private readonly int maxRetries;
         private readonly TelemetryContext? context;
+        private readonly int maxQueueSize;
+        private readonly int maxQueueBytes;
+        private readonly Action<DroppedEvent>? onEventDropped;
         private readonly object stateLock = new object();
         private readonly List<Event> events;
         private readonly List<IssueBreadcrumb> breadcrumbs = new List<IssueBreadcrumb>();
         private bool breadcrumbsTruncated;
+        private int pendingEventBytes;
+        private int droppedEvents;
         private bool closed;
 
-        private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries, TelemetryContext? context)
+        private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries, TelemetryContext? context, int maxQueueSize, int maxQueueBytes, Action<DroppedEvent>? onEventDropped)
         {
             this.apiKey = apiKey;
             this.maxRetries = maxRetries;
             this.context = context;
+            this.maxQueueSize = maxQueueSize;
+            this.maxQueueBytes = maxQueueBytes;
+            this.onEventDropped = onEventDropped;
             events = new List<Event>();
             sdk = new OrderedJsonObject()
                 .Add("name", sdkName)
@@ -45,7 +59,10 @@ namespace LogBrew.Unity
             string sdkVersion,
             int maxRetries = 2,
             TelemetryContext? context = null,
-            bool includeAutomaticContext = true)
+            bool includeAutomaticContext = true,
+            int maxQueueSize = DefaultMaxQueueSize,
+            int maxQueueBytes = DefaultMaxQueueBytes,
+            Action<DroppedEvent>? onEventDropped = null)
         {
             Validation.RequireNonEmpty("api_key", apiKey);
             Validation.RequireNonEmpty("game_name", gameName);
@@ -55,10 +72,15 @@ namespace LogBrew.Unity
                 throw new SdkException("validation_error", "max_retries must be non-negative");
             }
 
+            if (maxQueueSize <= 0 || maxQueueBytes <= 0)
+            {
+                throw new SdkException("validation_error", "queue bounds must be positive");
+            }
+
             var baseContext = TelemetryContext.Merge(
                 includeAutomaticContext ? TelemetryContext.RuntimeDefaults() : null,
                 context);
-            return new LogBrewClient(apiKey, gameName, sdkVersion, maxRetries, baseContext);
+            return new LogBrewClient(apiKey, gameName, sdkVersion, maxRetries, baseContext, maxQueueSize, maxQueueBytes, onEventDropped);
         }
 
         public int PendingEvents()
@@ -66,6 +88,24 @@ namespace LogBrew.Unity
             lock (stateLock)
             {
                 return events.Count;
+            }
+        }
+
+        /// <summary>Returns the encoded UTF-8 bytes of the queued events.</summary>
+        public int PendingEventBytes()
+        {
+            lock (stateLock)
+            {
+                return pendingEventBytes;
+            }
+        }
+
+        /// <summary>Returns how many events the bounded queue rejected since the client was created.</summary>
+        public int DroppedEvents()
+        {
+            lock (stateLock)
+            {
+                return droppedEvents;
             }
         }
 
@@ -231,10 +271,44 @@ namespace LogBrew.Unity
         {
             Validation.RequireNonEmpty("event id", id);
             Validation.RequireTimestamp(timestamp);
+            var item = new Event(type, timestamp, id, attributes);
+            var eventBytes = Encoding.UTF8.GetByteCount(JsonWriter.Write(item.ToJsonObject()));
+            DroppedEvent drop;
             lock (stateLock)
             {
                 RequireOpen();
-                events.Add(new Event(type, timestamp, id, attributes));
+                var reason = eventBytes > maxQueueBytes ? "event_too_large"
+                    : events.Count >= maxQueueSize ? "queue_overflow"
+                    : eventBytes > maxQueueBytes - pendingEventBytes ? "queue_bytes_overflow"
+                    : null;
+                if (reason == null)
+                {
+                    events.Add(item);
+                    pendingEventBytes += eventBytes;
+                    return;
+                }
+
+                droppedEvents = droppedEvents == int.MaxValue ? droppedEvents : droppedEvents + 1;
+                drop = new DroppedEvent(id, type, reason, droppedEvents);
+            }
+
+            if (onEventDropped == null || reportingDrop)
+            {
+                return;
+            }
+
+            reportingDrop = true;
+            try
+            {
+                onEventDropped(drop);
+            }
+            catch (Exception error) when (!(error is OutOfMemoryException))
+            {
+                // Drop callbacks are advisory and must never interrupt app telemetry.
+            }
+            finally
+            {
+                reportingDrop = false;
             }
         }
 
@@ -330,6 +404,7 @@ namespace LogBrew.Unity
                     if (response.StatusCode >= 200 && response.StatusCode < 300)
                     {
                         events.Clear();
+                        pendingEventBytes = 0;
                         return new TransportResponse(response.StatusCode, attempt);
                     }
 

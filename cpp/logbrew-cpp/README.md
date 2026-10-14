@@ -72,6 +72,10 @@ logbrew::TransportResponse response = client.flush(transport);
 
 `logbrew::SdkException` exposes a stable `code()` plus the exception message. `logbrew::Transport` is an abstract callback surface for app-owned delivery, while `logbrew::RecordingTransport` lets your app inspect queued JSON before network delivery.
 
+## Queue Bounds
+
+The client queue holds at most 1,000 events and 4 MiB of encoded event JSON by default. Set `max_queue_events` or `max_queue_bytes` in `logbrew::ClientOptions` to change them. When a bound is full, LogBrew drops the new event and keeps queued ones; the capture call does not throw. `dropped_events()` counts drops. The optional `on_event_dropped` callback receives a `logbrew::EventDrop` with the event ID, type, reason (`queue_overflow`, `queue_bytes_overflow`, or `event_too_large`), and total count. LogBrew catches callback exceptions and does not call the callback again for drops it causes.
+
 ## Sending To LogBrew
 
 Use `logbrew::HttpTransport` when your application is ready to send events to the hosted LogBrew intake:

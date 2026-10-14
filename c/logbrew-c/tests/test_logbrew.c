@@ -91,6 +91,107 @@ static void flush_success_clears_queue(void) {
   logbrew_client_free(client);
 }
 
+typedef struct {
+  LogBrewClient *client;
+  size_t calls;
+  char event_id[32];
+  char reason[32];
+  size_t dropped_events;
+} DropRecorder;
+
+static void log_event(LogBrewClient *client, const char *id) {
+  LogBrewError error;
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_client_log(client, id, "2026-06-02T10:00:03Z",
+      (LogBrewLogAttributes){"same size", "info", NULL}, &error) == LOGBREW_OK);
+}
+
+static void record_drop(void *user_data, const LogBrewEventDrop *drop) {
+  DropRecorder *recorder = (DropRecorder *)user_data;
+  recorder->calls++;
+  (void)snprintf(recorder->event_id, sizeof(recorder->event_id), "%s", drop->event_id);
+  (void)snprintf(recorder->reason, sizeof(recorder->reason), "%s", drop->reason);
+  recorder->dropped_events = drop->dropped_events;
+  if (recorder->client != NULL) {
+    log_event(recorder->client, "evt_nested");
+  }
+}
+
+static LogBrewClient *new_bounded_client(size_t max_events, size_t max_bytes, DropRecorder *recorder) {
+  LogBrewClient *client = NULL;
+  LogBrewError error;
+  LogBrewConfig config = {"LOGBREW_API_KEY", "logbrew-c", LOGBREW_C_VERSION, 2U};
+  LogBrewClientOptions options = {0};
+  options.max_queue_events = max_events;
+  options.max_queue_bytes = max_bytes;
+  options.on_event_dropped = record_drop;
+  options.event_dropped_user_data = recorder;
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_client_new_with_options(config, options, &client, &error) == LOGBREW_OK);
+  memset(recorder, 0, sizeof(*recorder));
+  return client;
+}
+
+static void expect_drop(const DropRecorder *recorder, const char *event_id, const char *reason, size_t dropped_events) {
+  EXPECT_TRUE(strcmp(recorder->event_id, event_id) == 0);
+  EXPECT_TRUE(strcmp(recorder->reason, reason) == 0);
+  EXPECT_TRUE(recorder->dropped_events == dropped_events);
+}
+
+static void bounded_queue_counts_newest_drops_with_reasons(void) {
+  DropRecorder recorder;
+  LogBrewClient *client = new_bounded_client(0U, 0U, &recorder);
+  LogBrewRecordingTransport transport;
+  LogBrewTransportResponse response;
+  LogBrewError error;
+  char id[32];
+  size_t index;
+  size_t event_bytes;
+  for (index = 0U; index <= LOGBREW_DEFAULT_MAX_QUEUE_EVENTS; index++) {
+    (void)snprintf(id, sizeof(id), "evt_%u", (unsigned int)index);
+    log_event(client, id);
+  }
+  EXPECT_TRUE(logbrew_client_pending_events(client) == LOGBREW_DEFAULT_MAX_QUEUE_EVENTS);
+  EXPECT_TRUE(logbrew_client_dropped_events(client) == 1U);
+  EXPECT_TRUE(recorder.calls == 1U);
+  expect_drop(&recorder, "evt_1000", "queue_overflow", 1U);
+
+  logbrew_recording_transport_init(&transport, NULL, 0U);
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_client_flush(client, logbrew_recording_transport_as_transport(&transport), &response, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_pending_event_bytes(client) == 0U);
+  EXPECT_TRUE(logbrew_client_dropped_events(client) == 1U);
+  log_event(client, "evt_a");
+  event_bytes = logbrew_client_pending_event_bytes(client);
+  logbrew_recording_transport_free(&transport);
+  logbrew_client_free(client);
+
+  client = new_bounded_client(0U, event_bytes, &recorder);
+  log_event(client, "evt_a");
+  log_event(client, "evt_b");
+  expect_drop(&recorder, "evt_b", "queue_bytes_overflow", 1U);
+  logbrew_client_free(client);
+
+  client = new_bounded_client(0U, event_bytes - 1U, &recorder);
+  log_event(client, "evt_b");
+  expect_drop(&recorder, "evt_b", "event_too_large", 1U);
+  EXPECT_TRUE(logbrew_client_pending_events(client) == 0U);
+  logbrew_client_free(client);
+}
+
+static void reentrant_drop_callback_is_not_repeated(void) {
+  DropRecorder recorder;
+  LogBrewClient *client = new_bounded_client(1U, 0U, &recorder);
+  recorder.client = client;
+  log_event(client, "evt_a");
+  log_event(client, "evt_b");
+  EXPECT_TRUE(recorder.calls == 1U);
+  expect_drop(&recorder, "evt_b", "queue_overflow", 1U);
+  EXPECT_TRUE(logbrew_client_dropped_events(client) == 2U);
+  EXPECT_TRUE(logbrew_client_pending_events(client) == 1U);
+  logbrew_client_free(client);
+}
+
 static void empty_flush_is_no_op(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingTransport recorder;
@@ -627,6 +728,8 @@ int main(void) {
   http_client_span_helpers_create_child_propagation();
   flush_success_clears_queue();
   empty_flush_is_no_op();
+  bounded_queue_counts_newest_drops_with_reasons();
+  reentrant_drop_callback_is_not_repeated();
   validation_failures_are_stable();
   unauthenticated_response_surfaces_clean_error();
   retry_recovery_and_retry_budget_are_observable();

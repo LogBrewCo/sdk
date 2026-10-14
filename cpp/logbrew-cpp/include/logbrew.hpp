@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -22,6 +23,8 @@ inline constexpr std::size_t traceparent_length = 55U;
 inline constexpr unsigned int telemetry_context_schema_version = 1U;
 inline constexpr std::size_t max_context_tags = 32U;
 inline constexpr std::size_t max_breadcrumbs = 64U;
+inline constexpr std::size_t default_max_queue_events = 1000U;
+inline constexpr std::size_t default_max_queue_bytes = 4U * 1024U * 1024U;
 inline constexpr std::size_t max_stack_frames = 32U;
 inline constexpr std::size_t max_exception_chain_entries = 8U;
 inline constexpr std::size_t max_span_events = 8U;
@@ -153,9 +156,22 @@ struct TelemetryContext {
   Tags tags;
 };
 
+/// Content-free description of one event the bounded queue rejected.
+struct EventDrop {
+  std::string event_id;
+  std::string event_type;
+  /// `queue_overflow`, `queue_bytes_overflow`, or `event_too_large`.
+  std::string reason;
+  std::size_t dropped_events = 0;
+};
+
 struct ClientOptions {
   std::optional<TelemetryContext> context;
   bool disable_automatic_context = false;
+  std::size_t max_queue_events = default_max_queue_events;
+  /// Encoded event JSON bytes.
+  std::size_t max_queue_bytes = default_max_queue_bytes;
+  std::function<void(const EventDrop &)> on_event_dropped;
 };
 
 namespace detail {
@@ -553,6 +569,8 @@ public:
   LogBrewClient(Config config, ClientOptions options);
 
   [[nodiscard]] std::size_t pending_events() const noexcept;
+  [[nodiscard]] std::size_t pending_event_bytes() const noexcept;
+  [[nodiscard]] std::size_t dropped_events() const noexcept;
   [[nodiscard]] std::string preview_json() const;
 
   TransportResponse flush(Transport &transport);
@@ -604,7 +622,13 @@ private:
   std::string sdk_version_;
   std::size_t max_retries_;
   bool closed_ = false;
-  std::vector<Event> events_;
+  std::size_t max_queue_events_;
+  std::size_t max_queue_bytes_;
+  std::function<void(const EventDrop &)> on_event_dropped_;
+  std::size_t pending_event_bytes_ = 0;
+  std::size_t dropped_events_ = 0;
+  bool reporting_drop_ = false;
+  std::vector<std::string> events_;
   std::optional<TelemetryContext> base_context_;
   std::vector<IssueBreadcrumb> breadcrumbs_;
   bool breadcrumbs_truncated_ = false;
