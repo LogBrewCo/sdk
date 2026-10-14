@@ -128,6 +128,7 @@ class AutomaticDeliveryController:
         self._deliver = deliver
         self._condition = threading.Condition()
         self._thread: threading.Thread | None = None
+        self._restart_after_abort = False
         self._stop_requested = False
         self._shutting_down = False
         self._closed = False
@@ -210,13 +211,14 @@ class AutomaticDeliveryController:
                     self._ensure_worker_locked(time.monotonic())
             self._condition.notify_all()
 
-    def manual_delivery_failed(self, error: BaseException, *, pending_events: int, owned: bool) -> None:
+    def manual_delivery_failed(self, error: BaseException, *, pending_events: int | None, owned: bool) -> None:
         if not owned:
             with self._condition:
                 self._last_outcome = "failed"
             return
         with self._condition:
-            self._has_pending = pending_events > 0
+            if pending_events is not None:
+                self._has_pending = pending_events > 0
             self._apply_failure_locked(error, time.monotonic())
             self._condition.notify_all()
 
@@ -234,7 +236,10 @@ class AutomaticDeliveryController:
         with self._condition:
             self._shutting_down = False
             self._stop_requested = False
-            self._thread = None
+            if self._thread is not None and self._thread.is_alive():
+                self._restart_after_abort = True
+            else:
+                self._thread = None
             self._has_pending = pending_events > 0
             if self._enabled and self._has_pending and self._pause_reason == "none":
                 now = time.monotonic()
@@ -310,6 +315,17 @@ class AutomaticDeliveryController:
             self._thread = worker
 
     def _worker(self) -> None:
+        try:
+            self._run_worker()
+        finally:
+            with self._condition:
+                self._thread = None
+                restart = self._restart_after_abort
+                self._restart_after_abort = False
+                if restart:
+                    self._ensure_worker_locked(time.monotonic())
+
+    def _run_worker(self) -> None:
         while True:
             with self._condition:
                 while True:
@@ -335,11 +351,13 @@ class AutomaticDeliveryController:
 
             try:
                 accepted_events, pending_events = self._deliver()
-            except Exception as error:
+            except BaseException as error:
                 with self._condition:
                     self._delivery_in_flight = False
                     self._apply_failure_locked(error, time.monotonic())
                     self._condition.notify_all()
+                if not isinstance(error, Exception):
+                    raise
             else:
                 with self._condition:
                     now = time.monotonic()
