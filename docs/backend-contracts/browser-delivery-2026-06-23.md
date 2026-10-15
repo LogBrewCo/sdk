@@ -2,15 +2,15 @@
 
 ## Status
 
-Backend contract status is pending. This report is SDK-originated from public browser SDK verification and competitor source comparison. It does not claim any new backend route is live.
+Backend contract status is pending. This report is SDK-originated from public browser SDK verification. It does not claim any new backend route is live.
 
 ## Priority
 
-P2 - Browser developers expect telemetry delivery to survive navigation, tab close, temporary connectivity loss, and quota/rate-limit responses. LogBrew now has bounded fetch keepalive, lifecycle flush reasons, return-online in-memory recovery, explicit persisted fetch-batch replay, retry-after parsing, and high-load queue-drop reporting, but remains weaker than Sentry, Datadog, and PostHog for beacon-style exit delivery until backend defines an authorization-safe browser unload contract.
+P2 - Browser developers expect telemetry delivery to survive navigation, tab close, temporary connectivity loss, and quota/rate-limit responses. LogBrew now has bounded fetch keepalive, lifecycle flush reasons, return-online in-memory recovery, explicit persisted fetch-batch replay, retry-after parsing, and high-load queue-drop reporting. Beacon-style exit delivery still needs an authorization-safe browser unload contract.
 
 ## User Impact
 
-Without a backend-owned browser unload contract, the browser SDK must keep using `fetch` with header-based client-key delivery. That is safer for today's public auth model, and the SDK can now persist failed fetch batches without storing the browser key, but it still cannot match competitor `sendBeacon` behavior in all page-exit cases. Users may still lose events during abrupt termination before JavaScript can persist or flush them.
+Without a backend-owned browser unload contract, the browser SDK must keep using `fetch` with header-based client-key delivery. That is safer for today's public auth model, and the SDK can now persist failed fetch batches without storing the browser key, but it cannot use `sendBeacon` delivery in all page-exit cases. Users may still lose events during abrupt termination before JavaScript can persist or flush them.
 
 ## Expected Backend Capability
 
@@ -51,13 +51,7 @@ The public browser SDK now proves the safe subset:
 - HTTP `429` surfaces as `SdkError` code `rate_limited` with optional `retryAfterMs`, preserves queued events, and avoids immediate retry.
 - The installed browser smokes prove auth failure, retry, shutdown, high-volume logging, pagehide flush, online recovery, persisted-batch replay, queue retention, and no client-key/query/hash/email leakage through packed packages.
 
-Competitor source pattern:
-
-- Sentry JavaScript `getsentry/sentry-javascript@c5e245f869eca352e5d11833dd9b3264da448ac9` uses bounded browser fetch keepalive, a promise buffer, dropped-event accounting, and category-aware rate-limit state.
-- Datadog Browser SDK `DataDog/browser-sdk@e387e045a32d41105ff49454aecc74edc7fd7d38` uses browser batching, retry state, bandwidth accounting, and `sendBeacon` on exit with fetch fallback.
-- PostHog JS `PostHog/posthog-js@5486ab34301d64ed6da0dcbc775fbd3f0a854a3e` has configurable request transports, retry callbacks, fetch keepalive thresholds, and a `sendBeacon` path for unload.
-
-LogBrew should not copy those heavier mechanisms blindly because today's SDK auth uses headers, public browser storage can hold sensitive telemetry, and backend owns usage/quota/category semantics.
+The SDK does not add beacon delivery yet because today's SDK auth uses headers, public browser storage can hold sensitive telemetry, and backend owns usage/quota/category semantics.
 
 ## Verification Needed
 

@@ -90,9 +90,9 @@ class BackendContractReportTests(unittest.TestCase):
             / "support-ticket-routes-2026-06-24.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("code-level verified locally but not deploy/live verified", report)
-        self.assertIn("redacted post-deploy live verifier", report)
-        self.assertIn("does not clear SDK network-call gating", report)
+        self.assertIn("Backend contract status is pending for SDK network calls", report)
+        self.assertIn("safe for SDK network calls yet", report)
+        self.assertIn("redacted live verification", report)
         self.assertIn("SDKs must not call `POST /api/support/tickets`", report)
         self.assertIn("explicit local diagnostics draft", report)
 

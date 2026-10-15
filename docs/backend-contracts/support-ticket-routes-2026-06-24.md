@@ -2,12 +2,8 @@
 
 ## Status
 
-Backend contract status is pending for deploy and live verification. SDK-facing contract notes
-say support-ticket storage/routes are code-level verified locally but not deploy/live verified.
-SDK-facing contract notes also say that a redacted post-deploy live verifier
-exists for the route family; that verifier is useful next-step evidence, but it
-does not clear SDK network-call gating until it passes against a deployed API.
-This SDK-originated public contract note does not claim that any support-ticket
+Backend contract status is pending for SDK network calls. This SDK-originated
+public contract note does not claim that any support-ticket
 route is live, documented for users, or safe for SDK network calls yet.
 
 ## Priority
@@ -30,7 +26,7 @@ examples or diagnostics.
 ## Expected Backend Capability
 
 Backend should provide authenticated, account-scoped support-ticket storage and
-lookup after deploy/live verification, with a redacted post-deploy live verifier
+lookup after deploy/live verification, with redacted live verification
 as the required proof path before public SDKs send ticket traffic.
 
 Suggested APIs:
@@ -62,11 +58,10 @@ Required backend behavior:
   exception text before storage or response.
 - Return stable validation and method-error envelopes with actionable `next`
   guidance.
-- Route each ticket to the expected owning automation lane without requiring
-  SDKs to infer ownership locally.
+- Route each ticket to its owner without requiring SDKs to infer ownership
+  locally.
 - Publish the route as live only after deploy/live verification proves storage,
-  lookup, redaction, and auth behavior against a safe environment. A verifier
-  script existing in backend is not enough; the pass result must be reported.
+  lookup, redaction, and auth behavior against a safe environment.
 
 ## SDK Gap Observed
 
@@ -96,10 +91,7 @@ account API material is used as ingest configuration.
 - Backend deploy/live smoke proof for `POST /api/support/tickets`,
   `GET /api/support/tickets`, and `GET /api/support/tickets/{ticket_id}` covering
   success, auth failure, method guidance, invalid payload, invalid ticket id,
-  wrong-account lookup, redaction, and no sensitive value echo. The current
-  backend live-verifier script can satisfy only the deployed happy-path portion
-  after it passes; broader negative-path proof remains required before SDK
-  ticket creation is release-ready.
+  wrong-account lookup, redaction, and no sensitive value echo.
 - SDK fake-intake or safe-env tests for any future network helper covering
   success, validation failure, auth failure, retry/non-retry behavior, explicit
   user/agent action, and no silent background ticket creation.
