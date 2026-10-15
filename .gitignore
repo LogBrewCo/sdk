@@ -5,9 +5,6 @@ __pycache__/
 CLAUDE.md
 .agents/
 skills-lock.json
-docs/competitor-research/
-docs/private-plans/
-memory.md
 plans/
 *plan*.md
 
