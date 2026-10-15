@@ -1,0 +1,58 @@
+name: Public guard
+
+# The scan job uses pull_request_target so fork pull requests get the full
+# project term list. It runs only the base branch copy of the guard and reads
+# the pull request as Git objects; it never checks out or runs its content.
+# The test job runs the pull request copy of the guard without the term list.
+on:
+  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: public-guard-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Public guard tests
+    if: github.event_name != 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test the guard
+        run: bash scripts/test-public-guard.sh
+
+  scan:
+    name: Public guard scan
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Checkout the base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan new commits and pull request text
+        env:
+          PUBLIC_GUARD_TERMS: ${{ secrets.PUBLIC_GUARD_TERMS }}
+          PUBLIC_GUARD_REQUIRE_TERMS: "1"
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/public-guard.sh github

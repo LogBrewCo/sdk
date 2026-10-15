@@ -572,6 +572,7 @@ def is_github_actions_oidc_or_secret_placeholder(relative_text: str, line: str) 
         "os.environ['central_portal_password']",
         "signing keys",
         "gh_token: ${{ github.token }}",
+        "public_guard_terms: ${{ secrets.public_guard_terms }}",
         "github_authorization: ${{ github.token }}",
         "github-token: ${{ github.token }}",
     )
