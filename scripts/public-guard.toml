@@ -1,0 +1,71 @@
+# Public guard rules for gitleaks 8.30.1. Keep this file identical in every
+# public LogBrew repository. Rules here are generic. Project-specific terms
+# come from the PUBLIC_GUARD_TERMS list at run time and never live in Git.
+# Each regex is written so that it does not match its own source text.
+
+title = "LogBrew public guard"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "local-path.1"
+description = "Local home-directory path"
+regex = '''(?i)(?:/U[s]ers/|/h[o]me/|[a-z]:\\U[s]ers\\)[a-z0-9._-]+[/\\]'''
+
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''(?i)[/\\](?:example|user|username|you|your-?name|me|name|runner|ubuntu|alice|bob|dev|developer|app|synthetic|private|test|tester|jdoe|jane|john|someone|<[^>]*>|\$[a-z_]+|\{[^}]*\})[/\\]$''']
+
+[[rules]]
+id = "local-path.2"
+description = "Agent or scratch workspace path"
+regex = '''(?i)(?:\.c[o]dex/(?:automations|sessions|skills|memories|worktrees|prompts)|\.cl[a]ude/(?:projects|memory|agents|skills|worktrees)|/t[m]p/claude-[0-9]|scratch[p]ad/)'''
+
+[[rules]]
+id = "private-network.1"
+description = "Shared address space (RFC 6598) address"
+regex = '''(?:^|[^0-9.])1[0]0\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}(?:[^0-9.]|$)'''
+
+[[rules]]
+id = "agent-attribution.1"
+description = "AI agent attribution"
+regex = '''(?i)(?:co-a[u]thored-by:[^\n]*(?:claude|anthropic|codex|openai|copilot|cursor|chatgpt|gemini|devin|aider)|generated (?:with|by) \[?(?:claude|codex|chatgpt|copilot|cursor|gemini)|n[o]reply@anthropic\.com|\x{1F916} gener[a]ted)'''
+
+[[rules]]
+id = "internal-plan.1"
+description = "Agent prompt or automation marker"
+regex = '''(?i)(?:<c[o]dex_delegation|<h[e]artbeat|autom[a]tion_id|source_th[r]ead_id|\b(?:developer|private|internal)[ _-]pr[o]mpt\b)'''
+
+[[rules]]
+id = "hidden-text.1"
+description = "Invisible or bidirectional control character"
+# A zero-width space right after @ is how dependency update notes break mentions.
+regex = '''(?:^|[^@])\x{200B}|[\x{200C}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{2066}-\x{2069}]'''
+
+[[rules]]
+id = "personal-data.1"
+description = "Email address outside reserved example domains"
+# The optional prefix lets the allowlist see URL user information and human Git trailers.
+regex = '''(?i)(?:\b(?:co-authored-by|signed-off-by):[^\n<]*<|\b[a-z][a-z0-9+.-]*://[^\s/@]*)?\b[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b'''
+
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = [
+  '''(?i)^(?:co-authored-by|signed-off-by):''',
+  '''(?i)^[a-z][a-z0-9+.-]*://''',
+  '''(?i)^n[o]-?reply@''',
+  '''(?i)@(?:[a-z0-9-]+\.)*(?:example\.(?:com|org|net)|[a-z0-9-]+\.(?:example|test|invalid|localhost)|logbrew\.(?:co|com|dev)|users\.n[o]reply\.github\.com|n[o]reply\.github\.com|github\.com)$''',
+  '''(?i)^(?:you|your-?(?:name|email)|user|username|name|first\.last|someone|me|jane|john|alice|bob|dev|developer|support|hello|security|team|admin)@(?:company|your-?(?:company|domain)|domain|acme|corp|org)\.(?:com|org|io|dev)$''',
+]
+
+[[rules.allowlists]]
+paths = ['''(?i)(?:^|/)(?:licen[cs]es?|notices?|third[-_]party[^/]*|AUTHORS|COPYING)(?:[./-][^/]*)?(?:/|$)''']
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Trace and span identifiers"
+regexTarget = "line"
+regexes = ['''(?i)\b(?:trace|span)(?:[_-]?id)?["']?\s*[=:]''']

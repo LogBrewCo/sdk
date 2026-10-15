@@ -91,3 +91,13 @@ This public guide applies to the whole repository.
   final diff before publishing. Remove generated artifacts before the final
   confidentiality scan.
 - Do not add `CLAUDE.md`, task-state files, or planning files.
+- Commits, PR titles and bodies, branch names, READMEs, and release notes
+  describe user-visible behavior only. Do not name hosting, network, storage,
+  or deployment internals, non-public repositories, local paths, plans,
+  agent sessions, costs, or real user data. Do not add AI attribution.
+- `scripts/public-guard.sh` enforces this. The required `Public guard` status
+  scans every new commit, commit message, changed path, branch name, and PR
+  title and body. Run `bash scripts/public-guard.sh install` once per checkout
+  to scan commit messages and pushes locally. Never use `--no-verify`. If a
+  finding is a false positive, change the rule in its own PR first; never
+  split, encode, or reword text only to pass the guard.
