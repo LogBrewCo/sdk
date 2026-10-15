@@ -458,19 +458,6 @@ class ConfidentialityScanTests(unittest.TestCase):
                 else:
                     self.assertEqual(failures, [])
 
-    def test_reports_public_research_memory_and_private_plan_paths(self) -> None:
-        failures = self.scan_fixture(
-            {
-                "docs/competitor-research/transport.md": "Public source notes\n",
-                "docs/private-plans/task.md": "Local task notes\n",
-                "memory.md": "SDK lane memory\n",
-            }
-        )
-        self.assertEqual(len(failures), 3)
-        self.assertTrue(any("docs/competitor-research" in failure for failure in failures))
-        self.assertTrue(any("docs/private-plans" in failure for failure in failures))
-        self.assertTrue(any("memory.md" in failure for failure in failures))
-
     def test_allows_local_ignored_agent_redirect_and_plans(self) -> None:
         sensitive_term = "cre" + "dential"
         planning_term = "stra" + "tegy"

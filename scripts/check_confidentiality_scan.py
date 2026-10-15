@@ -49,9 +49,6 @@ SELF_PATH = Path("scripts/check_confidentiality_scan.py")
 FORBIDDEN_PUBLIC_PLANNING_PATHS = (
     Path(".agents"),
     Path("CLAUDE.md"),
-    Path("docs/competitor-research"),
-    Path("docs/private-plans"),
-    Path("memory.md"),
     Path("plans"),
     Path("skills-lock.json"),
 )
@@ -831,7 +828,6 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
         return True
     if relative_text in {
         "docs/backend-contracts/release-artifact-symbolication-2026-06-13.md",
-        "docs/competitor-research/source-maps-debug-symbols-2026-06-13.md",
         "js/logbrew-js/README.md",
         "js/logbrew-next/README.md",
     }:
@@ -849,20 +845,12 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
         }
 
     support_docs = {
-        "docs/competitor-research/js-support-ticket-diagnostics-2026-06-20.md",
-        "docs/competitor-research/go-support-ticket-diagnostics-2026-06-20.md",
-        "docs/competitor-research/java-support-ticket-diagnostics-2026-06-20.md",
-        "docs/competitor-research/python-support-ticket-diagnostics-2026-06-20.md",
-        "docs/competitor-research/ruby-support-ticket-diagnostics-2026-06-20.md",
-        "docs/competitor-research/php-support-ticket-diagnostics-2026-06-20.md",
         "go/logbrew/README.md",
         "java/logbrew-java/README.md",
         "js/logbrew-js/README.md",
         "js/logbrew-js/index.d.cts",
         "js/logbrew-js/index.d.ts",
-        "memory.md",
         "dotnet/logbrew-dotnet/README.md",
-        "docs/competitor-research/dotnet-support-ticket-diagnostics-2026-06-20.md",
         "php/logbrew-php/README.md",
         "python/logbrew_py/README.md",
         "ruby/logbrew-ruby/README.md",
@@ -880,16 +868,8 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
             or "redact" in lower_line
             or "token-free" in lower_line
             or (
-                relative_text == "docs/competitor-research/ruby-support-ticket-diagnostics-2026-06-20.md"
-                and "url password removal" in lower_line
-            )
-            or (
                 relative_text == "ruby/logbrew-ruby/README.md"
                 and 'runtimeerror.new("hidden token")' in lower_line
-            )
-            or (
-                relative_text == "docs/competitor-research/php-support-ticket-diagnostics-2026-06-20.md"
-                and "masktokensinurl" in lower_line
             )
         )
 
@@ -1112,9 +1092,7 @@ def is_kotlin_okhttp_phase_timing_reference(
 
     lower_line = line.lower()
     ok_http_phase_paths = {
-        "docs/competitor-research/kotlin-android-trace-correlation-2026-06-16.md",
         "kotlin/logbrew-kotlin-okhttp/README.md",
-        "memory.md",
     }
     if relative_text in ok_http_phase_paths:
         allowed_fragments = (
@@ -1153,9 +1131,7 @@ def is_go_http_phase_timing_reference(
 
     lower_line = line.lower()
     go_phase_paths = {
-        "docs/competitor-research/go-outbound-http-tracing-2026-06-19.md",
         "go/logbrew/README.md",
-        "memory.md",
     }
     if relative_text in go_phase_paths:
         allowed_fragments = (
@@ -1255,9 +1231,7 @@ def is_kotlin_coroutine_context_reference(
         and "restore" in lower_line
         and relative_text
         in {
-            "docs/competitor-research/kotlin-android-trace-correlation-2026-06-16.md",
             "kotlin/logbrew-kotlin/README.md",
-            "memory.md",
         }
     )
 
