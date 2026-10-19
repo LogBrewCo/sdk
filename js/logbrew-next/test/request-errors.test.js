@@ -710,3 +710,38 @@ test("Automatic route metadata keeps concrete paths out when no stable template 
   `);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
+
+test("Route Handler setUser tags the route span and error issue of its own request only", () => {
+  const result = runInstalledConsumer(`
+    import assert from "node:assert/strict";
+    import { RecordingTransport } from "@logbrew/sdk";
+    import { withLogBrewRouteHandler } from "@logbrew/next";
+
+    const transport = RecordingTransport.alwaysAccept();
+    const options = { serverApiKey: "LOGBREW_SERVER_API_KEY", routeTemplate: "/api/account", transport };
+    const failing = withLogBrewRouteHandler(async (_request, _context, helpers) => {
+      assert.equal(helpers.setUser("user-42"), true);
+      throw new Error("account failed");
+    }, options);
+    const healthy = withLogBrewRouteHandler(async () => new Response("ok"), options);
+
+    await assert.rejects(failing(new Request("https://example.com/api/account"), {}));
+    const tagged = JSON.parse(transport.lastBody());
+    await healthy(new Request("https://example.com/api/account"), {});
+    const untagged = transport.lastBody();
+
+    const issue = tagged.events.find((event) => event.type === "issue");
+    assert.deepEqual(issue.attributes.context.subject, { id: "user-42", kind: "user" });
+    assert.equal(untagged.includes("subject"), false);
+    const span = tagged.events.find((event) => event.type === "span");
+    if (span) {
+      assert.deepEqual(span.attributes.context.subject, { id: "user-42", kind: "user" });
+    }
+    const invalid = withLogBrewRouteHandler(async (_request, _context, helpers) => {
+      helpers.setUser("");
+      return new Response("unreachable");
+    }, options);
+    await assert.rejects(invalid(new Request("https://example.com/api/account"), {}), /user id/u);
+  `);
+  assert.equal(result.status, 0, result.stderr);
+});

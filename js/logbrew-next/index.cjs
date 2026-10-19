@@ -122,7 +122,7 @@ function withLogBrewRouteHandler(handler, options = {}) {
     const { client, owned } = resolveClient(options, request, context);
     const transport = resolveTransport(options, { request, context, client }, defaultTransport);
     const trace = createRouteTraceContext(request, undefined, options);
-    const helpers = createRouteHelpers(client, transport, trace);
+    const helpers = createRouteHelpers(client, transport, trace, request);
     const startedAt = nowMs(options);
 
     return activeTraceContext.run(trace, async () => {
@@ -279,10 +279,43 @@ function resolveRequestErrorClient(options, runtime) {
   return { client: createLogBrewNextClient(options), owned: true };
 }
 
-function createRouteHelpers(client, transport, trace) {
+// Users belong to one route request, so one request's user never reaches another request.
+const routeSubjects = new WeakMap();
+const MAX_USER_ID_LENGTH = 200;
+
+function setRouteUser(request, id, { kind = "user" } = {}) {
+  const normalized = typeof id === "string" ? id.trim() : "";
+  const characters = Array.from(normalized);
+  if (characters.length === 0 || characters.length > MAX_USER_ID_LENGTH || characters.some((character) => {
+    const code = character.codePointAt(0);
+    return code <= 31 || (code >= 127 && code <= 159);
+  })) {
+    throw new SdkError("configuration_error", `LogBrew user id must be 1-${MAX_USER_ID_LENGTH} characters without control characters`);
+  }
+  if (kind !== "user" && kind !== "anonymous") {
+    throw new SdkError("configuration_error", "LogBrew user kind must be user or anonymous");
+  }
+  if (!request || typeof request !== "object") {
+    return false;
+  }
+  routeSubjects.set(request, { id: normalized, kind });
+  return true;
+}
+
+function withRouteSubject(attributes, request) {
+  const subject = request && typeof request === "object" ? routeSubjects.get(request) : undefined;
+  if (!subject || attributes?.context?.subject) {
+    return attributes;
+  }
+  return { ...attributes, context: { ...(attributes.context ?? { schemaVersion: 1 }), subject } };
+}
+
+function createRouteHelpers(client, transport, trace, request) {
   return {
     client,
     logbrew: client,
+    // Tags this request's route span and route error issue with an opaque app-owned user ID.
+    setUser: (id, options) => setRouteUser(request, id, options),
     trace,
     previewJson: () => client.previewJson(),
     flush: () => client.flush(transport),
@@ -351,7 +384,7 @@ function recordRouteRequest(options, { request, response, context, client, durat
       routeTemplate: resolveRouteTemplate(options, request, context),
       trace
     });
-  captureRouteRequestEvent(client, event);
+  captureRouteRequestEvent(client, { ...event, attributes: withRouteSubject(event.attributes, request) });
 }
 
 function recordRouteMetric(options, { request, response, context, client, durationMs, trace }) {
@@ -379,7 +412,7 @@ async function recordRouteError(options, error, runtime) {
           routeTemplate: resolveRouteTemplate(options, request, context),
           trace: routeTrace
         });
-      client.issue(event.id, event.timestamp, event.attributes);
+      client.issue(event.id, event.timestamp, withRouteSubject(event.attributes, request));
     }
   } catch (captureError) {
     await notifyFailure(options, captureError, { request, context, client, trace: routeTrace });

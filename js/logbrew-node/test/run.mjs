@@ -43,7 +43,8 @@ try {
       "breadcrumbs.test.js",
       "process-errors.test.js",
       "request-tracing.test.js",
-      "runtime-context.test.js"
+      "runtime-context.test.js",
+      "user-context.test.js"
     ],
     {
     cwd: testDirectory,

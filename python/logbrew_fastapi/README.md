@@ -68,6 +68,18 @@ When an incoming request has a valid W3C `traceparent` header, request capture c
 
 Request spans use the FastAPI route template, such as `GET /orders/{order_id}`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
+## Request User
+
+Call `set_logbrew_user()` once you know who made the request, for example after authentication. Every later event of that request, including the request span and any issue, carries `context.subject`:
+
+```python
+from logbrew_sdk import set_logbrew_user
+
+set_logbrew_user(account.public_id)  # an opaque app-owned ID, not an email address or name
+```
+
+The ID stays with its own request trace, so it never reaches another request's events. Outside a request the call does nothing and returns `False`. Pass `kind="anonymous"` for visitors who have not signed in. IDs are 1 to 200 characters without control characters. LogBrew stores only the ID and kind; it never collects email addresses, names, or IP addresses for you.
+
 ## Caller-owned delivery
 
 Use `add_logbrew_middleware()` when the application already owns its `LogBrewClient` and transport lifecycle, or when a deterministic local preview needs `RecordingTransport`. This low-level API accepts any object implementing the public `Transport` protocol:

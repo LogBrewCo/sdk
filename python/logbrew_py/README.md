@@ -228,6 +228,18 @@ Every client records what led up to an error and attaches it to the next issue a
 
 Breadcrumbs recorded inside a request trace (framework middleware, or `use_logbrew_trace`) attach only to issues from that request. Breadcrumbs outside a request attach to issues outside a request, such as process crashes. Each scope keeps the newest 64 and marks the issue `breadcrumbsTruncated` when older ones were dropped. Add your own with `add_logbrew_breadcrumb({"category": "checkout", "message": "payment submitted"})`. Pass `breadcrumbs=False` to `LogBrewClient.create()` to keep that client's issues free of automatic breadcrumbs; the sources stay installed once any client turns them on.
 
+## Request User (Frameworks and Traced Work)
+
+Call `set_logbrew_user()` once you know who made the request, for example after authentication. Inside a framework request or `use_logbrew_trace()`, every later event of that trace carries `context.subject`:
+
+```python
+from logbrew_sdk import set_logbrew_user
+
+set_logbrew_user(account.public_id)  # an opaque app-owned ID, not an email address or name
+```
+
+The ID stays with its own request trace, so it never reaches another request's events. Outside a request the call does nothing and returns `False`. Pass `kind="anonymous"` for visitors who have not signed in. IDs are 1 to 200 characters without control characters. LogBrew stores only the ID and kind; it never collects email addresses, names, or IP addresses for you.
+
 ## Process Crashes
 
 Framework integrations report errors inside a request. To also report uncaught exceptions in scripts, workers, startup code, and background threads, install process error capture once:

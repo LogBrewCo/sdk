@@ -14,7 +14,7 @@ from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
 from django.test import Client, RequestFactory
 from django.urls import path
 from logbrew_django import configure_logbrew, create_request_trace_context, get_active_logbrew_trace
-from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport, SdkError
+from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport, SdkError, set_logbrew_user
 
 
 def health(_request: HttpRequest) -> HttpResponse:
@@ -43,6 +43,11 @@ def boom(_request: HttpRequest) -> HttpResponse:
     raise RuntimeError("broken handler")
 
 
+def account_boom(_request: HttpRequest) -> HttpResponse:
+    set_logbrew_user("user-42")
+    raise RuntimeError("account failed")
+
+
 def order_boom(_request: HttpRequest, order_id: int) -> HttpResponse:
     raise RuntimeError(f"broken order {order_id}")
 
@@ -52,6 +57,7 @@ urlpatterns = [
     path("orders/<int:order_id>/", order_detail, name="order-detail"),
     path("traced-orders/<int:order_id>/", traced_order, name="traced-order"),
     path("boom/", boom, name="boom"),
+    path("account/boom/", account_boom, name="account-boom"),
     path("orders/<int:order_id>/boom/", order_boom, name="order-boom"),
 ]
 
@@ -236,6 +242,20 @@ class DjangoIntegrationTests(unittest.TestCase):
         self.assertIs(log["metadata"]["sampled"], True)
         self.assertNotIn("/traced-orders/42", json.dumps(span))
         self.assertNotIn("debug", json.dumps(payload))
+
+    def test_set_logbrew_user_tags_only_its_own_request(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        configure_logbrew(client=sdk_client, transport=transport)
+
+        Client(raise_request_exception=False).get("/account/boom/")
+        Client().get("/health/")
+
+        tagged, untagged = (json.loads(body) for body in transport.sent_bodies)
+        self.assertEqual([event["type"] for event in tagged["events"]], ["issue", "span"])
+        for event in tagged["events"]:
+            self.assertEqual(event["attributes"]["context"]["subject"], {"id": "user-42", "kind": "user"})
+        self.assertNotIn("subject", json.dumps(untagged))
 
     def test_exception_captures_issue_and_error_span(self) -> None:
         sdk_client = make_client()

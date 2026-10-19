@@ -296,11 +296,35 @@ function createLogBrewNodeContext(client, transport, trace) {
     client,
     logbrew: client,
     ...(trace ? { trace } : {}),
+    setUser: (id, options = {}) => setLogBrewUser(id, { ...options, trace }),
     transport,
     previewJson: () => client.previewJson(),
     flush: () => client.flush(transport),
     shutdown: () => client.shutdown(transport)
   };
+}
+
+// Users belong to one request trace, so one request's user never reaches another request's events.
+const traceSubjects = new WeakMap();
+const MAX_USER_ID_LENGTH = 200;
+
+function setLogBrewUser(id, { kind = "user", trace = getActiveLogBrewTrace() } = {}) {
+  const normalized = typeof id === "string" ? id.trim() : "";
+  const length = Array.from(normalized).length;
+  if (length === 0 || length > MAX_USER_ID_LENGTH || Array.from(normalized).some((character) => {
+    const code = character.codePointAt(0);
+    return code <= 31 || (code >= 127 && code <= 159);
+  })) {
+    throw new SdkError("configuration_error", `LogBrew user id must be 1-${MAX_USER_ID_LENGTH} characters without control characters`);
+  }
+  if (kind !== "user" && kind !== "anonymous") {
+    throw new SdkError("configuration_error", "LogBrew user kind must be user or anonymous");
+  }
+  if (!trace || typeof trace !== "object") {
+    return false;
+  }
+  traceSubjects.set(trace, { id: normalized, kind });
+  return true;
 }
 
 function getActiveLogBrewTrace() {
@@ -2109,7 +2133,11 @@ function traceMetadata(trace) {
 
 function activeTraceTelemetryContext() {
   const trace = getActiveLogBrewTrace();
-  return trace ? { schemaVersion: 1, trace: traceMetadata(trace) } : undefined;
+  if (!trace) {
+    return undefined;
+  }
+  const subject = traceSubjects.get(trace);
+  return { schemaVersion: 1, trace: traceMetadata(trace), ...(subject ? { subject } : {}) };
 }
 
 function nowMs(options) {
@@ -2198,6 +2226,7 @@ const exported = {
   queueOperationWithLogBrewSpan,
   purgeLogBrewNodePersistentQueue,
   runWithLogBrewTrace,
+  setLogBrewUser,
   withLogBrewHttpHandler
 };
 

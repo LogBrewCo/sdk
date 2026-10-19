@@ -124,6 +124,8 @@ export type LogBrewNodeContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
   trace?: LogBrewTraceContext;
+  /** Tag every event of this request with an opaque app-owned user ID. Returns false without a request trace. */
+  setUser(id: string, options?: { kind?: "user" | "anonymous" }): boolean;
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
@@ -849,6 +851,15 @@ export declare function installLogBrewPinoInstrumentation(
 /** Add an app-owned breadcrumb to the active request scope, or the process scope outside a request. */
 export declare function addLogBrewBreadcrumb(breadcrumb: IssueBreadcrumbInput & { timestamp?: string }): void;
 
+/**
+ * Tag every event of the active request with an opaque app-owned user ID (not an email or name).
+ * Returns false outside a request trace, so one request's user never reaches another request.
+ */
+export declare function setLogBrewUser(
+  id: string,
+  options?: { kind?: "user" | "anonymous"; trace?: LogBrewTraceContext }
+): boolean;
+
 /** Options for reporting process-level crashes. */
 export type LogBrewProcessErrorCaptureOptions = {
   /** Client that receives one unhandled issue per crash. */
@@ -987,6 +998,7 @@ declare const defaultExport: {
   queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
   purgeLogBrewNodePersistentQueue: typeof purgeLogBrewNodePersistentQueue;
   runWithLogBrewTrace: typeof runWithLogBrewTrace;
+  setLogBrewUser: typeof setLogBrewUser;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };
 

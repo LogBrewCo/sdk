@@ -27,6 +27,7 @@ from logbrew_sdk import (
     RecordingTransport,
     SdkError,
     create_logbrew_trace_context,
+    set_logbrew_user,
     use_logbrew_trace,
 )
 from typing_extensions import override
@@ -478,6 +479,26 @@ class FlaskIntegrationTests(_FlaskTestCase):
             self.assertIs(log["metadata"]["sampled"], expr2=True)
         self.assertNotIn("/orders/42", json.dumps(span))
         self.assertNotIn("debug", json.dumps(payload))
+
+    def test_set_logbrew_user_tags_only_its_own_request(self) -> None:
+        """A user set in one request reaches that request's issue and span, and no other request."""
+        add_logbrew_middleware(self.app, client=self.sdk_client, transport=self.transport)
+
+        @self.app.get("/account/boom")
+        def account_boom() -> dict[str, int]:
+            self.assertTrue(set_logbrew_user("user-42"))
+            raise RuntimeError(_ORDER_FAILURE)
+
+        @self.app.get("/health")
+        def health() -> dict[str, bool]:
+            return {"ok": True}
+
+        self.app.test_client().get("/account/boom", buffered=True)
+        payload = self._recorded_batch("issue", "span")
+        for event in payload["events"]:
+            self.assertEqual(event["attributes"]["context"]["subject"], {"id": "user-42", "kind": "user"})
+        self.app.test_client().get("/health", buffered=True)
+        self.assertNotIn("subject", json.dumps(json.loads(self.transport.sent_bodies[-1])))
 
     def test_exception_captures_issue_and_error_span(self) -> None:
         """Link the issue, error span, and metric while redacting exception text."""
