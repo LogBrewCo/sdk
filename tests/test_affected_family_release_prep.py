@@ -32,14 +32,14 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.31",
-            "js/logbrew-browser/package.json": "0.1.12",
+            "js/logbrew-js/package.json": "0.1.32",
+            "js/logbrew-browser/package.json": "0.1.13",
             "js/logbrew-express/package.json": "0.1.7",
             "js/logbrew-fastify/package.json": "0.1.7",
-            "js/logbrew-node/package.json": "0.1.15",
+            "js/logbrew-node/package.json": "0.1.16",
             "js/logbrew-nestjs/package.json": "0.1.8",
-            "js/logbrew-next/package.json": "0.1.10",
-            "js/logbrew-react/package.json": "0.1.1",
+            "js/logbrew-next/package.json": "0.1.11",
+            "js/logbrew-react/package.json": "0.1.2",
             "js/logbrew-react-native/package.json": "0.1.36",
             "js/logbrew-svelte/package.json": "0.1.5",
         }
@@ -47,7 +47,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.21"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.22"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.13"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.7"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.8"),
@@ -268,7 +268,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.21",
+                "logbrew-sdk": "0.1.22",
                 "logbrew-fastapi": "0.1.13",
                 "logbrew-flask": "0.1.7",
                 "logbrew-django": "0.1.8",
