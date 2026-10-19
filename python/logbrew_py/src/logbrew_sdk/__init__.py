@@ -1816,6 +1816,7 @@ from logbrew_sdk._dramatiq_client import (  # noqa: E402
     LogBrewDramatiqInstrumentation,
     instrument_dramatiq_broker_with_logbrew_spans,
 )
+from logbrew_sdk._process_errors import ProcessErrorCapture, install_process_error_capture  # noqa: E402
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 from logbrew_sdk._opentelemetry_processor import (  # noqa: E402
     LogBrewOpenTelemetrySpanExporter,
@@ -1874,6 +1875,7 @@ __all__ = [
     "Metadata",
     "MetadataValue",
     "MetricAttributes",
+    "ProcessErrorCapture",
     "RecordingTransport",
     "ReleaseAttributes",
     "SdkError",
@@ -1920,6 +1922,7 @@ __all__ = [
     "database_operation_with_logbrew_span",
     "get_active_logbrew_trace",
     "httpx_request_with_logbrew_span",
+    "install_process_error_capture",
     "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_arq_pool_with_logbrew_spans",
     "instrument_arq_worker_with_logbrew_spans",
