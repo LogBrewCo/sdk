@@ -24,7 +24,7 @@ _installed: list[ProcessErrorCapture] = []
 
 
 class ProcessErrorCapture:
-    """Installed hooks; `uninstall()` restores the hooks that were active before."""
+    """Installed hooks; `uninstall()` puts back the hooks that were active before."""
 
     def __init__(
         self,
@@ -41,7 +41,7 @@ class ProcessErrorCapture:
         self._previous_threading_excepthook = threading.excepthook
 
     def uninstall(self) -> None:
-        """Restore the previous hooks. Calling it again does nothing."""
+        """Put the previous hooks back. Calling it again does nothing."""
         with _install_lock:
             if self not in _installed:
                 return
