@@ -273,7 +273,7 @@ Usage, quota, and billing remain backend-owned and must not be inferred from que
 
 ## Automatic Delivery
 
-Pass an app-owned transport when you want the client to deliver retained events automatically. Automatic delivery starts lazily after the first accepted event, sends at 50 queued events or after 5 seconds by default, and uses the same bounded queue and exact-prefix acknowledgement as explicit flushes:
+Pass an app-owned transport when you want the client to deliver retained events automatically. Automatic delivery starts lazily after the first accepted event, sends at 50 queued events or 1 second after the first queued event by default, so a single event is readable in about a second while bursts still share one request, and uses the same bounded queue and exact-prefix acknowledgement as explicit flushes:
 
 ```python
 from logbrew_sdk import HttpTransport, LogBrewClient

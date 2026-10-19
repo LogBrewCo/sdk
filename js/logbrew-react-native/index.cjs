@@ -24,6 +24,8 @@ const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
 const SCREEN_ACTION_PREFIX = "screen:";
 const LAST_ROUTE = Symbol.for("co.logbrew.react-native.last-route");
 const BACKGROUND_APP_STATES = new Set(["background", "inactive"]);
+// Mobile keeps a 5-second interval to save battery and radio wakeups; flushOnBackground sends the rest.
+const DEFAULT_REACT_NATIVE_DELIVERY_INTERVAL_MS = 5000;
 const LogBrewNativeContext = React.createContext(null);
 const activeTraceScopes = [];
 let nextTraceScopeId = 0;
@@ -54,7 +56,7 @@ function createLogBrewReactNativeClient({
     apiKey: authKey,
     automaticDelivery,
     context,
-    deliveryIntervalMs,
+    deliveryIntervalMs: deliveryIntervalMs ?? DEFAULT_REACT_NATIVE_DELIVERY_INTERVAL_MS,
     deliveryQueueThreshold,
     eventStore,
     maxBatchBytes,

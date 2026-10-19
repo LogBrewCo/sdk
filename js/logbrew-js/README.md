@@ -456,7 +456,7 @@ Prefer removing sensitive values at the source before calling LogBrew. `eventFil
 
 ## Automatic Delivery
 
-When a client owns a `transport`, it automatically sends queued work after 5 seconds or when 50 events are waiting, whichever happens first. The one-shot timer starts only after capture, is `unref()`'d on Node.js, and is cancelled by manual flush, purge, or shutdown. Automatic sends reuse the same serialized flush path, immutable retry body, accepted-prefix acknowledgement, and persistent queue as manual calls. They do not install process, signal, page, or exit hooks.
+When a client owns a `transport`, it automatically sends queued work 1 second after the first queued event or when 50 events are waiting, whichever happens first, so a single event is readable in about a second while bursts still share one request. The one-shot timer starts only after capture, later events do not restart it, is `unref()`'d on Node.js, and is cancelled by manual flush, purge, or shutdown. Automatic sends reuse the same serialized flush path, immutable retry body, accepted-prefix acknowledgement, and persistent queue as manual calls. They do not install process, signal, page, or exit hooks.
 
 ```js
 const transport = RecordingTransport.alwaysAccept();
@@ -465,7 +465,7 @@ const client = LogBrewClient.create({
   sdkName: "checkout-api",
   sdkVersion: "1.0.0",
   transport,
-  deliveryIntervalMs: 5000,
+  deliveryIntervalMs: 1000,
   deliveryQueueThreshold: 50
 });
 
