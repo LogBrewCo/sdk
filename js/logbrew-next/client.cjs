@@ -30,9 +30,10 @@ function createLogBrewNextBrowserClient({
   if (!authKey) {
     throw new SdkError("configuration_error", "createLogBrewNextBrowserClient requires clientKey or apiKey");
   }
+  const deploymentContext = withPublicDeployment(context);
   return LogBrewClient.create({
     apiKey: authKey,
-    context: withPublicDeployment(context),
+    context: deploymentContext,
     deliveryIntervalMs,
     eventFilter,
     maxQueueSize,

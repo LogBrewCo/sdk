@@ -20,9 +20,10 @@ function createLogBrewNextEdgeRequestErrorHandler(options = {}) {
         "Edge request-error capture requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
       );
     }
+    const deploymentContext = nextDeploymentContext(options.context);
     const client = LogBrewClient.create({
       apiKey: authKey,
-      context: nextDeploymentContext(options.context),
+      context: deploymentContext,
       sdkName: options.sdkName ?? "logbrew-next",
       sdkVersion: options.sdkVersion ?? "0.1.9",
       maxRetries: options.maxRetries ?? 2

@@ -33,7 +33,8 @@ function createLogBrewNextClient({
       "createLogBrewNextClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, context: nextDeploymentContext(context), sdkName, sdkVersion, maxRetries });
+  const deploymentContext = nextDeploymentContext(context);
+  return LogBrewClient.create({ apiKey: authKey, context: deploymentContext, sdkName, sdkVersion, maxRetries });
 }
 
 function createLogBrewNextRequestErrorHandler(options = {}) {
