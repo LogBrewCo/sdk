@@ -207,7 +207,7 @@ namespace LogBrew
                     builder,
                     "LOGBREW_FLUSH_INTERVAL_MS",
                     "LogBrew:FlushIntervalMs",
-                    5000,
+                    1000,
                     10,
                     3600000)),
                 FlushAtQueueSize = ReadIntegerSetting(

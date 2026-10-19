@@ -461,3 +461,39 @@ fn owned_transport_drop_releases_resources_after_final_client_owner() {
     drop(client);
     receiver.recv_timeout(Duration::from_secs(1)).unwrap();
 }
+
+fn event_count(body: &[u8]) -> usize {
+    let batch: serde_json::Value = serde_json::from_slice(body).unwrap();
+    batch["events"].as_array().unwrap().len()
+}
+
+#[test]
+fn default_interval_delivers_a_single_event_within_about_one_second() {
+    let transport = SharedTransport::always_accept();
+    let mut client = automatic_client(transport.clone(), AutomaticDeliveryConfig::default());
+    let captured_at = Instant::now();
+    queue_log(&mut client, "evt_latency_001");
+
+    wait_until(Duration::from_millis(1500), || {
+        !transport.bodies().is_empty()
+    });
+
+    assert!(captured_at.elapsed() >= Duration::from_millis(900));
+    client.shutdown_owned().unwrap();
+}
+
+#[test]
+fn default_interval_sends_a_burst_as_one_request() {
+    let transport = SharedTransport::always_accept();
+    let mut client = automatic_client(transport.clone(), AutomaticDeliveryConfig::default());
+    for index in 0..20 {
+        queue_log(&mut client, &format!("evt_burst_{index:03}"));
+    }
+
+    wait_until(Duration::from_millis(1500), || {
+        !transport.bodies().is_empty()
+    });
+
+    assert_eq!(event_count(&transport.bodies()[0]), 20);
+    client.shutdown_owned().unwrap();
+}

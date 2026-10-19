@@ -91,7 +91,7 @@ The explicit Rails capture settings are:
 | `LOGBREW_RELEASE` | unset | Optional release identifier |
 | `LOGBREW_ENDPOINT` | `https://api.logbrew.co/v1/events` | HTTPS intake URL; loopback HTTP is accepted for local development |
 | `LOGBREW_REQUEST_TIMEOUT_MS` | `10000` | Per-request delivery timeout from 1 to 600000 ms |
-| `LOGBREW_FLUSH_INTERVAL_MS` | `5000` | Automatic delivery interval from 10 to 3600000 ms |
+| `LOGBREW_FLUSH_INTERVAL_MS` | `1000` | Automatic delivery interval after the first queued event, from 10 to 3600000 ms |
 | `LOGBREW_FLUSH_THRESHOLD` | `100` | Queue size from 1 to 1000 that requests an earlier flush |
 | `LOGBREW_CAPTURE_EXCEPTION_MESSAGES` | `false` | Opt in to exception message capture |
 | `LOGBREW_CAPTURE_RAILS_LOGS` | `false` | Opt in to bounded application-origin logs on active request and job traces |
@@ -692,7 +692,7 @@ client = LogBrew::Client.create_automatic(
   sdk_name: "checkout-worker",
   sdk_version: "1.0.0",
   transport: transport,
-  flush_interval: 5,
+  flush_interval: 1,
   flush_threshold: 100,
   retry_base_delay: 0.25,
   retry_max_delay: 30,
@@ -704,7 +704,7 @@ warn JSON.generate(client.delivery_health.to_h)
 client.shutdown
 ```
 
-The worker starts only after accepted queue work exists, then wakes when the queue reaches `flush_threshold` or `flush_interval` expires. Restart-hydrated persistent work wakes it immediately. Automatic and manual sends share the existing serialized flush, immutable failed prefix, accepted-prefix acknowledgement, batch bounds, and persistence format; no second queue or transport path is created.
+The worker starts only after accepted queue work exists, then wakes when the queue reaches `flush_threshold` or `flush_interval` expires. The defaults are 1 second and 100 events, so a single event is readable in about a second while bursts still share one request. Restart-hydrated persistent work wakes it immediately. Automatic and manual sends share the existing serialized flush, immutable failed prefix, accepted-prefix acknowledgement, batch bounds, and persistence format; no second queue or transport path is created.
 
 Retryable network, `408`, and `5xx` failures retain the exact failed body and use capped equal-jitter backoff. Authentication (`401`/`403`), quota (`429`), validation (`400`/`422`), and other non-retryable responses pause automatic sends without dropping queued work. `recover_automatic_delivery` performs one explicit synchronous flush through the owned transport and resumes scheduling only after success. Calling `flush(transport)` directly provides the same explicit recovery boundary. `stop_automatic_delivery` joins the worker without draining or discarding work; a later manual flush remains available.
 

@@ -28,7 +28,9 @@ internal static class AutomaticDeliveryTests
         ShutdownSerializesWithInflightDelivery();
         HealthIsStableJsonAndContentFree();
         MalformedTransportFailureDoesNotEscapeCapture();
-        return 13;
+        DefaultIntervalDeliversASingleEventWithinAboutOneSecond();
+        DefaultIntervalSendsABurstAsOneRequest();
+        return 15;
     }
 
     private static AutomaticDeliveryOptions Options(
@@ -61,6 +63,34 @@ internal static class AutomaticDeliveryTests
             transport,
             options ?? Options(),
             onEventDropped);
+    }
+
+    private static void DefaultIntervalDeliversASingleEventWithinAboutOneSecond()
+    {
+        var transport = new ControlledTransport(202);
+        var client = AutomaticClient(transport, new AutomaticDeliveryOptions());
+        var stopwatch = Stopwatch.StartNew();
+
+        client.Log("evt_latency_1", Timestamp, LogAttributes.Create("single", "info"));
+
+        AssertTrue(transport.WaitForRequests(1, TimeSpan.FromMilliseconds(1500)), "default interval did not deliver one event within 1.5 s");
+        AssertTrue(stopwatch.Elapsed >= TimeSpan.FromMilliseconds(900), "first event did not wait for its batch window");
+        client.Shutdown();
+    }
+
+    private static void DefaultIntervalSendsABurstAsOneRequest()
+    {
+        var transport = new ControlledTransport(202);
+        var client = AutomaticClient(transport, new AutomaticDeliveryOptions());
+        for (var index = 0; index < 20; index++)
+        {
+            client.Log($"evt_burst_{index}", Timestamp, LogAttributes.Create("burst", "info"));
+        }
+
+        AssertTrue(transport.WaitForRequests(1, TimeSpan.FromMilliseconds(1500)), "burst was not delivered within 1.5 s");
+        using var batch = JsonDocument.Parse(transport.Bodies[0]);
+        AssertTrue(batch.RootElement.GetProperty("events").GetArrayLength() == 20, "burst was not sent as one request");
+        client.Shutdown();
     }
 
     private static void AutomaticThresholdAndIntervalDelivery()

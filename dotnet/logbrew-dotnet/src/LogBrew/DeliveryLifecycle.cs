@@ -60,7 +60,7 @@ namespace LogBrew
     {
         private const int MaximumRetries = 10;
 
-        public TimeSpan FlushInterval { get; set; } = TimeSpan.FromSeconds(5);
+        public TimeSpan FlushInterval { get; set; } = TimeSpan.FromSeconds(1);
 
         public int FlushAtQueueSize { get; set; } = 100;
 

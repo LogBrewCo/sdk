@@ -177,7 +177,7 @@ var client = LogBrewClient.CreateAutomatic(
     new AutomaticDeliveryOptions
     {
         FlushAtQueueSize = 100,
-        FlushInterval = TimeSpan.FromSeconds(5),
+        FlushInterval = TimeSpan.FromSeconds(1),
         MaxRetries = 2
     });
 
