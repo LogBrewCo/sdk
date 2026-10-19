@@ -128,13 +128,17 @@ it returns. A delivery or callback failure is reported through
 already handling. The Edge runtime is left unchanged; use a Node.js route or
 server boundary for LogBrew server delivery.
 
-By default, the issue includes the error message, Next.js error digest, method,
-stable route file path, router kind, route type, render source, revalidation
-reason, and render type when Next.js supplies them. It does not capture request
-headers, authorization values, cookies, request bodies, query strings, URL
-fragments, concrete dynamic path values, or raw stack text. Set
-`includePathname: true` only when a query-free concrete pathname is intentional
-and acceptable for that application.
+By default, the issue includes the error message, exception type, structured
+stack frames, Next.js error digest, method, stable route file path, router kind,
+route type, render source, revalidation reason, and render type when Next.js
+supplies them. The exception mechanism is `nextjs.on_request_error`, or
+`nextjs.route_handler` for errors thrown inside `withLogBrewRouteHandler`.
+Frames keep only the file basename, line, column, and function name. The issue
+does not capture request headers, authorization values, cookies, request
+bodies, query strings, URL fragments, concrete dynamic path values, or raw
+stack text. Set `includePathname: true` only when a query-free concrete
+pathname is intentional and acceptable for that application, and
+`includeErrorStack: true` only when raw stack text is acceptable.
 
 If the same Route Handler also uses `withLogBrewRouteHandler`, set
 `captureErrors: false` on that wrapper so the global request-error hook is the

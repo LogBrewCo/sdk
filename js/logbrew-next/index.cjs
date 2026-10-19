@@ -2,6 +2,7 @@ const { AsyncLocalStorage } = require("node:async_hooks");
 const {
   LogBrewClient,
   SdkError,
+  createIssueAttributesFromError,
   parseTraceparent
 } = require("@logbrew/sdk");
 const { createNodeFetchTransport } = require("@logbrew/node");
@@ -72,6 +73,7 @@ function createLogBrewNextRequestErrorHandler(options = {}) {
 }
 
 function createNextRequestErrorEvent(error, request = {}, context = {}, {
+  includeErrorStack = false,
   includePathname = false,
   now = () => new Date().toISOString(),
   idFactory = defaultNextRequestErrorId
@@ -83,10 +85,13 @@ function createNextRequestErrorEvent(error, request = {}, context = {}, {
   return {
     id: idFactory(error, request, context),
     timestamp: now(),
-    attributes: {
+    attributes: createIssueAttributesFromError(error, {
       title: `${method} ${routePath} failed`,
-      level: "error",
       message: nextErrorMessage(error),
+      mechanism: "nextjs.on_request_error",
+      handled: false,
+      source: "nextjs.on_request_error",
+      includeErrorStack,
       metadata: {
         framework: "nextjs",
         method,
@@ -100,7 +105,7 @@ function createNextRequestErrorEvent(error, request = {}, context = {}, {
         ...(errorDigest ? { errorDigest } : {}),
         ...(pathname ? { pathname } : {})
       }
-    }
+    })
   };
 }
 
@@ -184,6 +189,7 @@ function createRouteRequestEvent(request, response, {
 }
 
 function createRouteErrorEvent(error, request, {
+  includeErrorStack = false,
   includeSearchParams = false,
   now = () => new Date().toISOString(),
   idFactory = defaultRouteErrorId,
@@ -193,15 +199,16 @@ function createRouteErrorEvent(error, request, {
   const url = safeUrl(request);
   const routePath = routeTemplateOnly(routeTemplate);
   const method = request?.method ?? "GET";
-  const message = error instanceof Error ? error.message : String(error);
   const routeTrace = trace ?? getActiveLogBrewTrace();
   return {
     id: idFactory(request, routePath),
     timestamp: now(),
-    attributes: {
+    attributes: createIssueAttributesFromError(error, {
       title: `${method} ${routePath} failed`,
-      level: "error",
-      message,
+      mechanism: "nextjs.route_handler",
+      handled: false,
+      source: "nextjs.route_handler",
+      includeErrorStack,
       metadata: {
         framework: "nextjs",
         method,
@@ -210,7 +217,7 @@ function createRouteErrorEvent(error, request, {
         ...(includeSearchParams ? { search: url.search || null } : {}),
         ...traceMetadata(routeTrace)
       }
-    }
+    })
   };
 }
 
