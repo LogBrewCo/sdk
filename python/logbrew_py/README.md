@@ -217,6 +217,26 @@ Structured frames are newest-first, capped at 32, and retain only a basename, li
 
 `evidence` is explicit application knowledge, not an SDK inference. LogBrew labels `likelyRootCause` as a reported hypothesis and keeps `likelyFixArea` separate from observed frames. Field-state arrays preserve missing, redacted, and truncated evidence for API, CLI, dashboard, and agent consumers. Use repository-relative file paths and never put authentication material, request bodies, personal data, or raw user input in these fields. See the shared [issue evidence contract](../../docs/issue-diagnostic-evidence.md).
 
+## Process Crashes
+
+Framework integrations report errors inside a request. To also report uncaught exceptions in scripts, workers, startup code, and background threads, install process error capture once:
+
+```python
+from logbrew_sdk import HttpTransport, LogBrewClient, install_process_error_capture
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.0.0",
+    transport=HttpTransport(),
+)
+install_process_error_capture(client)
+```
+
+It wraps `sys.excepthook` and `threading.excepthook`. Each crash becomes one unhandled issue with the exception type, structured frames, and chained causes from `create_issue_attributes_from_exception()`. A main-thread crash has level `critical` and mechanism `python.excepthook`. A thread crash has level `error` and mechanism `python.threading_excepthook`, because the process keeps running.
+
+The previous hooks still run afterwards, so Python prints the traceback and exits as before. Before that, the SDK waits at most `flush_timeout_seconds` (default 2, maximum 30) for delivery. `KeyboardInterrupt` is not reported. `on_capture_error` receives capture or delivery failures and never changes the exit path. Only one capture can be installed per process; `uninstall()` restores the previous hooks.
+
 ## Queue Pressure
 
 `LogBrewClient` keeps a bounded in-memory queue so a transport outage or burst of logs cannot grow without limit. The default capacity is `10_000` events. Pass `max_queue_size` when a service needs a smaller or larger cap:
