@@ -245,12 +245,12 @@ Raw stack text stays out of metadata unless you pass `includeErrorStack: true`. 
 `createLogBrewNodeClient()` records what led up to an error and attaches it to the next issue as ordered breadcrumbs:
 
 - `console.debug`, `log`, `info`, `warn`, and `error` calls, as text of at most 512 characters.
-- Outbound HTTP requests from `http`, `https`, `fetch`, and undici, as method, scheme, host, path, and status code. Query strings, fragments, credentials, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped.
+- Outbound HTTP requests from `http`, `https`, `fetch`, and undici, as method, scheme, host, path, and status code. Query strings, fragments, user info, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped.
 - Pino records (Pino 9.11 or newer in the 9.x line, or 10.1 or newer), as level and message.
 
 Breadcrumbs recorded inside a request (`withLogBrewHttpHandler`, framework middleware, or `runWithLogBrewTrace`) attach only to issues from that request. Breadcrumbs outside a request attach to issues outside a request, such as process crashes. Each scope keeps the newest 64 and marks the issue `breadcrumbsTruncated` when older ones were dropped. Add your own with `addLogBrewBreadcrumb({ category: "checkout", message: "payment submitted" })`. Pass `breadcrumbs: false` to turn the automatic sources off. HTTP breadcrumbs need Node.js diagnostics channels, which Bun does not provide.
 
-Console text is telemetry, so keep secrets and personal data out of console messages, as you would for any log.
+Console text is telemetry, so keep access keys and personal data out of console messages, as you would for any log.
 
 ## Existing Pino Logs
 
