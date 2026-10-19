@@ -646,7 +646,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 """
 [package]
 name = "logbrew"
-version = "0.1.7"
+version = "0.1.8"
 license = "MIT"
 repository = "https://github.com/LogBrewCo/sdk"
 readme = "README.md"
@@ -668,7 +668,7 @@ keywords = ["logbrew"]
 
     def test_maven_metadata_matches_each_release_family(self) -> None:
         self.assertIn(
-            "<version>0.1.9</version>",
+            "<version>0.1.10</version>",
             (ROOT / "java" / "logbrew-java" / "pom.xml").read_text(encoding="utf-8"),
         )
         for pom_path in (
