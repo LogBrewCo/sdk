@@ -405,7 +405,7 @@ if (response.status !== 204) {
 }
 
 const payload = JSON.parse(transport.lastBody());
-if (payload.events.length !== 2 || payload.sdk.name !== "logbrew-next" || payload.sdk.version !== "0.1.8") {
+if (payload.events.length !== 2 || payload.sdk.name !== "logbrew-next" || payload.sdk.version !== process.env.LOGBREW_EXPECTED_NEXT_VERSION) {
   throw new Error(`expected app log and request capture event: ${transport.lastBody()}`);
 }
 const appLog = payload.events.find((candidate) => candidate.id === "evt_next_app_log_001");
@@ -579,7 +579,7 @@ console.error(JSON.stringify({
   fallback: malformed.attributes.message
 }));
 EOF
-node capture-check.mjs 2> "$tmp_dir/capture-check.stderr.json"
+LOGBREW_EXPECTED_NEXT_VERSION="$next_package_version" node capture-check.mjs 2> "$tmp_dir/capture-check.stderr.json"
 grep -q '"ok":true' "$tmp_dir/capture-check.stderr.json"
 grep -q 'POST /api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/capture-check.stderr.json"
