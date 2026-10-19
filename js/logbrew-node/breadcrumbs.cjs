@@ -178,7 +178,7 @@ function httpBreadcrumb(method, url, statusCode) {
   };
 }
 
-// Keeps scheme, host, and path; drops credentials, query, and fragment.
+// Keeps scheme, host, and path; drops user info, query, and fragment.
 function requestUrl(request) {
   const header = request.getHeader?.("host");
   const host = typeof header === "string" ? header : request.host;
