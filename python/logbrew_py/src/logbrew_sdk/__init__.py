@@ -354,7 +354,7 @@ class TransportResponse:
     )
 
 
-EventDropReason: TypeAlias = Literal["queue_overflow", "queue_bytes_overflow", "event_too_large"]
+EventDropReason: TypeAlias = Literal["queue_overflow", "queue_bytes_overflow", "event_too_large", "evicted_for_fatal"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -863,23 +863,12 @@ class LogBrewClient:
         event_bytes = len(event_json.encode("utf-8"))
         request_bytes = len(f'{{"sdk":{self._sdk_json},"events":[{event_json}]}}'.encode())
 
-        reason: EventDropReason | None = None
         with self._state_lock:
             if self.closed or self._closing:
                 raise SdkError("shutdown_error", "client is already shut down")
-            if event_bytes > self.max_queue_bytes or request_bytes > self.max_batch_bytes:
-                reason = "event_too_large"
-            elif self._queue.count >= self.max_queue_size:
-                reason = "queue_overflow"
-            elif self._queue.byte_count + event_bytes > self.max_queue_bytes:
-                reason = "queue_bytes_overflow"
+            reason, evicted_drops = self._admission(event_type, attributes, event_bytes, request_bytes)
             if reason is not None:
-                self._dropped_events += 1
-                self._dropped_events_by_reason[reason] = self._dropped_events_by_reason.get(reason, 0) + 1
-                self._unreported_drops[reason] = min(
-                    MAX_CLIENT_REPORT_COUNT, self._unreported_drops.get(reason, 0) + 1
-                )
-                drop = EventDrop(event_id, event_type, reason, self._dropped_events)
+                drop = self._record_drop(event_id, event_type, reason)
             else:
                 self._queue.append(
                     record_id=uuid4().hex,
@@ -889,8 +878,58 @@ class LogBrewClient:
                 pending_events = self._queue.count
         if reason is None:
             self._automatic_delivery.event_retained(pending_events)
+            # Report evictions only after admission so drop callbacks cannot refill the freed room.
+            for evicted_drop in evicted_drops:
+                self._report_drop(evicted_drop)
         else:
             self._report_drop(drop)
+
+    def _admission(
+        self, event_type: str, attributes: Mapping[str, Any], event_bytes: int, request_bytes: int
+    ) -> tuple[EventDropReason | None, list[EventDrop]]:
+        """Return the drop reason, or None after making room; callers hold the state lock."""
+        reason: EventDropReason | None = None
+        if event_bytes > self.max_queue_bytes or request_bytes > self.max_batch_bytes:
+            return "event_too_large", []
+        if self._queue.count >= self.max_queue_size:
+            reason = "queue_overflow"
+        elif self._queue.byte_count + event_bytes > self.max_queue_bytes:
+            reason = "queue_bytes_overflow"
+        if reason is None or not _is_fatal_event(event_type, attributes):
+            return reason, []
+        # A crash report outranks older non-crash events, like the JavaScript SDK.
+        evicted = self._evict_for_fatal(event_bytes)
+        if not evicted:
+            return reason, []
+        return None, [self._record_drop(*_queued_identity(record), "evicted_for_fatal") for record in evicted]
+
+    def _record_drop(self, event_id: str, event_type: str, reason: EventDropReason) -> EventDrop:
+        self._dropped_events += 1
+        self._dropped_events_by_reason[reason] = self._dropped_events_by_reason.get(reason, 0) + 1
+        self._unreported_drops[reason] = min(MAX_CLIENT_REPORT_COUNT, self._unreported_drops.get(reason, 0) + 1)
+        return EventDrop(event_id, event_type, reason, self._dropped_events)
+
+    def _evict_for_fatal(self, event_bytes: int) -> tuple[QueuedEvent, ...]:
+        """Remove the oldest non-crash events outside the frozen delivery body, only when that makes room."""
+        remove = getattr(self._queue, "remove", None)
+        if remove is None:
+            return ()
+        protected_through = 0 if self._frozen_prefix is None else self._frozen_prefix.through_sequence
+        count = self._queue.count
+        byte_count = self._queue.byte_count + event_bytes
+        chosen: list[QueuedEvent] = []
+        for record in self._queue.snapshot():
+            if count < self.max_queue_size and byte_count <= self.max_queue_bytes:
+                break
+            if record.sequence <= protected_through or _is_fatal_record(record):
+                continue
+            chosen.append(record)
+            count -= 1
+            byte_count -= record.byte_count
+        if count >= self.max_queue_size or byte_count > self.max_queue_bytes:
+            return ()
+        remove({record.sequence for record in chosen})
+        return tuple(chosen)
 
     def _report_drop(self, drop: EventDrop) -> None:
         # Drop callbacks are advisory: failures and nested drops never reach the application.
@@ -1060,6 +1099,21 @@ class LogBrewClient:
                 "process_ownership_error",
                 "client cannot be used after fork; create a new client in the child process",
             )
+
+
+def _is_fatal_event(event_type: str, attributes: Mapping[str, Any]) -> bool:
+    # Fatal input severity is stored as critical; a critical issue is a crash report.
+    return event_type == "issue" and attributes.get("level") == "critical"
+
+
+def _is_fatal_record(record: QueuedEvent) -> bool:
+    event = json.loads(record.json)
+    return _is_fatal_event(event.get("type", ""), event.get("attributes", {}))
+
+
+def _queued_identity(record: QueuedEvent) -> tuple[str, str]:
+    event = json.loads(record.json)
+    return str(event.get("id", "")), str(event.get("type", ""))
 
 
 def _compact_json(value: Any) -> str:
