@@ -110,7 +110,7 @@ PYTHON_PACKAGES = {
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.19",
+        "version": "0.1.20",
     },
 }
 
