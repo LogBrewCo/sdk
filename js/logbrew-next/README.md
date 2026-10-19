@@ -125,8 +125,13 @@ export const onRequestError = createLogBrewNextRequestErrorHandler({
 Next.js awaits `onRequestError`, and the LogBrew adapter awaits delivery before
 it returns. A delivery or callback failure is reported through
 `onCaptureError` but never replaces the application error that Next.js is
-already handling. The Edge runtime is left unchanged; use a Node.js route or
-server boundary for LogBrew server delivery.
+already handling. In the Edge runtime (middleware and Edge routes), the hook
+sends the same issue with `fetch` and loads no Node.js modules.
+
+Server and Edge issues carry the release and environment from
+`LOGBREW_RELEASE` and `LOGBREW_ENVIRONMENT`, or from Vercel's
+`VERCEL_GIT_COMMIT_SHA` and `VERCEL_ENV` when the LogBrew variables are not
+set. `LOGBREW_SERVICE_NAME` sets the service. Explicit `context` fields win.
 
 By default, the issue includes the error message, exception type, structured
 stack frames, Next.js error digest, method, stable route file path, router kind,
@@ -268,6 +273,42 @@ export function LogBrewNextNavigationSpans({ traceparent }) {
 The client helper requires explicit W3C trace context through `traceparent` or `traceId` plus `spanId`. It does not patch `fetch`, `XMLHttpRequest`, browser history, or the Next router. It never records the concrete pathname, query string, hash, headers, cookies, request body, or raw `traceparent` value. If a pathname cannot be matched to a stable route template, it skips the span instead of emitting a high-cardinality URL. Metadata is primitive-only.
 
 Use `captureNextNavigation(client, input)` when you want to emit a route span from app-owned navigation callbacks instead of the React hook.
+
+## Client Errors
+
+`createLogBrewNextBrowserClient()` sends events on its own with `fetch` (5
+seconds after the first queued event, to save battery). Pass a `transport` to
+replace it, or `transport: null` to keep the client manual. Browser events
+carry the release and environment from `NEXT_PUBLIC_LOGBREW_RELEASE` and
+`NEXT_PUBLIC_LOGBREW_ENVIRONMENT`, or from `NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA`
+and `NEXT_PUBLIC_VERCEL_ENV`.
+
+Report errors that reach an error boundary from `app/error.tsx` or
+`app/global-error.tsx`:
+
+```jsx
+"use client";
+
+import { useEffect } from "react";
+import { captureNextClientError } from "@logbrew/next/client";
+import { logbrew } from "./logbrew-client";
+
+export default function Error({ error, reset }) {
+  useEffect(() => {
+    void captureNextClientError(logbrew, error, { routeTemplate: "/cart/[cartId]" });
+  }, [error]);
+  return <button onClick={() => reset()}>Try again</button>;
+}
+```
+
+The issue has mechanism `nextjs.error_boundary`, the exception type and
+frames, and the Next.js `digest` when present. Pass a stable route template,
+never a concrete path.
+
+Call `installLogBrewNextClientErrorCapture({ client })` once in a client
+component to also report uncaught browser errors (`nextjs.window_error`) and
+unhandled rejections (`nextjs.unhandled_rejection`), and to flush queued events
+when the page is hidden. `uninstall()` removes the listeners.
 
 ## Server Client Helper
 

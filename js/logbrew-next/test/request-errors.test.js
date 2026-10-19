@@ -9,13 +9,15 @@ import { fileURLToPath } from "node:url";
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const jsDir = path.resolve(packageDir, "..");
 
-function runInstalledConsumer(source, { extension = "mjs", linkDependencies = true } = {}) {
+function runInstalledConsumer(source, { extension = "mjs", linkDependencies = true, linkNode = linkDependencies } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-next-request-errors-"));
   try {
     const scopeDir = path.join(root, "node_modules", "@logbrew");
     fs.mkdirSync(scopeDir, { recursive: true });
     if (linkDependencies) {
       fs.symlinkSync(path.join(jsDir, "logbrew-js"), path.join(scopeDir, "sdk"), "dir");
+    }
+    if (linkNode) {
       fs.symlinkSync(path.join(jsDir, "logbrew-node"), path.join(scopeDir, "node"), "dir");
     }
     fs.symlinkSync(packageDir, path.join(scopeDir, "next"), "dir");
@@ -504,7 +506,7 @@ test("Next request-error instrumentation captures stable context without request
     });
     await edgeHandler(error, request, context);
     delete process.env.NEXT_RUNTIME;
-    assert.equal(edgeSends, 0);
+    assert.equal(edgeSends, 1);
   `);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -524,46 +526,48 @@ test("Next request-error instrumentation exposes the CommonJS package entry", ()
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
-test("Next request-error instrumentation leaves Edge runtime imports dependency-free", () => {
-  const result = runInstalledConsumer(`
-    import assert from "node:assert/strict";
-    import { createLogBrewNextRequestErrorHandler } from "@logbrew/next/instrumentation";
-
-    process.env.NEXT_RUNTIME = "edge";
-    let captureFailures = 0;
-    const onRequestError = createLogBrewNextRequestErrorHandler({
-      async onCaptureError() {
-        captureFailures += 1;
-      }
-    });
-    await onRequestError(
-      Object.assign(new Error("edge failure"), { digest: "edge_digest" }),
-      { path: "/edge", method: "GET", headers: {} },
-      { routerKind: "App Router", routePath: "/app/edge/page", routeType: "render" }
-    );
-    assert.equal(captureFailures, 0);
-  `, { linkDependencies: false });
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+test("Edge runtime request errors are sent with fetch and without Node.js-only packages", () => {
+  for (const extension of ["mjs", "cjs"]) {
+    const importLine = extension === "mjs"
+      ? 'import { createLogBrewNextRequestErrorHandler } from "@logbrew/next/instrumentation";'
+      : 'const { createLogBrewNextRequestErrorHandler } = require("@logbrew/next/instrumentation");';
+    const result = runInstalledConsumer(`
+      ${importLine}
+      const assert = require_assert();
+      function require_assert() { return globalThis.process.getBuiltinModule("node:assert/strict"); }
+      process.env.NEXT_RUNTIME = "edge";
+      process.env.LOGBREW_SERVER_API_KEY = "LOGBREW_SERVER_API_KEY";
+      process.env.VERCEL_GIT_COMMIT_SHA = "4f0c2d1";
+      process.env.VERCEL_ENV = "preview";
+      const sent = [];
+      globalThis.fetch = async (url, init) => { sent.push({ url, init }); return { status: 202 }; };
+      let failures = 0;
+      const onRequestError = createLogBrewNextRequestErrorHandler({ onCaptureError(error) { failures += 1; console.error(error); } });
+      (async () => {
+        await onRequestError(
+          Object.assign(new TypeError("edge failure"), { digest: "edge_digest" }),
+          { path: "/edge?debug=1", method: "GET", headers: {} },
+          { routerKind: "App Router", routePath: "/app/edge/page", routeType: "middleware" }
+        );
+        assert.equal(failures, 0);
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].url, "https://api.logbrew.co/v1/events");
+        assert.equal(sent[0].init.headers.authorization, ["Bearer", process.env.LOGBREW_SERVER_API_KEY].join(" "));
+        const issue = JSON.parse(sent[0].init.body).events[0].attributes;
+        assert.equal(issue.exception.type, "TypeError");
+        assert.equal(issue.exception.mechanism.type, "nextjs.on_request_error");
+        assert.equal(issue.metadata.routeType, "middleware");
+        assert.deepEqual(issue.context.resource.deployment, { environment: "preview", release: "4f0c2d1" });
+        assert.equal(JSON.stringify(issue).includes("debug=1"), false);
+      })();
+    `, { extension: extension === "mjs" ? "mjs" : "cjs", linkNode: false });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
+  for (const file of ["edge.cjs", "request-error-event.cjs"]) {
+    const source = fs.readFileSync(path.join(packageDir, file), "utf8");
+    assert.equal(/require\("node:|@logbrew\/node/u.test(source), false, file);
+  }
 });
-
-
-test("CommonJS request-error instrumentation skips Edge runtime without Node dependencies", () => {
-  const result = runInstalledConsumer(`
-    const assert = require("node:assert/strict");
-    const { createLogBrewNextRequestErrorHandler } = require("@logbrew/next/instrumentation");
-    process.env.NEXT_RUNTIME = "edge";
-    let failures = 0;
-    const handler = createLogBrewNextRequestErrorHandler({
-      onCaptureError() { failures += 1; }
-    });
-    handler(new Error("edge failure"), { path: "/edge", method: "GET" }, {}).then(() => {
-      assert.equal(failures, 0);
-    });
-  `, { extension: "cjs", linkDependencies: false });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-});
-
 
 test("Instrumentation runtime detection failures stay inside the telemetry boundary", () => {
   const result = runInstalledConsumer(`

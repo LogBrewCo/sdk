@@ -57,6 +57,9 @@
     "index.d.ts",
     "index.d.cts",
     "client.cjs",
+    "edge.cjs",
+    "edge.js",
+    "request-error-event.cjs",
     "client.js",
     "client.d.ts",
     "client.d.cts",
@@ -97,6 +100,6 @@
     "react-dom": ">=18"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check client.js && node --check client.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/client-route-spans.mjs && node --check examples/readme-example.mjs && node --check examples/request-errors.mjs && node --check examples/real-user-smoke.mjs && node --test"
+    "test": "node --check index.js && node --check index.cjs && node --check client.js && node --check client.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check edge.js && node --check edge.cjs && node --check request-error-event.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/client-route-spans.mjs && node --check examples/readme-example.mjs && node --check examples/request-errors.mjs && node --check examples/real-user-smoke.mjs && node --test"
   }
 }
