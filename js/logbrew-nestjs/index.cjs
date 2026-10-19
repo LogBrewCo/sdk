@@ -9,7 +9,8 @@ const {
   createLogBrewTraceContext,
   createNodeFetchTransport,
   getActiveLogBrewTrace,
-  runWithLogBrewTrace
+  runWithLogBrewTrace,
+  setLogBrewUser
 } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
@@ -295,6 +296,8 @@ function createRequestContext(client, transport, trace, shutdownClient) {
   return {
     client,
     logbrew: client,
+    // Tags every event of this request with an opaque app-owned user ID.
+    setUser: (id, options = {}) => setLogBrewUser(id, { ...options, trace }),
     trace,
     transport,
     previewJson: () => client.previewJson(),

@@ -170,6 +170,10 @@ export class CheckoutController {
 
 The trace context contains only normalized W3C IDs plus sampled state. The interceptor does not serialize the raw `traceparent` header and does not capture request bodies, headers, query strings, or arbitrary controller values.
 
+### Request User
+
+Inside a request, call `request.logbrew.setUser(id)` once you know who made it, for example in a guard after authentication. Every later event of that request carries `context.subject`. Use an opaque app-owned ID, not an email address or name; pass `{ kind: "anonymous" }` for visitors who have not signed in. The ID never reaches another request.
+
 ## Request Duration Metrics
 
 Enable request metrics when you want low-cardinality latency histograms from NestJS routes without changing controller behavior:
