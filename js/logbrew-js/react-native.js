@@ -1,11 +1,9 @@
 import sdk from "./core.cjs";
-import browserBreadcrumbs from "./browser-breadcrumbs.cjs";
-
-export const { installBrowserBreadcrumbs } = browserBreadcrumbs;
 
 export const {
   PRODUCT_ANALYTICS_KINDS,
   PRODUCT_ANALYTICS_SCHEMA_VERSION,
+  installBrowserBreadcrumbs,
   createBaggage,
   createIssueAttributesFromError,
   createNetworkMilestoneAttributes,
