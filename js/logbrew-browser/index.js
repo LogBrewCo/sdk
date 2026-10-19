@@ -7,6 +7,7 @@ import {
   createIssueAttributesFromError
 } from "@logbrew/sdk";
 import { createBeaconTransport } from "./beacon-transport.js";
+import { installBrowserBreadcrumbs } from "./breadcrumbs.js";
 import { addBrowserRuntimeContext } from "./runtime-context.js";
 import {
   captureBrowserFetchSpan,
@@ -202,11 +203,17 @@ export function installLogBrewBrowser(options = {}) {
   const transport = createBrowserTransport(options, browserWindow);
   const traceContext = resolveBrowserTraceContext(options);
   let installed = true;
+  const uninstallBreadcrumbs = options.breadcrumbs === false
+    ? () => undefined
+    : installBrowserBreadcrumbs(browserWindow, client, {
+      ignoredUrls: [options.endpoint ?? DEFAULT_ENDPOINT]
+    });
   const context = createLogBrewBrowserContext(client, transport, browserWindow, () => {
     if (!installed) {
       return;
     }
     installed = false;
+    uninstallBreadcrumbs();
     removeListeners(browserWindow, listeners);
     lifecycleDelivery.destroy();
   }, traceContext);
