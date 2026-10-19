@@ -32,13 +32,13 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.30",
-            "js/logbrew-browser/package.json": "0.1.11",
-            "js/logbrew-express/package.json": "0.1.6",
+            "js/logbrew-js/package.json": "0.1.31",
+            "js/logbrew-browser/package.json": "0.1.12",
+            "js/logbrew-express/package.json": "0.1.7",
             "js/logbrew-fastify/package.json": "0.1.7",
-            "js/logbrew-node/package.json": "0.1.14",
-            "js/logbrew-nestjs/package.json": "0.1.7",
-            "js/logbrew-next/package.json": "0.1.9",
+            "js/logbrew-node/package.json": "0.1.15",
+            "js/logbrew-nestjs/package.json": "0.1.8",
+            "js/logbrew-next/package.json": "0.1.10",
             "js/logbrew-react/package.json": "0.1.1",
             "js/logbrew-react-native/package.json": "0.1.36",
             "js/logbrew-svelte/package.json": "0.1.5",
@@ -47,10 +47,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.20"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.12"),
-            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.6"),
-            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.7"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.21"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.13"),
+            "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.7"),
+            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.8"),
         }
         for relative_path, expected in pypi_versions.items():
             project = tomllib.loads(source_text(relative_path))["project"]
@@ -151,10 +151,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             project["optional-dependencies"]["celery"],
-            ["logbrew-sdk[celery]>=0.1.18,<0.2.0"],
+            ["logbrew-sdk[celery]>=0.1.21,<0.2.0"],
         )
         self.assertNotIn("celery>=5,<6", project["dependencies"])
-        self.assertIn("logbrew-sdk>=0.1.18,<0.2.0", project["dependencies"])
+        self.assertIn("logbrew-sdk>=0.1.21,<0.2.0", project["dependencies"])
 
         for relative_path in (
             "python/logbrew_flask/pyproject.toml",
@@ -163,7 +163,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             integration = tomllib.loads(source_text(relative_path))["project"]
             with self.subTest(relative_path=relative_path):
                 self.assertIn(
-                    "logbrew-sdk>=0.1.12,<0.2.0",
+                    "logbrew-sdk>=0.1.21,<0.2.0",
                     integration["dependencies"],
                 )
 
@@ -268,10 +268,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.20",
-                "logbrew-fastapi": "0.1.12",
-                "logbrew-flask": "0.1.6",
-                "logbrew-django": "0.1.7",
+                "logbrew-sdk": "0.1.21",
+                "logbrew-fastapi": "0.1.13",
+                "logbrew-flask": "0.1.7",
+                "logbrew-django": "0.1.8",
             },
         )
 
