@@ -47,9 +47,9 @@ test("console, HTTP, and Pino records inside a request become that request's iss
   const client = newClient();
   const issue = await runWithLogBrewTrace(newTrace(), async () => {
     console.info("checkout started for cart %s", "cart-7");
-    await fetch(`${origin}/inventory?token=hidden#frag`);
+    await fetch(`${origin}/inventory?coupon=hidden#frag`);
     await new Promise((resolve) => {
-      httpGet(`${origin}/missing/price?session=hidden`, (res) => { res.resume(); res.on("end", resolve); });
+      httpGet(`${origin}/missing/price?coupon=hidden`, (res) => { res.resume(); res.on("end", resolve); });
     });
     pinoEndChannel.publish({ arguments: [{}, "", 40, Date.now()], result: '{"level":40,"msg":"stock low"}\n' });
     return captureIssue(client, "evt_issue_request");
