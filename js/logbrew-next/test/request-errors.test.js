@@ -386,7 +386,14 @@ test("Next request-error instrumentation captures stable context without request
     assert.equal(event.id, "evt_next_request_error_001");
     assert.equal(event.attributes.title, "POST /app/orders/[orderId]/page failed");
     assert.equal(event.attributes.message, "checkout render failed");
-    assert.deepEqual(event.attributes.metadata, {
+    const {
+      errorFrameColumn,
+      errorFrameFile,
+      errorFrameLine,
+      issueGroupingKey,
+      ...stableMetadata
+    } = event.attributes.metadata;
+    assert.deepEqual(stableMetadata, {
       framework: "nextjs",
       method: "POST",
       routePath: "/app/orders/[orderId]/page",
@@ -395,8 +402,22 @@ test("Next request-error instrumentation captures stable context without request
       renderSource: "react-server-components",
       revalidateReason: "stale",
       renderType: "dynamic",
-      errorDigest: "next_digest_123"
+      errorDigest: "next_digest_123",
+      source: "nextjs.on_request_error",
+      errorName: "Error",
+      errorMessage: "checkout render failed",
+      issueGroupingSource: "error_type_and_frame"
     });
+    assert.equal(errorFrameFile, "consumer.mjs");
+    assert.equal(typeof errorFrameLine, "number");
+    assert.equal(typeof errorFrameColumn, "number");
+    assert.equal(typeof issueGroupingKey, "string");
+    assert.deepEqual(event.attributes.exception, {
+      type: "Error",
+      mechanism: { type: "nextjs.on_request_error", handled: false }
+    });
+    assert.equal(event.attributes.stackFrames[0].filename, "consumer.mjs");
+    assert.equal(event.attributes.metadata.errorStack, undefined);
     const serializedEvent = JSON.stringify(event);
     for (const unsafeValue of ["order-42", "debug=", "Bearer", "session=", "#receipt"]) {
       assert.equal(serializedEvent.includes(unsafeValue), false, unsafeValue);

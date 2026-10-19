@@ -75,6 +75,7 @@ export type LogBrewNextRequestErrorOptions = CreateLogBrewNextClientConfig & Nod
   transport?: Transport | ((context: LogBrewNextRequestErrorInput & { client: LogBrewClient }) => Transport);
   /** Opt into a query-free concrete pathname. Stable routePath metadata remains the default. */
   includePathname?: boolean;
+  /** Include raw stack text in issue metadata. Structured frames are always captured. Defaults to false. */
   now?: () => string;
   idFactory?: (
     error: LogBrewNextRequestError,
@@ -177,6 +178,8 @@ export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewN
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;
   captureErrors?: boolean;
+  /** Include raw stack text in issue metadata. Structured frames are always captured. Defaults to false. */
+  includeErrorStack?: boolean;
   includeSearchParams?: boolean;
   metricName?: string;
   /** Supply a stable route template. Missing or invalid templates use "/" without reading the request pathname. */
@@ -224,6 +227,7 @@ export declare function createNextRequestErrorEvent(
   request: LogBrewNextRequestErrorRequest,
   context: LogBrewNextRequestErrorContext,
   options?: {
+    includeErrorStack?: boolean;
     includePathname?: boolean;
     now?: () => string;
     idFactory?: (
@@ -270,6 +274,7 @@ export declare function createRouteErrorEvent(
   error: unknown,
   request: Request,
   options?: {
+    includeErrorStack?: boolean;
     includeSearchParams?: boolean;
     now?: () => string;
     idFactory?: (request: Request, routeTemplate?: string) => string;

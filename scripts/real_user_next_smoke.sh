@@ -316,6 +316,14 @@ if (event.attributes.metadata.routePath !== "/app/orders/[orderId]/page") {
 if (event.attributes.metadata.errorDigest !== "next_digest_123") {
   throw new Error(`missing Next.js error digest: ${requestErrorTransport.lastBody()}`);
 }
+if (
+  event.attributes.exception?.type !== "Error" ||
+  event.attributes.exception.mechanism?.type !== "nextjs.on_request_error" ||
+  event.attributes.exception.mechanism.handled !== false ||
+  event.attributes.stackFrames?.[0]?.filename !== "instrumentation-check.mjs"
+) {
+  throw new Error(`missing structured exception evidence: ${requestErrorTransport.lastBody()}`);
+}
 for (const unsafeValue of ["order-42", "debug=", "Bearer", "session=", "#receipt"]) {
   if (requestErrorTransport.lastBody().includes(unsafeValue)) {
     throw new Error(`instrumentation payload leaked ${unsafeValue}: ${requestErrorTransport.lastBody()}`);
@@ -1117,6 +1125,12 @@ if ("search" in payload.events[0].attributes.metadata) {
 }
 if (payload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`error event should include trace id: ${transport.lastBody()}`);
+}
+if (
+  payload.events[0].attributes.exception?.mechanism?.type !== "nextjs.route_handler" ||
+  !(payload.events[0].attributes.stackFrames?.length > 0)
+) {
+  throw new Error(`error event should include structured exception evidence: ${transport.lastBody()}`);
 }
 if (payload.events[0].attributes.metadata.spanId !== "c0ffeec0ffeec0ff") {
   throw new Error(`error event should include route span id: ${transport.lastBody()}`);
