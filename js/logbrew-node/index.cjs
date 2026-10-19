@@ -27,6 +27,12 @@ const { instrumentLogBrewRedisClient: instrumentRedisClient } = require("./redis
 const { installLogBrewUndiciInstrumentation: installUndiciInstrumentation } = require("./undici.cjs");
 const { installLogBrewPinoInstrumentation: installPinoInstrumentation } = require("./pino.cjs");
 const { installLogBrewProcessErrorCapture: installProcessErrorCapture } = require("./process-errors.cjs");
+const {
+  addLogBrewBreadcrumb: addScopedBreadcrumb,
+  createBreadcrumbProvider,
+  ignoreBreadcrumbUrl,
+  installAutomaticBreadcrumbs
+} = require("./breadcrumbs.cjs");
 const { buildNodePersistentEventStore } = require("./persistent-event-store.cjs");
 const {
   createPersistentEventQueue,
@@ -62,6 +68,7 @@ const HTTP_CLIENT_URL_ACCESS_KEY = ["pass", "word"].join("");
 const HTTP_CLIENT_DEFAULT_AUTHORITY = ["local", "host"].join("");
 const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
 const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
+const BREADCRUMB_PROVIDER = Symbol.for("@logbrew/sdk.breadcrumbProvider");
 const activeTraceContext = new AsyncLocalStorage();
 const axiosInstrumentationHandles = new WeakMap();
 const httpClientInstrumentationHandles = new WeakMap();
@@ -70,6 +77,7 @@ function createLogBrewNodeClient({
   serverApiKey,
   apiKey,
   automaticDelivery,
+  breadcrumbs = true,
   captureRuntimeContext = true,
   context,
   deliveryIntervalMs,
@@ -99,6 +107,9 @@ function createLogBrewNodeClient({
   if (typeof captureRuntimeContext !== "boolean") {
     throw new SdkError("configuration_error", "captureRuntimeContext must be a boolean");
   }
+  if (typeof breadcrumbs !== "boolean") {
+    throw new SdkError("configuration_error", "breadcrumbs must be a boolean");
+  }
   if (persistentQueue !== undefined && persistentQueuePath !== undefined) {
     throw new SdkError("configuration_error", "persistentQueue and persistentQueuePath are mutually exclusive");
   }
@@ -122,6 +133,9 @@ function createLogBrewNodeClient({
       sdkName
     });
   const ownedTransport = transport ?? createNodeFetchTransport({ endpoint, fetchImpl, headers });
+  if (breadcrumbs) {
+    installAutomaticBreadcrumbs(getActiveLogBrewTrace);
+  }
   const environmentContext = addEnvironmentResourceContext(context);
   const clientContext = captureRuntimeContext ? addNodeRuntimeContext(environmentContext) : environmentContext;
   try {
@@ -133,6 +147,7 @@ function createLogBrewNodeClient({
       deliveryQueueThreshold,
       eventStore,
       [CONTEXT_PROVIDER]: activeTraceTelemetryContext,
+      [BREADCRUMB_PROVIDER]: breadcrumbProvider,
       ...(persistentQueuePath !== undefined
         ? {
             [EVENT_QUEUE_FACTORY]: (queueConfig) => createPersistentEventQueue({
@@ -167,6 +182,7 @@ function createNodeFetchTransport({
   fetchImpl = defaultFetch(),
   headers = {}
 } = {}) {
+  ignoreBreadcrumbUrl(endpoint);
   if (typeof endpoint !== "string" || endpoint.trim() === "") {
     throw new SdkError("configuration_error", "createNodeFetchTransport requires a non-empty endpoint");
   }
@@ -728,6 +744,13 @@ function installLogBrewPinoInstrumentation(options = {}) {
     ...options,
     traceProvider: options.traceProvider ?? getActiveLogBrewTrace
   });
+}
+
+const breadcrumbProvider = createBreadcrumbProvider(getActiveLogBrewTrace);
+
+// Records an app-owned breadcrumb in the active request scope, or the process scope outside a request.
+function addLogBrewBreadcrumb(breadcrumb) {
+  addScopedBreadcrumb(breadcrumb, getActiveLogBrewTrace);
 }
 
 function installLogBrewProcessErrorCapture(options) {
@@ -2145,6 +2168,7 @@ function slugify(value) {
 }
 
 const exported = {
+  addLogBrewBreadcrumb,
   axiosRequestWithLogBrewSpan,
   cacheOperationWithLogBrewSpan,
   captureHttpError,

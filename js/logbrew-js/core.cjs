@@ -97,6 +97,8 @@ const MAX_CLIENT_REPORT_COUNT = 1_000_000_000;
 const DELIVERY_HEALTH_SCHEMA_VERSION = 1;
 const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
 const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
+// Runtime packages supply request-scoped breadcrumbs through this seam; core merges them into issues.
+const BREADCRUMB_PROVIDER = Symbol.for("@logbrew/sdk.breadcrumbProvider");
 const MAX_ERROR_CAUSES = 5;
 const BUILTIN_ERROR_NAMES = new Set([
   "AggregateError",
@@ -216,6 +218,7 @@ class LogBrewClient {
     sdkVersion,
     context,
     [CONTEXT_PROVIDER]: contextProvider,
+    [BREADCRUMB_PROVIDER]: breadcrumbProvider,
     maxRetries = 2,
     eventFilter,
     maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
@@ -236,6 +239,9 @@ class LogBrewClient {
     const clientContext = validateTelemetryContext(context, "client telemetry context");
     if (contextProvider !== undefined && typeof contextProvider !== "function") {
       throw new SdkError("validation_error", "context provider must be a function");
+    }
+    if (breadcrumbProvider !== undefined && typeof breadcrumbProvider !== "function") {
+      throw new SdkError("validation_error", "breadcrumb provider must be a function");
     }
     requireNonNegativeInteger("maxRetries", maxRetries);
     if (eventFilter !== undefined && typeof eventFilter !== "function") {
@@ -286,6 +292,7 @@ class LogBrewClient {
       onEventDropped,
       context: clientContext,
       contextProvider,
+      breadcrumbProvider,
       sdk: {
         name: sdkName,
         language: "javascript",
@@ -308,6 +315,7 @@ class LogBrewClient {
     onEventDropped,
     context,
     contextProvider,
+    breadcrumbProvider,
     eventStore,
     eventQueueFactory,
     transport,
@@ -327,6 +335,7 @@ class LogBrewClient {
     this.onEventDropped = onEventDropped;
     this.context = cloneTelemetryContext(context);
     this.contextProvider = contextProvider;
+    this.breadcrumbProvider = breadcrumbProvider;
     this.transport = transport;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
@@ -632,18 +641,44 @@ class LogBrewClient {
   }
 
   #pushIssue(id, timestamp, attributes) {
-    const withBreadcrumbs = attributes.breadcrumbs !== undefined || this.issueBreadcrumbs.length === 0
+    if (attributes.breadcrumbs !== undefined) {
+      return this.#pushEvent("issue", id, timestamp, validateIssue(attributes));
+    }
+    const provided = this.#providedBreadcrumbs();
+    const merged = provided.breadcrumbs.length === 0
+      ? this.issueBreadcrumbs
+      : [...this.issueBreadcrumbs, ...provided.breadcrumbs]
+        .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+    const breadcrumbs = merged.slice(-MAX_ISSUE_BREADCRUMBS);
+    const truncated = attributes.breadcrumbsTruncated === true || this.issueBreadcrumbsTruncated
+      || provided.truncated || merged.length > breadcrumbs.length;
+    const withBreadcrumbs = breadcrumbs.length === 0
       ? attributes
-      : {
-          ...attributes,
-          breadcrumbs: this.issueBreadcrumbs,
-          ...(
-            attributes.breadcrumbsTruncated === true || this.issueBreadcrumbsTruncated
-              ? { breadcrumbsTruncated: true }
-              : {}
-          )
-        };
+      : { ...attributes, breadcrumbs, ...(truncated ? { breadcrumbsTruncated: true } : {}) };
     return this.#pushEvent("issue", id, timestamp, validateIssue(withBreadcrumbs));
+  }
+
+  // Provider failures and invalid entries never cost the issue itself.
+  #providedBreadcrumbs() {
+    let provided;
+    try {
+      provided = this.breadcrumbProvider?.();
+    } catch {
+      return { breadcrumbs: [], truncated: false };
+    }
+    if (!provided || !Array.isArray(provided.breadcrumbs)) {
+      return { breadcrumbs: [], truncated: false };
+    }
+    const breadcrumbs = [];
+    let truncated = provided.truncated === true || provided.breadcrumbs.length > MAX_ISSUE_BREADCRUMBS;
+    for (const breadcrumb of provided.breadcrumbs.slice(-MAX_ISSUE_BREADCRUMBS)) {
+      try {
+        breadcrumbs.push(validateIssueBreadcrumb(breadcrumb));
+      } catch {
+        truncated = true;
+      }
+    }
+    return { breadcrumbs, truncated };
   }
 
   #pushEvent(eventType, id, timestamp, attributes) {

@@ -21,6 +21,7 @@
   "files": [
     "automatic-event-id.cjs",
     "automatic-event-id.js",
+    "breadcrumbs.cjs",
     "index.cjs",
     "index.js",
     "mongo.cjs",
