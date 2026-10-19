@@ -71,6 +71,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Check the tool matrix
+        run: bash scripts/check-tool-matrix.sh && bash scripts/test-check-tool-matrix.sh
+
       - name: Run shell static analysis
         run: bash scripts/check_shell_static.sh
 

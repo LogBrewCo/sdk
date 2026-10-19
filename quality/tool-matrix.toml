@@ -1,0 +1,298 @@
+# Tool matrix: every gate, guard, and quality tool this repository runs, with its
+# version, checksum, rules, conflicts, exceptions, runtime, findings, and the date
+# its releases, advisories, and rules were last checked. scripts/check-tool-matrix.sh
+# enforces it (see its header); the Contract checks job runs that check.
+#
+# Runtimes come from GitHub Actions step timings since 2026-10-05. Every run starts
+# from a fresh runner. p99 needs 100 runs; below that an entry gives the run count
+# and the maximum ("push" and "pull request" runs).
+# Format: one `key = value` per line, arrays on one line, pins as "file::text"
+# where @VERSION@ stands for the entry's version. A `commands` entry ending in *
+# covers every command that starts with it.
+
+gates = ["scripts/check_go_static.sh", "scripts/check_java_static.sh", "scripts/check_js_lint.sh", "scripts/check_kotlin_style.sh", "scripts/check_php_static.sh", "scripts/check_public_sdks.sh", "scripts/check_python_static.sh", "scripts/check_rust_static.sh", "scripts/check_shell_static.sh", "scripts/check_swift_style.sh"]
+utilities = ["[", "[[", "awk", "basename", "bash", "break", "cat", "cd", "chmod", "command", "continue", "curl", "date", "dirname", "echo", "exit", "export", "find", "git", "grep", "kill", "local", "mapfile", "mkdir", "mktemp", "printf", "read", "rm", "rmdir", "set", "sha256sum", "shasum", "shift", "sleep", "sort", "sudo", "tail", "tar", "tr", "trap", "true", "umask", "uname", "unzip", "wait", "xargs", "redis-cli", "brew", "fetch_java_*", "python_package_version", "run_native_verifier"]
+
+[[tool]]
+id = "rust"
+risk = "Rust SDK compile errors, compiler lints, and test failures"
+tool = "rustc, cargo, and libtest"
+version = "1.99.0"
+pins = [".github/workflows/ci.yml::toolchain: @VERSION@"]
+uses = ["dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master", "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5"]
+commands = ["cargo test", "cargo publish"]
+runs_in = "CI Rust jobs; publish workflows"
+config = "rust/*/Cargo.toml"
+conflicts = "none known"
+exceptions = "none"
+runtime = "see clippy (the static step builds every target)"
+findings = "unknown: failures are fixed before merge and not recorded"
+replaces = "none"
+status = "behind: Rust 1.99.1 released 2026-10-13"
+checked = 2026-10-19
+
+[[tool]]
+id = "clippy-rustfmt"
+risk = "Rust lints and formatting drift"
+tool = "Clippy and rustfmt"
+version = "1.99.0"
+pins = [".github/workflows/ci.yml::toolchain: @VERSION@", "scripts/check_rust_static.sh::cargo clippy --all-targets --all-features -- -D warnings"]
+commands = ["cargo clippy", "cargo fmt", "scripts/check_rust_static.sh"]
+runs_in = "CI Contract checks: Run Rust static analysis"
+config = "every warning fails, default and all features"
+conflicts = "none known"
+exceptions = "none"
+runtime = "push n=1, max 50 s; pull request n=2, max 51 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "ruff"
+risk = "Python lint and formatting"
+tool = "Ruff (native Rust)"
+version = "0.15.15"
+pins = ["scripts/python_static_tools.txt::ruff==@VERSION@"]
+commands = ["scripts/check_python_static.sh"]
+runs_in = "CI Contract checks: Run Python static analysis"
+config = "pyproject settings in each Python package"
+conflicts = "none known"
+exceptions = "none"
+runtime = "with mypy: push n=6, max 33 s; pull request n=9, max 36 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+status = "behind: 0.17.1 released 2026-10-15"
+checked = 2026-10-19
+
+[[tool]]
+id = "mypy"
+risk = "Python type errors"
+tool = "mypy"
+version = "2.1.0"
+pins = ["scripts/python_static_tools.txt::mypy==@VERSION@"]
+commands = ["scripts/check_python_static.sh"]
+runs_in = "CI Contract checks: Run Python static analysis"
+config = "pyproject settings in each Python package"
+conflicts = "a Python tool, not native; a native type checker with equal coverage would replace it"
+exceptions = "none"
+runtime = "with ruff (see ruff)"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+status = "behind: 2.4.0 released"
+checked = 2026-10-19
+
+[[tool]]
+id = "oxlint"
+risk = "JavaScript and TypeScript lint"
+tool = "oxlint (native Rust)"
+version = "1.88.0"
+pins = ["scripts/check_js_lint.sh::oxlint_version=\"@VERSION@\""]
+commands = ["scripts/check_js_lint.sh"]
+runs_in = "CI Contract checks: Run JavaScript lint (when JavaScript changed)"
+config = "the oxlintrc.json the script writes"
+conflicts = "none known"
+exceptions = "none"
+runtime = "push n=1, max 1 s; pull request n=1, max 0 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "java-static"
+risk = "Java compile warnings and bug patterns"
+tool = "javac -Xlint:all -Werror and SpotBugs"
+version = "4.10.5"
+pins = ["scripts/check_java_static.sh::spotbugs_version=\"@VERSION@\""]
+uses = ["actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1", "gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0"]
+commands = ["scripts/check_java_static.sh", "javac", "java", "gradle"]
+runs_in = "CI Contract checks: Run Java static analysis; Java and Kotlin jobs"
+config = "Java 17 (setup-java); javac targets release 11"
+conflicts = "none known"
+exceptions = "none"
+runtime = "pull request n=2, max 23 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "ktlint"
+risk = "Kotlin style"
+tool = "ktlint"
+version = "1.8.0"
+pins = ["scripts/check_kotlin_style.sh::ktlint_version=\"@VERSION@\""]
+commands = ["scripts/check_kotlin_style.sh"]
+runs_in = "CI Kotlin checks"
+config = "ktlint defaults; the jar is verified against its published SHA-256"
+conflicts = "none known"
+exceptions = "none"
+runtime = "unknown: no run in the measured window"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "phpstan"
+risk = "PHP type and logic errors"
+tool = "PHPStan"
+version = "2.3.1"
+pins = ["scripts/check_php_static.sh::\"phpstan/phpstan\": \"@VERSION@\""]
+uses = ["shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0"]
+commands = ["scripts/check_php_static.sh", "composer", "php"]
+runs_in = "CI Contract checks: Run PHP static analysis; PHP jobs"
+config = "the phpstan.neon the script writes"
+conflicts = "none known"
+exceptions = "none"
+runtime = "pull request n=2, max 8 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "swift-style"
+risk = "Swift lint and formatting"
+tool = "SwiftLint and SwiftFormat"
+version = "0.65.1"
+pins = ["scripts/check_swift_style.sh::swiftlint_version=\"@VERSION@\"", "scripts/check_swift_style.sh::swiftformat_version=\"0.63.1\""]
+commands = ["scripts/check_swift_style.sh", "swift run"]
+runs_in = "CI Contract checks: Run Swift style checks; Swift jobs"
+config = "SwiftLint and SwiftFormat settings in swift/logbrew-swift; downloads verified against pinned SHA-256"
+conflicts = "none known"
+exceptions = "none"
+runtime = "push n=1, max 13 s; pull request n=2, max 23 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+status = "SwiftFormat behind: 0.64.0 released 2026-10-16"
+checked = 2026-10-19
+
+[[tool]]
+id = "staticcheck"
+risk = "Go bugs, simplifications, and style"
+tool = "Staticcheck (native Go)"
+version = "2026.2.2"
+pins = ["scripts/check_go_static.sh::version=\"@VERSION@\""]
+uses = ["actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0"]
+commands = ["scripts/check_go_static.sh", "go install", "go test", "go work"]
+runs_in = "CI Contract checks: Run Go static analysis; Go jobs"
+config = "Go version from tools/toolchain-probe/.go-version"
+conflicts = "none known"
+exceptions = "none"
+runtime = "push n=1, max 21 s; pull request n=2, max 18 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "shellcheck"
+risk = "shell script bugs"
+tool = "ShellCheck"
+version = "0.11.0"
+pins = ["scripts/check_shell_static.sh::shellcheck_version=\"v@VERSION@\""]
+commands = ["scripts/check_shell_static.sh"]
+runs_in = "CI Contract checks: Run shell static analysis"
+config = "downloads verified against pinned SHA-256 per platform"
+conflicts = "a compiled Haskell binary; no Rust or Go shell linter gives equal coverage"
+exceptions = "none"
+runtime = "push n=6, max 19 s; pull request n=9, max 20 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "javascript-toolchain"
+risk = "JavaScript SDK builds, tests, audits, and package-manager compatibility"
+tool = "Bun, plus npm, pnpm, Yarn, and Corepack for compatibility tests"
+version = "1.3.14"
+pins = [".github/workflows/ci.yml::bun-version: \"@VERSION@\""]
+uses = ["oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0", "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0"]
+commands = ["bun", "bun add", "bun audit", "bun install", "bun pm", "bun run", "bun test", "npm ci", "npm install", "npm pack", "npm test", "pnpm", "yarn", "corepack", "js/logbrew-react-native/test/run-native-store-tests.sh"]
+runs_in = "CI JavaScript jobs; release readiness; package publishing"
+config = "package.json in each package; npm, pnpm, and Yarn run because SDK users install with them"
+conflicts = "npm, pnpm, and Yarn are package managers under test, not quality tools"
+exceptions = "none"
+runtime = "see the JavaScript jobs in the CI workflow runs"
+findings = "unknown: no recorded finding"
+replaces = "none"
+status = "behind: Bun 1.4.3 released 2026-10-10"
+checked = 2026-10-19
+
+[[tool]]
+id = "language-runtimes"
+risk = "SDK tests and packaging on the Python, .NET, Ruby, and PHP runtimes users run"
+tool = "Python, .NET, and Ruby toolchains"
+version = "runner"
+unpinned = "setup actions pin the action commit; runtime versions are minor-pinned in the workflows (Python 3.10 and 3.13, .NET 8.0.x and 10.0.x, Ruby 3.3, PHP 8.2 and 8.4)"
+uses = ["actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0", "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0", "ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0", "NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0", "rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0", "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2"]
+commands = ["python", "python3", "bin/python", "dotnet msbuild", "dotnet pack", "dotnet restore", "dotnet run", "ruby", "gem"]
+runs_in = "CI language jobs; publish workflows"
+config = "the workflows"
+conflicts = "none known"
+exceptions = "none"
+runtime = "see the language jobs in the CI workflow runs"
+findings = "not a check; runtimes under test"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "repository-checks"
+risk = "SDK contract, payload, packaging, release, and real-user flow regressions"
+tool = "repository check, smoke, and release scripts"
+version = "repository"
+unpinned = "repository scripts, versioned by commit"
+uses = ["./tools/toolchain-probe", "./.release-control/tools/toolchain-probe", "./.github/workflows/publish-nuget.yml", "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2", "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"]
+commands = ["scripts/check_*", "scripts/real_*", "scripts/build_*", "scripts/ci_*", "scripts/generate_*", "scripts/java_*", "scripts/native_*", "scripts/nuget_*", "scripts/python_*", "scripts/read_*", "scripts/run_*", "scripts/*.sh"]
+runs_in = "CI Contract checks and language jobs; release readiness; publish workflows"
+config = "each script"
+conflicts = "none known"
+exceptions = "none"
+runtime = "see the CI workflow runs"
+findings = "unknown: no recorded finding"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "public-guard"
+risk = "secrets or non-public text in commits, paths, branch names, and pull request text"
+tool = "gitleaks with the public guard rules"
+version = "8.30.1"
+pins = ["scripts/public-guard.sh::readonly gitleaks_version=\"@VERSION@\"", "scripts/public-guard.sh::e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080", "scripts/public-guard.sh::551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"]
+commands = ["scripts/public-guard.sh", "scripts/test-public-guard.sh"]
+runs_in = "Public guard workflow (required status) on every pull request and push"
+config = "scripts/public-guard.toml"
+conflicts = "none known"
+exceptions = "false positives are fixed in their own pull request"
+runtime = "see the Public guard workflow runs"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "actions-checkout"
+risk = "CI source checkout supply chain"
+tool = "actions/checkout"
+version = "7.0.1"
+unpinned = "pinned by commit in every workflow (see uses)"
+uses = ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"]
+runs_in = "every workflow"
+config = "fetch-depth where a job compares history"
+conflicts = "none known"
+exceptions = "none"
+runtime = "a few seconds per run"
+findings = "not a check; supply-chain pin"
+replaces = "none"
+checked = 2026-10-19
+
+[[tool]]
+id = "tool-matrix"
+risk = "a gate tool without an entry, a pin that differs from its entry, an entry not checked for 30 days"
+tool = "scripts/check-tool-matrix.sh and its seeded tests"
+version = "repository"
+unpinned = "repository script, versioned by commit"
+commands = ["scripts/check-tool-matrix.sh", "scripts/test-check-tool-matrix.sh"]
+runs_in = "CI Contract checks: Check the tool matrix"
+config = "this file"
+conflicts = "reads commands with a small shell reader; a command built at run time or named by a variable is invisible to it, so tools a gate script runs through a variable are listed under that script"
+exceptions = "none"
+runtime = "new; record from CI runs at the next check"
+findings = "seeded: an unlisted command, a changed pin, a changed action commit, a stale or future date, and a missing field each fail"
+replaces = "none"
+checked = 2026-10-19
