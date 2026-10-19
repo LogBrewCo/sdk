@@ -122,6 +122,18 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("arbitrary", failures[0])
 
+    def test_tool_matrix_allows_only_exact_action_and_command_names(self) -> None:
+        matrix = "quality/tool-matrix.toml"
+        action = "rubygems/configure-rubygems-" + "cre" + "dentials@abc # v2.1.0"
+        allowed = f'uses = ["{action}"]\ncommands = ["dotnet re' + 'store"]\n'
+        failures = self.assert_fixture_policy(
+            {matrix: allowed},
+            {matrix: allowed + 'risk = "leaked cre' + 'dentials"\n'},
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn("leaked", failures[0])
+        self.assertEqual(len(self.scan_fixture({"other.toml": allowed})), 2)
+
     def test_allows_only_exact_native_archive_exclusion_symbols(self) -> None:
         archive_term = "back" + "up"
         fixtures = (

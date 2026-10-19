@@ -251,7 +251,7 @@ checked = 2026-10-19
 
 [[tool]]
 id = "public-guard"
-risk = "secrets or non-public text in commits, paths, branch names, and pull request text"
+risk = "leaked keys or non-public text in commits, paths, branch names, and pull request text"
 tool = "gitleaks with the public guard rules"
 version = "8.30.1"
 pins = ["scripts/public-guard.sh::readonly gitleaks_version=\"@VERSION@\"", "scripts/public-guard.sh::e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080", "scripts/public-guard.sh::551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"]

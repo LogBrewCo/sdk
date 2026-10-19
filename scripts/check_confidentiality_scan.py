@@ -193,6 +193,7 @@ def is_allowed_match(relative: Path, line: str) -> bool:
             is_support_ticket_diagnostics_reference,
             is_go_gin_privacy_reference,
             is_ruby_rails_smoke_reference,
+            is_tool_matrix_tool_name,
         )
     ):
         return True
@@ -450,6 +451,17 @@ def is_public_publishing_guidance(relative_text: str, line: str) -> bool:
     )
     lower_line = line.lower()
     return any(fragment in lower_line for fragment in allowed_fragments)
+
+
+def is_tool_matrix_tool_name(relative_text: str, line: str) -> bool:
+    """The tool matrix must name each action and command exactly as the workflows do."""
+    if relative_text != "quality/tool-matrix.toml":
+        return False
+    exact_names = ("rubygems/configure-rubygems-credentials@", '"dotnet restore"')
+    terms = {match.group(0).lower() for match in SENSITIVE_RE.finditer(line)}
+    return line.startswith(("uses = [", "commands = [")) and terms <= {"credential", "restore"} and all(
+        any(name in line.lower() for name in exact_names if term in name) for term in terms
+    )
 
 
 def is_npm_first_publish_placeholder(relative_text: str, line: str) -> bool:
