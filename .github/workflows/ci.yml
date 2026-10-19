@@ -442,7 +442,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends redis-server
           redis-cli ping >/dev/null 2>&1 || sudo redis-server --daemonize yes
           trap 'redis-cli shutdown >/dev/null 2>&1 || true' EXIT
-          python3 -m pip install certifi==2026.7.22 truststore==0.10.4 arq==0.28.0 dramatiq==2.2.1 fakeredis==2.31.3 rq==2.12.0 httpx==0.28.1 httpx2==2.15.1 aiohttp==3.14.5
+          python3 -m pip install certifi==2026.7.22 truststore==0.10.4 arq==0.28.0 dramatiq==2.2.1 fakeredis==2.31.3 rq==2.12.0 httpx==0.28.1 httpx2==2.14.0 aiohttp==3.14.5
           PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run FastAPI package checks
@@ -662,7 +662,7 @@ jobs:
 
       - name: Run installed core SDK tests
         run: |
-          python3 -m pip install --no-cache-dir --disable-pip-version-check './python/logbrew_py[arq,dramatiq,rq]' fakeredis==2.31.3 httpx==0.28.1 httpx2==2.15.1 aiohttp==3.14.5
+          python3 -m pip install --no-cache-dir --disable-pip-version-check './python/logbrew_py[arq,dramatiq,rq]' fakeredis==2.31.3 httpx==0.28.1 httpx2==2.14.0 aiohttp==3.14.5
           PYTHONPATH="" python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run installed FastAPI and Flask package checks
