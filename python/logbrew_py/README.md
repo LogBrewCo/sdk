@@ -252,7 +252,7 @@ client = LogBrewClient.create(
 )
 ```
 
-When the queue is full, LogBrew drops the new event and keeps existing queued context. Each drop has a reason: `queue_overflow` (event limit), `queue_bytes_overflow` (byte limit), or `event_too_large` (one event cannot fit the queue or one request). Use `dropped_events()`, `dropped_events_by_reason()`, and the optional `on_event_dropped` callback for local diagnostics, then call `flush()` or `shutdown()` with your transport:
+When the queue is full, LogBrew drops the new event and keeps existing queued context. A crash report (an issue with level `fatal` or `critical`) is the exception: it removes the oldest queued events that are not crash reports until it fits, so a burst of logs cannot push out the crash. It never removes events in a request body that is being sent or retried, and it removes nothing when that would not make room. The persistent queue does not remove queued events, so there a crash report at a full queue is dropped like any other event. Each drop has a reason: `queue_overflow` (event limit), `queue_bytes_overflow` (byte limit), `event_too_large` (one event cannot fit the queue or one request), or `evicted_for_fatal` (removed to make room for a crash report). Use `dropped_events()`, `dropped_events_by_reason()`, and the optional `on_event_dropped` callback for local diagnostics, then call `flush()` or `shutdown()` with your transport:
 
 ```python
 client = LogBrewClient.create(

@@ -89,6 +89,14 @@ class MemoryEventQueue:
             self._byte_count -= removed_bytes
         return split
 
+    def remove(self, sequences: set[int]) -> int:
+        """Remove exact records anywhere in the queue; used only to make room for a crash report."""
+        kept = [record for record in self._records if record.sequence not in sequences]
+        removed = len(self._records) - len(kept)
+        self._byte_count -= sum(record.byte_count for record in self._records if record.sequence in sequences)
+        self._records = kept
+        return removed
+
     def purge(self) -> int:
         removed = len(self._records)
         self._records.clear()
