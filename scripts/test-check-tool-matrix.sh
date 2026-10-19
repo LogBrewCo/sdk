@@ -3,8 +3,10 @@
 # test-check-tool-matrix.sh
 # Keep this file identical in every public LogBrew repository.
 # Proves that scripts/check-tool-matrix.sh passes on this repository and fails
-# on each seeded mistake: an unlisted gate command, a changed pin, a changed
-# action pin, an entry not checked for 30 days, and a missing field.
+# on each seeded mistake: an unlisted gate command, a changed pin, an action
+# pinned to a tag, an unlisted action, one action pinned two ways, an entry not
+# checked for 30 days, and a missing field. An action update across every
+# workflow passes without a matrix edit.
 
 set -euo pipefail
 
@@ -54,11 +56,43 @@ awk -v block="$block" '/^\[\[tool\]\]$/ { n++ } n == block && /^version = "/ { s
 cp "$work/edited" "$matrix"
 expect_failure "a changed pin" "no longer pins"
 
+# The first remote action pin in the workflows, for the action cases below.
+first_pin() {
+    grep -h -m 1 -E '^[ -]*uses: [^.][^@]*@[0-9a-f]{40} # ' "$work/repo"/.github/workflows/*.y*ml |
+        head -n 1 | sed -E 's/^[ -]*uses: *//; s/ +$//'
+}
+append_step() {
+    local workflows=("$work/repo"/.github/workflows/*.y*ml)
+    printf '\n      - uses: %s\n' "$1" >>"${workflows[0]}"
+}
+
 copy
-workflow="$(grep -l -m 1 'uses: ' "$work/repo"/.github/workflows/*.y*ml | head -n 1)"
-sed -E 's/(uses: [^@]+@)[0-9a-f]{40}/\10000000000000000000000000000000000000000/' "$workflow" >"$work/edited"
-cp "$work/edited" "$workflow"
-expect_failure "a changed action pin" "is not a tool's \`uses\` pin"
+pin="$(first_pin)"
+action="${pin%%@*}"
+for workflow in "$work/repo"/.github/workflows/*.y*ml; do
+    awk -v pin="$pin" -v action="$action" '{ i = index($0, pin); if (i) $0 = substr($0, 1, i - 1) action "@v1" } { print }' \
+        "$workflow" >"$work/edited"
+    cp "$work/edited" "$workflow"
+done
+expect_failure "an action pinned to a tag" "is not pinned to a commit"
+
+copy
+append_step "example/unlisted-action@1111111111111111111111111111111111111111 # v1.0.0"
+expect_failure "an unlisted action" "action \`example/unlisted-action\` is not in any tool's \`uses\`"
+
+copy
+append_step "$action@2222222222222222222222222222222222222222 # v0.0.1"
+expect_failure "one action pinned differently in two places" "action \`$action\` is pinned to more than one commit"
+
+copy
+# An update that moves every use of an action to a new commit and version needs no matrix edit.
+for workflow in "$work/repo"/.github/workflows/*.y*ml; do
+    awk -v pin="$pin" -v action="$action" '{ i = index($0, pin); if (i) $0 = substr($0, 1, i - 1) action "@3333333333333333333333333333333333333333 # v99.0.0" } { print }' \
+        "$workflow" >"$work/edited"
+    cp "$work/edited" "$workflow"
+done
+bash "$check" "$work/repo" >/dev/null
+printf 'ok: an action update in every workflow passes without a matrix edit\n'
 
 copy
 expect_failure "an entry not checked for 30 days" "more than 30 days ago" "2099-01-01"

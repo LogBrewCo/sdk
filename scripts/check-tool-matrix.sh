@@ -4,7 +4,8 @@
 # Keep this file identical in every public LogBrew repository.
 # Checks quality/tool-matrix.toml against the repository's gates. Fails when:
 # - a command a gate runs is neither a tool's `commands` entry nor in `utilities`;
-# - a workflow `uses:` line is not exactly a tool's `uses` pin (action, commit, version);
+# - a workflow action is not in any tool's `uses` (by name), is not pinned to a full
+#   commit with a version comment, or has different pins in different workflows;
 # - a tool's `pins` text (with @VERSION@ replaced by its version) is missing from its file;
 # - a tool was last checked more than 30 days ago, or in the future;
 # - a tool lacks a required field, or names a command no gate runs.
@@ -197,11 +198,29 @@ while IFS=$'\t' read -r id command; do
     fail "$id: command \`$command\` matches no gate command; remove it"
 done <"$work/commands"
 
-# Every action pin, exactly.
-grep -hE '^[ -]*uses: ' "$root"/.github/workflows/*.y*ml | sed 's/^[ -]*uses: *//' | sort -u | while IFS= read -r uses; do
-    grep -qxF -- "$uses" "$work/uses" || echo "workflow \`uses: $uses\` is not a tool's \`uses\` pin (action, commit, and version)"
-done >"$work/uses-errors"
-while IFS= read -r line; do fail "$line"; done <"$work/uses-errors"
+# Actions: the matrix lists each action by name; the workflows hold its pin.
+# Every remote action is pinned to a full commit with a version comment, and
+# one action has one pin across all workflows, so an update changes only the
+# workflows. A local action (./path) needs no pin.
+for workflow in "$root"/.github/workflows/*.y*ml; do
+    awk -v file="${workflow##*/}" '/^[ -]*uses: / { sub(/^[ -]*uses: */, ""); sub(/ +$/, ""); print file "\t" $0 }' "$workflow"
+done >"$work/actions"
+while IFS=$'\t' read -r file uses; do
+    name="${uses%%@*}"
+    grep -qxF -- "$name" "$work/uses" || fail "$file: action \`$name\` is not in any tool's \`uses\`; add it to quality/tool-matrix.toml"
+    [[ "$name" == ./* ]] && continue
+    [[ "${uses#*@}" =~ ^[0-9a-f]{40}\ \#\ [^\ ]+$ ]] ||
+        fail "$file: \`uses: $uses\` is not pinned to a commit; use $name@<40-hex commit> # <version>"
+done <"$work/actions"
+cut -f 2 "$work/actions" | grep -v '^\./' | sort -u | awk -F '@' '{ n[$1]++ } n[$1] == 2 { print $1 }' |
+    while IFS= read -r name; do
+        echo "action \`$name\` is pinned to more than one commit or version across workflows; use one pin"
+    done >"$work/pin-errors"
+while IFS= read -r line; do fail "$line"; done <"$work/pin-errors"
+while IFS= read -r name; do
+    awk -F '\t' -v name="$name" '{ split($2, part, "@") } part[1] == name { found = 1 } END { exit !found }' "$work/actions" ||
+        fail "action \`$name\` is in a tool's \`uses\` but no workflow uses it; remove it"
+done <"$work/uses"
 
 if ((${#errors[@]} > 0)); then
     printf 'tool matrix: %s\n' "${errors[@]}" >&2
