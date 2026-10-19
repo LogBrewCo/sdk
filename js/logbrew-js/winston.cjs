@@ -3,6 +3,10 @@ const { Writable } = require("node:stream");
 const { LogBrewClient, SdkError } = require("./core.cjs");
 const { buildLogContextHelpers } = require("./log-context.cjs");
 
+// Runtime packages with request scopes (such as @logbrew/node) register a recorder that keeps
+// breadcrumbs with the active request instead of the whole client.
+const BREADCRUMB_RECORDER = Symbol.for("@logbrew/sdk.breadcrumbRecorder");
+const MAX_BREADCRUMB_MESSAGE_LENGTH = 512;
 const WINSTON_RESERVED_FIELDS = new Set([
   "level",
   "message",
@@ -30,6 +34,7 @@ function createLogBrewWinstonTransport(config) {
   }
 
   const transport = config.transport;
+  const breadcrumbs = config.breadcrumbs !== false;
   const flushOnWrite = config.flushOnWrite === true;
   const includeErrorStack = config.includeErrorStack === true;
   const logger = config.logger ?? "winston";
@@ -49,6 +54,9 @@ function createLogBrewWinstonTransport(config) {
     objectMode: true,
     write(info, _encoding, callback) {
       try {
+        if (breadcrumbs) {
+          recordWinstonBreadcrumb(client, info);
+        }
         captureWinstonInfo({
           client,
           eventIdPrefix,
@@ -125,6 +133,49 @@ function captureWinstonInfo(config) {
       config.onError(error);
       return null;
     });
+  }
+}
+
+function recordWinstonBreadcrumb(client, info) {
+  if (!info || Array.isArray(info) || typeof info !== "object" || info.silent === true) {
+    return;
+  }
+  const breadcrumb = {
+    type: "debug",
+    category: "log.winston",
+    level: winstonBreadcrumbLevel(info.level),
+    message: Array.from(winstonMessage(info)).slice(0, MAX_BREADCRUMB_MESSAGE_LENGTH).join("")
+  };
+  const recorder = client.breadcrumbProvider ? globalThis[BREADCRUMB_RECORDER] : undefined;
+  try {
+    if (typeof recorder === "function") {
+      recorder(breadcrumb);
+    } else {
+      client.addBreadcrumb(breadcrumb);
+    }
+  } catch {
+    // Breadcrumbs are advisory; the log event below still goes out.
+  }
+}
+
+function winstonBreadcrumbLevel(level) {
+  switch (String(level).toLowerCase()) {
+    case "error":
+    case "crit":
+    case "critical":
+    case "fatal":
+    case "alert":
+    case "emerg":
+      return "error";
+    case "warn":
+    case "warning":
+      return "warning";
+    case "verbose":
+    case "debug":
+    case "silly":
+      return "debug";
+    default:
+      return "info";
   }
 }
 

@@ -535,6 +535,8 @@ export type WinstonLogInfo = Record<string, unknown> & {
 /** Configuration for the dependency-free Winston transport adapter. */
 export type WinstonTransportConfig = {
   client: LogBrewClient;
+  /** Record each Winston message as an issue breadcrumb (category `log.winston`). Defaults to true. */
+  breadcrumbs?: boolean;
   logger?: string;
   metadata?: Metadata;
   traceProvider?: () => LogCorrelationTraceContext | null | undefined;
@@ -924,6 +926,25 @@ export declare class LogBrewClient {
 
 /** Install explicit console capture while preserving the target console's normal output behavior. */
 export declare function installLogBrewConsoleCapture(config: ConsoleCaptureConfig): ConsoleCaptureHandle;
+
+/** Options for automatic browser breadcrumbs. Every source defaults to true. */
+export type BrowserBreadcrumbOptions = {
+  console?: boolean;
+  network?: boolean;
+  navigation?: boolean;
+  /** URLs whose requests are not recorded, such as the LogBrew ingest endpoint. */
+  ignoredUrls?: string[];
+};
+
+/**
+ * Record console calls, fetch and XHR requests, and route changes in a browser window as issue
+ * breadcrumbs on the client. The wrappers only observe calls. Returns an uninstall function.
+ */
+export declare function installBrowserBreadcrumbs(
+  browserWindow: unknown,
+  client: LogBrewClient,
+  options?: BrowserBreadcrumbOptions
+): () => void;
 
 /** Create safe action attributes for an app-owned product step without automatic UI capture. */
 export declare function createProductActionAttributes(

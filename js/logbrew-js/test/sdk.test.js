@@ -4012,3 +4012,25 @@ test("Winston transport queues info objects and flushes safely", async () => {
   assert.equal(body.events[1].attributes.metadata.errorMessage, "payment failed");
   assert.equal(body.events[1].attributes.metadata.errorStack, undefined);
 });
+
+test("Winston records become issue breadcrumbs unless breadcrumbs is false", () => {
+  const client = sampleClient();
+  const winstonTransport = createLogBrewWinstonTransport({ client, metadata: { service: "checkout" } });
+  winstonTransport.write({ level: "info", message: "cart ready", orderId: 42 });
+  winstonTransport.write({ level: "warn", message: "stock low" });
+  winstonTransport.write({ level: "silly", message: "x".repeat(600) });
+  client.issue("evt_winston_issue", "2026-06-02T10:00:08.000Z", createIssueAttributesFromError(new Error("checkout failed")));
+  const issue = JSON.parse(client.previewJson()).events.find((event) => event.id === "evt_winston_issue").attributes;
+  assert.deepEqual(issue.breadcrumbs.map(({ category, level, message }) => [category, level, message.length > 40 ? message.length : message]), [
+    ["log.winston", "info", "cart ready"],
+    ["log.winston", "warning", "stock low"],
+    ["log.winston", "debug", 512]
+  ]);
+  assert.equal(JSON.stringify(issue.breadcrumbs).includes("orderId"), false);
+
+  const quiet = sampleClient();
+  createLogBrewWinstonTransport({ client: quiet, breadcrumbs: false }).write({ level: "info", message: "cart ready" });
+  quiet.issue("evt_winston_quiet", "2026-06-02T10:00:08.000Z", createIssueAttributesFromError(new Error("checkout failed")));
+  const quietIssue = JSON.parse(quiet.previewJson()).events.find((event) => event.id === "evt_winston_quiet").attributes;
+  assert.equal(quietIssue.breadcrumbs, undefined);
+});

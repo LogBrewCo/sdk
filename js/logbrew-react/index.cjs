@@ -477,6 +477,35 @@ class LogBrewErrorBoundary extends React.Component {
   }
 }
 
+const REACT_ROOT_HANDLERS = Object.freeze({
+  onCaughtError: { handled: true, level: "error", mechanism: "react.caught_error" },
+  onRecoverableError: { handled: true, level: "warning", mechanism: "react.recoverable_error" },
+  onUncaughtError: { handled: false, level: "error", mechanism: "react.uncaught_error" }
+});
+
+// React 19 root options: pass the result to createRoot or hydrateRoot.
+// Errors a LogBrewErrorBoundary already reported are skipped. React's console
+// reporting stays on unless the app passes its own handler, which runs after capture.
+function createLogBrewReactRootOptions(client, { metadata, ...handlers } = {}) {
+  return Object.fromEntries(Object.entries(REACT_ROOT_HANDLERS).map(([name, capture]) => [
+    name,
+    (error, errorInfo) => {
+      if (!(name === "onCaughtError" && errorInfo?.errorBoundary instanceof LogBrewErrorBoundary)) {
+        try {
+          captureReactError(client, error, { ...capture, componentStack: errorInfo?.componentStack, metadata });
+        } catch {
+          // Capture failures never change how React reports the error.
+        }
+      }
+      if (typeof handlers[name] === "function") {
+        handlers[name](error, errorInfo);
+      } else {
+        console.error(error);
+      }
+    }
+  ]));
+}
+
 function defaultFetch() {
   return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
 }
@@ -812,6 +841,7 @@ module.exports = {
   captureReactRouterNavigation,
   createLogBrewReactRouterNavigationObserver,
   createLogBrewReactClient,
+  createLogBrewReactRootOptions,
   createReactActionEvent,
   createReactErrorEvent,
   createReactNetworkEvent,
@@ -834,6 +864,7 @@ module.exports = {
     captureReactRouterNavigation,
     createLogBrewReactRouterNavigationObserver,
     createLogBrewReactClient,
+    createLogBrewReactRootOptions,
     createReactActionEvent,
     createReactErrorEvent,
     createReactNetworkEvent,

@@ -47,6 +47,8 @@ export declare function captureNextClientError(
 export declare function installLogBrewNextClientErrorCapture(options: {
   client: LogBrewClient;
   browserWindow?: Window;
+  /** Console, fetch, XHR, and route-change breadcrumbs on each issue. Defaults to true. */
+  breadcrumbs?: boolean;
 }): { uninstall(): void };
 
 export type NextRoutePattern = string;

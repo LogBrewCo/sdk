@@ -13,7 +13,7 @@ npm install @logbrew/sdk @logbrew/react react
 pnpm add @logbrew/sdk @logbrew/react react
 ```
 
-The package ships plain ESM and CommonJS entrypoints, `.d.ts` and `.d.cts` declarations, a `LogBrewProvider`, `LogBrewErrorBoundary`, `useLogBrew`, `useLogBrewActions`, `useLogBrewAction`, `useLogBrewNetwork`, `useLogBrewReactRouterNavigation`, `createLogBrewReactRouterNavigationObserver`, `createReactRouterRouteTemplate`, `createLogBrewReactClient`, handled React error helpers, and explicit W3C trace propagation helpers for frontend-to-backend fetch calls. It keeps `@logbrew/sdk` and `react` as peer dependencies so app owners control their React/runtime versions.
+The package ships plain ESM and CommonJS entrypoints, `.d.ts` and `.d.cts` declarations, a `LogBrewProvider`, `LogBrewErrorBoundary`, `useLogBrew`, `useLogBrewActions`, `useLogBrewAction`, `useLogBrewNetwork`, `useLogBrewReactRouterNavigation`, `createLogBrewReactRouterNavigationObserver`, `createReactRouterRouteTemplate`, `createLogBrewReactClient`, `createLogBrewReactRootOptions` for React 19 root errors, handled React error helpers, and explicit W3C trace propagation helpers for frontend-to-backend fetch calls. It keeps `@logbrew/sdk` and `react` as peer dependencies so app owners control their React/runtime versions.
 
 If a React browser app also wants Web Vitals or interaction timing spans, install the browser package and import the optional subpath:
 
@@ -232,6 +232,29 @@ export function App() {
 ```
 
 Use `captureReactError(client, error, options)` for app-owned custom boundaries, event handlers, or async catch blocks. `createReactErrorEvent(error, options)` returns the issue event shape without queueing it, which is useful for previews or custom review screens.
+
+## React 19 Root Errors
+
+React 19 reports errors outside your boundaries through root options. Pass
+`createLogBrewReactRootOptions(client)` to `createRoot` or `hydrateRoot`:
+
+```js
+import { createRoot } from "react-dom/client";
+import { createLogBrewReactRootOptions } from "@logbrew/react";
+
+createRoot(container, createLogBrewReactRootOptions(client)).render(app);
+```
+
+- `onUncaughtError` records `react.uncaught_error` with `handled: false`.
+- `onCaughtError` records `react.caught_error` for errors caught by other
+  boundaries. Errors a `LogBrewErrorBoundary` caught are skipped, so each
+  error is reported once.
+- `onRecoverableError` records `react.recoverable_error` at `warning` level,
+  such as hydration mismatches React recovered from.
+
+Each issue includes React's component stack. React's console reporting stays
+on. Pass your own `onUncaughtError`, `onCaughtError`, or `onRecoverableError`
+to replace it; your handler runs after LogBrew records the error.
 
 ## Trace Propagation
 

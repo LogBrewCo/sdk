@@ -43,6 +43,7 @@
   },
   "files": [
     "index.cjs",
+    "browser-breadcrumbs.cjs",
     "core.cjs",
     "index.js",
     "index.d.ts",

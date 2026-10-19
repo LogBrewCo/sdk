@@ -4,10 +4,10 @@ import {
   RecordingTransport,
   SdkError,
   TransportError,
-  createIssueAttributesFromError
+  createIssueAttributesFromError,
+  installBrowserBreadcrumbs
 } from "@logbrew/sdk";
 import { createBeaconTransport } from "./beacon-transport.js";
-import { installBrowserBreadcrumbs } from "./breadcrumbs.js";
 import { addBrowserRuntimeContext } from "./runtime-context.js";
 import {
   captureBrowserFetchSpan,

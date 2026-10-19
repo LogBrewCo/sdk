@@ -228,6 +228,21 @@ export declare function shouldPropagateTraceparent(
 ): boolean;
 export declare function LogBrewProvider(props: LogBrewProviderProps): React.ReactElement;
 export declare class LogBrewErrorBoundary extends React.Component<LogBrewErrorBoundaryProps> {}
+export type ReactRootErrorInfo = {
+  componentStack?: string;
+  errorBoundary?: unknown;
+};
+export type ReactRootErrorHandler = (error: unknown, errorInfo: ReactRootErrorInfo) => void;
+export type LogBrewReactRootOptions = {
+  onCaughtError: ReactRootErrorHandler;
+  onRecoverableError: ReactRootErrorHandler;
+  onUncaughtError: ReactRootErrorHandler;
+};
+/** React 19 createRoot/hydrateRoot options that report root errors. App handlers run after capture. */
+export declare function createLogBrewReactRootOptions(
+  client: LogBrewClient,
+  options?: Partial<LogBrewReactRootOptions> & { metadata?: Metadata }
+): LogBrewReactRootOptions;
 export declare function createReactErrorEvent(error: unknown, options?: CaptureReactErrorOptions): ReactErrorEvent;
 export declare function captureReactError(
   client: LogBrewClient,
@@ -271,6 +286,7 @@ declare const defaultExport: {
   captureReactRouterNavigation: typeof captureReactRouterNavigation;
   createLogBrewReactRouterNavigationObserver: typeof createLogBrewReactRouterNavigationObserver;
   createLogBrewReactClient: typeof createLogBrewReactClient;
+  createLogBrewReactRootOptions: typeof createLogBrewReactRootOptions;
   createReactActionEvent: typeof createReactActionEvent;
   createReactErrorEvent: typeof createReactErrorEvent;
   createReactNetworkEvent: typeof createReactNetworkEvent;

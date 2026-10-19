@@ -9,6 +9,7 @@ django==5.2.16
 django-stubs==5.2.9
 fastapi==0.136.3
 Flask==3.1.2
+httpx==0.28.1
 httpx2==2.3.0
 fakeredis==2.31.3
 rq==2.12.0

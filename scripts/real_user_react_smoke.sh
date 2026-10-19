@@ -89,6 +89,7 @@ npm install --save-exact \
   "react@$react_version" \
   "react-dom@$react_dom_version" \
   "react-test-renderer@$renderer_version" \
+  jsdom \
   typescript \
   @types/react \
   @types/react-dom >/dev/null
@@ -1282,6 +1283,62 @@ if (cjsNetwork.attributes.metadata.routeTemplate !== "/api/cjs" || cjsNetwork.at
 }
 EOF
 node cjs-smoke.cjs
+
+# React 19 root options with real createRoot: each error is reported once, with its component stack.
+cat > root-errors.cjs <<'EOF'
+const { JSDOM } = require("jsdom");
+const dom = new JSDOM("<!doctype html><div id=\"root\"></div>");
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
+const React = require("react");
+const { flushSync } = require("react-dom");
+const { createRoot } = require("react-dom/client");
+const { LogBrewClient } = require("@logbrew/sdk");
+const { LogBrewErrorBoundary, createLogBrewReactRootOptions } = require("@logbrew/react");
+
+class AppBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+function Cart() { throw new TypeError("cart crashed"); }
+function Price() { throw new RangeError("price out of range"); }
+function Checkout() { throw new Error("checkout failed"); }
+
+const client = new LogBrewClient({ apiKey: "LOGBREW_CLIENT_KEY" });
+const consoleError = console.error;
+console.error = () => undefined;
+try {
+  const render = (element) => {
+    const root = createRoot(document.createElement("div"), createLogBrewReactRootOptions(client));
+    flushSync(() => { root.render(element); });
+  };
+  render(React.createElement(Cart));
+  render(React.createElement(AppBoundary, null, React.createElement(Price)));
+  render(React.createElement(LogBrewErrorBoundary, { client }, React.createElement(Checkout)));
+} finally {
+  console.error = consoleError;
+}
+setTimeout(() => {
+  const events = JSON.parse(client.previewJson()).events.map(({ attributes }) => [
+    attributes.exception.type,
+    attributes.exception.mechanism.type,
+    attributes.exception.mechanism.handled,
+    attributes.metadata.componentStack.includes("Checkout") || attributes.metadata.componentStack.includes("Price") || attributes.metadata.componentStack.includes("Cart")
+  ]);
+  const expected = [
+    ["TypeError", "react.uncaught_error", false, true],
+    ["RangeError", "react.caught_error", true, true],
+    ["Error", "react.error_boundary", true, true]
+  ];
+  if (JSON.stringify(events) !== JSON.stringify(expected)) {
+    throw new Error(`unexpected React root events: ${JSON.stringify(events)}`);
+  }
+  console.log(JSON.stringify({ ok: true, rootEvents: events.length }));
+}, 50);
+EOF
+node root-errors.cjs > "$tmp_dir/root-errors.json"
+grep -q '"rootEvents":3' "$tmp_dir/root-errors.json"
 
 node node_modules/@logbrew/react/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"

@@ -251,6 +251,7 @@ Raw stack text stays out of metadata unless you pass `includeErrorStack: true`. 
 - `console.debug`, `log`, `info`, `warn`, and `error` calls, as the level and the first string argument (the message template, at most 512 characters). Later arguments are never recorded, so values passed to `console` stay out of breadcrumbs.
 - Outbound HTTP requests from `http`, `https`, `fetch`, and undici, as method, scheme, host, path, and status code. Query strings, fragments, user info, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped.
 - Pino records (Pino 9.11 or newer in the 9.x line, or 10.1 or newer), as level and message.
+- Winston records sent through `createLogBrewWinstonTransport` from `@logbrew/sdk`, as level and message.
 
 Breadcrumbs recorded inside a request (`withLogBrewHttpHandler`, framework middleware, or `runWithLogBrewTrace`) attach only to issues from that request. Breadcrumbs outside a request attach to issues outside a request, such as process crashes. Each scope keeps the newest 64 and marks the issue `breadcrumbsTruncated` when older ones were dropped. Add your own with `addLogBrewBreadcrumb({ category: "checkout", message: "payment submitted" })`. Pass `breadcrumbs: false` to turn the automatic sources off. HTTP breadcrumbs need Node.js diagnostics channels, which Bun does not provide.
 

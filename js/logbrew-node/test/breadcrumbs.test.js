@@ -3,7 +3,7 @@ import { channel } from "node:diagnostics_channel";
 import { createServer, get as httpGet } from "node:http";
 import test from "node:test";
 
-import { RecordingTransport, createIssueAttributesFromError } from "@logbrew/sdk";
+import { RecordingTransport, createIssueAttributesFromError, createLogBrewWinstonTransport } from "@logbrew/sdk";
 import {
   addLogBrewBreadcrumb,
   createLogBrewNodeClient,
@@ -105,4 +105,18 @@ test("LogBrew's own delivery requests are not breadcrumbs", async (t) => {
 
 test("the breadcrumbs option must be a boolean", () => {
   assert.throws(() => newClient({ breadcrumbs: "yes" }), /breadcrumbs must be a boolean/u);
+});
+
+test("Winston records inside a request stay with that request's issue", () => {
+  const client = newClient();
+  const winston = createLogBrewWinstonTransport({ client });
+  runWithLogBrewTrace(newTrace(), () => { winston.write({ level: "info", message: "first request step" }); });
+  const issue = runWithLogBrewTrace(newTrace(), () => {
+    winston.write({ level: "error", message: "payment declined" });
+    return captureIssue(client, "evt_issue_winston");
+  });
+
+  assert.deepEqual(issue.breadcrumbs.map(({ category, level, message }) => [category, level, message]), [
+    ["log.winston", "error", "payment declined"]
+  ]);
 });

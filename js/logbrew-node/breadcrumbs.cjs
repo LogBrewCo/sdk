@@ -6,6 +6,8 @@ const MAX_BREADCRUMBS = 64;
 const MAX_MESSAGE_LENGTH = 512;
 const MAX_URL_LENGTH = 256;
 const INSTALLED = Symbol.for("@logbrew/node.automaticBreadcrumbs");
+// Lets the @logbrew/sdk Winston transport keep its breadcrumbs with the active request.
+const BREADCRUMB_RECORDER = Symbol.for("@logbrew/sdk.breadcrumbRecorder");
 const CONSOLE_LEVELS = Object.freeze({
   debug: "debug",
   error: "error",
@@ -76,6 +78,7 @@ function installAutomaticBreadcrumbs(activeTraceProvider) {
   }
   globalThis[INSTALLED] = true;
   const add = (breadcrumb) => addLogBrewBreadcrumb(breadcrumb, activeTraceProvider);
+  globalThis[BREADCRUMB_RECORDER] = add;
   installConsoleBreadcrumbs(add);
   installHttpBreadcrumbs(add);
   installPinoBreadcrumbs(add);
