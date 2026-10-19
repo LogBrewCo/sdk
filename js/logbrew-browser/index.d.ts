@@ -418,6 +418,11 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   client?: LogBrewClient;
   /** App-owned transports remain available to explicit flush, but are not invoked by page-exit lifecycle signals. */
   transport?: Transport;
+  /**
+   * Record console calls, fetch and XHR requests, and route changes as issue breadcrumbs. Defaults to true.
+   * The wrappers only observe: they never add headers or change requests.
+   */
+  breadcrumbs?: boolean;
   captureGlobalErrors?: boolean;
   captureUnhandledRejections?: boolean;
   capturePageViews?: boolean;

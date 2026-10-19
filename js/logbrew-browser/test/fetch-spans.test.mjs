@@ -179,6 +179,8 @@ test("installed browser fetch instrumentation patches only when explicitly insta
     browserWindow.fetch = originalFetch;
     const context = installLogBrewBrowser({
       browserWindow,
+      // Breadcrumbs wrap fetch too; this test checks that span instrumentation restores the exact original.
+      breadcrumbs: false,
       capturePageViews: false,
       clientKey: CLIENT_KEY,
       flushOnCapture: false,

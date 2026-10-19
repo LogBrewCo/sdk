@@ -21,6 +21,8 @@
   "files": [
     "beacon-transport.cjs",
     "beacon-transport.js",
+    "breadcrumbs.cjs",
+    "breadcrumbs.js",
     "fetch-spans.cjs",
     "fetch-spans.js",
     "interaction-timing.cjs",

@@ -545,7 +545,17 @@ const tracedFetch = createTraceparentFetch({
 
 `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so browser requests do not send tracing headers to unrelated origins. If the API is on another origin, configure that backend's CORS policy to allow the `traceparent` request header.
 
-LogBrew does not patch global `fetch` or XHR by default, capture request/response bodies, copy arbitrary headers, store query strings or hash fragments by default, or emit W3C baggage/tracestate from the browser helper. Use explicit app-owned fetch/XHR spans or network milestones for the routes that matter.
+Without explicit fetch instrumentation, LogBrew never adds tracing headers, captures request/response bodies, copies arbitrary headers, stores query strings or hash fragments, or emits W3C baggage/tracestate from the browser helper. The automatic breadcrumbs below observe `fetch` and XHR calls but never change them. Use explicit app-owned fetch/XHR spans or network milestones for the routes that matter.
+
+## Automatic Breadcrumbs
+
+`installLogBrewBrowser()` records what led up to an error and attaches it to the next issue as ordered breadcrumbs:
+
+- `console.debug`, `log`, `info`, `warn`, and `error` calls, as the level and the first string argument (the message template, at most 512 characters). Later arguments are never recorded.
+- `fetch` and `XMLHttpRequest` calls, as method, scheme, host, path, and status code. Query strings, fragments, user info, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped.
+- Route changes through `history.pushState`, `history.replaceState`, and `popstate`, as the previous and next pathname without query or fragment.
+
+The client keeps the newest 64 breadcrumbs. The wrappers only observe calls: they never add headers or change requests and responses. `uninstall()` puts back every method the wrappers still own. Pass `breadcrumbs: false` to leave `console`, `fetch`, XHR, and `history` untouched.
 
 ## SPA Navigation Tracing
 
