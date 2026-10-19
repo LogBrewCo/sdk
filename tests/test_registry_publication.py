@@ -32,6 +32,23 @@ check_release_metadata = load_module("check_release_metadata", RELEASE_METADATA_
 check_registry_publication = load_module("check_registry_publication", MODULE_PATH)
 
 
+def npm_like(payload: Any) -> set[str]:
+    return {payload["version"]}
+
+
+class FakeClock:
+    """Records waits without sleeping."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class RegistryPublicationTests(unittest.TestCase):
     def test_nuget_catalog_includes_httpclient(self) -> None:
         self.assertIn("LogBrew.HttpClient", check_registry_publication.NUGET_PACKAGES)
@@ -226,7 +243,7 @@ class RegistryPublicationTests(unittest.TestCase):
         ):
             observed: dict[str, set[str]] = {}
 
-            def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
+            def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None, **_kwargs):  # type: ignore[no-untyped-def]
                 observed[check.label] = expected
                 return []
 
@@ -505,7 +522,7 @@ class RegistryPublicationTests(unittest.TestCase):
         observed: dict[tuple[str, str], set[str]] = {}
         original_validate_check = check_registry_publication.validate_check
 
-        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
+        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None, **_kwargs):  # type: ignore[no-untyped-def]
             observed[(getattr(check, "family", ""), check.label)] = expected
             return []
 
@@ -539,7 +556,7 @@ class RegistryPublicationTests(unittest.TestCase):
         observed: dict[tuple[str, str], set[str]] = {}
         original_validate_check = check_registry_publication.validate_check
 
-        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
+        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None, **_kwargs):  # type: ignore[no-untyped-def]
             observed[(getattr(check, "family", ""), check.label)] = expected
             return []
 
@@ -656,6 +673,42 @@ class RegistryPublicationTests(unittest.TestCase):
         )
 
         self.assertEqual(failures, [])
+
+    def test_wait_passes_when_the_registry_answers_after_several_tries(self) -> None:
+        check = check_registry_publication.RegistryCheck("@logbrew/next", "https://example.test/next", npm_like)
+        clock = FakeClock()
+        calls = []
+
+        def fetcher(_url: str, _timeout: float) -> dict[str, str]:
+            calls.append(clock.now)
+            if len(calls) < 5:
+                raise urllib.error.HTTPError("https://example.test/next", 404, "Not Found", {}, None)  # type: ignore[arg-type]
+            return {"version": "0.1.9"}
+
+        failures = check_registry_publication.validate_check(
+            check, {"0.1.9"}, timeout=1.0, retry_delay=2.0, fetcher=fetcher,
+            max_wait_seconds=600, sleep=clock.sleep, clock=clock.monotonic,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(calls, [0.0, 2.0, 6.0, 14.0, 30.0])
+
+    def test_wait_fails_after_the_deadline_and_names_the_missing_version(self) -> None:
+        check = check_registry_publication.RegistryCheck("@logbrew/next", "https://example.test/next", npm_like)
+        clock = FakeClock()
+
+        def fetcher(_url: str, _timeout: float) -> dict[str, str]:
+            raise urllib.error.HTTPError("https://example.test/next", 404, "Not Found", {}, None)  # type: ignore[arg-type]
+
+        failures = check_registry_publication.validate_check(
+            check, {"0.1.9"}, timeout=1.0, retry_delay=2.0, fetcher=fetcher,
+            max_wait_seconds=600, sleep=clock.sleep, clock=clock.monotonic,
+        )
+
+        self.assertEqual(clock.now, 600.0)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("@logbrew/next 0.1.9 not visible after 600s", failures[0])
+        self.assertIn("HTTP 404", failures[0])
 
     def test_validate_check_reports_missing_version(self) -> None:
         check = check_registry_publication.RegistryCheck(

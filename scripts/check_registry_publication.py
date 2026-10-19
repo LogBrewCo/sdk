@@ -400,6 +400,9 @@ def is_missing_registry_page_error(error: BaseException) -> bool:
     return "HTTP 404" in message or "HTTP Error 404" in message or "returned error: 404" in message
 
 
+MAX_BACKOFF_DELAY_SECONDS = 30.0
+
+
 def validate_check(
     check: RegistryCheck,
     expected: set[str],
@@ -407,7 +410,12 @@ def validate_check(
     retries: int = 0,
     retry_delay: float = 5.0,
     fetcher: Callable[[str, float], Any] | None = None,
+    max_wait_seconds: float = 0.0,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
 ) -> list[str]:
+    if max_wait_seconds > 0:
+        return wait_for_check(check, expected, timeout, retry_delay, fetcher, max_wait_seconds, sleep, clock)
     last_failure: list[str] = []
     for attempt in range(retries + 1):
         try:
@@ -429,6 +437,32 @@ def validate_check(
             time.sleep(retry_delay)
 
     return last_failure
+
+
+def wait_for_check(
+    check: RegistryCheck,
+    expected: set[str],
+    timeout: float,
+    initial_delay: float,
+    fetcher: Callable[[str, float], Any] | None,
+    max_wait_seconds: float,
+    sleep: Callable[[float], None],
+    clock: Callable[[], float],
+) -> list[str]:
+    """Retry with doubling delays until the version appears or max_wait_seconds pass."""
+    deadline = clock() + max_wait_seconds
+    delay = max(initial_delay, 0.5)
+    while True:
+        failures = validate_check(check, expected, timeout, fetcher=fetcher)
+        remaining = deadline - clock()
+        if not failures or remaining <= 0:
+            break
+        sleep(min(delay, remaining))
+        delay = min(delay * 2, MAX_BACKOFF_DELAY_SECONDS)
+    if not failures:
+        return []
+    versions = ", ".join(sorted(expected))
+    return [f"{check.label} {versions} not visible after {max_wait_seconds:g}s; last error: {failures[0]}"]
 
 
 def validate_absent_check(
@@ -518,7 +552,16 @@ def validate(args: argparse.Namespace) -> list[str]:
             if args.require_npm_provenance and check.family == "npm":
                 check = npm_provenance_check(check.label, version)
                 expected = {version}
-            failures.extend(validate_check(check, expected, args.timeout, args.retries, args.retry_delay))
+            failures.extend(
+                validate_check(
+                    check,
+                    expected,
+                    args.timeout,
+                    args.retries,
+                    args.retry_delay,
+                    max_wait_seconds=args.max_wait_seconds,
+                )
+            )
     if "go" in args.target or ("all" in args.target and args.include_go):
         failures.extend(validate_go_module(args.version))
     return failures
@@ -701,6 +744,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--retries", type=int, default=6)
     parser.add_argument("--retry-delay", type=float, default=10.0)
+    parser.add_argument(
+        "--max-wait-seconds",
+        type=float,
+        default=0.0,
+        help="Retry with doubling delays (first --retry-delay, at most 30s) until this deadline; replaces --retries.",
+    )
     parser.add_argument(
         "--expect-absent",
         action="store_true",

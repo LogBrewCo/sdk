@@ -296,5 +296,58 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             self.assertNotIn(prefix + suffix, body)
 
 
+
+def _run_verify_registry_version(answer_after: int | None, max_wait: int) -> tuple[subprocess.CompletedProcess[str], int]:
+    """Run only verify_registry_version against a stub npm that answers after N calls."""
+    function = SCRIPT.read_text(encoding="utf-8").split("verify_registry_version() {", 1)[1].split("\n}\n", 1)[0]
+    with tempfile.TemporaryDirectory() as directory:
+        stub_dir = Path(directory)
+        counter = stub_dir / "calls"
+        counter.write_text("0", encoding="utf-8")
+        threshold = "" if answer_after is None else str(answer_after)
+        stub = stub_dir / "npm"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            f'calls=$(( $(cat "{counter}") + 1 )); echo "$calls" > "{counter}"\n'
+            f'threshold="{threshold}"\n'
+            'if [[ -n "$threshold" && "$calls" -ge "$threshold" ]]; then echo 0.1.9; exit 0; fi\n'
+            'echo "npm error code E404" >&2; exit 1\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        script = (
+            f'registry="https://registry.npmjs.org"\nverify_registry_version() {{{function}\n}}\n'
+            'verify_registry_version "@logbrew/next" "0.1.9"\necho visible\n'
+        )
+        env = {
+            **os.environ,
+            "PATH": f"{stub_dir}:{os.environ['PATH']}",
+            "LOGBREW_NPM_VIEW_MAX_WAIT_SECONDS": str(max_wait),
+            "LOGBREW_NPM_VIEW_INITIAL_DELAY_SECONDS": "1",
+        }
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, check=False)
+        return result, int(counter.read_text(encoding="utf-8"))
+
+
+class NpmRegistryWaitTests(unittest.TestCase):
+    def test_verify_waits_until_npm_serves_the_version(self) -> None:
+        # Delays of 1s and 2s: npm answers on the third call.
+        result, calls = _run_verify_registry_version(answer_after=3, max_wait=600)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("visible", result.stdout)
+        self.assertEqual(calls, 3)
+
+    def test_verify_fails_after_the_deadline_and_names_the_package(self) -> None:
+        function = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('LOGBREW_NPM_VIEW_MAX_WAIT_SECONDS:-600', function)
+        # Waits 1s and 2s, then the next 4s delay would pass the 3s deadline.
+        result, calls = _run_verify_registry_version(answer_after=None, max_wait=3)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("visible", result.stdout)
+        self.assertEqual(calls, 3)
+        self.assertIn("@logbrew/next@0.1.9 is not on npm after 3s", result.stderr)
+
 if __name__ == "__main__":
     unittest.main()
