@@ -1788,6 +1788,36 @@ run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" 
 grep -q '"type":"node.uncaught_exception","handled":false' "$tmp_dir/node-crash-batch.json"
 grep -q '"level":"critical"' "$tmp_dir/node-crash-batch.json"
 
+# Automatic breadcrumbs: console and outbound HTTP inside a request reach that request's issue.
+cat > breadcrumbs.mjs <<'EOF'
+import { createServer } from "node:http";
+import { createIssueAttributesFromError, RecordingTransport } from "@logbrew/sdk";
+import { createLogBrewNodeClient, createLogBrewTraceContext, runWithLogBrewTrace } from "@logbrew/node";
+
+const server = createServer((_req, res) => { res.writeHead(503); res.end(); });
+await new Promise((resolve) => { server.listen(0, "127.0.0.1", resolve); });
+const client = createLogBrewNodeClient({ apiKey: "LOGBREW_API_KEY", transport: RecordingTransport.alwaysAccept(), automaticDelivery: false });
+await runWithLogBrewTrace(createLogBrewTraceContext({}), async () => {
+  console.warn("inventory lookup for order %s", "order-7");
+  await fetch(`http://127.0.0.1:${server.address().port}/inventory?secret=hidden`);
+  client.issue("evt_breadcrumb_issue", new Date().toISOString(), createIssueAttributesFromError(new Error("checkout failed")));
+});
+server.close();
+process.stdout.write(client.previewJson());
+EOF
+node breadcrumbs.mjs > "$tmp_dir/node-breadcrumbs-batch.json" 2>/dev/null
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/node-breadcrumbs-batch.json" >/dev/null
+python3 - "$tmp_dir/node-breadcrumbs-batch.json" <<'PY'
+import json
+import sys
+
+crumbs = json.load(open(sys.argv[1], encoding="utf-8"))["events"][0]["attributes"]["breadcrumbs"]
+assert [crumb["category"] for crumb in crumbs] == ["console", "http.client"], crumbs
+assert crumbs[0]["message"] == "inventory lookup for order order-7", crumbs
+assert crumbs[1]["data"]["status_code"] == 503 and crumbs[1]["level"] == "error", crumbs
+assert "hidden" not in json.dumps(crumbs), crumbs
+PY
+
 cat > consumer.ts <<'EOF'
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
@@ -1989,6 +2019,7 @@ node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBre
 node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewFetchInstrumentation !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewUndiciInstrumentation !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewProcessErrorCapture !== "function") process.exit(1)'
+node -e 'const node = require("@logbrew/node"); if (typeof node.addLogBrewBreadcrumb !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"

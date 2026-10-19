@@ -2,6 +2,7 @@ import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
 import type {
   DroppedEvent,
   IssueAttributes,
+  IssueBreadcrumbInput,
   LogAttributes,
   LogBrewClient,
   Metadata,
@@ -17,6 +18,11 @@ import type {
 export type CreateLogBrewNodeClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
+  /**
+   * Record console calls, outbound HTTP requests, and Pino records as issue breadcrumbs, scoped to the
+   * active request. Defaults to true.
+   */
+  breadcrumbs?: boolean;
   /** Add bounded Node version, OS type/release, and architecture context. Defaults to true. */
   captureRuntimeContext?: boolean;
   context?: TelemetryContext;
@@ -840,6 +846,9 @@ export declare function installLogBrewPinoInstrumentation(
   options: LogBrewPinoInstrumentationConfig
 ): LogBrewPinoInstrumentationHandle;
 
+/** Add an app-owned breadcrumb to the active request scope, or the process scope outside a request. */
+export declare function addLogBrewBreadcrumb(breadcrumb: IssueBreadcrumbInput & { timestamp?: string }): void;
+
 /** Options for reporting process-level crashes. */
 export type LogBrewProcessErrorCaptureOptions = {
   /** Client that receives one unhandled issue per crash. */
@@ -948,6 +957,7 @@ declare module "node:http" {
 }
 
 declare const defaultExport: {
+  addLogBrewBreadcrumb: typeof addLogBrewBreadcrumb;
   axiosRequestWithLogBrewSpan: typeof axiosRequestWithLogBrewSpan;
   cacheOperationWithLogBrewSpan: typeof cacheOperationWithLogBrewSpan;
   captureHttpError: typeof captureHttpError;

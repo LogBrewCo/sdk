@@ -240,6 +240,18 @@ Node's exit behavior does not change. When no other `uncaughtException` handler 
 
 Raw stack text stays out of metadata unless you pass `includeErrorStack: true`. `onCaptureError(error)` receives capture or delivery failures and never changes the exit path. Only one capture can be installed per process; `uninstall()` removes both listeners.
 
+## Automatic Breadcrumbs
+
+`createLogBrewNodeClient()` records what led up to an error and attaches it to the next issue as ordered breadcrumbs:
+
+- `console.debug`, `log`, `info`, `warn`, and `error` calls, as text of at most 512 characters.
+- Outbound HTTP requests from `http`, `https`, `fetch`, and undici, as method, scheme, host, path, and status code. Query strings, fragments, credentials, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped.
+- Pino records (Pino 9.11 or newer in the 9.x line, or 10.1 or newer), as level and message.
+
+Breadcrumbs recorded inside a request (`withLogBrewHttpHandler`, framework middleware, or `runWithLogBrewTrace`) attach only to issues from that request. Breadcrumbs outside a request attach to issues outside a request, such as process crashes. Each scope keeps the newest 64 and marks the issue `breadcrumbsTruncated` when older ones were dropped. Add your own with `addLogBrewBreadcrumb({ category: "checkout", message: "payment submitted" })`. Pass `breadcrumbs: false` to turn the automatic sources off. HTTP breadcrumbs need Node.js diagnostics channels, which Bun does not provide.
+
+Console text is telemetry, so keep secrets and personal data out of console messages, as you would for any log.
+
 ## Existing Pino Logs
 
 If a Node service already uses Pino, install the opt-in diagnostics-channel integration once before the logs you want to capture. It observes Pino's finalized JSON record without replacing its destination, patching the logger, or adding Pino as an SDK dependency:

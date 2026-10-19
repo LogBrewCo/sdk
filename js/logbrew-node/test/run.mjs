@@ -40,6 +40,7 @@ try {
       ...process.argv.slice(2),
       "persistent-delivery.test.js",
       "pino-instrumentation.test.js",
+      "breadcrumbs.test.js",
       "process-errors.test.js",
       "request-tracing.test.js",
       "runtime-context.test.js"
