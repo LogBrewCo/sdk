@@ -57,11 +57,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((project["name"], project["version"]), expected)
 
         rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
-        self.assertEqual(rust["package"]["version"], "0.1.7")
+        self.assertEqual(rust["package"]["version"], "0.1.8")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
-        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.9")
-        for package, version in (("LogBrew", "0.1.7"), ("LogBrew.HttpClient", "0.1.2")):
+        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.10")
+        for package, version in (("LogBrew", "0.1.8"), ("LogBrew.HttpClient", "0.1.3")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
                 self.assertEqual(xml_value(path, "./PropertyGroup/Version"), version)
@@ -242,7 +242,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(xml_value(ROOT / "kotlin/logbrew-kotlin-okhttp/pom.xml", "{*}version"), "0.2.3")
 
         expected = {
-            "LogBrew.AspNetCore": "0.1.2",
+            "LogBrew.AspNetCore": "0.1.3",
             "LogBrew.EntityFrameworkCore": "0.1.0",
             "LogBrew.Hangfire": "0.1.0",
             "LogBrew.StackExchangeRedis": "0.1.0",
@@ -253,14 +253,14 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
-        self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.7")
-        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.15")
+        self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.8")
+        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.16")
         self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.20")
-        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.7")
-        self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.2")
-        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.2")
+        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.8")
+        self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.3")
+        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.3")
         self.assertEqual(check_release_metadata.DOTNET_HANGFIRE_VERSION, "0.1.0")
-        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.9")
+        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.10")
         self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.3")
         self.assertEqual(
             {
