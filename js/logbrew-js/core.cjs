@@ -2864,8 +2864,11 @@ function formatConsoleArgument(value, includeErrorStack) {
   }
 }
 
+const { installBrowserBreadcrumbs } = require("./browser-breadcrumbs.cjs");
+
 module.exports = {
   PRODUCT_ANALYTICS_KINDS,
+  installBrowserBreadcrumbs,
   PRODUCT_ANALYTICS_SCHEMA_VERSION,
   createBaggage,
   createIssueAttributesFromError,
