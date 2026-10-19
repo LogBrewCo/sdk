@@ -1,10 +1,18 @@
 let nodeHandlerPromise;
+let edgeHandlerPromise;
 
 export function createLogBrewNextRequestErrorHandler(options = {}) {
   let handler;
+  let edgeHandler;
   return async function logBrewNextRequestErrorHandler(error, request, context) {
     try {
-      if (process.env.NEXT_RUNTIME !== "edge") {
+      if (process.env.NEXT_RUNTIME === "edge") {
+        // The Edge runtime has no Node.js modules; this path sends with fetch only.
+        edgeHandlerPromise ??= import("./edge.js");
+        const edgeModule = await edgeHandlerPromise;
+        edgeHandler ??= edgeModule.createLogBrewNextEdgeRequestErrorHandler(options);
+        await edgeHandler(error, request, context);
+      } else {
         nodeHandlerPromise ??= import("./index.js");
         const module = await nodeHandlerPromise;
         handler ??= module.createLogBrewNextRequestErrorHandler(options);

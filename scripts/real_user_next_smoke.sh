@@ -193,6 +193,16 @@ import { RecordingTransport } from "@logbrew/sdk";
 export const requestErrorTransport = RecordingTransport.alwaysAccept();
 EOF
 
+# An Edge route makes next build compile instrumentation for the Edge runtime too.
+mkdir -p app/api/edge-probe
+cat > app/api/edge-probe/route.js <<'EOF'
+export const runtime = "edge";
+
+export function GET() {
+  return new Response("ok");
+}
+EOF
+
 cat > instrumentation.js <<'EOF'
 import { createLogBrewNextRequestErrorHandler } from "@logbrew/next/instrumentation";
 import { requestErrorTransport } from "./instrumentation-transport.js";

@@ -4,19 +4,27 @@ const React = require("react");
 const {
   LogBrewClient,
   SdkError,
+  createIssueAttributesFromError,
   parseTraceparent
 } = require("@logbrew/sdk");
+
+const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
+// Browsers keep a 5-second interval to save battery and radio; pagehide flushes the rest.
+const DEFAULT_BROWSER_DELIVERY_INTERVAL_MS = 5000;
 
 function createLogBrewNextBrowserClient({
   apiKey,
   clientKey,
   context,
+  deliveryIntervalMs = DEFAULT_BROWSER_DELIVERY_INTERVAL_MS,
+  endpoint = DEFAULT_ENDPOINT,
   eventFilter,
   sdkName = "logbrew-next-client",
   sdkVersion = "0.1.9",
   maxQueueSize,
   maxRetries = 2,
-  onEventDropped
+  onEventDropped,
+  transport
 } = {}) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
@@ -24,14 +32,126 @@ function createLogBrewNextBrowserClient({
   }
   return LogBrewClient.create({
     apiKey: authKey,
-    context,
+    context: withPublicDeployment(context),
+    deliveryIntervalMs,
     eventFilter,
     maxQueueSize,
     maxRetries,
     onEventDropped,
     sdkName,
-    sdkVersion
+    sdkVersion,
+    // Sends on its own; pass transport: null to keep the client manual.
+    ...(transport === null ? {} : { transport: transport ?? createNextBrowserTransport(endpoint) })
   });
+}
+
+// Report an error from app/error.tsx or app/global-error.tsx, then deliver it.
+function captureNextClientError(client, error, { digest, routeTemplate, flush = true } = {}) {
+  const safeDigest = typeof digest === "string" && /^[a-zA-Z0-9._:-]{1,128}$/u.test(digest)
+    ? digest
+    : typeof error?.digest === "string" && /^[a-zA-Z0-9._:-]{1,128}$/u.test(error.digest) ? error.digest : undefined;
+  const route = normalizeRouteTemplate(routeTemplate);
+  client.issue(`evt_next_client_error_${randomHex(8)}`, new Date().toISOString(), createIssueAttributesFromError(error, {
+    handled: false,
+    mechanism: "nextjs.error_boundary",
+    runtime: "browser",
+    source: "nextjs.error_boundary",
+    metadata: {
+      framework: "nextjs",
+      ...(safeDigest ? { errorDigest: safeDigest } : {}),
+      ...(route ? { routeTemplate: route } : {})
+    }
+  }));
+  return flush && client.transport ? client.flush().catch(() => undefined) : Promise.resolve(undefined);
+}
+
+// Report uncaught browser errors and unhandled rejections, and flush queued events on pagehide.
+function installLogBrewNextClientErrorCapture({ client, browserWindow = globalThis.window } = {}) {
+  if (!client || !browserWindow || typeof browserWindow.addEventListener !== "function") {
+    throw new SdkError("configuration_error", "installLogBrewNextClientErrorCapture requires a client and a browser window");
+  }
+  const capture = (error, mechanism) => {
+    try {
+      client.issue(`evt_next_client_error_${randomHex(8)}`, new Date().toISOString(), createIssueAttributesFromError(error, {
+        handled: false,
+        mechanism,
+        runtime: "browser",
+        source: mechanism,
+        metadata: { framework: "nextjs" }
+      }));
+    } catch {
+      // Capture failures never reach the page.
+    }
+  };
+  const listeners = {
+    error: (event) => { capture(event?.error ?? event?.message ?? "Uncaught browser error", "nextjs.window_error"); },
+    unhandledrejection: (event) => { capture(event?.reason, "nextjs.unhandled_rejection"); },
+    pagehide: () => { void client.flush?.().catch(() => undefined); }
+  };
+  for (const [type, listener] of Object.entries(listeners)) {
+    browserWindow.addEventListener(type, listener);
+  }
+  return {
+    uninstall() {
+      for (const [type, listener] of Object.entries(listeners)) {
+        browserWindow.removeEventListener?.(type, listener);
+      }
+    }
+  };
+}
+
+function createNextBrowserTransport(endpoint) {
+  return {
+    async send(apiKey, body) {
+      const response = await globalThis.fetch(endpoint, {
+        body,
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        keepalive: body.length <= 60000,
+        method: "POST"
+      });
+      return { statusCode: response.status, attempts: 1 };
+    }
+  };
+}
+
+// Next.js inlines NEXT_PUBLIC_* values at build time when they appear literally like this.
+function withPublicDeployment(context) {
+  let release;
+  let environment;
+  try {
+    release = process.env.NEXT_PUBLIC_LOGBREW_RELEASE || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
+    environment = process.env.NEXT_PUBLIC_LOGBREW_ENVIRONMENT || process.env.NEXT_PUBLIC_VERCEL_ENV;
+  } catch {
+    return context;
+  }
+  const deployment = {
+    ...(boundedValue(environment) ? { environment: boundedValue(environment) } : {}),
+    ...(boundedValue(release) ? { release: boundedValue(release) } : {})
+  };
+  if (Object.keys(deployment).length === 0) {
+    return context;
+  }
+  if (context !== undefined && (context === null || typeof context !== "object" || context.schemaVersion !== 1)) {
+    return context;
+  }
+  const resource = context?.resource ?? {};
+  return {
+    ...(context ?? { schemaVersion: 1 }),
+    resource: { ...resource, deployment: { ...deployment, ...resource.deployment } }
+  };
+}
+
+function boundedValue(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  const characters = Array.from(normalized);
+  const hasControl = characters.some((character) => {
+    const code = character.codePointAt(0);
+    return code <= 31 || (code >= 127 && code <= 159);
+  });
+  return characters.length > 0 && characters.length <= 256 && !hasControl ? normalized : undefined;
 }
 
 function createNextRouteTemplate({
@@ -308,10 +428,12 @@ function randomHex(bytes) {
 }
 
 const api = {
+  captureNextClientError,
   captureNextNavigation,
   createLogBrewNextBrowserClient,
   createNextNavigationSpanEvent,
   createNextRouteTemplate,
+  installLogBrewNextClientErrorCapture,
   useLogBrewNextNavigation
 };
 

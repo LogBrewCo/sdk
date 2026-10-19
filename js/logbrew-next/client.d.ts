@@ -4,7 +4,9 @@ import type {
   LogBrewClient,
   Metadata,
   SpanAttributes,
-  TelemetryContext
+  TelemetryContext,
+  Transport,
+  TransportResponse
 } from "@logbrew/sdk";
 
 export type CreateLogBrewNextBrowserClientConfig = {
@@ -17,7 +19,35 @@ export type CreateLogBrewNextBrowserClientConfig = {
   eventFilter?: EventFilter;
   maxQueueSize?: number;
   onEventDropped?: (drop: DroppedEvent) => void;
+  /** Delivery interval after the first queued event. Defaults to 5000 ms to save battery. */
+  deliveryIntervalMs?: number;
+  /** Ingest endpoint for the built-in fetch transport. */
+  endpoint?: string;
+  /** Custom transport, or null to keep the client manual. Defaults to a fetch transport that sends automatically. */
+  transport?: Transport | null;
 };
+
+export type NextClientErrorOptions = {
+  /** The `digest` Next.js passes to error boundaries; also read from `error.digest`. */
+  digest?: string;
+  /** Stable route template such as `/projects/[projectId]`, never a concrete path. */
+  routeTemplate?: string;
+  /** Deliver right away. Defaults to true. */
+  flush?: boolean;
+};
+
+/** Report an error from `app/error.tsx` or `app/global-error.tsx` as an unhandled issue. */
+export declare function captureNextClientError(
+  client: LogBrewClient,
+  error: unknown,
+  options?: NextClientErrorOptions
+): Promise<TransportResponse | undefined>;
+
+/** Report uncaught browser errors and unhandled rejections, and flush queued events on pagehide. */
+export declare function installLogBrewNextClientErrorCapture(options: {
+  client: LogBrewClient;
+  browserWindow?: Window;
+}): { uninstall(): void };
 
 export type NextRoutePattern = string;
 
@@ -87,7 +117,9 @@ export declare function useLogBrewNextNavigation(
 ): void;
 
 declare const defaultExport: {
+  captureNextClientError: typeof captureNextClientError;
   captureNextNavigation: typeof captureNextNavigation;
+  installLogBrewNextClientErrorCapture: typeof installLogBrewNextClientErrorCapture;
   createLogBrewNextBrowserClient: typeof createLogBrewNextBrowserClient;
   createNextNavigationSpanEvent: typeof createNextNavigationSpanEvent;
   createNextRouteTemplate: typeof createNextRouteTemplate;
