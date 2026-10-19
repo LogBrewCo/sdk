@@ -225,6 +225,8 @@ worker_lifecycle = instrument_celery_worker_processes_with_logbrew(
 PY
 
 persistence_key_hex="$("$python" -c 'import os; print(os.urandom(32).hex())')"
+expected_sdk_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$repo_root/python/logbrew_py/pyproject.toml")"
+LOGBREW_EXPECTED_SDK_VERSION="$expected_sdk_version" \
 LOGBREW_CELERY_RUNTIME="$tmp_dir/runtime" \
 LOGBREW_CELERY_QUEUE_ROOT="$tmp_dir/queues" \
 LOGBREW_CELERY_ENDPOINT="$(<"$tmp_dir/intake/endpoint.txt")" \
@@ -261,7 +263,7 @@ for directory in (broker, processed, control):
 
 if "site-packages" not in str(Path(logbrew_sdk.__file__)):
     raise SystemExit("LogBrew was not imported from the installed wheel")
-if importlib.metadata.version("logbrew-sdk") != "0.1.18":
+if importlib.metadata.version("logbrew-sdk") != os.environ["LOGBREW_EXPECTED_SDK_VERSION"]:
     raise SystemExit("installed wheel version changed")
 requirements = importlib.metadata.requires("logbrew-sdk") or []
 if not any("cryptography<50,>=49" in requirement and "persistence" in requirement for requirement in requirements):
