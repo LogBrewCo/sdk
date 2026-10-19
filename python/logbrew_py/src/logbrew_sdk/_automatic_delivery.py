@@ -87,6 +87,7 @@ class DeliveryPrefix:
     through_sequence: int
     event_count: int
     body: str
+    reported_drops: tuple[tuple[str, int], ...] = ()
 
 
 class DeliverySendError(SdkError):
