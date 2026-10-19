@@ -886,7 +886,7 @@ export declare class LogBrewClient {
     transport?: Transport;
     /** Enable interval and queue-threshold delivery. Defaults to true when transport is supplied. */
     automaticDelivery?: boolean;
-    /** One-shot delivery interval in milliseconds. Defaults to 5000 and must not exceed 60000. */
+    /** One-shot delivery interval in milliseconds. Defaults to 1000 and must not exceed 60000. */
     deliveryIntervalMs?: number;
     /** Queue count that triggers delivery without waiting for the interval. Defaults to min(50, maxQueueSize). */
     deliveryQueueThreshold?: number;

@@ -308,3 +308,16 @@ async function waitFor(predicate) {
   }
   assert.fail("condition was not met");
 }
+
+test("React Native keeps a 5-second automatic delivery interval unless the app sets one", async () => {
+  await withInstalledPackage(async ({ createLogBrewReactNativeClient }) => {
+    const transport = { send: () => ({ statusCode: 202 }) };
+    const mobile = createLogBrewReactNativeClient({ clientKey: "LOGBREW_CLIENT_KEY", transport });
+    const custom = createLogBrewReactNativeClient({ clientKey: "LOGBREW_CLIENT_KEY", transport, deliveryIntervalMs: 2000 });
+
+    assert.equal(mobile.deliveryIntervalMs, 5000);
+    assert.equal(custom.deliveryIntervalMs, 2000);
+    await mobile.shutdown();
+    await custom.shutdown();
+  });
+});

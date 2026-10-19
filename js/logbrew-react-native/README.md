@@ -80,7 +80,9 @@ For mobile apps, prefer an app-scoped public key through `clientKey`. Expo
 inlines `EXPO_PUBLIC_*` values into the app, so never use a server key there.
 `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
-Supplying `transport` enables the core SDK's bounded automatic delivery. It
+Supplying `transport` enables the core SDK's bounded automatic delivery. On
+mobile it sends 5 seconds after the first queued event or at 50 queued events,
+which saves battery and radio wakeups; set `deliveryIntervalMs` to change it. It
 coalesces concurrent work, retries transient failures, retains rejected
 batches, and pauses repeated automatic sends after authentication, rate-limit,
 or non-retryable failures. Do not add a second app-owned flush interval.

@@ -285,7 +285,7 @@ Inside `withLogBrewHttpHandler()`, active W3C trace IDs are added automatically.
 
 ## Delivery Bounds
 
-`createLogBrewNodeClient()` owns a fetch transport by default and accepts the core delivery controls directly. It sends after 5 seconds or 50 queued events by default, retains at most 1,000 events and 4 MiB of compact event data, then splits each flush into at most 100 events or 256 KiB of UTF-8 JSON per request.
+`createLogBrewNodeClient()` owns a fetch transport by default and accepts the core delivery controls directly. It sends 1 second after the first queued event or at 50 queued events by default, retains at most 1,000 events and 4 MiB of compact event data, then splits each flush into at most 100 events or 256 KiB of UTF-8 JSON per request.
 
 ```js
 const client = createLogBrewNodeClient({
@@ -293,7 +293,7 @@ const client = createLogBrewNodeClient({
   maxQueueBytes: 4 * 1024 * 1024,
   maxBatchEvents: 100,
   maxBatchBytes: 256 * 1024,
-  deliveryIntervalMs: 5000,
+  deliveryIntervalMs: 1000,
   deliveryQueueThreshold: 50
 });
 ```

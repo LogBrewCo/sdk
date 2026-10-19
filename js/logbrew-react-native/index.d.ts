@@ -36,6 +36,7 @@ export type CreateLogBrewReactNativeClientConfig = {
   apiKey?: string;
   clientKey?: string;
   context?: TelemetryContext;
+  /** Automatic delivery interval in milliseconds. Defaults to 5000 on mobile to save battery. */
   deliveryIntervalMs?: number;
   deliveryQueueThreshold?: number;
   /** Advanced synchronous persistence seam. React Native apps normally use the native entry's persistentQueue mode. */

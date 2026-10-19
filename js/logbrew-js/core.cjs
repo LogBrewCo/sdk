@@ -88,7 +88,8 @@ const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_EVENTS = 100;
 const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
-const DEFAULT_DELIVERY_INTERVAL_MS = 5000;
+// One second matches the OpenTelemetry log processor default, so a lone event becomes readable quickly.
+const DEFAULT_DELIVERY_INTERVAL_MS = 1000;
 const MAX_DELIVERY_INTERVAL_MS = 60 * 1000;
 const DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50;
 const MAX_CLIENT_REPORT_REASONS = 16;
