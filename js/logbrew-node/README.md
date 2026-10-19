@@ -244,7 +244,7 @@ Raw stack text stays out of metadata unless you pass `includeErrorStack: true`. 
 
 `createLogBrewNodeClient()` records what led up to an error and attaches it to the next issue as ordered breadcrumbs:
 
-- `console.debug`, `log`, `info`, `warn`, and `error` calls, as text of at most 512 characters.
+- `console.debug`, `log`, `info`, `warn`, and `error` calls, as the level and the first string argument (the message template, at most 512 characters). Later arguments are never recorded, so values passed to `console` stay out of breadcrumbs.
 - Outbound HTTP requests from `http`, `https`, `fetch`, and undici, as method, scheme, host, path, and status code. Query strings, fragments, user info, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped.
 - Pino records (Pino 9.11 or newer in the 9.x line, or 10.1 or newer), as level and message.
 
