@@ -1,7 +1,6 @@
 "use strict";
 
 const diagnosticsChannel = require("node:diagnostics_channel");
-const { format } = require("node:util");
 
 const MAX_BREADCRUMBS = 64;
 const MAX_MESSAGE_LENGTH = 512;
@@ -89,7 +88,7 @@ function installConsoleBreadcrumbs(add) {
       continue;
     }
     console[method] = function logBrewConsoleBreadcrumb(...args) {
-      const message = boundedText(safeFormat(args), MAX_MESSAGE_LENGTH);
+      const message = boundedText(consoleTemplate(args), MAX_MESSAGE_LENGTH);
       if (message) {
         add({ type: "debug", category: "console", level, message });
       }
@@ -216,12 +215,13 @@ function pinoLevel(level) {
   return PINO_LEVELS.find(([floor]) => numeric >= floor)?.[1] ?? "info";
 }
 
-function safeFormat(args) {
-  try {
-    return format(...args.map((value) => (value instanceof Error ? `${value.name}: ${value.message}` : value)));
-  } catch {
-    return "";
+// Records the message template, never the interpolated arguments, so values passed to console stay out.
+function consoleTemplate(args) {
+  const [first] = args;
+  if (typeof first === "string") {
+    return first;
   }
+  return first instanceof Error ? first.name || "Error" : "";
 }
 
 function boundedText(value, limit) {

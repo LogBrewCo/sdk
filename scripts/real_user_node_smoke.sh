@@ -1813,7 +1813,7 @@ import sys
 
 crumbs = json.load(open(sys.argv[1], encoding="utf-8"))["events"][0]["attributes"]["breadcrumbs"]
 assert [crumb["category"] for crumb in crumbs] == ["console", "http.client"], crumbs
-assert crumbs[0]["message"] == "inventory lookup for order order-7", crumbs
+assert crumbs[0]["message"] == "inventory lookup for order %s", crumbs
 assert crumbs[1]["data"]["status_code"] == 503 and crumbs[1]["level"] == "error", crumbs
 assert "hidden" not in json.dumps(crumbs), crumbs
 PY

@@ -62,7 +62,7 @@ test("console, HTTP, and Pino records inside a request become that request's iss
     { category: "http.client", level: "warning", message: undefined, data: { method: "GET", url: `${origin}/missing/price`, status_code: 404 } }
   ];
   assert.deepEqual(crumbs, [
-    { category: "console", level: "info", message: "checkout started for cart cart-7", data: undefined },
+    { category: "console", level: "info", message: "checkout started for cart %s", data: undefined },
     ...http,
     { category: "log.pino", level: "warning", message: "stock low", data: undefined }
   ]);
