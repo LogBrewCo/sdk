@@ -35,6 +35,7 @@
     "pino.js",
     "pg.cjs",
     "pg.js",
+    "process-errors.cjs",
     "redis.cjs",
     "redis.js",
     "runtime-context.cjs",

@@ -209,6 +209,29 @@ server.listen(3000);
 
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
 
+## Process Crashes
+
+Request middleware sees only errors that reach a request. Install process error capture once at startup to also report uncaught exceptions and unhandled promise rejections, including failures in timers, queue consumers, and startup code:
+
+```js
+import {
+  createLogBrewNodeClient,
+  installLogBrewProcessErrorCapture
+} from "@logbrew/node";
+
+const client = createLogBrewNodeClient({
+  sdkName: "checkout-api",
+  sdkVersion: "1.4.0"
+});
+installLogBrewProcessErrorCapture({ client });
+```
+
+Each crash becomes one unhandled issue with the exception type, structured stack frames, and the active request trace when the failure happened inside one. The mechanism is `node.uncaught_exception` or `node.unhandled_rejection`.
+
+Node's exit behavior does not change. When no other `uncaughtException` handler exists, the SDK waits at most `flushTimeoutMs` (default 2000, maximum 30000) for delivery, prints the error, and exits with code 1. An unhandled rejection still ends the process in Node's default mode and is reported once. If your app has its own `uncaughtException` or `unhandledRejection` handler, or runs with `--unhandled-rejections=warn`, `none`, or `warn-with-error-code`, the SDK reports the error and leaves the process running, as Node would. If your own handler exits the process, call `await client.flush()` before it exits.
+
+Raw stack text stays out of metadata unless you pass `includeErrorStack: true`. `onCaptureError(error)` receives capture or delivery failures and never changes the exit path. Only one capture can be installed per process; `uninstall()` removes both listeners.
+
 ## Existing Pino Logs
 
 If a Node service already uses Pino, install the opt-in diagnostics-channel integration once before the logs you want to capture. It observes Pino's finalized JSON record without replacing its destination, patching the logger, or adding Pino as an SDK dependency:

@@ -1758,6 +1758,36 @@ grep -q 'GET /captured' "$tmp_dir/node-smoke.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/node-smoke.stderr.json"
 grep -q '"requestHelper":"evt_node_request_001"' "$tmp_dir/node-smoke.stderr.json"
 
+# Seeded crash: the installed package must report it, then let Node exit with code 1.
+cat > crash.mjs <<'EOF'
+import { writeFileSync } from "node:fs";
+import { createLogBrewNodeClient, installLogBrewProcessErrorCapture } from "@logbrew/node";
+
+const client = createLogBrewNodeClient({
+  apiKey: "LOGBREW_API_KEY",
+  transport: {
+    send(_apiKey, body) {
+      writeFileSync(process.argv[2], body);
+      return { statusCode: 202 };
+    }
+  }
+});
+installLogBrewProcessErrorCapture({ client });
+setTimeout(() => {
+  throw new TypeError("seeded checkout crash");
+}, 0);
+EOF
+crash_status=0
+node crash.mjs "$tmp_dir/node-crash-batch.json" 2> "$tmp_dir/node-crash.stderr.txt" || crash_status=$?
+if [[ "$crash_status" != 1 ]]; then
+  printf 'expected the seeded crash to exit with code 1, got %s\n' "$crash_status" >&2
+  exit 1
+fi
+grep -q 'TypeError: seeded checkout crash' "$tmp_dir/node-crash.stderr.txt"
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/node-crash-batch.json" >/dev/null
+grep -q '"type":"node.uncaught_exception","handled":false' "$tmp_dir/node-crash-batch.json"
+grep -q '"level":"critical"' "$tmp_dir/node-crash-batch.json"
+
 cat > consumer.ts <<'EOF'
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
@@ -1958,6 +1988,7 @@ node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBre
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewMongoCollection !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewFetchInstrumentation !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewUndiciInstrumentation !== "function") process.exit(1)'
+node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewProcessErrorCapture !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"

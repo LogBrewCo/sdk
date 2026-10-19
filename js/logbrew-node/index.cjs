@@ -26,6 +26,7 @@ const { instrumentLogBrewPgClient: instrumentPgClient } = require("./pg.cjs");
 const { instrumentLogBrewRedisClient: instrumentRedisClient } = require("./redis.cjs");
 const { installLogBrewUndiciInstrumentation: installUndiciInstrumentation } = require("./undici.cjs");
 const { installLogBrewPinoInstrumentation: installPinoInstrumentation } = require("./pino.cjs");
+const { installLogBrewProcessErrorCapture: installProcessErrorCapture } = require("./process-errors.cjs");
 const { buildNodePersistentEventStore } = require("./persistent-event-store.cjs");
 const {
   createPersistentEventQueue,
@@ -726,6 +727,10 @@ function installLogBrewPinoInstrumentation(options = {}) {
     ...options,
     traceProvider: options.traceProvider ?? getActiveLogBrewTrace
   });
+}
+
+function installLogBrewProcessErrorCapture(options) {
+  return installProcessErrorCapture(options, getActiveLogBrewTrace);
 }
 
 function createHttpRequestEvent(req, res, {
@@ -2157,6 +2162,7 @@ const exported = {
   installLogBrewFetchInstrumentation,
   installLogBrewHttpClientInstrumentation,
   installLogBrewPinoInstrumentation,
+  installLogBrewProcessErrorCapture,
   installLogBrewUndiciInstrumentation,
   instrumentLogBrewAxiosInstance,
   instrumentLogBrewMongoCollection,
