@@ -71,27 +71,27 @@ PYTHON_PACKAGES = {
     "python/logbrew_django": {
         "name": "logbrew-django",
         "description": "Django integration",
-        "dependencies": {"Django>=4.2.30,<6", "logbrew-sdk>=0.1.12,<0.2.0"},
+        "dependencies": {"Django>=4.2.30,<6", "logbrew-sdk>=0.1.21,<0.2.0"},
         "package": "logbrew_django",
         "requires_python": ">=3.10",
-        "version": "0.1.7",
+        "version": "0.1.8",
     },
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
         "description": "FastAPI integration",
-        "dependencies": {"fastapi>=0.111.1", "logbrew-sdk>=0.1.18,<0.2.0"},
-        "optional_dependencies": {"celery": {"logbrew-sdk[celery]>=0.1.18,<0.2.0"}},
+        "dependencies": {"fastapi>=0.111.1", "logbrew-sdk>=0.1.21,<0.2.0"},
+        "optional_dependencies": {"celery": {"logbrew-sdk[celery]>=0.1.21,<0.2.0"}},
         "package": "logbrew_fastapi",
         "requires_python": ">=3.10",
-        "version": "0.1.12",
+        "version": "0.1.13",
     },
     "python/logbrew_flask": {
         "name": "logbrew-flask",
         "description": "Flask integration",
-        "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.12,<0.2.0"},
+        "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.21,<0.2.0"},
         "package": "logbrew_flask",
         "requires_python": ">=3.10",
-        "version": "0.1.6",
+        "version": "0.1.7",
     },
     "python/logbrew_py": {
         "name": "logbrew-sdk",
@@ -110,7 +110,7 @@ PYTHON_PACKAGES = {
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.20",
+        "version": "0.1.21",
     },
 }
 
