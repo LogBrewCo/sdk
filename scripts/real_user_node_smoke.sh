@@ -1799,7 +1799,7 @@ await new Promise((resolve) => { server.listen(0, "127.0.0.1", resolve); });
 const client = createLogBrewNodeClient({ apiKey: "LOGBREW_API_KEY", transport: RecordingTransport.alwaysAccept(), automaticDelivery: false });
 await runWithLogBrewTrace(createLogBrewTraceContext({}), async () => {
   console.warn("inventory lookup for order %s", "order-7");
-  await fetch(`http://127.0.0.1:${server.address().port}/inventory?secret=hidden`);
+  await fetch(`http://127.0.0.1:${server.address().port}/inventory?coupon=hidden`);
   client.issue("evt_breadcrumb_issue", new Date().toISOString(), createIssueAttributesFromError(new Error("checkout failed")));
 });
 server.close();
