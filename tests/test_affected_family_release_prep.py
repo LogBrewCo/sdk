@@ -36,9 +36,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-browser/package.json": "0.1.11",
             "js/logbrew-express/package.json": "0.1.6",
             "js/logbrew-fastify/package.json": "0.1.7",
-            "js/logbrew-node/package.json": "0.1.12",
+            "js/logbrew-node/package.json": "0.1.13",
             "js/logbrew-nestjs/package.json": "0.1.7",
-            "js/logbrew-next/package.json": "0.1.8",
+            "js/logbrew-next/package.json": "0.1.9",
             "js/logbrew-react/package.json": "0.1.1",
             "js/logbrew-react-native/package.json": "0.1.35",
             "js/logbrew-svelte/package.json": "0.1.5",
@@ -47,8 +47,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.17"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.11"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.18"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.12"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.6"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.7"),
         }
@@ -151,10 +151,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             project["optional-dependencies"]["celery"],
-            ["logbrew-sdk[celery]>=0.1.12,<0.2.0"],
+            ["logbrew-sdk[celery]>=0.1.18,<0.2.0"],
         )
         self.assertNotIn("celery>=5,<6", project["dependencies"])
-        self.assertIn("logbrew-sdk>=0.1.12,<0.2.0", project["dependencies"])
+        self.assertIn("logbrew-sdk>=0.1.18,<0.2.0", project["dependencies"])
 
         for relative_path in (
             "python/logbrew_flask/pyproject.toml",
@@ -267,8 +267,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.17",
-                "logbrew-fastapi": "0.1.11",
+                "logbrew-sdk": "0.1.18",
+                "logbrew-fastapi": "0.1.12",
                 "logbrew-flask": "0.1.6",
                 "logbrew-django": "0.1.7",
             },

@@ -79,11 +79,11 @@ PYTHON_PACKAGES = {
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
         "description": "FastAPI integration",
-        "dependencies": {"fastapi>=0.111.1", "logbrew-sdk>=0.1.12,<0.2.0"},
-        "optional_dependencies": {"celery": {"logbrew-sdk[celery]>=0.1.12,<0.2.0"}},
+        "dependencies": {"fastapi>=0.111.1", "logbrew-sdk>=0.1.18,<0.2.0"},
+        "optional_dependencies": {"celery": {"logbrew-sdk[celery]>=0.1.18,<0.2.0"}},
         "package": "logbrew_fastapi",
         "requires_python": ">=3.10",
-        "version": "0.1.11",
+        "version": "0.1.12",
     },
     "python/logbrew_flask": {
         "name": "logbrew-flask",
@@ -110,7 +110,7 @@ PYTHON_PACKAGES = {
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.17",
+        "version": "0.1.18",
     },
 }
 
