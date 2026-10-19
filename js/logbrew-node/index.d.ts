@@ -840,6 +840,32 @@ export declare function installLogBrewPinoInstrumentation(
   options: LogBrewPinoInstrumentationConfig
 ): LogBrewPinoInstrumentationHandle;
 
+/** Options for reporting process-level crashes. */
+export type LogBrewProcessErrorCaptureOptions = {
+  /** Client that receives one unhandled issue per crash. */
+  client: LogBrewClient;
+  /** Transport used for the crash flush. Defaults to the client's own transport. */
+  transport?: Transport;
+  /** Longest wait for delivery before Node exits, from 0 to 30000. Defaults to 2000. */
+  flushTimeoutMs?: number;
+  /** Include raw stack text in issue metadata. Defaults to false. */
+  includeErrorStack?: boolean;
+  /** Receives capture or delivery failures. It never changes the exit path. */
+  onCaptureError?: (error: unknown) => void;
+};
+
+export type LogBrewProcessErrorCaptureHandle = {
+  uninstall(): void;
+};
+
+/**
+ * Report uncaught exceptions and unhandled promise rejections, then keep Node's exit behavior:
+ * when no other handler exists, Node still exits with code 1 after a bounded flush.
+ */
+export declare function installLogBrewProcessErrorCapture(
+  options: LogBrewProcessErrorCaptureOptions
+): LogBrewProcessErrorCaptureHandle;
+
 export declare function installLogBrewUndiciInstrumentation(
   options: LogBrewUndiciInstrumentationOptions
 ): LogBrewUndiciInstrumentationHandle;
@@ -940,6 +966,7 @@ declare const defaultExport: {
   installLogBrewFetchInstrumentation: typeof installLogBrewFetchInstrumentation;
   installLogBrewHttpClientInstrumentation: typeof installLogBrewHttpClientInstrumentation;
   installLogBrewPinoInstrumentation: typeof installLogBrewPinoInstrumentation;
+  installLogBrewProcessErrorCapture: typeof installLogBrewProcessErrorCapture;
   installLogBrewUndiciInstrumentation: typeof installLogBrewUndiciInstrumentation;
   instrumentLogBrewAxiosInstance: typeof instrumentLogBrewAxiosInstance;
   instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;

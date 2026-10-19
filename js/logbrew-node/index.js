@@ -19,6 +19,7 @@ export const {
   installLogBrewFetchInstrumentation,
   installLogBrewHttpClientInstrumentation,
   installLogBrewPinoInstrumentation,
+  installLogBrewProcessErrorCapture,
   installLogBrewUndiciInstrumentation,
   instrumentLogBrewAxiosInstance,
   instrumentLogBrewMongoCollection,

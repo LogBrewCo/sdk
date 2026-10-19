@@ -1,0 +1,192 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import test from "node:test";
+
+import { RecordingTransport } from "@logbrew/sdk";
+import { createLogBrewNodeClient, installLogBrewProcessErrorCapture } from "../index.js";
+
+const SOURCE_MODULE_URL = new URL("../index.js", import.meta.url).href;
+
+async function startIntake(t) {
+  const batches = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      batches.push(JSON.parse(body));
+      res.writeHead(202, { "content-type": "application/json" });
+      res.end("{}");
+    });
+  });
+  await new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => {
+    server.close(resolve);
+  }));
+  return { batches, endpoint: `http://127.0.0.1:${server.address().port}/v1/events` };
+}
+
+// Runs an app that installs capture and then fails; the body follows the setup lines.
+function runApp(body, { endpoint, nodeArgs = [], options = "" }) {
+  const source = `
+    import { createLogBrewNodeClient, installLogBrewProcessErrorCapture, runWithLogBrewTrace } from ${JSON.stringify(SOURCE_MODULE_URL)};
+    const client = createLogBrewNodeClient({ apiKey: "TEST_API_KEY", endpoint: ${JSON.stringify(endpoint)}, maxRetries: 0 });
+    installLogBrewProcessErrorCapture({ client ${options} });
+    ${body}
+  `;
+  const child = spawn(process.execPath, [...nodeArgs, "--input-type=module", "--eval", source], {
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const startedAt = performance.now();
+  return new Promise((resolve) => {
+    child.on("close", (code) => {
+      resolve({ code, stderr, stdout, elapsedMs: performance.now() - startedAt });
+    });
+  });
+}
+
+function issues(batches) {
+  return batches.flatMap((batch) => batch.events).filter((event) => event.type === "issue");
+}
+
+test("an uncaught exception is delivered before Node exits with code 1", async (t) => {
+  const intake = await startIntake(t);
+  const result = await runApp(
+    `setTimeout(() => { null.checkout(); }, 0);`,
+    intake
+  );
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /TypeError/u);
+  const [issue, ...rest] = issues(intake.batches);
+  assert.deepEqual(rest, []);
+  assert.equal(issue.attributes.level, "critical");
+  assert.deepEqual(issue.attributes.exception, {
+    type: "TypeError",
+    mechanism: { type: "node.uncaught_exception", handled: false }
+  });
+  assert.ok(issue.attributes.stackFrames.length > 0);
+  assert.equal(issue.attributes.metadata.runtime, "node");
+  assert.equal(issue.attributes.metadata.errorStack, undefined);
+  assert.equal(issue.attributes.context.resource.runtime.name, "node");
+});
+
+test("an unhandled rejection is reported once and still exits with code 1", async (t) => {
+  const intake = await startIntake(t);
+  const result = await runApp(
+    `Promise.reject(new RangeError("checkout total out of range"));`,
+    intake
+  );
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /RangeError: checkout total out of range/u);
+  const reported = issues(intake.batches);
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].attributes.level, "critical");
+  assert.equal(reported[0].attributes.message, "checkout total out of range");
+  assert.deepEqual(reported[0].attributes.exception.mechanism, {
+    type: "node.unhandled_rejection",
+    handled: false
+  });
+});
+
+test("a non-Error rejection keeps Node's rejection error text", async (t) => {
+  const intake = await startIntake(t);
+  const result = await runApp(`Promise.reject("checkout-declined");`, intake);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /ERR_UNHANDLED_REJECTION/u);
+  assert.equal(issues(intake.batches).length, 1);
+});
+
+test("an app-owned uncaughtException handler keeps the process running", async (t) => {
+  const intake = await startIntake(t);
+  const result = await runApp(
+    `process.on("uncaughtException", () => {
+      setTimeout(() => { console.log("still running"); }, 200);
+    });
+    setTimeout(() => { throw new Error("recovered by app"); }, 0);`,
+    intake
+  );
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /still running/u);
+  assert.equal(issues(intake.batches)[0].attributes.message, "recovered by app");
+});
+
+test("warn mode reports a rejection without ending the process", async (t) => {
+  const intake = await startIntake(t);
+  const result = await runApp(
+    `Promise.reject(new Error("warned rejection"));
+    setTimeout(() => { console.log("still running"); }, 200);`,
+    { ...intake, nodeArgs: ["--unhandled-rejections=warn"] }
+  );
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /still running/u);
+  const [issue] = issues(intake.batches);
+  assert.equal(issue.attributes.level, "error");
+  assert.equal(issue.attributes.exception.mechanism.type, "node.unhandled_rejection");
+});
+
+test("a crash inside a request trace carries that trace", async (t) => {
+  const intake = await startIntake(t);
+  const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const result = await runApp(
+    `runWithLogBrewTrace({ traceId: "${traceId}", spanId: "00f067aa0ba902b7", sampled: true }, () => {
+      setTimeout(() => { throw new Error("inside request"); }, 0);
+    });`,
+    intake
+  );
+
+  assert.equal(result.code, 1);
+  const [issue] = issues(intake.batches);
+  assert.equal(issue.attributes.metadata.traceId, traceId);
+  assert.equal(issue.attributes.context.trace.traceId, traceId);
+});
+
+test("an unreachable intake delays exit by at most the flush timeout", async () => {
+  const result = await runApp(
+    `setTimeout(() => { throw new Error("intake down"); }, 0);`,
+    { endpoint: "http://192.0.2.1:9/v1/events", options: ", flushTimeoutMs: 300" }
+  );
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Error: intake down/u);
+  assert.ok(result.elapsedMs < 5000, `exit took ${result.elapsedMs} ms`);
+});
+
+test("capture installs once and uninstall removes both listeners", () => {
+  const client = createLogBrewNodeClient({ apiKey: "TEST_API_KEY", transport: RecordingTransport.alwaysAccept() });
+  const before = [process.listenerCount("uncaughtException"), process.listenerCount("unhandledRejection")];
+  const handle = installLogBrewProcessErrorCapture({ client });
+  assert.throws(() => installLogBrewProcessErrorCapture({ client }), /already installed/u);
+  handle.uninstall();
+  handle.uninstall();
+  assert.deepEqual(
+    [process.listenerCount("uncaughtException"), process.listenerCount("unhandledRejection")],
+    before
+  );
+  installLogBrewProcessErrorCapture({ client }).uninstall();
+});
+
+test("capture rejects invalid configuration", () => {
+  const client = createLogBrewNodeClient({ apiKey: "TEST_API_KEY", transport: RecordingTransport.alwaysAccept() });
+  assert.throws(() => installLogBrewProcessErrorCapture(), /config object/u);
+  assert.throws(() => installLogBrewProcessErrorCapture({ client: {} }), /LogBrewClient/u);
+  assert.throws(() => installLogBrewProcessErrorCapture({ client, flushTimeoutMs: 30_001 }), /flushTimeoutMs/u);
+  assert.throws(() => installLogBrewProcessErrorCapture({ client, transport: {} }), /transport\.send/u);
+});
