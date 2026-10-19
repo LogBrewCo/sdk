@@ -603,9 +603,9 @@ def validate_go(root: Path, failures: list[str]) -> None:
         "go/logbrew/go.mod: expected go 1.24.0",
     )
     modules = {
-        "otel": ("v0.1.8", "go.opentelemetry.io/otel/sdk v1.41.0"),
-        "gin": ("v0.1.7", "github.com/gin-gonic/gin v1.11.0"),
-        "asynq": ("v0.1.9", "github.com/hibiken/asynq v0.26.0"),
+        "otel": ("v0.1.12", "go.opentelemetry.io/otel/sdk v1.41.0"),
+        "gin": ("v0.1.12", "github.com/gin-gonic/gin v1.11.0"),
+        "asynq": ("v0.1.12", "github.com/hibiken/asynq v0.26.0"),
     }
     for name, (core_version, dependency) in modules.items():
         location = f"go/logbrew/{name}"
