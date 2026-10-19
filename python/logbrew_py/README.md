@@ -265,7 +265,9 @@ if client.dropped_events() > 0:
 
 `EventDrop` holds only the event ID, event type, reason, and total drop count. The callback is advisory: LogBrew ignores its exceptions and skips nested drops it causes, so capture never fails because of it.
 
-This counter is local process state only. Usage, quota, and billing remain backend-owned and must not be inferred from queue size or drop counts.
+LogBrew sees these drops too. The next request body carries the per-reason counts since the last accepted report, such as `"client_report":{"dropped_events":{"queue_overflow":3}}`. The client clears exactly those counts after a `2xx` response for that request; drops recorded while it is in flight, and counts in a failed or retried request, wait for the next one. A report never sends a request of its own, is left out when nothing was dropped, lists at most 16 reasons, caps each count at 1,000,000,000, and fits inside `max_batch_bytes`. Counts live in memory only, so drops not yet reported are lost when the process restarts.
+
+Usage, quota, and billing remain backend-owned and must not be inferred from queue size or drop counts.
 
 ## Automatic Delivery
 

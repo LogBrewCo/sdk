@@ -303,6 +303,8 @@ DEFAULT_MAX_QUEUE_SIZE = 10_000
 DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024
 DEFAULT_MAX_BATCH_EVENTS = 100
 DEFAULT_MAX_BATCH_BYTES = 256 * 1024
+MAX_CLIENT_REPORT_REASONS = 16
+MAX_CLIENT_REPORT_COUNT = 1_000_000_000
 TRACEPARENT_PATTERN = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$")
 ZERO_TRACE_ID = "00000000000000000000000000000000"
 ZERO_SPAN_ID = "0000000000000000"
@@ -597,6 +599,8 @@ class LogBrewClient:
         self.max_batch_bytes = max_batch_bytes
         self._dropped_events = 0
         self._dropped_events_by_reason: dict[EventDropReason, int] = {}
+        # Drops not yet acknowledged by the intake; they ride in the next batch as a client report.
+        self._unreported_drops: dict[str, int] = {}
         self._on_event_dropped = on_event_dropped
         self._drop_callback_state = local()
         self._owner_pid = os.getpid()
@@ -871,6 +875,9 @@ class LogBrewClient:
             if reason is not None:
                 self._dropped_events += 1
                 self._dropped_events_by_reason[reason] = self._dropped_events_by_reason.get(reason, 0) + 1
+                self._unreported_drops[reason] = min(
+                    MAX_CLIENT_REPORT_COUNT, self._unreported_drops.get(reason, 0) + 1
+                )
                 drop = EventDrop(event_id, event_type, reason, self._dropped_events)
             else:
                 self._queue.append(
@@ -914,11 +921,12 @@ class LogBrewClient:
                 if prefix is None:
                     records = self._queue.snapshot(through_sequence=snapshot_end)
                     if records:
-                        batch, body = self._build_batch(records)
+                        batch, body, reported_drops = self._build_batch(records)
                         prefix = DeliveryPrefix(
                             through_sequence=batch[-1].sequence,
                             event_count=len(batch),
                             body=body,
+                            reported_drops=reported_drops,
                         )
                         self._frozen_prefix = prefix
             if prefix is None:
@@ -939,6 +947,9 @@ class LogBrewClient:
                 acknowledged = self._queue.acknowledge(prefix.through_sequence)
                 if acknowledged == prefix.event_count:
                     self._frozen_prefix = None
+                # Clear only what this body carried; drops recorded while it was in flight stay pending.
+                for reason, count in prefix.reported_drops:
+                    self._unreported_drops[reason] -= count
             if acknowledged != prefix.event_count:
                 raise SdkError("queue_state_error", "accepted event prefix changed during delivery")
             self._automatic_delivery.record_accepted_events(acknowledged)
@@ -956,9 +967,26 @@ class LogBrewClient:
         if len(retained) != prefix.event_count:
             raise SdkError("queue_state_error", "retained delivery prefix changed")
 
-    def _build_batch(self, records: tuple[QueuedEvent, ...]) -> tuple[tuple[QueuedEvent, ...], str]:
+    def _build_batch(
+        self, records: tuple[QueuedEvent, ...]
+    ) -> tuple[tuple[QueuedEvent, ...], str, tuple[tuple[str, int], ...]]:
         prefix = f'{{"sdk":{self._sdk_json},"events":['
-        suffix = "]}"
+        reported_drops = tuple(
+            (reason, count) for reason, count in self._unreported_drops.items() if count > 0
+        )[:MAX_CLIENT_REPORT_REASONS]
+        if reported_drops:
+            report = _compact_json({"dropped_events": dict(reported_drops)})
+            batch = self._fit_batch(records, prefix, f'],"client_report":{report}}}')
+            if batch:
+                # A report never pushes a batch over max_batch_bytes; it waits for a batch with room.
+                body = f'{prefix}{",".join(record.json for record in batch)}],"client_report":{report}}}'
+                return batch, body, reported_drops
+        batch = self._fit_batch(records, prefix, "]}")
+        if not batch:
+            raise SdkError("queue_state_error", "queued event cannot fit the configured request limit")
+        return batch, f"{prefix}{','.join(record.json for record in batch)}]}}", ()
+
+    def _fit_batch(self, records: tuple[QueuedEvent, ...], prefix: str, suffix: str) -> tuple[QueuedEvent, ...]:
         body_bytes = len(prefix.encode("utf-8")) + len(suffix.encode("utf-8"))
         batch: list[QueuedEvent] = []
         for record in records:
@@ -969,9 +997,7 @@ class LogBrewClient:
                 break
             batch.append(record)
             body_bytes += separator_bytes + record.byte_count
-        if not batch:
-            raise SdkError("queue_state_error", "queued event cannot fit the configured request limit")
-        return tuple(batch), f"{prefix}{','.join(record.json for record in batch)}{suffix}"
+        return tuple(batch)
 
     def _send_body(self, transport: Transport, body: str) -> TransportResponse:
         def send_once() -> TransportResponse:
