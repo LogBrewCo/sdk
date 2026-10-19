@@ -235,7 +235,7 @@ install_process_error_capture(client)
 
 It wraps `sys.excepthook` and `threading.excepthook`. Each crash becomes one unhandled issue with the exception type, structured frames, and chained causes from `create_issue_attributes_from_exception()`. A main-thread crash has level `critical` and mechanism `python.excepthook`. A thread crash has level `error` and mechanism `python.threading_excepthook`, because the process keeps running.
 
-The previous hooks still run afterwards, so Python prints the traceback and exits as before. Before that, the SDK waits at most `flush_timeout_seconds` (default 2, maximum 30) for delivery. `KeyboardInterrupt` is not reported. `on_capture_error` receives capture or delivery failures and never changes the exit path. Only one capture can be installed per process; `uninstall()` restores the previous hooks.
+The previous hooks still run afterwards, so Python prints the traceback and exits as before. Before that, the SDK waits at most `flush_timeout_seconds` (default 2, maximum 30) for delivery. `KeyboardInterrupt` is not reported. `on_capture_error` receives capture or delivery failures and never changes the exit path. Only one capture can be installed per process; `uninstall()` puts the previous hooks back.
 
 ## Queue Pressure
 

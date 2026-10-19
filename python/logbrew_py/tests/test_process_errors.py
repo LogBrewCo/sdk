@@ -143,7 +143,7 @@ class ProcessErrorCaptureInstallTests(unittest.TestCase):
             transport=RecordingTransport.always_accept(),
         )
 
-    def test_install_once_and_uninstall_restores_previous_hooks(self) -> None:
+    def test_install_once_and_uninstall_puts_previous_hooks_back(self) -> None:
         before = (sys.excepthook, threading.excepthook)
         capture = install_process_error_capture(self.client())
         try:
