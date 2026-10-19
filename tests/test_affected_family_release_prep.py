@@ -32,7 +32,7 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.28",
+            "js/logbrew-js/package.json": "0.1.29",
             "js/logbrew-browser/package.json": "0.1.11",
             "js/logbrew-express/package.json": "0.1.6",
             "js/logbrew-fastify/package.json": "0.1.7",
