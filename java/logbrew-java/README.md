@@ -925,7 +925,7 @@ LogBrewClient client = LogBrewClient.createAutomatic(
     HttpTransport.builder().build(),
     DeliveryOptions.builder().build(),
     AutomaticDeliveryOptions.builder()
-        .flushInterval(Duration.ofSeconds(5))
+        .flushInterval(Duration.ofSeconds(1))
         .queueThreshold(100)
         .build()
 );
@@ -935,7 +935,7 @@ DeliveryHealth health = client.deliveryHealth();
 client.shutdown();
 ```
 
-An automatic client creates one lazy daemon scheduler only after work is queued. Threshold and interval wakes reuse the same bounded queue, immutable request batching, accepted-prefix acknowledgement, encrypted store, and serialized flush path as the manual API. A wake that arrives during delivery is coalesced. Retryable 408, 5xx, or network exhaustion uses bounded equal-jitter delays. The built-in `HttpTransport` also accepts one strict `Retry-After` delta-seconds or IMF-fixdate value on retryable responses, clamps it to the configured maximum delay, and never lets it shorten the client safety delay. Missing, malformed, duplicate, ambiguous, or past guidance uses the equal-jitter fallback. Guidance on 401, 429, validation, or other non-retryable responses is ignored. Custom transports remain unchanged and do not receive or expose raw response headers.
+An automatic client creates one lazy daemon scheduler only after work is queued. By default it sends 1 second after the first queued event or at 100 queued events, whichever comes first, so a single event is readable in about a second while bursts still share one request. Threshold and interval wakes reuse the same bounded queue, immutable request batching, accepted-prefix acknowledgement, encrypted store, and serialized flush path as the manual API. A wake that arrives during delivery is coalesced. Retryable 408, 5xx, or network exhaustion uses bounded equal-jitter delays. The built-in `HttpTransport` also accepts one strict `Retry-After` delta-seconds or IMF-fixdate value on retryable responses, clamps it to the configured maximum delay, and never lets it shorten the client safety delay. Missing, malformed, duplicate, ambiguous, or past guidance uses the equal-jitter fallback. Guidance on 401, 429, validation, or other non-retryable responses is ignored. Custom transports remain unchanged and do not receive or expose raw response headers.
 
 Terminal outcomes, exhausted retry budgets, and process-ownership changes pause automatic sends without dropping queued work. Call `resumeAutomaticDelivery()` only after the application has corrected the cause. Recovery, restart, and shutdown clear active server guidance. `flush(transport)` and `shutdown(transport)` remain authoritative and cancel stale scheduled generations; `shutdown()` uses the owned transport, drains once, and terminates the scheduler.
 

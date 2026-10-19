@@ -9,8 +9,8 @@ import java.util.Objects;
 public final class AutomaticDeliveryOptions {
     /** Largest supported interval or retry delay for one scheduler wake. */
     public static final Duration MAX_SCHEDULE_DELAY = Duration.ofHours(1);
-    /** Default delay before a non-threshold automatic flush. */
-    public static final Duration DEFAULT_FLUSH_INTERVAL = Duration.ofSeconds(5);
+    /** Default delay after the first queued event before a non-threshold automatic flush. */
+    public static final Duration DEFAULT_FLUSH_INTERVAL = Duration.ofSeconds(1);
     /** Default queued event count that requests an immediate automatic flush. */
     public static final int DEFAULT_QUEUE_THRESHOLD = 100;
     /** Default initial scheduler-level retry delay. */

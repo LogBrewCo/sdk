@@ -27,6 +27,8 @@ public final class LogBrewAutomaticDeliveryTest {
 
     private void run() throws Exception {
         testFirstEventDeliversWithoutManualFlush();
+        testDefaultIntervalDeliversASingleEventWithinAboutOneSecond();
+        testDefaultIntervalSendsABurstAsOneRequest();
         testThresholdPreemptsIntervalAndCoalescesDuringFlight();
         testRetryKeepsFrozenPrefixAndLaterWork();
         testCaptureDuringBackoffCannotPreemptRetryDelay();
@@ -54,6 +56,62 @@ public final class LogBrewAutomaticDeliveryTest {
         testSchedulerTerminationFailureDoesNotRewriteAcceptedShutdown();
         testManualClientDefaultsRemainCallerDriven();
         System.out.println("java automatic delivery tests ok (" + testsRun + " tests)");
+    }
+
+    private static LogBrewClient defaultIntervalClient(Transport transport) {
+        return LogBrewClient.createAutomatic(
+            API_KEY,
+            "logbrew-java",
+            "0.1.0",
+            transport,
+            DeliveryOptions.builder().maxRetries(0).build(),
+            AutomaticDeliveryOptions.builder().build()
+        );
+    }
+
+    private void testDefaultIntervalDeliversASingleEventWithinAboutOneSecond() throws Exception {
+        CountDownLatch delivered = new CountDownLatch(1);
+        RecordingTransport recording = RecordingTransport.alwaysAccept();
+        LogBrewClient client = defaultIntervalClient((apiKey, body) -> {
+            TransportResponse response = recording.send(apiKey, body);
+            delivered.countDown();
+            return response;
+        });
+        long capturedAt = System.nanoTime();
+
+        client.log("evt_java_latency_001", "2026-06-02T10:00:03Z", LogAttributes.create("single", "info"));
+
+        assertTrue(delivered.await(1500, TimeUnit.MILLISECONDS), "default interval delivers one event within 1.5 s");
+        assertTrue(System.nanoTime() - capturedAt >= TimeUnit.MILLISECONDS.toNanos(900), "first event waits for its window");
+        client.shutdown();
+        testsRun++;
+    }
+
+    private void testDefaultIntervalSendsABurstAsOneRequest() throws Exception {
+        CountDownLatch delivered = new CountDownLatch(1);
+        List<String> bodies = new ArrayList<>();
+        RecordingTransport recording = RecordingTransport.alwaysAccept();
+        LogBrewClient client = defaultIntervalClient((apiKey, body) -> {
+            TransportResponse response = recording.send(apiKey, body);
+            synchronized (bodies) {
+                bodies.add(body);
+            }
+            delivered.countDown();
+            return response;
+        });
+
+        for (int index = 0; index < 20; index++) {
+            client.log("evt_java_burst_" + index, "2026-06-02T10:00:03Z", LogAttributes.create("burst", "info"));
+        }
+
+        assertTrue(delivered.await(1500, TimeUnit.MILLISECONDS), "burst delivered within 1.5 s");
+        String first;
+        synchronized (bodies) {
+            first = bodies.get(0);
+        }
+        assertEquals(20, first.split("evt_java_burst_", -1).length - 1, "burst events in one request");
+        client.shutdown();
+        testsRun++;
     }
 
     private void testFirstEventDeliversWithoutManualFlush() throws Exception {

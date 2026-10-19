@@ -254,7 +254,7 @@ client.shutdown_owned()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The worker coalesces threshold and interval wakes, keeps one delivery in flight, and reuses the queue's immutable failed prefix. Retryable network, timeout, and server exhaustion use capped equal-jitter backoff. Authentication, quota, and other terminal rejection categories pause automatic delivery until `flush_owned` explicitly retries. No response headers or response text are parsed.
+By default the worker sends 1 second after the first queued event or at 100 queued events, whichever comes first, so a single event is readable in about a second while bursts still share one request. The worker coalesces threshold and interval wakes, keeps one delivery in flight, and reuses the queue's immutable failed prefix. Retryable network, timeout, and server exhaustion use capped equal-jitter backoff. Authentication, quota, and other terminal rejection categories pause automatic delivery until `flush_owned` explicitly retries. No response headers or response text are parsed.
 
 `shutdown_owned` is the explicit join-and-drain point: it stops and joins scheduling before draining its starting queue snapshot once. A failed shutdown leaves the client open with unaccepted work retained; a successful shutdown closes it. Dropping the final client owner only requests that the worker stop and does not promise an implicit flush or an unbounded wait for in-flight transport I/O. Owned transports should therefore use bounded I/O, and applications should call `shutdown_owned` when delivery at shutdown is required.
 

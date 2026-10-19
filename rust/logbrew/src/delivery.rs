@@ -23,9 +23,10 @@ pub const DEFAULT_MAX_QUEUE_BYTES: usize = 4 * 1024 * 1024;
 pub const DEFAULT_MAX_BATCH_EVENTS: usize = 100;
 /// Default maximum exact UTF-8 request-body bytes for one delivery batch.
 pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
-pub const DEFAULT_AUTOMATIC_DELIVERY_INTERVAL: Duration = Duration::from_secs(5);
+/// Delay after the first queued event before automatic delivery sends; later events share that request.
+pub const DEFAULT_AUTOMATIC_DELIVERY_INTERVAL: Duration = Duration::from_secs(1);
 pub const DEFAULT_AUTOMATIC_DELIVERY_THRESHOLD: usize = 100;
-pub const DEFAULT_AUTOMATIC_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+pub const DEFAULT_AUTOMATIC_RETRY_BASE_DELAY: Duration = Duration::from_secs(5);
 pub const DEFAULT_AUTOMATIC_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

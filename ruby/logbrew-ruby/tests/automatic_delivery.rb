@@ -492,4 +492,33 @@ end
 privacy_client.stop_automatic_delivery
 automatic_tests += 1
 
+def default_interval_client(transport)
+  LogBrew::Client.create_automatic(
+    api_key: "LOGBREW_API_KEY",
+    sdk_name: "logbrew-ruby-automatic",
+    sdk_version: "0.1.0",
+    transport: transport
+  )
+end
+
+single_transport = AutomaticScriptedTransport.new
+single_client = default_interval_client(single_transport)
+single_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+automatic_log(single_client, "evt_latency_001")
+wait_for_automatic("default interval must deliver one event within 1.5 s", timeout: 1.5) do
+  !single_transport.sent_bodies.empty?
+end
+single_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - single_started
+assert(single_elapsed >= 0.9, "first event must wait for its batch window")
+single_client.stop_automatic_delivery
+automatic_tests += 1
+
+burst_transport = AutomaticScriptedTransport.new
+burst_client = default_interval_client(burst_transport)
+20.times { |index| automatic_log(burst_client, format("evt_burst_%03d", index)) }
+wait_for_automatic("burst must be delivered within 1.5 s", timeout: 1.5) { !burst_transport.sent_bodies.empty? }
+assert(automatic_ids(burst_transport.sent_bodies.first).length == 20, "burst must go out as one request")
+burst_client.stop_automatic_delivery
+automatic_tests += 1
+
 puts "ruby automatic delivery tests ok (#{automatic_tests} tests)"

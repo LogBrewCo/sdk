@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultFlushInterval  = 2 * time.Second
+	defaultFlushInterval  = time.Second
 	defaultFlushThreshold = 100
 	defaultRetryBaseDelay = 100 * time.Millisecond
 	defaultRetryMaxDelay  = 5 * time.Second

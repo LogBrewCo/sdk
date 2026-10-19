@@ -47,7 +47,7 @@ Without `LOGBREW_SERVER_API_KEY`, the integration stays disabled and both calls 
 | `LOGBREW_RELEASE` | `LogBrew:Release` | unset | Optional release identifier |
 | `LOGBREW_ENDPOINT` | `LogBrew:Endpoint` | `https://api.logbrew.co/v1/events` | HTTPS intake URL without user-info/query/fragment data; loopback HTTP is accepted for local development |
 | `LOGBREW_REQUEST_TIMEOUT_MS` | `LogBrew:RequestTimeoutMs` | `10000` | HTTP delivery timeout from 1 ms through 10 minutes |
-| `LOGBREW_FLUSH_INTERVAL_MS` | `LogBrew:FlushIntervalMs` | `5000` | Automatic flush interval |
+| `LOGBREW_FLUSH_INTERVAL_MS` | `LogBrew:FlushIntervalMs` | `1000` | Automatic flush interval after the first queued event |
 | `LOGBREW_FLUSH_THRESHOLD` | `LogBrew:FlushThreshold` | `100` | Queue size that wakes delivery |
 
 Programmatic options take precedence:
