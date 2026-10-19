@@ -177,6 +177,18 @@ def checkout(order_id: str) -> dict[str, bool]:
 
 Run `python -m logbrew_flask.examples dependency-spans` to see a request span with database, cache, and queue child spans under the same trace. These helpers record operation names, systems, status, trace ids, span ids, parent span ids, and primitive metadata. They do not capture SQL bind values, result payloads, queue message payloads, cache values, arbitrary headers, baggage, or tracestate.
 
+## Request User
+
+Call `set_logbrew_user()` once you know who made the request, for example after authentication. Every later event of that request, including the request span and any issue, carries `context.subject`:
+
+```python
+from logbrew_sdk import set_logbrew_user
+
+set_logbrew_user(account.public_id)  # an opaque app-owned ID, not an email address or name
+```
+
+The ID stays with its own request trace, so it never reaches another request's events. Outside a request the call does nothing and returns `False`. Pass `kind="anonymous"` for visitors who have not signed in. IDs are 1 to 200 characters without control characters. LogBrew stores only the ID and kind; it never collects email addresses, names, or IP addresses for you.
+
 ## Privacy Defaults
 
 LogBrew does not capture concrete request paths, request bodies, response bodies, cookies, arbitrary headers, query strings, raw `traceparent` values, baggage, or tracestate. Exception issues include first-class exception type, `flask.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Automatic capture never reads or sends exception messages: the issue uses the fixed summary `Unhandled exception`, and every exception-chain node is marked `redacted`.

@@ -220,6 +220,10 @@ The metric carries the stable description `Duration of one completed server requ
 
 The wrapper expects App Router Route Handlers that return standard `Response` objects. It does not call `NextResponse.next()` and does not use the deprecated `middleware` filename. For Next.js 16 request interception, use the framework's `proxy.js` convention separately and keep LogBrew event creation in server-side route code.
 
+### Request User
+
+Inside `withLogBrewRouteHandler`, call `helpers.setUser(id)` once you know who made the request. The route span and the route error issue of that request carry `context.subject`. Use an opaque app-owned ID, not an email address or name; pass `{ kind: "anonymous" }` for visitors who have not signed in. The ID never reaches another request.
+
 ## Client Route Spans
 
 Use the browser-safe `@logbrew/next/client` subpath from client components. It has no `node:` imports and uses `clientKey` wording for browser setup:

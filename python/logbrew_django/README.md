@@ -63,6 +63,18 @@ Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace 
 
 Request spans use the Django resolver route template, such as `GET /orders/<int:order_id>/`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
+## Request User
+
+Call `set_logbrew_user()` once you know who made the request, for example after authentication. Every later event of that request, including the request span and any issue, carries `context.subject`:
+
+```python
+from logbrew_sdk import set_logbrew_user
+
+set_logbrew_user(account.public_id)  # an opaque app-owned ID, not an email address or name
+```
+
+The ID stays with its own request trace, so it never reaches another request's events. Outside a request the call does nothing and returns `False`. Pass `kind="anonymous"` for visitors who have not signed in. IDs are 1 to 200 characters without control characters. LogBrew stores only the ID and kind; it never collects email addresses, names, or IP addresses for you.
+
 ## Outbound HTTP child spans
 
 Django views can wrap a caller-owned HTTP request seam with `requests_request_with_logbrew_span(...)` to create an outbound child span under the active Django request trace and inject a normalized W3C `traceparent` header:

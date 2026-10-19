@@ -25,6 +25,7 @@ from logbrew_sdk import (
     RecordingTransport,
     SdkError,
     cache_operation_with_logbrew_span,
+    set_logbrew_user,
 )
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import StreamingResponse
@@ -664,6 +665,38 @@ class FastAPIIntegrationTests(unittest.TestCase):
         self.assertIs(log["metadata"]["sampled"], True)
         self.assertNotIn("/orders/42", json.dumps(span))
         self.assertNotIn("debug", json.dumps(payload))
+
+    def test_set_logbrew_user_tags_only_its_own_request(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        add_logbrew_middleware(app, client=sdk_client, transport=transport)
+
+        @app.get("/account/boom")
+        def account_boom() -> dict[str, bool]:
+            set_logbrew_user("user-42")
+            raise RuntimeError("account failed")
+
+        @app.get("/account/async")
+        async def account_async() -> dict[str, bool]:
+            set_logbrew_user("user-43")
+            return {"ok": True}
+
+        @app.get("/health")
+        def health() -> dict[str, bool]:
+            return {"ok": True}
+
+        with TestClient(app, raise_server_exceptions=False) as http:
+            http.get("/account/boom")
+            http.get("/account/async")
+            http.get("/health")
+
+        tagged, tagged_async, untagged = (json.loads(body) for body in transport.sent_bodies)
+        self.assertEqual([event["type"] for event in tagged["events"]], ["issue", "span"])
+        for event in tagged["events"]:
+            self.assertEqual(event["attributes"]["context"]["subject"], {"id": "user-42", "kind": "user"})
+        self.assertEqual(tagged_async["events"][0]["attributes"]["context"]["subject"]["id"], "user-43")
+        self.assertNotIn("subject", json.dumps(untagged))
 
     def test_exception_captures_issue_and_error_span(self) -> None:
         sdk_client = make_client()

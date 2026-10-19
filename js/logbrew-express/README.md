@@ -244,6 +244,21 @@ Express error-handling middleware uses four arguments: `(err, req, res, next)`. 
 
 When the failing request passed through `logbrewMiddleware()`, the issue stays on that request client until the response finishes, so the issue, final 500 request event, and optional duration metric are sent together before one shutdown. An aborted response uses its close lifecycle as a flush fallback. When the request has a valid `traceparent`, the default error event includes normalized trace correlation without echoing the raw propagation header. Matched route templates keep dynamic IDs and query values out of default issue titles, span names, metrics, and breadcrumbs.
 
+## Request User
+
+Call `req.logbrew.setUser()` once you know who made the request, for example in your authentication middleware. Every later event of that request, including the request span and any error issue, carries `context.subject`:
+
+```js
+app.use((req, _res, next) => {
+  if (req.account) {
+    req.logbrew.setUser(req.account.publicId); // an opaque app-owned ID, not an email address or name
+  }
+  next();
+});
+```
+
+The ID stays with its own request, so it never reaches another request's events. Pass `{ kind: "anonymous" }` for visitors who have not signed in. IDs are 1 to 200 characters without control characters. LogBrew stores only the ID and kind; it never collects email addresses, names, or IP addresses for you.
+
 ## Example Source
 
 The package includes example source for request middleware, error middleware, and app-owned response handling. The packaged examples use an explicit `RecordingTransport` so they can run offline and print serialized event batches without sending them. Use the default network-delivery snippets above as the starting point for wiring LogBrew into your Express application.

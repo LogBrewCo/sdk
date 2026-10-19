@@ -106,6 +106,8 @@ export type LogBrewTraceContext = {
 };
 
 export type LogBrewRouteHelpers = {
+  /** Tag this request's route span and route error issue with an opaque app-owned user ID. */
+  setUser(id: string, options?: { kind?: "user" | "anonymous" }): boolean;
   client: LogBrewClient;
   logbrew: LogBrewClient;
   trace?: LogBrewTraceContext;

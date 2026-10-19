@@ -217,6 +217,10 @@ server.listen(3000);
 
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
 
+## Request User
+
+Call `setLogBrewUser(id)` inside a request (`withLogBrewHttpHandler`, framework middleware, or `runWithLogBrewTrace`) once you know who made it. Every later event of that request carries `context.subject`. The ID stays with its own request trace, so it never reaches another request's events; outside a request the call does nothing and returns `false`. Use an opaque app-owned ID, not an email address or name, and pass `{ kind: "anonymous" }` for visitors who have not signed in. IDs are 1 to 200 characters without control characters. Request contexts also expose `context.setUser(id)`.
+
 ## Process Crashes
 
 Request middleware sees only errors that reach a request. Install process error capture once at startup to also report uncaught exceptions and unhandled promise rejections, including failures in timers, queue consumers, and startup code:

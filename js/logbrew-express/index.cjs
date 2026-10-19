@@ -9,7 +9,8 @@ const {
   createLogBrewTraceContext,
   createNodeFetchTransport,
   getActiveLogBrewTrace,
-  runWithLogBrewTrace
+  runWithLogBrewTrace,
+  setLogBrewUser
 } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-express";
@@ -299,6 +300,8 @@ function createRequestContext(client, transport, trace) {
     client,
     logbrew: client,
     ...(trace ? { trace } : {}),
+    // Tags every event of this request with an opaque app-owned user ID.
+    setUser: (id, options = {}) => setLogBrewUser(id, { ...options, trace }),
     transport,
     previewJson: () => client.previewJson(),
     flush: () => client.flush(transport),

@@ -99,6 +99,7 @@ from logbrew_sdk._trace_context import (
     trace_metadata,
     use_logbrew_trace,
 )
+from logbrew_sdk._user_context import active_user_subject, set_logbrew_user
 
 # Keep the long-standing public exception identity after moving its implementation out of this module.
 SdkError.__module__ = __name__
@@ -874,6 +875,8 @@ class LogBrewClient:
         event_context = attributes.pop("context", None)
         if (active_trace := trace_metadata()) and event_type != "span":
             event_context = merge_telemetry_contexts({"schemaVersion": 1, "trace": active_trace}, event_context)
+        if (user_subject := active_user_subject()) is not None:
+            event_context = merge_telemetry_contexts({"schemaVersion": 1, "subject": user_subject}, event_context)
         merged_context = merge_telemetry_contexts(self._context, event_context)
         if merged_context is not None:
             attributes["context"] = merged_context
@@ -2058,6 +2061,7 @@ __all__ = [
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
+    "set_logbrew_user",
     "span_attributes_from_open_telemetry_readable_span",
     "span_attributes_from_trace_context",
     "span_attributes_from_traceparent",

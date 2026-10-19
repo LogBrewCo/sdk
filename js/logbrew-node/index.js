@@ -31,6 +31,7 @@ export const {
   queueOperationWithLogBrewSpan,
   purgeLogBrewNodePersistentQueue,
   runWithLogBrewTrace,
+  setLogBrewUser,
   withLogBrewHttpHandler
 } = nodeSdk;
 

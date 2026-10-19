@@ -27,6 +27,8 @@ export type LogBrewExpressContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
   trace?: LogBrewTraceContext;
+  /** Tag every event of this request with an opaque app-owned user ID, such as after authentication. */
+  setUser(id: string, options?: { kind?: "user" | "anonymous" }): boolean;
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
