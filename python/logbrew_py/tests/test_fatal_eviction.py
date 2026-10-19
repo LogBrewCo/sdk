@@ -20,6 +20,7 @@ def create_client(drops: list[EventDrop] | None = None, **kwargs: Any) -> LogBre
         sdk_name="logbrew-python-fatal-eviction",
         sdk_version="0.1.0",
         max_retries=0,
+        breadcrumbs=False,
         on_event_dropped=None if drops is None else drops.append,
         **kwargs,
     )
