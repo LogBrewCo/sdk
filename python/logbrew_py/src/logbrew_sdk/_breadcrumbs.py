@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.client
+import importlib
 import logging
 import threading
 from collections import OrderedDict
@@ -10,6 +11,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -109,13 +111,74 @@ class LogBrewBreadcrumbHandler(logging.Handler):
 
 
 def install_automatic_breadcrumbs() -> None:
-    """Record logging records and http.client requests as breadcrumbs, once per process."""
+    """Record logging records and http.client, httpx, httpx2, and aiohttp requests as breadcrumbs, once per process."""
     with _lock:
         if _installed:
             return
         _installed.append(True)
     logging.getLogger().addHandler(LogBrewBreadcrumbHandler())
     _patch_http_client()
+    # Optional clients are patched only when the application has them installed.
+    for patch, module in ((_patch_httpx, "httpx"), (_patch_httpx, "httpx2"), (_patch_aiohttp, "aiohttp")):
+        with suppress(ImportError):
+            patch(importlib.import_module(module))
+
+
+def _record_request(method: str, url: object, status: int | None, failed: bool = False) -> None:
+    with suppress(Exception):
+        target = _sanitize_url(str(url))
+        if target in _ignored_urls:
+            return
+        breadcrumb = _http_breadcrumb(method, target, status)
+        add_logbrew_breadcrumb({**breadcrumb, "level": "error"} if failed else breadcrumb)
+
+
+def _patch_httpx(httpx: Any) -> None:
+    # httpx and httpx2 send through their own connection pools, not http.client.
+    original_send = httpx.Client.send
+    original_async_send = httpx.AsyncClient.send
+
+    def send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            response = original_send(self, request, *args, **kwargs)
+        except Exception:
+            _record_request(request.method, request.url, None, failed=True)
+            raise
+        _record_request(request.method, request.url, response.status_code)
+        return response
+
+    async def async_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            response = await original_async_send(self, request, *args, **kwargs)
+        except Exception:
+            _record_request(request.method, request.url, None, failed=True)
+            raise
+        _record_request(request.method, request.url, response.status_code)
+        return response
+
+    httpx.Client.send = send
+    httpx.AsyncClient.send = async_send
+
+
+def _patch_aiohttp(aiohttp: Any) -> None:
+    # aiohttp's public request tracing hooks, added to every new ClientSession.
+
+    async def on_request_end(_session: Any, _context: SimpleNamespace, params: Any) -> None:
+        _record_request(params.method, params.url, params.response.status)
+
+    async def on_request_exception(_session: Any, _context: SimpleNamespace, params: Any) -> None:
+        _record_request(params.method, params.url, None, failed=True)
+
+    original_init = aiohttp.ClientSession.__init__
+
+    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+        trace_config = aiohttp.TraceConfig()
+        trace_config.on_request_end.append(on_request_end)
+        trace_config.on_request_exception.append(on_request_exception)
+        kwargs["trace_configs"] = [*(kwargs.get("trace_configs") or ()), trace_config]
+        original_init(self, *args, **kwargs)
+
+    aiohttp.ClientSession.__init__ = init
 
 
 def _patch_http_client() -> None:

@@ -1,14 +1,13 @@
 "use strict";
 
-const { installBrowserBreadcrumbs } = require("./breadcrumbs.cjs");
-
 const {
   LogBrewClient,
   PRODUCT_ANALYTICS_SCHEMA_VERSION,
   RecordingTransport,
   SdkError,
   TransportError,
-  createIssueAttributesFromError
+  createIssueAttributesFromError,
+  installBrowserBreadcrumbs
 } = require("@logbrew/sdk");
 const { createBeaconTransport } = require("./beacon-transport.cjs");
 const { addBrowserRuntimeContext } = require("./runtime-context.cjs");

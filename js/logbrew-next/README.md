@@ -308,7 +308,11 @@ never a concrete path.
 Call `installLogBrewNextClientErrorCapture({ client })` once in a client
 component to also report uncaught browser errors (`nextjs.window_error`) and
 unhandled rejections (`nextjs.unhandled_rejection`), and to flush queued events
-when the page is hidden. `uninstall()` removes the listeners.
+when the page is hidden. Each issue carries the last 64 breadcrumbs: console
+calls (message template only), fetch and XHR requests (method, URL without
+query, status), and route changes. Requests to the LogBrew endpoint are
+skipped. Pass `breadcrumbs: false` to turn them off. `uninstall()` removes the
+listeners and puts back every patched method.
 
 ## Server Client Helper
 

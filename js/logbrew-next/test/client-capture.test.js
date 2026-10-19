@@ -107,3 +107,64 @@ test("server clients read release and environment from LOGBREW and Vercel variab
   `, { LOGBREW_RELEASE: "api@3.1.0", VERCEL_GIT_COMMIT_SHA: "9c1e7aa", VERCEL_ENV: "production", LOGBREW_SERVICE_NAME: "storefront" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
+
+test("client error capture records fetch, console, and route breadcrumbs, skipping the LogBrew endpoint", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import { createLogBrewNextBrowserClient, installLogBrewNextClientErrorCapture } from "@logbrew/next/client";
+
+    const sent = [];
+    const listeners = new Map();
+    const browserWindow = {
+      addEventListener(type, listener) { listeners.set(type, listener); },
+      removeEventListener(type) { listeners.delete(type); },
+      console: { error() {}, info() {}, log() {}, warn() {}, debug() {} },
+      fetch: async (url, init) => { sent.push({ url: String(url), init }); return { status: 202 }; },
+      history: {
+        pushState(_state, _title, url) {
+          const next = new URL(url, browserWindow.location.href);
+          browserWindow.location = { href: next.href, pathname: next.pathname };
+        },
+        replaceState() {}
+      },
+      location: { href: "https://shop.example/cart", pathname: "/cart" }
+    };
+    globalThis.fetch = (...args) => browserWindow.fetch(...args);
+    const client = createLogBrewNextBrowserClient({ clientKey: "LOGBREW_CLIENT_KEY", endpoint: "https://ingest.example/v1/events" });
+    const capture = installLogBrewNextClientErrorCapture({ client, browserWindow });
+    await browserWindow.fetch("https://api.shop.example/cart?coupon=SPRING", { method: "POST" });
+    browserWindow.console.warn("cart %s stale", "c_42");
+    browserWindow.history.pushState({}, "", "/checkout");
+    listeners.get("error")({ error: new TypeError("checkout failed") });
+    await client.flush();
+    const issue = sent.map(({ init }) => init?.body).filter(Boolean)
+      .flatMap((body) => JSON.parse(body).events)
+      .find((event) => event.attributes.exception?.mechanism?.type === "nextjs.window_error");
+    assert.ok(issue, "window error was not sent");
+    const crumbs = issue.attributes.breadcrumbs.map(({ category, message, data }) => ({ category, message, data }));
+    assert.deepEqual(crumbs.map(({ category }) => category), ["fetch", "console", "navigation"]);
+    assert.deepEqual(crumbs[0].data, { method: "POST", url: "https://api.shop.example/cart", status_code: 202 });
+    assert.equal(crumbs[1].message, "cart %s stale");
+    assert.ok(!JSON.stringify(crumbs).includes("ingest.example"));
+    capture.uninstall();
+    await client.shutdown();
+  `);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("breadcrumbs: false leaves fetch and console untouched", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import { createLogBrewNextBrowserClient, installLogBrewNextClientErrorCapture } from "@logbrew/next/client";
+
+    const fetch = async () => ({ status: 200 });
+    const browserWindow = { addEventListener() {}, removeEventListener() {}, console: { warn() {} }, fetch };
+    const originalWarn = browserWindow.console.warn;
+    const client = createLogBrewNextBrowserClient({ clientKey: "LOGBREW_CLIENT_KEY", transport: null });
+    installLogBrewNextClientErrorCapture({ client, browserWindow, breadcrumbs: false }).uninstall();
+    installLogBrewNextClientErrorCapture({ client, browserWindow, breadcrumbs: false });
+    assert.equal(browserWindow.fetch, fetch);
+    assert.equal(browserWindow.console.warn, originalWarn);
+  `);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});

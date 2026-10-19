@@ -5,12 +5,14 @@ import {
   LogBrewClient,
   SdkError,
   createIssueAttributesFromError,
+  installBrowserBreadcrumbs,
   parseTraceparent
 } from "@logbrew/sdk";
 
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 // Browsers keep a 5-second interval to save battery and radio; pagehide flushes the rest.
 const DEFAULT_BROWSER_DELIVERY_INTERVAL_MS = 5000;
+const clientEndpoints = new WeakMap();
 
 export function createLogBrewNextBrowserClient({
   apiKey,
@@ -31,7 +33,7 @@ export function createLogBrewNextBrowserClient({
     throw new SdkError("configuration_error", "createLogBrewNextBrowserClient requires clientKey or apiKey");
   }
   const deploymentContext = withPublicDeployment(context);
-  return LogBrewClient.create({
+  const client = LogBrewClient.create({
     apiKey: authKey,
     context: deploymentContext,
     deliveryIntervalMs,
@@ -44,6 +46,8 @@ export function createLogBrewNextBrowserClient({
     // Sends on its own; pass transport: null to keep the client manual.
     ...(transport === null ? {} : { transport: transport ?? createNextBrowserTransport(endpoint) })
   });
+  clientEndpoints.set(client, endpoint);
+  return client;
 }
 
 // Report an error from app/error.tsx or app/global-error.tsx, then deliver it.
@@ -67,7 +71,8 @@ export function captureNextClientError(client, error, { digest, routeTemplate, f
 }
 
 // Report uncaught browser errors and unhandled rejections, and flush queued events on pagehide.
-export function installLogBrewNextClientErrorCapture({ client, browserWindow = globalThis.window } = {}) {
+// Console, fetch, XHR, and route-change breadcrumbs ride along with each issue; breadcrumbs: false turns them off.
+export function installLogBrewNextClientErrorCapture({ breadcrumbs = true, browserWindow = globalThis.window, client } = {}) {
   if (!client || !browserWindow || typeof browserWindow.addEventListener !== "function") {
     throw new SdkError("configuration_error", "installLogBrewNextClientErrorCapture requires a client and a browser window");
   }
@@ -92,8 +97,12 @@ export function installLogBrewNextClientErrorCapture({ client, browserWindow = g
   for (const [type, listener] of Object.entries(listeners)) {
     browserWindow.addEventListener(type, listener);
   }
+  const uninstallBreadcrumbs = breadcrumbs === false
+    ? () => undefined
+    : installBrowserBreadcrumbs(browserWindow, client, { ignoredUrls: [clientEndpoints.get(client) ?? DEFAULT_ENDPOINT] });
   return {
     uninstall() {
+      uninstallBreadcrumbs();
       for (const [type, listener] of Object.entries(listeners)) {
         browserWindow.removeEventListener?.(type, listener);
       }

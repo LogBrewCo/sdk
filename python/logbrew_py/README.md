@@ -224,7 +224,7 @@ Structured frames are newest-first, capped at 32, and retain only a basename, li
 Every client records what led up to an error and attaches it to the next issue as ordered breadcrumbs:
 
 - Standard-library `logging` records that pass their logger's level, as level, logger name, and message template. Arguments are never interpolated, so values passed to a logger, such as job arguments, stay out of breadcrumbs.
-- Outbound requests through `http.client` (which backs `urllib`, `requests`, and `urllib3`), as method, scheme, host, path, and status code. Query strings, fragments, user info, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped. `httpx` and `aiohttp` requests are not recorded automatically.
+- Outbound requests through `http.client` (which backs `urllib`, `requests`, and `urllib3`), `httpx`, `httpx2`, and `aiohttp`, sync and async, as method, scheme, host, path, and status code. A request that fails before a response is an `error` breadcrumb. Query strings, fragments, user info, headers, and bodies are never recorded. LogBrew's own delivery requests are skipped.
 
 Breadcrumbs recorded inside a request trace (framework middleware, or `use_logbrew_trace`) attach only to issues from that request. Breadcrumbs outside a request attach to issues outside a request, such as process crashes. Each scope keeps the newest 64 and marks the issue `breadcrumbsTruncated` when older ones were dropped. Add your own with `add_logbrew_breadcrumb({"category": "checkout", "message": "payment submitted"})`. Pass `breadcrumbs=False` to `LogBrewClient.create()` to keep that client's issues free of automatic breadcrumbs; the sources stay installed once any client turns them on.
 

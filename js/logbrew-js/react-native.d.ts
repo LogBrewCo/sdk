@@ -81,6 +81,7 @@ export {
   createTraceparent,
   createTraceparentHeaders,
   createTracestate,
+  installBrowserBreadcrumbs,
   installLogBrewConsoleCapture,
   LogBrewClient,
   logAttributesFromConsoleArgs,

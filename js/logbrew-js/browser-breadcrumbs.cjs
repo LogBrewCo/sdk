@@ -1,3 +1,5 @@
+"use strict";
+
 const MAX_MESSAGE_LENGTH = 512;
 const MAX_URL_LENGTH = 256;
 const CONSOLE_LEVELS = Object.freeze({
@@ -9,8 +11,9 @@ const CONSOLE_LEVELS = Object.freeze({
 });
 
 // Records console calls, fetch and XHR requests, and route changes as issue breadcrumbs.
-// Returns an uninstall function that restores every patched method it still owns.
-export function installBrowserBreadcrumbs(browserWindow, client, {
+// Browser-safe and shared by @logbrew/browser and @logbrew/next/client. Returns an uninstall function
+// that puts back every patched method it still owns.
+function installBrowserBreadcrumbs(browserWindow, client, {
   console: captureConsole = true,
   ignoredUrls = [],
   navigation = true,
@@ -187,3 +190,5 @@ function boundedText(value, limit) {
   });
   return Array.from(characters.join("").replace(/\s+/gu, " ").trim()).slice(0, limit).join("");
 }
+
+module.exports = { installBrowserBreadcrumbs };

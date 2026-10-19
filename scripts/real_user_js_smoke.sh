@@ -2597,6 +2597,18 @@ test("installed Winston transport captures real Winston records", async () => {
   assert.equal(body.events[1].attributes.metadata.errorName, "Error");
   assert.equal(body.events[1].attributes.metadata.errorMessage, "payment failed");
   assert.equal(body.events[1].attributes.metadata.errorStack, undefined);
+
+  client.issue("installed_winston_issue", "2026-06-02T10:00:07.000Z", {
+    title: "Checkout failed",
+    level: "error",
+    message: "checkout failed"
+  });
+  const issue = JSON.parse(client.previewJson()).events[0].attributes;
+  assert.deepEqual(issue.breadcrumbs.map(({ category, level, message }) => [category, level, message]), [
+    ["log.winston", "warning", "checkout slow"],
+    ["log.winston", "error", "payment failed"]
+  ]);
+  assert.equal(JSON.stringify(issue.breadcrumbs).includes("orderId"), false);
 });
 EOF
 

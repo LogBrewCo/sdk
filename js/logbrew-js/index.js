@@ -16,6 +16,7 @@ export const {
   createTracestate,
   createLogBrewPinoDestination,
   createLogBrewWinstonTransport,
+  installBrowserBreadcrumbs,
   installLogBrewConsoleCapture,
   LogBrewClient,
   logbrewTraceContextFromCurrentOpenTelemetrySpan,
