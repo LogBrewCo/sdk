@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -22,6 +23,7 @@ from logbrew_sdk import (
     MetricAttributes,
     SdkError,
     SpanAttributes,
+    TelemetryContext,
     TelemetryTraceContext,
     Transport,
     TransportResponse,
@@ -172,12 +174,20 @@ class _LogBrewFastAPILifecycleMiddleware:
 _RUNTIME_STATE_ATTRIBUTE = "_logbrew_fastapi_runtime"
 
 
+def _deployment_context(environment: str | None) -> TelemetryContext | None:
+    # An explicit argument wins; then LOGBREW_ENVIRONMENT, which the core client reads; then production.
+    if environment is None and os.environ.get("LOGBREW_ENVIRONMENT", "").strip():
+        return None
+    resolved = "production" if environment is None else environment
+    return {"schemaVersion": 1, "resource": {"deployment": {"environment": resolved}}}
+
+
 def init_logbrew(
     app: FastAPI,
     *,
     api_key: str,
     service_name: str = "fastapi",
-    environment: str = "production",
+    environment: str | None = None,
     transport: Transport | None = None,
     automatic_delivery: bool = True,
     delivery_interval_seconds: float = 1.0,
@@ -208,7 +218,7 @@ def init_logbrew(
         api_key=api_key,
         sdk_name="logbrew-fastapi",
         sdk_version=sdk_version,
-        context={"schemaVersion": 1, "resource": {"deployment": {"environment": environment}}},
+        context=_deployment_context(environment),
         transport=selected_transport,
         automatic_delivery=automatic_delivery,
         delivery_interval_seconds=delivery_interval_seconds,

@@ -51,6 +51,14 @@ service, application, deployment, or framework identity from `sdkName`. Add
 those fields explicitly when they are stable and privacy-safe for your
 application.
 
+The client also reads three LogBrew variables, whether or not runtime context
+is on: `LOGBREW_SERVICE_NAME` becomes `resource.service.name`,
+`LOGBREW_ENVIRONMENT` becomes `resource.deployment.environment`, and
+`LOGBREW_RELEASE` becomes `resource.deployment.release`. Explicit `context`
+fields win one by one, so you can set the release in code and the environment
+in the deployment. Blank values, values over 256 characters, and values with
+control characters are ignored.
+
 ## HTTP Server
 
 ```js

@@ -300,5 +300,70 @@ class PythonRuntimeContextTests(unittest.TestCase):
         )
 
 
+
+class EnvironmentResourceContextTests(unittest.TestCase):
+    def create_client(self, **kwargs: Any) -> LogBrewClient:
+        return LogBrewClient.create(
+            api_key="LOGBREW_API_KEY",
+            sdk_name="logbrew-sdk",
+            sdk_version="0.1.0",
+            **kwargs,
+        )
+
+    def test_logbrew_variables_fill_service_environment_and_release(self) -> None:
+        environment = {
+            "LOGBREW_SERVICE_NAME": " checkout-worker ",
+            "LOGBREW_ENVIRONMENT": "production",
+            "LOGBREW_RELEASE": "checkout@1.4.0",
+        }
+        with patch.dict(os.environ, environment):
+            context = capture_log_context(self.create_client())
+
+        assert context is not None
+        self.assertEqual(context["resource"]["service"], {"name": "checkout-worker"})
+        self.assertEqual(
+            context["resource"]["deployment"],
+            {"environment": "production", "release": "checkout@1.4.0"},
+        )
+        self.assertIn("runtime", context["resource"])
+
+    def test_explicit_context_wins_field_by_field(self) -> None:
+        environment = {
+            "LOGBREW_SERVICE_NAME": "from-environment",
+            "LOGBREW_ENVIRONMENT": "staging",
+            "LOGBREW_RELEASE": "checkout@9.9.9",
+        }
+        explicit: TelemetryContext = {
+            "schemaVersion": 1,
+            "resource": {
+                "service": {"name": "checkout-worker", "version": "1.4.0"},
+                "deployment": {"release": "checkout@1.4.0"},
+            },
+        }
+        with patch.dict(os.environ, environment):
+            context = capture_log_context(self.create_client(context=explicit, capture_runtime_context=False))
+
+        self.assertEqual(
+            context,
+            {
+                "schemaVersion": 1,
+                "resource": {
+                    "service": {"name": "checkout-worker", "version": "1.4.0"},
+                    "deployment": {"environment": "staging", "release": "checkout@1.4.0"},
+                },
+            },
+        )
+
+    def test_blank_oversized_or_control_character_variables_are_ignored(self) -> None:
+        environment = {
+            "LOGBREW_SERVICE_NAME": "   ",
+            "LOGBREW_ENVIRONMENT": "x" * 257,
+            "LOGBREW_RELEASE": "checkout\n1.4.0",
+        }
+        with patch.dict(os.environ, environment):
+            context = capture_log_context(self.create_client(capture_runtime_context=False))
+
+        self.assertIsNone(context)
+
 if __name__ == "__main__":
     unittest.main()

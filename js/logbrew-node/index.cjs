@@ -11,7 +11,7 @@ const {
 const { AsyncLocalStorage } = require("node:async_hooks");
 const { errorMonitor } = require("node:events");
 const { createAutomaticEventId } = require("./automatic-event-id.cjs");
-const { addNodeRuntimeContext } = require("./runtime-context.cjs");
+const { addEnvironmentResourceContext, addNodeRuntimeContext } = require("./runtime-context.cjs");
 const {
   createLogBrewQueueBatchSpanOptions: createQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders: createQueueTraceHeaders,
@@ -122,7 +122,8 @@ function createLogBrewNodeClient({
       sdkName
     });
   const ownedTransport = transport ?? createNodeFetchTransport({ endpoint, fetchImpl, headers });
-  const clientContext = captureRuntimeContext ? addNodeRuntimeContext(context) : context;
+  const environmentContext = addEnvironmentResourceContext(context);
+  const clientContext = captureRuntimeContext ? addNodeRuntimeContext(environmentContext) : environmentContext;
   try {
     return LogBrewClient.create({
       apiKey: authKey,
