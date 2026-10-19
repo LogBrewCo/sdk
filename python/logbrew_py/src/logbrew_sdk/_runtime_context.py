@@ -2,13 +2,36 @@
 
 from __future__ import annotations
 
+import os
 import platform
 from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 from logbrew_sdk._telemetry_context import TelemetryContext, merge_telemetry_contexts
 
 MAX_CONTEXT_STRING_LENGTH = 256
+_ENVIRONMENT_RESOURCE_FIELDS = (
+    ("LOGBREW_SERVICE_NAME", "service", "name"),
+    ("LOGBREW_ENVIRONMENT", "deployment", "environment"),
+    ("LOGBREW_RELEASE", "deployment", "release"),
+)
+
+
+def add_environment_resource_context(
+    context: Mapping[str, Any] | None,
+    environ: Mapping[str, str] = os.environ,
+) -> Mapping[str, Any] | None:
+    """Fill service, environment, and release from LOGBREW_* variables beneath explicit context."""
+
+    resource: dict[str, dict[str, str]] = {}
+    for variable, section, field in _ENVIRONMENT_RESOURCE_FIELDS:
+        value = _bounded_probe(partial(environ.get, variable))
+        if value is not None:
+            resource.setdefault(section, {})[field] = value
+    if not resource:
+        return context
+    return merge_telemetry_contexts({"schemaVersion": 1, "resource": resource}, context)
 
 
 def add_python_runtime_context(context: Mapping[str, Any] | None) -> TelemetryContext:

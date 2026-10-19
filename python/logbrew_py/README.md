@@ -106,6 +106,8 @@ Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()
 
 Give issues, logs, spans, actions, metrics, releases, and environments the same bounded identity and correlation data with the versioned `context` option. Python framework clients reuse the core client, so framework-generated and app-created events share one resource, deployment, session, subject, trace, and tag vocabulary.
 
+Every client also reads three LogBrew variables: `LOGBREW_SERVICE_NAME` becomes `resource.service.name`, `LOGBREW_ENVIRONMENT` becomes `resource.deployment.environment`, and `LOGBREW_RELEASE` becomes `resource.deployment.release`. Explicit `context` fields win one by one. Blank values, values over 256 characters, and values with control characters are ignored.
+
 ```python
 from logbrew_sdk import LogBrewClient, TelemetryContext
 

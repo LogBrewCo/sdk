@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import unittest
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fastapi import BackgroundTasks, FastAPI, Request, Response, WebSocket
 from fastapi.testclient import TestClient
@@ -359,6 +360,32 @@ class FastAPIIntegrationTests(unittest.TestCase):
             self.assertEqual(event["attributes"]["context"]["resource"]["deployment"]["environment"], "development")
         self.assertNotIn(api_key, repr(runtime))
         self.assertNotIn(api_key, json.dumps(payload))
+
+    def test_init_logbrew_reads_environment_and_release_variables_unless_explicit(self) -> None:
+        cases = (
+            ({"LOGBREW_ENVIRONMENT": "staging", "LOGBREW_RELEASE": "checkout@1.4.0"}, None, "staging"),
+            ({"LOGBREW_ENVIRONMENT": "staging", "LOGBREW_RELEASE": "checkout@1.4.0"}, "development", "development"),
+            ({"LOGBREW_RELEASE": "checkout@1.4.0"}, None, "production"),
+        )
+        for variables, environment, expected in cases:
+            with self.subTest(variables=variables, environment=environment), patch.dict(
+                os.environ, variables, clear=False
+            ):
+                for name in {"LOGBREW_ENVIRONMENT", "LOGBREW_RELEASE"} - set(variables):
+                    os.environ.pop(name, None)
+                runtime = init_logbrew(
+                    FastAPI(),
+                    api_key="LOGBREW_API_KEY",
+                    environment=environment,
+                    transport=RecordingTransport.always_accept(),
+                    automatic_delivery=False,
+                )
+                runtime.client.log("evt_log", "2026-08-01T10:00:00Z", {"message": "ready", "level": "info"})
+                deployment = json.loads(runtime.client.preview_json())["events"][0]["attributes"]["context"][
+                    "resource"
+                ]["deployment"]
+                runtime.client.shutdown()
+                self.assertEqual(deployment, {"environment": expected, "release": "checkout@1.4.0"})
 
     def test_init_logbrew_flushes_after_custom_lifespan_teardown(self) -> None:
         logger = isolated_logger("fastapi.custom-lifespan")

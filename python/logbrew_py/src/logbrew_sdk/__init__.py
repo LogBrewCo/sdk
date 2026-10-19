@@ -51,7 +51,7 @@ from logbrew_sdk._issue_diagnostics import (
 )
 from logbrew_sdk._logging_identity import log_record_identity as _log_record_identity
 from logbrew_sdk._persistent_event_queue import PersistentEventQueue
-from logbrew_sdk._runtime_context import add_python_runtime_context
+from logbrew_sdk._runtime_context import add_environment_resource_context, add_python_runtime_context
 from logbrew_sdk._span_events import (
     SpanAttributes,
     SpanEventSummary,
@@ -587,10 +587,11 @@ class LogBrewClient:
         self.api_key = api_key
         self.sdk = sdk
         self._sdk_json = _compact_json(sdk)
+        context_with_environment = add_environment_resource_context(context)
         self._context = (
-            add_python_runtime_context(context)
+            add_python_runtime_context(context_with_environment)
             if capture_runtime_context
-            else validate_telemetry_context(context, label="client telemetry context")
+            else validate_telemetry_context(context_with_environment, label="client telemetry context")
         )
         self.max_retries = max_retries
         self.max_queue_size = max_queue_size

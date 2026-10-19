@@ -177,3 +177,76 @@ test("CommonJS and ESM clients expose the same default runtime context", async (
   assert.deepEqual(cjs.context, expectedDefaultContext());
   assert.equal(nodeSdk, commonJs.default);
 });
+
+async function withLogBrewEnvironment(values, callback) {
+  const names = ["LOGBREW_SERVICE_NAME", "LOGBREW_ENVIRONMENT", "LOGBREW_RELEASE"];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  for (const name of names) {
+    if (values[name] === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = values[name];
+    }
+  }
+  try {
+    return await callback();
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = previous[name];
+      }
+    }
+  }
+}
+
+test("LOGBREW_SERVICE_NAME, LOGBREW_ENVIRONMENT, and LOGBREW_RELEASE fill the resource", async () => {
+  const attributes = await withLogBrewEnvironment({
+    LOGBREW_SERVICE_NAME: " checkout-api ",
+    LOGBREW_ENVIRONMENT: "production",
+    LOGBREW_RELEASE: "checkout@1.4.0"
+  }, () => capturedAttributes(createLogBrewNodeClient));
+
+  assert.deepEqual(attributes.context.resource.service, { name: "checkout-api" });
+  assert.deepEqual(attributes.context.resource.deployment, {
+    environment: "production",
+    release: "checkout@1.4.0"
+  });
+  assert.deepEqual(attributes.context.resource.runtime, expectedDefaultContext().resource.runtime);
+});
+
+test("explicit context wins field by field over LOGBREW_* variables", async () => {
+  const attributes = await withLogBrewEnvironment({
+    LOGBREW_SERVICE_NAME: "from-environment",
+    LOGBREW_ENVIRONMENT: "staging",
+    LOGBREW_RELEASE: "checkout@9.9.9"
+  }, () => capturedAttributes(createLogBrewNodeClient, {
+    captureRuntimeContext: false,
+    context: {
+      schemaVersion: 1,
+      resource: {
+        service: { name: "checkout-api", version: "1.4.0" },
+        deployment: { release: "checkout@1.4.0" }
+      }
+    }
+  }));
+
+  assert.deepEqual(attributes.context, {
+    schemaVersion: 1,
+    resource: {
+      service: { name: "checkout-api", version: "1.4.0" },
+      deployment: { environment: "staging", release: "checkout@1.4.0" }
+    }
+  });
+});
+
+test("blank, oversized, or control-character variables are ignored", async () => {
+  const attributes = await withLogBrewEnvironment({
+    LOGBREW_SERVICE_NAME: "   ",
+    LOGBREW_ENVIRONMENT: "x".repeat(257),
+    LOGBREW_RELEASE: "checkout\n1.4.0"
+  }, () => capturedAttributes(createLogBrewNodeClient));
+
+  assert.deepEqual(attributes.context, expectedDefaultContext());
+});
