@@ -124,7 +124,7 @@ class ConfidentialityScanTests(unittest.TestCase):
 
     def test_tool_matrix_allows_only_exact_action_and_command_names(self) -> None:
         matrix = "quality/tool-matrix.toml"
-        action = "rubygems/configure-rubygems-" + "cre" + "dentials@abc # v2.1.0"
+        action = "rubygems/configure-rubygems-" + "cre" + "dentials"
         allowed = f'uses = ["{action}"]\ncommands = ["dotnet re' + 'store"]\n'
         failures = self.assert_fixture_policy(
             {matrix: allowed},

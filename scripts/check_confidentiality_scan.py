@@ -457,7 +457,7 @@ def is_tool_matrix_tool_name(relative_text: str, line: str) -> bool:
     """The tool matrix must name each action and command exactly as the workflows do."""
     if relative_text != "quality/tool-matrix.toml":
         return False
-    exact_names = ("rubygems/configure-rubygems-credentials@", '"dotnet restore"')
+    exact_names = ('"rubygems/configure-rubygems-credentials"', '"dotnet restore"')
     terms = {match.group(0).lower() for match in SENSITIVE_RE.finditer(line)}
     return line.startswith(("uses = [", "commands = [")) and terms <= {"credential", "restore"} and all(
         any(name in line.lower() for name in exact_names if term in name) for term in terms
