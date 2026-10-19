@@ -42,6 +42,13 @@ from logbrew_sdk._automatic_delivery import (
 from logbrew_sdk._automatic_delivery import (
     DeliveryHealthSnapshot as DeliveryHealthSnapshot,
 )
+from logbrew_sdk._breadcrumbs import (
+    LogBrewBreadcrumbHandler,
+    add_logbrew_breadcrumb,
+    current_breadcrumbs,
+    ignore_breadcrumb_url,
+    install_automatic_breadcrumbs,
+)
 from logbrew_sdk._errors import SdkError
 from logbrew_sdk._event_queue import EventQueue, MemoryEventQueue, QueuedEvent
 from logbrew_sdk._issue_diagnostics import (
@@ -51,7 +58,10 @@ from logbrew_sdk._issue_diagnostics import (
 )
 from logbrew_sdk._logging_identity import log_record_identity as _log_record_identity
 from logbrew_sdk._persistent_event_queue import PersistentEventQueue
-from logbrew_sdk._runtime_context import add_environment_resource_context, add_python_runtime_context
+from logbrew_sdk._runtime_context import (
+    add_environment_resource_context,
+    add_python_runtime_context,
+)
 from logbrew_sdk._span_events import (
     SpanAttributes,
     SpanEventSummary,
@@ -430,6 +440,7 @@ class HttpTransport:
         require_non_empty("endpoint", endpoint)
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise SdkError("configuration_error", "HttpTransport timeout must be positive")
+        ignore_breadcrumb_url(endpoint)
         try:
             timeout_seconds = float(timeout)
         except OverflowError:
@@ -517,6 +528,7 @@ class LogBrewClient:
         persistent_queue_directory: str | os.PathLike[str] | None = None,
         persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
         on_event_dropped: Callable[[EventDrop], None] | None = None,
+        breadcrumbs: bool = True,
     ) -> LogBrewClient:
         """Create a client from public SDK identity, retry, and API key settings."""
         require_non_empty("api_key", api_key)
@@ -539,6 +551,7 @@ class LogBrewClient:
             persistent_queue_directory=persistent_queue_directory,
             persistent_queue_encryption_key=persistent_queue_encryption_key,
             on_event_dropped=on_event_dropped,
+            breadcrumbs=breadcrumbs,
         )
 
     def __init__(
@@ -560,9 +573,15 @@ class LogBrewClient:
         persistent_queue_directory: str | os.PathLike[str] | None = None,
         persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
         on_event_dropped: Callable[[EventDrop], None] | None = None,
+        breadcrumbs: bool = True,
     ) -> None:
         if not isinstance(capture_runtime_context, bool):
             raise SdkError("configuration_error", "capture_runtime_context must be a boolean")
+        if not isinstance(breadcrumbs, bool):
+            raise SdkError("configuration_error", "breadcrumbs must be a boolean")
+        self._breadcrumbs = breadcrumbs
+        if breadcrumbs:
+            install_automatic_breadcrumbs()
         _require_positive_integer("max_queue_size", max_queue_size)
         _require_positive_integer("max_queue_bytes", max_queue_bytes)
         _require_positive_integer("max_batch_events", max_batch_events)
@@ -724,6 +743,14 @@ class LogBrewClient:
         self._push_event("environment", event_id, timestamp, validate_environment(attributes))
 
     def issue(self, event_id: str, timestamp: str, attributes: IssueAttributes) -> None:
+        if self._breadcrumbs and "breadcrumbs" not in attributes:
+            # Attach what led up to the issue in the active request scope, or the process scope.
+            breadcrumbs, truncated = current_breadcrumbs()
+            if breadcrumbs:
+                attributes = cast(
+                    IssueAttributes,
+                    {**attributes, "breadcrumbs": breadcrumbs, **({"breadcrumbsTruncated": True} if truncated else {})},
+                )
         self._push_event("issue", event_id, timestamp, validate_issue(attributes))
 
     def log(self, event_id: str, timestamp: str, attributes: LogAttributes) -> None:
@@ -1934,6 +1961,7 @@ __all__ = [
     "LogBrewAiohttpClientSessionInstrumentation",
     "LogBrewArqPoolInstrumentation",
     "LogBrewArqWorkerInstrumentation",
+    "LogBrewBreadcrumbHandler",
     "LogBrewCeleryInstrumentation",
     "LogBrewCeleryWorkerLifecycle",
     "LogBrewClient",
@@ -1981,6 +2009,7 @@ __all__ = [
     "Transport",
     "TransportError",
     "TransportResponse",
+    "add_logbrew_breadcrumb",
     "aiohttp_request_with_logbrew_span",
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
