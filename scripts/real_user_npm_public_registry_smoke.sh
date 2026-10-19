@@ -34,15 +34,26 @@ require_command() {
   fi
 }
 
+# npm can take minutes to serve a new version, so retry with doubling delays before failing.
 verify_registry_version() {
   local package_name="$1"
   local version="$2"
+  local max_wait="${LOGBREW_NPM_VIEW_MAX_WAIT_SECONDS:-600}"
+  local delay="${LOGBREW_NPM_VIEW_INITIAL_DELAY_SECONDS:-2}"
+  (( delay >= 1 )) || delay=1
+  local waited=0
   local found
-  found="$(npm view "${package_name}@${version}" version --registry "$registry")"
-  if [[ "$found" != "$version" ]]; then
-    echo "expected ${package_name}@${version} on npm, found ${found:-<missing>}" >&2
-    exit 1
-  fi
+  while true; do
+    found="$(npm view "${package_name}@${version}" version --registry "$registry" 2>/dev/null || true)"
+    [[ "$found" == "$version" ]] && return 0
+    if (( waited + delay > max_wait )); then
+      echo "${package_name}@${version} is not on npm after ${waited}s (found ${found:-<missing>})" >&2
+      exit 1
+    fi
+    sleep "$delay"
+    waited=$(( waited + delay ))
+    delay=$(( delay * 2 > 30 ? 30 : delay * 2 ))
+  done
 }
 
 fail_receipt_stage() {
