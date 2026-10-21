@@ -370,7 +370,7 @@ await client.shutdown(transport);
 purgeLogBrewNodePersistentQueue({ persistentQueuePath: queueParent });
 ```
 
-The SDK owns one fixed child directory, stores one compact event per atomic record, replays oldest first, and removes only accepted prefixes. Clean shutdown releases ownership immediately; after an abrupt exit, a new owner recovers after a short bounded lease expiry. Existing queue, UTF-8 byte, batch, and drop-new limits apply before disk admission.
+The SDK owns one fixed child directory, stores one compact event per atomic record, replays oldest first, and removes accepted prefixes and events evicted to make room for a crash report, so a restart never resends them. Clean shutdown releases ownership immediately; after an abrupt exit, a new owner recovers after a short bounded lease expiry. Existing queue, UTF-8 byte, batch, and drop-new limits apply before disk admission.
 
 Persistent mode fails closed for linked, weakly permissioned, corrupt, unexpected, concurrently owned, or unsupported storage. It never falls back to memory. Records necessarily contain the captured event JSON, but the storage protocol adds no API key, endpoint, request headers, process ID, caller path, or raw storage error. Browser clients and Node clients without either persistence option keep the existing in-memory behavior.
 

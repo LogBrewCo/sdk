@@ -631,6 +631,40 @@ test("hard exit replays retained events oldest first in the next process", async
   assert.deepEqual(payloadEventIds(transport.sentBodies), ["restart-0", "restart-1", "restart-2"]);
 });
 
+test("a fatal at a full persistent queue evicts the oldest log on disk across restart", async (t) => {
+  const parent = temporaryParent(t);
+  const childSource = `
+    import { createLogBrewNodeClient } from ${JSON.stringify(SOURCE_MODULE_URL)};
+    const client = createLogBrewNodeClient({ apiKey: "CHILD_KEY", maxQueueSize: 2, persistentQueuePath: process.argv[1] });
+    const fatal = {
+      title: "Crash",
+      level: "fatal",
+      exception: { type: "TypeError", mechanism: { type: "global", handled: false } }
+    };
+    client.issue("evict-fatal-0", ${JSON.stringify(FIXED_TIMESTAMP)}, fatal);
+    client.log("evict-1", ${JSON.stringify(FIXED_TIMESTAMP)}, { level: "info", message: "evict" });
+    const admission = client.issueWithAdmission("evict-fatal-2", ${JSON.stringify(FIXED_TIMESTAMP)}, fatal);
+    process.stdout.write(admission.status + ":" + client.deliveryHealth().droppedByReason.evicted_for_fatal);
+    process.exit(0);
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childSource, parent], {
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(child.stderr, "");
+  assert.equal(child.stdout, "admitted:1");
+  assert.deepEqual(eventFiles(parent), ["event-0000000000000001.json", "event-0000000000000003.json"]);
+
+  const ownerDirectory = join(queueDirectory(parent), ".owner");
+  const expired = new Date(0);
+  utimesSync(join(ownerDirectory, readdirSync(ownerDirectory)[0]), expired, expired);
+  const recovered = createClient(parent, { maxQueueSize: 2 });
+  const transport = RecordingTransport.alwaysAccept();
+  await recovered.shutdown(transport);
+  assert.deepEqual(payloadEventIds(transport.sentBodies), ["evict-fatal-0", "evict-fatal-2"]);
+  assert.deepEqual(eventFiles(parent), []);
+});
+
 const invalidStorageCases = [
     {
       name: "malformed",
@@ -649,13 +683,6 @@ const invalidStorageCases = [
       name: "unknown",
       prepare(child) {
         writeFileSync(join(child, "unexpected.bin"), "x", { mode: 0o600 });
-      }
-    },
-    {
-      name: "sequence-gap",
-      prepare(child) {
-        writeFileSync(join(child, "event-0000000000000001.json"), storedEvent("gap-first"), { mode: 0o600 });
-        writeFileSync(join(child, "event-0000000000000003.json"), storedEvent("gap-third"), { mode: 0o600 });
       }
     },
     {

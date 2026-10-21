@@ -126,15 +126,7 @@ class PersistentEventQueue {
     for (let index = 0; index < count; index += 1) {
       const record = this.records[0];
       try {
-        const temporaryPath = record.temporaryName === undefined
-          ? undefined
-          : join(this.storage.childPath, record.temporaryName);
-        validateRecordIdentity(
-          join(this.storage.childPath, record.name),
-          record.identity,
-          temporaryPath
-        );
-        unlinkSync(join(this.storage.childPath, record.name));
+        this.unlinkRecord(record);
         fsyncDirectory(this.storage.childPath);
       } catch {
         throw fixedError("persistent_queue_unavailable", "persistent queue acknowledgement failed");
@@ -142,6 +134,39 @@ class PersistentEventQueue {
       this.records.shift();
       this.totalBytes -= record.byteCount;
     }
+  }
+
+  // Removes evicted records; the core passes strictly ascending indexes.
+  remove(indexes) {
+    this.assertUsable();
+    if (!isAscendingIndexList(indexes, this.records.length)) {
+      throw fixedError("persistent_queue_invalid", "persistent queue removal is invalid");
+    }
+    for (let position = indexes.length - 1; position >= 0; position -= 1) {
+      const index = indexes[position];
+      const record = this.records[index];
+      try {
+        this.unlinkRecord(record);
+      } catch {
+        throw fixedError("persistent_queue_unavailable", "persistent queue removal failed");
+      }
+      this.records.splice(index, 1);
+      this.totalBytes -= record.byteCount;
+    }
+    try {
+      fsyncDirectory(this.storage.childPath);
+    } catch {
+      throw fixedError("persistent_queue_unavailable", "persistent queue removal failed");
+    }
+  }
+
+  unlinkRecord(record) {
+    const path = join(this.storage.childPath, record.name);
+    const temporaryPath = record.temporaryName === undefined
+      ? undefined
+      : join(this.storage.childPath, record.temporaryName);
+    validateRecordIdentity(path, record.identity, temporaryPath);
+    unlinkSync(path);
   }
 
   close() {
@@ -163,10 +188,8 @@ class PersistentEventQueue {
     let highestSequence = 0n;
     for (const name of recordNames) {
       const sequence = BigInt(RECORD_PATTERN.exec(name)[1]);
-      if (
-        sequence < 1n
-        || highestSequence !== 0n && sequence !== highestSequence + 1n
-      ) {
+      // Removal of evicted records leaves gaps; order stays strictly ascending.
+      if (sequence <= highestSequence) {
         throw fixedError("persistent_queue_invalid", "persistent queue order is invalid");
       }
       highestSequence = sequence;
@@ -579,6 +602,12 @@ function readRecord(path, config) {
     throw fixedError("persistent_queue_invalid", "persistent queue record is invalid");
   }
   return { byteCount, event, identity: identityOf(before), serialized };
+}
+
+function isAscendingIndexList(indexes, length) {
+  return Array.isArray(indexes) && indexes.every((index, position) => (
+    Number.isInteger(index) && index < length && index > (position === 0 ? -1 : indexes[position - 1])
+  ));
 }
 
 function validatePurgeRecord(path) {

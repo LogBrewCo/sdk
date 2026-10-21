@@ -1226,7 +1226,7 @@ function createEventStoreFromQueueFactory(eventQueueFactory, config) {
     restoreEvent: restoreStoredEvent
   });
   validateEventQueue(queue);
-  return {
+  const eventStore = {
     load() {
       const events = queue.events();
       const count = queue.length();
@@ -1256,6 +1256,10 @@ function createEventStoreFromQueueFactory(eventQueueFactory, config) {
       return queue.close();
     }
   };
+  if (typeof queue.remove === "function") {
+    eventStore.remove = (indexes) => queue.remove(indexes);
+  }
+  return eventStore;
 }
 
 function validateEventQueue(queue) {

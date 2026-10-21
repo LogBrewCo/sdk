@@ -77,6 +77,27 @@ function buildNodePersistentEventStore({
         sequences = sequences.slice(count);
       },
 
+      // Removes evicted records; the core passes strictly ascending indexes.
+      remove(indexes) {
+        assertOpen();
+        assertPinnedDirectory(queueDirectory, fail);
+        if (!Array.isArray(indexes) || indexes.some((index, position) => (
+          !Number.isSafeInteger(index) || index >= records.length || index <= (position === 0 ? -1 : indexes[position - 1])
+        ))) {
+          throw fail("persistent removal indexes are invalid");
+        }
+        try {
+          removeEventFiles(queueDirectory, indexes.map((index) => sequences[index]), fail, failCommit);
+        } catch (error) {
+          markCommitUncertain(error);
+          throw error;
+        }
+        const removed = new Set(indexes);
+        pendingBytes -= indexes.reduce((total, index) => total + records[index].eventBytes, 0);
+        records = records.filter((_, index) => !removed.has(index));
+        sequences = sequences.filter((_, index) => !removed.has(index));
+      },
+
       append(record) {
         assertOpen();
         assertPinnedDirectory(queueDirectory, fail);

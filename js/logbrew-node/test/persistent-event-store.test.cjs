@@ -193,6 +193,25 @@ test("encrypted store enforces one live owner and recovers a dead owner", (t) =>
   recovered.close();
 });
 
+test("encrypted store removes evicted records so a restart does not replay them", (t) => {
+  const directory = tempQueue(t);
+  const key = crypto.randomBytes(32);
+  const records = ["evt_remove_001", "evt_remove_002", "evt_remove_003"].map((id) => storedLog(id));
+  const writer = createStore(directory, key);
+  records.forEach((record) => writer.append(record));
+  assert.throws(() => writer.remove([2, 0]), { code: "persistence_error" });
+  writer.remove([0, 2]);
+  assert.deepEqual(writer.load(), [records[1]]);
+  writer.append(storedLog("evt_remove_004"));
+  writer.close();
+
+  const reader = createStore(directory, key);
+  assert.deepEqual(reader.load(), [records[1], storedLog("evt_remove_004")]);
+  reader.acknowledge(2);
+  reader.close();
+  assert.equal(fs.readdirSync(directory).some((entry) => entry.endsWith(".lbq")), false);
+});
+
 test("encrypted store purge removes every pending record", (t) => {
   const directory = tempQueue(t);
   const key = crypto.randomBytes(32);
