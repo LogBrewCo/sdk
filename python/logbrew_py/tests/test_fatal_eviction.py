@@ -63,7 +63,7 @@ class FatalEvictionTests(unittest.TestCase):
 
         body = json.loads(transport.sent_bodies[0])
         self.assertEqual([event["id"] for event in body["events"]], ["evt_fatal_001"])
-        self.assertEqual(body["client_report"], {"dropped_events": {"evicted_for_fatal": 1}})
+        self.assertEqual(body["client_report"]["dropped_events"], {"evicted_for_fatal": 1})
 
     def test_a_drop_callback_cannot_refill_the_room_an_eviction_made(self) -> None:
         client: LogBrewClient

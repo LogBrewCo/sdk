@@ -16,6 +16,7 @@
     }
   ],
   "client_report": {
+    "report_id": "5f0c6a1e9b2d4c7a8e3f1b6d0a9c2e4f",
     "dropped_events": {
       "event_too_large": 1,
       "evicted_for_fatal": 2,

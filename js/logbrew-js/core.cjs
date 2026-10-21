@@ -384,6 +384,8 @@ class LogBrewClient {
     };
     // In memory only: counts not yet acknowledged by a 2xx are lost on restart.
     this.unreportedDropsByReason = {};
+    // Drop counts frozen under one report ID until a 2xx acknowledges a body that carried them.
+    this.pendingClientReport = undefined;
     this.lastDropReason = "none";
     this.storage = resolvedEventStore ? "persistent" : "memory";
     this.hydratedEventCount = recovered.events.length;
@@ -949,9 +951,9 @@ class LogBrewClient {
       const batch = this.unacknowledgedBatch;
       const response = await this.#sendBatch(transport, batch.body);
       this.unacknowledgedBatch = undefined;
-      // Clear only what this body carried; drops recorded while it was in flight stay pending.
-      for (const [reason, count] of Object.entries(batch.droppedEvents ?? {})) {
-        this.unreportedDropsByReason[reason] -= count;
+      // Drops recorded while this body was in flight stay pending under a new report ID.
+      if (batch.carriesClientReport) {
+        this.pendingClientReport = undefined;
       }
       this.#acknowledge(batch.eventsCount);
       this.acceptedBatchCount = incrementBounded(this.acceptedBatchCount);
@@ -979,11 +981,8 @@ class LogBrewClient {
   }
 
   #nextBatch(maxEvents) {
-    const reported = Object.entries(this.unreportedDropsByReason).filter(([, count]) => count > 0);
-    const droppedEvents = reported.length > 0
-      ? Object.fromEntries(reported.slice(0, MAX_CLIENT_REPORT_REASONS))
-      : undefined;
-    const reportSuffix = droppedEvents && `],"client_report":${JSON.stringify({ dropped_events: droppedEvents })}}`;
+    const report = this.#pendingClientReport();
+    const reportSuffix = report && `],"client_report":${JSON.stringify(report)}}`;
     const reportedEvents = reportSuffix ? this.#batchEventCount(maxEvents, utf8ByteLength(reportSuffix)) : 0;
     const eventsCount = reportedEvents || this.#batchEventCount(maxEvents, this.batchSuffixBytes);
     if (eventsCount === 0) {
@@ -991,9 +990,25 @@ class LogBrewClient {
     }
     return {
       body: `${this.batchPrefix}${this.serializedEvents.slice(0, eventsCount).join(",")}${reportedEvents ? reportSuffix : this.batchSuffix}`,
-      droppedEvents: reportedEvents ? droppedEvents : undefined,
+      carriesClientReport: reportedEvents > 0,
       eventsCount
     };
+  }
+
+  // Freezes unreported drops under one stable ID, so every resend of them is counted once.
+  #pendingClientReport() {
+    if (this.pendingClientReport === undefined) {
+      const reported = Object.entries(this.unreportedDropsByReason).filter(([, count]) => count > 0);
+      if (reported.length === 0) {
+        return undefined;
+      }
+      const droppedEvents = Object.fromEntries(reported.slice(0, MAX_CLIENT_REPORT_REASONS));
+      for (const reason of Object.keys(droppedEvents)) {
+        delete this.unreportedDropsByReason[reason];
+      }
+      this.pendingClientReport = Object.freeze({ report_id: randomHex(16), dropped_events: droppedEvents });
+    }
+    return this.pendingClientReport;
   }
 
   #batchEventCount(maxEvents, suffixBytes) {
@@ -1191,6 +1206,19 @@ function utf8ByteLength(value) {
 // Fatal input severity is stored as critical; a critical issue is a crash report.
 function isFatalEvent(event) {
   return event.type === "issue" && event.attributes.level === "critical";
+}
+
+// Report IDs only need uniqueness, so runtimes without Web Crypto fall back to Math.random.
+function randomHex(byteLength) {
+  const bytes = new Uint8Array(byteLength);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function incrementBounded(value) {

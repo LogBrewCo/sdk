@@ -10,7 +10,18 @@ function createClient(options = {}) {
 }
 
 const log = (client, id, message = "queued") => client.log(id, timestamp, { message, level: "info" });
-const reports = (transport) => transport.sentBodies.map((body) => JSON.parse(body).client_report);
+const reportOf = (body) => JSON.parse(body).client_report;
+const reports = (transport) => transport.sentBodies.map((body) => withoutId(reportOf(body)));
+const reportIds = (transport) => transport.sentBodies.map((body) => reportOf(body)?.report_id);
+
+function withoutId(report) {
+  if (report === undefined) {
+    return undefined;
+  }
+  const { report_id: reportId, ...rest } = report;
+  assert.match(reportId, /^[0-9a-f]{32}$/u);
+  return rest;
+}
 
 test("drop counts ride in the next batch and clear after a 2xx", async () => {
   const client = createClient({ maxQueueSize: 1 });
@@ -61,7 +72,7 @@ test("drops during an in-flight batch stay pending for the next batch", async ()
   let release;
   const transport = {
     send(_apiKey, body) {
-      bodies.push(JSON.parse(body).client_report);
+      bodies.push(withoutId(reportOf(body)));
       return bodies.length === 1 ? new Promise((resolve) => { release = resolve; }) : { statusCode: 202 };
     }
   };
@@ -77,12 +88,40 @@ test("drops during an in-flight batch stay pending for the next batch", async ()
   assert.deepEqual(bodies, [{ dropped_events: { queue_overflow: 1 } }, { dropped_events: { queue_overflow: 2 } }]);
 });
 
+test("a report resent in a different batch keeps its report ID", async () => {
+  const client = createClient({ maxQueueSize: 1 });
+  log(client, "evt_log_001");
+  log(client, "evt_log_002");
+  const transport = new RecordingTransport([TransportError.network("offline"), { statusCode: 202 }, { statusCode: 202 }]);
+
+  await assert.rejects(client.flush(transport));
+  client.purgePendingEvents();
+  log(client, "evt_log_003");
+  await client.flush(transport);
+  log(client, "evt_log_004");
+  log(client, "evt_log_005");
+  await client.flush(transport);
+  log(client, "evt_log_006");
+  await client.flush(transport);
+
+  const ids = reportIds(transport);
+  assert.notEqual(transport.sentBodies[1], transport.sentBodies[0]);
+  assert.equal(ids[1], ids[0]);
+  assert.deepEqual(reports(transport), [
+    { dropped_events: { queue_overflow: 1 } },
+    { dropped_events: { queue_overflow: 1 } },
+    { dropped_events: { queue_overflow: 1 } },
+    undefined
+  ]);
+  assert.notEqual(ids[2], ids[0]);
+});
+
 test("a client report never pushes a batch over maxBatchBytes", async () => {
   const probe = createClient();
-  log(probe, "evt_log_001", "m".repeat(100));
+  log(probe, "evt_log_001", "m".repeat(200));
   const exactBytes = Buffer.byteLength(probe.previewJson().replace(/\s/g, ""), "utf8");
   const client = createClient({ maxBatchBytes: exactBytes });
-  log(client, "evt_log_001", "m".repeat(100));
+  log(client, "evt_log_001", "m".repeat(200));
   log(client, "evt_log_big", "x".repeat(exactBytes));
   const transport = RecordingTransport.alwaysAccept();
 

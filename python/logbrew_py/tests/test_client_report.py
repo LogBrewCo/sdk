@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import unittest
 from pathlib import Path
@@ -32,8 +33,20 @@ def log(client: LogBrewClient, event_id: str, message: str = "queued") -> None:
     client.log(event_id, "2026-06-02T10:00:00Z", {"message": message, "level": "info"})
 
 
+def without_id(report: Any) -> Any:
+    if report is None:
+        return None
+    stripped = dict(report)
+    assert re.fullmatch(r"[0-9a-f]{32}", stripped.pop("report_id"))
+    return stripped
+
+
+def report_ids(transport: RecordingTransport) -> list[Any]:
+    return [(json.loads(body).get("client_report") or {}).get("report_id") for body in transport.sent_bodies]
+
+
 def reports(transport: RecordingTransport) -> list[Any]:
-    return [json.loads(body).get("client_report") for body in transport.sent_bodies]
+    return [without_id(json.loads(body).get("client_report")) for body in transport.sent_bodies]
 
 
 class ClientReportTests(unittest.TestCase):
@@ -103,6 +116,29 @@ class ClientReportTests(unittest.TestCase):
                     ],
                 )
 
+    def test_a_report_resent_in_a_different_batch_keeps_its_report_id(self) -> None:
+        client = create_client(max_queue_size=1)
+        log(client, "evt_log_001")
+        log(client, "evt_log_002")
+        transport = RecordingTransport(
+            [TransportError.network("offline"), {"status_code": 202}, {"status_code": 202}]
+        )
+
+        with self.assertRaises(SdkError):
+            client.flush(transport)
+        client.purge_pending_events()
+        log(client, "evt_log_003")
+        client.flush(transport)
+        log(client, "evt_log_004")
+        log(client, "evt_log_005")
+        client.flush(transport)
+
+        ids = report_ids(transport)
+        self.assertNotEqual(transport.sent_bodies[1], transport.sent_bodies[0])
+        self.assertEqual(ids[1], ids[0])
+        self.assertNotEqual(ids[2], ids[0])
+        self.assertEqual(reports(transport), [{"dropped_events": {"queue_overflow": 1}}] * 3)
+
     def test_drops_during_an_in_flight_batch_stay_pending_for_the_next_batch(self) -> None:
         client = create_client(max_queue_size=1)
         log(client, "evt_log_001")
@@ -113,7 +149,7 @@ class ClientReportTests(unittest.TestCase):
 
         class BlockingTransport:
             def send(self, _api_key: str, body: str) -> TransportResponse:
-                sent.append(json.loads(body).get("client_report"))
+                sent.append(without_id(json.loads(body).get("client_report")))
                 if len(sent) == 1:
                     in_flight.set()
                     release.wait(5)
@@ -137,13 +173,13 @@ class ClientReportTests(unittest.TestCase):
 
     def test_a_client_report_never_pushes_a_batch_over_max_batch_bytes(self) -> None:
         probe = create_client()
-        log(probe, "evt_log_001", "m" * 100)
+        log(probe, "evt_log_001", "m" * 200)
         probe_transport = RecordingTransport.always_accept()
         probe.flush(probe_transport)
         exact_bytes = len(probe_transport.sent_bodies[0].encode("utf-8"))
 
         client = create_client(max_batch_bytes=exact_bytes)
-        log(client, "evt_log_001", "m" * 100)
+        log(client, "evt_log_001", "m" * 200)
         log(client, "evt_log_big", "x" * exact_bytes)
         transport = RecordingTransport.always_accept()
         client.flush(transport)
