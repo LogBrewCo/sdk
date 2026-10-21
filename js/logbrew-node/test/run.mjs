@@ -39,6 +39,7 @@ try {
       "test",
       ...process.argv.slice(2),
       "persistent-delivery.test.js",
+      "persistent-event-store.test.cjs",
       "pino-instrumentation.test.js",
       "breadcrumbs.test.js",
       "process-errors.test.js",
