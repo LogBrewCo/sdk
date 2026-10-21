@@ -68,11 +68,13 @@ EOF
 node no-otel.mjs > "$tmp_dir/no-otel.stdout.json"
 grep -q '"ok":true' "$tmp_dir/no-otel.stdout.json"
 
+# The newest API release can be ahead of the newest SDK's peer range; install the newest API it accepts.
+otel_api_range="$(npm view "@opentelemetry/sdk-trace-base@latest" "peerDependencies.@opentelemetry/api")"
 npm install \
   --save-exact \
   --no-audit \
   --fund=false \
-  "@opentelemetry/api@latest" \
+  "@opentelemetry/api@$otel_api_range" \
   "@opentelemetry/context-async-hooks@latest" \
   "@opentelemetry/sdk-trace-base@latest" \
   "typescript@latest" \
