@@ -67,6 +67,10 @@ func TestSchemaClientReportBounds(t *testing.T) {
 		{`{"dropped_events":{"queue_overflow":1.5}}`, false},
 		{`{"dropped_events":{"Queue_overflow":1}}`, false},
 		{`{"dropped_events":{"queue_overflow":1},"extra":1}`, false},
+		{`{"report_id":"5f0c6a1e9b2d4c7a8e3f1b6d0a9c2e4f","dropped_events":{"queue_overflow":1}}`, true},
+		{`{"report_id":"short","dropped_events":{"queue_overflow":1}}`, false},
+		{`{"report_id":"` + strings.Repeat("a", 65) + `","dropped_events":{"queue_overflow":1}}`, false},
+		{`{"report_id":"has space 0123456789","dropped_events":{"queue_overflow":1}}`, false},
 	} {
 		data := []byte(strings.Replace(batch, "REPORT", item.report, 1))
 		if valid, validationError := checker.validate(data); valid != item.valid || validationError != nil {

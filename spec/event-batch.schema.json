@@ -37,6 +37,10 @@
       "additionalProperties": false,
       "required": ["dropped_events"],
       "properties": {
+        "report_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,64}$"
+        },
         "dropped_events": {
           "type": "object",
           "minProperties": 1,

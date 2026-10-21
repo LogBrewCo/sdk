@@ -622,6 +622,8 @@ class LogBrewClient:
         self._dropped_events_by_reason: dict[EventDropReason, int] = {}
         # Drops not yet acknowledged by the intake; they ride in the next batch as a client report.
         self._unreported_drops: dict[str, int] = {}
+        # Drops frozen under one report ID until a 2xx acknowledges a body that carried them.
+        self._pending_report: tuple[str, tuple[tuple[str, int], ...]] | None = None
         self._on_event_dropped = on_event_dropped
         self._drop_callback_state = local()
         self._owner_pid = os.getpid()
@@ -1017,9 +1019,9 @@ class LogBrewClient:
                 acknowledged = self._queue.acknowledge(prefix.through_sequence)
                 if acknowledged == prefix.event_count:
                     self._frozen_prefix = None
-                # Clear only what this body carried; drops recorded while it was in flight stay pending.
-                for reason, count in prefix.reported_drops:
-                    self._unreported_drops[reason] -= count
+                # Drops recorded while this body was in flight stay pending under a new report ID.
+                if prefix.reported_drops:
+                    self._pending_report = None
             if acknowledged != prefix.event_count:
                 raise SdkError("queue_state_error", "accepted event prefix changed during delivery")
             self._automatic_delivery.record_accepted_events(acknowledged)
@@ -1041,11 +1043,18 @@ class LogBrewClient:
         self, records: tuple[QueuedEvent, ...]
     ) -> tuple[tuple[QueuedEvent, ...], str, tuple[tuple[str, int], ...]]:
         prefix = f'{{"sdk":{self._sdk_json},"events":['
-        reported_drops = tuple(
-            (reason, count) for reason, count in self._unreported_drops.items() if count > 0
-        )[:MAX_CLIENT_REPORT_REASONS]
-        if reported_drops:
-            report = _compact_json({"dropped_events": dict(reported_drops)})
+        if self._pending_report is None:
+            # Freeze unreported drops under one stable ID, so every resend of them is counted once.
+            drops = tuple(
+                (reason, count) for reason, count in self._unreported_drops.items() if count > 0
+            )[:MAX_CLIENT_REPORT_REASONS]
+            if drops:
+                for reason, _count in drops:
+                    del self._unreported_drops[reason]
+                self._pending_report = (uuid4().hex, drops)
+        if self._pending_report is not None:
+            report_id, reported_drops = self._pending_report
+            report = _compact_json({"report_id": report_id, "dropped_events": dict(reported_drops)})
             batch = self._fit_batch(records, prefix, f'],"client_report":{report}}}')
             if batch:
                 # A report never pushes a batch over max_batch_bytes; it waits for a batch with room.
