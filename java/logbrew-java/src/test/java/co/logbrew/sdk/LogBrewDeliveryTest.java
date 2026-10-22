@@ -8,12 +8,16 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Dependency-free delivery reliability tests for the Java SDK.
  */
 public final class LogBrewDeliveryTest {
     private static final String API_KEY = "LOGBREW_API_KEY";
+    private static final Pattern REPORT_ID =
+        Pattern.compile("\"client_report\": \\{\\s*\"report_id\": \"([0-9a-f]{32})\"");
     private int testsRun;
 
     public static void main(String[] args) throws Exception {
@@ -33,6 +37,10 @@ public final class LogBrewDeliveryTest {
         testCrashReportEvictsOldestQueuedEvent();
         testCrashReportEvictsByQueueBytes();
         testCrashReportKeepsEventsOwnedByDelivery();
+        testClientReportCountsEveryDropReasonAndClearsAfterAcceptance();
+        testClientReportKeepsItsIdUntilAccepted();
+        testDropsDuringAnInFlightBatchWaitForTheNextReport();
+        testClientReportNeverPushesABatchOverMaxBatchBytes();
         System.out.println("java delivery tests ok (" + testsRun + " tests)");
     }
 
@@ -352,6 +360,112 @@ public final class LogBrewDeliveryTest {
         testsRun++;
     }
 
+    private void testClientReportCountsEveryDropReasonAndClearsAfterAcceptance() {
+        LogBrewClient client = client(DeliveryOptions.builder()
+            .maxRetries(0)
+            .maxQueueEvents(2)
+            .maxBatchBytes(4096)
+            .build());
+        enqueueLog(client, "evt_java_report_0", "first");
+        enqueueLog(client, "evt_java_report_1", "second");
+        client.issue("evt_java_report_crash", "2026-06-02T10:00:04Z", IssueAttributes.create("App crashed", "fatal"));
+        enqueueLog(client, "evt_java_report_2", "third");
+        enqueueLog(client, "evt_java_report_3", "fourth");
+        enqueueLog(client, "evt_java_report_big", "x".repeat(5000));
+        RecordingTransport transport = RecordingTransport.alwaysAccept();
+
+        client.flush(transport);
+        enqueueLog(client, "evt_java_report_4", "fifth");
+        client.flush(transport);
+
+        List<String> bodies = transport.sentBodies();
+        String report = clientReport(bodies.get(0));
+        assertTrue(report != null, "the first batch carries a client report");
+        assertTrue(bodies.get(0).indexOf("\"events\"") < bodies.get(0).indexOf("\"client_report\""), "report follows events");
+        assertTrue(reportId(bodies.get(0)) != null, "report id format");
+        assertContains(report, "\"evicted_for_fatal\": 1");
+        assertContains(report, "\"queue_overflow\": 2");
+        assertContains(report, "\"event_too_large\": 1");
+        assertEquals(null, clientReport(bodies.get(1)), "an accepted report is not sent again");
+        testsRun++;
+    }
+
+    private void testClientReportKeepsItsIdUntilAccepted() {
+        LogBrewClient client = client(DeliveryOptions.builder().maxRetries(1).maxQueueEvents(2).build());
+        enqueueLog(client, "evt_java_report_id_0", "first");
+        enqueueLog(client, "evt_java_report_id_1", "second");
+        enqueueLog(client, "evt_java_report_id_2", "dropped");
+        RecordingTransport transport = RecordingTransport.scripted(
+            Integer.valueOf(503),
+            new TransportException("transport_network", "offline", true),
+            Integer.valueOf(202),
+            Integer.valueOf(202)
+        );
+
+        expectSdkException(() -> client.flush(transport));
+        client.flush(transport);
+        enqueueLog(client, "evt_java_report_id_3", "third");
+        enqueueLog(client, "evt_java_report_id_4", "fourth");
+        enqueueLog(client, "evt_java_report_id_5", "dropped");
+        client.flush(transport);
+
+        List<String> bodies = transport.sentBodies();
+        assertEquals(4, bodies.size(), "report id request count");
+        assertEquals(bodies.get(0), bodies.get(1), "a retry resends the same body");
+        assertEquals(reportId(bodies.get(0)), reportId(bodies.get(2)), "a later delivery keeps the report id");
+        assertContains(clientReport(bodies.get(2)), "\"queue_overflow\": 1");
+        assertTrue(reportId(bodies.get(3)) != null, "new drops get a report");
+        assertTrue(!reportId(bodies.get(3)).equals(reportId(bodies.get(0))), "new drops get a new report id");
+        assertContains(clientReport(bodies.get(3)), "\"queue_overflow\": 1");
+        testsRun++;
+    }
+
+    private void testDropsDuringAnInFlightBatchWaitForTheNextReport() {
+        LogBrewClient client = client(DeliveryOptions.builder().maxRetries(0).maxQueueEvents(1).build());
+        enqueueLog(client, "evt_java_inflight_0", "first");
+        enqueueLog(client, "evt_java_inflight_1", "dropped");
+        List<String> bodies = new ArrayList<>();
+        Transport transport = (apiKey, body) -> {
+            bodies.add(body);
+            if (bodies.size() == 1) {
+                enqueueLog(client, "evt_java_inflight_2", "dropped while sending");
+                enqueueLog(client, "evt_java_inflight_3", "dropped while sending");
+            }
+            return new TransportResponse(202, 1);
+        };
+
+        client.flush(transport);
+        enqueueLog(client, "evt_java_inflight_4", "next");
+        client.flush(transport);
+
+        assertContains(clientReport(bodies.get(0)), "\"queue_overflow\": 1");
+        assertContains(clientReport(bodies.get(1)), "\"queue_overflow\": 2");
+        assertTrue(!reportId(bodies.get(1)).equals(reportId(bodies.get(0))), "in-flight drops get a new report id");
+        testsRun++;
+    }
+
+    private void testClientReportNeverPushesABatchOverMaxBatchBytes() {
+        LogBrewClient probe = client(DeliveryOptions.builder().build());
+        enqueueLog(probe, "evt_java_report_fit_0", "m".repeat(200));
+        int exactBytes = utf8Bytes(probe.previewJson());
+
+        LogBrewClient client = client(DeliveryOptions.builder().maxRetries(0).maxBatchBytes(exactBytes).build());
+        enqueueLog(client, "evt_java_report_fit_0", "m".repeat(200));
+        enqueueLog(client, "evt_java_report_fit_big", "x".repeat(exactBytes));
+        RecordingTransport transport = RecordingTransport.alwaysAccept();
+        client.flush(transport);
+        enqueueLog(client, "evt_java_report_fit_1", "short");
+        client.flush(transport);
+
+        List<String> bodies = transport.sentBodies();
+        for (String body : bodies) {
+            assertTrue(utf8Bytes(body) <= exactBytes, "a report never exceeds max batch bytes");
+        }
+        assertEquals(null, clientReport(bodies.get(0)), "a full batch waits to carry the report");
+        assertContains(clientReport(bodies.get(1)), "\"event_too_large\": 1");
+        testsRun++;
+    }
+
     private static LogBrewClient client(DeliveryOptions options) {
         return LogBrewClient.create(API_KEY, "logbrew-java", "0.1.0", options);
     }
@@ -379,6 +493,16 @@ public final class LogBrewDeliveryTest {
             return error;
         }
         throw new AssertionError("expected SdkException");
+    }
+
+    private static String clientReport(String body) {
+        int start = body.indexOf("\"client_report\": ");
+        return start < 0 ? null : body.substring(start);
+    }
+
+    private static String reportId(String body) {
+        Matcher matcher = REPORT_ID.matcher(body);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private static int utf8Bytes(String value) {
