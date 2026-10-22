@@ -269,7 +269,10 @@ func (s *persistentStore) initialize() error {
 	return s.validateQueue(s.queue)
 }
 
-func (s *persistentStore) admit(event Event) error {
+// admit appends the event and removes the queued events at the ascending
+// remove indexes in one atomic write. Only events after the pending prefix
+// can be removed.
+func (s *persistentStore) admit(event Event, remove ...int) error {
 	if err := s.ensureUsable(); err != nil {
 		return err
 	}
@@ -277,11 +280,29 @@ func (s *persistentStore) admit(event Event) error {
 	if err != nil {
 		return &SdkError{Code: "serialization_error", Message: "event could not be serialized"}
 	}
-	if len(s.queue.Events) >= s.maxEvents || s.storedBytes()+len(encoded) > s.maxStoredBytes {
+	next := clonePersistedQueue(s.queue)
+	kept := next.Events[:0]
+	for index, raw := range next.Events {
+		if len(remove) > 0 && remove[0] == index {
+			if index < next.PendingPrefix {
+				return s.fail(persistenceSDKError("persistence_integrity_error"))
+			}
+			remove = remove[1:]
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	if len(remove) > 0 {
+		return s.fail(persistenceSDKError("persistence_integrity_error"))
+	}
+	storedBytes := len(encoded)
+	for _, raw := range kept {
+		storedBytes += len(raw)
+	}
+	if len(kept) >= s.maxEvents || storedBytes > s.maxStoredBytes {
 		return persistenceSDKError("persistence_overflow")
 	}
-	next := clonePersistedQueue(s.queue)
-	next.Events = append(next.Events, append(json.RawMessage(nil), encoded...))
+	next.Events = append(kept, append(json.RawMessage(nil), encoded...))
 	if err := s.writeQueue(next); err != nil {
 		return err
 	}
