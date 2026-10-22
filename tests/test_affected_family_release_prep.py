@@ -32,22 +32,22 @@ def json_object(relative_path: str) -> dict[str, object]:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.32",
-            "js/logbrew-browser/package.json": "0.1.13",
+            "js/logbrew-js/package.json": "0.1.33",
+            "js/logbrew-browser/package.json": "0.1.14",
             "js/logbrew-express/package.json": "0.1.7",
             "js/logbrew-fastify/package.json": "0.1.7",
-            "js/logbrew-node/package.json": "0.1.16",
+            "js/logbrew-node/package.json": "0.1.17",
             "js/logbrew-nestjs/package.json": "0.1.8",
             "js/logbrew-next/package.json": "0.1.11",
             "js/logbrew-react/package.json": "0.1.2",
-            "js/logbrew-react-native/package.json": "0.1.36",
+            "js/logbrew-react-native/package.json": "0.1.37",
             "js/logbrew-svelte/package.json": "0.1.5",
         }
         for relative_path, expected in npm_versions.items():
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.22"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.23"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.13"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.7"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.8"),
@@ -60,8 +60,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(rust["package"]["version"], "0.1.8")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
-        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.10")
-        for package, version in (("LogBrew", "0.1.8"), ("LogBrew.HttpClient", "0.1.3")):
+        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.11")
+        for package, version in (("LogBrew", "0.1.9"), ("LogBrew.HttpClient", "0.1.4")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
                 self.assertEqual(xml_value(path, "./PropertyGroup/Version"), version)
@@ -80,7 +80,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_react_native_release_requires_fixed_core_range_and_updates_native_identity(self) -> None:
         manifest = json_object("js/logbrew-react-native/package.json")
 
-        self.assertEqual(manifest["peerDependencies"]["@logbrew/sdk"], "^0.1.26")
+        self.assertEqual(manifest["peerDependencies"]["@logbrew/sdk"], "^0.1.33")
 
         self.assertIn(
             f'private static let sdkVersion = "{manifest["version"]}"',
@@ -255,12 +255,12 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
         self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.8")
         self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.16")
-        self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.20")
-        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.8")
+        self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.21")
+        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.9")
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.3")
-        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.3")
+        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.4")
         self.assertEqual(check_release_metadata.DOTNET_HANGFIRE_VERSION, "0.1.0")
-        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.10")
+        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.11")
         self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.3")
         self.assertEqual(
             {
@@ -268,7 +268,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.22",
+                "logbrew-sdk": "0.1.23",
                 "logbrew-fastapi": "0.1.13",
                 "logbrew-flask": "0.1.7",
                 "logbrew-django": "0.1.8",

@@ -86,7 +86,7 @@ export {
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
-const DEFAULT_SDK_VERSION = "0.1.13";
+const DEFAULT_SDK_VERSION = "0.1.14";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
