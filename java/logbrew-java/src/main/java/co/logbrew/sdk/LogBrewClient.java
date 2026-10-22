@@ -5,11 +5,13 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -33,6 +35,8 @@ public final class LogBrewClient {
     private final EncryptedEventStore eventStore;
     private final AutomaticDeliveryController automaticDelivery;
     private long pendingEventBytes;
+    // The newest event captured by a delivery snapshot or session; it and older events are never evicted.
+    private QueuedEvent deliveryProtectedThrough;
     private long droppedEventBytes;
     private int droppedEvents;
     private boolean closing;
@@ -594,8 +598,10 @@ public final class LogBrewClient {
         Map<String, Object> eventValue = Collections.unmodifiableMap(event.toMap());
         String eventJson = Json.write(eventValue);
         long eventBytes = utf8Bytes(eventJson);
-        QueuedEvent queuedEvent = new QueuedEvent(eventJson, eventBytes, null);
+        boolean fatal = "issue".equals(type) && "critical".equals(attributes.get("level"));
+        QueuedEvent queuedEvent = new QueuedEvent(eventJson, eventBytes, null, id, type, fatal);
         EventDrop drop = null;
+        List<EventDrop> evictions = new ArrayList<>();
         boolean queued = false;
 
         synchronized (stateLock) {
@@ -604,8 +610,8 @@ public final class LogBrewClient {
                 || utf8Bytes(serializeBatch(Collections.singletonList(queuedEvent)))
                     > deliveryOptions.maxBatchBytes()) {
                 drop = recordDrop(id, type, "event_too_large", eventBytes);
-            } else if (events.size() >= deliveryOptions.maxQueueEvents()
-                || eventBytes > deliveryOptions.maxQueueBytes() - pendingEventBytes) {
+            } else if (overflows(events.size(), pendingEventBytes + eventBytes)
+                && (!fatal || !evictForFatalLocked(eventBytes, evictions))) {
                 drop = recordDrop(id, type, "queue_overflow", eventBytes);
             } else {
                 if (eventStore != null) {
@@ -615,7 +621,7 @@ public final class LogBrewClient {
                         deliveryOptions.maxQueueEvents(),
                         deliveryOptions.maxQueueBytes()
                     );
-                    queuedEvent = new QueuedEvent(eventJson, eventBytes, record);
+                    queuedEvent = new QueuedEvent(eventJson, eventBytes, record, id, type, fatal);
                 }
                 events.addLast(queuedEvent);
                 pendingEventBytes += eventBytes;
@@ -628,9 +634,68 @@ public final class LogBrewClient {
             if (automaticDelivery != null) {
                 automaticDelivery.onDropped(drop.reason());
             }
-        } else if (queued && automaticDelivery != null) {
+        }
+        // Report evictions only after admission so drop callbacks cannot refill the freed room.
+        for (EventDrop eviction : evictions) {
+            reportDroppedEvent(eviction);
+            if (automaticDelivery != null) {
+                automaticDelivery.onDropped(eviction.reason());
+            }
+        }
+        if (queued && automaticDelivery != null) {
             automaticDelivery.onQueueChanged(pendingEvents());
         }
+    }
+
+    private boolean overflows(int queuedEvents, long queuedBytes) {
+        return queuedEvents >= deliveryOptions.maxQueueEvents() || queuedBytes > deliveryOptions.maxQueueBytes();
+    }
+
+    /**
+     * Removes the oldest events that are not crash reports and not captured by a delivery snapshot
+     * or session, only when that makes room. The encrypted store keeps every admitted event, so a
+     * crash report there is dropped like any other event at a full queue.
+     */
+    private boolean evictForFatalLocked(long eventBytes, List<EventDrop> evictions) {
+        if (eventStore != null) {
+            return false;
+        }
+        boolean protectedPrefix = false;
+        for (QueuedEvent queued : events) {
+            if (queued == deliveryProtectedThrough) {
+                protectedPrefix = true;
+                break;
+            }
+        }
+        Set<QueuedEvent> evicted = Collections.newSetFromMap(new IdentityHashMap<>());
+        int remainingEvents = events.size();
+        long remainingBytes = pendingEventBytes + eventBytes;
+        Iterator<QueuedEvent> candidates = events.iterator();
+        while (candidates.hasNext() && overflows(remainingEvents, remainingBytes)) {
+            QueuedEvent candidate = candidates.next();
+            if (protectedPrefix) {
+                protectedPrefix = candidate != deliveryProtectedThrough;
+                continue;
+            }
+            if (!candidate.fatal) {
+                evicted.add(candidate);
+                remainingEvents--;
+                remainingBytes -= candidate.serializedBytes;
+            }
+        }
+        if (evicted.isEmpty() || overflows(remainingEvents, remainingBytes)) {
+            return false;
+        }
+        Iterator<QueuedEvent> queued = events.iterator();
+        while (queued.hasNext()) {
+            QueuedEvent candidate = queued.next();
+            if (evicted.contains(candidate)) {
+                queued.remove();
+                pendingEventBytes -= candidate.serializedBytes;
+                evictions.add(recordDrop(candidate.id, candidate.type, "evicted_for_fatal", candidate.serializedBytes));
+            }
+        }
+        return true;
     }
 
     private EventDrop recordDrop(String id, String type, String reason, long serializedBytes) {
@@ -678,7 +743,10 @@ public final class LogBrewClient {
                     QueuedEvent event = new QueuedEvent(
                         record.eventJson(),
                         record.eventBytes(),
-                        record
+                        record,
+                        null,
+                        null,
+                        false
                     );
                     events.addLast(event);
                     pendingEventBytes += event.serializedBytes;
@@ -721,6 +789,7 @@ public final class LogBrewClient {
         synchronized (stateLock) {
             ensureNotClosedOrClosing();
             ensurePersistenceRecovered();
+            deliveryProtectedThrough = events.peekLast();
             return new DeliverySession(new ArrayList<>(events));
         }
     }
@@ -765,9 +834,12 @@ public final class LogBrewClient {
                     if (shutdown) {
                         closing = true;
                     }
-                    snapshot = session == null
-                        ? new ArrayList<>(events)
-                        : remainingSessionEvents(session);
+                    if (session == null) {
+                        deliveryProtectedThrough = events.peekLast();
+                        snapshot = new ArrayList<>(events);
+                    } else {
+                        snapshot = remainingSessionEvents(session);
+                    }
                 }
 
                 boolean shutdownCompleted = false;
@@ -1064,15 +1136,24 @@ public final class LogBrewClient {
         private final String eventJson;
         private final long serializedBytes;
         private final EncryptedEventStore.Record persistedRecord;
+        private final String id;
+        private final String type;
+        private final boolean fatal;
 
         private QueuedEvent(
             String eventJson,
             long serializedBytes,
-            EncryptedEventStore.Record persistedRecord
+            EncryptedEventStore.Record persistedRecord,
+            String id,
+            String type,
+            boolean fatal
         ) {
             this.eventJson = eventJson;
             this.serializedBytes = serializedBytes;
             this.persistedRecord = persistedRecord;
+            this.id = id;
+            this.type = type;
+            this.fatal = fatal;
         }
     }
 

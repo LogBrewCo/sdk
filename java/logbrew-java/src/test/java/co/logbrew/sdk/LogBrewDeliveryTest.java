@@ -30,6 +30,9 @@ public final class LogBrewDeliveryTest {
         testConcurrentFlushesSerializeAndDrainLaterWork();
         testTransportReentrantFlushFailsWithoutLosingWork();
         testFailedShutdownReopensAndRetainsWork();
+        testCrashReportEvictsOldestQueuedEvent();
+        testCrashReportEvictsByQueueBytes();
+        testCrashReportKeepsEventsOwnedByDelivery();
         System.out.println("java delivery tests ok (" + testsRun + " tests)");
     }
 
@@ -261,6 +264,91 @@ public final class LogBrewDeliveryTest {
         assertEquals(2, recovered.acceptedEvents(), "recovered accepted events");
         assertTrue(client.isClosed(), "recovered shutdown closes client");
         assertEquals(0, client.pendingEvents(), "recovered shutdown pending events");
+        testsRun++;
+    }
+
+    private void testCrashReportEvictsOldestQueuedEvent() {
+        List<LogBrewClient.EventDrop> drops = new ArrayList<>();
+        LogBrewClient client = client(DeliveryOptions.builder().maxQueueEvents(3).onEventDropped(drops::add).build());
+        enqueueLog(client, "evt_java_evict_0", "first");
+        enqueueLog(client, "evt_java_evict_1", "second");
+        enqueueLog(client, "evt_java_evict_2", "third");
+        client.issue("evt_java_evict_crash", "2026-06-02T10:00:04Z", IssueAttributes.create("App crashed", "fatal"));
+
+        String pending = client.previewJson();
+        assertNotContains(pending, "evt_java_evict_0");
+        assertContains(pending, "evt_java_evict_1");
+        assertContains(pending, "evt_java_evict_crash");
+        assertEquals(3, client.pendingEvents(), "eviction keeps the queue at its limit");
+        assertEquals(1, drops.size(), "eviction callback count");
+        assertEquals("evt_java_evict_0", drops.get(0).eventId(), "evicted event id");
+        assertEquals("evicted_for_fatal", drops.get(0).reason(), "eviction reason");
+        assertEquals(1, client.droppedEvents(), "eviction counts as a drop");
+
+        enqueueLog(client, "evt_java_evict_3", "fourth");
+        assertEquals("queue_overflow", drops.get(1).reason(), "other events still drop at a full queue");
+        testsRun++;
+    }
+
+    private void testCrashReportEvictsByQueueBytes() {
+        LogBrewClient probe = client(DeliveryOptions.builder().build());
+        enqueueLog(probe, "evt_java_evict_bytes_0", "same-size");
+        long logBytes = probe.pendingEventBytes();
+        probe.issue("evt_java_evict_bytes_crash", "2026-06-02T10:00:04Z", IssueAttributes.create("App crashed with a longer title", "critical"));
+        long crashBytes = probe.pendingEventBytes() - logBytes;
+
+        List<LogBrewClient.EventDrop> drops = new ArrayList<>();
+        LogBrewClient client = client(DeliveryOptions.builder()
+            .maxQueueEvents(10)
+            .maxQueueBytes(logBytes + crashBytes)
+            .maxBatchBytes(1_000_000)
+            .onEventDropped(drops::add)
+            .build());
+        enqueueLog(client, "evt_java_evict_bytes_0", "same-size");
+        enqueueLog(client, "evt_java_evict_bytes_1", "same-size");
+        client.issue("evt_java_evict_bytes_crash", "2026-06-02T10:00:04Z", IssueAttributes.create("App crashed with a longer title", "critical"));
+
+        String pending = client.previewJson();
+        assertNotContains(pending, "evt_java_evict_bytes_0");
+        assertContains(pending, "evt_java_evict_bytes_1");
+        assertContains(pending, "evt_java_evict_bytes_crash");
+        assertEquals(logBytes + crashBytes, client.pendingEventBytes(), "eviction keeps bytes within the limit");
+        assertEquals(1, drops.size(), "byte eviction callback count");
+        assertEquals("evicted_for_fatal", drops.get(0).reason(), "byte eviction reason");
+        testsRun++;
+    }
+
+    private void testCrashReportKeepsEventsOwnedByDelivery() {
+        List<LogBrewClient.EventDrop> drops = new ArrayList<>();
+        LogBrewClient client = client(DeliveryOptions.builder()
+            .maxQueueEvents(3)
+            .maxBatchEvents(1)
+            .onEventDropped(drops::add)
+            .build());
+        enqueueLog(client, "evt_java_owned_0", "first");
+        enqueueLog(client, "evt_java_owned_1", "second");
+        List<String> bodies = new ArrayList<>();
+        Transport transport = (apiKey, body) -> {
+            bodies.add(body);
+            if (bodies.size() == 1) {
+                enqueueLog(client, "evt_java_owned_later", "later");
+                client.issue("evt_java_owned_crash_0", "2026-06-02T10:00:04Z", IssueAttributes.create("First crash", "fatal"));
+                client.issue("evt_java_owned_crash_1", "2026-06-02T10:00:05Z", IssueAttributes.create("Second crash", "fatal"));
+            }
+            return new TransportResponse(202, 1);
+        };
+
+        client.flush(transport);
+
+        assertEquals(2, bodies.size(), "flush sends every snapshot batch");
+        assertContains(bodies.get(1), "evt_java_owned_1");
+        assertEquals(2, drops.size(), "drops while delivery owns the queue");
+        assertEquals("evt_java_owned_later", drops.get(0).eventId(), "only an event outside the snapshot is evicted");
+        assertEquals("evicted_for_fatal", drops.get(0).reason(), "owned eviction reason");
+        assertEquals("evt_java_owned_crash_1", drops.get(1).eventId(), "a crash report without room is dropped");
+        assertEquals("queue_overflow", drops.get(1).reason(), "owned overflow reason");
+        assertEquals(1, client.pendingEvents(), "the admitted crash report waits for the next flush");
+        assertContains(client.previewJson(), "evt_java_owned_crash_0");
         testsRun++;
     }
 
