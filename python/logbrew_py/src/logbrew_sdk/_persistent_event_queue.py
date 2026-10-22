@@ -19,7 +19,7 @@ _DATABASE_NAME = "events.sqlite3"
 _LOCK_NAME = ".lock"
 _ALLOWED_ENTRIES = {_LOCK_NAME, _DATABASE_NAME, f"{_DATABASE_NAME}-journal"}
 _EXPECTED_TABLES = {"events", "queue_state"}
-_PendingOperation = tuple[Literal["append", "ack", "purge"], int]
+_PendingOperation = tuple[Literal["append", "ack", "remove", "purge"], int]
 
 
 class PersistentEventQueue:
@@ -66,8 +66,7 @@ class PersistentEventQueue:
     @property
     def count(self) -> int:
         self._ensure_ready()
-        state = self._read_state(check_count=True)
-        return state.last_admitted - state.accepted_through
+        return self._read_state(check_count=True).count
 
     @property
     def byte_count(self) -> int:
@@ -80,10 +79,7 @@ class PersistentEventQueue:
         try:
             connection.execute("BEGIN IMMEDIATE")
             state = self._read_state(check_count=True)
-            if (
-                state.last_admitted - state.accepted_through >= self._max_queue_size
-                or state.pending_bytes + byte_count > self._max_queue_bytes
-            ):
+            if state.count >= self._max_queue_size or state.pending_bytes + byte_count > self._max_queue_bytes:
                 raise SdkError("persistent_queue_error", "persistent queue exceeds configured limits")
             sequence = state.last_admitted + 1
             event = QueuedEvent(
@@ -102,6 +98,7 @@ class PersistentEventQueue:
                     accepted_through=state.accepted_through,
                     last_admitted=sequence,
                     pending_bytes=state.pending_bytes + byte_count,
+                    pending_count=state.count + 1,
                 )
             )
             self._commit_transaction(
@@ -125,15 +122,13 @@ class PersistentEventQueue:
         if upper <= state.accepted_through:
             return ()
         records = self._read_records(through_sequence=upper)
-        expected = tuple(range(state.accepted_through + 1, upper + 1))
-        if tuple(record.sequence for record in records) != expected:
-            raise _integrity_error()
+        _check_sequences(records, state, upper)
         return records
 
     def last_sequence(self) -> int | None:
         self._ensure_ready()
         state = self._read_state(check_count=True)
-        return None if state.last_admitted == state.accepted_through else state.last_admitted
+        return None if state.count == 0 else state.last_admitted
 
     def acknowledge(self, through_sequence: int) -> int:
         self._ensure_ready()
@@ -144,8 +139,8 @@ class PersistentEventQueue:
             if through_sequence <= state.accepted_through or through_sequence > state.last_admitted:
                 raise _integrity_error()
             accepted = self._read_records(through_sequence=through_sequence)
-            expected = tuple(range(state.accepted_through + 1, through_sequence + 1))
-            if tuple(record.sequence for record in accepted) != expected:
+            _check_sequences(accepted, state, through_sequence)
+            if not accepted or accepted[-1].sequence != through_sequence:
                 raise _integrity_error()
             accepted_bytes = sum(record.byte_count for record in accepted)
             self._write_state(
@@ -153,6 +148,7 @@ class PersistentEventQueue:
                     accepted_through=through_sequence,
                     last_admitted=state.last_admitted,
                     pending_bytes=state.pending_bytes - accepted_bytes,
+                    pending_count=state.count - len(accepted),
                 )
             )
             connection.execute("DELETE FROM events WHERE sequence <= ?", (through_sequence,))
@@ -170,18 +166,59 @@ class PersistentEventQueue:
             raise
         return len(accepted)
 
+    def remove(self, sequences: set[int]) -> int:
+        """Remove exact pending records anywhere in the queue; used only to make room for a crash report."""
+
+        self._ensure_ready()
+        if not sequences:
+            return 0
+        connection = self._require_connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            state = self._read_state(check_count=True)
+            removed = [record for record in self._read_records() if record.sequence in sequences]
+            if len(removed) != len(sequences) or any(
+                record.sequence <= state.accepted_through for record in removed
+            ):
+                raise _integrity_error()
+            remaining = state.count - len(removed)
+            self._write_state(
+                QueueState(
+                    accepted_through=state.accepted_through,
+                    last_admitted=state.last_admitted,
+                    pending_bytes=state.pending_bytes - sum(record.byte_count for record in removed),
+                    pending_count=remaining,
+                )
+            )
+            for record in removed:
+                connection.execute("DELETE FROM events WHERE sequence = ?", (record.sequence,))
+            self._commit_transaction(
+                pending=("remove", remaining),
+                message="persistent event removal could not be confirmed",
+            )
+        except sqlite3.Error:
+            with suppress(sqlite3.Error):
+                connection.rollback()
+            raise SdkError("persistent_queue_error", "persistent event removal failed") from None
+        except BaseException:
+            with suppress(sqlite3.Error):
+                connection.rollback()
+            raise
+        return len(removed)
+
     def purge(self) -> int:
         self._ensure_ready()
         connection = self._require_connection()
         try:
             connection.execute("BEGIN IMMEDIATE")
             state = self._read_state(check_count=True)
-            removed = state.last_admitted - state.accepted_through
+            removed = state.count
             self._write_state(
                 QueueState(
                     accepted_through=state.last_admitted,
                     last_admitted=state.last_admitted,
                     pending_bytes=0,
+                    pending_count=0,
                 )
             )
             connection.execute("DELETE FROM events")
@@ -203,8 +240,7 @@ class PersistentEventQueue:
         """Revalidate authenticated state and return the pending event count."""
 
         self._ensure_ready()
-        state = self._validate_recovery()
-        return state.last_admitted - state.accepted_through
+        return self._validate_recovery().count
 
     def close(self) -> None:
         self._assert_owner()
@@ -387,9 +423,7 @@ class PersistentEventQueue:
                 raise _integrity_error()
             state = self._read_state(check_count=True)
             records = self._read_records()
-            expected = tuple(range(state.accepted_through + 1, state.last_admitted + 1))
-            if tuple(record.sequence for record in records) != expected:
-                raise _integrity_error()
+            _check_sequences(records, state, state.last_admitted)
             if (
                 len(records) > self._max_queue_size
                 or sum(record.byte_count for record in records) > self._max_queue_bytes
@@ -452,6 +486,11 @@ class PersistentEventQueue:
                 if state.accepted_through < value:
                     self._pending_confirmation = None
                     return
+            elif operation == "remove":
+                # No other queue work runs before confirmation, so a different count means no commit.
+                if state.count != value:
+                    self._pending_confirmation = None
+                    return
             elif state.accepted_through != state.last_admitted:
                 self._pending_confirmation = None
                 return
@@ -475,7 +514,7 @@ class PersistentEventQueue:
             state = self._crypto.decrypt_state(*rows[0])
             if check_count:
                 count = int(self._require_connection().execute("SELECT COUNT(*) FROM events").fetchone()[0])
-                if count != state.last_admitted - state.accepted_through:
+                if count != state.count:
                     raise _integrity_error()
             return state
         except SdkError:
@@ -600,6 +639,15 @@ class PersistentEventQueue:
             with suppress(OSError):
                 os.close(self._directory_fd)
             self._directory_fd = -1
+
+
+def _check_sequences(records: tuple[QueuedEvent, ...], state: QueueState, upper: int) -> None:
+    """Require ordered pending sequences; the stored count catches a row deleted outside this SDK."""
+
+    if records and (records[0].sequence <= state.accepted_through or records[-1].sequence > upper):
+        raise _integrity_error()
+    if upper == state.last_admitted and len(records) != state.count:
+        raise _integrity_error()
 
 
 def _validated_path(directory: str | os.PathLike[str]) -> Path:

@@ -943,9 +943,6 @@ class LogBrewClient:
 
     def _evict_for_fatal(self, event_bytes: int) -> tuple[QueuedEvent, ...]:
         """Remove the oldest non-crash events outside the frozen delivery body, only when that makes room."""
-        remove = getattr(self._queue, "remove", None)
-        if remove is None:
-            return ()
         protected_through = 0 if self._frozen_prefix is None else self._frozen_prefix.through_sequence
         count = self._queue.count
         byte_count = self._queue.byte_count + event_bytes
@@ -960,7 +957,7 @@ class LogBrewClient:
             byte_count -= record.byte_count
         if count >= self.max_queue_size or byte_count > self.max_queue_bytes:
             return ()
-        remove({record.sequence for record in chosen})
+        self._queue.remove({record.sequence for record in chosen})
         return tuple(chosen)
 
     def _report_drop(self, drop: EventDrop) -> None:

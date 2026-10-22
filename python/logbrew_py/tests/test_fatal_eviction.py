@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -145,21 +148,85 @@ class FatalEvictionTests(unittest.TestCase):
         self.assertEqual(sent, [["evt_log_001", "evt_log_002"], ["evt_log_001", "evt_log_002"], ["evt_fatal_001"]])
 
     @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
-    def test_a_persistent_queue_keeps_rejecting_at_a_full_queue(self) -> None:
+    def test_a_crash_report_at_a_full_persistent_queue_survives_a_hard_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "queue"
+            script = f"""
+import os
+from pathlib import Path
+from logbrew_sdk import LogBrewClient
+
+drops = []
+client = LogBrewClient.create(
+    api_key="lb_test_key",
+    sdk_name="logbrew-python-fatal-eviction",
+    sdk_version="0.1.0",
+    max_queue_size=2,
+    breadcrumbs=False,
+    on_event_dropped=drops.append,
+    persistent_queue_directory=Path(os.environ["QUEUE_DIR"]),
+    persistent_queue_encryption_key=bytes(32),
+)
+client.log("evt_log_001", "{TIMESTAMP}", {{"message": "queued", "level": "info"}})
+client.log("evt_log_002", "{TIMESTAMP}", {{"message": "queued", "level": "info"}})
+client.issue("evt_fatal_001", "{TIMESTAMP}", {FATAL!r})
+print([(drop.event_id, drop.reason) for drop in drops], flush=True)
+os._exit(0)
+"""
+            env = {
+                **os.environ,
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "QUEUE_DIR": str(directory),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+            command = [sys.executable, "-c", script]
+            result = subprocess.run(command, check=False, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "[('evt_log_001', 'evicted_for_fatal')]")
+
+            recovered = create_client(
+                max_queue_size=2,
+                persistent_queue_directory=directory,
+                persistent_queue_encryption_key=bytes(32),
+            )
+            self.assertEqual(queued_ids(recovered), ["evt_log_002", "evt_fatal_001"])
+            self.assertEqual(recovered.pending_events(), 2)
+            transport = RecordingTransport.always_accept()
+            recovered.shutdown(transport)
+            self.assertEqual(
+                [event["id"] for event in json.loads(transport.sent_bodies[0])["events"]],
+                ["evt_log_002", "evt_fatal_001"],
+            )
+
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
+    def test_a_persistent_crash_report_never_evicts_events_in_a_body_waiting_for_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             drops: list[EventDrop] = []
             client = create_client(
                 drops,
-                max_queue_size=1,
+                max_queue_size=3,
+                max_batch_events=2,
                 persistent_queue_directory=Path(temporary).resolve() / "queue",
                 persistent_queue_encryption_key=bytes(32),
             )
-            log(client, "evt_log_001")
+            for event_id in ("evt_log_001", "evt_log_002", "evt_log_003"):
+                log(client, event_id)
+            transport = RecordingTransport([{"status_code": 503}, {"status_code": 202}, {"status_code": 202}])
+            with self.assertRaises(SdkError):
+                client.flush(transport)
+
             client.issue("evt_fatal_001", TIMESTAMP, FATAL)
+            client.issue("evt_fatal_002", TIMESTAMP, FATAL)
+            client.flush(transport)
 
-            self.assertEqual([(drop.event_id, drop.reason) for drop in drops], [("evt_fatal_001", "queue_overflow")])
-            client.shutdown(RecordingTransport.always_accept())
-
+            self.assertEqual(
+                [(drop.event_id, drop.reason) for drop in drops],
+                [("evt_log_003", "evicted_for_fatal"), ("evt_fatal_002", "queue_overflow")],
+            )
+            sent = [[event["id"] for event in json.loads(body)["events"]] for body in transport.sent_bodies]
+            self.assertEqual(sent, [["evt_log_001", "evt_log_002"], ["evt_log_001", "evt_log_002"], ["evt_fatal_001"]])
+            self.assertEqual(client.pending_events(), 0)
+            client.shutdown(transport)
 
 if __name__ == "__main__":
     unittest.main()
