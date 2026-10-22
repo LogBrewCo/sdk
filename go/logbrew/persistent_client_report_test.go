@@ -211,8 +211,8 @@ func decodeSavedCounts(t *testing.T, raw json.RawMessage) map[string]int {
 
 const reportHelperEnv = "LOGBREW_REPORT_HELPER_DIRECTORY"
 
-// TestReportHelperProcess is the app that drops events and exits without
-// cleanup. The restart test below starts it.
+// TestReportHelperProcess is the app that drops an event and exits at once.
+// The restart test below starts it.
 func TestReportHelperProcess(t *testing.T) {
 	directory := os.Getenv(reportHelperEnv)
 	if directory == "" {
