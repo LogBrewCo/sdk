@@ -161,21 +161,37 @@ namespace LogBrew
         {
             var singleBodyBytes = batchBuilder.SingleEventRequestBytes(item);
             DroppedEvent? drop = null;
+            var evictions = new List<DroppedEvent>();
             if (durableSession != null)
             {
                 durableSession.EnterOperation();
                 try
                 {
+                    var evicted = new List<Event>();
                     lock (gate)
                     {
                         RequireOpenLocked();
-                        drop = AdmissionDropLocked(item, singleBodyBytes);
+                        drop = AdmissionDropLocked(item, singleBodyBytes, evicted);
                     }
                     if (drop == null)
                     {
                         var recordName = string.Empty;
                         try
                         {
+                            // Delete evicted records before storing the crash report, so a restart never
+                            // recovers more events than the queue bounds allow.
+                            if (evicted.Count > 0)
+                            {
+                                durableSession.Remove(evicted);
+                                lock (gate)
+                                {
+                                    foreach (var removed in evicted)
+                                    {
+                                        evictions.Add(RecordDropLocked(removed.Id, removed.Type, "evicted_for_fatal"));
+                                    }
+                                }
+                            }
+
                             recordName = durableSession.Persist(item);
                         }
                         catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
@@ -206,32 +222,20 @@ namespace LogBrew
                 {
                     durableSession.ExitOperation();
                 }
-                if (drop != null)
-                {
-                    dropReporter.Report(drop);
-                }
+                ReportDrops(drop, evictions);
                 return;
             }
-            var evictions = new List<DroppedEvent>();
             lock (gate)
             {
                 RequireOpenLocked();
-                var reason = DeliveryQueuePolicy.AdmissionDropReason(
-                    item, singleBodyBytes, events.Count, queuedBytes, maxQueueSize, maxQueueBytes);
-                if ((reason == "queue_overflow" || reason == "queue_bytes_overflow") && DeliveryQueuePolicy.IsFatal(item))
+                var evicted = new List<Event>();
+                drop = AdmissionDropLocked(item, singleBodyBytes, evicted);
+                foreach (var removed in evicted)
                 {
-                    foreach (var evicted in EvictForFatalLocked(item.SerializedByteCount))
-                    {
-                        evictions.Add(RecordDropLocked(evicted.Id, evicted.Type, "evicted_for_fatal"));
-                        reason = null;
-                    }
+                    evictions.Add(RecordDropLocked(removed.Id, removed.Type, "evicted_for_fatal"));
                 }
 
-                if (reason != null)
-                {
-                    drop = RecordDropLocked(item.Id, item.Type, reason);
-                }
-                else
+                if (drop == null)
                 {
                     var wasEmpty = events.Count == 0;
                     events.Add(item);
@@ -242,6 +246,11 @@ namespace LogBrew
                     }
                 }
             }
+            ReportDrops(drop, evictions);
+        }
+
+        private void ReportDrops(DroppedEvent? drop, List<DroppedEvent> evictions)
+        {
             if (drop != null)
             {
                 dropReporter.Report(drop);
@@ -255,8 +264,7 @@ namespace LogBrew
         }
 
         // Removes the oldest events that are not crash reports, not in the frozen batch being sent or
-        // retried, and not the last event of a pending flush, only when that makes room. Durable
-        // delivery keeps every admitted event, so this runs only for the in-memory queue.
+        // retried, and not the last event of a pending flush, only when that makes room.
         private List<Event> EvictForFatalLocked(int itemBytes)
         {
             var indexes = new List<int>();
@@ -326,10 +334,18 @@ namespace LogBrew
             }
         }
 
-        private DroppedEvent? AdmissionDropLocked(Event item, int singleBodyBytes)
+        // Returns the drop for an event that cannot enter the queue. A crash report at a full queue
+        // first removes older events into evicted; the caller records them once they are gone.
+        private DroppedEvent? AdmissionDropLocked(Event item, int singleBodyBytes, List<Event> evicted)
         {
             var reason = DeliveryQueuePolicy.AdmissionDropReason(
                 item, singleBodyBytes, events.Count, queuedBytes, maxQueueSize, maxQueueBytes);
+            if ((reason == "queue_overflow" || reason == "queue_bytes_overflow") && DeliveryQueuePolicy.IsFatal(item))
+            {
+                evicted.AddRange(EvictForFatalLocked(item.SerializedByteCount));
+                reason = evicted.Count > 0 ? null : reason;
+            }
+
             return reason == null ? null : RecordDropLocked(item.Id, item.Type, reason);
         }
 

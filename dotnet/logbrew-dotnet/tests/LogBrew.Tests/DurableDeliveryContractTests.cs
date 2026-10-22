@@ -64,11 +64,12 @@ internal static partial class DurableDeliveryContractTests
         PersistedAdmissionSurvivesPreCommitExit();
         DurableRestartRecoversOldestFirst();
         FrozenPrefixPersistsBeforeSendAndRetriesIdentically();
+        CrashReportEvictionSurvivesRestart();
         AcknowledgedPrefixCleanupResumesAfterExit();
         LocalAcknowledgementFailureRetainsExactPrefix();
         KeyRotationSurvivesRecordReplacementExit();
         RecoveryAdmissionIsBoundedBeforeRotation();
-        return 43;
+        return 44;
     }
 
     internal static int RunChild(string[] arguments)
@@ -110,6 +111,42 @@ internal static partial class DurableDeliveryContractTests
             client.Log("evt_frozen_restart", "2026-06-02T10:00:03Z", LogAttributes.Create("frozen", "info"));
             Thread.Sleep(TimeSpan.FromSeconds(5));
             return 3;
+        }
+
+        if (arguments[0] == "--durable-child-fatal-eviction")
+        {
+            var probe = LogBrewClient.Create(ApiKey, "logbrew-dotnet", "0.1.0");
+            probe.Log("evt_fatal_old", "2026-06-02T10:00:01Z", LogAttributes.Create(new string('a', 150), "info"));
+            probe.Log("evt_fatal_kept", "2026-06-02T10:00:02Z", LogAttributes.Create(new string('b', 150), "info"));
+            var maxQueueBytes = 10;
+            using (var preview = System.Text.Json.JsonDocument.Parse(probe.PreviewJson()))
+            {
+                foreach (var queued in preview.RootElement.GetProperty("events").EnumerateArray())
+                {
+                    maxQueueBytes += System.Text.Encoding.UTF8.GetByteCount(queued.GetRawText());
+                }
+            }
+
+            var drops = new List<DroppedEvent>();
+            using var key = new DurableDeliveryKey("primary-2026", Enumerable.Repeat((byte)0x31, 32).ToArray());
+            using var storage = new DurableDeliveryOptions(arguments[1], key);
+            var client = LogBrewClient.CreateAutomaticDurable(
+                ApiKey,
+                "logbrew-dotnet",
+                "0.1.0",
+                RecordingTransport.AlwaysAccept(),
+                storage,
+                new AutomaticDeliveryOptions
+                {
+                    FlushInterval = TimeSpan.FromHours(1),
+                    MaxQueueBytes = maxQueueBytes,
+                },
+                drops.Add);
+            client.Log("evt_fatal_old", "2026-06-02T10:00:01Z", LogAttributes.Create(new string('a', 150), "info"));
+            client.Log("evt_fatal_kept", "2026-06-02T10:00:02Z", LogAttributes.Create(new string('b', 150), "info"));
+            client.Issue("evt_fatal_crash", "2026-06-02T10:00:03Z", IssueAttributes.Create(new string('x', 150), "fatal"));
+            var evicted = drops.Count == 1 && drops[0].EventId == "evt_fatal_old" && drops[0].Reason == "evicted_for_fatal";
+            Environment.Exit(evicted && client.PendingEvents() == 2 ? 0 : 4);
         }
 
         if (arguments[0] == "--durable-child-admission-checkpoint")
@@ -504,6 +541,22 @@ internal static partial class DurableDeliveryContractTests
         AssertTrue(client.Flush().StatusCode == 202, "frozen restart flush failed");
         AssertTrue(transport.SentBodies.Count == 1 && transport.SentBodies[0] == expectedBody, "frozen restart body changed");
         AssertTrue(client.Shutdown().StatusCode == 204, "frozen restart shutdown failed");
+    }
+
+    private static void CrashReportEvictionSurvivesRestart()
+    {
+        using var root = new TemporaryDirectory();
+        RunDurableChild("--durable-child-fatal-eviction", root.Path);
+        var transport = new RecordingTransport(new object[] { 202 });
+        var client = CreateDurableClient(root.Path, transport: transport);
+
+        AssertTrue(client.PendingEvents() == 2, "restart did not recover the crash report and the kept event");
+        AssertTrue(client.Flush().StatusCode == 202, "eviction restart flush failed");
+        var body = transport.SentBodies[0];
+        AssertTrue(!body.Contains("evt_fatal_old", StringComparison.Ordinal), "evicted event came back after restart");
+        AssertTrue(body.Contains("evt_fatal_kept", StringComparison.Ordinal), "eviction removed more events than needed");
+        AssertTrue(body.Contains("evt_fatal_crash", StringComparison.Ordinal), "crash report did not survive restart");
+        AssertTrue(client.Shutdown().StatusCode == 204, "eviction restart shutdown failed");
     }
 
     private static void LocalAcknowledgementFailureRetainsExactPrefix()

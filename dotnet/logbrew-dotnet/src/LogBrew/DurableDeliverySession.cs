@@ -78,6 +78,29 @@ namespace LogBrew
             recordNames.Add(item, recordName);
         }
 
+        public void Remove(IReadOnlyList<Event> items)
+        {
+            RequireActive();
+            RequireRecovered();
+            var names = new List<string>(items.Count);
+            foreach (var item in items)
+            {
+                if (!recordNames.TryGetValue(item, out var recordName))
+                {
+                    throw new SdkException("state_error", "durable delivery record mapping changed");
+                }
+
+                names.Add(recordName);
+            }
+
+            store.ValidateOwnership();
+            store.RemoveEvents(names);
+            foreach (var item in items)
+            {
+                recordNames.Remove(item);
+            }
+        }
+
         public DurableRecoveryState TakeRecoveryState(int maxQueueSize, int maxQueueBytes)
         {
             RequireActive();

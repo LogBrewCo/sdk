@@ -11,6 +11,8 @@ namespace LogBrew
 
         string PersistEvent(Event item);
 
+        void RemoveEvents(IReadOnlyList<string> recordNames);
+
         void PersistPrefix(string body, IReadOnlyList<string> recordNames);
 
         void AcknowledgePrefix(IReadOnlyList<string> recordNames);
