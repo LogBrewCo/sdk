@@ -193,6 +193,34 @@ test("a fatal at a full durable queue evicts the oldest non-fatal record across 
   });
 });
 
+test("unreported drop counts survive a restart and resend under the same report ID", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+    const client = nativeClient(await importRuntime("drops-first", true), { maxQueueSize: 1, maxRetries: 0 });
+    addOfflineLog(client);
+    client.log("evt_rn_dropped", "2026-07-31T08:30:01.000Z", { level: "info", message: "dropped" });
+    const failedBodies = [];
+    await assert.rejects(client.flush({ send(_apiKey, body) {
+      failedBodies.push(body);
+      return { attempts: 1, statusCode: 503 };
+    } }));
+    const failedReport = JSON.parse(failedBodies[0]).client_report;
+    assert.deepEqual(failedReport.dropped_events, { queue_overflow: 1 });
+    assert.equal(nativeStore.records(`${CLIENT_KEY}:client-report`).length, 1);
+
+    const restarted = nativeClient(await importRuntime("drops-restart", true), { maxQueueSize: 1 });
+    const acceptedBodies = [];
+    await restarted.flush({ send(_apiKey, body) {
+      acceptedBodies.push(body);
+      return { attempts: 1, statusCode: 202 };
+    } });
+    assert.deepEqual(JSON.parse(acceptedBodies[0]).client_report, failedReport);
+    assert.deepEqual(
+      JSON.parse(nativeStore.records(`${CLIENT_KEY}:client-report`)[0].serializedEvent),
+      { pending: null, unreported: {} }
+    );
+  });
+});
+
 test("a Hermes fatal crash replays once per stable ID with correlation after a kill during replay", async () => {
   await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
     const debugId = "11111111-2222-4333-8444-555555555555";
@@ -300,7 +328,7 @@ test("failed native hydration closes its handle and permits same-key recovery", 
       () => nativeClient(runtime),
       (error) => error.code === "persistence_error"
     );
-    assert.deepEqual(nativeStore.calls.slice(-2), [
+    assert.deepEqual(nativeStore.calls.filter(([, key]) => key === CLIENT_KEY).slice(-2), [
       ["load", CLIENT_KEY],
       ["close", CLIENT_KEY]
     ]);

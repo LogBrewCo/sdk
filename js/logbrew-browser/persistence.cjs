@@ -222,6 +222,23 @@ function writePersistentBatches({ batches, onPersistError, storage, storageKey }
   }
 }
 
+// Per-tab Web Storage keeps a reload or crash from losing unreported drop counts; tabs never share them.
+function createBrowserClientReportStore(storage, storageKey = DEFAULT_PERSISTENCE_STORAGE_KEY) {
+  if (typeof storage?.getItem !== "function" || typeof storage.setItem !== "function") {
+    return undefined;
+  }
+  const key = `${storageKey}:client-report`;
+  return {
+    loadClientReport() {
+      const raw = storage.getItem(key);
+      return raw ? JSON.parse(raw) : undefined;
+    },
+    saveClientReport(state) {
+      storage.setItem(key, JSON.stringify(state));
+    }
+  };
+}
+
 function removePersistentBatch({ body, onPersistError, storage, storageKey }) {
   const batches = readPersistentBatches({ onPersistError, storage, storageKey })
     .filter((batch) => batch.body !== body);
@@ -379,5 +396,6 @@ function fallbackUtf8ByteLength(text) {
 }
 
 module.exports = {
+  createBrowserClientReportStore,
   createPersistentBrowserTransport
 };

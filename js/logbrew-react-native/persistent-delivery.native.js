@@ -12,6 +12,8 @@ const NATIVE_STORE_METHODS = [
   "purgeEventRecords"
 ];
 const PERSISTENT_QUEUE_MODES = new Set(["auto", "disabled", "required"]);
+// Drop counts live in a separate native queue, so existing native binaries keep them without changes.
+const CLIENT_REPORT_QUEUE_SUFFIX = ":client-report";
 
 export function resolveReactNativePersistentEventStore({
   authKey,
@@ -122,6 +124,7 @@ export function purgeReactNativePersistentQueue({ apiKey, clientKey } = {}) {
 }
 
 function createNativeEventStore(nativeStore, authKey, release) {
+  const reportKey = `${authKey}${CLIENT_REPORT_QUEUE_SUFFIX}`;
   const eventStore = {
     load() {
       const result = requireStatus(
@@ -181,7 +184,42 @@ function createNativeEventStore(nativeStore, authKey, release) {
         "purged"
       );
     },
+    // Appends the new state before acknowledging the old one, so a crash keeps one of them.
+    loadClientReport() {
+      const { records } = requireStatus(
+        "load",
+        callNative(nativeStore, "loadEventRecords", reportKey),
+        "loaded"
+      );
+      const latest = Array.isArray(records) ? records.at(-1)?.serializedEvent : undefined;
+      return typeof latest === "string" ? JSON.parse(latest) : undefined;
+    },
+    saveClientReport(state) {
+      const { records } = requireStatus(
+        "load",
+        callNative(nativeStore, "loadEventRecords", reportKey),
+        "loaded"
+      );
+      const serialized = JSON.stringify(state);
+      requireStatus(
+        "append",
+        callNative(nativeStore, "appendEventRecord", reportKey, serialized, serialized.length),
+        "appended"
+      );
+      if (Array.isArray(records) && records.length > 0) {
+        requireStatus(
+          "acknowledge",
+          callNative(nativeStore, "acknowledgeEventRecords", reportKey, records.length),
+          "acknowledged"
+        );
+      }
+    },
     close() {
+      try {
+        callNative(nativeStore, "closeEventStore", reportKey);
+      } catch {
+        // The drop-count queue is advisory; closing the event queue decides the outcome.
+      }
       try {
         requireStatus(
           "close",

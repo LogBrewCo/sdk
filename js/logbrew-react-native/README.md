@@ -166,6 +166,9 @@ delivery. When the queue is full, a fatal JavaScript report removes the oldest
 events that are not fatal and are not being sent, and counts each one as
 `evicted_for_fatal` in `deliveryHealth().droppedByReason`. The fatal is dropped
 only when the rest of the queue is fatal reports or a batch being sent.
+Drop counts not yet reported to LogBrew are kept in a separate native queue,
+so the next app start sends them, and a report that was already sent keeps
+its `report_id` so LogBrew counts it once.
 
 A successful `shutdown()` drains and closes the queue. A failed flush or
 shutdown leaves the exact remainder available to the same client and the next

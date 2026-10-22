@@ -9,6 +9,9 @@ const STORE_SCHEMA = 1;
 const RECORD_SCHEMA = 1;
 const MANIFEST_FILE = "manifest.json";
 const ACCEPTED_FILE = ".accepted";
+// Drop counts only: reason codes, counts, and a random report ID, never event data.
+const CLIENT_REPORT_FILE = "client-report.json";
+const MAX_CLIENT_REPORT_BYTES = 4096;
 const LOCK_DIRECTORY = ".lock";
 const LOCK_OWNER_FILE = "owner.json";
 const EVENT_FILE_PATTERN = /^event-([0-9]{16})\.lbq$/u;
@@ -121,6 +124,28 @@ function buildNodePersistentEventStore({
         sequences.push(sequence);
         pendingBytes += normalized.eventBytes;
         nextSequence += 1;
+      },
+
+      loadClientReport() {
+        assertOpen();
+        const reportPath = path.join(queueDirectory.path, CLIENT_REPORT_FILE);
+        if (!fs.existsSync(reportPath)) {
+          return undefined;
+        }
+        assertPrivateFile(reportPath, queueDirectory.owner, fail, "persistent queue client report");
+        if (fs.lstatSync(reportPath).size > MAX_CLIENT_REPORT_BYTES) {
+          throw fail("persistent queue client report is too large");
+        }
+        return JSON.parse(fs.readFileSync(reportPath, "utf8"));
+      },
+
+      saveClientReport(state) {
+        assertOpen();
+        const data = Buffer.from(JSON.stringify(state));
+        if (data.length > MAX_CLIENT_REPORT_BYTES) {
+          throw fail("persistent queue client report is too large");
+        }
+        atomicWrite(queueDirectory, CLIENT_REPORT_FILE, data, fail, failCommit, "client report");
       },
 
       close() {
@@ -459,7 +484,7 @@ function recoverRecords({ acceptedThrough, directory, fail, key, limits, onWarni
   const acceptedFiles = [];
   const entries = fs.readdirSync(directory).sort();
   for (const entry of entries) {
-    if ([ACCEPTED_FILE, LOCK_DIRECTORY, MANIFEST_FILE].includes(entry)) {
+    if ([ACCEPTED_FILE, CLIENT_REPORT_FILE, LOCK_DIRECTORY, MANIFEST_FILE].includes(entry)) {
       continue;
     }
     const fullPath = path.join(directory, entry);

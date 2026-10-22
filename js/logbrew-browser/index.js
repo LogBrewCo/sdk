@@ -29,7 +29,7 @@ import {
 } from "./navigation-timing.js";
 import { installBrowserLifecycleDelivery } from "./lifecycle-delivery.js";
 import { markLifecycleTransport } from "./lifecycle-transport.js";
-import { createPersistentBrowserTransport } from "./persistence.js";
+import { createBrowserClientReportStore, createPersistentBrowserTransport } from "./persistence.js";
 import {
   captureBrowserResourceTiming,
   createBrowserResourceTimingEvent,
@@ -85,6 +85,7 @@ export {
 };
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
+const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
 const DEFAULT_SDK_VERSION = "0.1.13";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
@@ -115,7 +116,8 @@ export function createLogBrewBrowserClient({
   release,
   service,
   sdkName = DEFAULT_SDK_NAME,
-  sdkVersion = DEFAULT_SDK_VERSION
+  sdkVersion = DEFAULT_SDK_VERSION,
+  [CLIENT_REPORT_STORE]: clientReportStore
 } = {}) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
@@ -139,7 +141,8 @@ export function createLogBrewBrowserClient({
     maxRetries,
     onEventDropped,
     sdkName,
-    sdkVersion
+    sdkVersion,
+    [CLIENT_REPORT_STORE]: clientReportStore
   });
 }
 
@@ -198,7 +201,10 @@ export function installLogBrewBrowser(options = {}) {
 
   const client = options.client ?? createLogBrewBrowserClient({
     ...options,
-    browserNavigator: options.browserNavigator ?? browserWindow.navigator
+    browserNavigator: options.browserNavigator ?? browserWindow.navigator,
+    [CLIENT_REPORT_STORE]: options.persistOffline
+      ? createBrowserClientReportStore(sessionStorageOf(browserWindow), options.persistOffline.storageKey)
+      : undefined
   });
   const transport = createBrowserTransport(options, browserWindow);
   const traceContext = resolveBrowserTraceContext(options);
@@ -892,6 +898,14 @@ function safeSuppressionReason(reason) {
     .replace(/[^a-z0-9_.:-]+/gu, "_")
     .replace(/^_+|_+$/gu, "")
     .slice(0, 80) || "matched_rule";
+}
+
+function sessionStorageOf(browserWindow) {
+  try {
+    return browserWindow.sessionStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function createBrowserTransport(options, browserWindow) {

@@ -317,7 +317,7 @@ const client = createLogBrewNodeClient({
 
 The automatic timer is client-owned, `unref()`'d, and installs no process, signal, or exit hooks. Set `automaticDelivery: false` for manual-only operation, or pass a custom `transport` to keep the same automatic lifecycle with app-owned I/O. Concurrent flush calls are serialized. Events captured during network I/O form at most one coalesced trailing cohort, retries reuse one stable body, and only acknowledged prefixes leave memory. `shutdown()` cancels scheduling, blocks new capture while draining once, and reopens the retained remainder if delivery fails. `deliveryHealth()` is content-free and exposes only lifecycle, queue, drop, in-flight/coalesced, outcome, and bounded counter fields.
 
-The two persistence options below are mutually exclusive. Use `persistentQueue` when caller-managed encryption at rest is required; use `persistentQueuePath` for the crash-safe lease and atomic-record protocol. Omitting both keeps the default in-memory queue.
+The two persistence options below are mutually exclusive. Use `persistentQueue` when caller-managed encryption at rest is required; use `persistentQueuePath` for the crash-safe lease and atomic-record protocol. Omitting both keeps the default in-memory queue. Both options also keep unreported drop counts in a small `client-report.json` file; it holds only reason codes, counts, and a random report ID, so it is not encrypted.
 
 ### Encrypted restart recovery
 
@@ -370,7 +370,7 @@ await client.shutdown(transport);
 purgeLogBrewNodePersistentQueue({ persistentQueuePath: queueParent });
 ```
 
-The SDK owns one fixed child directory, stores one compact event per atomic record, replays oldest first, and removes accepted prefixes and events evicted to make room for a crash report, so a restart never resends them. Clean shutdown releases ownership immediately; after an abrupt exit, a new owner recovers after a short bounded lease expiry. Existing queue, UTF-8 byte, batch, and drop-new limits apply before disk admission.
+The SDK owns one fixed child directory, stores one compact event per atomic record, replays oldest first, and removes accepted prefixes and events evicted to make room for a crash report, so a restart never resends them. Drop counts not yet reported are kept in the same directory, so the next process sends them under their original `report_id`. Clean shutdown releases ownership immediately; after an abrupt exit, a new owner recovers after a short bounded lease expiry. Existing queue, UTF-8 byte, batch, and drop-new limits apply before disk admission.
 
 Persistent mode fails closed for linked, weakly permissioned, corrupt, unexpected, concurrently owned, or unsupported storage. It never falls back to memory. Records necessarily contain the captured event JSON, but the storage protocol adds no API key, endpoint, request headers, process ID, caller path, or raw storage error. Browser clients and Node clients without either persistence option keep the existing in-memory behavior.
 

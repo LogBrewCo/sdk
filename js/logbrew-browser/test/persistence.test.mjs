@@ -300,6 +300,61 @@ test("online recovery skips same-session persisted copies while the live queue s
   }
 });
 
+test("a reloaded tab and another tab resend one drop report under one report ID", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const { installLogBrewBrowser } = imported;
+  const shared = createMemoryStorage();
+  const tabSession = createMemoryStorage();
+  const sentBodies = [];
+  const install = (browserWindow, statusCode) => installLogBrewBrowser({
+    browserWindow,
+    capturePageViews: false,
+    clientKey: CLIENT_KEY,
+    flushOnCapture: false,
+    maxQueueSize: 1,
+    maxRetries: 0,
+    persistOffline: { storage: shared },
+    replayPersistedOnInstall: false,
+    transport: {
+      async send(_apiKey, body) {
+        sentBodies.push(body);
+        return { statusCode };
+      }
+    }
+  });
+  const log = (context, id) => context.client.log(id, "2026-06-22T10:00:00Z", {
+    level: "info",
+    logger: "browser.lifecycle",
+    message: "tab queue"
+  });
+  try {
+    const firstTab = install(createFakeBrowserWindow(shared, tabSession), 503);
+    for (const id of ["evt_tab_001", "evt_tab_002", "evt_tab_003"]) {
+      log(firstTab, id);
+    }
+    await firstTab.flush().catch(() => undefined);
+    firstTab.uninstall();
+
+    const reloadedTab = install(createFakeBrowserWindow(shared, tabSession), 202);
+    log(reloadedTab, "evt_tab_reloaded_001");
+    await reloadedTab.flush();
+    const otherTab = install(createFakeBrowserWindow(shared), 202);
+    await otherTab.transport.replayStoredBatches(CLIENT_KEY);
+
+    const [failed, reloaded, replayed] = sentBodies.map((body) => JSON.parse(body));
+    assert.deepEqual(failed.events.map((event) => event.id), ["evt_tab_001"]);
+    assert.deepEqual(reloaded.events.map((event) => event.id), ["evt_tab_reloaded_001"]);
+    assert.deepEqual(replayed, failed);
+    assert.match(failed.client_report.report_id, /^[0-9a-f]{32}$/u);
+    assert.deepEqual(reloaded.client_report, failed.client_report);
+    assert.deepEqual(failed.client_report.dropped_events, { queue_overflow: 2 });
+    reloadedTab.uninstall();
+    otherTab.uninstall();
+  } finally {
+    await removeTempDir();
+  }
+});
+
 function createMemoryStorage() {
   const values = new Map();
   return {
@@ -337,7 +392,7 @@ function createMemoryLockManager() {
   };
 }
 
-function createFakeBrowserWindow(storage) {
+function createFakeBrowserWindow(storage, sessionStorage = createMemoryStorage()) {
   const listeners = new Map();
   const documentListeners = new Map();
   return {
@@ -351,6 +406,7 @@ function createFakeBrowserWindow(storage) {
       visibilityState: "visible"
     },
     localStorage: storage,
+    sessionStorage,
     addEventListener(type, listener) {
       addListener(listeners, type, listener);
     },
