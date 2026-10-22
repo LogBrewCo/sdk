@@ -1170,7 +1170,7 @@ class LogBrewClient:
 def _load_client_report(
     queue: EventQueue,
 ) -> tuple[tuple[str, tuple[tuple[str, int], ...]] | None, dict[str, int]]:
-    """Restore saved drop counts; anything unreadable or out of bounds is ignored, never fatal."""
+    """Load saved drop counts; anything unreadable or out of bounds is ignored, never fatal."""
     try:
         state = queue.load_client_report() or {}
     except Exception:
@@ -1178,12 +1178,12 @@ def _load_client_report(
     pending = state.get("pending")
     pending_counts = _valid_client_report_counts(pending.get("dropped_events") if isinstance(pending, dict) else None)
     report_id = pending.get("report_id") if isinstance(pending, dict) else None
-    restored = (
+    pending_report = (
         (report_id, tuple(pending_counts.items()))
         if isinstance(report_id, str) and CLIENT_REPORT_ID_PATTERN.fullmatch(report_id) and pending_counts
         else None
     )
-    return restored, _valid_client_report_counts(state.get("unreported"))
+    return pending_report, _valid_client_report_counts(state.get("unreported"))
 
 
 def _valid_client_report_counts(counts: Any) -> dict[str, int]:

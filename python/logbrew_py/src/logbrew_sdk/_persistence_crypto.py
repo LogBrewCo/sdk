@@ -32,7 +32,7 @@ class QueueState:
     pending_bytes: int
     # Fewer than last_admitted - accepted_through once a crash report evicted queued events.
     pending_count: int | None = None
-    # Unreported drop counts the client restores after a restart; never event data.
+    # Unreported drop counts the client loads after a restart; never event data.
     client_report: dict[str, Any] | None = None
 
     @property
