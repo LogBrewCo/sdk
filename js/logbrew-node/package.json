@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/node",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Node.js runtime helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
@@ -73,7 +73,7 @@
     "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "peerDependencies": {
-    "@logbrew/sdk": "^0.1.16"
+    "@logbrew/sdk": "^0.1.33"
   },
   "scripts": {
     "test": "bun test/run.mjs"

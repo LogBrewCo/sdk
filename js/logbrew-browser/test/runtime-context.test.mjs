@@ -38,9 +38,9 @@ const acceptingTransport = {
   }
 };
 
-test("browser package requires a core that ships the shared breadcrumb installer", () => {
+test("browser package requires a core that keeps drop counts in session storage", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  assert.equal(manifest.peerDependencies["@logbrew/sdk"], "^0.1.32");
+  assert.equal(manifest.peerDependencies["@logbrew/sdk"], "^0.1.33");
 });
 
 function lowEntropyNavigator() {
