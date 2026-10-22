@@ -74,6 +74,7 @@ public final class Main {
     private static final int BATCH_EVENTS = 50;
     private static final String API_KEY = "LOGBREW_INGEST_KEY";
     private static final String MESSAGE = "private-restart-message";
+    private static final int DROPPED_EVENTS = 3;
 
     private Main() {
     }
@@ -98,7 +99,7 @@ public final class Main {
         }
     }
 
-    private static void writeAndHalt(Path directory, byte[] key) {
+    private static void writeAndHalt(Path directory, byte[] key) throws Exception {
         EncryptedEventStore store = EncryptedEventStore.open(directory, key);
         LogBrewClient client = client(store);
         assertEquals(0, client.recoverPersistedEvents().pendingEvents(), "initial recovery");
@@ -110,6 +111,18 @@ public final class Main {
             );
         }
         assertEquals(RECOVERY_EVENTS, client.persistenceStatus().pendingEvents(), "durable admission");
+        // Events over the queue byte limit are dropped and counted; the count must survive the hard exit.
+        for (int index = 0; index < DROPPED_EVENTS; index++) {
+            client.log(
+                "evt_restart_too_large_" + index,
+                "2026-06-02T11:00:00Z",
+                LogAttributes.create("x".repeat(1_100_000), "info")
+            );
+            if (index == 1) {
+                // Drop counts are saved at once for a new reason and at most once a second after that.
+                Thread.sleep(1_100L);
+            }
+        }
         String preview = client.previewJson();
         assertStableRecoveredIds(preview);
         System.out.println("{"
@@ -137,6 +150,9 @@ public final class Main {
             assertEquals("transport_error", failure.code(), "third-batch failure");
             assertEquals(5, scenario.calls.get(), "scripted request count");
             assertTrue(scenario.retryBodyStable, "byte-identical 503 to 202 retry");
+            assertTrue(scenario.firstBody.contains("\"event_too_large\": " + DROPPED_EVENTS), "drop count survived the hard exit");
+            assertTrue(scenario.firstBody.contains("\"client_report\""), "restart request carries the report");
+            assertTrue(scenario.laterBodiesWithoutReport, "an accepted report is not sent again");
             assertEquals(51, client.pendingEvents(), "accepted prefix and later retention");
             assertEquals(51, client.persistenceStatus().pendingEvents(), "durable retained suffix");
 
@@ -148,6 +164,7 @@ public final class Main {
             assertEquals(51, drained.acceptedEvents(), "drained retained events");
             assertEquals(2, drainCalls.get(), "bounded retained requests");
             assertEquals(0, client.persistenceStatus().pendingEvents(), "durable drain");
+            assertTrue(!Files.exists(directory.resolve(".client-report.lbe")), "saved drop counts cleared after acknowledgement");
             client.shutdown((apiKey, body) -> new TransportResponse(202, 1));
 
             System.out.println("{"
@@ -169,7 +186,7 @@ public final class Main {
             DeliveryOptions.builder()
                 .maxRetries(1)
                 .maxQueueEvents(RECOVERY_EVENTS + 1)
-                .maxQueueBytes(32L * 1024L * 1024L)
+                .maxQueueBytes(1024L * 1024L)
                 .maxBatchEvents(BATCH_EVENTS)
                 .maxBatchBytes(8 * 1024 * 1024)
                 .encryptedEventStore(store)
@@ -251,6 +268,7 @@ public final class Main {
         private final AtomicInteger calls = new AtomicInteger();
         private String firstBody;
         private boolean retryBodyStable;
+        private boolean laterBodiesWithoutReport = true;
 
         private ScenarioTransport(LogBrewClient client) {
             this.client = client;
@@ -267,6 +285,9 @@ public final class Main {
             if (call == 2) {
                 retryBodyStable = firstBody.equals(body);
                 return new TransportResponse(202, 1);
+            }
+            if (call >= 3) {
+                laterBodiesWithoutReport &= !body.contains("client_report");
             }
             if (call == 3) {
                 assertTrue(body.contains("evt_restart_0050"), "second recovered prefix");
@@ -325,6 +346,8 @@ for path in store.iterdir():
     data = path.read_bytes()
     if any(needle and needle in data for needle in needles):
         raise SystemExit("persistence privacy check failed")
+if not (store / ".client-report.lbe").is_file():
+    raise SystemExit("drop counts were not saved before the hard exit")
 PY
 
 java -cp "$jar_path:$app_dir/classes" Main recover "$key_file" "$store_dir" "$preview_sha256" > "$app_dir/reader.out"

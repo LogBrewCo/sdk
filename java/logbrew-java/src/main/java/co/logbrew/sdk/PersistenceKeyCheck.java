@@ -60,6 +60,8 @@ final class PersistenceKeyCheck {
             || layout.highWaterFile != null
             || layout.intentFile != null
             || layout.purgeIntentFile != null
+            || layout.clientReportFile != null
+            || !layout.clientReportTemporaryFiles.isEmpty()
             || !layout.temporaryFiles.isEmpty()) {
             throw PersistenceCrypto.integrityFailure();
         }

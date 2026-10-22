@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import java.util.function.LongSupplier;
 
 /**
  * Buffered public client for validating, previewing, and flushing LogBrew events.
@@ -26,6 +27,7 @@ public final class LogBrewClient {
     static final String[] DELTA_CUMULATIVE_TEMPORALITIES = {"delta", "cumulative"};
     static final String[] INSTANT_TEMPORALITY = {"instant"};
     private static final int MAX_CLIENT_REPORT_COUNT = 1_000_000_000;
+    private static final long CLIENT_REPORT_SAVE_INTERVAL_NANOS = 1_000_000_000L;
 
     private final String apiKey;
     private final Map<String, Object> sdk;
@@ -45,6 +47,10 @@ public final class LogBrewClient {
     private final Map<String, Integer> unreportedDrops = new LinkedHashMap<>();
     // Drops frozen under one report ID until a 2xx acknowledges a body that carried them.
     private Map<String, Object> pendingReport;
+    // A persistent store keeps counts not yet acknowledged by a 2xx across restarts.
+    private LongSupplier clientReportClock = System::nanoTime;
+    private long clientReportSavedAt;
+    private boolean clientReportSaved;
     private boolean closing;
     private boolean closed;
     private Thread deliveryOwner;
@@ -722,7 +728,9 @@ public final class LogBrewClient {
         if (droppedEvents < Integer.MAX_VALUE) {
             droppedEvents++;
         }
+        boolean firstOfReason = !unreportedDrops.containsKey(reason);
         unreportedDrops.merge(reason, 1, (count, one) -> Math.min(MAX_CLIENT_REPORT_COUNT, count + one));
+        saveClientReport(firstOfReason);
         droppedEventBytes = serializedBytes > Long.MAX_VALUE - droppedEventBytes
             ? Long.MAX_VALUE
             : droppedEventBytes + serializedBytes;
@@ -774,6 +782,7 @@ public final class LogBrewClient {
                     events.addLast(event);
                     pendingEventBytes += event.serializedBytes;
                 }
+                loadSavedClientReport(store.loadClientReport());
                 persistenceRecovered = true;
                 status = snapshot.status(false);
                 recoveredEvents = events.size();
@@ -791,6 +800,56 @@ public final class LogBrewClient {
         String prefix = "{\n  \"type\": \"";
         int end = json.startsWith(prefix) ? json.indexOf('"', prefix.length()) : -1;
         return end < 0 ? null : json.substring(prefix.length(), end);
+    }
+
+    void setClientReportClock(LongSupplier clock) {
+        synchronized (stateLock) {
+            clientReportClock = clock;
+        }
+    }
+
+    private void loadSavedClientReport(PersistenceClientReport saved) {
+        if (saved == null) {
+            return;
+        }
+        if (pendingReport == null && saved.pendingId != null) {
+            pendingReport = new LinkedHashMap<>();
+            pendingReport.put("report_id", saved.pendingId);
+            pendingReport.put("dropped_events", new LinkedHashMap<>(saved.pending));
+        }
+        saved.unreported.forEach((reason, count) -> unreportedDrops.merge(
+            reason,
+            count,
+            (known, added) -> Math.min(MAX_CLIENT_REPORT_COUNT, known + added)
+        ));
+    }
+
+    /** Saves at once for a new report or reason, and at most once a second during a drop burst. */
+    private void saveClientReport(boolean immediately) {
+        if (eventStore == null) {
+            return;
+        }
+        long now = clientReportClock.getAsLong();
+        if (!immediately && clientReportSaved && now - clientReportSavedAt < CLIENT_REPORT_SAVE_INTERVAL_NANOS) {
+            return;
+        }
+        clientReportSaved = true;
+        clientReportSavedAt = now;
+        Map<String, Integer> pending = new LinkedHashMap<>();
+        if (pendingReport != null) {
+            ((Map<?, ?>) pendingReport.get("dropped_events")).forEach(
+                (reason, count) -> pending.put((String) reason, (Integer) count)
+            );
+        }
+        try {
+            eventStore.saveClientReport(new PersistenceClientReport(
+                pendingReport == null ? null : (String) pendingReport.get("report_id"),
+                pending,
+                new LinkedHashMap<>(unreportedDrops)
+            ));
+        } catch (RuntimeException error) {
+            // Drop counts are advisory: a failed save keeps them in memory and never blocks capture.
+        }
     }
 
     private EncryptedEventStore requireEventStore() {
@@ -885,9 +944,12 @@ public final class LogBrewClient {
                     shutdownCompleted = true;
                     return response;
                 } finally {
-                    if (shutdown && !shutdownCompleted) {
+                    if (shutdown) {
                         synchronized (stateLock) {
-                            closing = false;
+                            saveClientReport(true);
+                            if (!shutdownCompleted) {
+                                closing = false;
+                            }
                         }
                     }
                 }
@@ -969,6 +1031,7 @@ public final class LogBrewClient {
                 pendingReport.put("report_id", UUID.randomUUID().toString().replace("-", ""));
                 pendingReport.put("dropped_events", new LinkedHashMap<>(unreportedDrops));
                 unreportedDrops.clear();
+                saveClientReport(true);
             }
             report = pendingReport;
         }
@@ -1041,6 +1104,7 @@ public final class LogBrewClient {
             // Drops recorded while this body was in flight stay pending under a new report ID.
             if (batch.report != null && batch.report == pendingReport) {
                 pendingReport = null;
+                saveClientReport(true);
             }
             List<EncryptedEventStore.Record> persisted = new ArrayList<>();
             Iterator<QueuedEvent> queued = events.iterator();

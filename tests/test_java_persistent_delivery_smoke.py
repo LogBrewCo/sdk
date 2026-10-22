@@ -26,6 +26,8 @@ class JavaPersistentDeliverySmokeTests(unittest.TestCase):
         self.assertIn('PosixFilePermissions.fromString("rwx------")', script)
         self.assertIn('PosixFilePermissions.fromString("rw-------")', script)
         self.assertIn('persistence privacy check failed', script)
+        self.assertIn('drop count survived the hard exit', script)
+        self.assertIn('.client-report.lbe', script)
         self.assertNotIn('https://api.logbrew.co', script)
 
 

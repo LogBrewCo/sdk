@@ -34,6 +34,7 @@ public final class EncryptedEventStore implements AutoCloseable {
     private List<Record> activeRecords = new ArrayList<>();
     private long checkpointSequence;
     private long nextSequence = 1L;
+    private long clientReportSequence;
     private boolean attached;
     private boolean loaded;
     private boolean failed;
@@ -325,6 +326,98 @@ public final class EncryptedEventStore implements AutoCloseable {
         }
     }
 
+    /** Returns the saved drop counts, or null when none are saved or they are unreadable. */
+    PersistenceClientReport loadClientReport() {
+        synchronized (monitor) {
+            ensureLoaded();
+            Path path = files.path(PersistenceFiles.CLIENT_REPORT_NAME);
+            clientReportSequence = 0L;
+            removeOrphanedReportTemporaries();
+            if (!files.exists(path)) {
+                return null;
+            }
+            try {
+                PersistenceFiles.FileData data = files.read(path, PersistenceClientReport.MAX_BYTES);
+                byte[] plaintext = null;
+                try {
+                    PersistenceCrypto.Header header = crypto.header(data.bytes);
+                    plaintext = crypto.decrypt(PersistenceCrypto.CLIENT_REPORT, header.sequence, data.bytes, storeId);
+                    clientReportSequence = header.sequence;
+                    return PersistenceClientReport.decode(plaintext);
+                } finally {
+                    Arrays.fill(data.bytes, (byte) 0);
+                    if (plaintext != null) {
+                        Arrays.fill(plaintext, (byte) 0);
+                    }
+                }
+            } catch (SdkException error) {
+                // Drop counts are advisory: unreadable counts never block recovery of queued events.
+                return null;
+            }
+        }
+    }
+
+    private void removeQuietly(Path path) {
+        try {
+            files.delete(path);
+        } catch (IOException | SdkException error) {
+            // A leftover report temporary file is removed by the next recovery.
+        }
+    }
+
+    private void removeOrphanedReportTemporaries() {
+        try {
+            for (Path orphan : files.layout().clientReportTemporaryFiles) {
+                files.delete(orphan);
+            }
+            files.syncDirectory();
+        } catch (IOException error) {
+            // Drop counts are advisory: a leftover temporary file never blocks recovery.
+        }
+    }
+
+    /** Durably replaces the saved drop counts, or removes them when there is nothing to save. */
+    void saveClientReport(PersistenceClientReport report) {
+        synchronized (monitor) {
+            ensureLoaded();
+            Path path = files.path(PersistenceFiles.CLIENT_REPORT_NAME);
+            if (report.isEmpty()) {
+                try {
+                    if (files.exists(path)) {
+                        files.delete(path);
+                        files.syncDirectory();
+                    }
+                } catch (IOException error) {
+                    throw new SdkException("persistence_error", "drop counts could not be removed");
+                }
+                return;
+            }
+            long sequence = clientReportSequence + 1L;
+            byte[] payload = report.encode();
+            byte[] encoded = crypto.encrypt(PersistenceCrypto.CLIENT_REPORT, sequence, payload, storeId);
+            PersistenceFiles.OwnedFile temporary = null;
+            try {
+                // An atomic replace needs no intent: a crash leaves the old or the new counts, and
+                // recovery removes an orphaned temporary file without touching queued events.
+                temporary = files.createTemporary("report-pending");
+                PersistenceFiles.FileIdentity identity = files.writeAndForce(temporary, encoded);
+                files.move(temporary, path, true);
+                files.syncDirectory();
+                files.verifyExact(path, identity.size, identity.digest, identity.fileKey);
+                clientReportSequence = sequence;
+            } catch (IOException error) {
+                throw new SdkException("persistence_error", "drop counts could not be stored");
+            } finally {
+                if (temporary != null) {
+                    PersistenceFiles.closeQuietly(temporary);
+                    removeQuietly(temporary.path);
+                }
+                Arrays.fill(payload, (byte) 0);
+                Arrays.fill(encoded, (byte) 0);
+            }
+        }
+    }
+
     void purge() {
         synchronized (monitor) {
             ensureReadable();
@@ -332,6 +425,7 @@ public final class EncryptedEventStore implements AutoCloseable {
                 transaction.purge();
                 activeRecords = new ArrayList<>();
                 checkpointSequence = 0L;
+                clientReportSequence = 0L;
                 nextSequence = 1L;
                 loaded = true;
                 failed = false;

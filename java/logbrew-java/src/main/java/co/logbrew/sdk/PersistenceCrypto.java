@@ -20,6 +20,7 @@ final class PersistenceCrypto implements AutoCloseable {
     static final byte INTENT = 4;
     static final byte PURGE = 5;
     static final byte HIGH_WATER = 6;
+    static final byte CLIENT_REPORT = 7;
     static final int TAG_BYTES = 16;
     static final int HEADER_BYTES = 4 + 1 + 1 + 8 + 12 + 4;
 
