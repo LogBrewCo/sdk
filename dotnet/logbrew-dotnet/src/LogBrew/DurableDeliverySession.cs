@@ -51,7 +51,8 @@ namespace LogBrew
                 frozenBatch,
                 recoveryFailed: false,
                 snapshot.PersistedRecordCount,
-                snapshot.PersistedBytes);
+                snapshot.PersistedBytes,
+                snapshot.UnreportedDrops);
         }
 
         public void EnterOperation()
@@ -140,6 +141,14 @@ namespace LogBrew
             {
                 recordNames.Remove(item);
             }
+        }
+
+        public void SaveClientReport(IReadOnlyDictionary<string, int> unreported)
+        {
+            RequireActive();
+            RequireRecovered();
+            store.ValidateOwnership();
+            store.SaveClientReport(unreported);
         }
 
         public void Purge(IDurableDeliveryPurgeOwner owner)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 namespace LogBrew
@@ -18,6 +19,10 @@ namespace LogBrew
         // Drops frozen under one report ID until a 2xx acknowledges a request that carried them.
         private ClientReport? pendingReport;
         private int droppedEvents;
+        // Persistent clients save unreported counts at once for a new reason and at most once a second in a burst.
+        private bool unsaved;
+        private bool saveAtOnce;
+        private long savedAtTimestamp;
 
         internal DeliveryDropReporter(Action<DroppedEvent>? callback)
         {
@@ -32,8 +37,10 @@ namespace LogBrew
         internal DroppedEvent Record(string id, string type, string reason)
         {
             droppedEvents = DeliveryRuntimePolicy.SaturatingIncrement(droppedEvents);
-            unreportedDrops.TryGetValue(reason, out var unreported);
+            var seen = unreportedDrops.TryGetValue(reason, out var unreported);
             unreportedDrops[reason] = Math.Min(MaxClientReportCount, unreported + 1);
+            unsaved = true;
+            saveAtOnce |= !seen;
             return new DroppedEvent(id, type, reason, droppedEvents);
         }
 
@@ -49,9 +56,35 @@ namespace LogBrew
                 }
 
                 pendingReport = new ClientReport(Guid.NewGuid().ToString("N"), counts);
+                unsaved = true;
+                saveAtOnce = true;
             }
 
             return pendingReport;
+        }
+
+        // Loads counts saved by an earlier process, so the next request still carries them.
+        internal void LoadSaved(IReadOnlyDictionary<string, int> saved)
+        {
+            foreach (var pair in saved.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                unreportedDrops[pair.Key] = pair.Value;
+            }
+        }
+
+        // Returns the counts to save, or null when nothing changed or the save can wait for the burst to settle.
+        internal IReadOnlyDictionary<string, int>? TakeUnsavedCounts(bool force)
+        {
+            var now = Stopwatch.GetTimestamp();
+            if (!unsaved || (!force && !saveAtOnce && now - savedAtTimestamp < Stopwatch.Frequency))
+            {
+                return null;
+            }
+
+            unsaved = false;
+            saveAtOnce = false;
+            savedAtTimestamp = now;
+            return new Dictionary<string, int>(unreportedDrops, StringComparer.Ordinal);
         }
 
         // Drops recorded while the acknowledged request was in flight stay pending under a new report ID.

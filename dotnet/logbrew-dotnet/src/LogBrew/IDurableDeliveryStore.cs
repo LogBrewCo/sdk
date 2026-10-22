@@ -17,6 +17,9 @@ namespace LogBrew
 
         void AcknowledgePrefix(IReadOnlyList<string> recordNames);
 
+        // Stores drop counts no request has carried yet; an empty set removes the saved state.
+        void SaveClientReport(IReadOnlyDictionary<string, int> unreported);
+
         void Purge();
     }
 
@@ -27,13 +30,15 @@ namespace LogBrew
             DurableStoredPrefix? prefix,
             bool recoveryFailed,
             int persistedRecordCount,
-            long persistedBytes)
+            long persistedBytes,
+            IReadOnlyDictionary<string, int>? unreportedDrops = null)
         {
             Events = events;
             Prefix = prefix;
             RecoveryFailed = recoveryFailed;
             PersistedRecordCount = persistedRecordCount;
             PersistedBytes = persistedBytes;
+            UnreportedDrops = unreportedDrops ?? new Dictionary<string, int>();
         }
 
         internal IReadOnlyList<DurableStoredEvent> Events { get; }
@@ -45,6 +50,8 @@ namespace LogBrew
         internal int PersistedRecordCount { get; }
 
         internal long PersistedBytes { get; }
+
+        internal IReadOnlyDictionary<string, int> UnreportedDrops { get; }
     }
 
     internal sealed class DurableStoredEvent
