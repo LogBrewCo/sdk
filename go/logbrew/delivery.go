@@ -520,9 +520,10 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 				c.mu.Unlock()
 				return nil, flushResult{pause: DeliveryOutcomePersistencePause, generation: generation}, err
 			}
-			c.pendingBody = body
-			c.pendingPrefix = prefixLength
 		}
+		// The in-flight prefix stays fixed, so a crash report never evicts an event being sent.
+		c.pendingBody = body
+		c.pendingPrefix = prefixLength
 	}
 	c.health.inFlight = true
 	c.health.flushes++
@@ -561,10 +562,6 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 			c.signalAutomaticLocked()
 		}
 	} else {
-		if c.pendingBody == nil {
-			c.pendingBody = body
-			c.pendingPrefix = prefixLength
-		}
 		c.health.failedFlushes++
 		if !result.stale {
 			c.health.lastOutcome = DeliveryOutcomeRetryableFailure
