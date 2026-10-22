@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -19,7 +22,13 @@ const (
 	persistentQueueFile   = ".queue.lbq"
 )
 
-var persistenceKeyCheck = []byte("logbrew-go-persistence-key-check-v1")
+// clientReportSaveInterval limits drop count saves during a drop burst.
+const clientReportSaveInterval = time.Second
+
+var (
+	persistenceKeyCheck = []byte("logbrew-go-persistence-key-check-v1")
+	dropReasonPattern   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+)
 
 // PersistentDeliveryConfig opts an owned automatic client into encrypted
 // restart persistence. EncryptionKey must contain exactly 32 caller-owned
@@ -38,6 +47,10 @@ type persistedQueue struct {
 	Events        []json.RawMessage `json:"events"`
 	PendingBody   []byte            `json:"pendingBody,omitempty"`
 	PendingPrefix int               `json:"pendingPrefix,omitempty"`
+	// UnreportedDrops holds drop counts no request has carried yet. A request
+	// that is sent or retried keeps its own counts in PendingBody. The field
+	// appears only while counts exist, so a drained queue keeps its old shape.
+	UnreportedDrops json.RawMessage `json:"unreportedDrops,omitempty"`
 }
 
 type persistentStore struct {
@@ -79,6 +92,7 @@ func NewPersistentAutomaticClient(
 	client.events = recovered
 	client.pendingBody = pendingBody
 	client.pendingPrefix = pendingPrefix
+	client.unreportedDrops = store.loadUnreported()
 	if len(client.events) > 0 {
 		client.mu.Lock()
 		client.startAutomaticLocked()
@@ -310,7 +324,7 @@ func (s *persistentStore) admit(event Event, remove ...int) error {
 	return nil
 }
 
-func (s *persistentStore) retainPending(body []byte, prefix int) error {
+func (s *persistentStore) retainPending(body []byte, prefix int, unreported map[string]int) error {
 	if err := s.ensureUsable(); err != nil {
 		return err
 	}
@@ -320,6 +334,7 @@ func (s *persistentStore) retainPending(body []byte, prefix int) error {
 	next := clonePersistedQueue(s.queue)
 	next.PendingBody = append([]byte(nil), body...)
 	next.PendingPrefix = prefix
+	next.UnreportedDrops = encodeDropCounts(unreported)
 	if err := s.writeQueue(next); err != nil {
 		return err
 	}
@@ -327,7 +342,7 @@ func (s *persistentStore) retainPending(body []byte, prefix int) error {
 	return nil
 }
 
-func (s *persistentStore) acknowledge(prefix int) error {
+func (s *persistentStore) acknowledge(prefix int, unreported map[string]int) error {
 	if err := s.ensureUsable(); err != nil {
 		return err
 	}
@@ -343,11 +358,68 @@ func (s *persistentStore) acknowledge(prefix int) error {
 	next.Events = remaining
 	next.PendingBody = nil
 	next.PendingPrefix = 0
+	next.UnreportedDrops = encodeDropCounts(unreported)
 	if err := s.writeQueue(next); err != nil {
 		return err
 	}
 	s.queue = next
 	return nil
+}
+
+// saveUnreported stores the drop counts that no request carries yet.
+func (s *persistentStore) saveUnreported(unreported map[string]int) error {
+	if err := s.ensureUsable(); err != nil {
+		return err
+	}
+	next := clonePersistedQueue(s.queue)
+	next.UnreportedDrops = encodeDropCounts(unreported)
+	if bytes.Equal(next.UnreportedDrops, s.queue.UnreportedDrops) {
+		return nil
+	}
+	if err := s.writeQueue(next); err != nil {
+		return err
+	}
+	s.queue = next
+	return nil
+}
+
+// loadUnreported returns the saved drop counts. Anything unreadable or out of
+// bounds is ignored, never fatal.
+func (s *persistentStore) loadUnreported() map[string]int {
+	counts := make(map[string]int)
+	var saved map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(s.queue.UnreportedDrops))
+	decoder.UseNumber()
+	if decoder.Decode(&saved) != nil {
+		return counts
+	}
+	reasons := make([]string, 0, len(saved))
+	for reason := range saved {
+		reasons = append(reasons, reason)
+	}
+	slices.Sort(reasons)
+	for _, reason := range reasons {
+		number, isNumber := saved[reason].(json.Number)
+		count, err := number.Int64()
+		if !isNumber || err != nil || !dropReasonPattern.MatchString(reason) || count < 1 || count > maxClientReportCount {
+			continue
+		}
+		if counts[reason] = int(count); len(counts) == maxClientReportReasons {
+			break
+		}
+	}
+	return counts
+}
+
+func encodeDropCounts(counts map[string]int) json.RawMessage {
+	if len(counts) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(counts)
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 func (s *persistentStore) writeQueue(queue persistedQueue) error {
@@ -470,6 +542,7 @@ func clonePersistedQueue(queue persistedQueue) persistedQueue {
 		cloned.Events[index] = append(json.RawMessage(nil), queue.Events[index]...)
 	}
 	cloned.PendingBody = append([]byte(nil), queue.PendingBody...)
+	cloned.UnreportedDrops = slices.Clone(queue.UnreportedDrops)
 	return cloned
 }
 

@@ -256,6 +256,7 @@ func (c *Client) Shutdown(transport Transport) (*TransportResponse, error) {
 func (c *Client) finishShutdown(err error, wasAutomatic bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.saveUnreportedLocked(true)
 	if err == nil {
 		if c.persistent != nil {
 			if closeErr := c.persistent.close(); closeErr != nil {
@@ -513,7 +514,7 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 			return nil, flushResult{generation: generation}, &SdkError{Code: "serialization_error", Message: err.Error()}
 		}
 		if c.persistent != nil {
-			if err := c.persistent.retainPending(body, prefixLength); err != nil {
+			if err := c.persistent.retainPending(body, prefixLength, c.unreportedDrops); err != nil {
 				c.health.failedFlushes++
 				c.health.state = DeliveryStatePaused
 				c.health.lastOutcome = DeliveryOutcomePersistencePause
@@ -539,7 +540,7 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	c.health.attempts += uint64(result.attempts)
 	if sendErr == nil {
 		if c.persistent != nil {
-			if err := c.persistent.acknowledge(prefixLength); err != nil {
+			if err := c.persistent.acknowledge(prefixLength, c.unreportedDrops); err != nil {
 				c.health.failedFlushes++
 				c.health.state = DeliveryStatePaused
 				c.health.lastOutcome = DeliveryOutcomePersistencePause
