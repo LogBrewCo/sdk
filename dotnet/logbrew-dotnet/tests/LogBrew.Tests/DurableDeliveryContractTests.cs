@@ -106,6 +106,7 @@ internal static partial class DurableDeliveryContractTests
                     FlushAtQueueSize = 1,
                     FlushInterval = TimeSpan.FromHours(1),
                 });
+            client.Log("evt_frozen_too_large", "2026-06-02T10:00:02Z", LogAttributes.Create(new string('x', 256 * 1024), "info"));
             client.Log("evt_frozen_restart", "2026-06-02T10:00:03Z", LogAttributes.Create("frozen", "info"));
             Thread.Sleep(TimeSpan.FromSeconds(5));
             return 3;
@@ -495,6 +496,7 @@ internal static partial class DurableDeliveryContractTests
         var child = System.IO.Path.Combine(root.Path, ".logbrew-delivery-v1");
         AssertTrue(File.Exists(System.IO.Path.Combine(child, "delivery-state.lbd")), "frozen prefix was not persisted before send");
         var expectedBody = File.ReadAllText(System.IO.Path.Combine(root.Path, "expected-body.txt"));
+        AssertTrue(expectedBody.Contains("\"client_report\"", StringComparison.Ordinal) && expectedBody.Contains("\"report_id\"", StringComparison.Ordinal), "frozen prefix did not carry the drop report");
         var transport = new RecordingTransport(new object[] { 202 });
         var client = CreateDurableClient(root.Path, transport: transport);
 

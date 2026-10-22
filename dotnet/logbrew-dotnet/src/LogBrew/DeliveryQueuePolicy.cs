@@ -77,14 +77,15 @@ namespace LogBrew
             FrozenBatch? current,
             DeliveryBatchBuilder builder,
             IReadOnlyList<Event> events,
-            int targetEvents)
+            int targetEvents,
+            DeliveryDropReporter dropReporter)
         {
             if (current != null || events.Count == 0 || targetEvents <= 0)
             {
                 return current;
             }
 
-            return builder.Create(events, targetEvents);
+            return builder.Create(events, targetEvents, dropReporter.FreezeReport());
         }
 
         internal static void RequireCurrentPrefix(
