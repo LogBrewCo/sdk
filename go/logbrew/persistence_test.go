@@ -424,7 +424,7 @@ func TestPersistentStoreAllowsSDKUpgradeWithoutChangingFailedBody(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.retainPending(body, 1); err != nil {
+	if err := store.retainPending(body, 1, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.close(); err != nil {

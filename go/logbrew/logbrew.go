@@ -338,6 +338,9 @@ type Client struct {
 	shuttingDown    bool
 	shutdownFailed  bool
 	closed          bool
+	// reportSavedAt and reportClock throttle drop count saves; a nil clock uses time.Now.
+	reportSavedAt time.Time
+	reportClock   func() time.Time
 }
 
 // NewClient creates a public LogBrew client from user-supplied SDK identity
@@ -676,8 +679,28 @@ func (c *Client) recordDropLocked(id, eventType, reason string) EventDrop {
 	if c.unreportedDrops == nil {
 		c.unreportedDrops = make(map[string]int)
 	}
+	_, seen := c.unreportedDrops[reason]
 	c.unreportedDrops[reason] = min(maxClientReportCount, c.unreportedDrops[reason]+1)
+	c.saveUnreportedLocked(!seen)
 	return EventDrop{EventID: id, EventType: eventType, Reason: reason, DroppedEvents: c.droppedEvents}
+}
+
+// saveUnreportedLocked keeps unreported drop counts across restarts: at once
+// for a new reason, otherwise at most once a second during a drop burst.
+func (c *Client) saveUnreportedLocked(immediately bool) {
+	if c.persistent == nil {
+		return
+	}
+	now := time.Now
+	if c.reportClock != nil {
+		now = c.reportClock
+	}
+	if !immediately && now().Sub(c.reportSavedAt) < clientReportSaveInterval {
+		return
+	}
+	c.reportSavedAt = now()
+	// Drop counts are advisory: a failed save keeps them in memory and never fails the capture.
+	_ = c.persistent.saveUnreported(c.unreportedDrops)
 }
 
 // freezeClientReportLocked moves unreported drops under one new report ID
