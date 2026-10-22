@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -24,6 +25,7 @@ public final class LogBrewClient {
     static final String[] METRIC_KINDS = {"counter", "gauge", "histogram"};
     static final String[] DELTA_CUMULATIVE_TEMPORALITIES = {"delta", "cumulative"};
     static final String[] INSTANT_TEMPORALITY = {"instant"};
+    private static final int MAX_CLIENT_REPORT_COUNT = 1_000_000_000;
 
     private final String apiKey;
     private final Map<String, Object> sdk;
@@ -39,6 +41,10 @@ public final class LogBrewClient {
     private QueuedEvent deliveryProtectedThrough;
     private long droppedEventBytes;
     private int droppedEvents;
+    // Drops not yet acknowledged by the intake; they ride in the next batch as a client report.
+    private final Map<String, Integer> unreportedDrops = new LinkedHashMap<>();
+    // Drops frozen under one report ID until a 2xx acknowledges a body that carried them.
+    private Map<String, Object> pendingReport;
     private boolean closing;
     private boolean closed;
     private Thread deliveryOwner;
@@ -421,7 +427,7 @@ public final class LogBrewClient {
      * Returns the queued event batch as stable, pretty-printed JSON.
      */
     public String previewJson() {
-        return serializeBatch(snapshotEvents());
+        return serializeBatch(snapshotEvents(), null);
     }
 
     /**
@@ -607,7 +613,7 @@ public final class LogBrewClient {
         synchronized (stateLock) {
             ensureWritable();
             if (eventBytes > deliveryOptions.maxQueueBytes()
-                || utf8Bytes(serializeBatch(Collections.singletonList(queuedEvent)))
+                || utf8Bytes(serializeBatch(Collections.singletonList(queuedEvent), null))
                     > deliveryOptions.maxBatchBytes()) {
                 drop = recordDrop(id, type, "event_too_large", eventBytes);
             } else if (overflows(events.size(), pendingEventBytes + eventBytes)
@@ -702,6 +708,7 @@ public final class LogBrewClient {
         if (droppedEvents < Integer.MAX_VALUE) {
             droppedEvents++;
         }
+        unreportedDrops.merge(reason, 1, (count, one) -> Math.min(MAX_CLIENT_REPORT_COUNT, count + one));
         droppedEventBytes = serializedBytes > Long.MAX_VALUE - droppedEventBytes
             ? Long.MAX_VALUE
             : droppedEventBytes + serializedBytes;
@@ -884,7 +891,7 @@ public final class LogBrewClient {
         while (offset < snapshot.size()) {
             FrozenBatch batch = freezeNextBatch(snapshot, offset);
             SendResult result = sendBatch(transport, batch.body, maxAttempts);
-            acknowledgePrefix(batch.events);
+            acknowledgePrefix(batch);
             observer.onBatchAccepted(batch.events.size(), result.attempts);
             offset += batch.events.size();
             attempts += result.attempts;
@@ -930,12 +937,33 @@ public final class LogBrewClient {
     }
 
     private FrozenBatch freezeNextBatch(List<QueuedEvent> snapshot, int offset) {
+        Map<String, Object> report;
+        synchronized (stateLock) {
+            if (pendingReport == null && !unreportedDrops.isEmpty()) {
+                // Freeze unreported drops under one stable ID, so every resend of them is counted once.
+                pendingReport = new LinkedHashMap<>();
+                pendingReport.put("report_id", UUID.randomUUID().toString().replace("-", ""));
+                pendingReport.put("dropped_events", new LinkedHashMap<>(unreportedDrops));
+                unreportedDrops.clear();
+            }
+            report = pendingReport;
+        }
+        // A report never pushes a batch over maxBatchBytes; it waits for a batch with room.
+        FrozenBatch batch = report == null ? null : fitBatch(snapshot, offset, report);
+        batch = batch == null ? fitBatch(snapshot, offset, null) : batch;
+        if (batch == null) {
+            throw new SdkException("delivery_error", "queued event exceeds the configured request bound");
+        }
+        return batch;
+    }
+
+    private FrozenBatch fitBatch(List<QueuedEvent> snapshot, int offset, Map<String, Object> report) {
         List<QueuedEvent> batchEvents = new ArrayList<>();
         String body = null;
         int limit = Math.min(snapshot.size(), offset + deliveryOptions.maxBatchEvents());
         for (int index = offset; index < limit; index++) {
             batchEvents.add(snapshot.get(index));
-            String candidate = serializeBatch(batchEvents);
+            String candidate = serializeBatch(batchEvents, report);
             if (utf8Bytes(candidate) > deliveryOptions.maxBatchBytes()) {
                 batchEvents.remove(batchEvents.size() - 1);
                 break;
@@ -944,9 +972,9 @@ public final class LogBrewClient {
         }
 
         if (batchEvents.isEmpty() || body == null) {
-            throw new SdkException("delivery_error", "queued event exceeds the configured request bound");
+            return null;
         }
-        return new FrozenBatch(Collections.unmodifiableList(new ArrayList<>(batchEvents)), body);
+        return new FrozenBatch(Collections.unmodifiableList(new ArrayList<>(batchEvents)), body, report);
     }
 
     private SendResult sendBatch(Transport transport, String body, int maxAttempts) {
@@ -983,8 +1011,13 @@ public final class LogBrewClient {
         throw new SdkException("transport_error", "exhausted retries");
     }
 
-    private void acknowledgePrefix(List<QueuedEvent> accepted) {
+    private void acknowledgePrefix(FrozenBatch batch) {
+        List<QueuedEvent> accepted = batch.events;
         synchronized (stateLock) {
+            // Drops recorded while this body was in flight stay pending under a new report ID.
+            if (batch.report != null && batch.report == pendingReport) {
+                pendingReport = null;
+            }
             List<EncryptedEventStore.Record> persisted = new ArrayList<>();
             Iterator<QueuedEvent> queued = events.iterator();
             for (QueuedEvent expected : accepted) {
@@ -1043,7 +1076,7 @@ public final class LogBrewClient {
         }
     }
 
-    private String serializeBatch(List<QueuedEvent> batchEvents) {
+    private String serializeBatch(List<QueuedEvent> batchEvents, Map<String, Object> report) {
         StringBuilder builder = new StringBuilder();
         builder.append("{\n  \"sdk\": ");
         appendIndented(builder, Json.write(sdk), "  ");
@@ -1060,7 +1093,12 @@ public final class LogBrewClient {
             }
             builder.append("  ");
         }
-        return builder.append("]\n}").toString();
+        builder.append(']');
+        if (report != null) {
+            builder.append(",\n  \"client_report\": ");
+            appendIndented(builder, Json.write(report), "  ");
+        }
+        return builder.append("\n}").toString();
     }
 
     private static void appendIndented(StringBuilder builder, String value, String indentation) {
@@ -1160,10 +1198,12 @@ public final class LogBrewClient {
     private static final class FrozenBatch {
         private final List<QueuedEvent> events;
         private final String body;
+        private final Map<String, Object> report;
 
-        private FrozenBatch(List<QueuedEvent> events, String body) {
+        private FrozenBatch(List<QueuedEvent> events, String body, Map<String, Object> report) {
             this.events = events;
             this.body = body;
+            this.report = report;
         }
     }
 
