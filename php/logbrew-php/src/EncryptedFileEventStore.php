@@ -564,7 +564,12 @@ final class EncryptedFileEventStore
         } catch (\JsonException) {
             throw new SdkError('persistent_queue_error', 'persistent event storage contains an invalid retry batch');
         }
-        if (!is_array($batch) || array_keys($batch) !== ['sdk', 'events']) {
+        $report = is_array($batch) ? ($batch['client_report'] ?? null) : null;
+        if (
+            !is_array($batch)
+            || array_keys($batch) !== ($report === null ? ['sdk', 'events'] : ['sdk', 'events', 'client_report'])
+            || ($report !== null && !self::isClientReport($report))
+        ) {
             throw new SdkError('persistent_queue_error', 'persistent event storage contains an invalid retry batch');
         }
         $sdk = $batch['sdk'];
@@ -585,15 +590,43 @@ final class EncryptedFileEventStore
         }
         try {
             $sdkJson = json_encode($sdk, JSON_THROW_ON_ERROR);
+            $reportJson = $report === null ? '' : ',"client_report":' . json_encode($report, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
             throw new SdkError('persistent_queue_error', 'persistent event storage contains an invalid retry batch');
         }
         $expectedBody = '{"sdk":' . $sdkJson . ',"events":['
             . implode(',', array_map(static fn (array $record): string => $record['json'], $records))
-            . ']}';
+            . ']' . $reportJson . '}';
         if ($body !== $expectedBody) {
             throw new SdkError('persistent_queue_error', 'persistent event storage contains an invalid retry batch');
         }
+    }
+
+    private static function isClientReport(mixed $report): bool
+    {
+        if (
+            !is_array($report)
+            || array_keys($report) !== ['report_id', 'dropped_events']
+            || !is_string($report['report_id'])
+            || preg_match('/^[A-Za-z0-9_-]{16,64}$/D', $report['report_id']) !== 1
+            || !is_array($report['dropped_events'])
+            || $report['dropped_events'] === []
+            || count($report['dropped_events']) > 16
+        ) {
+            return false;
+        }
+        foreach ($report['dropped_events'] as $reason => $count) {
+            if (
+                !is_string($reason)
+                || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $reason) !== 1
+                || !is_int($count)
+                || $count < 1
+                || $count > 1_000_000_000
+            ) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private function readEncryptedFile(string $fileName, string $associatedData): string
