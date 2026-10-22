@@ -594,7 +594,8 @@ namespace LogBrew
                 frozenBatch,
                 batchBuilder,
                 events,
-                targetEvents);
+                targetEvents,
+                dropReporter);
             return frozenBatch;
         }
 
@@ -624,7 +625,7 @@ namespace LogBrew
                         return null;
                     }
 
-                    candidate = batchBuilder.Create(events, targetEvents);
+                    candidate = batchBuilder.Create(events, targetEvents, dropReporter.FreezeReport());
                 }
 
                 durableSession.PersistPrefix(candidate);
@@ -704,6 +705,7 @@ namespace LogBrew
         {
             queuedBytes -= DeliveryQueuePolicy.RemovePrefix(events, batch);
             frozenBatch = null;
+            dropReporter.Acknowledge(batch.Report);
             acceptedEvents = DeliveryRuntimePolicy.SaturatingAdd(acceptedEvents, batch.Events.Count);
             acceptedBatches = DeliveryRuntimePolicy.SaturatingIncrement(acceptedBatches);
             lastOutcome = DeliveryOutcome.Accepted;

@@ -765,6 +765,7 @@ tests += OperationTracingTests.Run();
 tests += DbCommandTelemetryTests.Run();
 tests += SupportTicketDraftTests.Run();
 tests += FatalEvictionTests.Run();
+tests += ClientReportTests.Run();
 tests += ServerRequestTelemetryTests.Run();
 tests += HttpClientTelemetryTests.Run();
 tests += ActivitySpanTelemetryTests.Run();

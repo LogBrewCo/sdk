@@ -21,14 +21,24 @@ namespace LogBrew
             return Encoding.UTF8.GetByteCount(BuildBody(new[] { item }));
         }
 
-        internal string BuildBody(IEnumerable<Event> events)
+        internal string BuildBody(IEnumerable<Event> events, ClientReport? report = null)
         {
-            return JsonWriter.Write(new OrderedJsonObject()
+            var body = new OrderedJsonObject()
                 .Add("sdk", sdk)
-                .Add("events", events.Select(item => item.ToJsonObject()).ToList()));
+                .Add("events", events.Select(item => item.ToJsonObject()).ToList());
+            body.AddIfNotNull("client_report", report?.ToJsonObject());
+            return JsonWriter.Write(body);
         }
 
-        internal FrozenBatch Create(IReadOnlyList<Event> events, int targetEvents)
+        internal FrozenBatch Create(IReadOnlyList<Event> events, int targetEvents, ClientReport? report)
+        {
+            // A report never pushes a request over the byte limit; it waits for a request with room.
+            return (report == null ? null : TryCreate(events, targetEvents, report))
+                ?? TryCreate(events, targetEvents, null)
+                ?? throw new SdkException("serialization_error", "queued event exceeds request byte limit");
+        }
+
+        private FrozenBatch? TryCreate(IReadOnlyList<Event> events, int targetEvents, ClientReport? report)
         {
             var selected = new List<Event>();
             string? selectedBody = null;
@@ -36,7 +46,7 @@ namespace LogBrew
             for (var index = 0; index < limit; index++)
             {
                 selected.Add(events[index]);
-                var candidate = BuildBody(selected);
+                var candidate = BuildBody(selected, report);
                 if (Encoding.UTF8.GetByteCount(candidate) > MaxRequestBytes)
                 {
                     selected.RemoveAt(selected.Count - 1);
@@ -46,25 +56,23 @@ namespace LogBrew
                 selectedBody = candidate;
             }
 
-            if (selected.Count == 0 || selectedBody == null)
-            {
-                throw new SdkException("serialization_error", "queued event exceeds request byte limit");
-            }
-
-            return new FrozenBatch(selected, selectedBody);
+            return selectedBody == null ? null : new FrozenBatch(selected, selectedBody, report);
         }
     }
 
     internal sealed class FrozenBatch
     {
-        internal FrozenBatch(IReadOnlyList<Event> events, string body)
+        internal FrozenBatch(IReadOnlyList<Event> events, string body, ClientReport? report = null)
         {
             Events = events;
             Body = body;
+            Report = report;
         }
 
         internal IReadOnlyList<Event> Events { get; }
 
         internal string Body { get; }
+
+        internal ClientReport? Report { get; }
     }
 }
