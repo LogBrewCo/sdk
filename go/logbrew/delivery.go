@@ -506,7 +506,8 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	if body == nil {
 		prefixLength = len(c.events)
 		var err error
-		body, err = json.MarshalIndent(eventBatch{SDK: c.sdk, Events: c.events[:prefixLength]}, "", "  ")
+		batch := eventBatch{SDK: c.sdk, Events: c.events[:prefixLength], ClientReport: c.freezeClientReportLocked()}
+		body, err = json.MarshalIndent(batch, "", "  ")
 		if err != nil {
 			c.mu.Unlock()
 			return nil, flushResult{generation: generation}, &SdkError{Code: "serialization_error", Message: err.Error()}
@@ -554,6 +555,8 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 		c.events = c.events[:remaining]
 		c.pendingBody = nil
 		c.pendingPrefix = 0
+		// Drops recorded while this body was in flight wait under a new report ID.
+		c.pendingReport = nil
 		c.health.acceptedEvents += uint64(prefixLength)
 		if !result.stale {
 			c.health.lastOutcome = DeliveryOutcomeAccepted

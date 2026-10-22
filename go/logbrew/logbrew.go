@@ -4,6 +4,8 @@ package logbrew
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,6 +57,10 @@ const (
 	eventDropReasonQueueOverflow = "queue_overflow"
 	// eventDropReasonEvictedForFatal marks a queued event removed to make room for a crash report.
 	eventDropReasonEvictedForFatal = "evicted_for_fatal"
+
+	// Client report bounds from spec/event-batch.schema.json.
+	maxClientReportReasons = 16
+	maxClientReportCount   = 1_000_000_000
 )
 
 var defaultHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
@@ -295,31 +301,43 @@ type Event struct {
 }
 
 type eventBatch struct {
-	SDK    sdkInfo `json:"sdk"`
-	Events []Event `json:"events"`
+	SDK          sdkInfo       `json:"sdk"`
+	Events       []Event       `json:"events"`
+	ClientReport *clientReport `json:"client_report,omitempty"`
+}
+
+// clientReport carries drop counts to LogBrew. Its ID stays fixed for every
+// resend of the same counts, so LogBrew counts them once.
+type clientReport struct {
+	ReportID      string         `json:"report_id"`
+	DroppedEvents map[string]int `json:"dropped_events"`
 }
 
 // Client buffers validated LogBrew events until they are previewed, flushed,
 // or shut down through a transport.
 type Client struct {
-	mu             sync.Mutex
-	flushMu        sync.Mutex
-	apiKey         string
-	sdk            sdkInfo
-	context        *TelemetryContext
-	maxRetries     int
-	maxQueueSize   int
-	events         []Event
-	pendingBody    []byte
-	pendingPrefix  int
-	droppedEvents  int
-	onEventDropped func(EventDrop)
-	automatic      *automaticDelivery
-	persistent     *persistentStore
-	health         deliveryHealthState
-	shuttingDown   bool
-	shutdownFailed bool
-	closed         bool
+	mu            sync.Mutex
+	flushMu       sync.Mutex
+	apiKey        string
+	sdk           sdkInfo
+	context       *TelemetryContext
+	maxRetries    int
+	maxQueueSize  int
+	events        []Event
+	pendingBody   []byte
+	pendingPrefix int
+	droppedEvents int
+	// unreportedDrops wait for the next request body; pendingReport is frozen
+	// in the body being sent or retried until LogBrew accepts it.
+	unreportedDrops map[string]int
+	pendingReport   *clientReport
+	onEventDropped  func(EventDrop)
+	automatic       *automaticDelivery
+	persistent      *persistentStore
+	health          deliveryHealthState
+	shuttingDown    bool
+	shutdownFailed  bool
+	closed          bool
 }
 
 // NewClient creates a public LogBrew client from user-supplied SDK identity
@@ -610,22 +628,10 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 		evicted = c.evictForFatalLocked()
 	}
 	if evicted != nil {
-		c.droppedEvents++
-		dropped = EventDrop{
-			EventID:       evicted.ID,
-			EventType:     evicted.Type,
-			Reason:        eventDropReasonEvictedForFatal,
-			DroppedEvents: c.droppedEvents,
-		}
+		dropped = c.recordDropLocked(evicted.ID, evicted.Type, eventDropReasonEvictedForFatal)
 		droppedHandler = c.onEventDropped
 	} else if len(c.events) >= c.maxQueueSize {
-		c.droppedEvents++
-		dropped = EventDrop{
-			EventID:       id,
-			EventType:     eventType,
-			Reason:        eventDropReasonQueueOverflow,
-			DroppedEvents: c.droppedEvents,
-		}
+		dropped = c.recordDropLocked(id, eventType, eventDropReasonQueueOverflow)
 		droppedHandler = c.onEventDropped
 		c.mu.Unlock()
 		notifyEventDropped(droppedHandler, dropped)
@@ -653,6 +659,41 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 		notifyEventDropped(droppedHandler, dropped)
 	}
 	return nil
+}
+
+func (c *Client) recordDropLocked(id, eventType, reason string) EventDrop {
+	c.droppedEvents++
+	if c.unreportedDrops == nil {
+		c.unreportedDrops = make(map[string]int)
+	}
+	c.unreportedDrops[reason] = min(maxClientReportCount, c.unreportedDrops[reason]+1)
+	return EventDrop{EventID: id, EventType: eventType, Reason: reason, DroppedEvents: c.droppedEvents}
+}
+
+// freezeClientReportLocked moves unreported drops under one new report ID
+// unless a report is already waiting for acknowledgement.
+func (c *Client) freezeClientReportLocked() *clientReport {
+	if c.pendingReport != nil || len(c.unreportedDrops) == 0 {
+		return c.pendingReport
+	}
+	reasons := make([]string, 0, len(c.unreportedDrops))
+	for reason := range c.unreportedDrops {
+		reasons = append(reasons, reason)
+	}
+	slices.Sort(reasons)
+	report := &clientReport{ReportID: newReportID(), DroppedEvents: make(map[string]int)}
+	for _, reason := range reasons[:min(len(reasons), maxClientReportReasons)] {
+		report.DroppedEvents[reason] = c.unreportedDrops[reason]
+		delete(c.unreportedDrops, reason)
+	}
+	c.pendingReport = report
+	return report
+}
+
+func newReportID() string {
+	var id [16]byte
+	_, _ = rand.Read(id[:])
+	return hex.EncodeToString(id[:])
 }
 
 // evictForFatalLocked removes the oldest event that is not a crash report and is not in the
