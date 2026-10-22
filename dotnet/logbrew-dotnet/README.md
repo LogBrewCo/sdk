@@ -911,6 +911,8 @@ client.Log("evt_log_001", "2026-06-02T10:00:03Z", LogAttributes.Create("worker s
 Console.Error.WriteLine(client.DroppedEvents());
 ```
 
+A crash report (an issue with level `fatal` or `critical`) at a full in-memory queue is the exception to dropping new events: it removes the oldest queued events that are not crash reports, not in a request being sent or retried, and not the last event an in-progress `Flush` will deliver, and each removed event is reported with reason `evicted_for_fatal`. When that cannot make room, or with durable delivery, the crash report is dropped like any other event.
+
 Drop callbacks are advisory and callback failures do not interrupt application logging. `Flush(transport)` keeps queued events after auth failures, retry-budget exhaustion, or non-2xx delivery and clears them only after a 2xx response. `Shutdown(transport)` flushes with the same rules, marks the client closed, and rejects later writes with `shutdown_error`.
 
 ## Microsoft.Extensions.Logging

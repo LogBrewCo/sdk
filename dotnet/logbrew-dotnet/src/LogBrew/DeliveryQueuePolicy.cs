@@ -27,6 +27,29 @@ namespace LogBrew
                 : null;
         }
 
+        internal static bool Overflows(int eventCount, long queuedBytes, int maxQueueSize, int maxQueueBytes)
+        {
+            return eventCount >= maxQueueSize || queuedBytes > maxQueueBytes;
+        }
+
+        internal static bool IsFatal(Event item)
+        {
+            if (item.Type != "issue")
+            {
+                return false;
+            }
+
+            foreach (var pair in item.Attributes.Values)
+            {
+                if (pair.Key == "level")
+                {
+                    return pair.Value is string level && level == "critical";
+                }
+            }
+
+            return false;
+        }
+
         internal static Event? Last(IReadOnlyList<Event> events)
         {
             return events.Count == 0 ? null : events[events.Count - 1];
