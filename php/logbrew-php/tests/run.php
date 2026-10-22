@@ -1413,6 +1413,7 @@ require __DIR__ . '/worker_lifecycle.php';
 require __DIR__ . '/persistent_delivery.php';
 require __DIR__ . '/client_report.php';
 require __DIR__ . '/persistent_fatal_eviction.php';
+require __DIR__ . '/persistent_client_report.php';
 require __DIR__ . '/symfony_integration.php';
 require __DIR__ . '/symfony_messenger.php';
 require __DIR__ . '/telemetry_context.php';

@@ -156,9 +156,17 @@ final class LogBrewClient
     /**
      * Drops frozen under one report ID until a 2xx acknowledges a request that carried them.
      *
-     * @var array{id:string, json:string}|null
+     * @var array{id:string, json:string, drops:array<string, int>}|null
      */
     private ?array $pendingReport = null;
+
+    /** Last saved drop counts, so an unchanged state is not written again. */
+    private ?string $savedReport = null;
+
+    private ?int $reportSavedAt = null;
+
+    /** Minimum nanoseconds between drop count saves during a drop burst. */
+    private int $reportSaveInterval = 1_000_000_000;
 
     private bool $closed = false;
 
@@ -390,7 +398,11 @@ final class LogBrewClient
         $this->closing = true;
         $this->flushing = true;
         try {
-            $response = $this->flushInternal($transport);
+            try {
+                $response = $this->flushInternal($transport);
+            } finally {
+                $this->saveClientReport(true);
+            }
             $this->eventStore?->close();
             $this->closed = true;
             return $response;
@@ -581,7 +593,9 @@ final class LogBrewClient
         if ($this->droppedEvents < PHP_INT_MAX) {
             $this->droppedEvents++;
         }
+        $firstOfReason = !isset($this->unreportedDrops[$reason]);
         $this->unreportedDrops[$reason] = min(self::MAX_CLIENT_REPORT_COUNT, ($this->unreportedDrops[$reason] ?? 0) + 1);
+        $this->saveClientReport($firstOfReason);
         if ($this->onEventDropped === null) {
             return;
         }
@@ -714,7 +728,10 @@ final class LogBrewClient
             $this->pendingReport = [
                 'id' => $id,
                 'json' => json_encode(['report_id' => $id, 'dropped_events' => $drops], JSON_THROW_ON_ERROR),
+                'drops' => $drops,
             ];
+            // Saved before the request is stored, so a stop in between can undercount but never count twice.
+            $this->saveClientReport(true);
         }
         return $this->pendingReport['json'] ?? null;
     }
@@ -725,7 +742,89 @@ final class LogBrewClient
         if ($this->retryBatchCarriesReport) {
             $this->pendingReport = null;
             $this->retryBatchCarriesReport = false;
+            $this->saveClientReport(true);
         }
+    }
+
+    /**
+     * Keep drop counts across restarts: at once for a new reason or report, otherwise at most once a second.
+     */
+    private function saveClientReport(bool $immediately): void
+    {
+        if ($this->eventStore === null) {
+            return;
+        }
+        $now = (int) hrtime(true);
+        if (!$immediately && $this->reportSavedAt !== null && $now - $this->reportSavedAt < $this->reportSaveInterval) {
+            return;
+        }
+        $this->reportSavedAt = $now;
+        $state = [];
+        if ($this->pendingReport !== null) {
+            $state['pending'] = ['report_id' => $this->pendingReport['id'], 'dropped_events' => $this->pendingReport['drops']];
+        }
+        if ($this->unreportedDrops !== []) {
+            $state['unreported'] = $this->unreportedDrops;
+        }
+        try {
+            $encoded = $state === [] ? null : json_encode($state, JSON_THROW_ON_ERROR);
+            if ($encoded !== $this->savedReport) {
+                $this->eventStore->saveClientReport($encoded);
+                $this->savedReport = $encoded;
+            }
+        } catch (\Throwable) {
+            // Drop counts are advisory: a failed save keeps them in memory and never blocks capture.
+        }
+    }
+
+    private function loadClientReport(EncryptedFileEventStore $eventStore): void
+    {
+        try {
+            $saved = $eventStore->loadClientReport();
+            $state = $saved === null ? null : json_decode($saved, true, 8, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            // Unreadable saved counts are ignored, never fatal.
+            return;
+        }
+        $this->savedReport = $saved;
+        if (!is_array($state)) {
+            return;
+        }
+        $this->unreportedDrops = self::validClientReportCounts($state['unreported'] ?? null);
+        $pending = $state['pending'] ?? null;
+        $drops = self::validClientReportCounts(is_array($pending) ? ($pending['dropped_events'] ?? null) : null);
+        $id = is_array($pending) ? ($pending['report_id'] ?? null) : null;
+        if (is_string($id) && preg_match('/^[A-Za-z0-9_-]{16,64}$/D', $id) === 1 && $drops !== []) {
+            $this->pendingReport = [
+                'id' => $id,
+                'json' => json_encode(['report_id' => $id, 'dropped_events' => $drops], JSON_THROW_ON_ERROR),
+                'drops' => $drops,
+            ];
+            $this->retryBatchCarriesReport = $this->retryBatchBody !== null
+                && str_contains($this->retryBatchBody, '"report_id":"' . $id . '"');
+        }
+    }
+
+    /** @return array<string, int> */
+    private static function validClientReportCounts(mixed $counts): array
+    {
+        if (!is_array($counts)) {
+            return [];
+        }
+        $valid = [];
+        foreach ($counts as $reason => $count) {
+            if (
+                is_string($reason)
+                && preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $reason) === 1
+                && is_int($count)
+                && $count >= 1
+                && $count <= self::MAX_CLIENT_REPORT_COUNT
+            ) {
+                $valid[$reason] = $count;
+            }
+        }
+
+        return array_slice($valid, 0, self::MAX_CLIENT_REPORT_REASONS, true);
     }
 
     private function acknowledge(int $events): void
@@ -771,6 +870,7 @@ final class LogBrewClient
             $this->retryBatchBody = $retry['body'];
             $this->retryBatchEvents = $retryEvents;
         }
+        $this->loadClientReport($this->eventStore);
     }
 
     /** @return array<string, mixed> */

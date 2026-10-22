@@ -16,6 +16,9 @@ final class EncryptedFileEventStore
     private const LOCK_FILE = '.lock';
     private const ACK_FILE = '.ack';
     private const RETRY_FILE = '.retry';
+    // Drop counts only: reason codes, counts, and a random report ID, never event data.
+    private const REPORT_FILE = '.report';
+    private const MAX_REPORT_BYTES = 4096;
     private const EVENT_FILE_PATTERN = '/^(?<sequence>[0-9]{20})\.event$/D';
     private const TEMP_FILE_PATTERN = '/^\.tmp-[a-f0-9]{32}$/D';
 
@@ -145,6 +148,44 @@ final class EncryptedFileEventStore
             'events' => $records,
             'retry' => $this->readRetryBatch($records),
         ];
+    }
+
+    /**
+     * Read the saved drop counts, or null when none are saved.
+     */
+    public function loadClientReport(): ?string
+    {
+        $this->assertUsable();
+        if (!is_array(@lstat($this->directory . '/' . self::REPORT_FILE))) {
+            return null;
+        }
+        $report = $this->readEncryptedFile(self::REPORT_FILE, 'report');
+        if (strlen($report) > self::MAX_REPORT_BYTES) {
+            throw new SdkError('persistent_queue_error', 'persistent drop counts are too large');
+        }
+
+        return $report;
+    }
+
+    /**
+     * Durably save drop counts, or remove the saved counts when given null.
+     */
+    public function saveClientReport(?string $report): void
+    {
+        $this->assertUsable();
+        if ($report === null) {
+            $path = $this->directory . '/' . self::REPORT_FILE;
+            if (is_array(@lstat($path))) {
+                if (!@unlink($path) || !DurableFileCommitter::syncDirectory($this->directory)) {
+                    throw new SdkError('persistence_commit_error', 'persistent drop counts could not be removed');
+                }
+            }
+            return;
+        }
+        if (strlen($report) > self::MAX_REPORT_BYTES) {
+            throw new SdkError('persistent_queue_error', 'persistent drop counts are too large');
+        }
+        $this->writeEncryptedFile(self::REPORT_FILE, $report, 'report', true);
     }
 
     /**
@@ -471,7 +512,7 @@ final class EncryptedFileEventStore
             ) {
                 continue;
             }
-            if ($entry === self::ACK_FILE || $entry === self::RETRY_FILE) {
+            if ($entry === self::ACK_FILE || $entry === self::RETRY_FILE || $entry === self::REPORT_FILE) {
                 self::assertSafeRegularFile($this->directory . '/' . $entry);
                 continue;
             }
