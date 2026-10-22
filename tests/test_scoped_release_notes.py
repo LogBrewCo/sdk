@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -18,15 +19,16 @@ SPEC.loader.exec_module(scoped_release_notes)
 
 class ScopedReleaseNotesTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(tempfile.mkdtemp())
         self.previous = Path.cwd()
         os.chdir(self.root)
-        self.addCleanup(os.chdir, self.previous)
         self.git("init", "-q")
         self.commit("go/pkg/a.go", "chore(go): start the package")
         self.git("tag", "go/pkg/v0.1.0")
+
+    def tearDown(self) -> None:
+        os.chdir(self.previous)
+        shutil.rmtree(self.root)
 
     def git(self, *args: str) -> None:
         subprocess.run(
