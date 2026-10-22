@@ -5,7 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -25,6 +27,12 @@ public final class LogBrewPersistenceTest {
         testRetryPrefixAcknowledgementAndLaterCaptureSurviveRestart();
         testFailedShutdownAndExactBoundsRecover();
         testCrashReportEvictsOldestPersistedEventAcrossRestart();
+        testUnreportedDropCountsSurviveARestart();
+        testAReportSentBeforeARestartKeepsItsReportId();
+        testADropBurstSavesOncePerSecondAndShutdownSavesTheRest();
+        testUnreadableSavedDropCountsAreIgnored();
+        testAnOrphanedDropCountFileNeverBlocksRecovery();
+        testSavedDropCountsTolerateLaterVersions();
         System.out.println("java persistence tests ok (" + testsRun + " tests)");
     }
 
@@ -233,17 +241,238 @@ public final class LogBrewPersistenceTest {
                 assertEquals("log", drops.get(1).eventType(), "recovered event type");
                 RecordingTransport transport = RecordingTransport.alwaysAccept();
                 assertEquals(3, client.flush(transport).acceptedEvents(), "drained after eviction");
-                assertContains(transport.sentBodies().get(0), "\"evicted_for_fatal\": 1");
+                // The first eviction was saved before the restart, so both are reported.
+                assertContains(transport.sentBodies().get(0), "\"evicted_for_fatal\": 2");
             }
 
             try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
                 assertEquals(0, persistentClient(store).recoverPersistedEvents().pendingEvents(), "nothing left after drain");
+            }
+            // Drained, the store has no evicted records or saved counts, so older SDKs open it again.
+            try (java.util.stream.Stream<Path> entries = Files.list(directory)) {
+                assertEquals(
+                    List.of(".admitted.lbe", ".checkpoint.lbe", ".key-check.lbe", ".owner.lock"),
+                    entries.map(entry -> entry.getFileName().toString()).sorted().collect(java.util.stream.Collectors.toList()),
+                    "drained store shape"
+                );
             }
         } finally {
             Arrays.fill(key, (byte) 0);
             deleteTree(directory);
         }
         testsRun++;
+    }
+
+    private void testUnreportedDropCountsSurviveARestart() throws Exception {
+        Path directory = createRealTempDirectory("logbrew-java-persistent-drops");
+        byte[] key = key(31);
+        try {
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                client.recoverPersistedEvents();
+                long[] now = {0L};
+                client.setClientReportClock(() -> now[0] += 2_000_000_000L);
+                enqueueLog(client, "evt_java_drops_0", "queued");
+                enqueueLog(client, "evt_java_drops_1", "dropped");
+                enqueueLog(client, "evt_java_drops_2", "dropped");
+                assertEquals(true, Files.exists(directory.resolve(".client-report.lbe")), "saved drop counts");
+            }
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                client.recoverPersistedEvents();
+                RecordingTransport transport = RecordingTransport.alwaysAccept();
+                client.flush(transport);
+                assertContains(transport.sentBodies().get(0), "\"queue_overflow\": 2");
+                assertEquals(false, Files.exists(directory.resolve(".client-report.lbe")), "cleared once acknowledged");
+                enqueueLog(client, "evt_java_drops_3", "later");
+                client.flush(transport);
+                assertNotContains(transport.sentBodies().get(1), "client_report");
+            }
+        } finally {
+            Arrays.fill(key, (byte) 0);
+            deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private void testAReportSentBeforeARestartKeepsItsReportId() throws Exception {
+        Path directory = createRealTempDirectory("logbrew-java-persistent-report-id");
+        byte[] key = key(37);
+        try {
+            RecordingTransport failing = RecordingTransport.scripted(503);
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                client.recoverPersistedEvents();
+                enqueueLog(client, "evt_java_report_id_0", "queued");
+                enqueueLog(client, "evt_java_report_id_1", "dropped");
+                expectSdkException(() -> client.flush(failing));
+                enqueueLog(client, "evt_java_report_id_2", "dropped later");
+            }
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                client.recoverPersistedEvents();
+                RecordingTransport transport = RecordingTransport.alwaysAccept();
+                client.flush(transport);
+                enqueueLog(client, "evt_java_report_id_3", "queued");
+                enqueueLog(client, "evt_java_report_id_4", "dropped");
+                client.flush(transport);
+
+                String sent = reportOf(failing.sentBodies().get(0));
+                assertEquals(sent, reportOf(transport.sentBodies().get(0)), "resent report keeps its ID and counts");
+                assertContains(sent, "\"queue_overflow\": 1");
+                // The drop recorded after the failed send waited under a new report ID.
+                assertNotEquals(sent, reportOf(transport.sentBodies().get(1)), "later drops use a new report ID");
+                assertContains(transport.sentBodies().get(1), "\"queue_overflow\": 2");
+            }
+        } finally {
+            Arrays.fill(key, (byte) 0);
+            deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private void testADropBurstSavesOncePerSecondAndShutdownSavesTheRest() throws Exception {
+        Path directory = createRealTempDirectory("logbrew-java-persistent-burst");
+        byte[] key = key(41);
+        try {
+            for (boolean shutdown : new boolean[] {false, true}) {
+                try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                    LogBrewClient client = tooLargeClient(store);
+                    client.recoverPersistedEvents();
+                    long[] now = {0L};
+                    client.setClientReportClock(() -> now[0]);
+                    for (int index = 0; index < 5; index++) {
+                        now[0] += 200_000_000L;
+                        enqueueLog(client, "evt_java_burst_" + shutdown + index, "x".repeat(200));
+                    }
+                    if (shutdown) {
+                        client.shutdown(RecordingTransport.alwaysAccept());
+                    }
+                }
+                // The first drop saved at once; the rest of the burst waits for the interval or shutdown.
+                assertEquals(shutdown ? 5 : 1, savedDropCount(directory, key), "saved drops, shutdown=" + shutdown);
+                deleteTree(directory.resolve(".client-report.lbe"));
+            }
+        } finally {
+            Arrays.fill(key, (byte) 0);
+            deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private void testUnreadableSavedDropCountsAreIgnored() throws Exception {
+        Path directory = createRealTempDirectory("logbrew-java-persistent-unreadable");
+        byte[] key = key(43);
+        try {
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                client.recoverPersistedEvents();
+                enqueueLog(client, "evt_java_unreadable_0", "queued");
+                Map<String, Integer> bad = new LinkedHashMap<>();
+                bad.put("Not-A-Reason", 1);
+                bad.put("event_too_large", 0);
+                bad.put("evicted_for_fatal", 2);
+                store.saveClientReport(new PersistenceClientReport("short", bad, bad));
+            }
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                assertEquals(1, client.recoverPersistedEvents().pendingEvents(), "event recovers");
+                RecordingTransport transport = RecordingTransport.alwaysAccept();
+                client.flush(transport);
+                assertContains(transport.sentBodies().get(0), "\"evicted_for_fatal\": 2");
+                assertNotContains(transport.sentBodies().get(0), "Not-A-Reason");
+                assertNotContains(transport.sentBodies().get(0), "event_too_large");
+            }
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                client.recoverPersistedEvents();
+                enqueueLog(client, "evt_java_unreadable_1", "queued");
+            }
+            Path unreadable = directory.resolve(".client-report.lbe");
+            Files.write(unreadable, new byte[] {1, 2, 3, 4});
+            Files.setPosixFilePermissions(unreadable, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                assertEquals(1, client.recoverPersistedEvents().pendingEvents(), "events recover past unreadable counts");
+                RecordingTransport transport = RecordingTransport.alwaysAccept();
+                client.flush(transport);
+                assertNotContains(transport.sentBodies().get(0), "client_report");
+            }
+        } finally {
+            Arrays.fill(key, (byte) 0);
+            deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private void testAnOrphanedDropCountFileNeverBlocksRecovery() throws Exception {
+        Path directory = createRealTempDirectory("logbrew-java-persistent-orphan");
+        byte[] key = key(47);
+        try {
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = dropClient(store);
+                client.recoverPersistedEvents();
+                enqueueLog(client, "evt_java_orphan_0", "queued");
+            }
+            Path orphan = directory.resolve(".report-pending-" + "0".repeat(32) + ".tmp");
+            Files.write(orphan, new byte[] {9});
+            Files.setPosixFilePermissions(orphan, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                assertEquals(1, dropClient(store).recoverPersistedEvents().pendingEvents(), "recovers with an orphaned report file");
+            }
+            assertEquals(false, Files.exists(orphan), "orphaned report file removed");
+        } finally {
+            Arrays.fill(key, (byte) 0);
+            deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private void testSavedDropCountsTolerateLaterVersions() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        counts.put("queue_overflow", 3);
+        byte[] current = new PersistenceClientReport("0123456789abcdef", counts, counts).encode();
+        byte[] later = Arrays.copyOf(current, current.length + 3);
+        later[0] = 2;
+        later[later.length - 1] = 7;
+        PersistenceClientReport decoded = PersistenceClientReport.decode(later);
+        assertEquals("0123456789abcdef", decoded.pendingId, "later version keeps the pending report");
+        assertEquals(counts, decoded.unreported, "later version keeps the unreported counts");
+        assertEquals(null, PersistenceClientReport.decode(new byte[] {0}), "unknown older version is ignored");
+        assertEquals(null, PersistenceClientReport.decode(Arrays.copyOf(current, 5)), "truncated counts are ignored");
+        testsRun++;
+    }
+
+    private static LogBrewClient tooLargeClient(EncryptedEventStore store) {
+        return LogBrewClient.create(
+            API_KEY,
+            "logbrew-java",
+            "0.1.0",
+            DeliveryOptions.builder().maxRetries(0).maxQueueBytes(100L).encryptedEventStore(store).build()
+        );
+    }
+
+    private static int savedDropCount(Path directory, byte[] key) {
+        try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+            store.recover(10, 1_000_000L, false);
+            PersistenceClientReport saved = store.loadClientReport();
+            return saved == null ? 0 : saved.unreported.values().stream().mapToInt(Integer::intValue).sum();
+        }
+    }
+
+    private static String reportOf(String body) {
+        int start = body.indexOf("\"client_report\"");
+        assertEquals(true, start >= 0, "body carries a client report");
+        return body.substring(start);
+    }
+
+    private static LogBrewClient dropClient(EncryptedEventStore store) {
+        return LogBrewClient.create(
+            API_KEY,
+            "logbrew-java",
+            "0.1.0",
+            DeliveryOptions.builder().maxRetries(0).maxQueueEvents(1).encryptedEventStore(store).build()
+        );
     }
 
     private static LogBrewClient evictionClient(EncryptedEventStore store, List<LogBrewClient.EventDrop> drops) {
@@ -334,6 +563,12 @@ public final class LogBrewPersistenceTest {
     private static void assertNotContains(String value, String needle) {
         if (value.contains(needle)) {
             throw new AssertionError("expected value not to contain " + needle);
+        }
+    }
+
+    private static void assertNotEquals(Object unexpected, Object actual, String label) {
+        if (unexpected.equals(actual)) {
+            throw new AssertionError(label + ": unexpectedly " + actual);
         }
     }
 

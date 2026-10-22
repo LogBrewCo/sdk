@@ -39,8 +39,10 @@ final class PersistenceFiles implements AutoCloseable {
     static final String HIGH_WATER_NAME = ".admitted.lbe";
     static final String INTENT_NAME = ".intent.lbe";
     static final String PURGE_INTENT_NAME = ".purge-intent.lbe";
+    static final String CLIENT_REPORT_NAME = ".client-report.lbe";
 
     private static final Pattern RECORD_NAME = Pattern.compile("([0-9]{20})\\.lbe");
+    private static final Pattern REPORT_TEMP_NAME = Pattern.compile("\\.report-pending-[0-9a-f]{32}\\.tmp");
     private static final Pattern TEMP_NAME = Pattern.compile(
         "\\.(?:pending|intent-pending|key-pending|purge-pending)-[0-9a-f]{32}\\.tmp"
     );
@@ -161,6 +163,8 @@ final class PersistenceFiles implements AutoCloseable {
             Path highWater = null;
             Path intent = null;
             Path purgeIntent = null;
+            Path clientReport = null;
+            List<Path> reportTemporary = new ArrayList<>();
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
                 for (Path path : stream) {
                     String name = name(path);
@@ -178,12 +182,20 @@ final class PersistenceFiles implements AutoCloseable {
                         verifyRegularFile(path);
                         intent = path;
                         purgeable.add(path);
+                    } else if (CLIENT_REPORT_NAME.equals(name)) {
+                        verifyRegularFile(path);
+                        clientReport = path;
+                        purgeable.add(path);
                     } else if (PURGE_INTENT_NAME.equals(name)) {
                         verifyRegularFile(path);
                         purgeIntent = path;
                     } else if (RECORD_NAME.matcher(name).matches()) {
                         verifyRegularFile(path);
                         records.add(path);
+                        purgeable.add(path);
+                    } else if (REPORT_TEMP_NAME.matcher(name).matches()) {
+                        verifyRegularFile(path);
+                        reportTemporary.add(path);
                         purgeable.add(path);
                     } else if (TEMP_NAME.matcher(name).matches()) {
                         verifyRegularFile(path);
@@ -203,7 +215,7 @@ final class PersistenceFiles implements AutoCloseable {
                 );
             }
             records.sort(Comparator.comparingLong(PersistenceFiles::recordSequence));
-            return new Layout(records, temporary, purgeable, checkpoint, highWater, intent, purgeIntent);
+            return new Layout(records, temporary, purgeable, checkpoint, highWater, intent, purgeIntent, clientReport, reportTemporary);
         }
     }
 
@@ -226,7 +238,7 @@ final class PersistenceFiles implements AutoCloseable {
     OwnedFile createTemporary(String role) throws IOException {
         synchronized (monitor) {
             String name = "." + role + "-" + UUID.randomUUID().toString().replace("-", "") + ".tmp";
-            if (!TEMP_NAME.matcher(name).matches()) {
+            if (!TEMP_NAME.matcher(name).matches() && !REPORT_TEMP_NAME.matcher(name).matches()) {
                 throw new IllegalArgumentException("unsupported persistence temporary role");
             }
             Path target = path(name);
@@ -742,6 +754,8 @@ final class PersistenceFiles implements AutoCloseable {
         final Path highWaterFile;
         final Path intentFile;
         final Path purgeIntentFile;
+        final Path clientReportFile;
+        final List<Path> clientReportTemporaryFiles;
 
         Layout(
             List<Path> recordFiles,
@@ -750,7 +764,9 @@ final class PersistenceFiles implements AutoCloseable {
             Path checkpointFile,
             Path highWaterFile,
             Path intentFile,
-            Path purgeIntentFile
+            Path purgeIntentFile,
+            Path clientReportFile,
+            List<Path> clientReportTemporaryFiles
         ) {
             this.recordFiles = recordFiles;
             this.temporaryFiles = temporaryFiles;
@@ -759,6 +775,8 @@ final class PersistenceFiles implements AutoCloseable {
             this.highWaterFile = highWaterFile;
             this.intentFile = intentFile;
             this.purgeIntentFile = purgeIntentFile;
+            this.clientReportFile = clientReportFile;
+            this.clientReportTemporaryFiles = clientReportTemporaryFiles;
         }
     }
 
