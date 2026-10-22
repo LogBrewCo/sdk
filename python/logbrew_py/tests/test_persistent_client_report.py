@@ -35,7 +35,7 @@ def log(client: LogBrewClient, event_id: str, message: str = "queued") -> None:
 
 
 def crash(client: LogBrewClient) -> None:
-    """Release the store without shutdown, like a process that exits without cleanup."""
+    """Release the store without shutdown, like a process that exits without shutting down."""
     client._queue.close()
 
 
