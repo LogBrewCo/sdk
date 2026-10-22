@@ -212,6 +212,23 @@ test("encrypted store removes evicted records so a restart does not replay them"
   assert.equal(fs.readdirSync(directory).some((entry) => entry.endsWith(".lbq")), false);
 });
 
+test("encrypted store keeps drop counts across reopen without event data", (t) => {
+  const directory = tempQueue(t);
+  const key = crypto.randomBytes(32);
+  const state = { pending: { report_id: "5f0c6a1e9b2d4c7a8e3f1b6d0a9c2e4f", dropped_events: { queue_overflow: 2 } }, unreported: {} };
+  const writer = createStore(directory, key);
+  assert.equal(writer.loadClientReport(), undefined);
+  writer.saveClientReport(state);
+  writer.append(storedLog("evt_report_001"));
+  writer.close();
+
+  const reader = createStore(directory, key);
+  assert.deepEqual(reader.loadClientReport(), state);
+  assert.equal(reader.load().length, 1);
+  assert.equal(fs.statSync(path.join(directory, "client-report.json")).mode & 0o777, 0o600);
+  reader.close();
+});
+
 test("encrypted store purge removes every pending record", (t) => {
   const directory = tempQueue(t);
   const key = crypto.randomBytes(32);

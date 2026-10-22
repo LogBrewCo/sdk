@@ -96,6 +96,11 @@ const MAX_CLIENT_REPORT_REASONS = 16;
 const MAX_CLIENT_REPORT_COUNT = 1_000_000_000;
 const DELIVERY_HEALTH_SCHEMA_VERSION = 1;
 const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
+// Runtimes without an event store (browser storage) persist unreported drop counts through this seam.
+const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
+const CLIENT_REPORT_SAVE_INTERVAL_MS = 1_000;
+const CLIENT_REPORT_ID_PATTERN = /^[A-Za-z0-9_-]{16,64}$/u;
+const CLIENT_REPORT_REASON_PATTERN = /^[a-z][a-z0-9_]{0,63}$/u;
 const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
 // Runtime packages supply request-scoped breadcrumbs through this seam; core merges them into issues.
 const BREADCRUMB_PROVIDER = Symbol.for("@logbrew/sdk.breadcrumbProvider");
@@ -228,6 +233,7 @@ class LogBrewClient {
     onEventDropped,
     eventStore,
     [EVENT_QUEUE_FACTORY]: eventQueueFactory,
+    [CLIENT_REPORT_STORE]: clientReportStore,
     transport,
     automaticDelivery = transport !== undefined,
     deliveryIntervalMs = DEFAULT_DELIVERY_INTERVAL_MS,
@@ -261,6 +267,9 @@ class LogBrewClient {
     if (eventStore !== undefined && eventQueueFactory !== undefined) {
       throw new SdkError("validation_error", "eventStore and event queue factory are mutually exclusive");
     }
+    if (clientReportStore !== undefined && !isClientReportStore(clientReportStore)) {
+      throw new SdkError("validation_error", "client report store must provide loadClientReport and saveClientReport");
+    }
     validateTransport(transport);
     if (typeof automaticDelivery !== "boolean") {
       throw new SdkError("validation_error", "automaticDelivery must be a boolean");
@@ -284,6 +293,7 @@ class LogBrewClient {
       deliveryQueueThreshold,
       eventStore,
       eventQueueFactory,
+      clientReportStore,
       eventFilter,
       maxBatchBytes,
       maxBatchEvents,
@@ -318,6 +328,7 @@ class LogBrewClient {
     breadcrumbProvider,
     eventStore,
     eventQueueFactory,
+    clientReportStore,
     transport,
     automaticDelivery,
     deliveryIntervalMs,
@@ -382,10 +393,14 @@ class LogBrewClient {
       queue_bytes_overflow: 0,
       queue_overflow: 0
     };
-    // In memory only: counts not yet acknowledged by a 2xx are lost on restart.
-    this.unreportedDropsByReason = {};
+    // A persistent store keeps counts not yet acknowledged by a 2xx across restarts.
+    this.clientReportStore = clientReportStore
+      ?? (isClientReportStore(resolvedEventStore) ? resolvedEventStore : undefined);
+    this.clientReportSavedAtMs = 0;
+    const restoredReport = loadClientReport(this.clientReportStore);
+    this.unreportedDropsByReason = restoredReport.unreported;
     // Drop counts frozen under one report ID until a 2xx acknowledges a body that carried them.
-    this.pendingClientReport = undefined;
+    this.pendingClientReport = restoredReport.pending;
     this.lastDropReason = "none";
     this.storage = resolvedEventStore ? "persistent" : "memory";
     this.hydratedEventCount = recovered.events.length;
@@ -620,6 +635,7 @@ class LogBrewClient {
       if (controlsAutomaticDelivery) {
         this.#recordAutomaticSuccess();
       }
+      this.#saveClientReport(true);
       if (this.eventStore) {
         try {
           requireSynchronousStoreResult("close", this.eventStore.close());
@@ -786,7 +802,9 @@ class LogBrewClient {
   #recordDroppedEvent(event, reason) {
     this.droppedEventCount = incrementBounded(this.droppedEventCount);
     this.droppedEventsByReason[reason] = incrementBounded(this.droppedEventsByReason[reason]);
+    const firstOfReason = this.unreportedDropsByReason[reason] === undefined;
     this.unreportedDropsByReason[reason] = Math.min(MAX_CLIENT_REPORT_COUNT, (this.unreportedDropsByReason[reason] ?? 0) + 1);
+    this.#saveClientReport(firstOfReason);
     this.lastDropReason = reason;
     this.lastDroppedAtUnixMs = nextBoundedTimestamp(this.lastDroppedAtUnixMs);
     if (!this.onEventDropped) {
@@ -954,6 +972,7 @@ class LogBrewClient {
       // Drops recorded while this body was in flight stay pending under a new report ID.
       if (batch.carriesClientReport) {
         this.pendingClientReport = undefined;
+        this.#saveClientReport(true);
       }
       this.#acknowledge(batch.eventsCount);
       this.acceptedBatchCount = incrementBounded(this.acceptedBatchCount);
@@ -1007,8 +1026,26 @@ class LogBrewClient {
         delete this.unreportedDropsByReason[reason];
       }
       this.pendingClientReport = Object.freeze({ report_id: randomHex(16), dropped_events: droppedEvents });
+      this.#saveClientReport(true);
     }
     return this.pendingClientReport;
+  }
+
+  // Saves at once for a new report or reason, and at most once a second during a drop burst.
+  #saveClientReport(immediately) {
+    const now = Date.now();
+    if (!this.clientReportStore || (!immediately && now - this.clientReportSavedAtMs < CLIENT_REPORT_SAVE_INTERVAL_MS)) {
+      return;
+    }
+    this.clientReportSavedAtMs = now;
+    try {
+      requireSynchronousStoreResult("saveClientReport", this.clientReportStore.saveClientReport({
+        pending: this.pendingClientReport ?? null,
+        unreported: { ...this.unreportedDropsByReason }
+      }));
+    } catch {
+      // Drop counts are advisory: a failed save keeps them in memory and never blocks capture.
+    }
   }
 
   #batchEventCount(maxEvents, suffixBytes) {
@@ -1221,6 +1258,37 @@ function randomHex(byteLength) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function isClientReportStore(store) {
+  return typeof store?.loadClientReport === "function" && typeof store.saveClientReport === "function";
+}
+
+// Restores saved drop counts; anything unreadable or out of bounds is ignored, never fatal.
+function loadClientReport(store) {
+  let state;
+  try {
+    state = store ? requireSynchronousStoreResult("loadClientReport", store.loadClientReport()) : undefined;
+  } catch {
+    state = undefined;
+  }
+  const pending = state?.pending;
+  const pendingCounts = validClientReportCounts(pending?.dropped_events);
+  return {
+    pending: CLIENT_REPORT_ID_PATTERN.test(pending?.report_id ?? "") && Object.keys(pendingCounts).length > 0
+      ? Object.freeze({ report_id: pending.report_id, dropped_events: pendingCounts })
+      : undefined,
+    unreported: validClientReportCounts(state?.unreported)
+  };
+}
+
+function validClientReportCounts(counts) {
+  if (!counts || typeof counts !== "object" || Array.isArray(counts)) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(counts).filter(([reason, count]) => (
+    CLIENT_REPORT_REASON_PATTERN.test(reason) && Number.isSafeInteger(count) && count >= 1 && count <= MAX_CLIENT_REPORT_COUNT
+  )).slice(0, MAX_CLIENT_REPORT_REASONS));
+}
+
 function incrementBounded(value) {
   return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
 }
@@ -1286,6 +1354,10 @@ function createEventStoreFromQueueFactory(eventQueueFactory, config) {
   };
   if (typeof queue.remove === "function") {
     eventStore.remove = (indexes) => queue.remove(indexes);
+  }
+  if (isClientReportStore(queue)) {
+    eventStore.loadClientReport = () => queue.loadClientReport();
+    eventStore.saveClientReport = (state) => queue.saveClientReport(state);
   }
   return eventStore;
 }

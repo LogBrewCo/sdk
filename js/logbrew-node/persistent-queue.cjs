@@ -26,10 +26,15 @@ const { SdkError } = require("@logbrew/sdk");
 
 const CHILD_NAME = "logbrew-node-queue-v1";
 const OWNER_NAME = ".owner";
+// Drop counts only: reason codes, counts, and a random report ID, never event data.
+const CLIENT_REPORT_NAME = "client-report.json";
+const CLIENT_REPORT_TEMP_NAME = ".client-report.tmp";
+const MAX_CLIENT_REPORT_BYTES = 4096;
 const RECLAIM_NAME = ".owner-reclaim";
 const RECORD_PATTERN = /^event-([0-9]{16})\.json$/u;
 const TEMP_PATTERN = /^\.event-([0-9]{16})\.tmp$/u;
 const LEASE_PATTERN = /^lease-([0-9a-f]{32})$/u;
+const NON_RECORD_NAMES = new Set([OWNER_NAME, CLIENT_REPORT_NAME]);
 const STALE_LEASE_MS = 30_000;
 const HEARTBEAT_MS = 1_000;
 const MAX_SEQUENCE = 9_999_999_999_999_999n;
@@ -160,6 +165,53 @@ class PersistentEventQueue {
     }
   }
 
+  loadClientReport() {
+    this.assertUsable();
+    const path = join(this.storage.childPath, CLIENT_REPORT_NAME);
+    const stat = lstatOptional(path);
+    if (stat === undefined) {
+      return undefined;
+    }
+    validateOwnedFile(stat, 0o600, [1]);
+    if (stat.size > MAX_CLIENT_REPORT_BYTES) {
+      throw fixedError("persistent_queue_invalid", "persistent queue client report is invalid");
+    }
+    const descriptor = openSync(path, constants.O_RDONLY | noFollowFlag());
+    try {
+      const buffer = Buffer.alloc(MAX_CLIENT_REPORT_BYTES + 1);
+      return JSON.parse(buffer.subarray(0, readSync(descriptor, buffer, 0, buffer.length, 0)).toString("utf8"));
+    } finally {
+      closeSync(descriptor);
+    }
+  }
+
+  saveClientReport(state) {
+    this.assertUsable();
+    const serialized = JSON.stringify(state);
+    if (Buffer.byteLength(serialized, "utf8") > MAX_CLIENT_REPORT_BYTES) {
+      throw fixedError("persistent_queue_invalid", "persistent queue client report is invalid");
+    }
+    const temporaryPath = join(this.storage.childPath, CLIENT_REPORT_TEMP_NAME);
+    let descriptor;
+    try {
+      descriptor = openSync(
+        temporaryPath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollowFlag(),
+        0o600
+      );
+      validateOwnedFile(fstatSync(descriptor), 0o600, [1]);
+      writeFileSync(descriptor, serialized, { encoding: "utf8" });
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      renameSync(temporaryPath, join(this.storage.childPath, CLIENT_REPORT_NAME));
+      fsyncDirectory(this.storage.childPath);
+    } catch {
+      closeQuietly(descriptor);
+      throw fixedError("persistent_queue_unavailable", "persistent queue client report could not be saved");
+    }
+  }
+
   unlinkRecord(record) {
     const path = join(this.storage.childPath, record.name);
     const temporaryPath = record.temporaryName === undefined
@@ -180,7 +232,7 @@ class PersistentEventQueue {
 
   load() {
     reconcileTemporaryRecords(this.storage.childPath);
-    const entries = readdirSync(this.storage.childPath).filter((name) => name !== OWNER_NAME);
+    const entries = readdirSync(this.storage.childPath).filter((name) => !NON_RECORD_NAMES.has(name));
     const recordNames = entries.filter((name) => RECORD_PATTERN.test(name)).sort();
     if (recordNames.length !== entries.length || recordNames.length > this.config.maxQueueSize) {
       throw fixedError("persistent_queue_invalid", "persistent queue contents are invalid");
@@ -337,7 +389,7 @@ function purgePersistentEventQueue({ persistentQueuePath } = {}) {
     owner = acquireLease(storage.childPath);
     reconcileTemporaryRecords(storage.childPath);
     const entries = readdirSync(storage.childPath).filter((name) => name !== OWNER_NAME);
-    if (entries.some((name) => !RECORD_PATTERN.test(name))) {
+    if (entries.some((name) => !RECORD_PATTERN.test(name) && name !== CLIENT_REPORT_NAME)) {
       throw fixedError("persistent_queue_invalid", "persistent queue contents are invalid");
     }
     for (const name of entries) {
@@ -518,6 +570,12 @@ function leaseIsStale(path, stat) {
 }
 
 function reconcileTemporaryRecords(childPath) {
+  const reportTemporaryPath = join(childPath, CLIENT_REPORT_TEMP_NAME);
+  const reportTemporaryStat = lstatOptional(reportTemporaryPath);
+  if (reportTemporaryStat !== undefined) {
+    validateOwnedFile(reportTemporaryStat, 0o600, [1]);
+    unlinkSync(reportTemporaryPath);
+  }
   const names = readdirSync(childPath).filter((name) => TEMP_PATTERN.test(name));
   for (const temporaryName of names) {
     const sequence = TEMP_PATTERN.exec(temporaryName)[1];

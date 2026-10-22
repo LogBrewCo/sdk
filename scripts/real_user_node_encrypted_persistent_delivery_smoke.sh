@@ -329,7 +329,7 @@ assertEqual(b.reports[0], null, "process B first request has no drop report");
 assertEqual(JSON.stringify(b.reports[1].dropped_events), JSON.stringify({ queue_overflow: 500 }), "process B drop report");
 assertEqual(/^[0-9a-f]{32}$/u.test(b.reports[1].report_id), true, "process B drop report ID");
 assertEqual(JSON.stringify(b.reports[2]), JSON.stringify(b.reports[1]), "process B resent drop report");
-assertEqual(c.firstReport, null, "in-memory drop counts end with the process");
+assertEqual(JSON.stringify(c.firstReport), JSON.stringify(b.reports[1]), "drop report survives the restart under its ID");
 assertEqual(b.healthSchema, 1, "process B health schema");
 assertEqual(c.healthSchema, 1, "process C health schema");
 assertEqual(b.hydratedEvents, 900, "process B hydration");

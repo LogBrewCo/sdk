@@ -149,3 +149,63 @@ test("client reports cap reasons at 16 and clamp counts", async () => {
   assert.equal(Object.keys(dropped).length, 16);
   assert.equal(dropped.queue_overflow, 1_000_000_000);
 });
+
+function reportStore(saved) {
+  const saves = [];
+  return {
+    saves,
+    records: [],
+    load() { return this.records; },
+    append(record) { this.records.push(record); },
+    acknowledge(count) { this.records.splice(0, count); },
+    purge() { this.records.splice(0); },
+    close() {},
+    loadClientReport() { return saved; },
+    saveClientReport(state) { saves.push(structuredClone(state)); }
+  };
+}
+
+test("a store restores a pending report first, then unreported counts under a new ID", async () => {
+  const pending = { report_id: "5f0c6a1e9b2d4c7a8e3f1b6d0a9c2e4f", dropped_events: { queue_overflow: 2 } };
+  const store = reportStore({ pending, unreported: { event_too_large: 3, Bad: 1, queue_overflow: 0 } });
+  const client = createClient({ eventStore: store });
+  log(client, "evt_log_001");
+  const transport = RecordingTransport.alwaysAccept();
+
+  await client.flush(transport);
+  log(client, "evt_log_002");
+  await client.shutdown(transport);
+
+  const sent = transport.sentBodies.map(reportOf);
+  assert.deepEqual(sent[0], pending);
+  assert.deepEqual(withoutId(sent[1]), { dropped_events: { event_too_large: 3 } });
+  assert.deepEqual(store.saves.at(-1), { pending: null, unreported: {} });
+});
+
+test("drops are saved at once per reason and at most once a second in a burst", () => {
+  const store = reportStore(undefined);
+  const client = createClient({ eventStore: store, maxQueueSize: 1 });
+  for (let index = 0; index < 50; index += 1) {
+    log(client, `evt_log_${index}`);
+  }
+  client.log("evt_log_big", timestamp, { message: "x".repeat(300 * 1024), level: "info" });
+
+  assert.deepEqual(store.saves, [
+    { pending: null, unreported: { queue_overflow: 1 } },
+    { pending: null, unreported: { queue_overflow: 49, event_too_large: 1 } }
+  ]);
+});
+
+test("a failing client report store never blocks capture", async () => {
+  const store = reportStore(undefined);
+  store.loadClientReport = () => { throw new Error("unreadable"); };
+  store.saveClientReport = () => { throw new Error("disk full"); };
+  const client = createClient({ eventStore: store, maxQueueSize: 1 });
+  log(client, "evt_log_001");
+  log(client, "evt_log_002");
+  const transport = RecordingTransport.alwaysAccept();
+
+  await client.flush(transport);
+
+  assert.deepEqual(withoutId(reportOf(transport.lastBody())), { dropped_events: { queue_overflow: 1 } });
+});

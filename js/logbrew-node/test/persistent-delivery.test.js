@@ -665,6 +665,68 @@ test("a fatal at a full persistent queue evicts the oldest log on disk across re
   assert.deepEqual(eventFiles(parent), []);
 });
 
+function runChild(source, args) {
+  const child = spawnSync(process.execPath, ["--input-type=module", "--eval", source, ...args], {
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(child.stderr, "");
+  assert.equal(child.status, 0);
+  return child.stdout;
+}
+
+function reportOf(body) {
+  return JSON.parse(body).client_report;
+}
+
+const DROP_CHILD = `
+  import { RecordingTransport, TransportError } from "@logbrew/sdk";
+  import { createLogBrewNodeClient } from ${JSON.stringify(SOURCE_MODULE_URL)};
+  const persistence = process.argv[2] === "path"
+    ? { persistentQueuePath: process.argv[1] }
+    : { persistentQueue: { directory: process.argv[1], encryptionKey: Buffer.from(process.argv[3], "hex") } };
+  const client = createLogBrewNodeClient({ apiKey: "CHILD_KEY", maxQueueSize: 1, maxRetries: 0, ...persistence });
+  for (const id of ["drop-0", "drop-1", "drop-2"]) {
+    client.log(id, ${JSON.stringify(FIXED_TIMESTAMP)}, { level: "info", message: "drop" });
+  }
+  const transport = new RecordingTransport([TransportError.network("offline")]);
+  await client.flush(transport).catch(() => {});
+  process.stdout.write(transport.sentBodies[0]);
+  process.exit(0);
+`;
+
+for (const mode of ["path", "encrypted"]) {
+  test(`${mode} persistence resends unreported drop counts under the same report ID after a hard exit`, async (t) => {
+    const parent = temporaryParent(t);
+    const key = "11".repeat(32);
+    const directory = mode === "path" ? parent : join(parent, "encrypted");
+    const failedBody = runChild(DROP_CHILD, [directory, mode, key]);
+    const failedReport = reportOf(failedBody);
+    assert.deepEqual(failedReport.dropped_events, { queue_overflow: 2 });
+
+    if (mode === "path") {
+      const ownerDirectory = join(queueDirectory(parent), ".owner");
+      const expired = new Date(0);
+      utimesSync(join(ownerDirectory, readdirSync(ownerDirectory)[0]), expired, expired);
+    }
+    const recovered = createLogBrewNodeClient({
+      apiKey: "TEST_API_KEY",
+      maxQueueSize: 1,
+      ...(mode === "path"
+        ? { persistentQueuePath: parent }
+        : { persistentQueue: { directory, encryptionKey: Buffer.from(key, "hex") } })
+    });
+    const transport = RecordingTransport.alwaysAccept();
+    await recovered.flush(transport);
+    capture(recovered, "after-ack");
+    await recovered.shutdown(transport);
+
+    assert.deepEqual(payloadEventIds(transport.sentBodies), ["drop-0", "after-ack"]);
+    assert.deepEqual(reportOf(transport.sentBodies[0]), failedReport);
+    assert.equal(reportOf(transport.sentBodies[1]), undefined);
+  });
+}
+
 const invalidStorageCases = [
     {
       name: "malformed",
