@@ -69,21 +69,21 @@ node no-otel.mjs > "$tmp_dir/no-otel.stdout.json"
 grep -q '"ok":true' "$tmp_dir/no-otel.stdout.json"
 
 # The newest API release can be ahead of the newest SDK's peer range; install the newest API it accepts.
-otel_api_range="$(npm view "@opentelemetry/sdk-trace-base@latest" "peerDependencies.@opentelemetry/api")"
+otel_api_range="$(npm view "@opentelemetry/sdk-trace@latest" "peerDependencies.@opentelemetry/api")"
 npm install \
   --save-exact \
   --no-audit \
   --fund=false \
   "@opentelemetry/api@$otel_api_range" \
   "@opentelemetry/context-async-hooks@latest" \
-  "@opentelemetry/sdk-trace-base@latest" \
+  "@opentelemetry/sdk-trace@latest" \
   "typescript@latest" \
   >/dev/null
-npm ls @logbrew/sdk @opentelemetry/api @opentelemetry/context-async-hooks @opentelemetry/sdk-trace-base > "$tmp_dir/npm-list-after-otel.txt"
+npm ls @logbrew/sdk @opentelemetry/api @opentelemetry/context-async-hooks @opentelemetry/sdk-trace > "$tmp_dir/npm-list-after-otel.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-after-otel.txt"
 grep -q '@opentelemetry/api@' "$tmp_dir/npm-list-after-otel.txt"
 grep -q '@opentelemetry/context-async-hooks@' "$tmp_dir/npm-list-after-otel.txt"
-grep -q '@opentelemetry/sdk-trace-base@' "$tmp_dir/npm-list-after-otel.txt"
+grep -q '@opentelemetry/sdk-trace@' "$tmp_dir/npm-list-after-otel.txt"
 
 cat > typecheck.mts <<'EOF'
 import {
@@ -164,7 +164,7 @@ EOF
 cat > otel.mjs <<'EOF'
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { context, SpanKind, TraceFlags, trace } from "@opentelemetry/api";
-import { BasicTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { TracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace";
 import {
   createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
@@ -284,7 +284,7 @@ try {
     metadata: { release: "checkout@1.2.3" },
     transport: processorTransport
   });
-  const provider = new BasicTracerProvider({ spanProcessors: [processor] });
+  const provider = new TracerProvider({ spanProcessors: [processor] });
   if (typeof provider.addSpanProcessor === "function") {
     provider.addSpanProcessor(processor);
   }
@@ -339,8 +339,8 @@ try {
     metadata: { release: "checkout@1.2.3" },
     transport: exporterTransport
   });
-  const exporterProvider = new BasicTracerProvider({
-    spanProcessors: [new SimpleSpanProcessor(exporter)]
+  const exporterProvider = new TracerProvider({
+    spanProcessors: [new SimpleSpanProcessor({ exporter })]
   });
   const exporterTracer = exporterProvider.getTracer("logbrew-otel-exporter-smoke", "1.0.0");
   const exporterSpan = exporterTracer.startSpan("POST /checkout", {
