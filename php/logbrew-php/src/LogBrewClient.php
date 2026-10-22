@@ -454,16 +454,24 @@ final class LogBrewClient
             $this->recordDroppedEvent($id, $type, 'event_too_large');
             return;
         }
-        $evicted = [];
+        $evictable = [];
         if ($this->overflows(count($this->events), $this->pendingEventBytes + $eventBytes)) {
-            $evicted = $fatal ? $this->evictForFatal($eventBytes) : [];
-            if ($evicted === []) {
+            $evictable = $fatal ? $this->fatalEvictionIndexes($eventBytes) : [];
+            if ($evictable === []) {
                 $this->recordDroppedEvent($id, $type, 'queue_overflow');
                 return;
             }
         }
 
+        $evicted = [];
         try {
+            if ($this->eventStore !== null && $evictable !== []) {
+                $this->replacePersistedEvents($evictable, $event, $eventJson, $evicted);
+                return;
+            }
+            foreach (array_reverse($evictable) as $index) {
+                array_unshift($evicted, $this->removeQueuedEvent($index));
+            }
             $storedSequence = $this->eventStore?->append($eventJson);
             $this->events[] = $event;
             $this->serializedEvents[] = $eventJson;
@@ -498,17 +506,13 @@ final class LogBrewClient
     }
 
     /**
-     * Removes the oldest events that are not crash reports and are not in the batch being sent or
-     * retried, only when that makes room. The persistent queue keeps every admitted event, so a crash
-     * report there is dropped like any other event at a full queue.
+     * Returns the oldest events that are not crash reports and are not in the batch being sent or
+     * retried, only when removing them makes room.
      *
-     * @return list<array{type:string, id:string}>
+     * @return list<int>
      */
-    private function evictForFatal(int $eventBytes): array
+    private function fatalEvictionIndexes(int $eventBytes): array
     {
-        if ($this->eventStore !== null) {
-            return [];
-        }
         $indexes = [];
         $events = count($this->events);
         $bytes = $this->pendingEventBytes + $eventBytes;
@@ -519,24 +523,57 @@ final class LogBrewClient
                 $bytes -= $this->serializedEventBytes[$index];
             }
         }
-        if ($this->overflows($events, $bytes)) {
-            return [];
+        return $this->overflows($events, $bytes) ? [] : $indexes;
+    }
+
+    /**
+     * Remove the newer evicted events first, then atomically overwrite the oldest one with the crash
+     * report, so the stored queue stays within its bounds if the process stops at any step.
+     *
+     * @param non-empty-list<int> $indexes
+     * @param array<string, mixed> $event
+     * @param list<array{type:string, id:string}> $evicted
+     */
+    private function replacePersistedEvents(array $indexes, array $event, string $eventJson, array &$evicted): void
+    {
+        $oldest = $indexes[0];
+        foreach (array_reverse(array_slice($indexes, 1)) as $index) {
+            $this->eventStore?->remove($this->persistedSequence($index));
+            array_unshift($evicted, $this->removeQueuedEvent($index));
         }
-        $evicted = [];
-        foreach ($indexes as $index) {
-            $evicted[] = [
-                'type' => self::eventField($this->events[$index], 'type'),
-                'id' => self::eventField($this->events[$index], 'id'),
-            ];
-        }
-        foreach (array_reverse($indexes) as $index) {
-            $this->pendingEventBytes -= $this->serializedEventBytes[$index];
-            array_splice($this->events, $index, 1);
-            array_splice($this->serializedEvents, $index, 1);
-            array_splice($this->serializedEventBytes, $index, 1);
-            array_splice($this->storedEventSequences, $index, 1);
-        }
-        return $evicted;
+        $this->eventStore?->replace($this->persistedSequence($oldest), $eventJson);
+        array_unshift($evicted, self::eventIdentity($this->events[$oldest]));
+        $this->pendingEventBytes += strlen($eventJson) - $this->serializedEventBytes[$oldest];
+        array_splice($this->events, $oldest, 1, [$event]);
+        array_splice($this->serializedEvents, $oldest, 1, [$eventJson]);
+        array_splice($this->serializedEventBytes, $oldest, 1, [strlen($eventJson)]);
+    }
+
+    private function persistedSequence(int $index): int
+    {
+        return $this->storedEventSequences[$index]
+            ?? throw new SdkError('persistent_queue_error', 'persistent event sequence is unavailable');
+    }
+
+    /** @return array{type:string, id:string} */
+    private function removeQueuedEvent(int $index): array
+    {
+        $identity = self::eventIdentity($this->events[$index]);
+        $this->pendingEventBytes -= $this->serializedEventBytes[$index];
+        array_splice($this->events, $index, 1);
+        array_splice($this->serializedEvents, $index, 1);
+        array_splice($this->serializedEventBytes, $index, 1);
+        array_splice($this->storedEventSequences, $index, 1);
+        return $identity;
+    }
+
+    /**
+     * @param array<string, mixed> $event
+     * @return array{type:string, id:string}
+     */
+    private static function eventIdentity(array $event): array
+    {
+        return ['type' => self::eventField($event, 'type'), 'id' => self::eventField($event, 'id')];
     }
 
     private function recordDroppedEvent(string $eventId, string $eventType, string $reason): void
