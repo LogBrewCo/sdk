@@ -71,13 +71,13 @@ class NugetReleasePlanTests(unittest.TestCase):
                     {
                         "packageId": "LogBrew",
                         "projectPath": "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj",
-                        "version": "0.1.9",
+                        "version": "0.1.10",
                         "versionOutput": "core_version",
                     },
                     {
                         "packageId": "LogBrew.HttpClient",
                         "projectPath": "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
-                        "version": "0.1.4",
+                        "version": "0.1.5",
                         "versionOutput": "httpclient_version",
                     },
                 ],
@@ -175,7 +175,7 @@ class NugetReleasePlanTests(unittest.TestCase):
                     {
                         "packageId": "LogBrew",
                         "projectPath": "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj",
-                        "version": "0.1.9",
+                        "version": "0.1.10",
                         "versionOutput": "core_version",
                     },
                 ],

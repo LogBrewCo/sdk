@@ -20,15 +20,15 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_pac
 PUBLIC_VERSION = "0.1.0"
 RUST_VERSION = "0.1.8"
 RUBYGEMS_VERSION = "0.1.16"
-PACKAGIST_VERSION = "0.1.21"
-DOTNET_VERSION = "0.1.9"
+PACKAGIST_VERSION = "0.1.22"
+DOTNET_VERSION = "0.1.10"
 DOTNET_ASPNETCORE_VERSION = "0.1.3"
 DOTNET_OTEL_VERSION = "0.1.1"
-DOTNET_HTTPCLIENT_VERSION = "0.1.4"
+DOTNET_HTTPCLIENT_VERSION = "0.1.5"
 DOTNET_HANGFIRE_VERSION = "0.1.0"
 UNITY_VERSION = "0.2.2"
 MAVEN_VERSION = "0.2.3"
-JAVA_MAVEN_VERSION = "0.1.11"
+JAVA_MAVEN_VERSION = "0.1.12"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
@@ -110,7 +110,7 @@ PYTHON_PACKAGES = {
         },
         "package": "logbrew_sdk",
         "requires_python": ">=3.10",
-        "version": "0.1.23",
+        "version": "0.1.24",
     },
 }
 
