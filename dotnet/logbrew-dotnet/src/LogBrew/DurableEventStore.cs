@@ -132,6 +132,27 @@ namespace LogBrew
             }
         }
 
+        public void RemoveEvents(IReadOnlyList<string> recordNames)
+        {
+            RequireNotDisposed();
+            foreach (var recordName in recordNames)
+            {
+                if (!TryParseEventRecordName(recordName, out _))
+                {
+                    throw StorageUnavailable();
+                }
+            }
+
+            ValidateOwnership();
+            foreach (var recordName in recordNames)
+            {
+                fileSystem.Delete(recordName, allowMissing: false);
+            }
+
+            fileSystem.FlushDirectory();
+            ValidateOwnership();
+        }
+
         public void PersistPrefix(string body, IReadOnlyList<string> recordNames)
         {
             RequireNotDisposed();

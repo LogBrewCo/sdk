@@ -14,6 +14,8 @@ namespace LogBrew
 
         void Track(Event item, string recordName);
 
+        void Remove(IReadOnlyList<Event> items);
+
         DurableRecoveryState TakeRecoveryState(int maxQueueSize, int maxQueueBytes);
 
         void PersistPrefix(FrozenBatch batch);
