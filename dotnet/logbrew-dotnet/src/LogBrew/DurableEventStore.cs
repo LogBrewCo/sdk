@@ -12,13 +12,17 @@ namespace LogBrew
     internal sealed class DurableEventStore : IDurableDeliveryStore
     {
         private const string StateFileName = "delivery-state.lbd";
+        // Exists only while unreported drop counts do, so a drained store keeps its earlier layout.
+        private const string ClientReportFileName = "client-report.lbd";
         private const byte EventRecordKind = 1;
         private const byte PrefixRecordKind = 2;
         private const byte AcknowledgedRecordKind = 3;
+        private const byte ClientReportRecordKind = 4;
         private const byte RecordVersion = 1;
         private const int NonceBytes = 12;
         private const int TagBytes = 16;
         private const int MaximumRecordBytes = 512 * 1024;
+        private const int MaximumClientReportBytes = 4096;
         private static readonly byte[] RecordMagic = Encoding.ASCII.GetBytes("LBDOTN01");
         private readonly DurableStoreFileSystem fileSystem;
         private readonly string primaryKeyId;
@@ -26,6 +30,7 @@ namespace LogBrew
         private readonly int maximumRecoveryEvents;
         private readonly long maximumRecoveryBytes;
         private long nextSequence = 1;
+        private bool clientReportExists;
         private bool disposed;
 
         private DurableEventStore(
@@ -190,11 +195,43 @@ namespace LogBrew
             }
         }
 
+        public void SaveClientReport(IReadOnlyDictionary<string, int> unreported)
+        {
+            RequireNotDisposed();
+            ValidateOwnership();
+            if (unreported.Count == 0)
+            {
+                if (clientReportExists)
+                {
+                    fileSystem.Delete(ClientReportFileName, allowMissing: true);
+                    fileSystem.FlushDirectory();
+                    clientReportExists = false;
+                }
+
+                return;
+            }
+
+            var plaintext = DurableRecordCodec.SerializeClientReport(unreported);
+            try
+            {
+                WriteEncryptedRecord(ClientReportFileName, ClientReportRecordKind, 0, plaintext, replace: clientReportExists);
+                clientReportExists = true;
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("client_report_persisted");
+#endif
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+            }
+        }
+
         public void Purge()
         {
             RequireNotDisposed();
             fileSystem.Purge();
             nextSequence = 1;
+            clientReportExists = false;
             RetirePreviousKeys();
         }
 
@@ -217,8 +254,9 @@ namespace LogBrew
             ValidateOwnership();
             var eventRecords = new List<KeyValuePair<long, string>>();
             var hasState = false;
+            var hasClientReport = false;
             foreach (var entry in fileSystem.EnumerateEntries(
-                (long)maximumRecoveryEvents + 1,
+                (long)maximumRecoveryEvents + 2,
                 maximumRecoveryBytes))
             {
                 persistedRecordCount = persistedRecordCount == int.MaxValue ? int.MaxValue : persistedRecordCount + 1;
@@ -239,6 +277,12 @@ namespace LogBrew
                 if (string.Equals(name, StateFileName, StringComparison.Ordinal) && !hasState)
                 {
                     hasState = true;
+                    continue;
+                }
+
+                if (string.Equals(name, ClientReportFileName, StringComparison.Ordinal) && !hasClientReport)
+                {
+                    hasClientReport = true;
                     continue;
                 }
 
@@ -301,10 +345,35 @@ namespace LogBrew
                 }
             }
 
+            clientReportExists = hasClientReport;
+            var unreported = hasClientReport ? LoadClientReport() : new Dictionary<string, int>();
             nextSequence = previousSequence == 0 ? 1 : checked(previousSequence + 1);
             ValidateOwnership();
             RetirePreviousKeys();
-            return new DurableStoreSnapshot(recovered, prefix, recoveryFailed: false, persistedRecordCount, persistedBytes);
+            return new DurableStoreSnapshot(recovered, prefix, recoveryFailed: false, persistedRecordCount, persistedBytes, unreported);
+        }
+
+        // Drop counts are advisory: a record that cannot be read is ignored and replaced by the next save.
+        private Dictionary<string, int> LoadClientReport()
+        {
+            try
+            {
+                var plaintext = ReadEncryptedRecord(ClientReportFileName, ClientReportRecordKind, 0, out var keyId);
+                try
+                {
+                    var counts = DurableRecordCodec.DeserializeClientReport(plaintext);
+                    RotateRecordIfNeeded(ClientReportFileName, ClientReportRecordKind, 0, keyId, plaintext);
+                    return counts;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(plaintext);
+                }
+            }
+            catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
+            {
+                return new Dictionary<string, int>(StringComparer.Ordinal);
+            }
         }
 
         private void WriteEncryptedRecord(string recordName, byte kind, long sequence, byte[] plaintext, bool replace)
@@ -599,7 +668,7 @@ namespace LogBrew
         {
             // Binary event records are bounded by twice the encoded queue plus fixed AEAD/name
             // overhead per event and one maximum-sized authenticated prefix record.
-            var fixedOverhead = (256L * maximumEvents) + MaximumRecordBytes;
+            var fixedOverhead = (256L * maximumEvents) + MaximumRecordBytes + MaximumClientReportBytes;
             var queueBytes = (long)maximumQueueBytes;
             return queueBytes > (long.MaxValue - fixedOverhead) / 2
                 ? long.MaxValue

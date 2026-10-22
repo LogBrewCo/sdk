@@ -65,11 +65,17 @@ internal static partial class DurableDeliveryContractTests
         DurableRestartRecoversOldestFirst();
         FrozenPrefixPersistsBeforeSendAndRetriesIdentically();
         CrashReportEvictionSurvivesRestart();
+        DropCountsSurviveARestartInAnotherProcess();
+        ASentReportKeepsItsIdAfterARestart();
+        ADropBurstSavesOncePerSecondAndShutdownSavesTheRest();
+        UnreadableSavedDropCountsAreIgnored();
+        InvalidSavedDropCountsAreDropped();
+        AFailedDropCountSaveNeverFailsCapture();
         AcknowledgedPrefixCleanupResumesAfterExit();
         LocalAcknowledgementFailureRetainsExactPrefix();
         KeyRotationSurvivesRecordReplacementExit();
         RecoveryAdmissionIsBoundedBeforeRotation();
-        return 44;
+        return 50;
     }
 
     internal static int RunChild(string[] arguments)
@@ -147,6 +153,34 @@ internal static partial class DurableDeliveryContractTests
             client.Issue("evt_fatal_crash", "2026-06-02T10:00:03Z", IssueAttributes.Create(new string('x', 150), "fatal"));
             var evicted = drops.Count == 1 && drops[0].EventId == "evt_fatal_old" && drops[0].Reason == "evicted_for_fatal";
             Environment.Exit(evicted && client.PendingEvents() == 2 ? 0 : 4);
+        }
+
+        if (arguments[0] == "--durable-child-drops")
+        {
+            var client = CreateDurableClient(arguments[1]);
+            client.Log("evt_drop_too_large", "2026-06-02T10:00:02Z", LogAttributes.Create(new string('x', 256 * 1024), "info"));
+            Environment.Exit(client.DroppedEvents() == 1 ? 0 : 4);
+        }
+
+        if (arguments[0] == "--durable-child-drops-frozen")
+        {
+            using var key = new DurableDeliveryKey("primary-2026", Enumerable.Repeat((byte)0x31, 32).ToArray());
+            using var storage = new DurableDeliveryOptions(arguments[1], key);
+            var client = LogBrewClient.CreateAutomaticDurable(
+                ApiKey,
+                "logbrew-dotnet",
+                "0.1.0",
+                new ExitOnSendTransport(System.IO.Path.Combine(arguments[1], "expected-body.txt")),
+                storage,
+                new AutomaticDeliveryOptions
+                {
+                    FlushAtQueueSize = 1,
+                    FlushInterval = TimeSpan.FromHours(1),
+                });
+            client.Log("evt_drop_too_large", "2026-06-02T10:00:02Z", LogAttributes.Create(new string('x', 256 * 1024), "info"));
+            client.Log("evt_drop_frozen", "2026-06-02T10:00:03Z", LogAttributes.Create("frozen", "info"));
+            Thread.Sleep(TimeSpan.FromSeconds(5));
+            return 3;
         }
 
         if (arguments[0] == "--durable-child-admission-checkpoint")

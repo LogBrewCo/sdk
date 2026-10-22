@@ -81,6 +81,7 @@ namespace LogBrew
                 }
                 else
                 {
+                    dropReporter.LoadSaved(recovered.UnreportedDrops);
                     events.AddRange(recovered.Events);
                     foreach (var item in recovered.Events)
                     {
@@ -223,6 +224,7 @@ namespace LogBrew
                     durableSession.ExitOperation();
                 }
                 ReportDrops(drop, evictions);
+                SaveDropCounts(force: false);
                 return;
             }
             lock (gate)
@@ -247,6 +249,40 @@ namespace LogBrew
                 }
             }
             ReportDrops(drop, evictions);
+        }
+
+        // Keeps unreported drop counts across restarts. Counts are advisory: a failed save never fails capture.
+        private void SaveDropCounts(bool force)
+        {
+            if (durableSession == null)
+            {
+                return;
+            }
+
+            IReadOnlyDictionary<string, int>? counts;
+            lock (gate)
+            {
+                counts = dropReporter.TakeUnsavedCounts(force);
+            }
+
+            if (counts == null)
+            {
+                return;
+            }
+
+            durableSession.EnterOperation();
+            try
+            {
+                durableSession.SaveClientReport(counts);
+            }
+            catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
+            {
+                // Counts stay in memory and ride in the next request.
+            }
+            finally
+            {
+                durableSession.ExitOperation();
+            }
         }
 
         private void ReportDrops(DroppedEvent? drop, List<DroppedEvent> evictions)
@@ -437,6 +473,7 @@ namespace LogBrew
                     nextWakeTimestamp = 0;
                 }
 
+                SaveDropCounts(force: true);
                 durableSession?.Dispose();
 
                 return response;
@@ -644,6 +681,8 @@ namespace LogBrew
                     candidate = batchBuilder.Create(events, targetEvents, dropReporter.FreezeReport());
                 }
 
+                // Save the counts that left the unreported set first, so a crash never counts them twice.
+                SaveDropCounts(force: true);
                 durableSession.PersistPrefix(candidate);
                 lock (gate)
                 {

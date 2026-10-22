@@ -87,6 +87,67 @@ namespace LogBrew
             return new DurableStoredPrefix(body, names);
         }
 
+        // Drop counts only: reason codes and counts, never event data.
+        internal static byte[] SerializeClientReport(IReadOnlyDictionary<string, int> unreported)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream, StrictUtf8, leaveOpen: true);
+            writer.Write(unreported.Count);
+            foreach (var pair in unreported)
+            {
+                WriteString(writer, pair.Key);
+                writer.Write(pair.Value);
+            }
+
+            return stream.ToArray();
+        }
+
+        // Saved drop counts are advisory: anything unreadable or out of bounds is ignored, never fatal.
+        // Bytes after the counts are ignored so later versions can append state.
+        internal static Dictionary<string, int> DeserializeClientReport(byte[] plaintext)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            try
+            {
+                using var stream = new MemoryStream(plaintext, writable: false);
+                using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
+                var saved = reader.ReadInt32();
+                for (var index = 0; index < saved && counts.Count < DeliveryDropReporter.MaxClientReportReasons; index++)
+                {
+                    var reason = ReadString(reader);
+                    var count = reader.ReadInt32();
+                    if (IsDropReason(reason) && count >= 1 && count <= DeliveryDropReporter.MaxClientReportCount)
+                    {
+                        counts[reason] = count;
+                    }
+                }
+            }
+            catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
+            {
+                counts.Clear();
+            }
+
+            return counts;
+        }
+
+        private static bool IsDropReason(string reason)
+        {
+            if (reason.Length == 0 || reason.Length > 64 || reason[0] < 'a' || reason[0] > 'z')
+            {
+                return false;
+            }
+
+            foreach (var character in reason)
+            {
+                if (!((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_'))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private static void WriteObject(BinaryWriter writer, OrderedJsonObject value, int depth)
         {
             if (depth > MaximumDepth || value.Values.Count > MaximumFields)

@@ -22,6 +22,8 @@ namespace LogBrew
 
         void Acknowledge(FrozenBatch batch);
 
+        void SaveClientReport(IReadOnlyDictionary<string, int> unreported);
+
         void Purge(IDurableDeliveryPurgeOwner owner);
     }
 
@@ -41,13 +43,15 @@ namespace LogBrew
             FrozenBatch? frozenBatch,
             bool recoveryFailed,
             int persistedRecordCount,
-            long persistedBytes)
+            long persistedBytes,
+            IReadOnlyDictionary<string, int>? unreportedDrops = null)
         {
             Events = events;
             FrozenBatch = frozenBatch;
             RecoveryFailed = recoveryFailed;
             PersistedRecordCount = persistedRecordCount;
             PersistedBytes = persistedBytes;
+            UnreportedDrops = unreportedDrops ?? new Dictionary<string, int>();
         }
 
         internal IReadOnlyList<Event> Events { get; }
@@ -59,5 +63,7 @@ namespace LogBrew
         internal int PersistedRecordCount { get; }
 
         internal long PersistedBytes { get; }
+
+        internal IReadOnlyDictionary<string, int> UnreportedDrops { get; }
     }
 }
