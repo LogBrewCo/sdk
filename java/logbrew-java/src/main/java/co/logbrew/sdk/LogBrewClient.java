@@ -612,22 +612,48 @@ public final class LogBrewClient {
 
         synchronized (stateLock) {
             ensureWritable();
-            if (eventBytes > deliveryOptions.maxQueueBytes()
+            boolean tooLarge = eventBytes > deliveryOptions.maxQueueBytes()
                 || utf8Bytes(serializeBatch(Collections.singletonList(queuedEvent), null))
-                    > deliveryOptions.maxBatchBytes()) {
+                    > deliveryOptions.maxBatchBytes();
+            boolean overflow = !tooLarge && overflows(events.size(), pendingEventBytes + eventBytes);
+            Set<QueuedEvent> evicted = overflow && fatal
+                ? fatalEvictionsLocked(eventBytes)
+                : Collections.<QueuedEvent>emptySet();
+            if (tooLarge) {
                 drop = recordDrop(id, type, "event_too_large", eventBytes);
-            } else if (overflows(events.size(), pendingEventBytes + eventBytes)
-                && (!fatal || !evictForFatalLocked(eventBytes, evictions))) {
+            } else if (overflow && evicted.isEmpty()) {
                 drop = recordDrop(id, type, "queue_overflow", eventBytes);
             } else {
                 if (eventStore != null) {
+                    List<EncryptedEventStore.Record> evictedRecords = new ArrayList<>();
+                    for (QueuedEvent candidate : events) {
+                        if (evicted.contains(candidate)) {
+                            evictedRecords.add(candidate.persistedRecord);
+                        }
+                    }
+                    // The store removes evicted events in the same durable write that admits this one.
                     EncryptedEventStore.Record record = eventStore.admit(
                         id,
                         eventJson,
                         deliveryOptions.maxQueueEvents(),
-                        deliveryOptions.maxQueueBytes()
+                        deliveryOptions.maxQueueBytes(),
+                        evictedRecords
                     );
                     queuedEvent = new QueuedEvent(eventJson, eventBytes, record, id, type, fatal);
+                }
+                Iterator<QueuedEvent> remaining = events.iterator();
+                while (remaining.hasNext()) {
+                    QueuedEvent candidate = remaining.next();
+                    if (evicted.contains(candidate)) {
+                        remaining.remove();
+                        pendingEventBytes -= candidate.serializedBytes;
+                        evictions.add(recordDrop(
+                            candidate.id,
+                            candidate.type,
+                            "evicted_for_fatal",
+                            candidate.serializedBytes
+                        ));
+                    }
                 }
                 events.addLast(queuedEvent);
                 pendingEventBytes += eventBytes;
@@ -658,14 +684,10 @@ public final class LogBrewClient {
     }
 
     /**
-     * Removes the oldest events that are not crash reports and not captured by a delivery snapshot
-     * or session, only when that makes room. The encrypted store keeps every admitted event, so a
-     * crash report there is dropped like any other event at a full queue.
+     * Selects the oldest events that are not crash reports and not captured by a delivery snapshot
+     * or session, only when removing them makes room; otherwise returns an empty set.
      */
-    private boolean evictForFatalLocked(long eventBytes, List<EventDrop> evictions) {
-        if (eventStore != null) {
-            return false;
-        }
+    private Set<QueuedEvent> fatalEvictionsLocked(long eventBytes) {
         boolean protectedPrefix = false;
         for (QueuedEvent queued : events) {
             if (queued == deliveryProtectedThrough) {
@@ -689,19 +711,11 @@ public final class LogBrewClient {
                 remainingBytes -= candidate.serializedBytes;
             }
         }
-        if (evicted.isEmpty() || overflows(remainingEvents, remainingBytes)) {
-            return false;
+        boolean storeLimit = eventStore != null && evicted.size() > PersistenceTransaction.MAX_EVICTIONS;
+        if (evicted.isEmpty() || storeLimit || overflows(remainingEvents, remainingBytes)) {
+            return Collections.emptySet();
         }
-        Iterator<QueuedEvent> queued = events.iterator();
-        while (queued.hasNext()) {
-            QueuedEvent candidate = queued.next();
-            if (evicted.contains(candidate)) {
-                queued.remove();
-                pendingEventBytes -= candidate.serializedBytes;
-                evictions.add(recordDrop(candidate.id, candidate.type, "evicted_for_fatal", candidate.serializedBytes));
-            }
-        }
-        return true;
+        return evicted;
     }
 
     private EventDrop recordDrop(String id, String type, String reason, long serializedBytes) {
@@ -747,13 +761,15 @@ public final class LogBrewClient {
                     finalizeAmbiguous
                 );
                 for (EncryptedEventStore.Record record : snapshot.records()) {
+                    String json = record.eventJson();
+                    String type = recoveredEventType(json);
                     QueuedEvent event = new QueuedEvent(
-                        record.eventJson(),
+                        json,
                         record.eventBytes(),
                         record,
-                        null,
-                        null,
-                        false
+                        record.eventId(),
+                        type,
+                        "issue".equals(type) && json.contains("\n    \"level\": \"critical\"")
                     );
                     events.addLast(event);
                     pendingEventBytes += event.serializedBytes;
@@ -767,6 +783,14 @@ public final class LogBrewClient {
             automaticDelivery.onQueueChanged(recoveredEvents);
         }
         return status;
+    }
+
+    // Persisted events are this client's own pretty-printed JSON, and string values never hold a raw
+    // newline, so these markers match only the top-level type and the attributes level.
+    private static String recoveredEventType(String json) {
+        String prefix = "{\n  \"type\": \"";
+        int end = json.startsWith(prefix) ? json.indexOf('"', prefix.length()) : -1;
+        return end < 0 ? null : json.substring(prefix.length(), end);
     }
 
     private EncryptedEventStore requireEventStore() {

@@ -16,6 +16,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.net.URI;
@@ -34,6 +35,7 @@ public final class EncryptedEventStoreTest {
     private void run() throws Exception {
         testRecordPostRenameFailureRemainsAmbiguousAfterReopen();
         testHighWaterPostRenameFailureRemainsAmbiguousAfterReopen();
+        testEvictingAdmissionIsOneDurableTransaction();
         testCheckpointPostRenameFailureRemainsAmbiguousAfterReopen();
         testAtomicOwnerOnlyCreationAndShortWrites();
         testNonPosixProviderFailsClosed();
@@ -84,6 +86,54 @@ public final class EncryptedEventStoreTest {
         } finally {
             Arrays.fill(key, (byte) 0);
             deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private void testEvictingAdmissionIsOneDurableTransaction() throws Exception {
+        for (EncryptedEventStore.FailurePoint point : new EncryptedEventStore.FailurePoint[] {
+            EncryptedEventStore.FailurePoint.AFTER_RECORD_RENAME,
+            EncryptedEventStore.FailurePoint.AFTER_HIGH_WATER_RENAME
+        }) {
+            Path directory = createRealTempDirectory("logbrew-java-evicting-admission");
+            byte[] key = key(43);
+            try {
+                try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                    store.attach();
+                    store.recover(2, 4096L, false);
+                    store.admit("evt_old", "{\"id\":\"evt_old\"}", 2, 4096L);
+                    store.admit("evt_kept", "{\"id\":\"evt_kept\"}", 2, 4096L);
+                }
+                try (EncryptedEventStore store = failingStore(directory, key, point)) {
+                    store.attach();
+                    EncryptedEventStore.Record oldest = store.recover(2, 4096L, false).records().get(0);
+                    assertEquals(
+                        "persistence_ambiguous",
+                        expectSdkException(() -> store.admit(
+                            "evt_crash",
+                            "{\"id\":\"evt_crash\"}",
+                            2,
+                            4096L,
+                            Collections.singletonList(oldest)
+                        )).code(),
+                        "interrupted evicting admission " + point
+                    );
+                }
+                try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                    store.attach();
+                    List<EncryptedEventStore.Record> records = store.recover(2, 4096L, true).records();
+                    assertEquals(2, records.size(), "finalized evicting admission " + point);
+                    assertEquals("evt_kept", records.get(0).eventId(), "kept event " + point);
+                    assertEquals("evt_crash", records.get(1).eventId(), "admitted crash report " + point);
+                }
+                try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                    store.attach();
+                    assertEquals(2, store.recover(2, 4096L, false).records().size(), "clean reopen " + point);
+                }
+            } finally {
+                Arrays.fill(key, (byte) 0);
+                deleteTree(directory);
+            }
         }
         testsRun++;
     }

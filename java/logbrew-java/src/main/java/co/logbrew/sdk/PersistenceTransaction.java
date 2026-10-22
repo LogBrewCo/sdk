@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Durable intent protocol for record admission and accepted-prefix checkpoints. */
@@ -20,6 +21,8 @@ final class PersistenceTransaction {
     private static final byte INTENT_VERSION = 2;
     private static final int DIGEST_BYTES = 32;
     private static final int MAX_INTENT_BYTES = 8192;
+    // Bounds the intent: each admission evicts at most this many older records.
+    static final int MAX_EVICTIONS = 32;
 
     private final PersistenceFiles files;
     private final PersistenceCrypto crypto;
@@ -54,7 +57,13 @@ final class PersistenceTransaction {
         );
     }
 
-    void commitAdmission(long sequence, Path recordTarget, byte[] record, byte[] highWater) {
+    void commitAdmission(
+        long sequence,
+        Path recordTarget,
+        byte[] record,
+        byte[] highWater,
+        Map<Long, byte[]> evictedRecords
+    ) {
         PersistenceFiles.Layout initial = files.layout();
         if (hasAmbiguity(initial)) {
             throw ambiguous("an earlier persistence transaction requires explicit recovery or purge");
@@ -62,6 +71,7 @@ final class PersistenceTransaction {
 
         PendingTarget recordPending = null;
         PendingTarget highWaterPending = null;
+        List<PendingTarget> evictedPending = new ArrayList<>();
         boolean intentDurable = false;
         try {
             recordPending = prepare(
@@ -78,19 +88,39 @@ final class PersistenceTransaction {
                 ),
                 null
             );
-            Intent intent = new Intent(
-                sequence,
-                Arrays.asList(recordPending.target, highWaterPending.target)
-            );
-            writeIntent(intent);
+            List<PendingTarget> pendingTargets = new ArrayList<>(Arrays.asList(recordPending, highWaterPending));
+            // Evicted records are replaced in the same intent, so recovery applies all or none.
+            for (Map.Entry<Long, byte[]> evicted : evictedRecords.entrySet()) {
+                long evictedSequence = evicted.getKey().longValue();
+                PendingTarget pending = prepare(
+                    new Target(
+                        PersistenceCrypto.RECORD,
+                        evictedSequence,
+                        true,
+                        files.recordPath(evictedSequence),
+                        evicted.getValue()
+                    ),
+                    null
+                );
+                evictedPending.add(pending);
+                pendingTargets.add(pending);
+            }
+            List<Target> targets = new ArrayList<>();
+            for (PendingTarget pending : pendingTargets) {
+                targets.add(pending.target);
+            }
+            writeIntent(new Intent(sequence, targets));
             intentDurable = true;
 
             failureInjector.fail(EncryptedEventStore.FailurePoint.BEFORE_RECORD_RENAME);
             files.move(recordPending.file, files.path(recordPending.target.targetName), false);
             failureInjector.fail(EncryptedEventStore.FailurePoint.AFTER_RECORD_RENAME);
+            for (PendingTarget pending : evictedPending) {
+                files.move(pending.file, files.path(pending.target.targetName), true);
+            }
             files.move(highWaterPending.file, files.path(highWaterPending.target.targetName), true);
             failureInjector.fail(EncryptedEventStore.FailurePoint.AFTER_HIGH_WATER_RENAME);
-            completeCommit(Arrays.asList(recordPending, highWaterPending));
+            completeCommit(pendingTargets);
         } catch (IOException error) {
             throw ambiguous("persistence transaction did not complete durably");
         } catch (SdkException error) {
@@ -104,6 +134,9 @@ final class PersistenceTransaction {
         } finally {
             closeQuietly(recordPending);
             closeQuietly(highWaterPending);
+            for (PendingTarget pending : evictedPending) {
+                closeQuietly(pending);
+            }
         }
     }
 
@@ -347,6 +380,10 @@ final class PersistenceTransaction {
     }
 
     private boolean matches(Path path, Target target) {
+        // A replaced record can be larger than its evicted replacement; a size mismatch is no match.
+        if (files.size(path) != target.expectedSize) {
+            return false;
+        }
         PersistenceFiles.FileData data = files.read(path, target.expectedSize);
         try {
             return data.identity.size == target.expectedSize
@@ -423,21 +460,24 @@ final class PersistenceTransaction {
         }
         long sequence = buffer.getLong();
         int targetCount = buffer.getInt();
-        if (sequence <= 0L || sequence != headerSequence || targetCount < 1 || targetCount > 2) {
+        if (sequence <= 0L
+            || sequence != headerSequence
+            || targetCount < 1
+            || targetCount > 2 + MAX_EVICTIONS) {
             throw PersistenceCrypto.integrityFailure();
         }
         List<Target> targets = new ArrayList<>();
         for (int index = 0; index < targetCount; index++) {
-            targets.add(decodeTarget(buffer, sequence));
+            targets.add(decodeTarget(buffer));
         }
         if (buffer.hasRemaining()) {
             throw PersistenceCrypto.integrityFailure();
         }
-        validateIntentShape(targets);
+        validateIntentShape(sequence, targets);
         return new Intent(sequence, targets);
     }
 
-    private static Target decodeTarget(ByteBuffer buffer, long intentSequence) {
+    private static Target decodeTarget(ByteBuffer buffer) {
         int fixed = 1 + 1 + Long.BYTES * 2 + Integer.BYTES * 3 + DIGEST_BYTES;
         if (buffer.remaining() < fixed) {
             throw PersistenceCrypto.integrityFailure();
@@ -450,7 +490,7 @@ final class PersistenceTransaction {
         int temporaryLength = buffer.getInt();
         int digestLength = buffer.getInt();
         long variable = (long) targetLength + temporaryLength + digestLength;
-        if (sequence != intentSequence
+        if (sequence <= 0L
             || (replaceValue != 0 && replaceValue != 1)
             || expectedSize <= 0L
             || targetLength <= 0
@@ -483,10 +523,12 @@ final class PersistenceTransaction {
         }
     }
 
-    private static void validateIntentShape(List<Target> targets) {
+    private static void validateIntentShape(long sequence, List<Target> targets) {
         if (targets.size() == 1) {
             Target checkpoint = targets.get(0);
-            if (checkpoint.kind != PersistenceCrypto.CHECKPOINT || !checkpoint.replace) {
+            if (checkpoint.kind != PersistenceCrypto.CHECKPOINT
+                || !checkpoint.replace
+                || checkpoint.sequence != sequence) {
                 throw PersistenceCrypto.integrityFailure();
             }
             return;
@@ -495,10 +537,21 @@ final class PersistenceTransaction {
         Target highWater = targets.get(1);
         if (record.kind != PersistenceCrypto.RECORD
             || record.replace
+            || record.sequence != sequence
             || highWater.kind != PersistenceCrypto.HIGH_WATER
             || !highWater.replace
-            || record.sequence != highWater.sequence) {
+            || highWater.sequence != sequence) {
             throw PersistenceCrypto.integrityFailure();
+        }
+        long previous = 0L;
+        for (Target evicted : targets.subList(2, targets.size())) {
+            if (evicted.kind != PersistenceCrypto.RECORD
+                || !evicted.replace
+                || evicted.sequence <= previous
+                || evicted.sequence >= sequence) {
+                throw PersistenceCrypto.integrityFailure();
+            }
+            previous = evicted.sequence;
         }
     }
 
@@ -547,7 +600,7 @@ final class PersistenceTransaction {
         private Intent(long sequence, List<Target> targets) {
             this.sequence = sequence;
             this.targets = Collections.unmodifiableList(new ArrayList<>(targets));
-            validateIntentShape(this.targets);
+            validateIntentShape(sequence, this.targets);
         }
     }
 

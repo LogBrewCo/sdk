@@ -24,6 +24,7 @@ public final class LogBrewPersistenceTest {
         testPersistentAndMemoryBatchesRemainByteCompatible();
         testRetryPrefixAcknowledgementAndLaterCaptureSurviveRestart();
         testFailedShutdownAndExactBoundsRecover();
+        testCrashReportEvictsOldestPersistedEventAcrossRestart();
         System.out.println("java persistence tests ok (" + testsRun + " tests)");
     }
 
@@ -198,6 +199,65 @@ public final class LogBrewPersistenceTest {
             deleteTree(directory);
         }
         testsRun++;
+    }
+
+    private void testCrashReportEvictsOldestPersistedEventAcrossRestart() throws Exception {
+        Path directory = createRealTempDirectory("logbrew-java-persistent-eviction");
+        byte[] key = key(29);
+        List<LogBrewClient.EventDrop> drops = new ArrayList<>();
+        try {
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = evictionClient(store, drops);
+                client.recoverPersistedEvents();
+                enqueueLog(client, "evt_java_persist_evict_0", "first");
+                enqueueLog(client, "evt_java_persist_evict_1", "second");
+                enqueueLog(client, "evt_java_persist_evict_2", "third");
+                client.issue("evt_java_persist_crash_0", "2026-06-02T10:00:04Z", IssueAttributes.create("App crashed", "fatal"));
+
+                assertEquals(1, drops.size(), "persistent eviction callback count");
+                assertEquals("evt_java_persist_evict_0", drops.get(0).eventId(), "persistent evicted event");
+                assertEquals("evicted_for_fatal", drops.get(0).reason(), "persistent eviction reason");
+                assertEquals(3, client.persistenceStatus().pendingEvents(), "persisted queue stays at its limit");
+            }
+
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                LogBrewClient client = evictionClient(store, drops);
+                assertEquals(3, client.recoverPersistedEvents().pendingEvents(), "recovered after eviction");
+                String recovered = client.previewJson();
+                assertNotContains(recovered, "evt_java_persist_evict_0");
+                assertContains(recovered, "evt_java_persist_evict_1");
+                assertContains(recovered, "evt_java_persist_crash_0");
+
+                client.issue("evt_java_persist_crash_1", "2026-06-02T10:00:05Z", IssueAttributes.create("App crashed again", "critical"));
+                assertEquals("evt_java_persist_evict_1", drops.get(1).eventId(), "a recovered crash report is kept");
+                assertEquals("log", drops.get(1).eventType(), "recovered event type");
+                RecordingTransport transport = RecordingTransport.alwaysAccept();
+                assertEquals(3, client.flush(transport).acceptedEvents(), "drained after eviction");
+                assertContains(transport.sentBodies().get(0), "\"evicted_for_fatal\": 1");
+            }
+
+            try (EncryptedEventStore store = EncryptedEventStore.open(directory, key)) {
+                assertEquals(0, persistentClient(store).recoverPersistedEvents().pendingEvents(), "nothing left after drain");
+            }
+        } finally {
+            Arrays.fill(key, (byte) 0);
+            deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private static LogBrewClient evictionClient(EncryptedEventStore store, List<LogBrewClient.EventDrop> drops) {
+        return LogBrewClient.create(
+            API_KEY,
+            "logbrew-java",
+            "0.1.0",
+            DeliveryOptions.builder()
+                .maxRetries(0)
+                .maxQueueEvents(3)
+                .onEventDropped(drops::add)
+                .encryptedEventStore(store)
+                .build()
+        );
     }
 
     private static LogBrewClient persistentClient(EncryptedEventStore store) {
