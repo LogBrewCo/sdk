@@ -372,6 +372,8 @@ must(err)
 
 `EventDrop` contains only `eventId`, `eventType`, `reason`, and the cumulative dropped count; it never includes event attributes, payloads, API keys, headers, or transport details. The advisory callback is panic-safe and cannot interrupt capture. `Flush` and `Shutdown` still preserve accepted events across retryable transport failures, and `DroppedEvents()` is not reset by a successful flush.
 
+LogBrew sees these drops too. The next request body carries the per-reason counts since the last accepted report, such as `"client_report":{"report_id":"5f0c6a1e9b2d4c7a8e3f1b6d0a9c2e4f","dropped_events":{"queue_overflow":3}}`. The counts keep one `report_id` until a `2xx` response acknowledges a request that carried them, including a retry after a restart with persistent delivery, and LogBrew counts every resend of one report ID once. Drops recorded while a request is in flight wait for the next report. A report never sends a request of its own, is left out when nothing was dropped, lists at most 16 reasons, and caps each count at 1,000,000,000. Counts not yet in a request live in memory only, so they are lost when the process restarts.
+
 ## Automatic Delivery
 
 Keep the existing manual behavior by using `NewClient`. To let a client own delivery, use `NewAutomaticClient` with one app-scoped transport:
