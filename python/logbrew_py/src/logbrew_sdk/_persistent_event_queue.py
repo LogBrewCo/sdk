@@ -8,6 +8,7 @@ import sqlite3
 import stat
 import weakref
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -19,7 +20,7 @@ _DATABASE_NAME = "events.sqlite3"
 _LOCK_NAME = ".lock"
 _ALLOWED_ENTRIES = {_LOCK_NAME, _DATABASE_NAME, f"{_DATABASE_NAME}-journal"}
 _EXPECTED_TABLES = {"events", "queue_state"}
-_PendingOperation = tuple[Literal["append", "ack", "remove", "purge"], int]
+_PendingOperation = tuple[Literal["append", "ack", "remove", "purge", "report"], int]
 
 
 class PersistentEventQueue:
@@ -94,8 +95,8 @@ class PersistentEventQueue:
                 (sequence, nonce, ciphertext),
             )
             self._write_state(
-                QueueState(
-                    accepted_through=state.accepted_through,
+                replace(
+                    state,
                     last_admitted=sequence,
                     pending_bytes=state.pending_bytes + byte_count,
                     pending_count=state.count + 1,
@@ -144,9 +145,9 @@ class PersistentEventQueue:
                 raise _integrity_error()
             accepted_bytes = sum(record.byte_count for record in accepted)
             self._write_state(
-                QueueState(
+                replace(
+                    state,
                     accepted_through=through_sequence,
-                    last_admitted=state.last_admitted,
                     pending_bytes=state.pending_bytes - accepted_bytes,
                     pending_count=state.count - len(accepted),
                 )
@@ -183,9 +184,8 @@ class PersistentEventQueue:
                 raise _integrity_error()
             remaining = state.count - len(removed)
             self._write_state(
-                QueueState(
-                    accepted_through=state.accepted_through,
-                    last_admitted=state.last_admitted,
+                replace(
+                    state,
                     pending_bytes=state.pending_bytes - sum(record.byte_count for record in removed),
                     pending_count=remaining,
                 )
@@ -206,6 +206,28 @@ class PersistentEventQueue:
             raise
         return len(removed)
 
+    def load_client_report(self) -> dict[str, Any] | None:
+        self._ensure_ready()
+        return self._read_state(check_count=False).client_report
+
+    def save_client_report(self, report: dict[str, Any] | None) -> None:
+        """Store unreported drop counts in the encrypted queue state."""
+
+        self._ensure_ready()
+        connection = self._require_connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._write_state(replace(self._read_state(check_count=False), client_report=report))
+            self._commit_transaction(pending=("report", 0), message="drop counts could not be confirmed")
+        except sqlite3.Error:
+            with suppress(sqlite3.Error):
+                connection.rollback()
+            raise SdkError("persistent_queue_error", "drop counts could not be stored") from None
+        except BaseException:
+            with suppress(sqlite3.Error):
+                connection.rollback()
+            raise
+
     def purge(self) -> int:
         self._ensure_ready()
         connection = self._require_connection()
@@ -213,14 +235,7 @@ class PersistentEventQueue:
             connection.execute("BEGIN IMMEDIATE")
             state = self._read_state(check_count=True)
             removed = state.count
-            self._write_state(
-                QueueState(
-                    accepted_through=state.last_admitted,
-                    last_admitted=state.last_admitted,
-                    pending_bytes=0,
-                    pending_count=0,
-                )
-            )
+            self._write_state(replace(state, accepted_through=state.last_admitted, pending_bytes=0, pending_count=0))
             connection.execute("DELETE FROM events")
             self._commit_transaction(
                 pending=("purge", state.last_admitted),
@@ -491,7 +506,7 @@ class PersistentEventQueue:
                 if state.count != value:
                     self._pending_confirmation = None
                     return
-            elif state.accepted_through != state.last_admitted:
+            elif operation == "purge" and state.accepted_through != state.last_admitted:
                 self._pending_confirmation = None
                 return
             os.fsync(self._directory_fd)

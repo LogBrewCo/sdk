@@ -9,6 +9,7 @@ import os
 import re
 import ssl
 import sys
+import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -316,6 +317,9 @@ DEFAULT_MAX_BATCH_EVENTS = 100
 DEFAULT_MAX_BATCH_BYTES = 256 * 1024
 MAX_CLIENT_REPORT_REASONS = 16
 MAX_CLIENT_REPORT_COUNT = 1_000_000_000
+CLIENT_REPORT_SAVE_INTERVAL_SECONDS = 1.0
+CLIENT_REPORT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+CLIENT_REPORT_REASON_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 TRACEPARENT_PATTERN = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$")
 ZERO_TRACE_ID = "00000000000000000000000000000000"
 ZERO_SPAN_ID = "0000000000000000"
@@ -620,10 +624,6 @@ class LogBrewClient:
         self.max_batch_bytes = max_batch_bytes
         self._dropped_events = 0
         self._dropped_events_by_reason: dict[EventDropReason, int] = {}
-        # Drops not yet acknowledged by the intake; they ride in the next batch as a client report.
-        self._unreported_drops: dict[str, int] = {}
-        # Drops frozen under one report ID until a 2xx acknowledges a body that carried them.
-        self._pending_report: tuple[str, tuple[tuple[str, int], ...]] | None = None
         self._on_event_dropped = on_event_dropped
         self._drop_callback_state = local()
         self._owner_pid = os.getpid()
@@ -647,6 +647,11 @@ class LogBrewClient:
                 encryption_key=persistent_queue_encryption_key,
             )
         self._queue = queue
+        # A persistent queue keeps counts not yet acknowledged by a 2xx across restarts.
+        self._client_report_saved_at = -math.inf
+        # Drops not yet acknowledged by the intake ride in the next batch as a client report; drops
+        # frozen under one report ID wait until a 2xx acknowledges a body that carried them.
+        self._pending_report, self._unreported_drops = _load_client_report(queue)
         self._automatic_delivery = AutomaticDeliveryController(
             enabled=automatic_options.enabled,
             interval_seconds=automatic_options.interval_seconds,
@@ -830,7 +835,11 @@ class LogBrewClient:
                     self._flush_owner_thread_id = thread_id
                 self._automatic_delivery.manual_delivery_started()
                 try:
-                    response = self._flush_internal(selected_transport)
+                    try:
+                        response = self._flush_internal(selected_transport)
+                    finally:
+                        with self._state_lock:
+                            self._save_client_report(immediately=True)
                     self._queue.close()
                 except BaseException as error:
                     with self._state_lock:
@@ -938,7 +947,9 @@ class LogBrewClient:
     def _record_drop(self, event_id: str, event_type: str, reason: EventDropReason) -> EventDrop:
         self._dropped_events += 1
         self._dropped_events_by_reason[reason] = self._dropped_events_by_reason.get(reason, 0) + 1
+        first_of_reason = reason not in self._unreported_drops
         self._unreported_drops[reason] = min(MAX_CLIENT_REPORT_COUNT, self._unreported_drops.get(reason, 0) + 1)
+        self._save_client_report(immediately=first_of_reason)
         return EventDrop(event_id, event_type, reason, self._dropped_events)
 
     def _evict_for_fatal(self, event_bytes: int) -> tuple[QueuedEvent, ...]:
@@ -959,6 +970,23 @@ class LogBrewClient:
             return ()
         self._queue.remove({record.sequence for record in chosen})
         return tuple(chosen)
+
+    def _save_client_report(self, *, immediately: bool) -> None:
+        """Save at once for a new report or reason, and at most once a second during a drop burst."""
+        now = time.monotonic()
+        if not immediately and now - self._client_report_saved_at < CLIENT_REPORT_SAVE_INTERVAL_SECONDS:
+            return
+        self._client_report_saved_at = now
+        pending = self._pending_report
+        report = {
+            "pending": None if pending is None else {"report_id": pending[0], "dropped_events": dict(pending[1])},
+            "unreported": dict(self._unreported_drops),
+        }
+        try:
+            self._queue.save_client_report(report if pending is not None or self._unreported_drops else None)
+        except Exception:
+            # Drop counts are advisory: a failed save keeps them in memory and never blocks capture.
+            return
 
     def _report_drop(self, drop: EventDrop) -> None:
         # Drop callbacks are advisory: failures and nested drops never reach the application.
@@ -1019,6 +1047,7 @@ class LogBrewClient:
                 # Drops recorded while this body was in flight stay pending under a new report ID.
                 if prefix.reported_drops:
                     self._pending_report = None
+                    self._save_client_report(immediately=True)
             if acknowledged != prefix.event_count:
                 raise SdkError("queue_state_error", "accepted event prefix changed during delivery")
             self._automatic_delivery.record_accepted_events(acknowledged)
@@ -1049,6 +1078,7 @@ class LogBrewClient:
                 for reason, _count in drops:
                     del self._unreported_drops[reason]
                 self._pending_report = (uuid4().hex, drops)
+                self._save_client_report(immediately=True)
         if self._pending_report is not None:
             report_id, reported_drops = self._pending_report
             report = _compact_json({"report_id": report_id, "dropped_events": dict(reported_drops)})
@@ -1135,6 +1165,39 @@ class LogBrewClient:
                 "process_ownership_error",
                 "client cannot be used after fork; create a new client in the child process",
             )
+
+
+def _load_client_report(
+    queue: EventQueue,
+) -> tuple[tuple[str, tuple[tuple[str, int], ...]] | None, dict[str, int]]:
+    """Restore saved drop counts; anything unreadable or out of bounds is ignored, never fatal."""
+    try:
+        state = queue.load_client_report() or {}
+    except Exception:
+        state = {}
+    pending = state.get("pending")
+    pending_counts = _valid_client_report_counts(pending.get("dropped_events") if isinstance(pending, dict) else None)
+    report_id = pending.get("report_id") if isinstance(pending, dict) else None
+    restored = (
+        (report_id, tuple(pending_counts.items()))
+        if isinstance(report_id, str) and CLIENT_REPORT_ID_PATTERN.fullmatch(report_id) and pending_counts
+        else None
+    )
+    return restored, _valid_client_report_counts(state.get("unreported"))
+
+
+def _valid_client_report_counts(counts: Any) -> dict[str, int]:
+    if not isinstance(counts, dict):
+        return {}
+    valid = [
+        (reason, count)
+        for reason, count in counts.items()
+        if isinstance(reason, str)
+        and CLIENT_REPORT_REASON_PATTERN.fullmatch(reason)
+        and type(count) is int
+        and 1 <= count <= MAX_CLIENT_REPORT_COUNT
+    ]
+    return dict(valid[:MAX_CLIENT_REPORT_REASONS])
 
 
 def _is_fatal_event(event_type: str, attributes: Mapping[str, Any]) -> bool:

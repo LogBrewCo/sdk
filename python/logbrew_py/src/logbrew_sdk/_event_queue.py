@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +34,10 @@ class EventQueue(Protocol):
     def acknowledge(self, through_sequence: int) -> int: ...
 
     def remove(self, sequences: set[int]) -> int: ...
+
+    def load_client_report(self) -> dict[str, Any] | None: ...
+
+    def save_client_report(self, report: dict[str, Any] | None) -> None: ...
 
     def purge(self) -> int: ...
 
@@ -98,6 +102,12 @@ class MemoryEventQueue:
         self._byte_count -= sum(record.byte_count for record in self._records if record.sequence in sequences)
         self._records = kept
         return removed
+
+    def load_client_report(self) -> dict[str, Any] | None:
+        return None
+
+    def save_client_report(self, report: dict[str, Any] | None) -> None:
+        return
 
     def purge(self) -> int:
         removed = len(self._records)
