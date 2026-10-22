@@ -817,6 +817,7 @@ require __DIR__ . '/laravel_queue.php';
 require __DIR__ . '/support_ticket.php';
 require __DIR__ . '/bounded_queue.php';
 require __DIR__ . '/bounded_batching.php';
+require __DIR__ . '/fatal_eviction.php';
 
 $client = sampleClient();
 $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
