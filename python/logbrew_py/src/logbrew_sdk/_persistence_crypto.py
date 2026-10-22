@@ -19,6 +19,11 @@ _RECORD_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _EXPECTED_EVENT_KEYS = {"type", "id", "timestamp", "attributes"}
 
 
+# State keys this version understands. Newer SDKs may add optional keys; older readers keep them.
+_REQUIRED_STATE_KEYS = frozenset({"acceptedThrough", "lastAdmitted", "pendingBytes"})
+_KNOWN_STATE_KEYS = _REQUIRED_STATE_KEYS | {"pendingCount", "clientReport"}
+
+
 class _Aead(Protocol):
     def encrypt(self, nonce: bytes, data: bytes, associated_data: bytes | None) -> bytes: ...
 
@@ -34,6 +39,8 @@ class QueueState:
     pending_count: int | None = None
     # Unreported drop counts the client loads after a restart; never event data.
     client_report: dict[str, Any] | None = None
+    # Optional state a newer SDK added. It is kept and written back unchanged, never interpreted.
+    extra: dict[str, Any] | None = None
 
     @property
     def count(self) -> int:
@@ -54,6 +61,7 @@ class PersistenceCrypto:
 
     def encrypt_state(self, state: QueueState) -> tuple[bytes, bytes]:
         payload: dict[str, Any] = {
+            **(state.extra or {}),
             "acceptedThrough": state.accepted_through,
             "lastAdmitted": state.last_admitted,
             "pendingBytes": state.pending_bytes,
@@ -67,8 +75,9 @@ class PersistenceCrypto:
 
     def decrypt_state(self, nonce: Any, ciphertext: Any) -> QueueState:
         payload = self._decrypt_json(nonce, ciphertext, self._state_aad())
-        if set(payload) - {"pendingCount", "clientReport"} != {"acceptedThrough", "lastAdmitted", "pendingBytes"}:
+        if not set(payload) >= _REQUIRED_STATE_KEYS:
             raise _integrity_error()
+        extra = {key: value for key, value in payload.items() if key not in _KNOWN_STATE_KEYS}
         accepted = payload["acceptedThrough"]
         admitted = payload["lastAdmitted"]
         pending_bytes = payload["pendingBytes"]
@@ -101,6 +110,7 @@ class PersistenceCrypto:
             pending_bytes=pending_bytes,
             pending_count=pending_count,
             client_report=client_report,
+            extra=extra or None,
         )
 
     def encrypt_event(self, event: QueuedEvent) -> tuple[bytes, bytes]:
