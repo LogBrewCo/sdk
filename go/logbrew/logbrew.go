@@ -53,6 +53,8 @@ const (
 	maxSpanLinks        = 8
 
 	eventDropReasonQueueOverflow = "queue_overflow"
+	// eventDropReasonEvictedForFatal marks a queued event removed to make room for a crash report.
+	eventDropReasonEvictedForFatal = "evicted_for_fatal"
 )
 
 var defaultHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
@@ -603,7 +605,20 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 		c.mu.Unlock()
 		return &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
-	if len(c.events) >= c.maxQueueSize {
+	var evicted *Event
+	if len(c.events) >= c.maxQueueSize && eventType == "issue" && attributes["level"] == "critical" {
+		evicted = c.evictForFatalLocked()
+	}
+	if evicted != nil {
+		c.droppedEvents++
+		dropped = EventDrop{
+			EventID:       evicted.ID,
+			EventType:     evicted.Type,
+			Reason:        eventDropReasonEvictedForFatal,
+			DroppedEvents: c.droppedEvents,
+		}
+		droppedHandler = c.onEventDropped
+	} else if len(c.events) >= c.maxQueueSize {
 		c.droppedEvents++
 		dropped = EventDrop{
 			EventID:       id,
@@ -633,6 +648,32 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 		}
 	}
 	c.mu.Unlock()
+	// Report an eviction only after admission so the handler cannot refill the freed room.
+	if evicted != nil {
+		notifyEventDropped(droppedHandler, dropped)
+	}
+	return nil
+}
+
+// evictForFatalLocked removes the oldest event that is not a crash report and is not in the
+// request body being sent or retried. The persistent queue keeps every admitted event, so a
+// crash report there is dropped like any other event at a full queue.
+func (c *Client) evictForFatalLocked() *Event {
+	if c.persistent != nil {
+		return nil
+	}
+	start := 0
+	if c.pendingBody != nil {
+		start = c.pendingPrefix
+	}
+	for index := start; index < len(c.events); index++ {
+		if c.events[index].Type == "issue" && c.events[index].Attributes["level"] == "critical" {
+			continue
+		}
+		evicted := c.events[index]
+		c.events = append(c.events[:index], c.events[index+1:]...)
+		return &evicted
+	}
 	return nil
 }
 

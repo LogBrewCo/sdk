@@ -354,7 +354,7 @@ instead of emitting a weaker wrapper-only shape. See the shared
 
 ## High-Load Behavior
 
-`NewClient` keeps the in-memory event queue bounded to 1,000 events by default. Set `Config.MaxQueueSize` when your service needs a larger or smaller local buffer. When the queue is full, LogBrew drops new events instead of blocking app logging or discarding already-buffered release/environment/request context. Use `DroppedEvents()` for a local counter and `OnEventDropped` for an advisory callback:
+`NewClient` keeps the in-memory event queue bounded to 1,000 events by default. Set `Config.MaxQueueSize` when your service needs a larger or smaller local buffer. When the queue is full, LogBrew drops new events instead of blocking app logging or discarding already-buffered release/environment/request context. A crash report (an issue with level `fatal` or `critical`) is the exception: it removes the oldest queued event that is not a crash report and is not in a request being sent or retried, and reports it with reason `evicted_for_fatal`. When no such event exists, or with persistent delivery, the crash report is dropped like any other event. Use `DroppedEvents()` for a local counter and `OnEventDropped` for an advisory callback:
 
 ```go
 client, err := logbrew.NewClient(logbrew.Config{
