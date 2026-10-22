@@ -19,6 +19,7 @@ namespace LogBrew
         private readonly List<Event> events = new List<Event>();
         private readonly object gate = new object();
         private readonly int ownerProcessId;
+        private readonly Dictionary<Event, int> snapshotTargets = new Dictionary<Event, int>();
         private FrozenBatch? frozenBatch;
         private Thread? worker;
         private bool workerStopRequested;
@@ -211,11 +212,26 @@ namespace LogBrew
                 }
                 return;
             }
+            var evictions = new List<DroppedEvent>();
             lock (gate)
             {
                 RequireOpenLocked();
-                drop = AdmissionDropLocked(item, singleBodyBytes);
-                if (drop == null)
+                var reason = DeliveryQueuePolicy.AdmissionDropReason(
+                    item, singleBodyBytes, events.Count, queuedBytes, maxQueueSize, maxQueueBytes);
+                if ((reason == "queue_overflow" || reason == "queue_bytes_overflow") && DeliveryQueuePolicy.IsFatal(item))
+                {
+                    foreach (var evicted in EvictForFatalLocked(item.SerializedByteCount))
+                    {
+                        evictions.Add(RecordDropLocked(evicted.Id, evicted.Type, "evicted_for_fatal"));
+                        reason = null;
+                    }
+                }
+
+                if (reason != null)
+                {
+                    drop = RecordDropLocked(item.Id, item.Type, reason);
+                }
+                else
                 {
                     var wasEmpty = events.Count == 0;
                     events.Add(item);
@@ -229,6 +245,84 @@ namespace LogBrew
             if (drop != null)
             {
                 dropReporter.Report(drop);
+            }
+
+            // Report evictions only after admission so drop callbacks cannot refill the freed room.
+            foreach (var eviction in evictions)
+            {
+                dropReporter.Report(eviction);
+            }
+        }
+
+        // Removes the oldest events that are not crash reports, not in the frozen batch being sent or
+        // retried, and not the last event of a pending flush, only when that makes room. Durable
+        // delivery keeps every admitted event, so this runs only for the in-memory queue.
+        private List<Event> EvictForFatalLocked(int itemBytes)
+        {
+            var indexes = new List<int>();
+            var count = events.Count;
+            long bytes = (long)queuedBytes + itemBytes;
+            for (var index = frozenBatch?.Events.Count ?? 0;
+                index < events.Count && DeliveryQueuePolicy.Overflows(count, bytes, maxQueueSize, maxQueueBytes);
+                index++)
+            {
+                var candidate = events[index];
+                if (DeliveryQueuePolicy.IsFatal(candidate) || snapshotTargets.ContainsKey(candidate))
+                {
+                    continue;
+                }
+
+                indexes.Add(index);
+                count--;
+                bytes -= candidate.SerializedByteCount;
+            }
+
+            var evicted = new List<Event>();
+            if (DeliveryQueuePolicy.Overflows(count, bytes, maxQueueSize, maxQueueBytes))
+            {
+                return evicted;
+            }
+
+            foreach (var index in indexes)
+            {
+                evicted.Add(events[index]);
+            }
+
+            for (var position = indexes.Count - 1; position >= 0; position--)
+            {
+                queuedBytes -= events[indexes[position]].SerializedByteCount;
+                events.RemoveAt(indexes[position]);
+            }
+
+            return evicted;
+        }
+
+        private void AddSnapshotTargetLocked(Event? target)
+        {
+            if (target != null)
+            {
+                snapshotTargets[target] = snapshotTargets.TryGetValue(target, out var holders) ? holders + 1 : 1;
+            }
+        }
+
+        private void RemoveSnapshotTarget(Event? target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            lock (gate)
+            {
+                var holders = snapshotTargets[target];
+                if (holders == 1)
+                {
+                    snapshotTargets.Remove(target);
+                }
+                else
+                {
+                    snapshotTargets[target] = holders - 1;
+                }
             }
         }
 
@@ -251,9 +345,17 @@ namespace LogBrew
             {
                 RequireOpenLocked();
                 targetEvent = DeliveryQueuePolicy.Last(events);
+                AddSnapshotTargetLocked(targetEvent);
             }
 
-            return FlushSnapshot(transport, targetEvent, allowClosing: false);
+            try
+            {
+                return FlushSnapshot(transport, targetEvent, allowClosing: false);
+            }
+            finally
+            {
+                RemoveSnapshotTarget(targetEvent);
+            }
         }
 
         internal TransportResponse Flush()
