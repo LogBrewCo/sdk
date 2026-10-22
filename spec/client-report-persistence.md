@@ -12,9 +12,9 @@ still carries the counts, and a report that was already sent keeps its
 | `unreported` | `{reason: count}` for drops that no request has carried yet. |
 | `pending` | `{report_id, dropped_events}` for counts frozen under one report ID until a 2xx acknowledges a request that carried them. |
 
-Stores that already keep the request being sent or retried (Go, PHP) keep
-`pending` inside that request and save only `unreported`. Other stores save
-both.
+Stores that keep the stored copy of the request being sent or retried (Go,
+.NET) keep `pending` inside that copy and save only `unreported`. Other stores
+(Java, Node, PHP, Python) save both.
 
 ## Rules
 
@@ -26,7 +26,9 @@ both.
 - **When to save.** Save at once when a drop reason first appears, when counts
   freeze under a report ID, and when a 2xx clears them. During a drop burst,
   save at most once a second. Save again at shutdown.
-- **Failed save.** Keep the counts in memory and never block capture.
+- **Failed save.** Keep the counts in memory. A failed save never fails the
+  capture call that triggered it. A store that cannot write reports its usual
+  storage error on later operations.
 - **Contents.** Reason codes, counts, and a random report ID only. Never event
   data.
 - **Clear when empty.** With no counts left, remove the saved state so the
