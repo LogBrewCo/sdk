@@ -72,7 +72,9 @@ agent_path="/home/zed/.co""dex/sessions/$term"
 email="jane.roe-$term@""acmecorp-mail.com"
 shared_ip="100.""101.17.$((RANDOM % 200 + 1))"
 attribution="Co-Authored-""By: Cla""ude <bot@example.com>"
-access_key="ghp_$(printf '%s' "$term$term$term$term" | head -c 36)"
+# A fixed hash, not the random term: a term with repeated digits can fall below
+# the access key entropy limit, and then the sample is not a finding.
+access_key="ghp_$(printf 'public guard sample key' | git hash-object --stdin | head -c 36)"
 bidi="a$(utf8 226 128 174)b"
 
 expect_commit "project term in file" 1 "infrastructure: src/app.txt:1 in commit" "$term" src/app.txt "host $term"
