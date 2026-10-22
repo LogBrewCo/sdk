@@ -32,6 +32,8 @@ class QueueState:
     pending_bytes: int
     # Fewer than last_admitted - accepted_through once a crash report evicted queued events.
     pending_count: int | None = None
+    # Unreported drop counts the client restores after a restart; never event data.
+    client_report: dict[str, Any] | None = None
 
     @property
     def count(self) -> int:
@@ -51,7 +53,7 @@ class PersistenceCrypto:
         self._aead = _load_aead(bytes(key))
 
     def encrypt_state(self, state: QueueState) -> tuple[bytes, bytes]:
-        payload = {
+        payload: dict[str, Any] = {
             "acceptedThrough": state.accepted_through,
             "lastAdmitted": state.last_admitted,
             "pendingBytes": state.pending_bytes,
@@ -59,16 +61,19 @@ class PersistenceCrypto:
         # Gap-free queues keep the original state shape, so earlier SDK versions can still open them.
         if state.count != state.last_admitted - state.accepted_through:
             payload["pendingCount"] = state.count
+        if state.client_report is not None:
+            payload["clientReport"] = state.client_report
         return self._encrypt(_compact_json(payload).encode("utf-8"), self._state_aad())
 
     def decrypt_state(self, nonce: Any, ciphertext: Any) -> QueueState:
         payload = self._decrypt_json(nonce, ciphertext, self._state_aad())
-        if set(payload) - {"pendingCount"} != {"acceptedThrough", "lastAdmitted", "pendingBytes"}:
+        if set(payload) - {"pendingCount", "clientReport"} != {"acceptedThrough", "lastAdmitted", "pendingBytes"}:
             raise _integrity_error()
         accepted = payload["acceptedThrough"]
         admitted = payload["lastAdmitted"]
         pending_bytes = payload["pendingBytes"]
         pending_count = payload.get("pendingCount")
+        client_report = payload.get("clientReport")
         if (
             isinstance(accepted, bool)
             or not isinstance(accepted, int)
@@ -79,6 +84,7 @@ class PersistenceCrypto:
             or isinstance(pending_bytes, bool)
             or not isinstance(pending_bytes, int)
             or pending_bytes < 0
+            or (client_report is not None and not isinstance(client_report, dict))
             or (
                 pending_count is not None
                 and (
@@ -94,6 +100,7 @@ class PersistenceCrypto:
             last_admitted=admitted,
             pending_bytes=pending_bytes,
             pending_count=pending_count,
+            client_report=client_report,
         )
 
     def encrypt_event(self, event: QueuedEvent) -> tuple[bytes, bytes]:
