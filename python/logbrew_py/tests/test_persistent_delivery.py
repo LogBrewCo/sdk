@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-from logbrew_sdk import LogBrewClient, SdkError, TransportResponse
+from logbrew_sdk import IssueAttributes, LogBrewClient, SdkError, TransportResponse
 
 PERSISTENCE_KEY = bytes(range(32))
 HAS_PERSISTENCE_CRYPTO = importlib.util.find_spec("cryptography") is not None
@@ -58,14 +58,16 @@ def close_queue_for_reopen(client: LogBrewClient) -> None:
 
 
 class CommitThenFailConnection:
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(self, connection: sqlite3.Connection, *, commit: bool = True) -> None:
         self._connection = connection
+        self._commit = commit
 
     def execute(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         return self._connection.execute(*args, **kwargs)
 
     def commit(self) -> None:
-        self._connection.commit()
+        if self._commit:
+            self._connection.commit()
         raise sqlite3.OperationalError("injected ambiguous commit")
 
     def rollback(self) -> None:
@@ -219,6 +221,47 @@ class PersistentQueueRecoveryTests(unittest.TestCase):
             self.assertEqual(second_transport.sent_bodies, [])
             self.assertEqual(client.pending_events(), 0)
             client.shutdown(ScriptedTransport())
+
+    def test_crash_report_eviction_commit_is_confirmed_or_rolled_back_before_later_work(self) -> None:
+        fatal: IssueAttributes = {"title": "App crashed", "level": "fatal", "message": "worker crashed"}
+        for committed in (True, False):
+            with self.subTest(committed=committed), tempfile.TemporaryDirectory() as temporary:
+                client = create_persistent_client(Path(temporary).resolve() / "queue", max_queue_size=2)
+                capture_log(client, "evt_old", "oldest")
+                capture_log(client, "evt_kept", "kept")
+                queue = cast(Any, client._queue)
+                queue._connection = CommitThenFailConnection(queue._connection, commit=committed)
+                with self.assertRaises(SdkError) as raised:
+                    client.issue("evt_fatal", "2026-07-14T10:00:00Z", fatal)
+                self.assertEqual(raised.exception.code, "persistence_commit_error")
+                self.assertEqual(queue._pending_confirmation, ("remove", 1))
+
+                expected = ["evt_kept"] if committed else ["evt_old", "evt_kept"]
+                self.assertEqual([event["id"] for event in client.events], expected)
+                self.assertIsNone(queue._pending_confirmation)
+                client.shutdown(ScriptedTransport(202))
+
+    def test_a_row_deleted_after_an_eviction_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve() / "queue"
+            client = create_persistent_client(directory, max_queue_size=3)
+            for event_id in ("evt_1", "evt_2", "evt_3"):
+                capture_log(client, event_id, "queued")
+            client.issue("evt_fatal", "2026-07-14T10:00:00Z", {"title": "App crashed", "level": "fatal"})
+            queue = cast(Any, client._queue)
+            with self.assertRaises(SdkError) as missing:
+                queue.remove({1})
+            self.assertEqual(missing.exception.code, "persistence_integrity_error")
+            close_queue_for_reopen(client)
+
+            connection = sqlite3.connect(directory / "events.sqlite3")
+            connection.execute("DELETE FROM events WHERE sequence = 3")
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(SdkError) as raised:
+                create_persistent_client(directory, max_queue_size=3)
+            self.assertEqual(raised.exception.code, "persistence_integrity_error")
 
     def test_unavailable_commit_confirmation_blocks_later_queue_work(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
