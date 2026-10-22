@@ -40,6 +40,11 @@ final class PersistenceRecordCodec {
         }
     }
 
+    // An evicted record keeps its sequence, so recovery still proves every record is present.
+    static byte[] evictedPayload() {
+        return new byte[Integer.BYTES * 2];
+    }
+
     long readCheckpoint(Path path) {
         if (path == null) {
             return 0L;
@@ -86,6 +91,7 @@ final class PersistenceRecordCodec {
         }
     }
 
+    /** Returns the record, or null for a record evicted to make room for a crash report. */
     EncryptedEventStore.Record readRecord(Path path, long expectedSequence, long maxEventBytes) {
         PersistenceFiles.FileData data = files.read(path, recordFileBound(maxEventBytes));
         PersistenceCrypto.Header header = crypto.header(data.bytes);
@@ -105,6 +111,9 @@ final class PersistenceRecordCodec {
             }
             int idLength = payload.getInt();
             int eventLength = payload.getInt();
+            if (idLength == 0 && eventLength == 0 && !payload.hasRemaining()) {
+                return null;
+            }
             if (idLength <= 0
                 || eventLength <= 0
                 || eventLength > maxEventBytes

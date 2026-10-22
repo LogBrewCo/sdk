@@ -386,6 +386,14 @@ final class PersistenceFiles implements AutoCloseable {
         }
     }
 
+    long size(Path path) {
+        synchronized (monitor) {
+            verifyBoundary();
+            verifyRegularFile(path);
+            return readAttributes(path).size();
+        }
+    }
+
     boolean exists(Path path) {
         synchronized (monitor) {
             verifyBoundary();

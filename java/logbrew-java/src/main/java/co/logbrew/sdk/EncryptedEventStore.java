@@ -8,8 +8,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Opt-in, caller-owned encrypted restart store for canonical event JSON.
@@ -175,15 +179,46 @@ public final class EncryptedEventStore implements AutoCloseable {
     }
 
     Record admit(String eventId, String eventJson, int maxEvents, long maxBytes) {
+        return admit(eventId, eventJson, maxEvents, maxBytes, Collections.emptyList());
+    }
+
+    /** Admits one event and removes {@code evicted} active records in the same durable write. */
+    Record admit(String eventId, String eventJson, int maxEvents, long maxBytes, List<Record> evicted) {
         synchronized (monitor) {
             ensureLoaded();
             validateBounds(maxEvents, maxBytes);
+            Set<Record> evictedSet = Collections.newSetFromMap(new IdentityHashMap<>());
+            evictedSet.addAll(evicted);
+            if (evicted.size() > PersistenceTransaction.MAX_EVICTIONS || evictedSet.size() != evicted.size()) {
+                throw new SdkException("persistence_bounds_exceeded", "persistence bounds reject the eviction");
+            }
+            Map<Long, byte[]> evictedRecords = new LinkedHashMap<>();
+            List<Record> remaining = new ArrayList<>();
+            for (Record active : activeRecords) {
+                if (evictedSet.contains(active)) {
+                    recordCodec.verifyUnchanged(active);
+                    evictedRecords.put(
+                        Long.valueOf(active.sequence),
+                        crypto.encrypt(
+                            PersistenceCrypto.RECORD,
+                            active.sequence,
+                            PersistenceRecordCodec.evictedPayload(),
+                            storeId
+                        )
+                    );
+                } else {
+                    remaining.add(active);
+                }
+            }
+            if (evictedRecords.size() != evicted.size()) {
+                throw PersistenceCrypto.integrityFailure();
+            }
             byte[] eventBytes = eventJson.getBytes(StandardCharsets.UTF_8);
             if (eventBytes.length > maxBytes) {
                 throw new SdkException("persistence_bounds_exceeded", "persistence bounds reject the event");
             }
-            long currentBytes = pendingBytes(activeRecords);
-            if (activeRecords.size() >= maxEvents || eventBytes.length > maxBytes - currentBytes) {
+            long currentBytes = pendingBytes(remaining);
+            if (remaining.size() >= maxEvents || eventBytes.length > maxBytes - currentBytes) {
                 throw new SdkException("persistence_bounds_exceeded", "persistence bounds reject the event");
             }
             if (nextSequence <= 0L || nextSequence == Long.MAX_VALUE) {
@@ -209,10 +244,12 @@ public final class EncryptedEventStore implements AutoCloseable {
                     sequence,
                     target,
                     encoded,
-                    highWaterEncoded
+                    highWaterEncoded,
+                    evictedRecords
                 );
                 Record record = recordCodec.readRecord(target, sequence, maxBytes);
-                activeRecords.add(record);
+                remaining.add(record);
+                activeRecords = remaining;
                 nextSequence++;
                 return record;
             } catch (SdkException error) {
@@ -226,6 +263,9 @@ public final class EncryptedEventStore implements AutoCloseable {
                 Arrays.fill(highWaterPayload, (byte) 0);
                 Arrays.fill(highWaterEncoded, (byte) 0);
                 Arrays.fill(eventBytes, (byte) 0);
+                for (byte[] evictedRecord : evictedRecords.values()) {
+                    Arrays.fill(evictedRecord, (byte) 0);
+                }
             }
         }
     }
@@ -351,6 +391,10 @@ public final class EncryptedEventStore implements AutoCloseable {
                 throw PersistenceCrypto.integrityFailure();
             }
             Record record = recordCodec.readRecord(path, sequence, maxBytes);
+            expectedSequence = sequence == Long.MAX_VALUE ? Long.MAX_VALUE : sequence + 1L;
+            if (record == null) {
+                continue;
+            }
             if (records.size() >= maxEvents || record.eventBytes > maxBytes - eventBytes) {
                 throw new SdkException(
                     "persistence_bounds_exceeded",
@@ -359,7 +403,6 @@ public final class EncryptedEventStore implements AutoCloseable {
             }
             records.add(record);
             eventBytes += record.eventBytes;
-            expectedSequence = sequence == Long.MAX_VALUE ? Long.MAX_VALUE : sequence + 1L;
         }
         long expectedAfterHighWater = highWater == Long.MAX_VALUE ? Long.MAX_VALUE : highWater + 1L;
         if (expectedSequence != expectedAfterHighWater) {
