@@ -411,17 +411,17 @@ final class LogBrewClient
         if ($mergedContext !== null) {
             $attributes['context'] = $mergedContext->toArray();
         }
-        if (count($this->events) >= $this->maxQueueSize) {
-            $this->recordDroppedEvent($id, $type, 'queue_overflow');
-            return;
-        }
-
         $event = [
             'type' => $type,
             'id' => $id,
             'timestamp' => $timestamp,
             'attributes' => $attributes,
         ];
+        $fatal = self::isFatalEvent($event);
+        if (!$fatal && count($this->events) >= $this->maxQueueSize) {
+            $this->recordDroppedEvent($id, $type, 'queue_overflow');
+            return;
+        }
 
         try {
             $eventJson = json_encode($event, JSON_THROW_ON_ERROR);
@@ -436,17 +436,89 @@ final class LogBrewClient
             $this->recordDroppedEvent($id, $type, 'event_too_large');
             return;
         }
-        if ($eventBytes > $this->maxQueueBytes - $this->pendingEventBytes) {
-            $this->recordDroppedEvent($id, $type, 'queue_overflow');
-            return;
+        $evicted = [];
+        if ($this->overflows(count($this->events), $this->pendingEventBytes + $eventBytes)) {
+            $evicted = $fatal ? $this->evictForFatal($eventBytes) : [];
+            if ($evicted === []) {
+                $this->recordDroppedEvent($id, $type, 'queue_overflow');
+                return;
+            }
         }
 
-        $storedSequence = $this->eventStore?->append($eventJson);
-        $this->events[] = $event;
-        $this->serializedEvents[] = $eventJson;
-        $this->serializedEventBytes[] = $eventBytes;
-        $this->storedEventSequences[] = $storedSequence;
-        $this->pendingEventBytes += $eventBytes;
+        try {
+            $storedSequence = $this->eventStore?->append($eventJson);
+            $this->events[] = $event;
+            $this->serializedEvents[] = $eventJson;
+            $this->serializedEventBytes[] = $eventBytes;
+            $this->storedEventSequences[] = $storedSequence;
+            $this->pendingEventBytes += $eventBytes;
+        } finally {
+            // Report evictions only after admission so drop callbacks cannot refill the freed room.
+            foreach ($evicted as $evictedEvent) {
+                $this->recordDroppedEvent($evictedEvent['id'], $evictedEvent['type'], 'evicted_for_fatal');
+            }
+        }
+    }
+
+    private function overflows(int $events, int $bytes): bool
+    {
+        return $events >= $this->maxQueueSize || $bytes > $this->maxQueueBytes;
+    }
+
+    /** @param array<string, mixed> $event */
+    private static function isFatalEvent(array $event): bool
+    {
+        $attributes = $event['attributes'] ?? null;
+        return ($event['type'] ?? null) === 'issue' && is_array($attributes) && ($attributes['level'] ?? null) === 'critical';
+    }
+
+    /** @param array<string, mixed> $event */
+    private static function eventField(array $event, string $field): string
+    {
+        $value = $event[$field] ?? null;
+        return is_string($value) ? $value : '';
+    }
+
+    /**
+     * Removes the oldest events that are not crash reports and are not in the batch being sent or
+     * retried, only when that makes room. The persistent queue keeps every admitted event, so a crash
+     * report there is dropped like any other event at a full queue.
+     *
+     * @return list<array{type:string, id:string}>
+     */
+    private function evictForFatal(int $eventBytes): array
+    {
+        if ($this->eventStore !== null) {
+            return [];
+        }
+        $indexes = [];
+        $events = count($this->events);
+        $bytes = $this->pendingEventBytes + $eventBytes;
+        for ($index = $this->retryBatchEvents; $index < count($this->events) && $this->overflows($events, $bytes); $index++) {
+            if (!self::isFatalEvent($this->events[$index])) {
+                $indexes[] = $index;
+                $events--;
+                $bytes -= $this->serializedEventBytes[$index];
+            }
+        }
+        if ($this->overflows($events, $bytes)) {
+            return [];
+        }
+        $evicted = [];
+        foreach ($indexes as $index) {
+            $evicted[] = [
+                'type' => self::eventField($this->events[$index], 'type'),
+                'id' => self::eventField($this->events[$index], 'id'),
+            ];
+        }
+        foreach (array_reverse($indexes) as $index) {
+            $this->pendingEventBytes -= $this->serializedEventBytes[$index];
+            array_splice($this->events, $index, 1);
+            array_splice($this->serializedEvents, $index, 1);
+            array_splice($this->serializedEventBytes, $index, 1);
+            array_splice($this->storedEventSequences, $index, 1);
+        }
+        return $evicted;
     }
 
     private function recordDroppedEvent(string $eventId, string $eventType, string $reason): void
@@ -501,17 +573,10 @@ final class LogBrewClient
         while ($remainingEvents > 0) {
             $batch = $this->nextBatch(min($remainingEvents, $this->maxBatchEvents));
             $this->stagePersistentBatch($batch['events'], $batch['body']);
-            if ($this->eventStore !== null) {
-                $this->retryBatchBody = $batch['body'];
-                $this->retryBatchEvents = $batch['events'];
-            }
-            try {
-                $response = $this->sendBatch($transport, $batch['body']);
-            } catch (\Throwable $error) {
-                $this->retryBatchBody = $batch['body'];
-                $this->retryBatchEvents = $batch['events'];
-                throw $error;
-            }
+            // Record the batch before sending so a failed send retries it and fatal eviction skips it.
+            $this->retryBatchBody = $batch['body'];
+            $this->retryBatchEvents = $batch['events'];
+            $response = $this->sendBatch($transport, $batch['body']);
             $this->acknowledge($batch['events']);
             $this->retryBatchBody = null;
             $this->retryBatchEvents = 0;
