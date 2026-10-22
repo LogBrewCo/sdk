@@ -121,6 +121,8 @@ final class LogBrewClient
     private const INSTANT_TEMPORALITY = ['instant'];
     private const NON_NEGATIVE_METRIC_KINDS = ['counter', 'histogram'];
     private const MAX_METRIC_DESCRIPTION_LENGTH = 1_024;
+    private const MAX_CLIENT_REPORT_REASONS = 16;
+    private const MAX_CLIENT_REPORT_COUNT = 1_000_000_000;
 
     /** @var list<array<string, mixed>> */
     private array $events = [];
@@ -140,7 +142,23 @@ final class LogBrewClient
 
     private int $retryBatchEvents = 0;
 
+    private bool $retryBatchCarriesReport = false;
+
     private int $droppedEvents = 0;
+
+    /**
+     * Drops not yet sent to LogBrew; they ride in the next request as a client report.
+     *
+     * @var array<string, int>
+     */
+    private array $unreportedDrops = [];
+
+    /**
+     * Drops frozen under one report ID until a 2xx acknowledges a request that carried them.
+     *
+     * @var array{id:string, json:string}|null
+     */
+    private ?array $pendingReport = null;
 
     private bool $closed = false;
 
@@ -526,6 +544,7 @@ final class LogBrewClient
         if ($this->droppedEvents < PHP_INT_MAX) {
             $this->droppedEvents++;
         }
+        $this->unreportedDrops[$reason] = min(self::MAX_CLIENT_REPORT_COUNT, ($this->unreportedDrops[$reason] ?? 0) + 1);
         if ($this->onEventDropped === null) {
             return;
         }
@@ -564,6 +583,7 @@ final class LogBrewClient
             $this->acknowledge($retryBatchEvents);
             $this->retryBatchBody = null;
             $this->retryBatchEvents = 0;
+            $this->clearReportAfterAcknowledgement();
             $remainingEvents -= $retryBatchEvents;
             $attempts += $response->attempts;
             $batches++;
@@ -576,10 +596,12 @@ final class LogBrewClient
             // Record the batch before sending so a failed send retries it and fatal eviction skips it.
             $this->retryBatchBody = $batch['body'];
             $this->retryBatchEvents = $batch['events'];
+            $this->retryBatchCarriesReport = $batch['report'];
             $response = $this->sendBatch($transport, $batch['body']);
             $this->acknowledge($batch['events']);
             $this->retryBatchBody = null;
             $this->retryBatchEvents = 0;
+            $this->clearReportAfterAcknowledgement();
             $remainingEvents -= $batch['events'];
             $attempts += $response->attempts;
             $batches++;
@@ -602,10 +624,29 @@ final class LogBrewClient
         $this->eventStore->stageBatch($sequences, $body);
     }
 
-    /** @return array{body:string, events:int} */
+    /** @return array{body:string, events:int, report:bool} */
     private function nextBatch(int $maxEvents): array
     {
-        $bodyBytes = $this->batchPrefixBytes + strlen(self::BATCH_SUFFIX);
+        $report = $this->pendingClientReport();
+        if ($report !== null) {
+            $suffix = '],"client_report":' . $report . '}';
+            $events = $this->fitBatch($maxEvents, $suffix);
+            if ($events > 0) {
+                // A report never pushes a request over maxBatchBytes; it waits for a request with room.
+                return ['body' => $this->batchBody($events, $suffix), 'events' => $events, 'report' => true];
+            }
+        }
+        $events = $this->fitBatch($maxEvents, self::BATCH_SUFFIX);
+        if ($events === 0) {
+            throw new SdkError('transport_error', 'queued event cannot fit the configured batch byte limit');
+        }
+
+        return ['body' => $this->batchBody($events, self::BATCH_SUFFIX), 'events' => $events, 'report' => false];
+    }
+
+    private function fitBatch(int $maxEvents, string $suffix): int
+    {
+        $bodyBytes = $this->batchPrefixBytes + strlen($suffix);
         $events = 0;
         for ($index = 0; $index < $maxEvents; $index++) {
             $separatorBytes = $events === 0 ? 0 : 1;
@@ -616,14 +657,38 @@ final class LogBrewClient
             $bodyBytes = $nextBodyBytes;
             $events++;
         }
-        if ($events === 0) {
-            throw new SdkError('transport_error', 'queued event cannot fit the configured batch byte limit');
-        }
+        return $events;
+    }
 
-        return [
-            'body' => $this->batchPrefix . implode(',', array_slice($this->serializedEvents, 0, $events)) . self::BATCH_SUFFIX,
-            'events' => $events,
-        ];
+    private function batchBody(int $events, string $suffix): string
+    {
+        return $this->batchPrefix . implode(',', array_slice($this->serializedEvents, 0, $events)) . $suffix;
+    }
+
+    /**
+     * Freeze unreported drops under one stable report ID, so every resend of them is counted once.
+     */
+    private function pendingClientReport(): ?string
+    {
+        if ($this->pendingReport === null && $this->unreportedDrops !== []) {
+            $drops = array_slice($this->unreportedDrops, 0, self::MAX_CLIENT_REPORT_REASONS, true);
+            $this->unreportedDrops = array_diff_key($this->unreportedDrops, $drops);
+            $id = bin2hex(random_bytes(16));
+            $this->pendingReport = [
+                'id' => $id,
+                'json' => json_encode(['report_id' => $id, 'dropped_events' => $drops], JSON_THROW_ON_ERROR),
+            ];
+        }
+        return $this->pendingReport['json'] ?? null;
+    }
+
+    private function clearReportAfterAcknowledgement(): void
+    {
+        // Drops recorded while the request was in flight stay unreported and get a new report ID.
+        if ($this->retryBatchCarriesReport) {
+            $this->pendingReport = null;
+            $this->retryBatchCarriesReport = false;
+        }
     }
 
     private function acknowledge(int $events): void
