@@ -47,7 +47,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.24"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.25"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.13"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.7"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.8"),
@@ -60,8 +60,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(rust["package"]["version"], "0.1.8")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
-        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.12")
-        for package, version in (("LogBrew", "0.1.10"), ("LogBrew.HttpClient", "0.1.5")):
+        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.13")
+        for package, version in (("LogBrew", "0.1.11"), ("LogBrew.HttpClient", "0.1.6")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
                 self.assertEqual(xml_value(path, "./PropertyGroup/Version"), version)
@@ -255,12 +255,12 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
         self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.8")
         self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.16")
-        self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.22")
-        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.10")
+        self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.23")
+        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.11")
         self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.3")
-        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.5")
+        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.6")
         self.assertEqual(check_release_metadata.DOTNET_HANGFIRE_VERSION, "0.1.0")
-        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.12")
+        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.13")
         self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.3")
         self.assertEqual(
             {
@@ -268,7 +268,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.24",
+                "logbrew-sdk": "0.1.25",
                 "logbrew-fastapi": "0.1.13",
                 "logbrew-flask": "0.1.7",
                 "logbrew-django": "0.1.8",
