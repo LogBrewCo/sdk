@@ -616,49 +616,59 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 	if context != nil {
 		attributes["context"] = telemetryContextMap(context)
 	}
-	var dropped EventDrop
-	var droppedHandler func(EventDrop)
 	c.mu.Lock()
 	if c.closed || c.shuttingDown {
 		c.mu.Unlock()
 		return &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
-	var evicted *Event
-	if len(c.events) >= c.maxQueueSize && eventType == "issue" && attributes["level"] == "critical" {
-		evicted = c.evictForFatalLocked()
+	event := Event{
+		Type: eventType, ID: id, Timestamp: timestamp, Attributes: attributes,
 	}
-	if evicted != nil {
-		dropped = c.recordDropLocked(evicted.ID, evicted.Type, eventDropReasonEvictedForFatal)
-		droppedHandler = c.onEventDropped
-	} else if len(c.events) >= c.maxQueueSize {
-		dropped = c.recordDropLocked(id, eventType, eventDropReasonQueueOverflow)
-		droppedHandler = c.onEventDropped
+	var victims []int
+	if isCrashReport(event) {
+		victims = c.fatalVictimsLocked(event)
+	}
+	if len(victims) == 0 && len(c.events) >= c.maxQueueSize {
+		dropped := c.recordDropLocked(id, eventType, eventDropReasonQueueOverflow)
+		droppedHandler := c.onEventDropped
 		c.mu.Unlock()
 		notifyEventDropped(droppedHandler, dropped)
 		return nil
 	}
-	event := Event{
-		Type: eventType, ID: id, Timestamp: timestamp, Attributes: attributes,
-	}
 	if c.persistent != nil {
-		if err := c.persistent.admit(event); err != nil {
+		if err := c.persistent.admit(event, victims...); err != nil {
 			c.mu.Unlock()
 			return err
 		}
 	}
-	c.events = append(c.events, event)
+	drops := make([]EventDrop, 0, len(victims))
+	kept := c.events[:0]
+	for index, queued := range c.events {
+		if len(victims) > len(drops) && victims[len(drops)] == index {
+			drops = append(drops, c.recordDropLocked(queued.ID, queued.Type, eventDropReasonEvictedForFatal))
+			continue
+		}
+		kept = append(kept, queued)
+	}
+	clear(c.events[len(kept):])
+	c.events = append(kept, event)
 	if c.automatic != nil {
 		c.startAutomaticLocked()
 		if len(c.events) >= c.automatic.flushThreshold {
 			c.signalAutomaticLocked()
 		}
 	}
+	droppedHandler := c.onEventDropped
 	c.mu.Unlock()
-	// Report an eviction only after admission so the handler cannot refill the freed room.
-	if evicted != nil {
+	// Report evictions only after admission so the handler cannot refill the freed room.
+	for _, dropped := range drops {
 		notifyEventDropped(droppedHandler, dropped)
 	}
 	return nil
+}
+
+func isCrashReport(event Event) bool {
+	return event.Type == "issue" && event.Attributes["level"] == "critical"
 }
 
 func (c *Client) recordDropLocked(id, eventType, reason string) EventDrop {
@@ -696,26 +706,38 @@ func newReportID() string {
 	return hex.EncodeToString(id[:])
 }
 
-// evictForFatalLocked removes the oldest event that is not a crash report and is not in the
-// request body being sent or retried. The persistent queue keeps every admitted event, so a
-// crash report there is dropped like any other event at a full queue.
-func (c *Client) evictForFatalLocked() *Event {
+// fatalVictimsLocked returns the ascending indexes of the oldest events that
+// are not crash reports and are not in the request being sent or retried
+// whose removal makes room for the crash report. It returns nil when the
+// queue has room already or when no such set of events makes room.
+func (c *Client) fatalVictimsLocked(event Event) []int {
+	count, storedBytes, maxBytes := len(c.events)+1, 0, 0
 	if c.persistent != nil {
-		return nil
+		encoded, err := json.Marshal(event)
+		if err != nil {
+			return nil
+		}
+		storedBytes, maxBytes = c.persistent.storedBytes()+len(encoded), c.persistent.maxStoredBytes
 	}
 	start := 0
 	if c.pendingBody != nil {
 		start = c.pendingPrefix
 	}
-	for index := start; index < len(c.events); index++ {
-		if c.events[index].Type == "issue" && c.events[index].Attributes["level"] == "critical" {
+	var victims []int
+	for index := start; index < len(c.events) && (count > c.maxQueueSize || storedBytes > maxBytes); index++ {
+		if isCrashReport(c.events[index]) {
 			continue
 		}
-		evicted := c.events[index]
-		c.events = append(c.events[:index], c.events[index+1:]...)
-		return &evicted
+		victims = append(victims, index)
+		count--
+		if c.persistent != nil {
+			storedBytes -= len(c.persistent.queue.Events[index])
+		}
 	}
-	return nil
+	if count > c.maxQueueSize || storedBytes > maxBytes {
+		return nil
+	}
+	return victims
 }
 
 func notifyEventDropped(handler func(EventDrop), drop EventDrop) {
