@@ -178,6 +178,30 @@ final class EncryptedFileEventStore
     }
 
     /**
+     * Durably remove one queued event that is not in the staged request body.
+     */
+    public function remove(int $sequence): void
+    {
+        $fileName = $this->queuedEventFile($sequence);
+        if (!@unlink($this->directory . '/' . $fileName) || !DurableFileCommitter::syncDirectory($this->directory)) {
+            throw new SdkError('persistence_commit_error', 'persistent event durability is unconfirmed');
+        }
+        $this->assertUsable();
+    }
+
+    /**
+     * Durably and atomically replace one queued event that is not in the staged request body.
+     */
+    public function replace(int $sequence, string $eventJson): void
+    {
+        if ($eventJson === '') {
+            throw new SdkError('validation_error', 'persistent event must be non-empty');
+        }
+        $fileName = $this->queuedEventFile($sequence);
+        $this->writeEncryptedFile($fileName, $eventJson, 'event:' . $fileName, true);
+    }
+
+    /**
      * Persist the exact next request body before any transport attempt.
      *
      * @param list<int> $sequences
@@ -661,6 +685,15 @@ final class EncryptedFileEventStore
         }
 
         return $plaintext;
+    }
+
+    private function queuedEventFile(int $sequence): string
+    {
+        $fileName = $this->scanEventFiles()[$sequence] ?? null;
+        if ($fileName === null) {
+            throw new SdkError('persistent_queue_error', 'persistent event is not queued');
+        }
+        return $fileName;
     }
 
     private function writeEncryptedFile(

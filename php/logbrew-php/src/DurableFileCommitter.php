@@ -139,7 +139,7 @@ final class DurableFileCommitter
             && @unlink($path);
     }
 
-    private static function syncDirectory(string $directory): bool
+    public static function syncDirectory(string $directory): bool
     {
         $handle = @fopen($directory, 'rb');
         if (!is_resource($handle)) {
