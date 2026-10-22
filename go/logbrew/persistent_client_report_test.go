@@ -134,7 +134,7 @@ func TestADropBurstSavesAtMostOnceASecondAndShutdownSavesTheRest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if report := sentReport(t, accepted.bodiesSnapshot()[0]); report == nil || report.DroppedEvents["queue_overflow"] != 5 {
-		t.Fatalf("restart restored report %#v, want 5 queue_overflow drops", report)
+		t.Fatalf("restart loaded report %#v, want 5 queue_overflow drops", report)
 	}
 }
 
@@ -166,7 +166,7 @@ func TestUnreadableSavedDropCountsAreIgnored(t *testing.T) {
 				}
 			}
 			if !reflect.DeepEqual(restarted.unreportedDrops, want) {
-				t.Fatalf("restored %v, want %v", restarted.unreportedDrops, want)
+				t.Fatalf("loaded %v, want %v", restarted.unreportedDrops, want)
 			}
 		})
 	}
@@ -212,7 +212,7 @@ func decodeSavedCounts(t *testing.T, raw json.RawMessage) map[string]int {
 const reportHelperEnv = "LOGBREW_REPORT_HELPER_DIRECTORY"
 
 // TestReportHelperProcess is the app that drops events and exits without
-// cleanup. TestUnreportedDropCountsSurviveARestartInAnotherProcess starts it.
+// cleanup. The restart test below starts it.
 func TestReportHelperProcess(t *testing.T) {
 	directory := os.Getenv(reportHelperEnv)
 	if directory == "" {
