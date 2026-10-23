@@ -184,4 +184,48 @@ for needle in ("Shared Telemetry Context", "Issue Diagnostics", "Span Evidence",
         raise SystemExit(f"missing README guidance: {needle}")
 PY
 
+# A SwiftPM app adds the LogBrewObjC product and imports the module.
+consumer_dir="$tmp_dir/swiftpm-consumer"
+mkdir -p "$consumer_dir/Sources/ObjCConsumer/include"
+cat > "$consumer_dir/Package.swift" <<EOF
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "ObjCConsumer",
+    platforms: [.macOS(.v13)],
+    dependencies: [.package(path: "$repo_root")],
+    targets: [
+        .executableTarget(
+            name: "ObjCConsumer",
+            dependencies: [.product(name: "LogBrewObjC", package: "${repo_root##*/}")]
+        ),
+    ]
+)
+EOF
+cat > "$consumer_dir/Sources/ObjCConsumer/main.m" <<'EOF'
+@import LogBrewObjC;
+
+int main(void) {
+  @autoreleasepool {
+    NSError *error = nil;
+    LBWClient *client = [[LBWClient alloc] initWithConfig:[LBWConfig configWithAPIKey:@"LOGBREW_API_KEY"] error:&error];
+    [client releaseWithID:@"evt_release_001" timestamp:@"2026-06-02T10:00:00Z" attributes:@{@"version": @"1.2.3"} error:&error];
+    LBWRecordingTransport *transport = [[LBWRecordingTransport alloc] init];
+    if (client == nil || [client flushWithTransport:transport error:&error] == nil) {
+      return 1;
+    }
+    printf("%s\n", transport.lastBody.UTF8String);
+  }
+  return 0;
+}
+EOF
+swift run --package-path "$consumer_dir" --scratch-path "$tmp_dir/swiftpm-build" ObjCConsumer \
+  > "$tmp_dir/swiftpm.stdout.json" 2> "$tmp_dir/swiftpm.log" || {
+  cat "$tmp_dir/swiftpm.log" >&2
+  exit 1
+}
+run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/swiftpm.stdout.json" >/dev/null
+grep -q '"evt_release_001"' "$tmp_dir/swiftpm.stdout.json"
+
 echo "objc package checks passed with $($objc_command --version | head -n 1)"

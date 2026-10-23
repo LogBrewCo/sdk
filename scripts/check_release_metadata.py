@@ -1120,6 +1120,8 @@ def validate_swift(root: Path, failures: list[str]) -> None:
             '.iOS(.v15)',
             '.library(name: "LogBrew", targets: ["LogBrew"])',
             '.library(name: "LogBrewCrash", targets: ["LogBrewCrash"])',
+            '.library(name: "LogBrewObjC", targets: ["LogBrewObjC"])',
+            'path: "objc/logbrew-objc"',
             'path: "swift/logbrew-swift/Sources/LogBrew"',
             'path: "swift/logbrew-swift/Sources/LogBrewCrash"',
             'path: "swift/logbrew-swift/Tests/LogBrewTests"',
