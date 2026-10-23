@@ -138,14 +138,14 @@ tool = "ktlint"
 version = "1.8.0"
 pins = ["scripts/check_kotlin_style.sh::ktlint_version=\"@VERSION@\""]
 commands = ["scripts/check_kotlin_style.sh"]
-runs_in = "CI Kotlin checks"
+runs_in = "CI Contract checks (required): Run Kotlin style checks, on every run"
 config = "ktlint defaults; the jar is verified against its published SHA-256"
 conflicts = "none known"
 exceptions = "none"
-runtime = "unknown: no run in the measured window"
-findings = "unknown: findings are fixed before merge"
+runtime = "local 2026-10-23: 6.3 s including the jar download; CI uses the runner's preinstalled Java 17"
+findings = "2026-10-23: 0 on main; a seeded invalid file fails"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-10-23
 
 [[tool]]
 id = "phpstan"

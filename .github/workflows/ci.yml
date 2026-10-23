@@ -188,7 +188,6 @@ jobs:
           PATH="$LOGBREW_STATICCHECK_BIN:$PATH" bash scripts/check_go_static.sh
 
       - name: Run Kotlin style checks
-        if: ${{ needs.changed-areas.outputs.kotlin == 'true' }}
         run: bash scripts/check_kotlin_style.sh
 
       - name: Run Swift style checks
