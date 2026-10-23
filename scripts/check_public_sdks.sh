@@ -703,7 +703,7 @@ run_shell_step "python3 scripts/check_release_metadata.py"
 mark_step_complete
 
 begin_next_step "GitHub release safety checks"
-run_shell_step "python3 scripts/check_github_release_safety.py"
+run_shell_step "source scripts/native_verifier.sh && run_native_verifier github-release-safety"
 mark_step_complete
 
 begin_next_step "Markdown link checks"

@@ -196,7 +196,10 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             ),
         )
         self.assert_step_sequence(
-            ("GitHub release safety checks", "python3 scripts/check_github_release_safety.py"),
+            (
+                "GitHub release safety checks",
+                "source scripts/native_verifier.sh && run_native_verifier github-release-safety",
+            ),
         )
 
     def test_public_verifier_runs_release_artifact_smokes_before_hygiene(self) -> None:

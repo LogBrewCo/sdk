@@ -261,9 +261,12 @@ func run() int {
 	if os.Args[1] == ciSelectMode {
 		return checkCISelect(os.Args[2:], os.Getenv, runGit, os.Stdout, os.Stderr)
 	}
+	if os.Args[1] == releaseSafetyMode {
+		return checkReleaseSafety(os.Args[2:], ghAPI, os.Stdout, os.Stderr)
+	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, or ci-select mode\n", exitUsage)
+			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, or github-release-safety mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {

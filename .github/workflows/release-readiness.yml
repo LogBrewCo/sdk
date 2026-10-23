@@ -170,7 +170,8 @@ jobs:
       - name: Check GitHub release safety
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" github-release-safety --allow-public-branch-summary
 
       - name: Run JavaScript release artifact smoke
         run: bash scripts/real_user_js_release_artifact_smoke.sh

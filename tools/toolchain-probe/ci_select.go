@@ -76,7 +76,6 @@ var (
 		"scripts/real_user_maven_central_public_smoke.sh":         {"tests.test_maven_central_public_smoke"},
 		"scripts/real_user_swiftpm_public_smoke.sh":               {"tests.test_swiftpm_public_smoke"},
 		"scripts/real_user_native_release_public_smoke.sh":        {"tests.test_native_release_public_smoke"},
-		"scripts/check_github_release_safety.py":                  {"tests.test_github_release_safety"},
 		"scripts/check_nuget_public_artifacts.py":                 {"tests.test_nuget_public_artifacts"},
 		"scripts/check_nuget_release_receipt_provenance.py":       nugetReceiptTests,
 		"scripts/check_publication_run.py":                        {"tests.test_publication_run"},
