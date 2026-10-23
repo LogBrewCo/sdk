@@ -141,7 +141,7 @@ For native Laravel onboarding, do not leave delivery correctness to app-specific
 ## Release checks
 
 - Shared release metadata: `python3 scripts/check_release_metadata.py`
-- SDK-originated backend contract reports: `python3 scripts/check_backend_contract_reports.py`
+- SDK-originated backend contract reports: `source scripts/native_verifier.sh && run_native_verifier backend-reports .`
 - GitHub release safety settings before publishing: `python3 scripts/check_github_release_safety.py`
 - JavaScript release-artifact dry-run proof: `bash scripts/real_user_js_release_artifact_smoke.sh`
 - JavaScript release-artifact installed CLI prep/manifest/frame proof: `bash scripts/real_user_js_release_artifact_cli_smoke.sh`

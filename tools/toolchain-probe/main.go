@@ -252,9 +252,12 @@ func run() int {
 	if os.Args[1] == markdownLinksMode {
 		return checkMarkdownLinks(os.Args[2:], os.Stdout, os.Stderr)
 	}
+	if os.Args[1] == backendReportsMode {
+		return checkBackendReports(os.Args[2:], os.Stdout, os.Stderr)
+	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, event-batch-check, or markdown-links mode\n", exitUsage)
+			"schema-check, event-batch-check, markdown-links, or backend-reports mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {

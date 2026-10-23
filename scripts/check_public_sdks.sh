@@ -695,7 +695,7 @@ run_shell_step "bash scripts/real_user_objc_smoke.sh"
 mark_step_complete
 
 begin_next_step "Backend contract report checks"
-run_shell_step "python3 scripts/check_backend_contract_reports.py"
+run_shell_step "source scripts/native_verifier.sh && run_native_verifier backend-reports \"\$PWD\""
 mark_step_complete
 
 begin_next_step "Release metadata checks"
