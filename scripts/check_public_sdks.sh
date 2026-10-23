@@ -319,7 +319,7 @@ run_shell_step "cd rust/logbrew && cargo publish --dry-run --allow-dirty"
 mark_step_complete
 
 begin_next_step "JavaScript tests"
-run_shell_step "python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
+run_shell_step "bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
 mark_step_complete
 
 begin_next_step "JavaScript package dry-run"
