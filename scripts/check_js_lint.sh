@@ -131,8 +131,9 @@ cat > "$tmp_dir/oxlintrc.json" <<'EOF'
 EOF
 
 # Type-aware pass. Oxlint replaces ESLint consistent-return with typescript/consistent-return,
-# and no-invalid-this with the TypeScript compiler's noImplicitThis (TS2683). Checking
-# JavaScript reports every other TypeScript diagnostic too, so only these two fail.
+# and no-invalid-this with the TypeScript compiler's noImplicitThis (TS2683). TS1108 is a
+# top-level return in an ES module, the one syntax error Oxlint's parser accepts. Checking
+# JavaScript reports every other TypeScript diagnostic too, so only these three fail.
 cat > "$tmp_dir/type-aware.json" <<'EOF'
 { "plugins": ["typescript"], "categories": { "correctness": "off" }, "rules": { "typescript/consistent-return": "error" } }
 EOF
@@ -147,7 +148,7 @@ EOF
 }
 type_aware_findings() {
   (cd "$1" && "$oxlint_bin" --config "$tmp_dir/type-aware.json" --type-aware --type-check . || true) |
-    grep -E 'typescript\((consistent-return|TS2683)\)' || true
+    grep -E 'typescript\((consistent-return|TS2683|TS1108)\)' || true
 }
 
 # Seeded check: the pass must catch one example of each failure class.
@@ -157,9 +158,10 @@ cat > "$tmp_dir/seeded/seeded.js" <<'EOF'
 export function sometimesReturns(flag) { if (flag) { return 1; } return; }
 export function readsThis() { return this.value; }
 EOF
+printf 'return;\n' > "$tmp_dir/seeded/top-level-return.mjs"
 seeded="$(type_aware_findings "$tmp_dir/seeded")"
-if [[ "$seeded" != *"consistent-return"* || "$seeded" != *"TS2683"* ]]; then
-  printf 'type-aware lint missed a seeded consistent-return or no-invalid-this example:\n%s\n' "$seeded" >&2
+if [[ "$seeded" != *"consistent-return"* || "$seeded" != *"TS2683"* || "$seeded" != *"TS1108"* ]]; then
+  printf 'type-aware lint missed a seeded consistent-return, no-invalid-this, or top-level return example:\n%s\n' "$seeded" >&2
   exit 1
 fi
 

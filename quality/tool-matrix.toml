@@ -89,12 +89,12 @@ version = "1.89.0"
 pins = ["scripts/check_js_lint.sh::oxlint_version=\"@VERSION@\""]
 commands = ["scripts/check_js_lint.sh"]
 runs_in = "CI Contract checks: Run JavaScript lint (when JavaScript changed)"
-config = "the oxlintrc.json the script writes; a second type-aware pass enables typescript/consistent-return and fails on TypeScript TS2683 (noImplicitThis, Oxlint's no-invalid-this replacement) only"
+config = "the oxlintrc.json the script writes; a second type-aware pass enables typescript/consistent-return and fails on TypeScript TS2683 (noImplicitThis, Oxlint's no-invalid-this replacement) only, and TS1108 (a top-level return, the one syntax error the parse misses)"
 conflicts = "checkJs reports about 10,000 other TypeScript diagnostics on the untyped JavaScript; the type-aware pass ignores them"
 exceptions = "none"
-runtime = "push n=1, max 1 s; pull request n=1, max 0 s; local 2026-10-23 with the type-aware pass: 2.7 s including downloads"
-findings = "2026-10-23: consistent-return 0, no-invalid-this 54 (wrappers that read this without a JSDoc @this tag); a seeded example of each must fail on every run"
-replaces = "none"
+runtime = "push n=1, max 1 s; pull request n=1, max 0 s; local 2026-10-23 with the type-aware pass: 2.7 s including downloads; the replaced per-file node --check took 16.7 s for 274 files"
+findings = "2026-10-23: consistent-return 0, no-invalid-this 54 (wrappers that read this without a JSDoc @this tag); a seeded example of each must fail on every run. Syntax: on 17 seeded syntax errors the Oxlint parse plus TS1108 reported all 17, the same as node --check"
+replaces = "scripts/check_js_sources.py (node --check on each JavaScript file, local check only)"
 checked = 2026-10-23
 
 [[tool]]
