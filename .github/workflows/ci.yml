@@ -238,7 +238,8 @@ jobs:
       - name: Check GitHub release safety
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" github-release-safety --allow-public-branch-summary
 
       - name: Run Maven Central public install smoke
         if: ${{ needs.changed-areas.outputs.maven == 'true' }}
