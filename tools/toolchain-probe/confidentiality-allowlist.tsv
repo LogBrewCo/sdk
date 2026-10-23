@@ -1,0 +1,463 @@
+# Reviewed lines that the confidentiality scan allows. One rule per line, four
+# tab-separated fields: path, terms, match, text.
+# - path: a glob from the repository root; "**/" is any number of directories,
+#   "**" any text, "*" any text in one directory, "{a,b}" either alternative.
+# - terms: the sensitive words found on the line, lowercased: "*" for any,
+#   "a,b" for exactly these, "<=a,b" for only these, ">=a" for at least these.
+# - match: line (the trimmed line equals text), raw (the line equals text),
+#   prefix (the trimmed line starts with text), has (the line contains text),
+#   ihas (the lowercased line contains text), item (the trimmed line without
+#   surrounding commas and quotes equals text), only (the line contains text
+#   and nothing sensitive outside it), re (the line matches a Go regular
+#   expression), or any (text is "-").
+
+# Publishing and release workflows name their credential settings, never values.
+docs/github-actions.md	*	ihas	long-lived registry tokens
+.github/publishing/trusted-publishers.md	*	ihas	after adding packagist secrets
+.github/publishing/trusted-publishers.md	*	ihas	central portal credentials
+.github/publishing/trusted-publishers.md	*	ihas	central_portal_password
+.github/publishing/trusted-publishers.md	*	ihas	environment secrets
+.github/publishing/trusted-publishers.md	*	ihas	maven central signing
+.github/publishing/trusted-publishers.md	*	ihas	nuget_user
+.github/publishing/trusted-publishers.md	*	ihas	packagist_api_token
+.github/publishing/trusted-publishers.md	*	ihas	packagist_username
+.github/publishing/trusted-publishers.md	*	ihas	release environment secret
+.github/publishing/trusted-publishers.md	*	ihas	rubygems/configure-rubygems-credentials
+.github/publishing/trusted-publishers.md	*	ihas	signing keys
+.github/publishing/trusted-publishers.md	*	ihas	trusted publisher
+.github/publishing/trusted-publishers.md	*	ihas	trusted publishing
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	/-/npm/v1/oidc/token/exchange/package/
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	actions_id_token_request_token
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	actions_id_token_request_url
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	central portal publishing credentials
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	central portal user-token credentials
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	generated central portal publishing credentials
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	generated central portal publishing values
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	return exchange.token
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	token: grants[index]
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	typeof exchange.token
+tests/test_release_metadata.py	*	ihas	/-/npm/v1/oidc/token/exchange/package/
+tests/test_release_metadata.py	*	ihas	central portal credentials
+tests/test_release_metadata.py	*	ihas	central portal publishing credentials
+tests/test_release_metadata.py	*	ihas	central portal user-token credentials
+tests/test_release_metadata.py	*	ihas	generated central portal publishing credentials
+tests/test_release_metadata.py	*	ihas	id-token: write
+tests/test_release_metadata.py	*	ihas	maven central generated credential hint
+tests/test_release_metadata.py	*	ihas	maven central user-token credential hint
+scripts/check_release_metadata.py	*	ihas	"maven central generated credential hint": "generated central portal publishing credentials"
+scripts/check_release_metadata.py	*	ihas	"maven central user-token credential hint": "central portal user-token credentials"
+scripts/check_release_metadata.py	*	ihas	"npm oidc exchange": "/-/npm/v1/oidc/" "token/exchange/package/"
+scripts/check_release_metadata.py	*	ihas	"npm oidc permission": "id-" "token: write"
+tests/test_affected_family_release_prep.py	*	ihas	"/-/npm/v1/oidc/" "token/exchange/package/"
+tests/test_affected_family_release_prep.py	*	ihas	npm_config_to
+scripts/check_maven_central_auth_preflight.sh	*	ihas	central_portal_password
+scripts/check_maven_central_auth_preflight.sh	*	ihas	central_portal_username
+scripts/check_maven_central_auth_preflight.sh	*	ihas	generated central portal publishing values
+tests/test_maven_central_auth_preflight.py	*	ihas	central_portal_password
+tests/test_maven_central_auth_preflight.py	*	ihas	central_portal_username
+tests/test_maven_central_auth_preflight.py	*	ihas	generated_token_hint
+tests/test_maven_central_auth_preflight.py	*	ihas	requires_secret_env_names
+tests/test_maven_central_auth_preflight.py	*	ihas	secret-token
+tests/test_maven_central_auth_preflight.py	*	ihas	secret_values
+tests/test_maven_central_auth_preflight.py	*	ihas	user-token
+tests/test_release_metadata.py	*	ihas	central_portal_password
+tests/test_release_metadata.py	*	ihas	central_portal_username
+tests/test_release_metadata.py	*	ihas	secret names only
+tests/test_release_metadata.py	*	ihas	secret-token
+tests/test_release_metadata.py	*	ihas	secret_names_only
+tests/test_release_metadata.py	*	ihas	user-token
+.github/workflows/publish-packages.yml	*	line	secrets: inherit
+.github/workflows/**	*	ihas	apitoken=${packagist_api_token}
+.github/workflows/**	*	ihas	cargo_registry_token
+.github/workflows/**	*	ihas	central portal credentials
+.github/workflows/**	*	ihas	central_portal_password: ${{ secrets.central_portal_password }}
+.github/workflows/**	*	ihas	central_portal_password:?set central_portal_password
+.github/workflows/**	*	ihas	central_portal_username: ${{ secrets.central_portal_username }}
+.github/workflows/**	*	ihas	central_portal_username:?set central_portal_username
+.github/workflows/**	*	ihas	configure rubygems trusted publishing credentials
+.github/workflows/**	*	ihas	gh_token: ${{ github.token }}
+.github/workflows/**	*	ihas	github-token: ${{ github.token }}
+.github/workflows/**	*	ihas	github_authorization: ${{ github.token }}
+.github/workflows/**	*	ihas	id-token: write
+.github/workflows/**	*	ihas	maven_gpg_key_id: ${{ secrets.maven_gpg_key_id }}
+.github/workflows/**	*	ihas	maven_gpg_passphrase: ${{ secrets.maven_gpg_passphrase }}
+.github/workflows/**	*	ihas	maven_gpg_private_key: ${{ secrets.maven_gpg_private_key }}
+.github/workflows/**	*	ihas	os.environ['central_portal_password']
+.github/workflows/**	*	ihas	packagist_api_token: ${{ secrets.packagist_api_token }}
+.github/workflows/**	*	ihas	packagist_api_token:-
+.github/workflows/**	*	ihas	packagist_api_token:?set packagist_api_token
+.github/workflows/**	*	ihas	packagist_username: ${{ secrets.packagist_username }}
+.github/workflows/**	*	ihas	packagist_username:?set packagist_username
+.github/workflows/**	*	ihas	persist-credentials: false
+.github/workflows/**	*	ihas	public_guard_terms: ${{ secrets.public_guard_terms }}
+.github/workflows/**	*	ihas	rubygems/configure-rubygems-credentials
+.github/workflows/**	*	ihas	secrets.nuget_user
+.github/workflows/**	*	ihas	signing keys
+quality/tool-matrix.toml	credential	re	^(?:uses|commands) = \[(?i:.*"rubygems/configure-rubygems-credentials")
+quality/tool-matrix.toml	restore	re	^(?:uses|commands) = \[(?i:.*"dotnet restore")
+quality/tool-matrix.toml	credential,restore	re	^(?:uses|commands) = \[(?i:.*"rubygems/configure-rubygems-credentials".*"dotnet restore"|.*"dotnet restore".*"rubygems/configure-rubygems-credentials")
+.github/workflows/ci.yml	strategy	line	strategy:
+{.github/workflows/publish-nuget.yml,tests/test_release_metadata.py}	restore	has	dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-restore
+{.github/workflows/publish-nuget.yml,tests/test_release_metadata.py}	restore	has	dotnet restore dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj
+
+# Release artifact upload names its auth variable and loopback endpoint checks.
+js/logbrew-js/release-artifacts.js	*	re	upload-js.*--token-env|--token-env.*upload-js
+js/logbrew-js/README.md	*	has	--token-env LOGBREW_RELEASE_ARTIFACT_AUTH
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	"token-env": "string"
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	--token-env
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	Authorization
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	Authorization:
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	Bearer ${token}
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	Bearer {token}
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	DEFAULT_TOKEN_ENV
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	DEFAULT_UPLOAD_TOKEN_ENV
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	auth: { tokenEnv }
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	const hostname =
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	const token =
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	const tokenEnv
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	endpoint, token, body
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	hostname =
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	hostname ===
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	hostname.lower()
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	if (!token)
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	if (tokenEnv
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	if not hostname:
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	if not token:
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	isLoopbackUploadEndpoint
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	must include a hostname
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	net.isIP(hostname)
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	parsed.hostname
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	parsed.password
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	parsed.username
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	parsedEndpoint.password
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	parsedEndpoint.username
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	postMultipart
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	post_multipart
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	release-artifact token
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	requireLoopbackUploadEndpoint
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	token = os.environ.get
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	token,
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	token: str
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	token=token
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	tokenEnv
+{js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts,scripts/release_artifact_upload_common.py,scripts/upload_js_release_artifacts.py,scripts/upload_native_release_artifacts.py}	*	has	tokenEnv?: string
+js/logbrew-react-native/README.md	*	has	tokenEnv
+{scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	--token-env LOGBREW_RELEASE_ARTIFACT_TOKEN_BAD
+{scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	LOGBREW_RELEASE_ARTIFACT_TOKEN
+{scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	containsToken
+{scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	expected_token
+{scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	wrong-token
+{tests/test_js_release_artifact_upload.py,tests/test_native_release_artifact_upload.py}	*	has	?token=ignored
+{js/logbrew-js/test/release-artifacts-cli.test.js,scripts/real_user_js_release_artifact_cli_smoke.sh}	*	has	token=placeholder
+js/logbrew-js/test/release-artifacts-cli.test.js	*	has	tokenEnv: authEnvName
+{docs/backend-contracts/release-artifact-symbolication-2026-06-13.md,js/logbrew-js/README.md,js/logbrew-next/README.md}	*	re	(?i)upload.*artifact|artifact.*upload
+
+# Privacy denylists name the keys they drop; fixtures use placeholder values.
+{**angular**,docs/sdk-readiness-checklist.md}	*	has	InjectionToken
+{**angular**,docs/sdk-readiness-checklist.md}	*	has	LOG_BREW_ANGULAR_CONTEXT
+{**angular**,docs/sdk-readiness-checklist.md}	*	has	injection token
+{**angular**,docs/sdk-readiness-checklist.md}	*	has	injection-token
+{scripts/real_user_**,js/logbrew-*/**/examples/real-user-smoke.mjs}	*	has	token=secret
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	arg
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	bind
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	connection
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	cookie
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	credential
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	dsn
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	header
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	host
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	key
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	param
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	password
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	payload
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	port
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	query
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	secret
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	statement
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	token
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	url
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	user
+python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	value
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	auth
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	authorization
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	connectionstring
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	cookie
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	cookies
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	header
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	headers
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	host
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	hostname
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	key
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	param
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	params
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	password
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	query
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	secret
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	sql
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	statement
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	token
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	url
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	username
+java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	value
+java/logbrew-java/src/main/java/co/logbrew/sdk/PersistenceCrypto.java	*	line	import javax.crypto.spec.SecretKeySpec;
+java/logbrew-java/src/main/java/co/logbrew/sdk/PersistenceCrypto.java	*	line	new SecretKeySpec(key, "AES"),
+js/logbrew-js/opentelemetry.cjs	*	has	SENSITIVE_OTEL_ATTRIBUTE_PATTERN
+README.md	*	line	- Automatic Pino metadata excludes credentials, cookies, bodies, payloads, query text, raw URLs, propagation headers, local file paths, and stack text by default.
+js/logbrew-fastify/README.md	*	line	Primitive structured fields become bounded LogBrew metadata. Credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text are excluded automatically. Keep normal Pino redaction enabled because the log message itself is telemetry.
+js/logbrew-fastify/README.md	*	line	redact: ["authorization", "cookie", "password", "token"]
+js/logbrew-js/core.cjs	*	line	"credentials",
+js/logbrew-js/core.cjs	*	line	"password",
+js/logbrew-js/core.cjs	*	line	"secret",
+js/logbrew-js/core.cjs	*	line	"token",
+js/logbrew-js/core.cjs	*	line	|| normalized.endsWith("credentials")
+js/logbrew-js/core.cjs	*	line	|| normalized.endsWith("password")
+js/logbrew-js/core.cjs	*	line	|| normalized.endsWith("secret")
+js/logbrew-js/core.cjs	*	line	|| normalized.endsWith("token")
+js/logbrew-js/test/sdk.test.js	*	line	requestUrl: "/checkout/42?token=hidden",
+js/logbrew-node/README.md	*	line	Primitive structured fields become `context.*` metadata. Runtime defaults and nested objects are omitted. Credentials, authorization and cookie fields, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack fields are also excluded automatically; serialized error name/message remain available, while stack text requires `includeErrorStack: true`. The log message itself is telemetry, so keep secrets and user-entered text out of messages and retain your normal Pino redaction policy.
+js/logbrew-node/README.md	*	line	redact: ["authorization", "cookie", "password", "token"]
+js/logbrew-node/test/pino-instrumentation.test.js	*	line	hostname: "host.local",
+js/logbrew-node/test/pino-instrumentation.test.js	*	line	requestUrl: "/checkout/42?token=hidden",
+scripts/real_user_fastify_smoke.sh	*	line	if (JSON.stringify(pinoPayload).includes("Bearer hidden") || JSON.stringify(pinoPayload).includes("token=hidden")) {
+scripts/real_user_fastify_smoke.sh	*	line	nested: { token: "hidden" }
+scripts/real_user_fastify_smoke.sh	*	line	requestUrl: "/auto?token=hidden",
+python/logbrew_py/src/logbrew_sdk/_opentelemetry_processor.py	*	has	SENSITIVE_OTEL_ATTRIBUTE_PATTERN
+python/logbrew_py/src/logbrew_sdk/_opentelemetry_processor.py	*	has	r"(^|[._-])(
+python/logbrew_py/src/logbrew_sdk/_opentelemetry_processor.py	*	has	r"private[-_]?key|
+js/logbrew-react-native/apple-native-diagnostics.js	password	has	parsed.password
+js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift	password	has	components.password == nil
+go/logbrew/gin/README.md	*	line	values and drops keys that suggest credentials, payloads, URLs, headers,
+go/logbrew/gin/middleware.go	*	line	"host", "hostname", "ipaddress", "key", "message", "params", "parameters", "password", "path",
+go/logbrew/gin/middleware.go	*	line	"payload", "query", "remoteaddress", "secret", "sql", "stack", "statement", "token",
+go/logbrew/gin/middleware.go	*	line	// credentials, payloads, URLs, headers, queries, or raw propagation are
+go/logbrew/gin/middleware_test.go	*	line	"https://private.example.test/articles/private-article?token=private-query-value",
+go/logbrew/gin/middleware_test.go	*	line	for _, unsafe := range []string{"private panic value", "private-id", "token=private", "Bearer private", "Authorization"} {
+go/logbrew/gin/middleware_test.go	*	line	for _, unsafe := range append([]string{"private-user", "token=private", "traceparent"}, testCase.headers...) {
+go/logbrew/gin/middleware_test.go	*	line	request := httptest.NewRequest(http.MethodGet, "/panic/private-id?token=private", nil)
+go/logbrew/gin/middleware_test.go	*	line	request := httptest.NewRequest(http.MethodGet, "/profiles/private-user?token=private", nil)
+scripts/real_user_go_gin_smoke.sh	*	line	"https://private.example.test/articles/private-article?token=private-query",
+scripts/real_user_go_gin_smoke.sh	*	line	httptest.NewRequest(http.MethodGet, "/panic/private-id?token=private-panic-query", nil),
+scripts/real_user_ruby_rails_smoke.sh	*	line	config.secret_key_base = "installed-rails-smoke-secret-key-base"
+
+# Support-ticket drafts redact credentials; docs and tests describe that.
+scripts/real_user_go_support_ticket_smoke.sh	*	line	"apiKey":      token,
+scripts/real_user_go_support_ticket_smoke.sh	*	line	token := strings.Join([]string{"lbw", "ingest", "hidden"}, "_")
+{dotnet/logbrew-dotnet/README.md,go/logbrew/README.md,java/logbrew-java/README.md,js/logbrew-js/README.md,js/logbrew-js/index.d.cts,js/logbrew-js/index.d.ts,php/logbrew-php/README.md,python/logbrew_py/README.md,ruby/logbrew-ruby/README.md,scripts/real_user_js_smoke.sh,scripts/real_user_python_smoke.sh}	*	ihas	account/session api credentials
+{dotnet/logbrew-dotnet/README.md,go/logbrew/README.md,java/logbrew-java/README.md,js/logbrew-js/README.md,js/logbrew-js/index.d.cts,js/logbrew-js/index.d.ts,php/logbrew-php/README.md,python/logbrew_py/README.md,ruby/logbrew-ruby/README.md,scripts/real_user_js_smoke.sh,scripts/real_user_python_smoke.sh}	*	ihas	diagnostic
+{dotnet/logbrew-dotnet/README.md,go/logbrew/README.md,java/logbrew-java/README.md,js/logbrew-js/README.md,js/logbrew-js/index.d.cts,js/logbrew-js/index.d.ts,php/logbrew-php/README.md,python/logbrew_py/README.md,ruby/logbrew-ruby/README.md,scripts/real_user_js_smoke.sh,scripts/real_user_python_smoke.sh}	*	ihas	redact
+{dotnet/logbrew-dotnet/README.md,go/logbrew/README.md,java/logbrew-java/README.md,js/logbrew-js/README.md,js/logbrew-js/index.d.cts,js/logbrew-js/index.d.ts,php/logbrew-php/README.md,python/logbrew_py/README.md,ruby/logbrew-ruby/README.md,scripts/real_user_js_smoke.sh,scripts/real_user_python_smoke.sh}	*	ihas	support routes
+{dotnet/logbrew-dotnet/README.md,go/logbrew/README.md,java/logbrew-java/README.md,js/logbrew-js/README.md,js/logbrew-js/index.d.cts,js/logbrew-js/index.d.ts,php/logbrew-php/README.md,python/logbrew_py/README.md,ruby/logbrew-ruby/README.md,scripts/real_user_js_smoke.sh,scripts/real_user_python_smoke.sh}	*	ihas	support ticket
+{dotnet/logbrew-dotnet/README.md,go/logbrew/README.md,java/logbrew-java/README.md,js/logbrew-js/README.md,js/logbrew-js/index.d.cts,js/logbrew-js/index.d.ts,php/logbrew-php/README.md,python/logbrew_py/README.md,ruby/logbrew-ruby/README.md,scripts/real_user_js_smoke.sh,scripts/real_user_python_smoke.sh}	*	ihas	support-ticket
+{dotnet/logbrew-dotnet/README.md,go/logbrew/README.md,java/logbrew-java/README.md,js/logbrew-js/README.md,js/logbrew-js/index.d.cts,js/logbrew-js/index.d.ts,php/logbrew-php/README.md,python/logbrew_py/README.md,ruby/logbrew-ruby/README.md,scripts/real_user_js_smoke.sh,scripts/real_user_python_smoke.sh}	*	ihas	token-free
+ruby/logbrew-ruby/README.md	*	ihas	runtimeerror.new("hidden token")
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'authtoken',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'clientsecret',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'credential',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'credentials',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'password',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'refreshtoken',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'secret',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	'token',
+php/logbrew-php/src/SupportTicketDraft.php	*	line	return preg_match('/(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]/i', $value) === 1
+php/logbrew-php/src/SupportTicketDraft.php	*	line	|| preg_match('/\blbw_(?:ingest|client|api)_[A-Za-z0-9._-]+/i', $value) === 1;
+php/logbrew-php/tests/support_ticket.php	*	line	'authorization' => 'Bearer lbw_ingest_secret_value',
+php/logbrew-php/tests/support_ticket.php	*	line	'cookie' => 'session=secret',
+php/logbrew-php/tests/support_ticket.php	*	line	'debugNote' => 'failed at https://api.example.com/v1/events?token=secret from /Users/example/project/.env',
+php/logbrew-php/tests/support_ticket.php	*	line	'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',
+php/logbrew-php/tests/support_ticket.php	*	line	'lbw_ingest_secret_value',
+php/logbrew-php/tests/support_ticket.php	*	line	'token=secret',
+php/logbrew-php/tests/support_ticket.php	*	line	'tokenText' => 'token=secret',
+php/logbrew-php/tests/support_ticket.php	*	line	assertTrue(($supportNested['tokenText'] ?? null) === '[redacted]', 'expected support draft nested token text redaction');
+php/logbrew-php/examples/real_user_smoke.php	*	line	'authorization' => 'Bearer lbw_ingest_secret_value',
+php/logbrew-php/examples/real_user_smoke.php	*	line	'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',
+scripts/real_user_php_smoke.sh	*	line	'authorization' => 'Bearer lbw_ingest_secret_value',
+scripts/real_user_php_smoke.sh	*	line	'debugNote' => 'failed at https://api.example.com/v1/events?token=secret from /Users/example/project/.env',
+scripts/real_user_php_smoke.sh	*	line	'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',
+scripts/real_user_php_smoke.sh	*	line	'lbw_ingest_secret_value',
+scripts/real_user_php_smoke.sh	*	line	'token=secret',
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	authtoken
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	clientsecret
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	credential
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	password
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	refreshtoken
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	secret
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	token
+ruby/logbrew-ruby/lib/logbrew/support_ticket.rb	*	line	value.match?(/(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]/i) ||
+ruby/logbrew-ruby/examples/real_user_smoke.rb	*	line	error: RuntimeError.new("contains hidden token")
+ruby/logbrew-ruby/tests/run.rb	*	line	assert(events[1].fetch("token") == "[redacted]", "expected support nested token redaction")
+ruby/logbrew-ruby/tests/run.rb	*	line	error: RuntimeError.new("contains hidden token"),
+ruby/logbrew-ruby/tests/run.rb	*	line	exception_message: "password leaked in snake case message",
+ruby/logbrew-ruby/tests/run.rb	*	line	{ token: "hidden" }
+scripts/real_user_ruby_smoke.sh	*	line	error: RuntimeError.new("hidden token"),
+js/logbrew-js/support-ticket.cjs	*	line	"authtoken",
+js/logbrew-js/support-ticket.cjs	*	line	"clientsecret",
+js/logbrew-js/support-ticket.cjs	*	line	"credential",
+js/logbrew-js/support-ticket.cjs	*	line	"password",
+js/logbrew-js/support-ticket.cjs	*	line	"refreshtoken",
+js/logbrew-js/support-ticket.cjs	*	line	"secret",
+js/logbrew-js/support-ticket.cjs	*	line	"token"
+js/logbrew-js/support-ticket.cjs	*	line	return /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]/iu.test(value)
+go/logbrew/support_ticket.go	*	line	"authtoken":        {},
+go/logbrew/support_ticket.go	*	line	"clientsecret":     {},
+go/logbrew/support_ticket.go	*	line	"credential",
+go/logbrew/support_ticket.go	*	line	"credential":       {},
+go/logbrew/support_ticket.go	*	line	"credentials":      {},
+go/logbrew/support_ticket.go	*	line	"password",
+go/logbrew/support_ticket.go	*	line	"password":         {},
+go/logbrew/support_ticket.go	*	line	"refreshtoken":     {},
+go/logbrew/support_ticket.go	*	line	"secret",
+go/logbrew/support_ticket.go	*	line	"secret":           {},
+go/logbrew/support_ticket.go	*	line	"token",
+go/logbrew/support_ticket.go	*	line	"token":            {},
+go/logbrew/support_ticket.go	*	line	// CreateSupportTicketDraft builds a local-only, token-free support-ticket
+go/logbrew/support_ticket.go	*	line	if supportSensitiveAssignmentPattern.MatchString(value) || supportTokenPattern.MatchString(value) {
+go/logbrew/support_ticket.go	*	line	supportSensitiveAssignmentPattern = regexp.MustCompile(`(?i)(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]`)
+go/logbrew/support_ticket.go	*	line	supportTokenPattern               = regexp.MustCompile(`(?i)(?:\bBearer\s+[A-Za-z0-9._~+/=-]+|\blbw_ingest_[A-Za-z0-9._-]+|\b(?:sk|pk|xox[abprs]?)-[A-Za-z0-9_-]{10,}|\bAKIA[0-9A-Z]{16}\b)`)
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"(?i)(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]"
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"authtoken",
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"clientsecret",
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"credential",
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"credentials",
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"password",
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"refreshtoken",
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"secret",
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	"token"
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	* credentials.</p>
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	if (SENSITIVE_ASSIGNMENT_PATTERN.matcher(value).find() || TOKEN_PATTERN.matcher(value).find()) {
+java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java	*	line	private static final Pattern TOKEN_PATTERN = Pattern.compile(
+dotnet/logbrew-dotnet/src/LogBrew/SupportTicketDraft.cs	*	line	/// account/session API credentials.
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"authtoken",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"clientsecret",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"credential",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"credentials",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"password",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"refreshtoken",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"secret",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	"token",
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	if (SensitiveAssignmentPattern.IsMatch(value) || TokenPattern.IsMatch(value))
+dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs	*	line	private static readonly Regex TokenPattern = new Regex(
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"Build a local-only, token-free support-ticket create payload draft without calling backend routes."
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"authtoken",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"clientsecret",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"credential",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"credentials",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"password",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"refreshtoken",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"secret",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	"token",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	_SENSITIVE_KEY_MARKERS = (
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	_TOKEN_PATTERN = re.compile(
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	if _SENSITIVE_ASSIGNMENT_PATTERN.search(value) or _TOKEN_PATTERN.search(value):
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	r"(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]",
+python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	return normalized in _SENSITIVE_KEYS or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
+js/logbrew-js/test/sdk.test.js	*	line	{ token: "[redacted]" }
+js/logbrew-js/test/sdk.test.js	*	line	{ token: "hidden" }
+go/logbrew/support_ticket_test.go	*	line	if len(events) != 2 || events[1].(map[string]any)["token"] != "[redacted]" {
+go/logbrew/support_ticket_test.go	*	line	map[string]any{"token": "hidden"},
+java/logbrew-java/src/test/java/co/logbrew/sdk/SupportTicketDraftTest.java	*	line	assertEquals("[redacted]", safeSecondEvent.get("token"), "event token");
+java/logbrew-java/src/test/java/co/logbrew/sdk/SupportTicketDraftTest.java	*	line	secondEvent.put("token", "hidden");
+dotnet/logbrew-dotnet/tests/LogBrew.Tests/SupportTicketDraftTests.cs	*	line	Require((string)secondEvent["token"]! == "[redacted]", "expected nested token redaction");
+dotnet/logbrew-dotnet/tests/LogBrew.Tests/SupportTicketDraftTests.cs	*	line	new Dictionary<string, object?> { ["token"] = "hidden" }
+python/logbrew_py/tests/test_support_ticket.py	*	line	"access_token": "[redacted]",
+python/logbrew_py/tests/test_support_ticket.py	*	line	"access_token": "hidden",
+python/logbrew_py/tests/test_support_ticket.py	*	line	"api_key": "[redacted]",
+python/logbrew_py/tests/test_support_ticket.py	*	line	"api_key": "hidden",
+python/logbrew_py/tests/test_support_ticket.py	*	line	"cookie_header": "[redacted]",
+python/logbrew_py/tests/test_support_ticket.py	*	line	"cookie_header": "cookie=hidden",
+python/logbrew_py/tests/test_support_ticket.py	*	line	"events": [{"token": "[redacted]"}, {"ok": True}],
+python/logbrew_py/tests/test_support_ticket.py	*	line	"events": [{"token": "hidden"}, {"ok": True}],
+scripts/real_user_php_smoke.sh	*	ihas	account/session api credentials
+scripts/real_user_php_smoke.sh	*	ihas	support ticket
+scripts/real_user_php_smoke.sh	*	ihas	supportdraft
+scripts/real_user_php_smoke.sh	*	ihas	token-free
+
+# Runtime symbols: context tokens, restore and cleanup hooks, DNS timing, host checks, backup exclusion.
+README.md	hostnames	prefix	and does not probe hostnames, process details, environment variables, local
+rust/logbrew/README.md	customer	has	"customer.tier"
+rust/logbrew/README.md	hostnames	prefix	The client adds conservative `rust` runtime
+rust/logbrew/README.md	restore	prefix	`activate_telemetry_context` returns a same-thread RAII guard
+rust/logbrew/README.md	customer	prefix	Session and subject IDs must be application-owned opaque identifiers.
+rust/logbrew/src/telemetry_context.rs	restore	line	/// Restore this guard's context contribution. Repeated calls are harmless.
+rust/logbrew/src/telemetry_context.rs	restore	line	/// Run one synchronous closure with context and restore the exact previous scope on unwind.
+rust/logbrew/src/telemetry_context.rs	token	has	NEXT_CONTEXT_TOKEN
+rust/logbrew/src/telemetry_context.rs	token	has	active.token == token
+rust/logbrew/src/telemetry_context.rs	token	has	self.token.take()
+rust/logbrew/src/telemetry_context.rs	token	has	token: Option<u64>
+rust/logbrew/src/telemetry_context.rs	token	has	token: Some(token)
+rust/logbrew/src/telemetry_context.rs	token	has	token: u64
+rust/logbrew/src/telemetry_context.rs	token	has	{ token, context }
+rust/logbrew/tests/telemetry_context.rs	customer	has	"customer.tier"
+rust/logbrew/tests/telemetry_context.rs	hostname	line	"hostname",
+rust/logbrew/tests/telemetry_context.rs	restore	prefix	fn synchronous_scopes_restore_on_close_drop_panic_and_threads()
+scripts/check_rust_first_useful_payload.py	hostname	prefix	for forbidden_key in ["hostname",
+{js/logbrew-react-native/ios/GeneratedAppleDiagnostics/LogBrewCrash/CrashEngine.swift,swift/logbrew-swift/Sources/LogBrewCrash/CrashEngine.swift}	cleanup	has	reportCleanupPolicy
+{js/logbrew-react-native/ios/GeneratedAppleDiagnostics/LogBrew/DurableDeliveryStoreRecovery.swift,objc/logbrew-objc/README.md,objc/logbrew-objc/src/LBWDurableDeliveryStore.m,objc/logbrew-objc/tests/test_durable_delivery.m,objc/logbrew-objc/tests/test_durable_delivery_recovery.m,swift/logbrew-swift/README.md,swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift,swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift}	<=backup,cleanup	any	-
+js/logbrew-react-native/android/src/main/java/co/logbrew/reactnative/FatalStoreModuleImpl.java	backup	only	getNoBackupFilesDir
+js/logbrew-react-native/ios/GeneratedAppleDiagnostics/LogBrewCrash/CrashStorageDirectory.swift	backup	only	isExcludedFromBackup
+js/logbrew-react-native/ios/LBRNFatalStoreModule.mm	backup	only	NSURLIsExcludedFromBackupKey
+swift/logbrew-swift/Sources/LogBrewCrash/CrashStorageDirectory.swift	backup	only	isExcludedFromBackup
+swift/logbrew-swift/Tests/LogBrewCrashTests/NativeHangIncidentStoreTests.swift	backup	only	isExcludedFromBackup
+kotlin/logbrew-kotlin-okhttp/README.md	>=dns	ihas	dns host
+kotlin/logbrew-kotlin-okhttp/README.md	>=dns	ihas	dns names
+kotlin/logbrew-kotlin-okhttp/README.md	>=dns	ihas	dns, connect
+kotlin/logbrew-kotlin-okhttp/README.md	>=dns	ihas	dns/connect
+kotlin/logbrew-kotlin-okhttp/README.md	>=dns	ihas	dnsend
+kotlin/logbrew-kotlin-okhttp/README.md	>=dns	ihas	dnsstart
+kotlin/logbrew-kotlin-okhttp/README.md	>=dns	ihas	okhttp.phase.dnsms
+{kotlin/logbrew-kotlin-okhttp/src/main/kotlin/co/logbrew/sdk/okhttp/LogBrewOkHttpPhaseTimings.kt,kotlin/logbrew-kotlin-okhttp/tests/LogBrewOkHttpInterceptorTests.kt}	>=dns	ihas	dns
+go/logbrew/README.md	>=dns	ihas	dns, connect
+go/logbrew/README.md	>=dns	ihas	dns/connect
+go/logbrew/README.md	>=dns	ihas	dnsdone
+go/logbrew/README.md	>=dns	ihas	dnsms
+go/logbrew/README.md	>=dns	ihas	dnsstart
+{go/logbrew/http_client_trace.go,go/logbrew/trace_correlation_test.go}	>=dns	ihas	dns
+go/logbrew/http_client_trace.go	hostname	line	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(request.URL.Hostname()), "."))
+scripts/real_user_python_public_pypi_smoke.sh	hostname	line	if final_url.scheme != "https" or final_url.hostname != "files.pythonhosted.org":
+scripts/real_user_python_public_pypi_smoke.sh	hostname	line	if parsed.scheme != "https" or parsed.hostname != "files.pythonhosted.org":
+kotlin/logbrew-kotlin/src/main/kotlin/co/logbrew/sdk/LogBrewCoroutines.kt	restore	has	restoreThreadContext
+kotlin/logbrew-kotlin/README.md	restore	ihas	coroutine
+dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrewHttpClientFactoryCorrelation.cs	dns	any	-
+dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrewHttpClientFactoryCorrelation.cs	dns,hostname	any	-
+{dotnet/logbrew-dotnet/src/LogBrew.HttpClient/README.md,dotnet/logbrew-dotnet/src/LogBrew.HttpClient/examples/HttpClientFactoryCorrelation.cs,dotnet/logbrew-dotnet/tests/LogBrew.HttpClient.Tests/Program.cs}	dns	any	-
+scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh	token	has	PublicKeyToken
+scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh	token	line	return token == null || token.Length == 0 ? "unsigned" : Convert.ToHexString(token).ToLowerInvariant();
+tests/test_dotnet_httpclient_package_compatibility_smoke.py	token	has	"GetPublicKeyToken"
+{**/*.cs,scripts/real_user_**}	*	has	.Token
+{**/*.cs,scripts/real_user_**}	*	has	CancellationToken
+{**/*.cs,scripts/real_user_**}	*	has	cancellationToken
+**/*.cs	restore	line	#pragma warning restore CA1031
+dotnet/logbrew-dotnet/README.md	secret	raw	Only one process may own a store. Recovery fails closed for missing or wrong keys, corruption, unknown files, unsafe ownership, links, or replacement. Supply one primary key and a bounded list of previous keys to rotate records during recovery; new records always use the primary key. Key IDs identify keys but are not secret and must contain only stable letters, numbers, `.`, `_`, or `-`.
+dotnet/logbrew-dotnet/src/LogBrew/DurableEventStore.cs	cleanup	has	CleanupAcknowledged
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	WindowsBackupSemantics | WindowsOpenReparsePoint,
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	WindowsShareRead | (allowDelete ? WindowsShareDelete : 0),
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	WindowsShareRead | WindowsShareDelete,
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	WindowsShareRead | WindowsShareWrite,
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	private const uint WindowsBackupSemantics = 0x02000000;
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	private const uint WindowsShareDelete = 4;
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	private const uint WindowsShareRead = 1;
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	private const uint WindowsShareWrite = 2;
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	return WindowsShareRead
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	| (allowDelete ? WindowsShareDelete : 0)
+dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs	*	line	| (allowWrite ? WindowsShareWrite : 0);
+dotnet/logbrew-dotnet/tests/LogBrew.Tests/DurableDeliveryContractTests.cs	cleanup	has	AcknowledgedPrefixCleanupResumesAfterExit
+dotnet/logbrew-dotnet/tests/LogBrew.Tests/DurableDeliveryContractTests.cs	cleanup	has	acknowledged prefix reappeared after cleanup restart
+dotnet/logbrew-dotnet/tests/LogBrew.Tests/DurableDeliveryContractTests.cs	cleanup	has	acknowledgement cleanup restart shutdown failed
+dotnet/logbrew-dotnet/tests/LogBrew.Tests/DurableDeliveryContractTests.cs	cleanup	has	acknowledgement marker was not durable before cleanup
+scripts/**	cleanup	any	-
+**/*_test.go	cleanup	has	t.Cleanup(
+tools/toolchain-probe/**/*.go	<=cleanup,credential,token	any	-
+js/**/*.{cjs,cts,js,mjs,ts}	restore	any	-
+{python/logbrew_py/src/logbrew_sdk/_arq_client.py,python/logbrew_py/src/logbrew_sdk/_queue_client.py,python/logbrew_py/src/logbrew_sdk/_rq_client.py}	restore	any	-
+scripts/real_user_**.sh	restore	any	-
+docs/github-actions.md	*	line	group during cleanup, including children left behind after command exit.
+python/logbrew_py/README.md	*	line	For Requests, HTTPX, and aiohttp, `uninstall()` restores the original method only if LogBrew's wrapper is still installed. If your application replaces that method afterward, removal preserves the replacement. Uninstall and reinstall instrumentation to capture calls through the new method.
+python/logbrew_py/src/logbrew_sdk/_http_instrumentation.py	*	line	self._restore_request = _instrumentation.patch_instance_attributes(
+python/logbrew_py/src/logbrew_sdk/_http_instrumentation.py	*	line	self._restore_request()
+python/logbrew_py/src/logbrew_sdk/_instrumentation.py	*	line	"""Restore original attributes only while this patch still owns them."""
+python/logbrew_py/src/logbrew_sdk/_instrumentation.py	*	line	def restore() -> None:
+python/logbrew_py/src/logbrew_sdk/_instrumentation.py	*	line	return restore
+tests/test_check_public_sdks.py	*	line	self.addCleanup(temporary.cleanup)
+tools/toolchain-probe/main.go	*	line	return "cleanup failed"
+*/**/tests/**/*.py	cleanup	has	.addCleanup(
+**/*.{c,cpp,h,hpp}	*	has	curl_easy_cleanup

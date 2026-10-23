@@ -719,7 +719,7 @@ run_shell_step "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/ci
 mark_step_complete
 
 begin_next_step "Confidentiality leak scan"
-run_shell_step "python3 scripts/check_confidentiality_scan.py"
+run_shell_step "source scripts/native_verifier.sh && run_native_verifier confidentiality-scan \"\$PWD\""
 mark_step_complete
 
 begin_next_step "JavaScript release artifact smoke"

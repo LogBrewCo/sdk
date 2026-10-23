@@ -69,7 +69,7 @@ var (
 			"tests.test_github_release_safety_gates", "tests.test_js_installed_artifact_workflow_gates",
 		},
 		".github/workflows/publish-packages.yml": {
-			"tests.test_confidentiality_scan", "tests.test_publication_run", "tests.test_registry_publication",
+			"tests.test_publication_run", "tests.test_registry_publication",
 			"tests.test_release_metadata", "tests.test_swiftpm_public_smoke",
 		},
 		".github/workflows/reconcile-public-packages.yml":         publicReconciliationTests,
@@ -82,7 +82,6 @@ var (
 		"scripts/check_registry_publication.py":                   {"tests.test_registry_publication"},
 		"scripts/check_python_release_artifacts.py":               {"tests.test_python_release_artifacts"},
 		"scripts/check_release_metadata.py":                       {"tests.test_release_metadata"},
-		"scripts/check_confidentiality_scan.py":                   {"tests.test_confidentiality_scan"},
 		"scripts/real_user_node_ingest_contract_smoke.sh":         {"tests.test_default_ingest_endpoints"},
 		"scripts/real_user_react_native_smoke.sh":                 {"tests.test_react_native_global_errors"},
 		"scripts/real_user_react_native_bundle_smoke.sh":          {"tests.test_react_native_mobile_core"},
