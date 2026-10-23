@@ -258,9 +258,12 @@ func run() int {
 	if os.Args[1] == generatedArtifactsMode {
 		return checkGeneratedArtifacts(os.Args[2:], os.Stdout, os.Stderr)
 	}
+	if os.Args[1] == ciSelectMode {
+		return checkCISelect(os.Args[2:], os.Getenv, runGit, os.Stdout, os.Stderr)
+	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, event-batch-check, markdown-links, backend-reports, or generated-artifacts mode\n", exitUsage)
+			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, or ci-select mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {
