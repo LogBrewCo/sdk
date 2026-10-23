@@ -267,7 +267,7 @@ checked = 2026-10-19
 
 [[tool]]
 id = "native-verifier"
-risk = "invalid event batches and package JSON; broken local Markdown links; incomplete backend contract reports"
+risk = "invalid event batches and package JSON; broken local Markdown links; incomplete backend contract reports; build output left in the working tree"
 tool = "native SDK verifier (tools/toolchain-probe, Go); it replaces the Python repository checks one family at a time"
 version = "repository"
 unpinned = "built from this repository with the Go version in tools/toolchain-probe/.go-version"
@@ -276,9 +276,9 @@ runs_in = "CI Contract checks; package and smoke scripts; release readiness"
 config = "tools/toolchain-probe"
 conflicts = "none known"
 exceptions = "none"
-runtime = "markdown-links, local 2026-10-23, 5 runs each: Go 0.02-0.03 s, Python 0.09-0.19 s; backend-reports: Go 0.00-0.01 s, Python 0.05-0.07 s"
-findings = "markdown-links: the same findings as the Python check on the repository and on a seeded copy (missing file, missing anchor, numbered repeat anchor, link that leaves the repository); backend-reports: the same findings on the repository and on a seeded copy (wrong title, missing section, empty section, no priority, capability, or verification)"
-replaces = "scripts/check_markdown_links.py on 2026-10-23 (test coverage: Python 76% of branches, Go 97.7% of statements; a file that is not UTF-8 now fails with its path instead of a traceback); scripts/check_backend_contract_reports.py on 2026-10-23 (Python 72% of branches, Go 96.2% of statements)"
+runtime = "markdown-links, local 2026-10-23, 5 runs each: Go 0.02-0.03 s, Python 0.09-0.19 s; backend-reports: Go 0.00-0.01 s, Python 0.05-0.07 s; generated-artifacts: Go 0.02-0.03 s, Python 0.10-0.16 s"
+findings = "markdown-links: the same findings as the Python check on the repository and on a seeded copy (missing file, missing anchor, numbered repeat anchor, link that leaves the repository); backend-reports: the same findings on the repository and on a seeded copy (wrong title, missing section, empty section, no priority, capability, or verification); generated-artifacts: the same 14 leftover build outputs reported by both checkers in a used checkout"
+replaces = "scripts/check_markdown_links.py on 2026-10-23 (test coverage: Python 76% of branches, Go 97.7% of statements; a file that is not UTF-8 now fails with its path instead of a traceback); scripts/check_backend_contract_reports.py on 2026-10-23 (Python 72% of branches, Go 96.2% of statements); scripts/check_generated_artifacts.py on 2026-10-23 (Python 65% of branches, Go 100% of statements)"
 checked = 2026-10-23
 
 [[tool]]
