@@ -1595,6 +1595,7 @@ function installLogBrewConsoleCapture(config) {
 }
 
 function createConsoleCaptureMethod(config) {
+  /** @this {*} */
   return function logBrewConsoleMethod(...args) {
     config.original.apply(this, args);
     if (!config.state.installed) {

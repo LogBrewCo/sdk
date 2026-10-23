@@ -83,6 +83,7 @@ function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
   const originalSend = prototype.send;
   const states = new WeakMap();
 
+  /** @this {XMLHttpRequest} */
   const wrappedOpen = function logbrewXhrOpen(method, url, ...args) {
     states.set(this, {
       method: xhrMethod(method),
@@ -92,6 +93,7 @@ function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
   };
   prototype.open = wrappedOpen;
 
+  /** @this {XMLHttpRequest} */
   const wrappedSend = function logbrewXhrSend(...args) {
     const state = states.get(this) ?? {
       method: "GET",

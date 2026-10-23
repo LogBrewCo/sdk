@@ -49,6 +49,7 @@ function patchConsole(target, add) {
     return [];
   }
   return Object.entries(CONSOLE_LEVELS).flatMap(([method, level]) => replaceMethod(target, method, (original) => (
+    /** @this {Console} */
     function logBrewConsoleBreadcrumb(...args) {
       const message = boundedText(consoleTemplate(args), MAX_MESSAGE_LENGTH);
       if (message) {
@@ -60,7 +61,7 @@ function patchConsole(target, add) {
 }
 
 function patchFetch(browserWindow, add, ignored) {
-  return replaceMethod(browserWindow, "fetch", (original) => async function logBrewFetchBreadcrumb(input, init) {
+  return replaceMethod(browserWindow, "fetch", (original) => /** @this {*} */ async function logBrewFetchBreadcrumb(input, init) {
     const method = String(init?.method ?? input?.method ?? "GET").toUpperCase();
     const url = sanitizeUrl(typeof input === "string" || input instanceof URL ? input : input?.url, browserWindow);
     try {
@@ -85,11 +86,11 @@ function patchXhr(browserWindow, add, ignored) {
   }
   const state = new WeakMap();
   return [
-    ...replaceMethod(prototype, "open", (original) => function logBrewXhrOpen(method, url, ...rest) {
+    ...replaceMethod(prototype, "open", (original) => /** @this {XMLHttpRequest} */ function logBrewXhrOpen(method, url, ...rest) {
       state.set(this, { method: String(method ?? "GET").toUpperCase(), url: sanitizeUrl(url, browserWindow) });
       return original.call(this, method, url, ...rest);
     }),
-    ...replaceMethod(prototype, "send", (original) => function logBrewXhrSend(...args) {
+    ...replaceMethod(prototype, "send", (original) => /** @this {XMLHttpRequest} */ function logBrewXhrSend(...args) {
       const request = state.get(this);
       if (request && !ignored.has(request.url) && typeof this.addEventListener === "function") {
         this.addEventListener("loadend", () => {
@@ -115,6 +116,7 @@ function patchNavigation(browserWindow, add) {
     }
   };
   const restores = ["pushState", "replaceState"].flatMap((method) => replaceMethod(history, method, (original) => (
+    /** @this {History} */
     function logBrewNavigationBreadcrumb(...args) {
       const result = original.apply(this, args);
       record();
