@@ -266,6 +266,22 @@ replaces = "none"
 checked = 2026-10-19
 
 [[tool]]
+id = "native-verifier"
+risk = "invalid event batches and package JSON; broken local Markdown links"
+tool = "native SDK verifier (tools/toolchain-probe, Go); it replaces the Python repository checks one family at a time"
+version = "repository"
+unpinned = "built from this repository with the Go version in tools/toolchain-probe/.go-version"
+commands = ["run_native_verifier"]
+runs_in = "CI Contract checks; package and smoke scripts; release readiness"
+config = "tools/toolchain-probe"
+conflicts = "none known"
+exceptions = "none"
+runtime = "markdown-links, local 2026-10-23, 5 runs each: Go 0.02-0.03 s, Python 0.09-0.19 s"
+findings = "markdown-links: the same findings as the Python check on the repository and on a seeded copy (missing file, missing anchor, numbered repeat anchor, link that leaves the repository)"
+replaces = "scripts/check_markdown_links.py on 2026-10-23 (test coverage: Python 76% of branches, Go 97.7% of statements; a file that is not UTF-8 now fails with its path instead of a traceback)"
+checked = 2026-10-23
+
+[[tool]]
 id = "public-guard"
 risk = "leaked keys or non-public text in commits, paths, branch names, and pull request text"
 tool = "gitleaks with the public guard rules"
