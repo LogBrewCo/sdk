@@ -123,10 +123,9 @@ jobs:
 
       - name: Set up Rust
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: 1.99.0
-          components: clippy, rustfmt
+        run: |
+          rustup toolchain install --no-self-update
+          rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

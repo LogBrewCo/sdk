@@ -112,7 +112,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
         directory, separator, _ = path.partition("/")
         if separator and directory in SOURCE_AREAS:
             enabled.add(directory)
-        if path in {"Cargo.toml", "Cargo.lock"}:
+        if path in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml"}:
             enabled.add("rust")
         if path.startswith("js/"):
             enabled.add("javascript")

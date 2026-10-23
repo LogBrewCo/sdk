@@ -18,10 +18,10 @@ utilities = ["[", "[[", "awk", "basename", "bash", "break", "cat", "cd", "chmod"
 id = "rust"
 risk = "Rust SDK compile errors, compiler lints, and test failures"
 tool = "rustc, cargo, and libtest"
-version = "1.99.0"
-pins = [".github/workflows/ci.yml::toolchain: @VERSION@"]
-uses = ["dtolnay/rust-toolchain", "rust-lang/crates-io-auth-action"]
-commands = ["cargo test", "cargo publish"]
+version = "the channel in rust-toolchain.toml (1.99.1 on 2026-10-23); Dependabot proposes each new stable release"
+pins = ["rust-toolchain.toml::channel = \"", ".github/dependabot.yml::package-ecosystem: rust-toolchain"]
+uses = ["rust-lang/crates-io-auth-action"]
+commands = ["cargo test", "cargo publish", "rustup"]
 runs_in = "CI Rust jobs; publish workflows"
 config = "rust/*/Cargo.toml"
 conflicts = "none known"
@@ -29,15 +29,14 @@ exceptions = "none"
 runtime = "see clippy (the static step builds every target)"
 findings = "unknown: failures are fixed before merge and not recorded"
 replaces = "none"
-status = "behind: Rust 1.99.1 released 2026-10-13"
-checked = 2026-10-19
+checked = 2026-10-23
 
 [[tool]]
 id = "clippy-rustfmt"
 risk = "Rust lints and formatting drift"
 tool = "Clippy and rustfmt"
-version = "1.99.0"
-pins = [".github/workflows/ci.yml::toolchain: @VERSION@", "scripts/check_rust_static.sh::cargo clippy --all-targets --all-features -- -D warnings"]
+version = "the rust toolchain (rust-toolchain.toml installs clippy and rustfmt with it)"
+pins = ["rust-toolchain.toml::components = [\"clippy\", \"rustfmt\"]", "scripts/check_rust_static.sh::cargo clippy --all-targets --all-features -- -D warnings"]
 commands = ["cargo clippy", "cargo fmt", "scripts/check_rust_static.sh"]
 runs_in = "CI Contract checks: Run Rust static analysis"
 config = "every warning fails, default and all features"

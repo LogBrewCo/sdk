@@ -563,9 +563,9 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: stable
+        run: |
+          rustup toolchain install --no-self-update
+          rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
 
       - name: Read Rust crate version
         id: crate-version
