@@ -37,6 +37,7 @@ class CiChangedAreasTests(unittest.TestCase):
     def test_language_owned_paths_enable_only_that_language_area(self) -> None:
         cases = {
             "rust/logbrew/src/lib.rs": "rust",
+            "rust-toolchain.toml": "rust",
             "js/logbrew-js/src/index.ts": "javascript",
             "python/logbrew_py/src/logbrew/__init__.py": "python",
             "go/logbrew/logbrew.go": "go",
