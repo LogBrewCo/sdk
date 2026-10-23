@@ -64,7 +64,6 @@ PATH_TARGETS = {
         "tests.test_native_release_public_smoke",
     ),
     "scripts/check_github_release_safety.py": ("tests.test_github_release_safety",),
-    "scripts/check_backend_contract_reports.py": ("tests.test_backend_contract_reports",),
     "scripts/check_nuget_public_artifacts.py": ("tests.test_nuget_public_artifacts",),
     "scripts/check_nuget_release_receipt_provenance.py": (
         "tests.test_nuget_release_receipt_provenance",
