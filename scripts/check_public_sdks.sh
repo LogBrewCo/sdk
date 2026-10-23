@@ -707,7 +707,7 @@ run_shell_step "python3 scripts/check_github_release_safety.py"
 mark_step_complete
 
 begin_next_step "Markdown link checks"
-run_shell_step "python3 scripts/check_markdown_links.py"
+run_shell_step "source scripts/native_verifier.sh && run_native_verifier markdown-links \"\$PWD\""
 mark_step_complete
 
 begin_next_step "Shell static analysis"

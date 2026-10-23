@@ -74,7 +74,7 @@ Prefer a machine-readable top-level verifier that also records the exact toolcha
 
 When an ecosystem has a first-class package artifact, prefer installing that artifact instead of the source directory so packaging mistakes are caught before release.
 
-Keep local Markdown links in package READMEs and shared docs under an automated checker such as `python3 scripts/check_markdown_links.py`; SDK UX includes the path users click before they install anything, not only the code they run afterward.
+Keep local Markdown links in package READMEs and shared docs under an automated checker such as the native verifier's `markdown-links` mode; SDK UX includes the path users click before they install anything, not only the code they run afterward.
 
 When smoke and package checks are implemented as shell scripts, run pinned ShellCheck from a temp-owned verifier such as `bash scripts/check_shell_static.sh`; verify the downloaded release digest, lint at style severity where practical, and keep any exclusions narrow and tied to intentional cross-language snippets or dynamic virtualenv activation.
 
@@ -153,7 +153,7 @@ For native Laravel onboarding, do not leave delivery correctness to app-specific
 - Native/mobile release-artifact dry-run proof: `bash scripts/real_user_native_release_artifact_smoke.sh`
 - Native/mobile release-artifact upload proof: `bash scripts/real_user_native_release_artifact_upload_smoke.sh`
 - Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`; for Maven verification while optional artifacts are still pending publication, pass `--maven-artifact` and `--maven-version` only for the currently public artifacts.
-- Shared Markdown docs: `python3 scripts/check_markdown_links.py`
+- Shared Markdown docs: `source scripts/native_verifier.sh && run_native_verifier markdown-links .`
 - Shared shell smoke/package scripts: `bash scripts/check_shell_static.sh`
 - JavaScript, Browser, Node.js, Express, Fastify, NestJS, Angular, Vue, Svelte, React, React Native, or Next.js: `python3 scripts/check_js_sources.py`, `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, package `npm test`, framework smoke scripts, and `npm pack --dry-run`
 - Python, FastAPI, Flask, and Django: `python3 scripts/check_python_sources.py`, `bash scripts/check_python_static.sh`, `bash scripts/check_fastapi_package.sh`, `bash scripts/check_flask_package.sh`, `bash scripts/check_django_package.sh`, `LOGBREW_FASTAPI_FRAMEWORK_VERSION=0.111.1 LOGBREW_FASTAPI_HTTPX_VERSION=0.23.3 bash scripts/real_user_fastapi_smoke.sh`, `bash scripts/real_user_fastapi_smoke.sh`, `bash scripts/real_user_flask_smoke.sh`, `bash scripts/real_user_django_smoke.sh`, `python -m build`, and `twine check dist/*`
