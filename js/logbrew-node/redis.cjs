@@ -68,6 +68,7 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
   }
 
   let installed = true;
+  /** @this {*} */
   function logBrewInstrumentedRedisSendCommand(...args) {
     if (!installed) {
       return originalSendCommand.apply(this, args);
@@ -75,6 +76,7 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
     return traceRedisCommand(this, originalSendCommand, args, options);
   }
 
+  /** @this {*} */
   function logBrewInstrumentedRedisConnect(...args) {
     if (!installed || !originalConnect) {
       return originalConnect?.apply(this, args);
@@ -241,6 +243,7 @@ function redisPipelineMethodEntries(redisClient) {
 }
 
 function createInstrumentedRedisPipelineMethod(originalMethod, methodName, options, isInstalled) {
+  /** @this {*} */
   function logBrewInstrumentedRedisPipelineMethod(...args) {
     const pipeline = originalMethod.apply(this, args);
     if (!isInstalled() || !pipeline || typeof pipeline !== "object") {
@@ -274,6 +277,7 @@ function wrapRedisPipelineAddCommand(pipeline, commandNames) {
     return;
   }
   const originalAddCommand = pipeline.addCommand;
+  /** @this {*} */
   function logBrewInstrumentedRedisPipelineAddCommand(...args) {
     recordRedisPipelineCommand(commandNames, redisPipelineCommandNameFromAddCommandArgs(args));
     return originalAddCommand.apply(this, args);
@@ -289,6 +293,7 @@ function wrapRedisPipelineCommandMethod(pipeline, methodName, commandNames) {
     return;
   }
   const originalMethod = pipeline[methodName];
+  /** @this {*} */
   function logBrewInstrumentedRedisPipelineCommand(...args) {
     const countBefore = commandNames.length;
     const result = originalMethod.apply(this, args);
@@ -311,6 +316,7 @@ function wrapRedisPipelineExec(pipeline, methodName, defaultOperationKind, comma
   const operationKind = defaultOperationKind === "PIPELINE" || methodName === "execAsPipeline" ? "PIPELINE" : "MULTI";
   const operationName = operationKind === "PIPELINE" ? "redis.pipeline" : "redis.multi";
 
+  /** @this {*} */
   function logBrewInstrumentedRedisPipelineExec(...args) {
     if (!options.client) {
       throw new SdkError("configuration_error", "instrumentLogBrewRedisClient requires client");

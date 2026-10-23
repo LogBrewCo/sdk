@@ -20,6 +20,7 @@ function instrumentLogBrewPgClient(pgClient, options = {}) {
   }
 
   let installed = true;
+  /** @this {*} */
   function logBrewInstrumentedPgQuery(...args) {
     if (!installed) {
       return originalQuery.apply(this, args);

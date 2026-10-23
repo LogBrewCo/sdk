@@ -368,6 +368,7 @@ function installGlobalXMLHttpRequestInstrumentation(client, {
   const doneState = typeof xhrType.DONE === "number" ? xhrType.DONE : 4;
   const safeRouteTemplateFactory = routeTemplateFactory ?? defaultXhrRouteTemplateFactory;
 
+  /** @this {XMLHttpRequest} */
   function wrappedOpen(method, url) {
     this[contextKey] = {
       method: normalizeXhrMethod(method),
@@ -377,6 +378,7 @@ function installGlobalXMLHttpRequestInstrumentation(client, {
     return originalOpen.apply(this, arguments);
   }
 
+  /** @this {XMLHttpRequest} */
   function wrappedSend(body) {
     const context = this[contextKey];
     if (!context) {

@@ -86,17 +86,33 @@ checked = 2026-10-19
 id = "oxlint"
 risk = "JavaScript and TypeScript lint"
 tool = "oxlint (native Rust)"
-version = "1.88.0"
+version = "1.89.0"
 pins = ["scripts/check_js_lint.sh::oxlint_version=\"@VERSION@\""]
 commands = ["scripts/check_js_lint.sh"]
 runs_in = "CI Contract checks: Run JavaScript lint (when JavaScript changed)"
-config = "the oxlintrc.json the script writes"
+config = "the oxlintrc.json the script writes; a second type-aware pass enables typescript/consistent-return and fails on TypeScript TS2683 (noImplicitThis, Oxlint's no-invalid-this replacement) only"
+conflicts = "checkJs reports about 10,000 other TypeScript diagnostics on the untyped JavaScript; the type-aware pass ignores them"
+exceptions = "none"
+runtime = "push n=1, max 1 s; pull request n=1, max 0 s; local 2026-10-23 with the type-aware pass: 2.7 s including downloads"
+findings = "2026-10-23: consistent-return 0, no-invalid-this 54 (wrappers that read this without a JSDoc @this tag); a seeded example of each must fail on every run"
+replaces = "none"
+checked = 2026-10-23
+
+[[tool]]
+id = "tsgolint"
+risk = "type information for Oxlint's type-aware rules"
+tool = "tsgolint (native Go, TypeScript 7 checker)"
+version = "7.0.2005"
+pins = ["scripts/check_js_lint.sh::tsgolint_version=\"@VERSION@\""]
+commands = ["scripts/check_js_lint.sh"]
+runs_in = "CI Contract checks: Run JavaScript lint (when JavaScript changed)"
+config = "a temporary js/tsconfig.json with allowJs, checkJs, and noImplicitThis; the npm registry tarball is verified against a pinned SHA-256"
 conflicts = "none known"
 exceptions = "none"
-runtime = "push n=1, max 1 s; pull request n=1, max 0 s"
-findings = "unknown: findings are fixed before merge"
+runtime = "see oxlint"
+findings = "see oxlint"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-10-23
 
 [[tool]]
 id = "java-static"

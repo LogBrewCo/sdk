@@ -139,6 +139,7 @@ function createMongooseModelMethodWrapper(mongooseModel, originalMethod, methodN
 }
 
 function createMongooseDocumentMethodWrapper(mongooseModel, originalMethod, methodName, options, isInstalled) {
+  /** @this {*} */
   return function logBrewMongooseDocumentMethod(...args) {
     if (!isInstalled()) {
       return originalMethod.apply(this, args);
