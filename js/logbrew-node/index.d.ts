@@ -879,8 +879,9 @@ export type LogBrewProcessErrorCaptureHandle = {
 };
 
 /**
- * Report uncaught exceptions and unhandled promise rejections, then keep Node's exit behavior:
- * when no other handler exists, Node still exits with code 1 after a bounded flush.
+ * Report uncaught exceptions, unhandled promise rejections, and worker thread errors, then keep
+ * Node's exit behavior: when no other handler exists, Node still exits with code 1 after a
+ * bounded flush.
  */
 export declare function installLogBrewProcessErrorCapture(
   options: LogBrewProcessErrorCaptureOptions

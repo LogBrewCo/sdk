@@ -1,5 +1,6 @@
 "use strict";
 
+const diagnosticsChannel = require("node:diagnostics_channel");
 const { writeSync } = require("node:fs");
 const { inspect } = require("node:util");
 const {
@@ -14,9 +15,11 @@ const DEFAULT_FLUSH_TIMEOUT_MS = 2000;
 const MAX_FLUSH_TIMEOUT_MS = 30_000;
 const UNCAUGHT_MECHANISM = "node.uncaught_exception";
 const REJECTION_MECHANISM = "node.unhandled_rejection";
+const WORKER_MECHANISM = "node.worker_error";
 const NON_FATAL_REJECTION_MODES = new Set(["warn", "none", "warn-with-error-code"]);
 
-// Reports uncaught exceptions and unhandled rejections, then keeps Node's own exit behavior.
+// Reports uncaught exceptions, unhandled rejections, and worker thread errors, then keeps
+// Node's own exit behavior.
 function installLogBrewProcessErrorCapture(config, activeTraceProvider = () => undefined) {
   const options = validateConfig(config);
   const nodeProcess = globalThis.process;
@@ -62,6 +65,21 @@ function installLogBrewProcessErrorCapture(config, activeTraceProvider = () => u
     });
   };
 
+  // A worker error with no app listener ends the main thread, as an uncaught exception.
+  // One with an app listener is the app's to handle, so it is only reported.
+  const onWorkerCreated = ({ worker }) => {
+    worker.on("error", function onWorkerError(error) {
+      if (worker.listenerCount("error") === 1) {
+        // Without listeners, emit throws exactly as it would without the SDK.
+        worker.off("error", onWorkerError);
+        worker.emit("error", error);
+      } else if (installed) {
+        capture(error, WORKER_MECHANISM, "error");
+        void flushWithin(options);
+      }
+    });
+  };
+
   function capture(error, mechanism, level) {
     if (isObjectLike(error)) {
       if (reported.has(error)) {
@@ -96,6 +114,7 @@ function installLogBrewProcessErrorCapture(config, activeTraceProvider = () => u
 
   nodeProcess.on("uncaughtException", onUncaughtException);
   nodeProcess.on("unhandledRejection", onUnhandledRejection);
+  diagnosticsChannel.subscribe("worker_threads", onWorkerCreated);
   nodeProcess[INSTALLED] = true;
   let installed = true;
   return {
@@ -106,6 +125,7 @@ function installLogBrewProcessErrorCapture(config, activeTraceProvider = () => u
       installed = false;
       nodeProcess.off("uncaughtException", onUncaughtException);
       nodeProcess.off("unhandledRejection", onUnhandledRejection);
+      diagnosticsChannel.unsubscribe("worker_threads", onWorkerCreated);
       delete nodeProcess[INSTALLED];
     }
   };

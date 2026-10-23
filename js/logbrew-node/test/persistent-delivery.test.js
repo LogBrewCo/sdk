@@ -631,6 +631,40 @@ test("hard exit replays retained events oldest first in the next process", async
   assert.deepEqual(payloadEventIds(transport.sentBodies), ["restart-0", "restart-1", "restart-2"]);
 });
 
+test("a process crash with an unreachable intake is sent by the next process", async (t) => {
+  const parent = temporaryParent(t);
+  const childSource = `
+    import { createLogBrewNodeClient, installLogBrewProcessErrorCapture } from ${JSON.stringify(SOURCE_MODULE_URL)};
+    const client = createLogBrewNodeClient({
+      apiKey: "CHILD_KEY",
+      endpoint: "http://192.0.2.1:9/v1/events",
+      maxRetries: 0,
+      persistentQueuePath: process.argv[1]
+    });
+    installLogBrewProcessErrorCapture({ client, flushTimeoutMs: 200 });
+    setTimeout(() => { throw new TypeError("crashed while offline"); }, 0);
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childSource, parent], {
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(child.status, 1);
+  assert.match(child.stderr, /TypeError: crashed while offline/u);
+
+  const ownerDirectory = join(queueDirectory(parent), ".owner");
+  const expired = new Date(0);
+  utimesSync(join(ownerDirectory, readdirSync(ownerDirectory)[0]), expired, expired);
+  const recovered = createClient(parent);
+  const transport = RecordingTransport.alwaysAccept();
+  await recovered.shutdown(transport);
+  const [crash] = transport.sentBodies.flatMap((body) => JSON.parse(body).events);
+  assert.equal(crash.type, "issue");
+  assert.equal(crash.attributes.level, "critical");
+  assert.equal(crash.attributes.exception.type, "TypeError");
+  assert.equal(crash.attributes.exception.mechanism.type, "node.uncaught_exception");
+  assert.deepEqual(eventFiles(parent), []);
+});
+
 test("a fatal at a full persistent queue evicts the oldest log on disk across restart", async (t) => {
   const parent = temporaryParent(t);
   const childSource = `
