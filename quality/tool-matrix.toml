@@ -15,6 +15,23 @@ gates = ["scripts/check_go_static.sh", "scripts/check_java_static.sh", "scripts/
 utilities = ["[", "[[", "awk", "basename", "bash", "break", "cat", "cd", "chmod", "command", "continue", "curl", "date", "dirname", "echo", "exit", "export", "find", "git", "grep", "kill", "local", "mapfile", "mkdir", "mktemp", "printf", "read", "rm", "rmdir", "set", "sha256sum", "shasum", "shift", "sleep", "sort", "sudo", "tail", "tar", "tr", "trap", "true", "umask", "uname", "unzip", "wait", "xargs", "redis-cli", "brew", "fetch_java_*", "python_package_version", "run_native_verifier"]
 
 [[tool]]
+id = "ruff"
+risk = "Python lint and formatting"
+tool = "Ruff (native Rust)"
+version = "0.15.15"
+pins = ["scripts/python_static_tools.txt::ruff==@VERSION@"]
+commands = ["scripts/check_python_static.sh"]
+runs_in = "CI Contract checks: Run Python static analysis"
+config = "pyproject settings in each Python package"
+conflicts = "none known"
+exceptions = "none"
+runtime = "with mypy: push n=6, max 33 s; pull request n=9, max 36 s"
+findings = "unknown: findings are fixed before merge"
+replaces = "none"
+status = "behind: 0.17.1 released 2026-10-15"
+checked = 2026-10-19
+
+[[tool]]
 id = "rust"
 risk = "Rust SDK compile errors, compiler lints, and test failures"
 tool = "rustc, cargo, and libtest"
@@ -45,23 +62,6 @@ exceptions = "none"
 runtime = "push n=1, max 50 s; pull request n=2, max 51 s"
 findings = "unknown: findings are fixed before merge"
 replaces = "none"
-checked = 2026-10-19
-
-[[tool]]
-id = "ruff"
-risk = "Python lint and formatting"
-tool = "Ruff (native Rust)"
-version = "0.15.15"
-pins = ["scripts/python_static_tools.txt::ruff==@VERSION@"]
-commands = ["scripts/check_python_static.sh"]
-runs_in = "CI Contract checks: Run Python static analysis"
-config = "pyproject settings in each Python package"
-conflicts = "none known"
-exceptions = "none"
-runtime = "with mypy: push n=6, max 33 s; pull request n=9, max 36 s"
-findings = "unknown: findings are fixed before merge"
-replaces = "none"
-status = "behind: 0.17.1 released 2026-10-15"
 checked = 2026-10-19
 
 [[tool]]
