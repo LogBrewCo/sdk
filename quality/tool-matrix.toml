@@ -255,7 +255,7 @@ tool = "repository check, smoke, and release scripts"
 version = "repository"
 unpinned = "repository scripts, versioned by commit"
 uses = ["./tools/toolchain-probe", "./.release-control/tools/toolchain-probe", "./.github/workflows/publish-nuget.yml", "actions/download-artifact", "actions/upload-artifact"]
-commands = ["scripts/check_*", "scripts/real_*", "scripts/build_*", "scripts/ci_*", "scripts/generate_*", "scripts/java_*", "scripts/native_*", "scripts/nuget_*", "scripts/python_*", "scripts/read_*", "scripts/run_*", "scripts/*.sh"]
+commands = ["scripts/check_*", "scripts/real_*", "scripts/build_*", "scripts/generate_*", "scripts/java_*", "scripts/native_*", "scripts/nuget_*", "scripts/python_*", "scripts/read_*", "scripts/run_*", "scripts/*.sh"]
 runs_in = "CI Contract checks and language jobs; release readiness; publish workflows"
 config = "each script"
 conflicts = "none known"
@@ -267,7 +267,7 @@ checked = 2026-10-19
 
 [[tool]]
 id = "native-verifier"
-risk = "invalid event batches and package JSON; broken local Markdown links; incomplete backend contract reports; build output left in the working tree"
+risk = "invalid event batches and package JSON; broken local Markdown links; incomplete backend contract reports; build output left in the working tree; CI skipping a language job or Python unit test a change needs"
 tool = "native SDK verifier (tools/toolchain-probe, Go); it replaces the Python repository checks one family at a time"
 version = "repository"
 unpinned = "built from this repository with the Go version in tools/toolchain-probe/.go-version"
@@ -276,9 +276,9 @@ runs_in = "CI Contract checks; package and smoke scripts; release readiness"
 config = "tools/toolchain-probe"
 conflicts = "none known"
 exceptions = "none"
-runtime = "markdown-links, local 2026-10-23, 5 runs each: Go 0.02-0.03 s, Python 0.09-0.19 s; backend-reports: Go 0.00-0.01 s, Python 0.05-0.07 s; generated-artifacts: Go 0.02-0.03 s, Python 0.10-0.16 s"
-findings = "markdown-links: the same findings as the Python check on the repository and on a seeded copy (missing file, missing anchor, numbered repeat anchor, link that leaves the repository); backend-reports: the same findings on the repository and on a seeded copy (wrong title, missing section, empty section, no priority, capability, or verification); generated-artifacts: the same 14 leftover build outputs reported by both checkers in a used checkout"
-replaces = "scripts/check_markdown_links.py on 2026-10-23 (test coverage: Python 76% of branches, Go 97.7% of statements; a file that is not UTF-8 now fails with its path instead of a traceback); scripts/check_backend_contract_reports.py on 2026-10-23 (Python 72% of branches, Go 96.2% of statements); scripts/check_generated_artifacts.py on 2026-10-23 (Python 65% of branches, Go 100% of statements)"
+runtime = "markdown-links, local 2026-10-23, 5 runs each: Go 0.02-0.03 s, Python 0.09-0.19 s; backend-reports: Go 0.00-0.01 s, Python 0.05-0.07 s; generated-artifacts: Go 0.02-0.03 s, Python 0.10-0.16 s; ci-select: Go 0.00-0.01 s, Python 0.04-0.05 s for both selectors, but the CI selection job takes 20-24 s instead of 6-8 s because it downloads the pinned Go (about 10 s) to build the verifier; installing that Go with setup-go first measured slower (17 s)"
+findings = "markdown-links: the same findings as the Python check on the repository and on a seeded copy (missing file, missing anchor, numbered repeat anchor, link that leaves the repository); backend-reports: the same findings on the repository and on a seeded copy (wrong title, missing section, empty section, no priority, capability, or verification); generated-artifacts: the same 14 leftover build outputs reported by both checkers in a used checkout; ci-select: the same areas and unit test modules as the two Python selectors for 2,351 path sets (every tracked file, seeded edge paths, and the changed files of the last 600 commits), apart from the two removed selector test modules; a test file name that is not a plain dotted identifier now runs every unit test instead of reaching the shell"
+replaces = "scripts/check_markdown_links.py on 2026-10-23 (test coverage: Python 76% of branches, Go 97.7% of statements; a file that is not UTF-8 now fails with its path instead of a traceback); scripts/check_backend_contract_reports.py on 2026-10-23 (Python 72% of branches, Go 96.2% of statements); scripts/check_generated_artifacts.py on 2026-10-23 (Python 65% of branches, Go 100% of statements); scripts/ci_changed_areas.py and scripts/ci_unit_test_targets.py on 2026-10-23 (Python 59% of branches, Go 99.0% of statements; one step instead of two, and the selection job builds the verifier instead of installing Python)"
 checked = 2026-10-23
 
 [[tool]]
