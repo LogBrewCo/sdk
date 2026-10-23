@@ -264,9 +264,12 @@ func run() int {
 	if os.Args[1] == releaseSafetyMode {
 		return checkReleaseSafety(os.Args[2:], ghAPI, os.Stdout, os.Stderr)
 	}
+	if os.Args[1] == confidentialityMode {
+		return checkConfidentiality(os.Args[2:], os.Stdout, os.Stderr)
+	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, or github-release-safety mode\n", exitUsage)
+			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, or confidentiality-scan mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {

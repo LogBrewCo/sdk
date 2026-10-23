@@ -84,9 +84,7 @@ func TestCISelectUnitTests(t *testing.T) {
 		{[]string{"tests/test_release_metadata.py", "tests/test_release_metadata.py"}, []string{"tests.test_release_metadata"}},
 		{[]string{"js/logbrew-node/index.js", "scripts/real_user_node_ingest_contract_smoke.sh"},
 			[]string{"tests.test_default_ingest_endpoints"}},
-		{[]string{".github/workflows/reconcile-public-packages.yml", "scripts/check_confidentiality_scan.py",
-			"scripts/real_user_dotnet_selected_public_nuget_smoke.sh"}, append([]string{"tests.test_confidentiality_scan"},
-			publicReconciliationTests...)},
+		{[]string{".github/workflows/reconcile-public-packages.yml", "scripts/real_user_dotnet_selected_public_nuget_smoke.sh"}, publicReconciliationTests},
 	} {
 		_, modules, runAll := selected(t, test.paths...)
 		want := slices.Compact(slices.Sorted(slices.Values(test.want)))
