@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import diagnosticsChannel from "node:diagnostics_channel";
 import { createServer } from "node:http";
 import test from "node:test";
 
@@ -32,14 +33,14 @@ async function startIntake(t) {
 }
 
 // Runs an app that installs capture and then fails; the body follows the setup lines.
-function runApp(body, { endpoint, nodeArgs = [], options = "" }) {
+function runApp(body, { endpoint, nodeArgs = [], options = "", runtime = process.execPath }) {
   const source = `
     import { createLogBrewNodeClient, installLogBrewProcessErrorCapture, runWithLogBrewTrace } from ${JSON.stringify(SOURCE_MODULE_URL)};
     const client = createLogBrewNodeClient({ apiKey: "TEST_API_KEY", endpoint: ${JSON.stringify(endpoint)}, maxRetries: 0 });
     installLogBrewProcessErrorCapture({ client ${options} });
     ${body}
   `;
-  const child = spawn(process.execPath, [...nodeArgs, "--input-type=module", "--eval", source], {
+  const child = spawn(runtime, [...nodeArgs, "--input-type=module", "--eval", source], {
     stdio: ["ignore", "pipe", "pipe"]
   });
   let stdout = "";
@@ -158,6 +159,42 @@ test("a crash inside a request trace carries that trace", async (t) => {
   assert.equal(issue.attributes.context.trace.traceId, traceId);
 });
 
+// Bun has no worker_threads diagnostics channel, so the worker tests run on Node.
+test("a worker error the app handles is reported and the app keeps running", async (t) => {
+  const intake = await startIntake(t);
+  const result = await runApp(
+    `const { Worker } = await import("node:worker_threads");
+    const worker = new Worker("throw new RangeError('worker failed')", { eval: true });
+    worker.on("error", () => process.stdout.write("app handled;"));
+    worker.on("exit", () => setTimeout(() => process.stdout.write("still running"), 50));`,
+    { ...intake, runtime: "node" }
+  );
+
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, "app handled;still running");
+  const [issue] = issues(intake.batches);
+  assert.equal(issue.attributes.level, "error");
+  assert.equal(issue.attributes.exception.type, "RangeError");
+  assert.equal(issue.attributes.exception.mechanism.type, "node.worker_error");
+  assert.equal(issue.attributes.exception.mechanism.handled, false);
+});
+
+test("a worker error without an app listener still ends the process and is reported once", async (t) => {
+  const intake = await startIntake(t);
+  const result = await runApp(
+    `const { Worker } = await import("node:worker_threads");
+    new Worker("throw new RangeError('unhandled in worker')", { eval: true });`,
+    { ...intake, runtime: "node" }
+  );
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /RangeError.*: unhandled in worker/u);
+  const reported = issues(intake.batches);
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].attributes.level, "critical");
+  assert.equal(reported[0].attributes.exception.mechanism.type, "node.uncaught_exception");
+});
+
 test("an unreachable intake delays exit by at most the flush timeout", async () => {
   const result = await runApp(
     `setTimeout(() => { throw new Error("intake down"); }, 0);`,
@@ -169,17 +206,21 @@ test("an unreachable intake delays exit by at most the flush timeout", async () 
   assert.ok(result.elapsedMs < 5000, `exit took ${result.elapsedMs} ms`);
 });
 
-test("capture installs once and uninstall removes both listeners", () => {
+test("capture installs once and uninstall removes every listener", () => {
   const client = createLogBrewNodeClient({ apiKey: "TEST_API_KEY", transport: RecordingTransport.alwaysAccept() });
+  const workers = diagnosticsChannel.channel("worker_threads");
   const before = [process.listenerCount("uncaughtException"), process.listenerCount("unhandledRejection")];
+  assert.equal(workers.hasSubscribers, false);
   const handle = installLogBrewProcessErrorCapture({ client });
   assert.throws(() => installLogBrewProcessErrorCapture({ client }), /already installed/u);
+  assert.equal(workers.hasSubscribers, true);
   handle.uninstall();
   handle.uninstall();
   assert.deepEqual(
     [process.listenerCount("uncaughtException"), process.listenerCount("unhandledRejection")],
     before
   );
+  assert.equal(workers.hasSubscribers, false);
   installLogBrewProcessErrorCapture({ client }).uninstall();
 });
 

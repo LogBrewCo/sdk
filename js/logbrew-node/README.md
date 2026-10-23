@@ -223,7 +223,7 @@ Call `setLogBrewUser(id)` inside a request (`withLogBrewHttpHandler`, framework 
 
 ## Process Crashes
 
-Request middleware sees only errors that reach a request. Install process error capture once at startup to also report uncaught exceptions and unhandled promise rejections, including failures in timers, queue consumers, and startup code:
+Request middleware sees only errors that reach a request. Install process error capture once at startup to also report uncaught exceptions, unhandled promise rejections, and worker thread errors, including failures in timers, queue consumers, and startup code:
 
 ```js
 import {
@@ -242,7 +242,11 @@ Each crash becomes one unhandled issue with the exception type, structured stack
 
 Node's exit behavior does not change. When no other `uncaughtException` handler exists, the SDK waits at most `flushTimeoutMs` (default 2000, maximum 30000) for delivery, prints the error, and exits with code 1. An unhandled rejection still ends the process in Node's default mode and is reported once. If your app has its own `uncaughtException` or `unhandledRejection` handler, or runs with `--unhandled-rejections=warn`, `none`, or `warn-with-error-code`, the SDK reports the error and leaves the process running, as Node would. If your own handler exits the process, call `await client.flush()` before it exits.
 
-Raw stack text stays out of metadata unless you pass `includeErrorStack: true`. `onCaptureError(error)` receives capture or delivery failures and never changes the exit path. Only one capture can be installed per process; `uninstall()` removes both listeners.
+Errors thrown in `worker_threads` workers are captured too. When your app listens for a worker's `error` event, the SDK reports the error as an `error`-level issue with mechanism `node.worker_error` and leaves the handling to your listener. Without a listener, the error ends the process as an uncaught exception, as in plain Node, and is reported once. Bun does not announce new workers, so worker capture needs Node.js.
+
+With a persistent queue (`persistentQueuePath`), a crash report that cannot be delivered before exit stays on disk. The next process that opens the queue sends it.
+
+Raw stack text stays out of metadata unless you pass `includeErrorStack: true`. `onCaptureError(error)` receives capture or delivery failures and never changes the exit path. Only one capture can be installed per process; `uninstall()` removes its listeners.
 
 ## Automatic Breadcrumbs
 
