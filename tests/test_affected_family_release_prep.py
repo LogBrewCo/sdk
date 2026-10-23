@@ -36,7 +36,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-browser/package.json": "0.1.14",
             "js/logbrew-express/package.json": "0.1.7",
             "js/logbrew-fastify/package.json": "0.1.7",
-            "js/logbrew-node/package.json": "0.1.17",
+            "js/logbrew-node/package.json": "0.1.18",
             "js/logbrew-nestjs/package.json": "0.1.8",
             "js/logbrew-next/package.json": "0.1.11",
             "js/logbrew-react/package.json": "0.1.2",
