@@ -756,7 +756,7 @@ mark_step_complete
 
 begin_next_step "Generated artifact hygiene"
 cleanup_build_artifacts
-run_shell_step "PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py"
+run_shell_step "source scripts/native_verifier.sh && run_native_verifier generated-artifacts \"\$PWD\""
 mark_step_complete
 
 log_line "all public SDK checks passed"
