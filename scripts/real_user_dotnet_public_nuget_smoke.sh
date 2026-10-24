@@ -4,6 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 source "$repo_root/scripts/dotnet_verifier_lock.sh"
+source "$repo_root/scripts/native_verifier.sh"
 
 core_version="${1:-${LOGBREW_NUGET_CORE_VERSION:-${LOGBREW_DOTNET_CORE_VERSION:-0.1.7}}}"
 aspnetcore_version="${2:-${LOGBREW_NUGET_ASPNETCORE_VERSION:-${LOGBREW_DOTNET_ASPNETCORE_VERSION:-0.1.2}}}"
@@ -79,7 +80,8 @@ if [[ -n "$otel_version" ]]; then
   require_package_line "LogBrew.OpenTelemetry" "$otel_version"
 fi
 
-httpclient_digests="$(python3 - "$repo_root/scripts" "$NUGET_PACKAGES/logbrew.httpclient/$httpclient_version/logbrew.httpclient.$httpclient_version.nupkg" "$source_commit" "$httpclient_content_sha256" <<'PY'
+httpclient_package="$NUGET_PACKAGES/logbrew.httpclient/$httpclient_version/logbrew.httpclient.$httpclient_version.nupkg"
+httpclient_digest="$(python3 - "$httpclient_package" "$source_commit" "$httpclient_content_sha256" <<'PY'
 import hashlib
 import re
 import sys
@@ -87,12 +89,9 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])
-from check_dotnet_release_artifacts import package_content_sha256
-
-package_path = Path(sys.argv[2])
-source_commit = sys.argv[3]
-expected_content_digest = sys.argv[4]
+package_path = Path(sys.argv[1])
+source_commit = sys.argv[2]
+expected_content_digest = sys.argv[3]
 if source_commit and re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
     raise SystemExit("invalid expected source commit")
 if expected_content_digest and re.fullmatch(r"[0-9a-f]{64}", expected_content_digest) is None:
@@ -122,17 +121,17 @@ if (
 if source_commit and repository.attrib.get("commit") != source_commit:
     raise SystemExit("installed HttpClient package commit mismatch")
 
-digest = hashlib.sha256(package_bytes).hexdigest()
-try:
-    content_digest = package_content_sha256(package_path)
-except (OSError, RuntimeError, ValueError, zipfile.BadZipFile):
-    raise SystemExit("invalid installed HttpClient package content") from None
-if expected_content_digest and content_digest != expected_content_digest:
-    raise SystemExit("installed HttpClient package content digest mismatch")
-print(digest, content_digest)
+print(hashlib.sha256(package_bytes).hexdigest())
 PY
 )"
-read -r httpclient_digest installed_content_digest <<< "$httpclient_digests"
+if ! installed_content_digest="$(run_native_verifier release-artifacts nuget-content "$httpclient_package" 2>/dev/null)"; then
+  echo "invalid installed HttpClient package content" >&2
+  exit 1
+fi
+if [[ -n "$httpclient_content_sha256" && "$installed_content_digest" != "$httpclient_content_sha256" ]]; then
+  echo "installed HttpClient package content digest mismatch" >&2
+  exit 1
+fi
 
 cat > "$app_dir/Program.cs" <<'CS'
 using System;

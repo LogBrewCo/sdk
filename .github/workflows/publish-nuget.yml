@@ -217,7 +217,7 @@ jobs:
           if [[ "$selected_httpclient" == "true" ]]; then
             artifact_args+=(--dependency-range "LogBrew.HttpClient:LogBrew=${{ steps.nuget-version.outputs.core_dependency_range }}")
           fi
-          python3 scripts/check_dotnet_release_artifacts.py "${artifact_args[@]}"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts dotnet "${artifact_args[@]}"
 
           httpclient_content_sha256=""
           if [[ "$selected_httpclient" == "true" ]]; then

@@ -333,7 +333,6 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_nuget_public_artifacts.py
             scripts/check_nuget_release_receipt_provenance.py
             scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
@@ -361,7 +360,6 @@ jobs:
             exit 1
           fi
           control_files=(
-            scripts/check_nuget_public_artifacts.py
             scripts/check_nuget_release_receipt_provenance.py
             scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
@@ -449,18 +447,11 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
         run: |
           set -Eeuo pipefail
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_nuget_public_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_nuget_public_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
           dependency_range="$(
             python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_catalog import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' \
               "$CORE_VERSION"
           )"
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts nuget-public \
             --nuget-version "LogBrew=$CORE_VERSION" \
             --nuget-version "LogBrew.HttpClient=$HTTPCLIENT_VERSION" \
             --source-commit "$RELEASE_SOURCE_SHA" \

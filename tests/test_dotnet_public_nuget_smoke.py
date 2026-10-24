@@ -39,7 +39,7 @@ class DotnetPublicNugetSmokeTests(unittest.TestCase):
             "dotnet build",
             "dotnet run",
             "sha256",
-            "package_content_sha256",
+            "release-artifacts nuget-content",
             "repository",
             "AddLogBrewCorrelation",
             "LogBrewTrace.Activate",
