@@ -44,7 +44,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             "httpclient_version=",
             "steps.nuget-version.outputs.httpclient_version",
             "src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
-            "nuget_release_plan.py entries",
+            "release-plan nuget entries",
             "python3 scripts/check_dotnet_release_artifacts.py",
             "-p:EnableSourceLink=true",
             "steps.nuget-artifacts.outputs.httpclient_content_sha256",
@@ -77,7 +77,7 @@ class ReleaseMetadataTests(unittest.TestCase):
 
         self.assertIn("nuget_packages:", workflow)
         self.assertIn("NUGET_PACKAGES_INPUT: ${{ inputs.nuget_packages }}", workflow)
-        self.assertIn("nuget_release_plan.py create", workflow)
+        self.assertIn("release-plan nuget create", workflow)
         plan_step = workflow.split("- name: Plan selected NuGet packages", 1)[1].split(
             "\n      - name:", 1
         )[0]
@@ -156,8 +156,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 "\n      - name:",
                 1,
             )[0]
-            self.assertIn("python3 scripts/nuget_release_plan.py", section)
-            self.assertNotIn(".release-control/scripts/nuget_release_plan.py", section)
+            self.assertIn('"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget', section)
 
 
     def test_publish_packages_grants_oidc_to_the_reusable_nuget_job(self) -> None:
@@ -344,7 +343,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
 
         self.assertIn("INPUT_NUGET_PACKAGES: ${{ inputs.nuget_packages }}", workflow)
-        self.assertIn("nuget_release_plan.py canonicalize", workflow)
+        self.assertIn("release-plan nuget canonicalize", workflow)
         self.assertIn("printf 'nuget_packages=%s\\n' \"$nuget_packages\"", workflow)
         self.assertIn('-f nuget_packages="$NUGET_PACKAGES"', workflow)
         self.assertIn('-f include_swiftpm="$INCLUDE_SWIFTPM"', workflow)
@@ -415,7 +414,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         upload = workflow.index("Upload Maven Central deployment bundle")
 
         self.assertIn("maven_artifacts:", workflow)
-        self.assertIn("maven_release_plan.py create", workflow[plan:collision])
+        self.assertIn("release-plan maven create", workflow[plan:collision])
         self.assertIn("--maven-plan-scope selected", workflow[collision:build])
         self.assertIn("--expect-absent", workflow[collision:build])
         self.assertIn("--maven-plan-scope dependencies", workflow[collision:build])
@@ -592,7 +591,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             "INPUT_MAVEN_ARTIFACTS: ${{ inputs.maven_artifacts }}",
             resolve_step,
         )
-        self.assertIn("maven_release_plan.py canonicalize", resolve_script)
+        self.assertIn("release-plan maven canonicalize", resolve_script)
         self.assertIn("--artifacts-env INPUT_MAVEN_ARTIFACTS", resolve_script)
         self.assertNotIn('maven_artifacts="$INPUT_MAVEN_ARTIFACTS"', resolve_script)
         self.assertNotIn('echo "maven_artifacts=$maven_artifacts"', resolve_script)

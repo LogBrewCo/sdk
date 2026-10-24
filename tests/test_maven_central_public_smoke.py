@@ -237,7 +237,7 @@ class MavenCentralPublicSmokeTests(unittest.TestCase):
         for expected in (
             "--plan",
             "--bundle",
-            "maven_release_plan.py validate",
+            "release-plan maven validate",
             "LOGBREW_MAVEN_REPOSITORY_UNDER_TEST",
             "LOGBREW_MAVEN_SELECTED_MODULES",
             "exclusiveContent",

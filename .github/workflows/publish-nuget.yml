@@ -92,12 +92,17 @@ jobs:
             fi
           done
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Plan selected NuGet packages
         env:
           NUGET_PACKAGES_INPUT: ${{ inputs.nuget_packages }}
         run: |
           set -Eeuo pipefail
-          python3 scripts/nuget_release_plan.py create --root "$GITHUB_WORKSPACE" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget create --root "$GITHUB_WORKSPACE" \
             --packages-env NUGET_PACKAGES_INPUT \
             --output "$RUNNER_TEMP/logbrew-nuget-release-plan.json"
 
@@ -136,21 +141,16 @@ jobs:
             echo "otel_version=$otel_version"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build native SDK verifier
-        uses: ./tools/toolchain-probe
-        with:
-          cache: "false"
-
       - name: Validate NuGet release metadata
         shell: bash
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
-          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget validate --root "$GITHUB_WORKSPACE" --plan "$plan"
           version_args=()
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
-          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata "${version_args[@]}" .
 
       - name: Check NuGet version collision
@@ -159,11 +159,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
-          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget validate --root "$GITHUB_WORKSPACE" --plan "$plan"
           version_args=()
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
-          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
           python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
             --target nuget --expect-absent "${version_args[@]}"
 
@@ -173,7 +173,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
-          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget validate --root "$GITHUB_WORKSPACE" --plan "$plan"
           source_commit="$(git rev-parse HEAD)"
           pack_args=(
             --configuration Release
@@ -200,7 +200,7 @@ jobs:
             else
               dotnet pack "$project_path" "${legacy_pack_args[@]}"
             fi
-          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format projects)
+          done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format projects)
 
           artifact_args=(
             --directory dist/nuget
@@ -213,7 +213,7 @@ jobs:
             if [[ "$package_version" == LogBrew.HttpClient=* ]]; then
               selected_httpclient=true
             fi
-          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
           if [[ "$selected_httpclient" == "true" ]]; then
             artifact_args+=(--dependency-range "LogBrew.HttpClient:LogBrew=${{ steps.nuget-version.outputs.core_dependency_range }}")
           fi
@@ -241,7 +241,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
-          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget validate --root "$GITHUB_WORKSPACE" --plan "$plan"
           while IFS= read -r package_path; do
             dotnet nuget push "$package_path" \
               --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
@@ -263,11 +263,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
-          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget validate --root "$GITHUB_WORKSPACE" --plan "$plan"
           version_args=()
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
-          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
           python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
             --target nuget "${version_args[@]}" --retries 20 --retry-delay 30
 
@@ -277,8 +277,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
-          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
-          selection_mode="$(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format mode)"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          selection_mode="$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format mode)"
           if [[ "$selection_mode" == "all" ]]; then
             bash scripts/real_user_dotnet_public_nuget_smoke.sh \
               "${{ steps.nuget-version.outputs.core_version }}" \
@@ -292,7 +292,7 @@ jobs:
           else
             bash scripts/real_user_dotnet_selected_public_nuget_smoke.sh "$plan"
             mapfile -t selected_ids < <(
-              python3 scripts/nuget_release_plan.py entries \
+              "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries \
                 --root "$GITHUB_WORKSPACE" --plan "$plan" --format ids
             )
             if [[ ${#selected_ids[@]} -eq 1 && "${selected_ids[0]}" == "LogBrew.AspNetCore" ]]; then
@@ -308,7 +308,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
-          mapfile -t selected_ids < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format ids)
+          mapfile -t selected_ids < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format ids)
           has_core=false
           has_httpclient=false
           for package_id in "${selected_ids[@]}"; do

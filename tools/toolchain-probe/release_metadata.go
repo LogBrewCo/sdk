@@ -44,17 +44,18 @@ var publicSemver = regexp.MustCompile(`^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$`)
 // releaseCatalog holds the public package identities and versions that
 // release-catalog.toml declares.
 type releaseCatalog struct {
-	PublicVersion string         `toml:"public_version"`
-	Rust          string         `toml:"rust"`
-	RubyGems      string         `toml:"rubygems"`
-	Packagist     string         `toml:"packagist"`
-	Unity         string         `toml:"unity"`
-	Maven         string         `toml:"maven"`
-	JavaMaven     string         `toml:"java_maven"`
-	NPM           [][]string     `toml:"npm"`
-	RepoWide      [][]string     `toml:"repo_wide"`
-	NuGet         []nugetRelease `toml:"nuget"`
-	PyPI          []pypiRelease  `toml:"pypi"`
+	PublicVersion  string         `toml:"public_version"`
+	Rust           string         `toml:"rust"`
+	RubyGems       string         `toml:"rubygems"`
+	Packagist      string         `toml:"packagist"`
+	Unity          string         `toml:"unity"`
+	Maven          string         `toml:"maven"`
+	JavaMaven      string         `toml:"java_maven"`
+	NPM            [][]string     `toml:"npm"`
+	MavenArtifacts [][]string     `toml:"maven_artifacts"`
+	RepoWide       [][]string     `toml:"repo_wide"`
+	NuGet          []nugetRelease `toml:"nuget"`
+	PyPI           []pypiRelease  `toml:"pypi"`
 }
 
 type nugetRelease struct {
@@ -88,6 +89,11 @@ func loadReleaseCatalog(text string) (releaseCatalog, error) {
 	for _, entry := range catalog.NPM {
 		if len(entry) != 2 {
 			return catalog, errors.New("each npm entry needs a directory and a package name")
+		}
+	}
+	for _, entry := range catalog.MavenArtifacts {
+		if len(entry) < 2 {
+			return catalog, errors.New("each maven_artifacts entry needs an artifact and a directory")
 		}
 	}
 	for _, entry := range catalog.RepoWide {
@@ -1020,15 +1026,24 @@ func boundName(name xml.Name, scopes [][]string) bool {
 		slices.ContainsFunc(scopes, func(declared []string) bool { return slices.Contains(declared, name.Space) })
 }
 
+// parseXML reads text as UTF-8 whatever encoding the declaration names, and
+// rejects an XML declaration after the start of the document, like
+// ElementTree.fromstring on decoded text.
 func parseXML(data []byte) (*xmlElement, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.CharsetReader = func(_ string, input io.Reader) (io.Reader, error) { return input, nil }
+	start := int64(len(data) - len(bytes.TrimPrefix(data, []byte("\ufeff"))))
 	var root *xmlElement
 	var stack []*xmlElement
 	var scopes [][]string
 	for {
+		offset := decoder.InputOffset()
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
 			break
+		}
+		if instruction, ok := token.(xml.ProcInst); ok && instruction.Target == "xml" && offset != start {
+			err = errors.New("XML declaration not at start of document")
 		}
 		if err != nil {
 			return nil, err
@@ -1394,13 +1409,13 @@ func (check *metadataCheck) publishReleaseWorkflow(text string) {
 		{"Maven selected-artifact release input", "maven_artifacts:"},
 		{"Maven selected-artifact dispatch", `-f maven_artifacts="$MAVEN_ARTIFACTS"`},
 		{"Maven release selector environment binding", "INPUT_MAVEN_ARTIFACTS: " + mavenSelectorInput},
-		{"Maven release selector canonicalization", "maven_release_plan.py canonicalize"},
+		{"Maven release selector canonicalization", "release-plan maven canonicalize"},
 		{"Maven release selector environment input", "--artifacts-env INPUT_MAVEN_ARTIFACTS"},
 		{"Maven release canonical output", `printf 'maven_artifacts=%s\n' "$maven_artifacts"`},
 		{"NuGet selected-package release input", "nuget_packages:"},
 		{"NuGet selected-package dispatch", `-f nuget_packages="$NUGET_PACKAGES"`},
 		{"NuGet release selector environment binding", "INPUT_NUGET_PACKAGES: " + nugetSelectorInput},
-		{"NuGet release selector canonicalization", "nuget_release_plan.py canonicalize"},
+		{"NuGet release selector canonicalization", "release-plan nuget canonicalize"},
 		{"NuGet release canonical output", `printf 'nuget_packages=%s\n' "$nuget_packages"`},
 	})
 	script := after(before(after(text, "name: Resolve release publish inputs"),
@@ -1467,10 +1482,6 @@ func (check *metadataCheck) publishPackagesWorkflow(text string) {
 		needles = append(needles, [2]string{"NuGet " + release.ID + " version output", release.VersionOutput + "="})
 	}
 	check.described(text+"\n"+npmPublisher, publishPackagesWorkflow, needles)
-	if check.requirePaths("scripts/nuget_release_plan.py") {
-		check.require(strings.Contains(check.read("scripts/nuget_release_plan.py"), "DOTNET_RELEASE_PACKAGES"),
-			"scripts/nuget_release_plan.py: must use the canonical NuGet release catalog")
-	}
 	for _, entry := range check.catalog.NPM {
 		check.require(strings.Contains(text, entry[0]), publishPackagesWorkflow+": missing npm package dir "+entry[0])
 	}
@@ -1501,8 +1512,8 @@ func (check *metadataCheck) mavenJob(job string) {
 var publishNeedles = [][2]string{
 	{"NuGet package version output", "id: nuget-version"},
 	{"NuGet HttpClient pack", "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj"},
-	{"NuGet selected package plan", "nuget_release_plan.py create"},
-	{"NuGet selected package plan validation", "nuget_release_plan.py validate"},
+	{"NuGet selected package plan", "release-plan nuget create"},
+	{"NuGet selected package plan validation", "release-plan nuget validate"},
 	{"NuGet selected package iteration", "--format projects"},
 	{"NuGet XML documentation pack", "-p:GenerateDocumentationFile=true"},
 	{"NuGet HttpClient documentation pack", "httpclient_pack_args="},
@@ -1562,7 +1573,7 @@ var publishNeedles = [][2]string{
 	{"Maven authenticated deployment wait", "wait --deployment-id-file"},
 	{"Maven bounded deployment deadline", "--timeout-seconds 3600"},
 	{"Maven selected-artifact input", "maven_artifacts:"},
-	{"Maven selected-artifact plan", "maven_release_plan.py create"},
+	{"Maven selected-artifact plan", "release-plan maven create"},
 	{"Maven selected-artifact environment input", "MAVEN_ARTIFACTS_INPUT: " + mavenSelectorInput},
 	{"Maven selected-artifact parser input", "--artifacts-env MAVEN_ARTIFACTS_INPUT"},
 	{"Maven selected-version collision preflight", "--maven-plan-scope selected"},

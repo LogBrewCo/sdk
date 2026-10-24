@@ -94,9 +94,10 @@ class ReleaseArtifactReceiptModeTests(unittest.TestCase):
                 (root / "plan.json").write_text("{}", encoding="utf-8")
                 (artifacts / "LogBrew.0.1.5.nupkg").write_bytes(b"core")
                 (artifacts / "LogBrew.HttpClient.0.1.0.nupkg").write_bytes(b"client")
-                planner = scripts / "nuget_release_plan.py"
+                planner = fake_bin / "verifier"
                 planner.write_text(
                     """\
+#!/usr/bin/env python3
 import sys
 
 if "validate" in sys.argv:
@@ -112,6 +113,7 @@ else:
 """,
                     encoding="utf-8",
                 )
+                planner.chmod(0o755)
                 provenance = scripts / "check_nuget_release_receipt_provenance.py"
                 provenance.write_text(
                     """\
@@ -162,6 +164,7 @@ fi
                     {
                         "FAIL_STAGE": failure,
                         "LOGBREW_RELEASE_SOURCE_ROOT": str(source),
+                        "LOGBREW_TOOLCHAIN_PROBE_BIN": str(planner),
                         "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
                         "TMPDIR": str(root),
                     }

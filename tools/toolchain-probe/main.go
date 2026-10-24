@@ -273,9 +273,12 @@ func run() int {
 	if os.Args[1] == releaseVersionsMode {
 		return checkReleaseVersions(os.Args[2:], os.Stdout, os.Stderr)
 	}
+	if os.Args[1] == releasePlanMode {
+		return checkReleasePlan(os.Args[2:], os.LookupEnv, os.Stdout, os.Stderr)
+	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, confidentiality-scan, release-metadata, or release-versions mode\n", exitUsage)
+			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, confidentiality-scan, release-metadata, release-versions, or release-plan mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {
