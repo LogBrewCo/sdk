@@ -28,7 +28,7 @@ const (
 	releaseArtifactsMode  = "release-artifacts"
 	releaseArtifactsUsage = "usage: release-artifacts dotnet|nuget-public [flags] | release-artifacts nuget-content PACKAGE | " +
 		"release-artifacts python create|verify|check-manifest|normalize-sdist|resolve-public [flags] [SDIST...] | " +
-		"release-artifacts native-manifest [flags]\n"
+		"release-artifacts native-manifest|js-prepare|js-manifest|js-symbolicate|js-fake-intake [flags]\n"
 	packageSignature = ".signature.p7s"
 	sourceLinkRoot   = "raw.githubusercontent.com/LogBrewCo/sdk"
 )
@@ -55,6 +55,9 @@ var (
 func checkReleaseArtifacts(arguments []string, transport http.RoundTripper, output, diagnostic io.Writer) int {
 	if len(arguments) > 0 && arguments[0] == "native-manifest" {
 		return checkNativeManifest(arguments[1:], output, diagnostic)
+	}
+	if len(arguments) > 0 && jsArtifactFlags[arguments[0]] != nil {
+		return checkJSArtifacts(arguments[0], arguments[1:], output, diagnostic)
 	}
 	if len(arguments) == 2 && arguments[0] == "nuget-content" {
 		data, err := os.ReadFile(arguments[1])

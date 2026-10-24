@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -57,7 +58,7 @@ port_file="$tmp_dir/fake-intake-port"
 state_file="$tmp_dir/fake-intake-state.json"
 expected_bearer="fake-vite-release-artifact-auth-value"
 
-python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
+run_native_verifier release-artifacts js-fake-intake \
   --port-file "$port_file" \
   --state-file "$state_file" \
   --expected-bearer "$expected_bearer" \

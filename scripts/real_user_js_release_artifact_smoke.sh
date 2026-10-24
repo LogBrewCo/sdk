@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -36,7 +37,7 @@ Path(sys.argv[1]).write_text(
 PY
 
 debug_plan_dry_run="$tmp_dir/debug-plan-dry-run.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
+run_native_verifier release-artifacts js-prepare \
   --build-dir "$dist_dir" \
   > "$debug_plan_dry_run"
 
@@ -58,13 +59,13 @@ assert "debugId=" not in js_source
 PY
 
 debug_plan_written="$tmp_dir/debug-plan-written.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
+run_native_verifier release-artifacts js-prepare \
   --build-dir "$dist_dir" \
   --write \
   > "$debug_plan_written"
 
 debug_plan_idempotent="$tmp_dir/debug-plan-idempotent.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
+run_native_verifier release-artifacts js-prepare \
   --build-dir "$dist_dir" \
   > "$debug_plan_idempotent"
 
@@ -92,7 +93,7 @@ assert source_map["debug_id"] == debug_id
 PY
 
 blocked_manifest="$tmp_dir/manifest-blocked.json"
-if python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
+if run_native_verifier release-artifacts js-manifest \
   --build-dir "$dist_dir" \
   --release "2026.06.13" \
   --environment "production" \
@@ -104,7 +105,7 @@ if python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
 fi
 
 ready_manifest="$tmp_dir/manifest-ready.json"
-python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
+run_native_verifier release-artifacts js-manifest \
   --build-dir "$dist_dir" \
   --release "2026.06.13" \
   --environment "production" \
@@ -155,13 +156,13 @@ Path(sys.argv[1]).write_text(
 PY
 
 rn_debug_plan="$tmp_dir/react-native-debug-plan.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
+run_native_verifier release-artifacts js-prepare \
   --build-dir "$rn_dist_dir" \
   --write \
   > "$rn_debug_plan"
 
 rn_manifest="$tmp_dir/react-native-manifest.json"
-python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
+run_native_verifier release-artifacts js-manifest \
   --build-dir "$rn_dist_dir" \
   --release "2026.06.13" \
   --environment "production" \
