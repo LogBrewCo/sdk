@@ -84,7 +84,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
     def test_vite_smoke_uploads_real_build_artifacts_to_loopback_intake(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_vite_release_artifact_smoke.sh").read_text(encoding="utf-8")
 
-        self.assertIn("js_release_artifact_fake_intake.py", smoke)
+        self.assertIn("release-artifacts js-fake-intake", smoke)
         self.assertIn("createLogBrewViteReleaseArtifactsPlugin", smoke)
         self.assertIn("upload: {", smoke)
         self.assertIn("LOGBREW_RELEASE_ARTIFACT_ENDPOINT", smoke)
@@ -121,7 +121,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
     def test_next_smoke_uploads_real_build_artifacts_to_loopback_intake(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_next_release_artifact_smoke.sh").read_text(encoding="utf-8")
 
-        self.assertIn("js_release_artifact_fake_intake.py", smoke)
+        self.assertIn("release-artifacts js-fake-intake", smoke)
         self.assertIn("withLogBrewNextReleaseArtifacts", smoke)
         self.assertIn("upload: {", smoke)
         self.assertIn("LOGBREW_RELEASE_ARTIFACT_ENDPOINT", smoke)

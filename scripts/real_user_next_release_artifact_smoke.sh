@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
 export npm_config_cache="$tmp_dir/npm-cache"
@@ -104,7 +105,7 @@ port_file="$tmp_dir/fake-intake-port"
 state_file="$tmp_dir/fake-intake-state.json"
 expected_bearer="fake-next-release-artifact-auth-value"
 
-python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
+run_native_verifier release-artifacts js-fake-intake \
   --port-file "$port_file" \
   --state-file "$state_file" \
   --expected-bearer "$expected_bearer" \
@@ -250,21 +251,19 @@ if [[ -z "$target_js" ]]; then
   exit 1
 fi
 
-target_map="$(python3 - "$repo_root" "$chunks_dir" "$target_js" <<'PY'
+target_plan="$tmp_dir/target-plan.json"
+run_native_verifier release-artifacts js-prepare --build-dir "$chunks_dir" > "$target_plan" || true
+target_map="$(python3 - "$target_plan" "$chunks_dir" "$target_js" <<'PY'
+import json
+import os
 import sys
-from pathlib import Path
 
-scripts_dir = Path(sys.argv[1]) / "scripts"
-sys.path.insert(0, str(scripts_dir))
-from create_js_release_artifact_manifest import find_source_mapping_url, resolve_source_map_path
-
-chunks_dir = Path(sys.argv[2])
-target_js = Path(sys.argv[3])
-source_mapping_url = find_source_mapping_url(target_js.read_text(encoding="utf-8", errors="replace"))
-source_map_path, _warnings, errors = resolve_source_map_path(target_js, chunks_dir, source_mapping_url)
-if errors or source_map_path is None or not source_map_path.exists():
-    raise SystemExit(f"could not resolve target source map: {errors}")
-print(source_map_path.resolve())
+plan = json.load(open(sys.argv[1], encoding="utf-8"))
+target = os.path.relpath(sys.argv[3], sys.argv[2])
+artifact = next((item for item in plan["artifacts"] if item["path"] == target), None)
+if artifact is None or "sourceMapPath" not in artifact:
+    raise SystemExit(f"could not resolve target source map: {artifact and artifact['validation']['errors']}")
+print(os.path.realpath(os.path.join(sys.argv[2], artifact["sourceMapPath"])))
 PY
 )"
 

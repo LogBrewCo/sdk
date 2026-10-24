@@ -2,20 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_MODULE_PATH = ROOT / "scripts" / "create_js_release_artifact_manifest.py"
 UPLOAD_MODULE_PATH = ROOT / "scripts" / "upload_js_release_artifacts.py"
-
-MANIFEST_SPEC = importlib.util.spec_from_file_location("create_js_release_artifact_manifest", MANIFEST_MODULE_PATH)
-assert MANIFEST_SPEC is not None
-create_js_release_artifact_manifest = importlib.util.module_from_spec(MANIFEST_SPEC)
-assert MANIFEST_SPEC.loader is not None
-MANIFEST_SPEC.loader.exec_module(create_js_release_artifact_manifest)
 
 UPLOAD_SPEC = importlib.util.spec_from_file_location("upload_js_release_artifacts", UPLOAD_MODULE_PATH)
 assert UPLOAD_SPEC is not None
@@ -45,13 +39,17 @@ class JavaScriptReleaseArtifactUploadTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        manifest = create_js_release_artifact_manifest.create_manifest(
-            build_dir=build_dir,
-            release="1.2.3",
-            environment="production",
-            service="checkout-web",
-            minified_path_prefix="https://cdn.example/assets",
+        result = subprocess.run(
+            ["bash", "-c", 'source scripts/native_verifier.sh && run_native_verifier "$@"', "verifier",
+             "release-artifacts", "js-manifest", "--build-dir", str(build_dir), "--release", "1.2.3",
+             "--environment", "production", "--service", "checkout-web",
+             "--minified-path-prefix", "https://cdn.example/assets"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        manifest = json.loads(result.stdout)
         self.assertEqual(manifest["validation"]["status"], "ready")
         return build_dir, manifest
 

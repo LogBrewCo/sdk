@@ -705,16 +705,9 @@ func writePlanJSON(path string, value any, indent string) error {
 // pyJSONText encodes sorted, ASCII-only JSON like Python's json.dumps with
 // sort_keys, indented by indent or compact when it is empty, plus a newline.
 func pyJSONText(value any, indent string) (string, error) {
-	value, err := pyJSONNumbers(value)
-	var encoded bytes.Buffer
-	encoder := json.NewEncoder(&encoded)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", indent)
-	if err == nil {
-		err = encoder.Encode(value)
-	}
+	encoded, err := pyJSONEncode(value, indent)
 	var text strings.Builder
-	for _, character := range encoded.String() {
+	for _, character := range encoded {
 		switch {
 		case character < utf8.RuneSelf-1:
 			text.WriteRune(character)
@@ -726,4 +719,18 @@ func pyJSONText(value any, indent string) (string, error) {
 		}
 	}
 	return text.String(), err
+}
+
+// pyJSONEncode encodes sorted JSON with Python's numbers, indented by indent
+// or compact when it is empty, plus a newline.
+func pyJSONEncode(value any, indent string) (string, error) {
+	value, err := pyJSONNumbers(value)
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", indent)
+	if err == nil {
+		err = encoder.Encode(value)
+	}
+	return encoded.String(), err
 }
