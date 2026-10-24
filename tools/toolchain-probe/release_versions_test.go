@@ -16,7 +16,9 @@ func manifestText(relative, version string) string {
 	case name == "Cargo.toml":
 		return "[package]\nversion = \"" + version + "\"\n"
 	case strings.HasSuffix(name, ".gemspec"):
-		return "Gem::Specification.new do |spec|\n  spec.version = '" + version + "'\nend\n"
+		return "require_relative \"lib/logbrew/version\"\n\nGem::Specification.new(\"logbrew-sdk\", LogBrew::VERSION) do |spec|\nend\n"
+	case strings.HasSuffix(name, ".rb"):
+		return "module LogBrew\n  VERSION = \"" + version + "\"\nend\n"
 	case name == "pom.xml":
 		return `<project xmlns="` + mavenNamespace + `"><version>` + version + "</version></project>"
 	}
@@ -24,12 +26,15 @@ func manifestText(relative, version string) string {
 }
 
 // versionFixture writes every repo-wide manifest with one version.
+const rubyVersionFile = "ruby/logbrew-ruby/lib/logbrew/version.rb"
+
 func versionFixture(t *testing.T, version string) string {
 	t.Helper()
 	root := t.TempDir()
 	for _, entry := range mustCatalog().RepoWide {
 		writeFixtureFile(t, root, entry[2], manifestText(entry[2], version))
 	}
+	writeFixtureFile(t, root, rubyVersionFile, manifestText(rubyVersionFile, version))
 	return root
 }
 
@@ -42,11 +47,27 @@ func TestReleaseVersionsRepositoryRustVersion(t *testing.T) {
 	}
 }
 
+// Every repo-wide manifest in this repository yields a version, including the
+// gem, whose gemspec loads its version file.
+func TestReleaseVersionsRepositoryManifests(t *testing.T) {
+	t.Parallel()
+	for _, entry := range mustCatalog().RepoWide {
+		if version, err := readManifestVersion("../..", entry[2]); err != nil || version == "" ||
+			entry[0] == "rubygems" && version != mustCatalog().RubyGems {
+			t.Errorf("%s: %q, %v", entry[2], version, err)
+		}
+	}
+}
+
 func TestReleaseVersionsCommand(t *testing.T) {
 	t.Parallel()
 	aligned, mixed, broken := versionFixture(t, "1.2.3"), versionFixture(t, "1.2.3"), versionFixture(t, "1.2.3")
 	writeFixtureFile(t, mixed, "js/logbrew-js/package.json", manifestText("package.json", "1.2.4"))
 	writeFixtureFile(t, mixed, rustCrateManifest, manifestText("Cargo.toml", "1.2.4"))
+	writeFixtureFile(t, mixed, rubyVersionFile, manifestText("version.rb", "1.2.4"))
+	gemless, unversioned := versionFixture(t, "1.2.3"), versionFixture(t, "1.2.3")
+	writeFixtureFile(t, gemless, rubyVersionFile, "module LogBrew\nend\n")
+	writeFixtureFile(t, unversioned, "ruby/logbrew-ruby/logbrew-sdk.gemspec", "Gem::Specification.new(\"logbrew-sdk\")\n")
 	writeFixtureFile(t, broken, "java/logbrew-java/pom.xml", "<project><version>1.2.3</version></project>")
 	writeFixtureFile(t, broken, rustCrateManifest, "\xff")
 	const usage = "usage: release-versions TAG [root] | release-versions --rust [root]\n"
@@ -61,12 +82,16 @@ func TestReleaseVersionsCommand(t *testing.T) {
 		{"1.2.3\n", "", []string{"--rust", aligned}, exitOK},
 		{"", "repo-wide release tag v1.2.3 expects every publishable package to be 1.2.3, but these manifests differ:\n" +
 			"- npm @logbrew/sdk: 1.2.4 (js/logbrew-js/package.json)\n- crates logbrew: 1.2.4 (rust/logbrew/Cargo.toml)\n" +
+			"- rubygems logbrew-sdk: 1.2.4 (ruby/logbrew-ruby/logbrew-sdk.gemspec)\n" +
 			"Use scoped/manual changed-package publishing, or bump every listed package before creating the " +
 			"repo-wide v1.2.3 GitHub Release.\n", []string{"v1.2.3", mixed}, exitFailure},
 		{"", failed + "expected repo-wide release tag like v0.1.1, got 'go/logbrew/v1.2.3'\n",
 			[]string{"go/logbrew/v1.2.3", aligned}, exitFailure},
 		{"", failed + "rust/logbrew/Cargo.toml: invalid UTF-8\n", []string{"v1.2.3", broken}, exitFailure},
 		{"", "rust/logbrew/Cargo.toml: invalid UTF-8\n", []string{"--rust", broken}, exitFailure},
+		{"", failed + rubyVersionFile + ": could not read package version\n", []string{"v1.2.3", gemless}, exitFailure},
+		{"", failed + "ruby/logbrew-ruby/logbrew-sdk.gemspec: could not read package version\n",
+			[]string{"v1.2.3", unversioned}, exitFailure},
 		{"", failed + "js/logbrew-js/package.json: open", []string{"v1.2.3", t.TempDir()}, exitFailure},
 		{"", usage, nil, exitUsage},
 		{"", usage, []string{"--unknown"}, exitUsage},
@@ -118,6 +143,8 @@ func TestManifestVersion(t *testing.T) {
 		{nil, "Cargo.toml", "[package\n", true},
 		{"1.0.0", "a.gemspec", "do |spec|\n\tspec.version = \"1.0.0\"\n", false},
 		{nil, "a.gemspec", "Gem::Specification.new(\"a\", A::VERSION) do |spec|\n", false},
+		{"1.0.0", "version.rb", "module A\n  VERSION = '1.0.0'\nend\n", false},
+		{nil, "version.rb", "module A\nend\n", false},
 		{"2", "A.csproj", "<Project><PropertyGroup><Other/></PropertyGroup>" +
 			"<PropertyGroup><Version>2</Version></PropertyGroup><PropertyGroup><Version>3</Version></PropertyGroup></Project>", false},
 		{"", "A.csproj", "<Project><PropertyGroup><Version/></PropertyGroup>" +

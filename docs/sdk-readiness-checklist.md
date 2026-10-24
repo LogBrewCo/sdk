@@ -140,8 +140,10 @@ For native Laravel onboarding, do not leave delivery correctness to app-specific
 
 ## Release checks
 
-- Shared release metadata: `source scripts/native_verifier.sh && run_native_verifier release-metadata .`
-- SDK-originated backend contract reports: `source scripts/native_verifier.sh && run_native_verifier backend-reports .`
+Run these from the repository root in Bash.
+
+- Shared release metadata: `source scripts/native_verifier.sh && run_native_verifier release-metadata "$PWD"`
+- SDK-originated backend contract reports: `source scripts/native_verifier.sh && run_native_verifier backend-reports "$PWD"`
 - GitHub release safety settings before publishing: `source scripts/native_verifier.sh && run_native_verifier github-release-safety`
 - JavaScript release-artifact dry-run proof: `bash scripts/real_user_js_release_artifact_smoke.sh`
 - JavaScript release-artifact installed CLI prep/manifest/frame proof: `bash scripts/real_user_js_release_artifact_cli_smoke.sh`
@@ -153,7 +155,7 @@ For native Laravel onboarding, do not leave delivery correctness to app-specific
 - Native/mobile release-artifact dry-run proof: `bash scripts/real_user_native_release_artifact_smoke.sh`
 - Native/mobile release-artifact upload proof: `bash scripts/real_user_native_release_artifact_upload_smoke.sh`
 - Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`; for Maven verification while optional artifacts are still pending publication, pass `--maven-artifact` and `--maven-version` only for the currently public artifacts.
-- Shared Markdown docs: `source scripts/native_verifier.sh && run_native_verifier markdown-links .`
+- Shared Markdown docs: `source scripts/native_verifier.sh && run_native_verifier markdown-links "$PWD"`
 - Shared shell smoke/package scripts: `bash scripts/check_shell_static.sh`
 - JavaScript, Browser, Node.js, Express, Fastify, NestJS, Angular, Vue, Svelte, React, React Native, or Next.js: `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, package `npm test`, framework smoke scripts, and `npm pack --dry-run`
 - Python, FastAPI, Flask, and Django: `python3 scripts/check_python_sources.py`, `bash scripts/check_python_static.sh`, `bash scripts/check_fastapi_package.sh`, `bash scripts/check_flask_package.sh`, `bash scripts/check_django_package.sh`, `LOGBREW_FASTAPI_FRAMEWORK_VERSION=0.111.1 LOGBREW_FASTAPI_HTTPX_VERSION=0.23.3 bash scripts/real_user_fastapi_smoke.sh`, `bash scripts/real_user_fastapi_smoke.sh`, `bash scripts/real_user_flask_smoke.sh`, `bash scripts/real_user_django_smoke.sh`, `python -m build`, and `twine check dist/*`
