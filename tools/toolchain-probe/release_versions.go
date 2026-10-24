@@ -25,7 +25,8 @@ const (
 var (
 	repoWideReleaseTag = regexp.MustCompile(
 		`^(?:refs/tags/)?v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$`)
-	gemspecVersion = regexp.MustCompile(`(?m)^\s*spec\.version\s*=\s*["']([^"']+)["']`)
+	rubyVersion  = regexp.MustCompile(`(?m)^\s*(?:spec\.version|VERSION)\s*=\s*["']([^"']+)["']`)
+	gemspecLoads = regexp.MustCompile(`(?m)^\s*require_relative\s+["']([^"']*version)["']`)
 )
 
 // checkReleaseVersions fails when a repo-wide release tag differs from any
@@ -87,6 +88,11 @@ func readManifestVersion(root, relative string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", relative, err)
 	}
+	// A gemspec without spec.version takes the VERSION constant from the
+	// version file it loads, as the gem itself does.
+	if match := gemspecLoads.FindSubmatch(data); value == nil && match != nil && strings.HasSuffix(relative, ".gemspec") {
+		return readManifestVersion(root, path.Join(path.Dir(relative), string(match[1])+".rb"))
+	}
 	if version, ok := value.(string); ok && version != "" {
 		return version, nil
 	}
@@ -103,8 +109,8 @@ func manifestVersion(name string, data []byte) (any, error) {
 	case name == "pyproject.toml", name == "Cargo.toml":
 		err = toml.Unmarshal(data, &payload)
 		return field(payload, map[bool]string{true: "project", false: "package"}[name == "pyproject.toml"], "version"), err
-	case strings.HasSuffix(name, ".gemspec"):
-		if match := gemspecVersion.FindSubmatch(data); match != nil {
+	case strings.HasSuffix(name, ".gemspec"), strings.HasSuffix(name, ".rb"):
+		if match := rubyVersion.FindSubmatch(data); match != nil {
 			return string(match[1]), nil
 		}
 		return nil, nil
