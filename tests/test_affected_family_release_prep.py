@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import release_catalog  # noqa: E402
 from check_npm_peer_compatibility import caret_range_allows  # noqa: E402
-import check_repo_wide_release_versions  # noqa: E402
 
 
 def xml_value(path: Path, xpath: str) -> str | None:
@@ -364,14 +363,6 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertIn("--lib ESNext,DOM,DOM.Iterable", smoke)
         self.assertIn("--skipLibCheck true", smoke)
         self.assertIn("Instrumentation.onRequestError", smoke)
-
-    def test_repo_wide_guard_includes_newly_publishable_flask_and_httpclient(self) -> None:
-        labels = {
-            manifest.label
-            for manifest in check_repo_wide_release_versions.REPO_WIDE_RELEASE_MANIFESTS
-        }
-        self.assertIn("logbrew-flask", labels)
-        self.assertIn("LogBrew.HttpClient", labels)
 
 
 if __name__ == "__main__":

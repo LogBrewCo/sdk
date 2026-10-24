@@ -1,5 +1,5 @@
-# Public package versions and identities that the release-metadata check
-# expects. Release preparation updates the versions here.
+# Public package versions and identities that the release-metadata and
+# release-versions checks expect. Release preparation updates the versions here.
 
 public_version = "0.1.0"
 rust = "0.1.8"
@@ -28,6 +28,34 @@ npm = [
   ["js/logbrew-react-native", "@logbrew/react-native"],
   ["js/logbrew-svelte", "@logbrew/svelte"],
   ["js/logbrew-vue", "@logbrew/vue"],
+]
+
+# [ecosystem, package, manifest]: packages that a repo-wide vX.Y.Z GitHub
+# Release publishes, so each manifest version must equal the tag.
+repo_wide = [
+  ["npm", "@logbrew/sdk", "js/logbrew-js/package.json"],
+  ["npm", "@logbrew/browser", "js/logbrew-browser/package.json"],
+  ["npm", "@logbrew/node", "js/logbrew-node/package.json"],
+  ["npm", "@logbrew/express", "js/logbrew-express/package.json"],
+  ["npm", "@logbrew/fastify", "js/logbrew-fastify/package.json"],
+  ["npm", "@logbrew/nestjs", "js/logbrew-nestjs/package.json"],
+  ["npm", "@logbrew/angular", "js/logbrew-angular/package.json"],
+  ["npm", "@logbrew/vue", "js/logbrew-vue/package.json"],
+  ["npm", "@logbrew/svelte", "js/logbrew-svelte/package.json"],
+  ["npm", "@logbrew/react", "js/logbrew-react/package.json"],
+  ["npm", "@logbrew/react-native", "js/logbrew-react-native/package.json"],
+  ["npm", "@logbrew/next", "js/logbrew-next/package.json"],
+  ["pypi", "logbrew-sdk", "python/logbrew_py/pyproject.toml"],
+  ["pypi", "logbrew-fastapi", "python/logbrew_fastapi/pyproject.toml"],
+  ["pypi", "logbrew-flask", "python/logbrew_flask/pyproject.toml"],
+  ["pypi", "logbrew-django", "python/logbrew_django/pyproject.toml"],
+  ["crates", "logbrew", "rust/logbrew/Cargo.toml"],
+  ["rubygems", "logbrew-sdk", "ruby/logbrew-ruby/logbrew-sdk.gemspec"],
+  ["nuget", "LogBrew", "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj"],
+  ["nuget", "LogBrew.HttpClient", "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj"],
+  ["maven", "co.logbrew:logbrew-sdk", "java/logbrew-java/pom.xml"],
+  ["maven", "co.logbrew:logbrew-kotlin", "kotlin/logbrew-kotlin/pom.xml"],
+  ["maven", "co.logbrew:logbrew-kotlin-okhttp", "kotlin/logbrew-kotlin-okhttp/pom.xml"],
 ]
 
 # Each NuGet package lives at dotnet/logbrew-dotnet/src/<id>/<id>.csproj.

@@ -9,7 +9,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'printf "%s\n" "rust automatic delivery installed smoke failed" >&2' ERR
 
-crate_version="$(python3 "$repo_root/scripts/read_rust_crate_version.py" "$repo_root/rust/logbrew/Cargo.toml")"
+source "$repo_root/scripts/native_verifier.sh"
+crate_version="$(run_native_verifier release-versions --rust "$repo_root")"
 crate_name="logbrew-$crate_version"
 
 CARGO_NET_OFFLINE=true cargo package \

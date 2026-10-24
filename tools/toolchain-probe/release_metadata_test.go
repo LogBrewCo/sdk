@@ -425,7 +425,7 @@ func TestReleaseMetadataCommand(t *testing.T) {
 
 func TestReleaseCatalogErrors(t *testing.T) {
 	t.Parallel()
-	for _, text := range []string{"unknown = 1\n", "npm = [[\"js/logbrew-js\"]]\n", "rust = [\n"} {
+	for _, text := range []string{"unknown = 1\n", "npm = [[\"js/logbrew-js\"]]\n", "repo_wide = [[\"npm\"]]\n", "rust = [\n"} {
 		if _, err := loadReleaseCatalog(text); err == nil {
 			t.Errorf("%q: catalog loaded", text)
 		}
