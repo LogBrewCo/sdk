@@ -150,15 +150,7 @@ func publicPackage(transport http.RoundTripper, directory, id, version, commit s
 // metadata may arrive gzip-compressed, and only as a single gzip member.
 func fetchBounded(transport http.RoundTripper, url string, limit int64, timeout time.Duration, metadata bool,
 ) ([]byte, error) {
-	client := &http.Client{Transport: transport, Timeout: timeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return errPublicNuGet }}
-	request, err := http.NewRequest(http.MethodGet, url, nil)
-	var response *http.Response
-	if err == nil {
-		request.Header.Set("User-Agent", "LogBrew public package reconciliation")
-		request.Header.Set("Accept-Encoding", map[bool]string{false: "identity", true: "gzip"}[metadata])
-		response, err = client.Do(request)
-	}
+	response, err := getPublic(transport, url, timeout, map[bool]string{false: "identity", true: "gzip"}[metadata])
 	if err != nil {
 		return nil, errPublicNuGet
 	}
@@ -185,6 +177,19 @@ func fetchBounded(transport http.RoundTripper, url string, limit int64, timeout 
 		}
 	}
 	return nil, errPublicNuGet
+}
+
+// getPublic sends one registry request without following redirects.
+func getPublic(transport http.RoundTripper, url string, timeout time.Duration, encoding string) (*http.Response, error) {
+	client := &http.Client{Transport: transport, Timeout: timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return errPublicNuGet }}
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("User-Agent", "LogBrew public package reconciliation")
+	request.Header.Set("Accept-Encoding", encoding)
+	return client.Do(request)
 }
 
 func readBounded(reader io.Reader, limit int64) ([]byte, error) {
@@ -362,7 +367,7 @@ func declaresDocumentType(document []byte) bool {
 func validatePublicPackage(body []byte, id, version, commit string, contract dependencyContract) (string, error) {
 	err := errPublicNuGet
 	var entries []zipEntry
-	if preflightPackage(body) {
+	if preflightPackage(body, maxPackageBytes) {
 		entries, err = openZip(body)
 	}
 	if err == nil {
@@ -416,11 +421,11 @@ func validNuspecDependencies(metadata *xmlElement, contract dependencyContract) 
 }
 
 // preflightPackage requires a single-disk ZIP whose central directory ends the
-// file, within the public package limits.
-func preflightPackage(data []byte) bool {
+// file, within the public archive limits and the size limit.
+func preflightPackage(data []byte, limit int) bool {
 	tail := data[max(0, len(data)-maxZipTailBytes):]
 	offset := bytes.LastIndex(tail, []byte("PK\x05\x06"))
-	if len(data) == 0 || len(data) > maxPackageBytes || offset < 0 || len(tail)-offset < zipEndRecordBytes {
+	if len(data) == 0 || len(data) > limit || offset < 0 || len(tail)-offset < zipEndRecordBytes {
 		return false
 	}
 	record := tail[offset+4:]
@@ -459,6 +464,6 @@ func boundedEntries(entries []zipEntry) error {
 // backslashes, as Python's PurePosixPath reads it.
 func safeArchiveName(name string) bool {
 	parts := slices.DeleteFunc(strings.Split(name, "/"), func(part string) bool { return part == "" || part == "." })
-	return len(parts) > 0 && !strings.HasPrefix(name, "/") && !strings.Contains(name, "\\") &&
+	return len(parts) > 0 && !strings.HasPrefix(name, "/") && !strings.ContainsAny(name, "\\\x00") &&
 		!slices.Contains(parts, "..")
 }

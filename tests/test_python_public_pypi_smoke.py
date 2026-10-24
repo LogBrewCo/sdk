@@ -52,7 +52,7 @@ class PythonPublicPyPISmokeTests(unittest.TestCase):
             'metadata.requires("logbrew-fastapi")',
             "--manifest",
             "--artifact-root",
-            "check_python_release_artifacts.py",
+            'toolchain-probe" release-artifacts python verify',
             "files.pythonhosted.org",
             "sha256",
             "https://pypi.org/simple",

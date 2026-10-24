@@ -184,7 +184,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         public_receipt = workflow.index("Verify public PyPI installs")
 
         for expected in (
-            "check_python_release_artifacts.py create",
+            "release-artifacts python create",
             "--source-commit",
             "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}",
             "python-release-artifacts.json",
@@ -234,7 +234,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         packed_receipt = publish.index("Verify packed Python distributions")
         self.assertIn('git show -s --format=%ct HEAD', publish)
         self.assertIn("$RUNNER_TEMP/python-reproducibility", publish)
-        self.assertIn("check_python_release_artifacts.py verify", publish)
+        self.assertIn("release-artifacts python verify", publish)
         self.assertLess(manifest, reproducibility)
         self.assertLess(reproducibility, packed_receipt)
 
@@ -248,7 +248,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         upload = workflow.index("Upload Python public reconciliation")
         install = workflow.index("Verify public PyPI installs")
         for expected in (
-            "check_python_release_artifacts.py resolve-public",
+            "release-artifacts python resolve-public",
             "--directory dist/pypi",
             "--manifest dist/pypi/python-release-artifacts.json",
             '--output-directory "$RUNNER_TEMP/python-public-artifacts"',
@@ -280,8 +280,8 @@ class ReleaseMetadataTests(unittest.TestCase):
             "path: .release-control",
             checkout_auth_setting,
             "check_publication_run.py",
-            "check_python_release_artifacts.py",
-            'python3 "$control_script" create',
+            "resolve-public",
+            "release-artifacts python create",
             "release-artifacts nuget-public",
             "check_nuget_release_receipt_provenance.py",
             '--source-root "$GITHUB_WORKSPACE"',

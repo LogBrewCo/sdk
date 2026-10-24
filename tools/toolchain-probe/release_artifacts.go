@@ -26,9 +26,10 @@ import (
 
 const (
 	releaseArtifactsMode  = "release-artifacts"
-	releaseArtifactsUsage = "usage: release-artifacts dotnet|nuget-public [flags] | release-artifacts nuget-content PACKAGE\n"
-	packageSignature      = ".signature.p7s"
-	sourceLinkRoot        = "raw.githubusercontent.com/LogBrewCo/sdk"
+	releaseArtifactsUsage = "usage: release-artifacts dotnet|nuget-public [flags] | release-artifacts nuget-content PACKAGE | " +
+		"release-artifacts python create|verify|check-manifest|normalize-sdist|resolve-public [flags] [SDIST...]\n"
+	packageSignature = ".signature.p7s"
+	sourceLinkRoot   = "raw.githubusercontent.com/LogBrewCo/sdk"
 )
 
 var (
@@ -36,13 +37,20 @@ var (
 	dependencyRangePattern = regexp.MustCompile(`^\[([^,\s]+), ([^)\s]+)\)$`)
 	// Each command's required and optional flags.
 	releaseArtifactFlags = map[string][2][]string{
-		"dotnet":       {{"directory", "source-commit", "manifest"}, {"nuget-version", "dependency-range"}},
-		"nuget-public": {{"source-commit", "dependency-range", "source-root", "output-directory", "manifest"}, {"nuget-version"}},
+		"dotnet":                 {{"directory", "source-commit", "manifest"}, {"nuget-version", "dependency-range"}},
+		"nuget-public":           {{"source-commit", "dependency-range", "source-root", "output-directory", "manifest"}, {"nuget-version"}},
+		"python create":          {{"directory", "source-commit", "manifest"}, {"python-version"}},
+		"python verify":          {{"directory", "manifest"}, nil},
+		"python check-manifest":  {{"manifest", "source-commit"}, {"python-version"}},
+		"python normalize-sdist": {{"source-date-epoch"}, nil},
+		"python resolve-public": {{"directory", "manifest", "output-directory", "public-manifest", "reconciliation"},
+			nil},
 	}
 )
 
 // checkReleaseArtifacts validates exact .NET packages before publication, the
-// public NuGet bytes for reconciliation, or prints one package's content digest.
+// public NuGet bytes for reconciliation, or exact Python distributions, or
+// prints one package's content digest.
 func checkReleaseArtifacts(arguments []string, transport http.RoundTripper, output, diagnostic io.Writer) int {
 	if len(arguments) == 2 && arguments[0] == "nuget-content" {
 		data, err := os.ReadFile(arguments[1])
@@ -58,15 +66,21 @@ func checkReleaseArtifacts(arguments []string, transport http.RoundTripper, outp
 	flags := flag.NewFlagSet(releaseArtifactsMode, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	values := map[string]*string{}
-	for _, name := range []string{"directory", "source-commit", "manifest", "source-root", "output-directory"} {
+	for _, name := range []string{"directory", "source-commit", "manifest", "source-root", "output-directory",
+		"public-manifest", "reconciliation", "source-date-epoch"} {
 		values[name] = flags.String(name, "", "")
 	}
-	var versions, ranges versionFlags
+	var versions, ranges, pythonVersions versionFlags
 	flags.Var(&versions, "nuget-version", "")
 	flags.Var(&ranges, "dependency-range", "")
+	flags.Var(&pythonVersions, "python-version", "")
+	command, rest := "", arguments
+	for len(rest) > 0 && (command == "" || command == "python") {
+		command, rest = strings.TrimPrefix(command+" "+rest[0], " "), rest[1:]
+	}
 	var spec [2][]string
-	if len(arguments) > 0 && flags.Parse(arguments[1:]) == nil && flags.NArg() == 0 {
-		spec = releaseArtifactFlags[arguments[0]]
+	if flags.Parse(rest) == nil && (flags.NArg() == 0) != (command == "python normalize-sdist") {
+		spec = releaseArtifactFlags[command]
 	}
 	set := map[string]bool{}
 	flags.Visit(func(used *flag.Flag) { set[used.Name] = true })
@@ -77,10 +91,14 @@ func checkReleaseArtifacts(arguments []string, transport http.RoundTripper, outp
 	for _, name := range spec[0] {
 		valid = valid && set[name]
 	}
-	if !valid {
+	epoch, parsed := pyInt(*values["source-date-epoch"], 10, false)
+	if !valid || command == "python normalize-sdist" && !parsed {
 		return writeText(diagnostic, releaseArtifactsUsage, exitUsage)
 	}
-	if arguments[0] == "dotnet" {
+	if python, found := strings.CutPrefix(command, "python "); found {
+		return checkPythonArtifacts(python, values, pythonVersions, flags.Args(), epoch, transport, output, diagnostic)
+	}
+	if command == "dotnet" {
 		return checkDotnetArtifacts(values, versions, ranges, output, diagnostic)
 	}
 	return checkPublicNuGet(values, versions, ranges[len(ranges)-1], transport, output, diagnostic)
@@ -474,12 +492,20 @@ func readZipFile(entry zipEntry) ([]byte, error) {
 	return data, err
 }
 
-// packageContentSHA256 digests every member except the repository signature
-// by name, size, and bytes, so signing does not change the digest. A bounded
-// digest also applies the public package limits.
+// packageContentSHA256 digests every member except the repository signature,
+// so signing does not change the digest. A bounded digest also applies the
+// public package limits.
 func packageContentSHA256(data []byte, bounded bool) (string, error) {
+	return zipContentSHA256(data, map[bool]int{true: maxPackageBytes}[bounded],
+		func(name string) bool { return name != packageSignature })
+}
+
+// zipContentSHA256 digests the members that keep accepts by name, size, and
+// bytes. A positive limit also applies the public archive limits.
+func zipContentSHA256(data []byte, limit int, keep func(string) bool) (string, error) {
 	var err error
-	if bounded && !preflightPackage(data) {
+	bounded := limit > 0
+	if bounded && !preflightPackage(data, limit) {
 		err = errPublicNuGet
 	}
 	var entries []zipEntry
@@ -489,7 +515,7 @@ func packageContentSHA256(data []byte, bounded bool) (string, error) {
 	if err == nil && bounded {
 		err = boundedEntries(entries)
 	}
-	entries = slices.DeleteFunc(entries, func(entry zipEntry) bool { return entry.name == packageSignature })
+	entries = slices.DeleteFunc(entries, func(entry zipEntry) bool { return !keep(entry.name) })
 	slices.SortStableFunc(entries, func(left, right zipEntry) int { return strings.Compare(left.name, right.name) })
 	digest := sha256.New()
 	for index := 0; err == nil && index < len(entries); index++ {
