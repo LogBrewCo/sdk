@@ -470,28 +470,28 @@ jobs:
 
       - name: Publish logbrew-sdk to PyPI
         if: ${{ ! inputs.dry_run }}
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist/pypi/logbrew_py
           skip-existing: true
 
       - name: Publish logbrew-fastapi to PyPI
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist/pypi/logbrew_fastapi
           skip-existing: true
 
       - name: Publish logbrew-flask to PyPI
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist/pypi/logbrew_flask
           skip-existing: true
 
       - name: Publish logbrew-django to PyPI
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist/pypi/logbrew_django
           skip-existing: true
