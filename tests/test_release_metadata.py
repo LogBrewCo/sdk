@@ -139,8 +139,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
 
         protected_checker = (
-            '"$GITHUB_WORKSPACE/.release-control/scripts/'
-            'check_registry_publication.py"'
+            '"$RUNNER_TEMP/logbrew-release-control-probe" '
+            'registry-publication'
         )
         self.assertEqual(workflow.count(protected_checker), 2)
         for stage in (

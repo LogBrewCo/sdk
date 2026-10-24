@@ -52,9 +52,7 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_registry_publication.py
-            scripts/release_catalog.py
-            tools/toolchain-probe/release-catalog.toml
+            tools/toolchain-probe
           sparse-checkout-cone-mode: false
 
       - name: Bind protected release control
@@ -80,8 +78,7 @@ jobs:
             exit 1
           fi
           control_files=(
-            scripts/check_registry_publication.py
-            scripts/release_catalog.py
+            tools/toolchain-probe/action.yml
             tools/toolchain-probe/release-catalog.toml
           )
           for relative_path in "${control_files[@]}"; do
@@ -91,6 +88,15 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Build protected registry verifier
+        uses: ./.release-control/tools/toolchain-probe
+        with:
+          cache: "false"
+
+      - name: Keep protected registry verifier
+        shell: bash
+        run: mv "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" "$RUNNER_TEMP/logbrew-release-control-probe"
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -164,7 +170,7 @@ jobs:
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
           done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
-          python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
+          "$RUNNER_TEMP/logbrew-release-control-probe" registry-publication \
             --target nuget --expect-absent "${version_args[@]}"
 
       - name: Pack NuGet package
@@ -251,12 +257,6 @@ jobs:
               --skip-duplicate
           done < <(find dist/nuget -maxdepth 1 -type f -name '*.nupkg' -print | sort)
 
-      - name: Set up Python for registry verification
-        if: ${{ ! inputs.dry_run }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13"
-
       - name: Verify public NuGet package
         if: ${{ ! inputs.dry_run }}
         shell: bash
@@ -268,7 +268,7 @@ jobs:
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
           done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
-          python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
+          "$RUNNER_TEMP/logbrew-release-control-probe" registry-publication \
             --target nuget "${version_args[@]}" --retries 20 --retry-delay 30
 
       - name: Verify public NuGet install
