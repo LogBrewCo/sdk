@@ -52,7 +52,7 @@ var (
 	}
 	publicReconciliationTests = []string{
 		"tests.test_nuget_release_receipt_provenance", "tests.test_publication_run", "tests.test_python_public_pypi_smoke",
-		"tests.test_python_release_artifacts", "tests.test_release_artifact_receipt_modes", "tests.test_release_metadata",
+		"tests.test_release_artifact_receipt_modes", "tests.test_release_metadata",
 	}
 	nugetReceiptTests = []string{
 		"tests.test_nuget_release_receipt_provenance", "tests.test_release_artifact_receipt_modes",
@@ -79,7 +79,6 @@ var (
 		"scripts/check_nuget_release_receipt_provenance.py":       nugetReceiptTests,
 		"scripts/check_publication_run.py":                        {"tests.test_publication_run"},
 		"scripts/check_registry_publication.py":                   {"tests.test_registry_publication"},
-		"scripts/check_python_release_artifacts.py":               {"tests.test_python_release_artifacts"},
 		"scripts/release_catalog.py":                              releaseCatalogTests,
 		"tools/toolchain-probe/release-catalog.toml":              releaseCatalogTests,
 		"scripts/real_user_node_ingest_contract_smoke.sh":         {"tests.test_default_ingest_endpoints"},

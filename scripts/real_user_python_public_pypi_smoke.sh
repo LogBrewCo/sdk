@@ -335,7 +335,7 @@ for package, (expected_id, directory, filename_name) in zip(
         destination.write_bytes(body)
 PY
     fi
-    python3 scripts/check_python_release_artifacts.py verify \
+    "$tmp_dir/toolchain-probe" release-artifacts python verify \
         --directory "$artifact_root" \
         --manifest "$manifest_path"
     packages=()

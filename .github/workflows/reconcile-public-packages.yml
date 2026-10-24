@@ -99,7 +99,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/check_publication_run.py
-            scripts/check_python_release_artifacts.py
+            tools/toolchain-probe
           sparse-checkout-cone-mode: false
 
       - name: Bind protected release control
@@ -121,7 +121,7 @@ jobs:
             echo "Release checkout binding mismatch." >&2
             exit 1
           fi
-          for name in check_publication_run.py check_python_release_artifacts.py; do
+          for name in check_publication_run.py; do
             path="$control_root/scripts/$name"
             expected="$(
               git -C "$control_root" show "${RELEASE_CONTROL_SHA}:scripts/$name" |
@@ -159,6 +159,11 @@ jobs:
             --workflow-sha "$PUBLICATION_WORKFLOW_SHA" \
             --source-sha "$RELEASE_SOURCE_SHA"
 
+      - name: Build protected native SDK verifier
+        uses: ./.release-control/tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Download authenticated Python release manifest
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -183,14 +188,7 @@ jobs:
             echo "Authenticated Python release manifest is invalid." >&2
             exit 1
           fi
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_python_release_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python \
             check-manifest --manifest "${entries[0]}" \
             --source-commit "$RELEASE_SOURCE_SHA" \
             --python-version "logbrew-sdk=$SDK_VERSION" \
@@ -225,7 +223,7 @@ jobs:
               --wheel \
               --outdir "$output_dir" \
               "$package_dir"
-            python3 scripts/check_python_release_artifacts.py normalize-sdist \
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python normalize-sdist \
               --source-date-epoch "$SOURCE_DATE_EPOCH" \
               "$output_dir"/*.tar.gz
           done
@@ -240,14 +238,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
         run: |
           set -Eeuo pipefail
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_python_release_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" create \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python create \
             --directory "$RUNNER_TEMP/python-source-build" \
             --source-commit "$RELEASE_SOURCE_SHA" \
             --python-version "logbrew-sdk=$SDK_VERSION" \
@@ -259,14 +250,7 @@ jobs:
       - name: Reconcile public Python artifacts
         run: |
           set -Eeuo pipefail
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_python_release_artifacts.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python \
             resolve-public \
             --directory "$RUNNER_TEMP/python-source-build" \
             --manifest "$RUNNER_TEMP/python-source-build.json" \

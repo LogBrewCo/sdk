@@ -492,7 +492,7 @@ func TestPublicPackageValidation(t *testing.T) {
 func TestPublicArchiveLimits(t *testing.T) {
 	archive := zipBytes(t, zipMember{name: "a", body: "x"})
 	end := len(archive) - zipEndRecordBytes
-	if !preflightPackage(archive) {
+	if !preflightPackage(archive, maxPackageBytes) {
 		t.Fatal("valid archive rejected")
 	}
 	for name, data := range map[string][]byte{
@@ -506,7 +506,7 @@ func TestPublicArchiveLimits(t *testing.T) {
 		"offset":    patched(archive, end+16, 0),
 		"comment":   append(bytes.Clone(archive), 0),
 	} {
-		if preflightPackage(data) {
+		if preflightPackage(data, maxPackageBytes) {
 			t.Errorf("%s: archive accepted", name)
 		}
 	}

@@ -373,6 +373,8 @@ jobs:
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
 
       - name: Read Python package versions
         id: pypi-version
@@ -420,7 +422,7 @@ jobs:
               --wheel \
               --outdir "$output_dir" \
               "$package_dir"
-            python3 scripts/check_python_release_artifacts.py normalize-sdist \
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python normalize-sdist \
               --source-date-epoch "$SOURCE_DATE_EPOCH" \
               "$output_dir"/*.tar.gz
             python -m twine check "$output_dir"/*
@@ -430,7 +432,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 scripts/check_python_release_artifacts.py create \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python create \
             --directory dist/pypi \
             --source-commit "$(git rev-parse HEAD)" \
             --python-version "logbrew-sdk=${{ steps.pypi-version.outputs.core_version }}" \
@@ -451,11 +453,11 @@ jobs:
               --wheel \
               --outdir "$output_dir" \
               "$package_dir"
-            python3 scripts/check_python_release_artifacts.py normalize-sdist \
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python normalize-sdist \
               --source-date-epoch "$SOURCE_DATE_EPOCH" \
               "$output_dir"/*.tar.gz
           done
-          python3 scripts/check_python_release_artifacts.py verify \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python verify \
             --directory "$RUNNER_TEMP/python-reproducibility" \
             --manifest dist/pypi/python-release-artifacts.json
 
@@ -527,7 +529,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 scripts/check_python_release_artifacts.py resolve-public \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python resolve-public \
             --directory dist/pypi \
             --manifest dist/pypi/python-release-artifacts.json \
             --output-directory "$RUNNER_TEMP/python-public-artifacts" \
