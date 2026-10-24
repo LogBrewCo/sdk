@@ -2,7 +2,7 @@ name: Build native SDK verifier
 description: Build the verifier with its colocated compiler and dependency pins.
 inputs:
   cache:
-    description: Restore and save the Go toolchain, module, and build caches.
+    description: Reuse the Go toolchain, module, and build caches across runs.
     default: "true"
 runs:
   using: composite
