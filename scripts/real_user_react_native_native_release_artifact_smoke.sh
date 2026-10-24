@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -54,7 +55,7 @@ with zipfile.ZipFile(dsym_archive, "w") as archive:
 PY
 
 manifest="$tmp_dir/react-native-native-manifest.json"
-python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
+run_native_verifier release-artifacts native-manifest \
   --artifact-root "$app_root" \
   --release "2026.06.22-react-native-native" \
   --environment "production" \
