@@ -104,6 +104,11 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || inputs.ref }}
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
+
       - id: release
         name: Resolve release publish inputs
         shell: bash
@@ -179,9 +184,9 @@ jobs:
           fi
 
           if [[ "$publish_packages" == "true" ]]; then
-            nuget_packages="$(python3 scripts/nuget_release_plan.py canonicalize \
+            nuget_packages="$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget canonicalize \
               --packages-env INPUT_NUGET_PACKAGES)"
-            maven_artifacts="$(python3 scripts/maven_release_plan.py canonicalize \
+            maven_artifacts="$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan maven canonicalize \
               --root "$GITHUB_WORKSPACE" \
               --artifacts-env INPUT_MAVEN_ARTIFACTS)"
           else
@@ -207,12 +212,6 @@ jobs:
             echo "include_swiftpm=$include_swiftpm"
             printf 'verify_swiftpm_version=%s\n' "$verify_swiftpm_version"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Build native SDK verifier
-        if: ${{ steps.release.outputs.release_kind == 'repo-wide' }}
-        uses: ./tools/toolchain-probe
-        with:
-          cache: "false"
 
       - name: Guard repo-wide release package versions
         if: ${{ steps.release.outputs.release_kind == 'repo-wide' }}

@@ -337,6 +337,8 @@ jobs:
             scripts/check_nuget_release_receipt_provenance.py
             scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
+            scripts/native_verifier.sh
+            tools/toolchain-probe
           sparse-checkout-cone-mode: false
 
       - name: Bind protected release control
@@ -363,6 +365,7 @@ jobs:
             scripts/check_nuget_release_receipt_provenance.py
             scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
+            scripts/native_verifier.sh
           )
           for relative_path in "${control_files[@]}"; do
             path="$control_root/$relative_path"
@@ -412,6 +415,11 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Build protected native SDK verifier
+        uses: ./.release-control/tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Bind selected NuGet package plan
         shell: bash
         env:
@@ -421,10 +429,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-reconciliation-plan.json"
-          python3 scripts/nuget_release_plan.py create --root "$GITHUB_WORKSPACE" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget create --root "$GITHUB_WORKSPACE" \
             --packages-env NUGET_PACKAGES_INPUT --output "$plan"
           mapfile -t versions < <(
-            python3 scripts/nuget_release_plan.py entries \
+            "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries \
               --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions
           )
           expected=("LogBrew=$CORE_VERSION" "LogBrew.HttpClient=$HTTPCLIENT_VERSION")

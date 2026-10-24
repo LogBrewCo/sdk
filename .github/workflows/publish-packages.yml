@@ -812,12 +812,17 @@ jobs:
           fi
           printf 'script_sha256=%s\n' "$expected_control_sha256" >> "$GITHUB_OUTPUT"
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Plan selected Maven artifacts
         env:
           MAVEN_ARTIFACTS_INPUT: ${{ inputs.maven_artifacts }}
         run: |
           set -Eeuo pipefail
-          python3 scripts/maven_release_plan.py create --root "$GITHUB_WORKSPACE" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan maven create --root "$GITHUB_WORKSPACE" \
             --artifacts-env MAVEN_ARTIFACTS_INPUT \
             --output "$RUNNER_TEMP/logbrew-maven-release-plan.json"
 

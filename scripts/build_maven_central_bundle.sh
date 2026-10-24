@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 output_path="$repo_root/dist/logbrew-maven-central-bundle.zip"
 manifest_path=""
@@ -95,6 +96,10 @@ fi
 if [[ -z "$manifest_path" ]]; then
   manifest_path="$output_path.manifest.json"
 fi
+# The verifier may run from its own directory, so pass it absolute paths.
+[[ -z "$release_plan_path" || "$release_plan_path" == /* ]] || release_plan_path="$PWD/$release_plan_path"
+[[ "$manifest_path" == /* ]] || manifest_path="$PWD/$manifest_path"
+[[ "$output_path" == /* ]] || output_path="$PWD/$output_path"
 
 require_tool() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -111,12 +116,12 @@ if [[ -z "$release_plan_path" ]]; then
   for artifact in "${selected_artifacts[@]}"; do
     create_args+=(--artifact "$artifact")
   done
-  python3 "$repo_root"/scripts/maven_release_plan.py create \
+  run_native_verifier release-plan maven create \
     --root "$repo_root" \
     "${create_args[@]}" \
     --output "$release_plan_path"
 fi
-python3 "$repo_root"/scripts/maven_release_plan.py validate \
+run_native_verifier release-plan maven validate \
   --root "$repo_root" \
   --plan "$release_plan_path"
 
@@ -425,7 +430,7 @@ finalize_artifacts
 validate_staging
 zip_bundle
 source_commit="$(git -C "$repo_root" rev-parse HEAD)"
-python3 "$repo_root"/scripts/maven_release_plan.py manifest \
+run_native_verifier release-plan maven manifest \
   --plan "$release_plan_path" \
   --stage "$stage_dir" \
   --bundle "$output_path" \

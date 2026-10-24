@@ -24,7 +24,8 @@ func nativeCallerScripts(tb testing.TB) []string {
 		if invocation < 0 {
 			continue
 		}
-		launcher := strings.Index(source, `source "$repo_root/scripts/native_verifier.sh"`)
+		launcher := max(strings.Index(source, `source "$repo_root/scripts/native_verifier.sh"`),
+			strings.Index(source, `source "$control_root/scripts/native_verifier.sh"`))
 		if launcher < 0 || launcher > invocation {
 			tb.Fatalf("native caller does not load its launcher before use: %s", path)
 		}
@@ -57,7 +58,7 @@ func nativeWorkflowJobs(source string) []string {
 func TestNativeValidatorCallerProvisioning(t *testing.T) {
 	t.Parallel()
 	callers := nativeCallerScripts(t)
-	for _, name := range []string{"ci.yml", "publish-packages.yml", "release-readiness.yml"} {
+	for _, name := range []string{"ci.yml", "publish-nuget.yml", "publish-packages.yml", "release-readiness.yml"} {
 		data, readable := readCheckFile("../../.github/workflows/" + name)
 		if !readable {
 			t.Fatal("native workflow is unreadable")

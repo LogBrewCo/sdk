@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-maven-central-public.XXXXXX")"
 central_url="https://repo.maven.apache.org/maven2"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
@@ -39,7 +40,8 @@ fi
 if [[ "$receipt_mode" == "1" ]]; then
     [[ -z "$release_plan_path" && ${#legacy_args[@]} -eq 1 ]] || exit 1
 elif [[ -n "$release_plan_path" ]]; then
-    python3 "$repo_root"/scripts/maven_release_plan.py validate \
+    [[ "$release_plan_path" == /* ]] || release_plan_path="$PWD/$release_plan_path"
+    run_native_verifier release-plan maven validate \
         --root "$repo_root" \
         --plan "$release_plan_path"
 fi

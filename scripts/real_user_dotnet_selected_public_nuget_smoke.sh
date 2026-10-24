@@ -8,6 +8,7 @@ if [[ "$repo_root" != /* || -L "$repo_root" || ! -d "$repo_root" ||
   echo "NuGet release source root is invalid" >&2
   exit 1
 fi
+source "$control_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-nuget-selected.XXXXXX")"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 plan=""
@@ -151,7 +152,8 @@ if [[ -z "$plan" ]]; then
   exit 2
 fi
 
-python3 "$repo_root/scripts/nuget_release_plan.py" validate \
+[[ "$plan" == /* ]] || plan="$PWD/$plan"
+run_native_verifier release-plan nuget validate \
   --root "$repo_root" \
   --plan "$plan" >/dev/null
 
@@ -159,7 +161,7 @@ selected=()
 while IFS= read -r item; do
   selected+=("$item")
 done < <(
-  python3 "$repo_root/scripts/nuget_release_plan.py" entries \
+  run_native_verifier release-plan nuget entries \
     --root "$repo_root" \
     --plan "$plan" \
     --format versions
@@ -171,7 +173,7 @@ fi
 
 if [[ -n "$artifact_root" ]]; then
   selection_mode="$(
-    python3 "$repo_root/scripts/nuget_release_plan.py" entries \
+    run_native_verifier release-plan nuget entries \
       --root "$repo_root" --plan "$plan" --format mode
   )"
   if [[ "$selection_mode" != "selected" || -L "$artifact_root" || ! -d "$artifact_root" ]]; then
@@ -254,7 +256,7 @@ selected_ids=()
 while IFS= read -r package_id; do
   selected_ids+=("$package_id")
 done < <(
-  python3 "$repo_root/scripts/nuget_release_plan.py" entries \
+  run_native_verifier release-plan nuget entries \
     --root "$repo_root" \
     --plan "$plan" \
     --format ids
