@@ -4,6 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 source "$repo_root/scripts/dotnet_verifier_lock.sh"
+source "$repo_root/scripts/native_verifier.sh"
 
 core_version="${1:-}"
 httpclient_version="${2:-}"
@@ -179,7 +180,7 @@ dotnet restore "$app_dir/HttpClientCompatibility.csproj" \
   "${restore_sources[@]}" >/dev/null
 
 installed_package="$NUGET_PACKAGES/logbrew.httpclient/$httpclient_version/logbrew.httpclient.$httpclient_version.nupkg"
-package_digests="$(python3 - "$repo_root/scripts" "$installed_package" "$httpclient_version" "$source_commit" "$expected_content_sha256" "$core_version" <<'PY'
+raw_digest="$(python3 - "$repo_root/scripts" "$installed_package" "$httpclient_version" "$source_commit" "$core_version" <<'PY'
 import hashlib
 import sys
 import zipfile
@@ -187,14 +188,12 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
-from check_dotnet_release_artifacts import package_content_sha256
 from release_catalog import compatible_dependency_range
 
 package_path = Path(sys.argv[2])
 expected_version = sys.argv[3]
 source_commit = sys.argv[4]
-expected_content = sys.argv[5]
-core_version = sys.argv[6]
+core_version = sys.argv[5]
 expected_range = compatible_dependency_range(core_version)
 
 try:
@@ -249,14 +248,14 @@ for group in groups:
     if len(matches) != 1 or matches[0].attrib.get("version") != expected_range:
         raise SystemExit("installed HttpClient package dependency mismatch")
 
-raw_digest = hashlib.sha256(package_bytes).hexdigest()
-content_digest = package_content_sha256(package_path)
-if content_digest != expected_content:
-    raise SystemExit("installed HttpClient package content digest mismatch")
-print(raw_digest, content_digest)
+print(hashlib.sha256(package_bytes).hexdigest())
 PY
 )"
-read -r raw_digest content_digest <<< "$package_digests"
+content_digest="$(run_native_verifier release-artifacts nuget-content "$installed_package")"
+if [[ "$content_digest" != "$expected_content_sha256" ]]; then
+  echo "installed HttpClient package content digest mismatch" >&2
+  exit 1
+fi
 
 dotnet build "$app_dir/HttpClientCompatibility.csproj" \
   --configuration Release \

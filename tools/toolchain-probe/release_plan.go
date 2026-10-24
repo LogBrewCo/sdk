@@ -535,6 +535,10 @@ func readPlanJSON(path string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodePlanJSON(data)
+}
+
+func decodePlanJSON(data []byte) (any, error) {
 	if !utf8.Valid(data) {
 		return nil, errUnicodeDecode
 	}

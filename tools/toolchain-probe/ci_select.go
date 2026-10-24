@@ -51,9 +51,8 @@ var (
 		"js/logbrew-react-native/test/run-native-store-tests.sh",
 	}
 	publicReconciliationTests = []string{
-		"tests.test_nuget_public_artifacts", "tests.test_nuget_release_receipt_provenance",
-		"tests.test_publication_run", "tests.test_python_public_pypi_smoke", "tests.test_python_release_artifacts",
-		"tests.test_release_artifact_receipt_modes", "tests.test_release_metadata",
+		"tests.test_nuget_release_receipt_provenance", "tests.test_publication_run", "tests.test_python_public_pypi_smoke",
+		"tests.test_python_release_artifacts", "tests.test_release_artifact_receipt_modes", "tests.test_release_metadata",
 	}
 	nugetReceiptTests = []string{
 		"tests.test_nuget_release_receipt_provenance", "tests.test_release_artifact_receipt_modes",
@@ -77,7 +76,6 @@ var (
 		"scripts/real_user_maven_central_public_smoke.sh":         {"tests.test_maven_central_public_smoke"},
 		"scripts/real_user_swiftpm_public_smoke.sh":               {"tests.test_swiftpm_public_smoke"},
 		"scripts/real_user_native_release_public_smoke.sh":        {"tests.test_native_release_public_smoke"},
-		"scripts/check_nuget_public_artifacts.py":                 {"tests.test_nuget_public_artifacts"},
 		"scripts/check_nuget_release_receipt_provenance.py":       nugetReceiptTests,
 		"scripts/check_publication_run.py":                        {"tests.test_publication_run"},
 		"scripts/check_registry_publication.py":                   {"tests.test_registry_publication"},

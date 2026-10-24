@@ -1008,13 +1008,14 @@ func (check *metadataCheck) swift() {
 	}
 }
 
-// xmlElement keeps what the checks read from XML: names, the text before the
-// first child, and child elements.
+// xmlElement keeps what the checks read from XML: names, attributes keyed as
+// ElementTree keys them, the text before the first child, and child elements.
 type xmlElement struct {
-	value    *string
-	name     string
-	space    string
-	children []*xmlElement
+	value      *string
+	attributes map[string]string
+	name       string
+	space      string
+	children   []*xmlElement
 }
 
 const xmlNamespace = "http://www.w3.org/XML/1998/namespace"
@@ -1051,18 +1052,25 @@ func parseXML(data []byte) (*xmlElement, error) {
 		switch token := token.(type) {
 		case xml.StartElement:
 			names, declared := []xml.Name{token.Name}, []string{}
+			element := &xmlElement{name: token.Name.Local, space: token.Name.Space, attributes: map[string]string{}}
 			for _, attribute := range token.Attr {
-				if attribute.Name.Space == "xmlns" || attribute.Name == (xml.Name{Local: "xmlns"}) {
-					declared = append(declared, attribute.Value)
-				} else {
-					names = append(names, attribute.Name)
+				key := attribute.Name.Local
+				if attribute.Name.Space != "" {
+					key = "{" + attribute.Name.Space + "}" + key
 				}
+				if attribute.Name.Space == "xmlns" || key == "xmlns" {
+					declared = append(declared, attribute.Value)
+					continue
+				}
+				if _, found := element.attributes[key]; found {
+					return nil, errors.New("duplicate attribute")
+				}
+				names, element.attributes[key] = append(names, attribute.Name), attribute.Value
 			}
 			scopes = append(scopes, declared)
 			if slices.ContainsFunc(names, func(name xml.Name) bool { return !boundName(name, scopes) }) {
 				return nil, errors.New("unbound prefix")
 			}
-			element := &xmlElement{name: token.Name.Local, space: token.Name.Space}
 			switch {
 			case len(stack) > 0:
 				parent := stack[len(stack)-1]
@@ -1076,9 +1084,15 @@ func parseXML(data []byte) (*xmlElement, error) {
 		case xml.EndElement:
 			stack, scopes = stack[:len(stack)-1], scopes[:len(scopes)-1]
 		case xml.CharData:
+			text := string(token)
+			if offset == 0 {
+				text = strings.TrimPrefix(text, "\ufeff")
+			}
+			if len(stack) == 0 && strings.Trim(text, " \t\r\n") != "" {
+				return nil, errors.New("junk outside the document element")
+			}
 			if len(stack) > 0 && len(stack[len(stack)-1].children) == 0 {
 				top := stack[len(stack)-1]
-				text := string(token)
 				if top.value != nil {
 					text = *top.value + text
 				}
@@ -1128,6 +1142,26 @@ func (element *xmlElement) all(name string) []*xmlElement {
 		}
 	}
 	return matches
+}
+
+// iter returns the element and its descendants in document order.
+func (element *xmlElement) iter() []*xmlElement {
+	if element == nil {
+		return nil
+	}
+	elements := []*xmlElement{element}
+	for _, child := range element.children {
+		elements = append(elements, child.iter()...)
+	}
+	return elements
+}
+
+// attribute returns an attribute's value, or nil when it is missing.
+func (element *xmlElement) attribute(name string) any {
+	if value, found := element.attributes[name]; found {
+		return value
+	}
+	return nil
 }
 
 // text follows child names and returns the trimmed text, or nil when an
@@ -1383,7 +1417,7 @@ func (check *metadataCheck) reconcileWorkflow(text string) {
 		{"publication boundary authentication", "check_publication_run.py"},
 		{"Python artifact reconciliation", "check_python_release_artifacts.py"},
 		{"protected Python artifact creation", `python3 "$control_script" create`},
-		{"NuGet artifact reconciliation", "check_nuget_public_artifacts.py"},
+		{"NuGet artifact reconciliation", "release-artifacts nuget-public"},
 		{"NuGet provenance verification", "check_nuget_release_receipt_provenance.py"},
 		{"NuGet immutable source binding", `--source-root "$GITHUB_WORKSPACE"`},
 		{"Python exact-byte install", "real_user_python_public_pypi_smoke.sh"},
@@ -1520,7 +1554,7 @@ var publishNeedles = [][2]string{
 	{"NuGet symbol pack", "-p:SymbolPackageFormat=snupkg"},
 	{"NuGet source commit pack", "-p:RepositoryCommit=$source_commit"},
 	{"NuGet Source Link pack", "-p:EnableSourceLink=true"},
-	{"NuGet artifact validation", "python3 scripts/check_dotnet_release_artifacts.py"},
+	{"NuGet artifact validation", "release-artifacts dotnet"},
 	{"NuGet artifact digest receipt", "steps.nuget-artifacts.outputs.httpclient_content_sha256"},
 	{"NuGet collision preflight", "--expect-absent"},
 	{"NuGet bounded core dependency", `--dependency-range "LogBrew.HttpClient:LogBrew=`},

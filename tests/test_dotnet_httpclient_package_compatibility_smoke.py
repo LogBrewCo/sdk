@@ -16,7 +16,7 @@ class DotnetHttpClientPackageCompatibilitySmokeTests(unittest.TestCase):
         for expected in (
             "LogBrew.HttpClient",
             "LOGBREW_NUGET_SOURCE",
-            "package_content_sha256",
+            "release-artifacts nuget-content",
             "source_commit",
             "GetPublicKeyToken",
             "<PublishAot>true</PublishAot>",
