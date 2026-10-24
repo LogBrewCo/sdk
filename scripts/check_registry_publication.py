@@ -18,14 +18,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from check_release_metadata import (
+from release_catalog import (
+    DOTNET_RELEASE_PACKAGES,
     MAVEN_VERSION,
     PACKAGIST_VERSION,
     PUBLIC_VERSION,
     RUBYGEMS_VERSION,
     RUST_VERSION,
 )
-from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES
 
 
 NPM_PACKAGES = (

@@ -44,10 +44,6 @@ tests/test_release_metadata.py	*	ihas	generated central portal publishing creden
 tests/test_release_metadata.py	*	ihas	id-token: write
 tests/test_release_metadata.py	*	ihas	maven central generated credential hint
 tests/test_release_metadata.py	*	ihas	maven central user-token credential hint
-scripts/check_release_metadata.py	*	ihas	"maven central generated credential hint": "generated central portal publishing credentials"
-scripts/check_release_metadata.py	*	ihas	"maven central user-token credential hint": "central portal user-token credentials"
-scripts/check_release_metadata.py	*	ihas	"npm oidc exchange": "/-/npm/v1/oidc/" "token/exchange/package/"
-scripts/check_release_metadata.py	*	ihas	"npm oidc permission": "id-" "token: write"
 tests/test_affected_family_release_prep.py	*	ihas	"/-/npm/v1/oidc/" "token/exchange/package/"
 tests/test_affected_family_release_prep.py	*	ihas	npm_config_to
 scripts/check_maven_central_auth_preflight.sh	*	ihas	central_portal_password

@@ -15,7 +15,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "check_registry_publication.py"
-RELEASE_METADATA_PATH = ROOT / "scripts" / "check_release_metadata.py"
+RELEASE_CATALOG_PATH = ROOT / "scripts" / "release_catalog.py"
 
 
 def load_module(module_name: str, path: Path) -> Any:
@@ -28,7 +28,7 @@ def load_module(module_name: str, path: Path) -> Any:
     return module
 
 
-check_release_metadata = load_module("check_release_metadata", RELEASE_METADATA_PATH)
+release_catalog = load_module("release_catalog", RELEASE_CATALOG_PATH)
 check_registry_publication = load_module("check_registry_publication", MODULE_PATH)
 
 
@@ -202,12 +202,12 @@ class RegistryPublicationTests(unittest.TestCase):
 
     def test_released_package_sets_match_metadata(self) -> None:
         self.assertEqual(
-            set(check_release_metadata.JS_PACKAGES.values())
+            set(release_catalog.JS_PACKAGES.values())
             - {"@logbrew/prisma"},
             set(check_registry_publication.NPM_PACKAGES),
         )
         self.assertEqual(
-            check_release_metadata.NUGET_PACKAGES,
+            {package.package_id for package in release_catalog.DOTNET_RELEASE_PACKAGES},
             set(check_registry_publication.NUGET_PACKAGES),
         )
 
@@ -238,8 +238,8 @@ class RegistryPublicationTests(unittest.TestCase):
     def test_family_targets_use_their_release_versions_by_default(self) -> None:
         original_validate_check = check_registry_publication.validate_check
         for target, label, version in (
-            ("rubygems", "logbrew-sdk", check_release_metadata.RUBYGEMS_VERSION),
-            ("packagist", "logbrew/sdk", check_release_metadata.PACKAGIST_VERSION),
+            ("rubygems", "logbrew-sdk", release_catalog.RUBYGEMS_VERSION),
+            ("packagist", "logbrew/sdk", release_catalog.PACKAGIST_VERSION),
         ):
             observed: dict[str, set[str]] = {}
 
@@ -473,13 +473,13 @@ class RegistryPublicationTests(unittest.TestCase):
                 "rubygems",
                 "0.1.0",
                 {},
-                (f"logbrew-sdk@{check_release_metadata.RUBYGEMS_VERSION}",),
+                (f"logbrew-sdk@{release_catalog.RUBYGEMS_VERSION}",),
             ),
             (
                 "packagist",
                 "0.1.0",
                 {},
-                (f"logbrew/sdk@{check_release_metadata.PACKAGIST_VERSION}",),
+                (f"logbrew/sdk@{release_catalog.PACKAGIST_VERSION}",),
             ),
             (
                 "maven",
@@ -536,11 +536,11 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertEqual(observed[("pypi", "logbrew-sdk")], {"0.1.4", "v0.1.4"})
         self.assertEqual(
             observed[("rubygems", "logbrew-sdk")],
-            check_registry_publication.expected_versions(check_release_metadata.RUBYGEMS_VERSION),
+            check_registry_publication.expected_versions(release_catalog.RUBYGEMS_VERSION),
         )
         self.assertEqual(
             observed[("packagist", "logbrew/sdk")],
-            check_registry_publication.expected_versions(check_release_metadata.PACKAGIST_VERSION),
+            check_registry_publication.expected_versions(release_catalog.PACKAGIST_VERSION),
         )
 
     def test_same_named_packages_use_family_scoped_defaults(self) -> None:
@@ -570,11 +570,11 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertEqual(observed[("pypi", "logbrew-sdk")], {"0.1.4", "v0.1.4"})
         self.assertEqual(
             observed[("rubygems", "logbrew-sdk")],
-            check_registry_publication.expected_versions(check_release_metadata.RUBYGEMS_VERSION),
+            check_registry_publication.expected_versions(release_catalog.RUBYGEMS_VERSION),
         )
         self.assertEqual(
             observed[("packagist", "logbrew/sdk")],
-            check_registry_publication.expected_versions(check_release_metadata.PACKAGIST_VERSION),
+            check_registry_publication.expected_versions(release_catalog.PACKAGIST_VERSION),
         )
 
     def test_cross_family_verify_requires_exact_released_package_sets(self) -> None:

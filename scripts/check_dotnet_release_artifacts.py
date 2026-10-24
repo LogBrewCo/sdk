@@ -12,7 +12,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, compatible_dependency_range
+from release_catalog import DOTNET_RELEASE_PACKAGES, compatible_dependency_range
 
 
 REPOSITORY_URL = "https://github.com/LogBrewCo/sdk"

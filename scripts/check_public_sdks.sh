@@ -699,7 +699,7 @@ run_shell_step "source scripts/native_verifier.sh && run_native_verifier backend
 mark_step_complete
 
 begin_next_step "Release metadata checks"
-run_shell_step "python3 scripts/check_release_metadata.py"
+run_shell_step "source scripts/native_verifier.sh && run_native_verifier release-metadata \"\$PWD\""
 mark_step_complete
 
 begin_next_step "GitHub release safety checks"

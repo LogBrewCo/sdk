@@ -152,6 +152,11 @@ jobs:
           bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts
           (cd tools/npm-publish && bun audit)
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Publish npm packages
         id: npm-packages
         shell: bash
@@ -243,7 +248,7 @@ jobs:
             fi
           done
 
-          python3 scripts/check_release_metadata.py "${metadata_args[@]}"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata "${metadata_args[@]}" .
 
           npm_publication_plan="$(mktemp)"
           publication_plan_args=(--registry "https://registry.npmjs.org")
@@ -1010,8 +1015,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/check_registry_publication.py
-            scripts/check_release_metadata.py
-            scripts/release_metadata_dotnet.py
+            scripts/release_catalog.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
@@ -1041,12 +1045,12 @@ jobs:
           fi
           control_files=(
             scripts/check_registry_publication.py
-            scripts/check_release_metadata.py
-            scripts/release_metadata_dotnet.py
+            scripts/release_catalog.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
             tools/toolchain-probe/action.yml
+            tools/toolchain-probe/release-catalog.toml
             spec/event-batch.schema.json
             scripts/check_sdk_parity.py
             fixtures/valid-batch.json
@@ -1153,8 +1157,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/check_registry_publication.py
-            scripts/check_release_metadata.py
-            scripts/release_metadata_dotnet.py
+            scripts/release_catalog.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
@@ -1184,12 +1187,12 @@ jobs:
           fi
           control_files=(
             scripts/check_registry_publication.py
-            scripts/check_release_metadata.py
-            scripts/release_metadata_dotnet.py
+            scripts/release_catalog.py
             scripts/real_user_swiftpm_public_smoke.sh
             scripts/native_verifier.sh
             scripts/release_artifact_receipt.py
             tools/toolchain-probe/action.yml
+            tools/toolchain-probe/release-catalog.toml
             spec/event-batch.schema.json
             scripts/check_sdk_parity.py
             fixtures/valid-batch.json
