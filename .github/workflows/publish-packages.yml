@@ -1208,6 +1208,8 @@ jobs:
 
       - name: Build protected native SDK verifier
         uses: ./.release-control/tools/toolchain-probe
+        with:
+          cache: "false"
 
       - name: Verify public Swift products
         shell: bash

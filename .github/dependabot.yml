@@ -1,7 +1,9 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /tools/toolchain-probe
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
