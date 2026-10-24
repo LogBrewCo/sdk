@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -31,7 +32,7 @@ const (
 	publishNuGetWorkflow    = ".github/workflows/publish-nuget.yml"
 	reconcilePublicWorkflow = ".github/workflows/reconcile-public-packages.yml"
 	checkoutDiscardsAuth    = "persist-credentials: false"
-	protectedRegistryCheck  = `"$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py"`
+	protectedRegistryCheck  = `"$RUNNER_TEMP/logbrew-release-control-probe" registry-publication`
 	mavenSelectorInput      = "${{ inputs.maven_artifacts }}"
 	nugetSelectorInput      = "${{ inputs.nuget_packages }}"
 )
@@ -390,8 +391,12 @@ func pyString(text string) string {
 			builder.WriteString(`\r`)
 		case character == '\t':
 			builder.WriteString(`\t`)
-		case character < ' ' || character == 0x7f:
+		case character < 0x100 && !unicode.IsPrint(character):
 			fmt.Fprintf(&builder, `\x%02x`, character)
+		case character < 0x10000 && !unicode.IsPrint(character):
+			fmt.Fprintf(&builder, `\u%04x`, character)
+		case !unicode.IsPrint(character):
+			fmt.Fprintf(&builder, `\U%08x`, character)
 		default:
 			builder.WriteRune(character)
 		}

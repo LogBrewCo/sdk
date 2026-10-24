@@ -356,7 +356,7 @@ func TestReleaseWorkflowFindings(t *testing.T) {
 		{replaceAll(checkoutDiscardsAuth, "persist-credentials: true"), publishNuGet, []string{
 			publishNuGet + ": both checkouts must discard authentication state",
 		}},
-		{replaceAll(protectedRegistryCheck, `"scripts/check_registry_publication.py"`), publishNuGet, []string{
+		{replaceAll(protectedRegistryCheck, `"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication`), publishNuGet, []string{
 			publishNuGet + ": missing protected registry checker execution",
 			publishNuGet + ": both NuGet registry checks must use protected release control",
 		}},

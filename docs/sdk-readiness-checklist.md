@@ -154,7 +154,7 @@ Run these from the repository root in Bash.
 - JavaScript release-artifact upload proof: `bash scripts/real_user_js_release_artifact_upload_smoke.sh`
 - Native/mobile release-artifact dry-run proof: `bash scripts/real_user_native_release_artifact_smoke.sh`
 - Native/mobile release-artifact upload proof: `bash scripts/real_user_native_release_artifact_upload_smoke.sh`
-- Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`; for Maven verification while optional artifacts are still pending publication, pass `--maven-artifact` and `--maven-version` only for the currently public artifacts.
+- Public registry versions after real publishes: `source scripts/native_verifier.sh && run_native_verifier registry-publication --target all`; for Maven verification while optional artifacts are still pending publication, pass `--maven-artifact` and `--maven-version` only for the currently public artifacts.
 - Shared Markdown docs: `source scripts/native_verifier.sh && run_native_verifier markdown-links "$PWD"`
 - Shared shell smoke/package scripts: `bash scripts/check_shell_static.sh`
 - JavaScript, Browser, Node.js, Express, Fastify, NestJS, Angular, Vue, Svelte, React, React Native, or Next.js: `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, package `npm test`, framework smoke scripts, and `npm pack --dry-run`
