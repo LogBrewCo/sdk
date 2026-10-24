@@ -5,7 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 trap 'echo "rust dependency real-user smoke failed near line $LINENO" >&2' ERR
-crate_version="$(python3 "$repo_root/scripts/read_rust_crate_version.py" "$repo_root/rust/logbrew/Cargo.toml")"
+source "$repo_root/scripts/native_verifier.sh"
+crate_version="$(run_native_verifier release-versions --rust "$repo_root")"
 crate_name="logbrew-$crate_version"
 
 cargo package \

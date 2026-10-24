@@ -94,4 +94,4 @@ For Maven Central, set `maven_artifacts` to the explicit artifact IDs being rele
 3. Keep `.github/publishing/trusted-publishers.md` aligned with registry-side trusted publisher records.
 4. Run publish workflow dry-runs before every external publish.
 5. Run `target=verify` after registry publishes or when marketplace state is unclear.
-6. Before creating a repo-wide Release, run `python3 scripts/check_repo_wide_release_versions.py vX.Y.Z` and fix any mixed-version output.
+6. Before creating a repo-wide Release, run `source scripts/native_verifier.sh && run_native_verifier release-versions vX.Y.Z "$PWD"` and fix any mixed-version output.

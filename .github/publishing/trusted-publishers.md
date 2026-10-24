@@ -24,7 +24,8 @@ show package-specific progress without republishing unrelated SDKs. Use the manu
 Important: GitHub evaluates `release` workflows from the release tag's commit. Do not create
 GitHub Releases for historical tags that point to commits before the scoped-release guard unless
 `publish-release.yml` is disabled or the workflow behavior has been audited first.
-Before creating a repo-wide Release, run `python3 scripts/check_repo_wide_release_versions.py vX.Y.Z`
+Before creating a repo-wide Release, run
+`source scripts/native_verifier.sh && run_native_verifier release-versions vX.Y.Z "$PWD"`
 so mixed package versions fail before registry publishing is dispatched.
 
 Run the package workflow in dry-run mode before any real publish:

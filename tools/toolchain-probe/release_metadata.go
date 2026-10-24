@@ -52,6 +52,7 @@ type releaseCatalog struct {
 	Maven         string         `toml:"maven"`
 	JavaMaven     string         `toml:"java_maven"`
 	NPM           [][]string     `toml:"npm"`
+	RepoWide      [][]string     `toml:"repo_wide"`
 	NuGet         []nugetRelease `toml:"nuget"`
 	PyPI          []pypiRelease  `toml:"pypi"`
 }
@@ -87,6 +88,11 @@ func loadReleaseCatalog(text string) (releaseCatalog, error) {
 	for _, entry := range catalog.NPM {
 		if len(entry) != 2 {
 			return catalog, errors.New("each npm entry needs a directory and a package name")
+		}
+	}
+	for _, entry := range catalog.RepoWide {
+		if len(entry) != 3 {
+			return catalog, errors.New("each repo_wide entry needs an ecosystem, a package, and a manifest")
 		}
 	}
 	return catalog, nil
@@ -996,18 +1002,29 @@ func (check *metadataCheck) swift() {
 	}
 }
 
-// xmlElement keeps what the checks read from XML: local names, the text
-// before the first child, and child elements.
+// xmlElement keeps what the checks read from XML: names, the text before the
+// first child, and child elements.
 type xmlElement struct {
 	value    *string
 	name     string
+	space    string
 	children []*xmlElement
+}
+
+const xmlNamespace = "http://www.w3.org/XML/1998/namespace"
+
+// boundName reports whether a name's namespace prefix was declared in scope;
+// the decoder leaves an undeclared prefix in place of its namespace.
+func boundName(name xml.Name, scopes [][]string) bool {
+	return name.Space == "" || name.Space == xmlNamespace ||
+		slices.ContainsFunc(scopes, func(declared []string) bool { return slices.Contains(declared, name.Space) })
 }
 
 func parseXML(data []byte) (*xmlElement, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
 	var root *xmlElement
 	var stack []*xmlElement
+	var scopes [][]string
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
@@ -1018,7 +1035,19 @@ func parseXML(data []byte) (*xmlElement, error) {
 		}
 		switch token := token.(type) {
 		case xml.StartElement:
-			element := &xmlElement{name: token.Name.Local}
+			names, declared := []xml.Name{token.Name}, []string{}
+			for _, attribute := range token.Attr {
+				if attribute.Name.Space == "xmlns" || attribute.Name == (xml.Name{Local: "xmlns"}) {
+					declared = append(declared, attribute.Value)
+				} else {
+					names = append(names, attribute.Name)
+				}
+			}
+			scopes = append(scopes, declared)
+			if slices.ContainsFunc(names, func(name xml.Name) bool { return !boundName(name, scopes) }) {
+				return nil, errors.New("unbound prefix")
+			}
+			element := &xmlElement{name: token.Name.Local, space: token.Name.Space}
 			switch {
 			case len(stack) > 0:
 				parent := stack[len(stack)-1]
@@ -1030,7 +1059,7 @@ func parseXML(data []byte) (*xmlElement, error) {
 			}
 			stack = append(stack, element)
 		case xml.EndElement:
-			stack = stack[:len(stack)-1]
+			stack, scopes = stack[:len(stack)-1], scopes[:len(scopes)-1]
 		case xml.CharData:
 			if len(stack) > 0 && len(stack[len(stack)-1].children) == 0 {
 				top := stack[len(stack)-1]
@@ -1315,7 +1344,7 @@ func (check *metadataCheck) releaseWorkflows() {
 		}
 		docs := check.read(relative)
 		check.require(strings.Contains(docs, "release tag's commit") && strings.Contains(docs, "historical tags") &&
-			strings.Contains(docs, "check_repo_wide_release_versions.py"),
+			strings.Contains(docs, "run_native_verifier release-versions"),
 			relative+": missing release workflow safety warning")
 		if relative == ".github/publishing/trusted-publishers.md" {
 			check.needles(docs, relative+": missing trusted publisher npm package ", check.catalog.npmNames()...)
@@ -1359,7 +1388,7 @@ func (check *metadataCheck) publishReleaseWorkflow(text string) {
 		{"scoped GitHub Release publish disable", `publish_packages="false"`},
 		{"repo-wide SemVer release gate",
 			`elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then`},
-		{"repo-wide version guard", `python3 scripts/check_repo_wide_release_versions.py "$REF"`},
+		{"repo-wide version guard", `"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-versions "$REF" .`},
 		{"publish dispatch output guard", "if: ${{ steps.release.outputs.publish_packages == 'true' }}"},
 		{"scoped GitHub Release summary", "Skipped package publishing for scoped GitHub Release"},
 		{"Maven selected-artifact release input", "maven_artifacts:"},
@@ -1518,7 +1547,7 @@ var publishNeedles = [][2]string{
 	{"npm provenance generation", "provenance: true"},
 	{"npm provenance registry verification", "--require-npm-provenance"},
 	{"crates.io package version output", "id: crate-version"},
-	{"crates.io manifest version reader", "python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml"},
+	{"crates.io manifest version reader", `"${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-versions --rust .`},
 	{"crates.io exact public version verification",
 		`--target crates --version "${{ steps.crate-version.outputs.version }}"`},
 	{"Maven Central public install smoke", "bash scripts/real_user_maven_central_public_smoke.sh"},

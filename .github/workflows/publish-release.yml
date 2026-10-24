@@ -208,11 +208,18 @@ jobs:
             printf 'verify_swiftpm_version=%s\n' "$verify_swiftpm_version"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Build native SDK verifier
+        if: ${{ steps.release.outputs.release_kind == 'repo-wide' }}
+        uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Guard repo-wide release package versions
         if: ${{ steps.release.outputs.release_kind == 'repo-wide' }}
         env:
           REF: ${{ steps.release.outputs.ref }}
-        run: python3 scripts/check_repo_wide_release_versions.py "$REF"
+        run: |
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-versions "$REF" .
 
       - name: Dispatch publish-packages.yml
         if: ${{ steps.release.outputs.publish_packages == 'true' }}

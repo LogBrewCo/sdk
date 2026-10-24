@@ -572,9 +572,14 @@ jobs:
           rustup toolchain install --no-self-update
           rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Read Rust crate version
         id: crate-version
-        run: echo "version=$(python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-versions --rust .)" >> "$GITHUB_OUTPUT"
 
       - name: Dry-run crate package
         working-directory: rust/logbrew
