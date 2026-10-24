@@ -188,7 +188,7 @@ from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
 from check_dotnet_release_artifacts import package_content_sha256
-from release_metadata_dotnet import compatible_dependency_range
+from release_catalog import compatible_dependency_range
 
 package_path = Path(sys.argv[2])
 expected_version = sys.argv[3]

@@ -141,7 +141,7 @@ func TestArgumentDiagnosticWriteFailure(t *testing.T) {
 		code   int
 	}{
 		{"bad-args", "toolchain-probe accepts inventory, clock, summary, deadline, package-json, " +
-			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, or confidentiality-scan mode\n", wantUsageExit},
+			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, confidentiality-scan, or release-metadata mode\n", wantUsageExit},
 		{closedArgumentFixture, "", wantWriteExit},
 	} {
 		t.Run(test.mode, func(t *testing.T) {

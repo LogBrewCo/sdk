@@ -53,8 +53,8 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/check_registry_publication.py
-            scripts/check_release_metadata.py
-            scripts/release_metadata_dotnet.py
+            scripts/release_catalog.py
+            tools/toolchain-probe/release-catalog.toml
           sparse-checkout-cone-mode: false
 
       - name: Bind protected release control
@@ -81,8 +81,8 @@ jobs:
           fi
           control_files=(
             scripts/check_registry_publication.py
-            scripts/check_release_metadata.py
-            scripts/release_metadata_dotnet.py
+            scripts/release_catalog.py
+            tools/toolchain-probe/release-catalog.toml
           )
           for relative_path in "${control_files[@]}"; do
             control_path="$control_root/$relative_path"
@@ -122,7 +122,7 @@ jobs:
             echo "Could not read NuGet package versions from .NET package projects" >&2
             exit 1
           fi
-          core_dependency_range="$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_metadata_dotnet import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' "$core_version")"
+          core_dependency_range="$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_catalog import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' "$core_version")"
           core_dependency_range_msbuild="${core_dependency_range/, /%2C}"
           {
             echo "core_version=$core_version"
@@ -136,6 +136,11 @@ jobs:
             echo "otel_version=$otel_version"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
+
       - name: Validate NuGet release metadata
         shell: bash
         run: |
@@ -146,7 +151,7 @@ jobs:
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
           done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
-          python3 scripts/check_release_metadata.py "${version_args[@]}"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-metadata "${version_args[@]}" .
 
       - name: Check NuGet version collision
         if: ${{ ! inputs.dry_run }}

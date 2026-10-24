@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import check_release_metadata  # noqa: E402
+import release_catalog  # noqa: E402
 from check_npm_peer_compatibility import caret_range_allows  # noqa: E402
 import check_repo_wide_release_versions  # noqa: E402
 
@@ -59,7 +59,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
         self.assertEqual(rust["package"]["version"], "0.1.8")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
-        self.assertIn(f'VERSION = "{check_release_metadata.RUBYGEMS_VERSION}"', ruby_version)
+        self.assertIn(f'VERSION = "{release_catalog.RUBYGEMS_VERSION}"', ruby_version)
         self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.13")
         for package, version in (("LogBrew", "0.1.11"), ("LogBrew.HttpClient", "0.1.6")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
@@ -252,21 +252,27 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             project = ROOT / f"dotnet/logbrew-dotnet/src/{package_id}/{package_id}.csproj"
             self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
-    def test_release_checker_constants_match_the_affected_version_matrix(self) -> None:
-        self.assertEqual(check_release_metadata.RUST_VERSION, "0.1.8")
-        self.assertEqual(check_release_metadata.RUBYGEMS_VERSION, "0.1.16")
-        self.assertEqual(check_release_metadata.PACKAGIST_VERSION, "0.1.23")
-        self.assertEqual(check_release_metadata.DOTNET_VERSION, "0.1.11")
-        self.assertEqual(check_release_metadata.DOTNET_ASPNETCORE_VERSION, "0.1.3")
-        self.assertEqual(check_release_metadata.DOTNET_HTTPCLIENT_VERSION, "0.1.6")
-        self.assertEqual(check_release_metadata.DOTNET_HANGFIRE_VERSION, "0.1.0")
-        self.assertEqual(check_release_metadata.JAVA_MAVEN_VERSION, "0.1.13")
-        self.assertEqual(check_release_metadata.MAVEN_VERSION, "0.2.3")
+    def test_release_catalog_matches_the_affected_version_matrix(self) -> None:
+        catalog = release_catalog.CATALOG
+        self.assertEqual(release_catalog.RUST_VERSION, "0.1.8")
+        self.assertEqual(release_catalog.RUBYGEMS_VERSION, "0.1.16")
+        self.assertEqual(release_catalog.PACKAGIST_VERSION, "0.1.23")
         self.assertEqual(
+            {package.package_id: package.version for package in release_catalog.DOTNET_RELEASE_PACKAGES},
             {
-                value["name"]: value["version"]
-                for value in check_release_metadata.PYTHON_PACKAGES.values()
+                "LogBrew": "0.1.11",
+                "LogBrew.AspNetCore": "0.1.3",
+                "LogBrew.EntityFrameworkCore": "0.1.0",
+                "LogBrew.Hangfire": "0.1.0",
+                "LogBrew.HttpClient": "0.1.6",
+                "LogBrew.StackExchangeRedis": "0.1.0",
+                "LogBrew.OpenTelemetry": "0.1.1",
             },
+        )
+        self.assertEqual(catalog["java_maven"], "0.1.13")
+        self.assertEqual(release_catalog.MAVEN_VERSION, "0.2.3")
+        self.assertEqual(
+            {package["name"]: package["version"] for package in catalog["pypi"]},
             {
                 "logbrew-sdk": "0.1.25",
                 "logbrew-fastapi": "0.1.13",

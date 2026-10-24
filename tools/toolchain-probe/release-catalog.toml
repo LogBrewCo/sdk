@@ -1,0 +1,109 @@
+# Public package versions and identities that the release-metadata check
+# expects. Release preparation updates the versions here.
+
+public_version = "0.1.0"
+rust = "0.1.8"
+rubygems = "0.1.16"
+packagist = "0.1.23"
+unity = "0.2.2"
+maven = "0.2.3"
+java_maven = "0.1.13"
+
+# [directory, npm package]
+npm = [
+  ["js/logbrew-angular", "@logbrew/angular"],
+  ["js/logbrew-amqplib", "@logbrew/amqplib"],
+  ["js/logbrew-aws-sqs", "@logbrew/aws-sqs"],
+  ["js/logbrew-browser", "@logbrew/browser"],
+  ["js/logbrew-bullmq", "@logbrew/bullmq"],
+  ["js/logbrew-express", "@logbrew/express"],
+  ["js/logbrew-fastify", "@logbrew/fastify"],
+  ["js/logbrew-js", "@logbrew/sdk"],
+  ["js/logbrew-kafkajs", "@logbrew/kafkajs"],
+  ["js/logbrew-nestjs", "@logbrew/nestjs"],
+  ["js/logbrew-next", "@logbrew/next"],
+  ["js/logbrew-node", "@logbrew/node"],
+  ["js/logbrew-prisma", "@logbrew/prisma"],
+  ["js/logbrew-react", "@logbrew/react"],
+  ["js/logbrew-react-native", "@logbrew/react-native"],
+  ["js/logbrew-svelte", "@logbrew/svelte"],
+  ["js/logbrew-vue", "@logbrew/vue"],
+]
+
+# Each NuGet package lives at dotnet/logbrew-dotnet/src/<id>/<id>.csproj.
+[[nuget]]
+id = "LogBrew"
+version = "0.1.11"
+version_output = "core_version"
+
+[[nuget]]
+id = "LogBrew.AspNetCore"
+version = "0.1.3"
+version_output = "aspnetcore_version"
+
+[[nuget]]
+id = "LogBrew.EntityFrameworkCore"
+version = "0.1.0"
+version_output = "efcore_version"
+
+[[nuget]]
+id = "LogBrew.Hangfire"
+version = "0.1.0"
+version_output = "hangfire_version"
+
+[[nuget]]
+id = "LogBrew.HttpClient"
+version = "0.1.6"
+version_output = "httpclient_version"
+
+[[nuget]]
+id = "LogBrew.StackExchangeRedis"
+version = "0.1.0"
+version_output = "redis_version"
+
+[[nuget]]
+id = "LogBrew.OpenTelemetry"
+version = "0.1.1"
+version_output = "otel_version"
+
+[[pypi]]
+dir = "python/logbrew_django"
+name = "logbrew-django"
+version = "0.1.8"
+package = "logbrew_django"
+description = "Django integration"
+requires_python = ">=3.10"
+dependencies = ["Django>=4.2.30,<6", "logbrew-sdk>=0.1.21,<0.2.0"]
+
+[[pypi]]
+dir = "python/logbrew_fastapi"
+name = "logbrew-fastapi"
+version = "0.1.13"
+package = "logbrew_fastapi"
+description = "FastAPI integration"
+requires_python = ">=3.10"
+dependencies = ["fastapi>=0.111.1", "logbrew-sdk>=0.1.21,<0.2.0"]
+optional_dependencies = { celery = ["logbrew-sdk[celery]>=0.1.21,<0.2.0"] }
+
+[[pypi]]
+dir = "python/logbrew_flask"
+name = "logbrew-flask"
+version = "0.1.7"
+package = "logbrew_flask"
+description = "Flask integration"
+requires_python = ">=3.10"
+dependencies = ["Flask>=3.1", "logbrew-sdk>=0.1.21,<0.2.0"]
+
+[[pypi]]
+dir = "python/logbrew_py"
+name = "logbrew-sdk"
+version = "0.1.25"
+package = "logbrew_sdk"
+description = "Public LogBrew Python SDK"
+requires_python = ">=3.10"
+dependencies = [
+  "certifi>=2026.7.22",
+  "truststore>=0.10.4,<1",
+  "typing-extensions>=4.1; python_version < '3.11'",
+]
+optional_dependencies = { arq = ["arq>=0.28,<1"], celery = ["celery>=5,<6"], dramatiq = ["dramatiq>=2.2.1,<3"], persistence = ["cryptography>=49,<50"], rq = ["rq>=2,<3"] }

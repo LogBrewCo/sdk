@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, NoReturn
 
-from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES
+from release_catalog import DOTNET_RELEASE_PACKAGES
 
 
 SCHEMA_VERSION = 1

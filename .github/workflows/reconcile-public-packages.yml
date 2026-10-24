@@ -449,7 +449,7 @@ jobs:
             exit 1
           fi
           dependency_range="$(
-            python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_metadata_dotnet import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' \
+            python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_catalog import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' \
               "$CORE_VERSION"
           )"
           python3 "$control_script" \

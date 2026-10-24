@@ -59,6 +59,7 @@ var (
 		"tests.test_nuget_release_receipt_provenance", "tests.test_release_artifact_receipt_modes",
 		"tests.test_release_metadata",
 	}
+	releaseCatalogTests = []string{"tests.test_affected_family_release_prep", "tests.test_registry_publication"}
 	// Python unit test modules that a change to one of these paths selects.
 	ciPathTests = map[string][]string{
 		".github/workflows/ci.yml": {
@@ -81,7 +82,8 @@ var (
 		"scripts/check_publication_run.py":                        {"tests.test_publication_run"},
 		"scripts/check_registry_publication.py":                   {"tests.test_registry_publication"},
 		"scripts/check_python_release_artifacts.py":               {"tests.test_python_release_artifacts"},
-		"scripts/check_release_metadata.py":                       {"tests.test_release_metadata"},
+		"scripts/release_catalog.py":                              releaseCatalogTests,
+		"tools/toolchain-probe/release-catalog.toml":              releaseCatalogTests,
 		"scripts/real_user_node_ingest_contract_smoke.sh":         {"tests.test_default_ingest_endpoints"},
 		"scripts/real_user_react_native_smoke.sh":                 {"tests.test_react_native_global_errors"},
 		"scripts/real_user_react_native_bundle_smoke.sh":          {"tests.test_react_native_mobile_core"},
