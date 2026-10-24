@@ -1,9 +1,14 @@
 name: Build native SDK verifier
 description: Build the verifier with its colocated compiler and dependency pins.
+inputs:
+  cache:
+    description: Restore and save the Go toolchain, module, and build caches.
+    default: "true"
 runs:
   using: composite
   steps:
-    - shell: bash
+    - id: source
+      shell: bash
       run: |
         set -Eeuo pipefail
         native_root="$GITHUB_ACTION_PATH"
@@ -22,12 +27,6 @@ runs:
             exit 1
           fi
         done
-        read -r go_version < "$native_root/.go-version"
-        if [[ ! "$go_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Native verifier compiler pin is invalid." >&2
-          exit 1
-        fi
-        export GOENV=off GOWORK=off GOFLAGS=-mod=readonly
         if ! bootstrap_go="$(command -v go)"; then
           case "$RUNNER_ARCH" in
             X64) go_arch=x64 ;;
@@ -44,7 +43,34 @@ runs:
           echo "A runner Go compiler is required to provision the verifier pin." >&2
           exit 1
         fi
-        go_root="$(GOTOOLCHAIN="go$go_version" GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org "$bootstrap_go" env GOROOT)"
+        printf 'bootstrap-go=%s\n' "$bootstrap_go" >> "$GITHUB_OUTPUT"
+        printf 'cache-key=native-verifier-%s-%s-%s\n' "$RUNNER_OS" "$RUNNER_ARCH" \
+          "$(git -C "$native_root" hash-object .go-version go.sum | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+        {
+          echo 'cache-paths<<EOF'
+          GOENV=off GOTOOLCHAIN=local "$bootstrap_go" env GOMODCACHE GOCACHE
+          echo EOF
+        } >> "$GITHUB_OUTPUT"
+
+    - if: ${{ inputs.cache == 'true' }}
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.source.outputs.cache-paths }}
+        key: ${{ steps.source.outputs.cache-key }}
+
+    - shell: bash
+      env:
+        BOOTSTRAP_GO: ${{ steps.source.outputs.bootstrap-go }}
+      run: |
+        set -Eeuo pipefail
+        native_root="$GITHUB_ACTION_PATH"
+        read -r go_version < "$native_root/.go-version"
+        if [[ ! "$go_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Native verifier compiler pin is invalid." >&2
+          exit 1
+        fi
+        export GOENV=off GOWORK=off GOFLAGS=-mod=readonly
+        go_root="$(GOTOOLCHAIN="go$go_version" GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org "$BOOTSTRAP_GO" env GOROOT)"
         GOTOOLCHAIN=local GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org "$go_root/bin/go" -C "$native_root" mod download
         git -C "$native_root" diff --exit-code -- go.mod go.sum
         probe_path="$RUNNER_TEMP/logbrew-toolchain-probe"
