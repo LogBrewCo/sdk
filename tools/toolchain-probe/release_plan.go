@@ -686,6 +686,25 @@ func pyJSONNumbers(value any) (any, error) {
 // writePlanJSON atomically writes sorted, ASCII-only JSON like Python's
 // json.dump with sort_keys, indented by indent or compact when it is empty.
 func writePlanJSON(path string, value any, indent string) error {
+	text, err := pyJSONText(value, indent)
+	if err == nil {
+		err = os.MkdirAll(filepath.Dir(path), 0o777)
+	}
+	var temporary *os.File
+	if err == nil {
+		temporary, err = os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	}
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary.Name())
+	_, err = temporary.WriteString(text)
+	return errors.Join(err, temporary.Sync(), temporary.Close(), os.Rename(temporary.Name(), path))
+}
+
+// pyJSONText encodes sorted, ASCII-only JSON like Python's json.dumps with
+// sort_keys, indented by indent or compact when it is empty, plus a newline.
+func pyJSONText(value any, indent string) (string, error) {
 	value, err := pyJSONNumbers(value)
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)
@@ -706,17 +725,5 @@ func writePlanJSON(path string, value any, indent string) error {
 			fmt.Fprintf(&text, `\u%04x`, character)
 		}
 	}
-	if err == nil {
-		err = os.MkdirAll(filepath.Dir(path), 0o777)
-	}
-	var temporary *os.File
-	if err == nil {
-		temporary, err = os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	}
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temporary.Name())
-	_, err = temporary.WriteString(text.String())
-	return errors.Join(err, temporary.Sync(), temporary.Close(), os.Rename(temporary.Name(), path))
+	return text.String(), err
 }

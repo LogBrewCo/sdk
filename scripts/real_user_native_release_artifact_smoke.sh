@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -88,7 +89,7 @@ with zipfile.ZipFile(dsym_archive, "w") as archive:
 PY
 
 ready_manifest="$tmp_dir/native-manifest-ready.json"
-python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
+run_native_verifier release-artifacts native-manifest \
   --artifact-root "$artifact_root" \
   --release "2026.06.17" \
   --environment "production" \
@@ -208,7 +209,7 @@ PY
 blocked_mapping="$artifact_root/android/empty-mapping.txt"
 printf '%s\n' '# compiler: R8' > "$blocked_mapping"
 blocked_manifest="$tmp_dir/native-manifest-blocked.json"
-if python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
+if run_native_verifier release-artifacts native-manifest \
   --artifact-root "$artifact_root" \
   --release "2026.06.17" \
   --environment "production" \

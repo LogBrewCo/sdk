@@ -58,6 +58,7 @@ func TestCISelectAreas(t *testing.T) {
 		".github/workflows/publish-packages.yml":                     {"maven"},
 		"scripts/real_user_next_release_artifact_smoke.sh":           {"release_artifacts"},
 		"js/logbrew-js/release-artifact/upload.js":                   {"javascript", "release_artifacts"},
+		"tools/toolchain-probe/native_symbols.go":                    {"go", "release_artifacts"},
 		"scripts/real_user_native_release_public_smoke.sh":           {"c"},
 		"js/logbrew-react-native/README.md":                          {"javascript"},
 		"js/logbrew-react-native/src/NativeStore.ts":                 {"javascript", "react_native_native"},

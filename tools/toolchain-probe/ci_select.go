@@ -193,6 +193,9 @@ func ciPathAreas(path string, enabled map[string]bool) {
 			}
 		}
 	}
+	if strings.HasPrefix(path, "tools/toolchain-probe/native_") {
+		enabled["release_artifacts"] = true
+	}
 	if directory, _, nested := strings.Cut(path, "/"); nested && slices.Contains(ciSourceAreas, directory) {
 		enabled[directory] = true
 	}

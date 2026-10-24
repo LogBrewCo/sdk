@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,20 +18,29 @@ if str(TESTS_DIR) not in sys.path:
 from native_elf_fixture import write_android_elf_symbol  # noqa: E402
 from native_unity_fixture import write_unity_symbols_zip  # noqa: E402
 
-MANIFEST_MODULE_PATH = ROOT / "scripts" / "create_native_release_artifact_manifest.py"
 UPLOAD_MODULE_PATH = ROOT / "scripts" / "upload_native_release_artifacts.py"
-
-MANIFEST_SPEC = importlib.util.spec_from_file_location("create_native_release_artifact_manifest", MANIFEST_MODULE_PATH)
-assert MANIFEST_SPEC is not None
-create_native_release_artifact_manifest = importlib.util.module_from_spec(MANIFEST_SPEC)
-assert MANIFEST_SPEC.loader is not None
-MANIFEST_SPEC.loader.exec_module(create_native_release_artifact_manifest)
 
 UPLOAD_SPEC = importlib.util.spec_from_file_location("upload_native_release_artifacts", UPLOAD_MODULE_PATH)
 assert UPLOAD_SPEC is not None
 upload_native_release_artifacts = importlib.util.module_from_spec(UPLOAD_SPEC)
 assert UPLOAD_SPEC.loader is not None
 UPLOAD_SPEC.loader.exec_module(upload_native_release_artifacts)
+
+
+def create_manifest(artifact_root: Path, service: str, artifacts: list[tuple[str, Path]]) -> dict[str, object]:
+    arguments = ["--artifact-root", str(artifact_root), "--release", "2026.06.18", "--environment", "production"]
+    arguments += ["--service", service]
+    for artifact_type, path in artifacts:
+        arguments += ["--artifact", f"{artifact_type}={path}"]
+    result = subprocess.run(
+        ["bash", "-c", 'source scripts/native_verifier.sh && run_native_verifier "$@"', "verifier",
+         "release-artifacts", "native-manifest", *arguments],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return json.loads(result.stdout)
 
 
 class NativeReleaseArtifactUploadTests(unittest.TestCase):
@@ -46,15 +56,10 @@ class NativeReleaseArtifactUploadTests(unittest.TestCase):
             encoding="utf-8",
         )
         write_android_elf_symbol(native_so)
-        manifest = create_native_release_artifact_manifest.create_manifest(
-            artifact_root=artifact_root,
-            release="2026.06.18",
-            environment="production",
-            service="checkout-mobile",
-            artifacts=[
-                ("android_proguard_mapping", mapping_file),
-                ("android_native_symbols", native_symbols_dir),
-            ],
+        manifest = create_manifest(
+            artifact_root,
+            "checkout-mobile",
+            [("android_proguard_mapping", mapping_file), ("android_native_symbols", native_symbols_dir)],
         )
         self.assertEqual(manifest["validation"]["status"], "ready")
         return artifact_root, manifest, mapping_file, native_so
@@ -116,13 +121,7 @@ class NativeReleaseArtifactUploadTests(unittest.TestCase):
             artifact_root = Path(tmp) / "artifacts"
             unity_archive = artifact_root / "unity" / "symbols.zip"
             write_unity_symbols_zip(unity_archive)
-            manifest = create_native_release_artifact_manifest.create_manifest(
-                artifact_root=artifact_root,
-                release="2026.06.18",
-                environment="production",
-                service="checkout-unity",
-                artifacts=[("unity_symbols", unity_archive)],
-            )
+            manifest = create_manifest(artifact_root, "checkout-unity", [("unity_symbols", unity_archive)])
             self.assertEqual(manifest["validation"]["status"], "ready")
 
             files = upload_native_release_artifacts.collect_artifact_files(manifest, artifact_root)

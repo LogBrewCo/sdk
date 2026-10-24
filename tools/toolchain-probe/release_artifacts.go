@@ -27,7 +27,8 @@ import (
 const (
 	releaseArtifactsMode  = "release-artifacts"
 	releaseArtifactsUsage = "usage: release-artifacts dotnet|nuget-public [flags] | release-artifacts nuget-content PACKAGE | " +
-		"release-artifacts python create|verify|check-manifest|normalize-sdist|resolve-public [flags] [SDIST...]\n"
+		"release-artifacts python create|verify|check-manifest|normalize-sdist|resolve-public [flags] [SDIST...] | " +
+		"release-artifacts native-manifest [flags]\n"
 	packageSignature = ".signature.p7s"
 	sourceLinkRoot   = "raw.githubusercontent.com/LogBrewCo/sdk"
 )
@@ -52,6 +53,9 @@ var (
 // public NuGet bytes for reconciliation, or exact Python distributions, or
 // prints one package's content digest.
 func checkReleaseArtifacts(arguments []string, transport http.RoundTripper, output, diagnostic io.Writer) int {
+	if len(arguments) > 0 && arguments[0] == "native-manifest" {
+		return checkNativeManifest(arguments[1:], output, diagnostic)
+	}
 	if len(arguments) == 2 && arguments[0] == "nuget-content" {
 		data, err := os.ReadFile(arguments[1])
 		digest := ""
@@ -464,16 +468,31 @@ func lastEntry(entries []zipEntry, name string) zipEntry {
 // it, its data must not overlap the next member, it must not be encrypted,
 // and its CRC must match the directory.
 func readZipFile(entry zipEntry) ([]byte, error) {
+	reader, compressed, err := openZipFile(entry)
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, int64(entry.size)))
+	if err == nil && (crc32.ChecksumIEEE(data) != entry.crc ||
+		len(compressed) < int(entry.compressed) && len(data) < int(entry.size)) {
+		err = errZipEntry
+	}
+	return data, err
+}
+
+// openZipFile checks a member's local header and returns its decompressing
+// reader and stored bytes.
+func openZipFile(entry zipEntry) (io.Reader, []byte, error) {
 	local := entry.archive[min(len(entry.archive), max(0, entry.header)):]
 	if entry.header < 0 || len(local) < 30 || !bytes.HasPrefix(local, []byte("PK\x03\x04")) {
-		return nil, errZipEntry
+		return nil, nil, errZipEntry
 	}
 	nameEnd := 30 + int(binary.LittleEndian.Uint16(local[26:]))
 	name, err := zipName(local[30:min(len(local), nameEnd)], binary.LittleEndian.Uint16(local[6:]))
 	start := min(len(entry.archive), entry.header+nameEnd+int(binary.LittleEndian.Uint16(local[28:])))
 	if err != nil || name != entry.directory || entry.flags&0x61 != 0 ||
 		entry.end != entry.header && start+int(entry.compressed) > entry.end {
-		return nil, errZipEntry
+		return nil, nil, errZipEntry
 	}
 	compressed := entry.archive[start:min(len(entry.archive), start+int(entry.compressed))]
 	readers := map[uint16]io.Reader{
@@ -482,14 +501,9 @@ func readZipFile(entry zipEntry) ([]byte, error) {
 	}
 	reader, supported := readers[entry.method]
 	if !supported {
-		return nil, zip.ErrAlgorithm
+		return nil, nil, zip.ErrAlgorithm
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, int64(entry.size)))
-	if err == nil && (crc32.ChecksumIEEE(data) != entry.crc ||
-		len(compressed) < int(entry.compressed) && len(data) < int(entry.size)) {
-		err = errZipEntry
-	}
-	return data, err
+	return reader, compressed, nil
 }
 
 // packageContentSHA256 digests every member except the repository signature,
