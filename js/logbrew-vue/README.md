@@ -33,10 +33,10 @@ createApp(App)
 
 For Vue browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples and server-side use.
 
-## Verify It Works
+## Read Events Back
 
 A successful send shows that LogBrew accepted the request. It does not show
-that you can read the event. After your app sends one test event, read it
+that you can read the event. After your app sends one event, read it
 back with a project read key:
 
 ```bash
@@ -48,7 +48,7 @@ logbrew issues --since 1h --json
 ```
 
 A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
-when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+when you finish. [Read your events back](https://docs.logbrew.co/guides/verify-setup)
 covers key kinds, empty results, and how to revoke the key.
 
 ## Composable

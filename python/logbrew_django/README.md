@@ -63,10 +63,10 @@ Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace 
 
 Request spans use the Django resolver route template, such as `GET /orders/<int:order_id>/`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
-## Verify It Works
+## Read Events Back
 
 A successful send shows that LogBrew accepted the request. It does not show
-that you can read the event. After your app sends one test event, read it
+that you can read the event. After your app sends one event, read it
 back with a project read key:
 
 ```bash
@@ -78,7 +78,7 @@ logbrew issues --since 1h --json
 ```
 
 A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
-when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+when you finish. [Read your events back](https://docs.logbrew.co/guides/verify-setup)
 covers key kinds, empty results, and how to revoke the key.
 
 ## Request User
