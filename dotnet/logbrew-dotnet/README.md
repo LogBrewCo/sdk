@@ -49,6 +49,24 @@ TransportResponse response = client.Shutdown(RecordingTransport.AlwaysAccept());
 Console.Error.WriteLine(response.StatusCode);
 ```
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Shared Telemetry Context
 
 `TelemetryContext` gives issues, logs, spans, actions, metrics, releases, and environments the same versioned resource and correlation vocabulary. Set stable service/deployment identity once with `LogBrewClientOptions`, activate request or job identity with `LogBrewTelemetry.ActivateContext(...)`, and use an attribute's `WithContext(...)` only for an event-specific override.

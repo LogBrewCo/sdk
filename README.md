@@ -129,6 +129,9 @@ The JavaScript core and framework clients merge this bounded context into every 
 request and does not indicate hosted delivery or event visibility. Use the
 released runtime package's HTTP transport and then read the event through the
 authenticated CLI or API for end-to-end confirmation.
+A project read key does that read without account sign-in, for example from
+CI or a coding agent. See
+[Verify your setup](https://docs.logbrew.co/guides/verify-setup).
 
 Python:
 

@@ -81,6 +81,24 @@ For browser React apps, prefer a browser-scoped public key through `clientKey`. 
 
 `createLogBrewReactClient()` also passes through the core SDK queue controls: `maxQueueSize`, `eventFilter`, `onEventDropped`, and `maxRetries`. Use them to keep heavy UI bursts bounded and observable without interrupting React rendering.
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Product Actions And Network Milestones
 
 Use `useLogBrewAction()` for product steps your React app already understands, such as route changes, clicks, form submits, retry decisions, and funnel steps. Use `useLogBrewNetwork()` for important API milestones that should be correlated with the same session or trace. Both helpers enqueue LogBrew `action` events and add a bounded breadcrumb for later issues. React Router navigation helpers do the same with sanitized route templates. This gives LogBrew and AI agents a structured timeline across many app sessions without requiring visual replay.

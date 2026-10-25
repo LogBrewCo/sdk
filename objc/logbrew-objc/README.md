@@ -227,6 +227,24 @@ LBWHTTPTransport *transport =
 
 `LBWHTTPTransport` uses Foundation `NSURLSession`, so it does not add third-party dependencies. It validates `http://` and `https://` endpoints, sends `authorization: Bearer <api key>` and `content-type: application/json`, rejects custom overrides for those reserved headers, supports safe additional headers, and maps request failures into retryable transport errors. It does not patch global `NSURLSession` behavior, inspect application traffic, collect request or response payloads, or capture arbitrary headers from your app.
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Automatic Delivery (Opt-In)
 
 Manual delivery remains the default. To let one client own delivery, provide an app-owned transport and explicit options before capturing events:

@@ -217,6 +217,24 @@ server.listen(3000);
 
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Request User
 
 Call `setLogBrewUser(id)` inside a request (`withLogBrewHttpHandler`, framework middleware, or `runWithLogBrewTrace`) once you know who made it. Every later event of that request carries `context.subject`. The ID stays with its own request trace, so it never reaches another request's events; outside a request the call does nothing and returns `false`. Use an opaque app-owned ID, not an email address or name, and pass `{ kind: "anonymous" }` for visitors who have not signed in. IDs are 1 to 200 characters without control characters. Request contexts also expose `context.setUser(id)`.

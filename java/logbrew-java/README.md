@@ -111,6 +111,24 @@ public final class App {
 }
 ```
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## First Useful Telemetry
 
 For a production Java service, the first useful LogBrew payload is usually a release marker, environment marker, one service log, one product action, one network milestone, one request duration metric, and one W3C-linked request span. That gives developers and AI assistants enough context to answer "what changed?", "where did this happen?", "what did the user do?", "which API call mattered?", and "which trace links the signals?" without installing a Java agent or global HTTP instrumentation.

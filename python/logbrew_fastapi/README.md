@@ -16,6 +16,24 @@ python3 -m pip install logbrew-fastapi
 
 The package is typed, ships `py.typed`, and installs the compatible core `logbrew-sdk`. It supports FastAPI 0.111.1 and later. It does not install or replace application-owned HTTP clients such as `httpx` or `httpx2`. Keep the real project key in application configuration rather than source control.
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Production setup
 
 ```python
