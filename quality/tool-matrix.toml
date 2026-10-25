@@ -341,6 +341,6 @@ config = "scan source --recursive over every lockfile and manifest it reads (go.
 conflicts = "none known; Dependabot alerts read a different database and missed the Go and Maven findings below"
 exceptions = "none"
 runtime = "local n=1, 20 s for the whole repository"
-findings = "first run 2026-10-25: 17 advisories in 6 packages (Go: quic-go, golang.org/x/net, otel/sdk; Maven: spring-webflux, spring-webmvc, lz4-java) that Dependabot did not report"
+findings = "seeded 2026-10-25: a throwaway branch pinning golang.org/x/text v0.3.0 failed with GO-2020-0015 and opened issue #424 (run 40185016916; branch deleted); local run on main 2026-10-25: 17 advisories in 6 packages (Go: quic-go, golang.org/x/net, otel/sdk; Maven: spring-webflux, spring-webmvc, lz4-java) that Dependabot did not report"
 replaces = "none"
 checked = 2026-10-25
