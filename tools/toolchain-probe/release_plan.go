@@ -592,9 +592,12 @@ func pyErrorName(err error) string {
 
 // pyStrip trims the characters Python's str.strip removes.
 func pyStrip(text string) string {
-	return strings.TrimFunc(text, func(character rune) bool {
-		return unicode.IsSpace(character) || character >= 0x1c && character <= 0x1f
-	})
+	return strings.TrimFunc(text, pyIsSpace)
+}
+
+// pyIsSpace reports whether Python's str.isspace holds for a character.
+func pyIsSpace(character rune) bool {
+	return unicode.IsSpace(character) || character >= 0x1c && character <= 0x1f
 }
 
 // pyEqual compares decoded JSON the way Python's == does, so 1, 1.0, and true

@@ -132,6 +132,9 @@ func TestReleaseMetadataFindings(t *testing.T) {
 			[]string{amqplib + ": expected exports['.'].require.default './index.cjs', got './index.js'"}},
 		{replaceOnce(`">=0.10"`, `">=0.9"`), amqplib,
 			[]string{amqplib + ": expected peerDependencies.amqplib '>=0.10', got '>=0.9'"}},
+		{replaceOnce(`"@logbrew/sdk": "^`, `"@logbrew/sdk": "^9`), "js/logbrew-node/package.json", []string{
+			"js/logbrew-node/package.json: peerDependencies.@logbrew/sdk must allow @logbrew/sdk ",
+		}},
 		{replaceOnce(`"./release-artifacts.js"`, `"./other.js"`), sdkJS,
 			[]string{sdkJS + ": expected bin.logbrew-release-artifacts './release-artifacts.js', got './other.js'"}},
 		{replaceOnce(`"./instrumentation": {`, `"./unused": {`), nextJS,

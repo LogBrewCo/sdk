@@ -231,7 +231,7 @@ jobs:
           for package_dir in "${package_dirs[@]}"; do
             peer_release_args+=(--selected-dir "$package_dir")
           done
-          python3 scripts/check_npm_workspace_peer_release.py "${peer_release_args[@]}"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-checks npm-workspace "${peer_release_args[@]}"
 
           if [[ " ${package_dirs[*]} " == *" js/logbrew-react-native "* ]]; then
             bash scripts/real_user_react_native_minimum_peer_smoke.sh
@@ -257,7 +257,7 @@ jobs:
             publication_plan_args+=(--package "$package_version")
           done
           missing_npm_packages=()
-          python3 scripts/plan_npm_publication.py \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-checks npm-plan \
             "${publication_plan_args[@]}" > "$npm_publication_plan"
           bun -e '
             const fs = require("node:fs");
@@ -768,12 +768,12 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: .release-control
           persist-credentials: false
-          sparse-checkout: scripts/check_maven_central_deployment.py
+          sparse-checkout: |
+            tools/toolchain-probe
           sparse-checkout-cone-mode: false
 
       - name: Bind protected Maven release control
         if: ${{ ! inputs.dry_run }}
-        id: maven-release-control
         shell: bash
         env:
           RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
@@ -795,21 +795,33 @@ jobs:
             echo "Release checkout binding mismatch." >&2
             exit 1
           fi
-          control_script="$control_root/scripts/check_maven_central_deployment.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]]; then
-            echo "Protected release control is incomplete." >&2
-            exit 1
-          fi
-          expected_control_sha256="$(
-            git -C "$control_root" show "${RELEASE_CONTROL_SHA}:scripts/check_maven_central_deployment.py" |
-              sha256sum | awk '{print $1}'
-          )"
-          actual_control_sha256="$(sha256sum "$control_script" | awk '{print $1}')"
-          if [[ ! "$expected_control_sha256" =~ ^[0-9a-f]{64}$ || "$actual_control_sha256" != "$expected_control_sha256" ]]; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          printf 'script_sha256=%s\n' "$expected_control_sha256" >> "$GITHUB_OUTPUT"
+          control_files=(
+            tools/toolchain-probe/action.yml
+            tools/toolchain-probe/release-catalog.toml
+          )
+          for relative_path in "${control_files[@]}"; do
+            control_path="$control_root/$relative_path"
+            if [[ ! -f "$control_path" || -L "$control_path" ]]; then
+              echo "Protected release control is incomplete." >&2
+              exit 1
+            fi
+          done
+
+      - name: Build protected Maven release verifier
+        if: ${{ ! inputs.dry_run }}
+        uses: ./.release-control/tools/toolchain-probe
+        with:
+          cache: "false"
+
+      - name: Keep protected Maven release verifier
+        if: ${{ ! inputs.dry_run }}
+        id: maven-release-control
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          control_script="$RUNNER_TEMP/logbrew-release-control-probe"
+          mv "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" "$control_script"
+          printf 'script_sha256=%s\n' "$(sha256sum "$control_script" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -891,7 +903,7 @@ jobs:
           set -Eeuo pipefail
           : "${CENTRAL_PORTAL_USERNAME:?Set CENTRAL_PORTAL_USERNAME as a release environment secret.}"
           : "${CENTRAL_PORTAL_PASSWORD:?Set CENTRAL_PORTAL_PASSWORD as a release environment secret.}"
-          control_script="$GITHUB_WORKSPACE/.release-control/scripts/check_maven_central_deployment.py"
+          control_script="$RUNNER_TEMP/logbrew-release-control-probe"
           verify_control_script() {
             actual_control_sha256="$(sha256sum "$control_script" | awk '{print $1}')"
             if [[ ! "$MAVEN_RELEASE_CONTROL_SHA256" =~ ^[0-9a-f]{64}$ || "$actual_control_sha256" != "$MAVEN_RELEASE_CONTROL_SHA256" ]]; then
@@ -933,7 +945,7 @@ jobs:
             exit "$curl_status"
           fi
           verify_control_script
-          python3 "$control_script" \
+          "$control_script" release-checks maven-deployment \
             capture --deployment-id-file "$RUNNER_TEMP/logbrew-maven-central-deployment-id" \
             < "$response_file"
 
@@ -945,13 +957,13 @@ jobs:
           MAVEN_RELEASE_CONTROL_SHA256: ${{ steps.maven-release-control.outputs.script_sha256 }}
         run: |
           set -Eeuo pipefail
-          control_script="$GITHUB_WORKSPACE/.release-control/scripts/check_maven_central_deployment.py"
+          control_script="$RUNNER_TEMP/logbrew-release-control-probe"
           actual_control_sha256="$(sha256sum "$control_script" | awk '{print $1}')"
           if [[ ! "$MAVEN_RELEASE_CONTROL_SHA256" =~ ^[0-9a-f]{64}$ || "$actual_control_sha256" != "$MAVEN_RELEASE_CONTROL_SHA256" ]]; then
             echo "Protected release control changed." >&2
             exit 1
           fi
-          python3 "$control_script" \
+          "$control_script" release-checks maven-deployment \
             wait --deployment-id-file "$RUNNER_TEMP/logbrew-maven-central-deployment-id" \
             --timeout-seconds 3600 --poll-interval-seconds 30
 

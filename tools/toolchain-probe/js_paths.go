@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -54,6 +55,12 @@ func pyReadText(path string) (string, error) {
 // pyRealpath resolves a path like Python's os.path.realpath without strict
 // mode: missing parts stay as written and a symbolic link loop stops there.
 func pyRealpath(path string) (string, error) {
+	return pyResolve(path, false)
+}
+
+// pyResolve resolves a path like os.path.realpath; in strict mode a missing
+// part or a symbolic link loop is an error, as in Path.resolve(strict=True).
+func pyResolve(path string, strict bool) (string, error) {
 	if strings.ContainsRune(path, 0) {
 		return "", pyValueError("embedded null byte")
 	}
@@ -92,6 +99,8 @@ func pyRealpath(path string) (string, error) {
 			target, linkError = os.Readlink(next)
 		}
 		switch {
+		case strict && (err != nil || linkError != nil || found && cached == nil):
+			return "", cmp.Or(err, linkError, error(syscall.ELOOP))
 		case err != nil || info.Mode()&fs.ModeSymlink == 0 || found && cached == nil || linkError != nil:
 			resolved = next
 		case found:

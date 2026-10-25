@@ -89,7 +89,7 @@ grep -q 'http.server.duration' "$tmp_dir/nestjs-readme.md"
 grep -q 'low-cardinality' "$tmp_dir/nestjs-readme.md"
 grep -q 'createLogBrewNestLogger' "$tmp_dir/nestjs-readme.md"
 grep -q 'app.useLogger' "$tmp_dir/nestjs-readme.md"
-python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
+run_native_verifier release-checks npm-peers \
   "$tmp_dir/nestjs-package.json" \
   "@logbrew/node=$node_package_version" \
   "@logbrew/sdk=$sdk_package_version"

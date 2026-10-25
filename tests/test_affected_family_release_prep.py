@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import release_catalog  # noqa: E402
-from check_npm_peer_compatibility import caret_range_allows  # noqa: E402
 
 
 def xml_value(path: Path, xpath: str) -> str | None:
@@ -106,17 +105,6 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                     self.assertIn(declaration, source)
 
         self.assertIn('from "./index.cjs"', source_text("js/logbrew-node/index.js"))
-
-    def test_node_runtime_context_accepts_the_current_core_release(self) -> None:
-        core_manifest = json_object("js/logbrew-js/package.json")
-        node_manifest = json_object("js/logbrew-node/package.json")
-
-        self.assertTrue(
-            caret_range_allows(
-                node_manifest["peerDependencies"]["@logbrew/sdk"],
-                core_manifest["version"],
-            )
-        )
 
     def test_python_core_declares_and_ci_installs_tls_trust_dependencies(self) -> None:
         project = tomllib.loads(source_text("python/logbrew_py/pyproject.toml"))["project"]

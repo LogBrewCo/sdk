@@ -63,14 +63,7 @@ class ReleaseArtifactReceiptModeTests(unittest.TestCase):
         )
         self.assertIn('<add key="receipt" value="$source_dir" />', body)
         self.assertNotIn('<add key="receipt" value="$bound" />', body)
-        self.assertIn(
-            '"$control_root/scripts/check_nuget_release_receipt_provenance.py"',
-            body,
-        )
-        self.assertNotIn(
-            '"$repo_root/scripts/check_nuget_release_receipt_provenance.py"',
-            body,
-        )
+        self.assertIn("run_native_verifier release-checks nuget-provenance", body)
 
     def test_nuget_exact_execution_reports_only_fixed_failure_stages(self) -> None:
         cases = (
@@ -98,8 +91,14 @@ class ReleaseArtifactReceiptModeTests(unittest.TestCase):
                 planner.write_text(
                     """\
 #!/usr/bin/env python3
+import os
 import sys
 
+if sys.argv[1] == "release-checks":
+    if os.environ["FAIL_STAGE"] == "provenance":
+        print("sensitive provenance details", file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0)
 if "validate" in sys.argv:
     raise SystemExit(0)
 format_name = sys.argv[sys.argv.index("--format") + 1]
@@ -114,18 +113,6 @@ else:
                     encoding="utf-8",
                 )
                 planner.chmod(0o755)
-                provenance = scripts / "check_nuget_release_receipt_provenance.py"
-                provenance.write_text(
-                    """\
-import os
-import sys
-
-if os.environ["FAIL_STAGE"] == "provenance":
-    print("sensitive provenance details", file=sys.stderr)
-    raise SystemExit(1)
-""",
-                    encoding="utf-8",
-                )
                 dotnet = fake_bin / "dotnet"
                 dotnet.write_text(
                     """\

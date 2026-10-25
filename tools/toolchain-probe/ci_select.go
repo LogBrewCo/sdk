@@ -51,12 +51,7 @@ var (
 		"js/logbrew-react-native/test/run-native-store-tests.sh",
 	}
 	publicReconciliationTests = []string{
-		"tests.test_nuget_release_receipt_provenance", "tests.test_publication_run", "tests.test_python_public_pypi_smoke",
-		"tests.test_release_artifact_receipt_modes", "tests.test_release_metadata",
-	}
-	nugetReceiptTests = []string{
-		"tests.test_nuget_release_receipt_provenance", "tests.test_release_artifact_receipt_modes",
-		"tests.test_release_metadata",
+		"tests.test_python_public_pypi_smoke", "tests.test_release_artifact_receipt_modes", "tests.test_release_metadata",
 	}
 	releaseCatalogTests = []string{"tests.test_affected_family_release_prep"}
 	// Python unit test modules that a change to one of these paths selects.
@@ -69,22 +64,21 @@ var (
 			"tests.test_github_release_safety_gates", "tests.test_js_installed_artifact_workflow_gates",
 		},
 		".github/workflows/publish-packages.yml": {
-			"tests.test_publication_run",
 			"tests.test_release_metadata", "tests.test_swiftpm_public_smoke",
 		},
-		".github/workflows/reconcile-public-packages.yml":         publicReconciliationTests,
-		"scripts/real_user_maven_central_public_smoke.sh":         {"tests.test_maven_central_public_smoke"},
-		"scripts/real_user_swiftpm_public_smoke.sh":               {"tests.test_swiftpm_public_smoke"},
-		"scripts/real_user_native_release_public_smoke.sh":        {"tests.test_native_release_public_smoke"},
-		"scripts/check_nuget_release_receipt_provenance.py":       nugetReceiptTests,
-		"scripts/check_publication_run.py":                        {"tests.test_publication_run"},
-		"scripts/release_catalog.py":                              releaseCatalogTests,
-		"tools/toolchain-probe/release-catalog.toml":              releaseCatalogTests,
-		"scripts/real_user_node_ingest_contract_smoke.sh":         {"tests.test_default_ingest_endpoints"},
-		"scripts/real_user_react_native_smoke.sh":                 {"tests.test_react_native_global_errors"},
-		"scripts/real_user_react_native_bundle_smoke.sh":          {"tests.test_react_native_mobile_core"},
-		"scripts/real_user_go_persistence_smoke.sh":               {"tests.test_go_persistence_smoke"},
-		"scripts/real_user_dotnet_selected_public_nuget_smoke.sh": nugetReceiptTests,
+		".github/workflows/reconcile-public-packages.yml":  publicReconciliationTests,
+		"scripts/real_user_maven_central_public_smoke.sh":  {"tests.test_maven_central_public_smoke"},
+		"scripts/real_user_swiftpm_public_smoke.sh":        {"tests.test_swiftpm_public_smoke"},
+		"scripts/real_user_native_release_public_smoke.sh": {"tests.test_native_release_public_smoke"},
+		"scripts/release_catalog.py":                       releaseCatalogTests,
+		"tools/toolchain-probe/release-catalog.toml":       releaseCatalogTests,
+		"scripts/real_user_node_ingest_contract_smoke.sh":  {"tests.test_default_ingest_endpoints"},
+		"scripts/real_user_react_native_smoke.sh":          {"tests.test_react_native_global_errors"},
+		"scripts/real_user_react_native_bundle_smoke.sh":   {"tests.test_react_native_mobile_core"},
+		"scripts/real_user_go_persistence_smoke.sh":        {"tests.test_go_persistence_smoke"},
+		"scripts/real_user_dotnet_selected_public_nuget_smoke.sh": {
+			"tests.test_release_artifact_receipt_modes", "tests.test_release_metadata",
+		},
 	}
 )
 

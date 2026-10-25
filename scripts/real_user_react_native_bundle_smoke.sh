@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 react_native_version="0.86.0"
 react_version="19.2.3"
 react_native_cli_version="20.1.0"
@@ -158,8 +159,8 @@ for (const relativePath of [
 }
 NODE
 
-  python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
-    "./node_modules/@logbrew/react-native/package.json" \
+  run_native_verifier release-checks npm-peers \
+    "$PWD/node_modules/@logbrew/react-native/package.json" \
     "@logbrew/sdk=$expected_sdk_version"
 
   node <<'NODE'

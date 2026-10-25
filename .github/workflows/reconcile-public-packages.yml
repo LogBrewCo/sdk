@@ -98,7 +98,6 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_publication_run.py
             tools/toolchain-probe
           sparse-checkout-cone-mode: false
 
@@ -121,19 +120,18 @@ jobs:
             echo "Release checkout binding mismatch." >&2
             exit 1
           fi
-          for name in check_publication_run.py; do
-            path="$control_root/scripts/$name"
-            expected="$(
-              git -C "$control_root" show "${RELEASE_CONTROL_SHA}:scripts/$name" |
-                sha256sum | awk '{print $1}'
-            )"
-            actual="$(sha256sum "$path" | awk '{print $1}')"
-            if [[ ! -f "$path" || -L "$path" || ! "$expected" =~ ^[0-9a-f]{64}$ || "$actual" != "$expected" ]]; then
-              echo "Protected release control changed." >&2
+          for relative_path in tools/toolchain-probe/action.yml tools/toolchain-probe/release-catalog.toml; do
+            control_path="$control_root/$relative_path"
+            if [[ ! -f "$control_path" || -L "$control_path" ]]; then
+              echo "Protected release control is incomplete." >&2
               exit 1
             fi
-            printf '%s_sha256=%s\n' "${name%.py}" "$expected" >> "$GITHUB_OUTPUT"
           done
+
+      - name: Build protected native SDK verifier
+        uses: ./.release-control/tools/toolchain-probe
+        with:
+          cache: "false"
 
       - name: Authenticate PyPI publication boundary
         shell: bash
@@ -145,24 +143,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$PUBLICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_publication_run.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_publication_run.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-checks publication-run \
             --repository "$GITHUB_REPOSITORY" \
             --run-id "$PUBLICATION_RUN_ID" \
             --family pypi \
             --workflow-sha "$PUBLICATION_WORKFLOW_SHA" \
             --source-sha "$RELEASE_SOURCE_SHA"
-
-      - name: Build protected native SDK verifier
-        uses: ./.release-control/tools/toolchain-probe
-        with:
-          cache: "false"
 
       - name: Download authenticated Python release manifest
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -317,8 +303,6 @@ jobs:
           path: .release-control
           persist-credentials: false
           sparse-checkout: |
-            scripts/check_nuget_release_receipt_provenance.py
-            scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
             scripts/native_verifier.sh
             tools/toolchain-probe
@@ -344,8 +328,6 @@ jobs:
             exit 1
           fi
           control_files=(
-            scripts/check_nuget_release_receipt_provenance.py
-            scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
             scripts/native_verifier.sh
           )
@@ -360,8 +342,12 @@ jobs:
               echo "Protected release control changed." >&2
               exit 1
             fi
-            printf '%s_sha256=%s\n' "$(basename "${relative_path%.*}")" "$expected" >> "$GITHUB_OUTPUT"
           done
+
+      - name: Build protected native SDK verifier
+        uses: ./.release-control/tools/toolchain-probe
+        with:
+          cache: "false"
 
       - name: Authenticate NuGet publication boundary
         shell: bash
@@ -373,14 +359,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$PUBLICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          control_root="$GITHUB_WORKSPACE/.release-control"
-          control_script="$control_root/scripts/check_publication_run.py"
-          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
-            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_publication_run.py; then
-            echo "Protected release control changed." >&2
-            exit 1
-          fi
-          python3 "$control_script" \
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-checks publication-run \
             --repository "$GITHUB_REPOSITORY" \
             --run-id "$PUBLICATION_RUN_ID" \
             --family nuget \
@@ -396,11 +375,6 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-
-      - name: Build protected native SDK verifier
-        uses: ./.release-control/tools/toolchain-probe
-        with:
-          cache: "false"
 
       - name: Bind selected NuGet package plan
         shell: bash

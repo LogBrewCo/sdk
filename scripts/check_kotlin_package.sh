@@ -112,7 +112,7 @@ kotlinc "$okhttp_package_dir"/tests/*.kt \
   -d "$tmp_dir/logbrew-kotlin-okhttp-tests.jar"
 java -cp "$tmp_dir/logbrew-kotlin-okhttp-tests.jar:$okhttp_classpath" LogBrewOkHttpInterceptorTestsKt
 
-python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
+run_native_verifier release-checks maven-pom \
   "$okhttp_package_dir/pom.xml" \
   --group-id co.logbrew \
   --artifact-id logbrew-kotlin-okhttp \
@@ -191,7 +191,7 @@ for needle in (
         raise SystemExit(f"missing OkHttp pom metadata: {needle}")
 PY
 
-python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
+run_native_verifier release-checks maven-pom \
   "$package_dir/pom.xml" \
   --group-id co.logbrew \
   --artifact-id logbrew-kotlin \
