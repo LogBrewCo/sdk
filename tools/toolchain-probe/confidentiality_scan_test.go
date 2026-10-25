@@ -115,9 +115,14 @@ func TestConfidentialityReportsAndAllowsLines(t *testing.T) {
 			"AGENTS.md": "/" + "Users/name/project\n", "docs/AGENTS.override.md": "/" + "home/name/x\n",
 			"docs/notes.md": "/" + "Users/name/project\n",
 		}, []string{"./AGENTS.md:1:/" + "Users/name/project", "./docs/AGENTS.override.md:1:/" + "home/name/x"}},
-		{"readme language", map[string]string{"js/README.md": "Install it.\nRun the smoke test.\n"},
-			[]string{"./js/README.md:2:public README should describe LogBrew service integration, not SDK verification: " +
-				"Run the smoke test."}},
+		{"readme language", map[string]string{"js/README.md": "Install it.\nRun the smoke test.\n" +
+			"See [the guide](https://docs.logbrew.co/guides/verify-setup).\nSee https://example.com/verify-setup.\n"},
+			[]string{
+				"./js/README.md:2:public README should describe LogBrew service integration, not SDK verification: " +
+					"Run the smoke test.",
+				"./js/README.md:4:public README should describe LogBrew service integration, not SDK verification: " +
+					"See https://example.com/verify-setup.",
+			}},
 		{"line breaks and encoding", map[string]string{"a.txt": "one\r\ntwo\rthree\vfour " + wordKey + "\xff\n"},
 			[]string{"./a.txt:4:four " + wordKey}},
 	} {

@@ -39,8 +39,10 @@ var (
 		`\bverif(?:y|ied|ier|ication)\b|\btests?\b|\btesting\b|temporary app|temp app|disposable app|fresh app|` +
 		`fresh temporary app|package checks?|repository checks?|artifact inspection|ci run|registry mechanics|` +
 		`automation agents?|for automation agents|agent-facing)`)
-	userHomePath = regexp.MustCompile("(?:/Users/[^/\\s`]+/|/home/[^/\\s`]+/|[A-Za-z]:\\\\Users\\\\[^\\\\\\s`]+\\\\)")
-	skippedDirs  = []string{
+	// Public docs URLs are fixed page names, not README prose, so their slugs skip the README language check.
+	publicDocsURL = regexp.MustCompile(`https://docs\.logbrew\.co/[^\s)>\]]*`)
+	userHomePath  = regexp.MustCompile("(?:/Users/[^/\\s`]+/|/home/[^/\\s`]+/|[A-Za-z]:\\\\Users\\\\[^\\\\\\s`]+\\\\)")
+	skippedDirs   = []string{
 		".agents", ".git", ".mypy_cache", ".pytest_cache", ".venv", "__pycache__", "build", "dist", "node_modules",
 		"target", "vendor",
 	}
@@ -177,7 +179,7 @@ func confidentialityFailures(root string, rules []allowRule) []string {
 			continue
 		}
 		for number, line := range fileLines(root, relative) {
-			if readmeForbidden.MatchString(line) {
+			if readmeForbidden.MatchString(publicDocsURL.ReplaceAllString(line, "")) {
 				failures = append(failures, "./"+relative+":"+strconv.Itoa(number+1)+":public README should describe "+
 					"LogBrew service integration, not SDK verification: "+line)
 			}

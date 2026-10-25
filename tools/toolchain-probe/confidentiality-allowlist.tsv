@@ -453,3 +453,6 @@ tools/toolchain-probe/main.go	*	line	return "cleanup failed"
 # The advisory issue script reads the workflow token from the environment, never a value.
 scripts/advisory-issue.sh	*	line	# closes it. Needs GH_TOKEN with issues: write and the GitHub Actions run
 scripts/advisory-issue.sh	*	line	printf 'Authorization: Bearer %s\n' "$GH_TOKEN" |
+
+# README read-back steps name the CLI token variable, never a value.
+**/README.md	*	only	LOGBREW_TOKEN
