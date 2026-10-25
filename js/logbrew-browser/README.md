@@ -47,6 +47,24 @@ Set `flushOnOnline: false`, `flushOnPageHide: false`, or `flushOnVisibilityHidde
 
 Lifecycle delivery never uses `sendBeacon`, a custom transport, or a fetch transport configured with `keepalive: false`. Unsupported or oversized work remains in the existing queue; it is not silently dropped. After importing `createFetchTransport`, an app can deliver work that exceeds a deliberately lowered keepalive limit with `logbrew.client.flush(createFetchTransport({ keepalive: false }))`. Authentication, rate-limit, and nonretryable responses pause additional lifecycle sends until an explicit successful `flush()`. The client key stays in the `Authorization` header and is never added to the endpoint, query string, request body, persistence metadata, or delivery health.
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Default Runtime Context
 
 `installLogBrewBrowser()` and `createLogBrewBrowserClient()` add a small typed

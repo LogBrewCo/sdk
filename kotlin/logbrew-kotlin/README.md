@@ -98,6 +98,24 @@ println(client.previewJson())
 val response = client.flush(RecordingTransport.alwaysAccept())
 ```
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Shared Investigation Context
 
 Use `TelemetryContext` to give issues, logs, spans, metrics, actions, releases, and environments the same bounded service, deployment, runtime, framework, operating-system, device, application, trace, session, subject, and tag evidence. Configure stable defaults once on the client, then add a task/thread scope or a narrow event override:

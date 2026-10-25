@@ -79,6 +79,24 @@ print("status=\(response.statusCode) attempts=\(response.attempts)")
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush(transport:)` or `shutdown(transport:)` to send queued events through a transport, and use `previewJSON()` when you want a stable local JSON preview before sending anything.
 
+## Verify It Works
+
+A successful send shows that LogBrew accepted the request. It does not show
+that you can read the event. After your app sends one test event, read it
+back with a project read key:
+
+```bash
+logbrew projects keys create "<project_id>" --kind read \
+  --ingest-key-file "$HOME/.logbrew/setup-check.read" --json
+export LOGBREW_TOKEN="$(< "$HOME/.logbrew/setup-check.read")"
+logbrew read logs --since 1h --json
+logbrew issues --since 1h --json
+```
+
+A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
+when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+covers key kinds, empty results, and how to revoke the key.
+
 ## Rich Investigation Context
 
 The client automatically adds conservative Swift runtime, Apple operating-system version, application bundle, and CPU architecture context to every release, environment, issue, log, span, action, and metric. It does not automatically collect a device identifier, hardware model, host name, account name, locale, IP address, user identity, or session identity. Disable even this conservative context with `includeAutomaticContext: false` when an app needs a fully explicit capture policy.
