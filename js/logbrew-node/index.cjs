@@ -45,6 +45,13 @@ const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_EVENTS = 100;
 const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 const MAX_SPAN_EVENTS = 8;
+// Matches the process error capture default: one intake round trip, then Node exits.
+const EXIT_FLUSH_TIMEOUT_MS = 2000;
+const exitFlushes = new Set();
+const exitFlushRegistry = new FinalizationRegistry((entry) => {
+  exitFlushes.delete(entry);
+});
+let exitFlushListening = false;
 const FETCH_TIMING_METADATA_KEYS = Object.freeze({
   connectMs: "http.phase.connect_ms",
   decodedBodySize: "http.response.decoded_size",
@@ -132,14 +139,19 @@ function createLogBrewNodeClient({
       onWarning: persistentQueue.onWarning,
       sdkName
     });
-  const ownedTransport = transport ?? createNodeFetchTransport({ endpoint, fetchImpl, headers });
+  const exitAbort = transport === undefined ? new AbortController() : undefined;
+  const ownedTransport = transport ?? createNodeFetchTransport({
+    endpoint,
+    fetchImpl: abortableFetch(fetchImpl ?? defaultFetch(), exitAbort.signal),
+    headers
+  });
   if (breadcrumbs) {
     installAutomaticBreadcrumbs(getActiveLogBrewTrace);
   }
   const environmentContext = addEnvironmentResourceContext(context);
   const clientContext = captureRuntimeContext ? addNodeRuntimeContext(environmentContext) : environmentContext;
   try {
-    return LogBrewClient.create({
+    const client = LogBrewClient.create({
       apiKey: authKey,
       automaticDelivery,
       context: clientContext,
@@ -163,6 +175,10 @@ function createLogBrewNodeClient({
       ...limits,
       ...(onEventDropped !== undefined ? { onEventDropped } : {})
     });
+    if (client.automaticDelivery) {
+      flushOnExit(client, exitAbort);
+    }
+    return client;
   } catch (error) {
     try {
       eventStore?.close();
@@ -170,6 +186,50 @@ function createLogBrewNodeClient({
       // Preserve the client configuration or recovery failure.
     }
     throw error;
+  }
+}
+
+function abortableFetch(fetchImpl, signal) {
+  if (typeof fetchImpl !== "function") {
+    return fetchImpl;
+  }
+  return (url, init) => fetchImpl(url, { ...init, signal });
+}
+
+// Sends what is still queued when the event loop empties, because the delivery timer does not keep Node running.
+function flushOnExit(client, exitAbort) {
+  const entry = { client: new WeakRef(client), exitAbort, failed: false, inFlight: false };
+  exitFlushes.add(entry);
+  exitFlushRegistry.register(client, entry);
+  if (!exitFlushListening) {
+    exitFlushListening = true;
+    process.on("beforeExit", flushPendingClients);
+  }
+}
+
+function flushPendingClients() {
+  for (const entry of exitFlushes) {
+    const client = entry.client.deref();
+    if (client === undefined || client.closed) {
+      exitFlushes.delete(entry);
+      continue;
+    }
+    // A failed exit flush is not repeated, so a down intake cannot keep the process alive.
+    if (entry.failed || entry.inFlight || client.closing || client.pendingEvents() === 0) {
+      continue;
+    }
+    entry.inFlight = true;
+    const deadline = entry.exitAbort === undefined
+      ? undefined
+      : setTimeout(() => entry.exitAbort.abort(), EXIT_FLUSH_TIMEOUT_MS).unref();
+    client.flush()
+      .catch(() => {
+        entry.failed = true;
+      })
+      .finally(() => {
+        clearTimeout(deadline);
+        entry.inFlight = false;
+      });
   }
 }
 
