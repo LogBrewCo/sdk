@@ -13,7 +13,7 @@ class PackagistPublicSmokeTests(unittest.TestCase):
         body = SCRIPT.read_text(encoding="utf-8")
 
         for expected in (
-            'release_artifact_receipt.py" extract',
+            'run_native_verifier release-artifacts receipt extract',
             'payload.get("name") != "logbrew/sdk"',
             '"LogBrew\\\\": "php/logbrew-php/src/"',
             '"type": "path"',

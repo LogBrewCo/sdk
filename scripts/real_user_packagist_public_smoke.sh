@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.10}}"
 tmp_dir="$(mktemp -d)"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
@@ -20,10 +21,10 @@ run_receipt_smoke() {
   local bound="$tmp_dir/receipt-artifacts"
   local extracted="$tmp_dir/receipt-source"
   local metadata="$tmp_dir/receipt-metadata.json"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+  run_native_verifier release-artifacts receipt bind \
     --family "packagist" --output-dir "$bound" --metadata "$metadata" \
     >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" extract \
+  run_native_verifier release-artifacts receipt extract \
     --family "packagist" --metadata "$metadata" --index 0 --output-dir "$extracted" \
     >"$tmp_dir/receipt-extract.out" 2>"$tmp_dir/receipt-extract.err"
   local package_root
@@ -92,7 +93,7 @@ if ($response->statusCode !== 202) {
     exit(1);
 }
 PHP
-  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+  run_native_verifier release-artifacts receipt attest \
     --family "packagist" --metadata "$metadata"
 }
 

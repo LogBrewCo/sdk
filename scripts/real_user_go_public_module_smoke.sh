@@ -56,10 +56,10 @@ run_receipt_smoke() {
   local bound="$tmp_dir/receipt-artifacts"
   local metadata="$tmp_dir/receipt-metadata.json"
   local extracted="$tmp_dir/receipt-source"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+  run_native_verifier release-artifacts receipt bind \
     --family "go" --output-dir "$bound" --metadata "$metadata" \
     >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" extract \
+  run_native_verifier release-artifacts receipt extract \
     --family "go" --metadata "$metadata" --index 0 --output-dir "$extracted" \
     >"$tmp_dir/receipt-extract.out" 2>"$tmp_dir/receipt-extract.err"
   local package_root
@@ -107,7 +107,7 @@ func main() {
 }
 GO
   go run . >"$tmp_dir/receipt-run.out" 2>"$tmp_dir/receipt-run.err"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+  run_native_verifier release-artifacts receipt attest \
     --family "go" --metadata "$metadata"
 }
 
