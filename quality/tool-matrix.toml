@@ -328,3 +328,19 @@ runtime = "new; record from CI runs at the next check"
 findings = "seeded: an unlisted command, a changed pin, a changed action commit, a stale or future date, and a missing field each fail"
 replaces = "none"
 checked = 2026-10-19
+
+[[tool]]
+id = "osv-scanner"
+risk = "a security advisory published against a locked dependency after the change that locked it merged"
+tool = "OSV-Scanner (native Go) and scripts/advisory-issue.sh"
+version = "2.7.0"
+pins = [".github/workflows/advisories.yml::osv-scanner/releases/download/v@VERSION@/osv-scanner_linux_amd64", ".github/workflows/advisories.yml::160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b"]
+commands = ["osv-scanner", "scripts/advisory-issue.sh"]
+runs_in = "Advisories workflow: every day at 05:17 UTC and on manual runs"
+config = "scan source --recursive over every lockfile and manifest it reads (go.mod, pom.xml with transitive resolution, .csproj, bun.lock); no ignored advisories"
+conflicts = "none known; Dependabot alerts read a different database and missed the Go and Maven findings below"
+exceptions = "none"
+runtime = "local n=1, 20 s for the whole repository"
+findings = "first run 2026-10-25: 17 advisories in 6 packages (Go: quic-go, golang.org/x/net, otel/sdk; Maven: spring-webflux, spring-webmvc, lz4-java) that Dependabot did not report"
+replaces = "none"
+checked = 2026-10-25

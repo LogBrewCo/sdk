@@ -1,0 +1,73 @@
+name: Advisories
+
+# Scans the locked dependencies every day, so an advisory published after a
+# change merged still fails within 24 hours. A failed scan opens or updates the
+# issue "Dependency advisories" and fails the run; a clean scan closes it
+# (scripts/advisory-issue.sh).
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: advisories
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan locked dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      report: ${{ steps.scan.outputs.report }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan with osv-scanner
+        id: scan
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/osv-scanner" https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64
+          echo "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          report="$RUNNER_TEMP/advisories.txt"
+          status=0
+          "$RUNNER_TEMP/osv-scanner" scan source --recursive --allow-no-lockfiles --verbosity warn . >"$report" 2>&1 || status=$?
+          cat "$report"
+          delimiter="report_$RANDOM$RANDOM"
+          { echo "report<<$delimiter"; tail -c 60000 "$report"; echo; echo "$delimiter"; } >>"$GITHUB_OUTPUT"
+          exit "$status"
+
+  report:
+    name: Open, update, or close the advisory issue
+    needs: scan
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/advisory-issue.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ needs.scan.outputs.report }}
+          RESULT: ${{ needs.scan.result }}
+        run: |
+          printf '%s\n' "$REPORT" >"$RUNNER_TEMP/advisories.txt"
+          bash scripts/advisory-issue.sh "$RESULT" "$RUNNER_TEMP/advisories.txt"
