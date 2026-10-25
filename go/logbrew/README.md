@@ -8,10 +8,12 @@ Public Go SDK for creating LogBrew event batches, validating them locally, and f
 
 ## Install
 
-The current public module declares Go 1.24.0. If an existing application's
-`go.mod` declares an older Go version, review its compiler and deployment
-support policy and upgrade intentionally before installing LogBrew. Automated
-setup must not silently raise an application's Go version.
+The module requires Go 1.26.0 or newer. LogBrew Go modules support the Go
+releases that still get security fixes, currently Go 1.26 and 1.27. If an
+existing application's `go.mod` declares an older Go version, review its
+compiler and deployment support policy and upgrade intentionally before
+installing LogBrew. Automated setup must not silently raise an application's Go
+version.
 
 ```bash
 go get github.com/LogBrewCo/sdk/go/logbrew@latest

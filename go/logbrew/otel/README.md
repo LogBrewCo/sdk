@@ -6,6 +6,8 @@ Use this module only when your app already has OpenTelemetry Go installed and yo
 
 ## Install
 
+The module requires Go 1.26.0 or newer:
+
 ```bash
 go get github.com/LogBrewCo/sdk/go/logbrew/otel@v0.1.0
 ```

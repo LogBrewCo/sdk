@@ -111,9 +111,10 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
 
     def test_native_probe_failure_stops_without_recursive_reporting(self) -> None:
         fake_go = self.temp_dir / "go"
+        pinned = (ROOT / "tools" / "toolchain-probe" / ".go-version").read_text().strip()
         fake_go.write_text(
             "#!/bin/sh\n"
-            'if [ "$1" = version ]; then printf "go version go1.27.1 fixture\\n"; exit 0; fi\n'
+            f'if [ "$1" = version ]; then printf "go version go{pinned} fixture\\n"; exit 0; fi\n'
             '[ "$GOTOOLCHAIN:$GOPROXY:$GOSUMDB" = "local:off:off" ] || printf "unexpected build policy\\n" >&2\n'
             "exit 7\n"
         )

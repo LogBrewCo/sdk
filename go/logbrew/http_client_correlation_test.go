@@ -254,7 +254,7 @@ func TestHTTPClientCorrelationOmitsIPLikeAndMalformedHosts(t *testing.T) {
 		{host: "127.0.0.1"},
 		{host: "127.1"},
 		{host: "2130706433"},
-		{host: "2001:db8::1"},
+		{host: "[2001:db8::1]"},
 		{host: "bad_label.example"},
 		{host: "-bad.example"},
 	}

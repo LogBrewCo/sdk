@@ -627,7 +627,7 @@ func (check *metadataCheck) pythonPackage(release pypiRelease) {
 }
 
 func (check *metadataCheck) goModules() {
-	const goVersion = `(?m)^go 1\.24\.0$`
+	const goVersion = `(?m)^go 1\.26\.0$`
 	manifestFound := check.requirePaths("go/logbrew/go.mod")
 	check.requirePaths("go/logbrew/README.md")
 	if !manifestFound {
@@ -636,11 +636,11 @@ func (check *metadataCheck) goModules() {
 	content := check.read("go/logbrew/go.mod")
 	check.require(regexp.MustCompile(`(?m)^module github\.com/LogBrewCo/sdk/go/logbrew$`).MatchString(content),
 		"go/logbrew/go.mod: unexpected module path")
-	check.require(regexp.MustCompile(goVersion).MatchString(content), "go/logbrew/go.mod: expected go 1.24.0")
+	check.require(regexp.MustCompile(goVersion).MatchString(content), "go/logbrew/go.mod: expected go 1.26.0")
 	for _, module := range [][3]string{
-		{"otel", "v0.1.12", "go.opentelemetry.io/otel/sdk v1.41.0"},
-		{"gin", "v0.1.12", "github.com/gin-gonic/gin v1.11.0"},
-		{"asynq", "v0.1.12", "github.com/hibiken/asynq v0.26.0"},
+		{"otel", "v0.1.15", "go.opentelemetry.io/otel/sdk v1.47.0"},
+		{"gin", "v0.1.15", "github.com/gin-gonic/gin v1.12.0"},
+		{"asynq", "v0.1.15", "github.com/hibiken/asynq v0.26.0"},
 	} {
 		location := "go/logbrew/" + module[0]
 		moduleFound := check.requirePaths(location + "/go.mod")
@@ -651,7 +651,7 @@ func (check *metadataCheck) goModules() {
 		text := check.read(location + "/go.mod")
 		for _, rule := range [][2]string{
 			{"unexpected module path", `(?m)^module ` + regexp.QuoteMeta("github.com/LogBrewCo/sdk/go/logbrew/"+module[0]) + `$`},
-			{"expected go 1.24.0", goVersion},
+			{"expected go 1.26.0", goVersion},
 			{"expected parent LogBrew module requirement", `github\.com/LogBrewCo/sdk/go/logbrew ` + module[1]},
 			{"expected framework requirement", regexp.QuoteMeta(module[2])},
 		} {

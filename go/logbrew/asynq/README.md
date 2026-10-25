@@ -2,7 +2,8 @@
 
 This module adds producer-to-worker trace propagation, queue spans for every
 attempt, and one correlated issue for terminal failures or panics. It never
-copies task payloads, headers, or error messages into telemetry.
+copies task payloads, headers, or error messages into telemetry. It requires
+Go 1.26.0 or newer.
 
 ```bash
 go get github.com/LogBrewCo/sdk/go/logbrew/asynq@latest

@@ -106,14 +106,14 @@ export GOPROXY="file://$proxy_dir,file://$shared_go_proxy,https://proxy.golang.o
 export GOSUMDB=off
 
 go mod init logbrew-go-otel-smoke >/dev/null
-go mod edit -go=1.24.0
+go mod edit -go=1.26.0
 go get github.com/LogBrewCo/sdk/go/logbrew/otel@v0.1.0 >/dev/null
 grep -q 'github.com/LogBrewCo/sdk/go/logbrew/otel v0.1.0' go.mod
 go list -m all > "$tmp_dir/go-otel-modules-before-remove.txt"
-grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.12$' "$tmp_dir/go-otel-modules-before-remove.txt"
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.15$' "$tmp_dir/go-otel-modules-before-remove.txt"
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew/otel v0.1.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
-grep -q '^go.opentelemetry.io/otel v1.41.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
-grep -q '^go.opentelemetry.io/otel/sdk v1.41.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
+grep -q '^go.opentelemetry.io/otel v1.47.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
+grep -q '^go.opentelemetry.io/otel/sdk v1.47.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
 go get github.com/LogBrewCo/sdk/go/logbrew/otel@none >/dev/null
 if grep -q 'github.com/LogBrewCo/sdk/go/logbrew/otel' go.mod; then
 	echo "expected go get @none to remove OTel bridge module requirement" >&2

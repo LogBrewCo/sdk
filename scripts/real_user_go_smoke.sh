@@ -61,7 +61,7 @@ mod_file="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.mod"
 test -f "$info_file"
 test -f "$mod_file"
 grep -q '^module github.com/LogBrewCo/sdk/go/logbrew$' "$mod_file"
-grep -q '^go 1.24.0$' "$mod_file"
+grep -q '^go 1.26.0$' "$mod_file"
 python3 - "$info_file" <<'PY'
 import json
 import sys
@@ -378,17 +378,17 @@ export GOPROXY="file://$proxy_dir"
 export GOSUMDB=off
 
 go mod init lifecycle-app >/dev/null
-go mod edit -go=1.24.0
+go mod edit -go=1.26.0
 go get github.com/LogBrewCo/sdk/go/logbrew@v0.1.0 >/dev/null
 grep -q '^module lifecycle-app$' go.mod
-grep -q '^go 1.24.0$' go.mod
+grep -q '^go 1.26.0$' go.mod
 grep -q '^require github.com/LogBrewCo/sdk/go/logbrew v0.1.0 // indirect$' go.mod
 go list -m all > lifecycle-module-graph.txt
 grep -q '^lifecycle-app$' lifecycle-module-graph.txt
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' lifecycle-module-graph.txt
 go get github.com/LogBrewCo/sdk/go/logbrew@none >/dev/null
 grep -q '^module lifecycle-app$' go.mod
-grep -q '^go 1.24.0$' go.mod
+grep -q '^go 1.26.0$' go.mod
 if grep -q 'github.com/LogBrewCo/sdk/go/logbrew' go.mod; then
 	echo "expected go.mod to remove SDK dependency after go get @none" >&2
 	exit 1
@@ -411,7 +411,7 @@ export GOPROXY="file://$proxy_dir"
 export GOSUMDB=off
 
 go mod init smoke-app >/dev/null
-go mod edit -go=1.24.0
+go mod edit -go=1.26.0
 
 cat > main.go <<'EOF'
 package main
@@ -1588,7 +1588,7 @@ go get github.com/LogBrewCo/sdk/go/logbrew@v0.1.0 >/dev/null
 grep -q '^require github.com/LogBrewCo/sdk/go/logbrew v0.1.0 // indirect$' go.mod
 go mod tidy
 grep -q '^module smoke-app$' go.mod
-grep -q '^go 1.24.0$' go.mod
+grep -q '^go 1.26.0$' go.mod
 grep -q '^require github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' go.mod
 test -f go.sum
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0 h1:' go.sum
@@ -1659,7 +1659,7 @@ if root.get("Path") != "smoke-app":
     raise SystemExit(f"unexpected root module path: {root.get('Path')!r}")
 if str(root.get("GoMod", "")).endswith("/smoke-app/go.mod") is False:
     raise SystemExit(f"unexpected root go.mod path: {root.get('GoMod')!r}")
-if root.get("GoVersion") != "1.24.0":
+if root.get("GoVersion") != "1.26.0":
     raise SystemExit(f"unexpected root Go version: {root.get('GoVersion')!r}")
 
 sdk = next(
@@ -1678,7 +1678,7 @@ if "/pkg/mod/" not in str(sdk.get("Dir", "")) or not str(sdk.get("Dir", "")).end
     raise SystemExit(f"unexpected SDK module dir in graph output: {sdk.get('Dir')!r}")
 if "/pkg/mod/cache/download/" not in str(sdk.get("GoMod", "")) or not str(sdk.get("GoMod", "")).endswith("/@v/v0.1.0.mod"):
     raise SystemExit(f"unexpected SDK module go.mod path in graph output: {sdk.get('GoMod')!r}")
-if sdk.get("GoVersion") != "1.24.0":
+if sdk.get("GoVersion") != "1.26.0":
     raise SystemExit(f"unexpected SDK module Go version in graph output: {sdk.get('GoVersion')!r}")
 PY
 make smoke-build >/dev/null

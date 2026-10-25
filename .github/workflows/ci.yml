@@ -636,6 +636,40 @@ jobs:
       - name: Run installed Symfony compatibility smoke test
         run: LOGBREW_SYMFONY_CONSTRAINT='^6.4' bash scripts/real_user_php_symfony_smoke.sh
 
+  go-compatibility:
+    name: Go 1.26 compatibility
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.go == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build native SDK verifier
+        uses: ./tools/toolchain-probe
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Run Go SDK tests
+        run: bash scripts/check_go_tests.sh
+
+      - name: Run Go real-user smoke test
+        run: bash scripts/real_user_go_smoke.sh
+
+      - name: Run Go OpenTelemetry installed-artifact smoke test
+        run: bash scripts/real_user_go_opentelemetry_smoke.sh
+
+      - name: Run Go Gin installed-artifact smoke test
+        run: bash scripts/real_user_go_gin_smoke.sh
+
   python-compatibility:
     name: Python 3.10 compatibility (Django ${{ matrix.django_version }})
     needs: changed-areas
