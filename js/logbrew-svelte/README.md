@@ -67,10 +67,10 @@ export const logbrew = installLogBrewBrowser({
 Browser and server keys are separate. Never place the server key in a public Svelte bundle.
 Keep the canonical shared-context environment and release identical on both surfaces; use stable service names to distinguish browser and server work without breaking deployment filtering.
 
-## Verify It Works
+## Read Events Back
 
 A successful send shows that LogBrew accepted the request. It does not show
-that you can read the event. After your app sends one test event, read it
+that you can read the event. After your app sends one event, read it
 back with a project read key:
 
 ```bash
@@ -82,7 +82,7 @@ logbrew issues --since 1h --json
 ```
 
 A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
-when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+when you finish. [Read your events back](https://docs.logbrew.co/guides/verify-setup)
 covers key kinds, empty results, and how to revoke the key.
 
 ## Component Context

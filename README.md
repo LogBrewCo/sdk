@@ -131,7 +131,7 @@ released runtime package's HTTP transport and then read the event through the
 authenticated CLI or API for end-to-end confirmation.
 A project read key does that read without account sign-in, for example from
 CI or a coding agent. See
-[Verify your setup](https://docs.logbrew.co/guides/verify-setup).
+[Read your events back](https://docs.logbrew.co/guides/verify-setup).
 
 Python:
 

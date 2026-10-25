@@ -36,10 +36,10 @@ app.Run();
 
 Without `LOGBREW_SERVER_API_KEY`, the integration stays disabled and both calls are safe no-ops. Set `LOGBREW_ENABLED=false` to disable it explicitly. `LOGBREW_API_KEY` and `LOGBREW_INGEST_KEY` are not aliases: when either legacy name is present without the canonical server key, startup names the exact `LOGBREW_SERVER_API_KEY` correction without printing the key value.
 
-## Verify It Works
+## Read Events Back
 
 A successful send shows that LogBrew accepted the request. It does not show
-that you can read the event. After your app sends one test event, read it
+that you can read the event. After your app sends one event, read it
 back with a project read key:
 
 ```bash
@@ -51,7 +51,7 @@ logbrew issues --since 1h --json
 ```
 
 A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
-when you finish. [Verify your setup](https://docs.logbrew.co/guides/verify-setup)
+when you finish. [Read your events back](https://docs.logbrew.co/guides/verify-setup)
 covers key kinds, empty results, and how to revoke the key.
 
 ## Configuration
