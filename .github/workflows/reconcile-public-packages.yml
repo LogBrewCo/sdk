@@ -405,10 +405,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
         run: |
           set -Eeuo pipefail
-          dependency_range="$(
-            python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_catalog import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' \
-              "$CORE_VERSION"
-          )"
+          dependency_range="$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-checks nuget-range "$CORE_VERSION")"
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts nuget-public \
             --nuget-version "LogBrew=$CORE_VERSION" \
             --nuget-version "LogBrew.HttpClient=$HTTPCLIENT_VERSION" \

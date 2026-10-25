@@ -133,7 +133,7 @@ jobs:
             echo "Could not read NuGet package versions from .NET package projects" >&2
             exit 1
           fi
-          core_dependency_range="$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_catalog import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' "$core_version")"
+          core_dependency_range="$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-checks nuget-range "$core_version")"
           core_dependency_range_msbuild="${core_dependency_range/, /%2C}"
           {
             echo "core_version=$core_version"

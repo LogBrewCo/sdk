@@ -180,21 +180,18 @@ dotnet restore "$app_dir/HttpClientCompatibility.csproj" \
   "${restore_sources[@]}" >/dev/null
 
 installed_package="$NUGET_PACKAGES/logbrew.httpclient/$httpclient_version/logbrew.httpclient.$httpclient_version.nupkg"
-raw_digest="$(python3 - "$repo_root/scripts" "$installed_package" "$httpclient_version" "$source_commit" "$core_version" <<'PY'
+expected_range="$(run_native_verifier release-checks nuget-range "$core_version")"
+raw_digest="$(python3 - "$installed_package" "$httpclient_version" "$source_commit" "$expected_range" <<'PY'
 import hashlib
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])
-from release_catalog import compatible_dependency_range
-
-package_path = Path(sys.argv[2])
-expected_version = sys.argv[3]
-source_commit = sys.argv[4]
-core_version = sys.argv[5]
-expected_range = compatible_dependency_range(core_version)
+package_path = Path(sys.argv[1])
+expected_version = sys.argv[2]
+source_commit = sys.argv[3]
+expected_range = sys.argv[4]
 
 try:
     package_bytes = package_path.read_bytes()

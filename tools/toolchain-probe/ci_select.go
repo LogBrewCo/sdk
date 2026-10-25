@@ -70,7 +70,6 @@ var (
 		"scripts/real_user_maven_central_public_smoke.sh":  {"tests.test_maven_central_public_smoke"},
 		"scripts/real_user_swiftpm_public_smoke.sh":        {"tests.test_swiftpm_public_smoke"},
 		"scripts/real_user_native_release_public_smoke.sh": {"tests.test_native_release_public_smoke"},
-		"scripts/release_catalog.py":                       releaseCatalogTests,
 		"tools/toolchain-probe/release-catalog.toml":       releaseCatalogTests,
 		"scripts/real_user_node_ingest_contract_smoke.sh":  {"tests.test_default_ingest_endpoints"},
 		"scripts/real_user_react_native_smoke.sh":          {"tests.test_react_native_global_errors"},
