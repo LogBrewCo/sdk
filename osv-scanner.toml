@@ -1,0 +1,35 @@
+# Reviewed advisory exceptions for the daily scan (.github/workflows/advisories.yml).
+# Each entry names the fixed version, why this repository cannot require it yet,
+# and a review date. An expired entry fails the scan again.
+
+# golang.org/x/net HTTP/2 advisories, fixed in v0.60.0, which requires Go 1.26.
+# The gin module supports Go 1.24.0, and v0.49.0 is the newest release that
+# still builds there. Apps on Go 1.26 or newer can require v0.60.0 directly.
+[[IgnoredVulns]]
+id = "GO-2026-6603"
+ignoreUntil = 2027-01-31
+reason = "Fixed in golang.org/x/net v0.60.0, which requires Go 1.26; the gin module supports Go 1.24.0."
+
+[[IgnoredVulns]]
+id = "GO-2026-6611"
+ignoreUntil = 2027-01-31
+reason = "Fixed in golang.org/x/net v0.60.0, which requires Go 1.26; the gin module supports Go 1.24.0."
+
+[[IgnoredVulns]]
+id = "GO-2026-6612"
+ignoreUntil = 2027-01-31
+reason = "Fixed in golang.org/x/net v0.60.0, which requires Go 1.26; the gin module supports Go 1.24.0."
+
+[[IgnoredVulns]]
+id = "GO-2026-6617"
+ignoreUntil = 2027-01-31
+reason = "Fixed in golang.org/x/net v0.60.0, which requires Go 1.26; the gin module supports Go 1.24.0."
+
+# go.opentelemetry.io/otel/sdk exporter logging advisory, fixed in v1.45.0,
+# which requires Go 1.25. The otel module supports Go 1.24.0, and v1.41.0 is
+# the newest release that still builds there. The module uses no exporter
+# named in the advisory; apps on Go 1.25 or newer can require v1.45.0 directly.
+[[IgnoredVulns]]
+id = "GO-2026-6505"
+ignoreUntil = 2027-01-31
+reason = "Fixed in go.opentelemetry.io/otel/sdk v1.45.0, which requires Go 1.25; the otel module supports Go 1.24.0."

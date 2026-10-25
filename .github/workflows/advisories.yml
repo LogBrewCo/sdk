@@ -3,7 +3,8 @@ name: Advisories
 # Scans the locked dependencies every day, so an advisory published after a
 # change merged still fails within 24 hours. A failed scan opens or updates the
 # issue "Dependency advisories" and fails the run; a clean scan closes it
-# (scripts/advisory-issue.sh). Only main runs: both jobs skip any other ref.
+# (scripts/advisory-issue.sh). Reviewed exceptions live in osv-scanner.toml, each
+# with a review date. Only main runs: both jobs skip any other ref.
 
 on:
   schedule:
@@ -41,7 +42,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/osv-scanner"
           report="$RUNNER_TEMP/advisories.txt"
           status=0
-          "$RUNNER_TEMP/osv-scanner" scan source --recursive --allow-no-lockfiles --verbosity warn . >"$report" 2>&1 || status=$?
+          "$RUNNER_TEMP/osv-scanner" scan source --config=osv-scanner.toml --recursive --allow-no-lockfiles --verbosity warn . >"$report" 2>&1 || status=$?
           cat "$report"
           delimiter="report_$RANDOM$RANDOM"
           { echo "report<<$delimiter"; tail -c 60000 "$report"; echo; echo "$delimiter"; } >>"$GITHUB_OUTPUT"

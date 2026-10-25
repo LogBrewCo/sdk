@@ -77,7 +77,7 @@ If you register `LogBrewSpringKafkaTracing` manually, or enable `LogBrewSpringBo
 <dependency>
   <groupId>org.springframework.kafka</groupId>
   <artifactId>spring-kafka</artifactId>
-  <version>4.1.0</version>
+  <version>4.1.2</version>
 </dependency>
 ```
 

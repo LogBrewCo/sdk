@@ -337,10 +337,10 @@ version = "2.7.0"
 pins = [".github/workflows/advisories.yml::osv-scanner/releases/download/v@VERSION@/osv-scanner_linux_amd64", ".github/workflows/advisories.yml::160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b"]
 commands = ["osv-scanner", "scripts/advisory-issue.sh"]
 runs_in = "Advisories workflow: every day at 05:17 UTC and on manual runs"
-config = "scan source --recursive over every lockfile and manifest it reads (go.mod, pom.xml with transitive resolution, .csproj, bun.lock); no ignored advisories"
+config = "scan source --config=osv-scanner.toml --recursive over every lockfile and manifest it reads (go.mod, pom.xml with transitive resolution, .csproj, bun.lock)"
 conflicts = "none known; Dependabot alerts read a different database and missed the Go and Maven findings below"
-exceptions = "none"
+exceptions = "osv-scanner.toml, review by 2027-01-31: GO-2026-6603, GO-2026-6611, GO-2026-6612, GO-2026-6617 (fixed in golang.org/x/net v0.60.0, which needs Go 1.26; the gin module supports Go 1.24.0) and GO-2026-6505 (fixed in go.opentelemetry.io/otel/sdk v1.45.0, which needs Go 1.25; the otel module supports Go 1.24.0)"
 runtime = "local n=1, 20 s for the whole repository"
-findings = "seeded 2026-10-25: a throwaway branch pinning golang.org/x/text v0.3.0 failed with GO-2020-0015 and opened issue #424 (run 40185016916; branch deleted); local run on main 2026-10-25: 17 advisories in 6 packages (Go: quic-go, golang.org/x/net, otel/sdk; Maven: spring-webflux, spring-webmvc, lz4-java) that Dependabot did not report"
+findings = "seeded 2026-10-25: a throwaway branch pinning golang.org/x/text v0.3.0 failed with GO-2020-0015 and opened issue #424 (run 40185016916; branch deleted); local run on main 2026-10-25: 17 advisories in 6 packages (Go: quic-go, golang.org/x/net, otel/sdk; Maven: spring-webflux, spring-webmvc, lz4-java) that Dependabot did not report; 2026-10-25 upgrades cleared the quic-go, Spring, and lz4-java findings (quic-go v0.59.1, Spring Framework 7.0.10, lz4-java 1.12.1) and the 5 Go findings above became reviewed exceptions; the scan is clean"
 replaces = "none"
 checked = 2026-10-25

@@ -33,8 +33,8 @@ fetch_java_servlet_deps() {
 
 fetch_java_spring_boot_deps() {
   local deps_dir="$1"
-  local spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.1.0}"
-  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
+  local spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.1.2}"
+  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.10}"
 
   fetch_maven_jars "$deps_dir" \
     "org/springframework/boot/spring-boot/$spring_boot_version/spring-boot-$spring_boot_version" \
@@ -48,9 +48,9 @@ fetch_java_spring_boot_deps() {
 
 fetch_java_spring_kafka_deps() {
   local deps_dir="$1"
-  local spring_kafka_version="${LOGBREW_SPRING_KAFKA_VERSION:-4.1.0}"
-  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
-  local kafka_clients_version="${LOGBREW_KAFKA_CLIENTS_VERSION:-4.2.1}"
+  local spring_kafka_version="${LOGBREW_SPRING_KAFKA_VERSION:-4.1.2}"
+  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.10}"
+  local kafka_clients_version="${LOGBREW_KAFKA_CLIENTS_VERSION:-4.2.2}"
   local micrometer_observation_version="${LOGBREW_MICROMETER_OBSERVATION_VERSION:-1.17.0}"
 
   fetch_maven_jars "$deps_dir" \
@@ -63,8 +63,8 @@ fetch_java_spring_kafka_deps() {
 
 fetch_java_spring_web_deps() {
   local deps_dir="$1"
-  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
-  local reactor_version="${LOGBREW_REACTOR_VERSION:-3.8.6}"
+  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.10}"
+  local reactor_version="${LOGBREW_REACTOR_VERSION:-3.8.8}"
   local reactive_streams_version="${LOGBREW_REACTIVE_STREAMS_VERSION:-1.0.4}"
   local micrometer_version="${LOGBREW_MICROMETER_OBSERVATION_VERSION:-1.17.0}"
 
