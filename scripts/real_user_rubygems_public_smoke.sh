@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rubygems-public.XXXXXX")"
 
 version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.14}}"
@@ -47,7 +48,7 @@ export GEM_PATH="$gem_home"
 run_receipt_smoke() {
   local bound="$tmp_dir/receipt-artifacts"
   local metadata="$tmp_dir/receipt-metadata.json"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+  run_native_verifier release-artifacts receipt bind \
     --family "rubygems" --output-dir "$bound" --metadata "$metadata" \
     >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
   gem install "$bound/0.gem" --local --install-dir "$gem_home" --no-document \
@@ -65,7 +66,7 @@ client.log("event", "2026-01-01T00:00:00Z", { message: "ok", level: "info" })
 response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 raise "receipt execution failed" unless response.status_code == 202
 RUBY
-  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+  run_native_verifier release-artifacts receipt attest \
     --family "rubygems" --metadata "$metadata"
 }
 

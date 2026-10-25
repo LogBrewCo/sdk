@@ -133,11 +133,11 @@ run_receipt_smoke() {
   local core_version="${LOGBREW_DOTNET_CORE_VERSION:-}"
   local httpclient_version="${LOGBREW_DOTNET_HTTPCLIENT_VERSION:-}"
   [[ -n "$core_version" && -n "$httpclient_version" ]]
-  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+  run_native_verifier release-artifacts receipt bind \
     --family "nuget" --output-dir "$bound" --metadata "$metadata" \
     >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
   run_exact_package_smoke "$bound" "$core_version" "$httpclient_version"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+  run_native_verifier release-artifacts receipt attest \
     --family "nuget" --metadata "$metadata"
 }
 

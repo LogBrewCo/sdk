@@ -27,9 +27,9 @@ class ReleaseArtifactReceiptModeTests(unittest.TestCase):
             with self.subTest(family=family):
                 body = (ROOT / "scripts" / script_name).read_text(encoding="utf-8")
                 self.assertIn('LOGBREW_RELEASE_RECEIPT_MODE', body)
-                self.assertIn('release_artifact_receipt.py" bind', body)
+                self.assertIn('run_native_verifier release-artifacts receipt bind', body)
                 self.assertIn(f'--family "{family}"', body)
-                self.assertIn('release_artifact_receipt.py" attest', body)
+                self.assertIn('run_native_verifier release-artifacts receipt attest', body)
                 self.assertIn('run_receipt_smoke', body)
 
     def test_normal_registry_mode_remains_the_default(self) -> None:

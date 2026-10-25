@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-nestjs-public.XXXXXX")"
 registry="https://registry.npmjs.org"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
@@ -370,13 +371,13 @@ run_receipt_smoke() {
     && -n "${LOGBREW_NPM_SDK_VERSION:-}" ]] || exit 1
   local bound="$tmp_dir/receipt-artifacts"
   local metadata="$tmp_dir/receipt-metadata.json"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+  run_native_verifier release-artifacts receipt bind \
     --family "npm-nestjs" \
     --output-dir "$bound" \
     --metadata "$metadata" \
     >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
   install_and_execute "$bound/0.tgz"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+  run_native_verifier release-artifacts receipt attest \
     --family "npm-nestjs" \
     --metadata "$metadata"
 }

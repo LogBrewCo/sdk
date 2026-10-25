@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 receipt_failure() {
@@ -22,10 +23,10 @@ run_receipt_smoke() {
   local bound="$tmp_dir/receipt-artifacts"
   local metadata="$tmp_dir/receipt-metadata.json"
   local extracted="$tmp_dir/receipt-source"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+  run_native_verifier release-artifacts receipt bind \
     --family "crates" --output-dir "$bound" --metadata "$metadata" \
     >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" extract \
+  run_native_verifier release-artifacts receipt extract \
     --family "crates" --metadata "$metadata" --index 0 --output-dir "$extracted" \
     >"$tmp_dir/receipt-extract.out" 2>"$tmp_dir/receipt-extract.err"
   local package_root
@@ -60,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 RS
   cargo run --quiet --manifest-path "$app/Cargo.toml" \
     >"$tmp_dir/receipt-run.out" 2>"$tmp_dir/receipt-run.err"
-  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+  run_native_verifier release-artifacts receipt attest \
     --family "crates" --metadata "$metadata"
 }
 

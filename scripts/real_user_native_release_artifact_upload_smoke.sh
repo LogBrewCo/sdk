@@ -144,7 +144,7 @@ fi
 endpoint_base="http://127.0.0.1:$(cat "$port_file")"
 export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_token"
 
-python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
+run_native_verifier release-artifacts native-upload \
   --artifact-root "$artifact_root" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/retry-success?ignored=query#ignored" \
@@ -152,7 +152,7 @@ python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
   --max-retries 2 \
   > "$tmp_dir/upload-success.json"
 
-python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
+run_native_verifier release-artifacts native-upload \
   --artifact-root "$artifact_root" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/retry-success" \
@@ -160,7 +160,7 @@ python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
   > "$tmp_dir/upload-dry-run.json"
 
 export LOGBREW_RELEASE_ARTIFACT_TOKEN_BAD="wrong-token"
-if python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
+if run_native_verifier release-artifacts native-upload \
   --artifact-root "$artifact_root" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/auth-failure" \
@@ -172,7 +172,7 @@ if python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
   exit 1
 fi
 
-if python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
+if run_native_verifier release-artifacts native-upload \
   --artifact-root "$artifact_root" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/validation-failure" \
@@ -184,7 +184,7 @@ if python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
 fi
 
 printf '%s\n' 'tampered mapping' >> "$mapping_file"
-if python3 "$repo_root/scripts/upload_native_release_artifacts.py" \
+if run_native_verifier release-artifacts native-upload \
   --artifact-root "$artifact_root" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/retry-success" \

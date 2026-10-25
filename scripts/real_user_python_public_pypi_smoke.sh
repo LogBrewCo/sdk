@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-python-public-pypi.XXXXXX")"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 uv_version="0.12.9"
@@ -167,7 +168,7 @@ replay_local_wheels_with_pip() {
 run_receipt_smoke() {
     local bound="$tmp_dir/receipt-artifacts"
     local metadata="$tmp_dir/receipt-metadata.json"
-    python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+    run_native_verifier release-artifacts receipt bind \
         --family "pypi" --output-dir "$bound" --metadata "$metadata" \
         >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
     local install_dir="$tmp_dir/receipt-wheels"
@@ -225,7 +226,7 @@ response = client.shutdown(RecordingTransport())
 if response.status_code != 202:
     raise SystemExit(1)
 PY
-    python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+    run_native_verifier release-artifacts receipt attest \
         --family "pypi" --metadata "$metadata"
 }
 

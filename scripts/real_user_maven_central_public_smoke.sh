@@ -86,7 +86,7 @@ selected_modules_csv="$(IFS=,; printf '%s' "${selected_modules[*]}")"
 run_receipt_smoke() {
     local bound="$tmp_dir/receipt-artifacts"
     local metadata="$tmp_dir/receipt-metadata.json"
-    python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+    run_native_verifier release-artifacts receipt bind \
         --family "maven" --output-dir "$bound" --metadata "$metadata" \
         >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
     python3 "$repo_root/scripts/check_maven_jar_metadata.py" \
@@ -114,7 +114,7 @@ JAVA
         >"$tmp_dir/receipt-javac.out" 2>"$tmp_dir/receipt-javac.err"
     java -cp "$bound/0.jar:$tmp_dir/receipt-app/classes" Receipt \
         >"$tmp_dir/receipt-run.out" 2>"$tmp_dir/receipt-run.err"
-    python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+    run_native_verifier release-artifacts receipt attest \
         --family "maven" --metadata "$metadata"
 }
 
