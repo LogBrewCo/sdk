@@ -178,7 +178,7 @@ func TestRegistryPublicationChecks(t *testing.T) {
 			"<metadata><versioning><latest>" + catalog.Maven + "</latest></versioning></metadata>")
 	}
 	for _, name := range registryNPM {
-		responses["https://registry.npmjs.org/"+pyQuote(name)] = ok(`{"versions": {"0.1.0": {}}}`)
+		responses["https://registry.npmjs.org/"+pyQuote(name, "")] = ok(`{"versions": {"0.1.0": {}}}`)
 	}
 	code, output, diagnostic, _ := runRegistry(responses, "--include-unity-npm", "--include-pypi-extras",
 		"--include-crates", "--include-packagist", "--include-maven", "--include-openupm")
@@ -369,7 +369,7 @@ func TestRegistryVersionReaders(t *testing.T) {
 			t.Errorf("pyG(%g) = %q, want %q", value, got, want)
 		}
 	}
-	if got := pyQuote("@a/Z_.-~é"); got != "%40a%2FZ_.-~%C3%A9" {
+	if got := pyQuote("@a/Z_.-~é", ""); got != "%40a%2FZ_.-~%C3%A9" {
 		t.Fatalf("pyQuote = %q", got)
 	}
 	if got := pyString("a\u2028\u0085\U000e0001"); got != `'a\u2028\x85\U000e0001'` {

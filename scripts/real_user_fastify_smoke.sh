@@ -93,7 +93,7 @@ grep -q 'onApplicationLogCaptureError' "$tmp_dir/fastify-readme.md"
 grep -q 'installLogBrewPinoInstrumentation()' "$tmp_dir/fastify-readme.md"
 grep -q 'preserves the original serialized output' "$tmp_dir/node-readme.md"
 grep -q 'Pino 9.11' "$tmp_dir/node-readme.md"
-python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
+run_native_verifier release-checks npm-peers \
   "$tmp_dir/fastify-package.json" \
   "@logbrew/node=$node_package_version" \
   "@logbrew/sdk=$sdk_package_version"

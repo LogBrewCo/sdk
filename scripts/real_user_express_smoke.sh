@@ -85,7 +85,7 @@ grep -q 'spanIdFactory' "$tmp_dir/express-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/express-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/express-readme.md"
 grep -q 'low-cardinality' "$tmp_dir/express-readme.md"
-python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
+run_native_verifier release-checks npm-peers \
   "$tmp_dir/express-package.json" \
   "@logbrew/node=$node_package_version" \
   "@logbrew/sdk=$sdk_package_version"

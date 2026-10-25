@@ -280,6 +280,10 @@ func run() int {
 	if os.Args[1] == releaseArtifactsMode {
 		return checkReleaseArtifacts(os.Args[2:], http.DefaultTransport, os.Stdout, os.Stderr)
 	}
+	if os.Args[1] == releaseChecksMode {
+		return checkRelease(os.Args[2:], releaseTools{http.DefaultTransport, os.Stdin, time.Sleep, time.Now},
+			os.Stdout, os.Stderr)
+	}
 	if os.Args[1] == registryPublicationMode {
 		start := time.Now()
 		return checkRegistryPublication(os.Args[2:], http.DefaultTransport,
@@ -288,7 +292,7 @@ func run() int {
 	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, confidentiality-scan, release-metadata, release-versions, release-plan, release-artifacts, or registry-publication mode\n", exitUsage)
+			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, confidentiality-scan, release-metadata, release-versions, release-plan, release-artifacts, release-checks, or registry-publication mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {

@@ -100,7 +100,7 @@ java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.lo
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringBootHttpClientAutoConfigurationTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.SupportTicketDraftTest
 
-python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
+run_native_verifier release-checks maven-pom \
   "$package_dir/pom.xml" \
   --group-id co.logbrew \
   --artifact-id logbrew-sdk \

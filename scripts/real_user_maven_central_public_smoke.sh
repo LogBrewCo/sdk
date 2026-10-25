@@ -89,7 +89,7 @@ run_receipt_smoke() {
     run_native_verifier release-artifacts receipt bind \
         --family "maven" --output-dir "$bound" --metadata "$metadata" \
         >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
-    python3 "$repo_root/scripts/check_maven_jar_metadata.py" \
+    run_native_verifier release-checks maven-jar \
         "$bound/0.jar" "$java_version"
     mkdir -p "$tmp_dir/receipt-app/classes"
     cat > "$tmp_dir/receipt-app/Receipt.java" <<'JAVA'

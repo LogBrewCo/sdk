@@ -57,6 +57,7 @@ tests/test_maven_central_auth_preflight.py	*	ihas	secret-token
 tests/test_maven_central_auth_preflight.py	*	ihas	secret_values
 tests/test_maven_central_auth_preflight.py	*	ihas	user-token
 tests/test_release_metadata.py	*	ihas	central_portal_password
+tools/toolchain-probe/{release_checks_test,release_registry_checks}.go	*	ihas	central_portal_password
 tests/test_release_metadata.py	*	ihas	central_portal_username
 tests/test_release_metadata.py	*	ihas	secret names only
 tests/test_release_metadata.py	*	ihas	secret-token

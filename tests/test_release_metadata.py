@@ -279,11 +279,10 @@ class ReleaseMetadataTests(unittest.TestCase):
             '[[ "$CONTROL_REF" != "refs/heads/main"',
             "path: .release-control",
             checkout_auth_setting,
-            "check_publication_run.py",
+            "release-checks publication-run",
             "resolve-public",
             "release-artifacts python create",
             "release-artifacts nuget-public",
-            "check_nuget_release_receipt_provenance.py",
             '--source-root "$GITHUB_WORKSPACE"',
             "real_user_python_public_pypi_smoke.sh",
             "real_user_dotnet_selected_public_nuget_smoke.sh",
@@ -454,10 +453,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             + ": false"
         )
         self.assertIn(checkout_auth_setting, control_checkout)
-        self.assertIn(
-            "scripts/check_maven_central_deployment.py",
-            control_checkout,
-        )
+        self.assertIn("tools/toolchain-probe", control_checkout)
 
         control_binding = maven_job.split(
             "- name: Bind protected Maven release control",
@@ -465,8 +461,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         )[1].split("- name: Plan selected Maven artifacts", 1)[0]
         self.assertIn("id: maven-release-control", control_binding)
         self.assertIn(
-            "git -C \"$control_root\" show "
-            "\"${RELEASE_CONTROL_SHA}:scripts/check_maven_central_deployment.py\"",
+            'mv "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" "$control_script"',
             control_binding,
         )
         self.assertIn("script_sha256=", control_binding)

@@ -107,7 +107,7 @@ grep -q '@logbrew/next/instrumentation' "$tmp_dir/next-readme.md"
 grep -q 'createLogBrewNextRequestErrorHandler' "$tmp_dir/next-readme.md"
 grep -q 'React Server Components, Route Handlers, Server Actions, and Proxy' "$tmp_dir/next-readme.md"
 grep -q 'does not capture request' "$tmp_dir/next-readme.md"
-python3 "$repo_root/scripts/check_npm_peer_compatibility.py" \
+run_native_verifier release-checks npm-peers \
   "$tmp_dir/next-package.json" \
   "@logbrew/node=$node_package_version" \
   "@logbrew/sdk=$sdk_package_version"

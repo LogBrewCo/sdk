@@ -303,7 +303,7 @@ func (run *registryRun) checks() []registryCheck {
 			packages = append(slices.Clone(packages), unityPackage)
 		}
 		for _, name := range packages {
-			checks = append(checks, registryCheck{name, "https://registry.npmjs.org/" + pyQuote(name), "npm", npmVersions,
+			checks = append(checks, registryCheck{name, "https://registry.npmjs.org/" + pyQuote(name, ""), "npm", npmVersions,
 				false})
 		}
 	}
@@ -353,7 +353,7 @@ func (run *registryRun) checks() []registryCheck {
 }
 
 func npmProvenanceCheck(name, version string) registryCheck {
-	return registryCheck{name + " provenance", "https://registry.npmjs.org/" + pyQuote(name) + "/" + pyQuote(version),
+	return registryCheck{name + " provenance", "https://registry.npmjs.org/" + pyQuote(name, "") + "/" + pyQuote(version, ""),
 		"npm-provenance", npmProvenanceVersions, false}
 }
 
@@ -530,7 +530,7 @@ func npmProvenanceVersions(payload any) []string {
 	address, addressOK := field(attestations, "url").(string)
 	if field(attestations, "provenance", "predicateType") != "https://slsa.dev/provenance/v1" || !versionOK ||
 		!addressOK || !strings.HasPrefix(address, "https://registry.npmjs.org/-/npm/v1/attestations/") ||
-		!strings.HasSuffix(address, "@"+pyQuote(version)) {
+		!strings.HasSuffix(address, "@"+pyQuote(version, "")) {
 		return nil
 	}
 	return []string{version}
@@ -648,11 +648,12 @@ func pyTruthy(value any) bool {
 	return number != 0
 }
 
-// pyQuote percent-encodes like urllib.parse.quote with no safe characters.
-func pyQuote(text string) string {
+// pyQuote percent-encodes like urllib.parse.quote with the safe characters.
+func pyQuote(text, safe string) string {
 	var quoted strings.Builder
 	for _, value := range []byte(text) {
-		if 'a' <= value|0x20 && value|0x20 <= 'z' || '0' <= value && value <= '9' || strings.IndexByte("_.-~", value) >= 0 {
+		if 'a' <= value|0x20 && value|0x20 <= 'z' || '0' <= value && value <= '9' ||
+			strings.IndexByte("_.-~"+safe, value) >= 0 {
 			quoted.WriteByte(value)
 		} else {
 			fmt.Fprintf(&quoted, "%%%02X", value)

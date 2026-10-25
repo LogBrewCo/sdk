@@ -120,7 +120,7 @@ CS
   run_stage consumer-execution \
     dotnet run --project "$tmp_dir/exact-app/exact-app.csproj" --no-restore
   run_stage provenance-verification \
-    python3 "$control_root/scripts/check_nuget_release_receipt_provenance.py" \
+    run_native_verifier release-checks nuget-provenance \
       --bound-dir "$bound" --source-dir "$source_dir" \
       --packages-dir "$NUGET_PACKAGES" \
       --assets "$tmp_dir/exact-app/obj/project.assets.json" \

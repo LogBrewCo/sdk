@@ -526,6 +526,11 @@ func (check *metadataCheck) jsPackage(directory, name, expectedVersion string) {
 	if name == "@logbrew/amqplib" {
 		check.equal(location, "peerDependencies.amqplib", field(manifest, "peerDependencies", "amqplib"), ">=0.10")
 	}
+	if name == "@logbrew/node" {
+		peer, _ := field(manifest, "peerDependencies", "@logbrew/sdk").(string)
+		core, _ := check.readJSON("js/logbrew-js/package.json")["version"].(string)
+		check.require(caretAllows(peer, core), location+": peerDependencies.@logbrew/sdk must allow @logbrew/sdk "+core)
+	}
 	check.jsExport(location, manifest, ".", "index", ".d.cts")
 }
 
@@ -1419,11 +1424,10 @@ func (check *metadataCheck) reconcileWorkflow(text string) {
 		{"protected control input", "ref: ${{ github.workflow_sha }}"},
 		{"protected branch binding", `[[ "$CONTROL_REF" != "refs/heads/main"`},
 		{"discarded checkout authentication state", checkoutDiscardsAuth},
-		{"publication boundary authentication", "check_publication_run.py"},
+		{"publication boundary authentication", "release-checks publication-run"},
 		{"Python artifact reconciliation", "resolve-public"},
 		{"protected Python artifact creation", "release-artifacts python create"},
 		{"NuGet artifact reconciliation", "release-artifacts nuget-public"},
-		{"NuGet provenance verification", "check_nuget_release_receipt_provenance.py"},
 		{"NuGet immutable source binding", `--source-root "$GITHUB_WORKSPACE"`},
 		{"Python exact-byte install", "real_user_python_public_pypi_smoke.sh"},
 		{"NuGet exact-byte install", "real_user_dotnet_selected_public_nuget_smoke.sh"},
