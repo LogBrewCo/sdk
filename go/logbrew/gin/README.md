@@ -8,7 +8,7 @@ configuration, delivery, retry, flush, shutdown, and Gin recovery.
 
 ## Install
 
-The module requires Go 1.24.0 or newer:
+The module requires Go 1.26.0 or newer:
 
 ```bash
 go get github.com/LogBrewCo/sdk/go/logbrew/gin@latest

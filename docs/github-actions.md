@@ -20,13 +20,15 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 ## Local verifier inventory
 
 The JSON summary from `scripts/check_public_sdks.sh` requires the exact local Go
-version in `tools/toolchain-probe/.go-version`, currently 1.27.1. CI reads the
+version in `tools/toolchain-probe/.go-version`, currently 1.27.3. CI reads the
 same pin. The build selects that version explicitly, uses only the standard
 library, verifies the selected binary's reported version, and disables toolchain
 and module downloads with `GOTOOLCHAIN=local`. A missing or mismatched pinned
 toolchain fails instead of downloading or falling back. Compilation time is
-separate from the probe deadlines below. The Go SDK's public compiler floor is
-unchanged.
+separate from the probe deadlines below. The Go modules support only Go releases
+that still get security fixes, currently Go 1.26 and 1.27, so each declares
+`go 1.26.0`. The Go 1.26 compatibility CI job runs the Go tests and installed
+module smoke tests on Go 1.26.
 
 On macOS and Linux, the inventory runs at most four distinct version commands at
 once. Each command has a two-second deadline and a 4 KiB limit per output stream.

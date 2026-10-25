@@ -1,6 +1,6 @@
 module github.com/LogBrewCo/sdk/tools/toolchain-probe
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/dlclark/regexp2 v1.12.0
