@@ -56,6 +56,7 @@ func TestReleaseChecksUsage(t *testing.T) {
 	for _, arguments := range [][]string{{}, {"nope"}, {"npm-peers"}, {"npm-peers", "m", "bad"}, {"npm-peers", "m", "=1.0.0"},
 		{"maven-pom", "--group-id"}, {"maven-pom", "pom", "--group-id", "g", "--artifact-id", "a"},
 		{"release-notes", "a", "b", "--since", "x"}, {"maven-deployment"}, {"maven-deployment", "nope"},
+		{"nuget-range"}, {"nuget-range", "x.1.0"}, {"nuget-range", "1.2.3", "1.2.3"},
 		{"publication-run", "--repository", "a/b", "--run-id", "x", "--family", "pypi", "--workflow-sha", "a",
 			"--source-sha", "b"},
 		{"publication-run", "--repository", "a/b", "--run-id", "1", "--family", "other", "--workflow-sha", "a",
@@ -74,6 +75,14 @@ func TestReleaseChecksUsage(t *testing.T) {
 	parsed, help, err := parseCheck(spec, []string{"a", "--since", "x", "--", "-b"})
 	if help || err != nil || !slices.Equal(parsed.positional, []string{"a", "-b"}) || parsed.values["since"] != "x" {
 		t.Fatalf("parsed = %v, %v, %v", parsed, help, err)
+	}
+}
+
+func TestNuGetRange(t *testing.T) {
+	for version, want := range map[string]string{"0.1.11": "[0.1.11, 0.2.0)\n", "2.3.4-rc.1": "[2.3.4-rc.1, 3.0.0)\n"} {
+		if code, output, _ := runChecks(nil, "", "nuget-range", version); code != exitOK || output != want {
+			t.Errorf("%s = %d, %q", version, code, output)
+		}
 	}
 }
 

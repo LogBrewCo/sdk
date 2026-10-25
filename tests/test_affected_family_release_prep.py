@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 import tomllib
 import unittest
 import xml.etree.ElementTree as ET
@@ -10,9 +9,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-import release_catalog  # noqa: E402
 
 
 def xml_value(path: Path, xpath: str) -> str | None:
@@ -25,6 +21,9 @@ def source_text(relative_path: str | Path) -> str:
 
 def json_object(relative_path: str) -> dict[str, object]:
     return json.loads(source_text(relative_path))
+
+
+CATALOG = tomllib.loads(source_text("tools/toolchain-probe/release-catalog.toml"))
 
 
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
@@ -57,7 +56,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
         self.assertEqual(rust["package"]["version"], "0.1.8")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
-        self.assertIn(f'VERSION = "{release_catalog.RUBYGEMS_VERSION}"', ruby_version)
+        self.assertIn(f'VERSION = "{CATALOG["rubygems"]}"', ruby_version)
         self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.13")
         for package, version in (("LogBrew", "0.1.11"), ("LogBrew.HttpClient", "0.1.6")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
@@ -240,12 +239,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
     def test_release_catalog_matches_the_affected_version_matrix(self) -> None:
-        catalog = release_catalog.CATALOG
-        self.assertEqual(release_catalog.RUST_VERSION, "0.1.8")
-        self.assertEqual(release_catalog.RUBYGEMS_VERSION, "0.1.16")
-        self.assertEqual(release_catalog.PACKAGIST_VERSION, "0.1.23")
+        self.assertEqual(CATALOG["rust"], "0.1.8")
+        self.assertEqual(CATALOG["rubygems"], "0.1.16")
+        self.assertEqual(CATALOG["packagist"], "0.1.23")
         self.assertEqual(
-            {package.package_id: package.version for package in release_catalog.DOTNET_RELEASE_PACKAGES},
+            {package["id"]: package["version"] for package in CATALOG["nuget"]},
             {
                 "LogBrew": "0.1.11",
                 "LogBrew.AspNetCore": "0.1.3",
@@ -256,10 +254,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LogBrew.OpenTelemetry": "0.1.1",
             },
         )
-        self.assertEqual(catalog["java_maven"], "0.1.13")
-        self.assertEqual(release_catalog.MAVEN_VERSION, "0.2.3")
+        self.assertEqual(CATALOG["java_maven"], "0.1.13")
+        self.assertEqual(CATALOG["maven"], "0.2.3")
         self.assertEqual(
-            {package["name"]: package["version"] for package in catalog["pypi"]},
+            {package["name"]: package["version"] for package in CATALOG["pypi"]},
             {
                 "logbrew-sdk": "0.1.25",
                 "logbrew-fastapi": "0.1.13",

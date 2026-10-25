@@ -1197,7 +1197,7 @@ func (element *xmlElement) rawText(name string) any {
 
 func compatibleDependencyRange(version string) string {
 	parts := strings.SplitN(version, ".", 3)
-	if len(parts) < 2 {
+	if len(parts) < 3 {
 		return ""
 	}
 	major, majorError := strconv.Atoi(parts[0])

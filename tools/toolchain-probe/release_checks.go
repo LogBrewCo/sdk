@@ -23,6 +23,7 @@ import (
 const (
 	releaseChecksMode  = "release-checks"
 	releaseChecksUsage = "usage: release-checks npm-peers MANIFEST PACKAGE=VERSION... | maven-jar JAR VERSION | " +
+		"nuget-range VERSION | " +
 		"npm-workspace|npm-plan|maven-pom|maven-deployment capture|maven-deployment wait|nuget-provenance|" +
 		"publication-run|release-notes [flags]\n"
 	mavenJARFailure = "Maven JAR metadata validation failed\n"
@@ -139,6 +140,11 @@ func checkRelease(arguments []string, tools releaseTools, output, diagnostic io.
 			return writeText(diagnostic, mavenJARFailure, exitFailure)
 		}
 		return exitOK
+	case "nuget-range":
+		if dependencyRange := compatibleDependencyRange(strings.Join(arguments, " ")); len(arguments) == 1 && dependencyRange != "" {
+			return writeText(output, dependencyRange+"\n", exitOK)
+		}
+		return writeText(diagnostic, releaseChecksUsage, exitUsage)
 	}
 	spec, found := releaseCheckSpecs[command]
 	parsed, help, err := parseCheck(spec, arguments)
