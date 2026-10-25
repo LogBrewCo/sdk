@@ -33,7 +33,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-browser/package.json": "0.1.14",
             "js/logbrew-express/package.json": "0.1.7",
             "js/logbrew-fastify/package.json": "0.1.7",
-            "js/logbrew-node/package.json": "0.1.18",
+            "js/logbrew-node/package.json": "0.1.19",
             "js/logbrew-nestjs/package.json": "0.1.8",
             "js/logbrew-next/package.json": "0.1.11",
             "js/logbrew-react/package.json": "0.1.2",
@@ -44,7 +44,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.25"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.26"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.13"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.7"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.8"),
@@ -259,7 +259,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(
             {package["name"]: package["version"] for package in CATALOG["pypi"]},
             {
-                "logbrew-sdk": "0.1.25",
+                "logbrew-sdk": "0.1.26",
                 "logbrew-fastapi": "0.1.13",
                 "logbrew-flask": "0.1.7",
                 "logbrew-django": "0.1.8",
