@@ -3,7 +3,7 @@ name: Advisories
 # Scans the locked dependencies every day, so an advisory published after a
 # change merged still fails within 24 hours. A failed scan opens or updates the
 # issue "Dependency advisories" and fails the run; a clean scan closes it
-# (scripts/advisory-issue.sh).
+# (scripts/advisory-issue.sh). Only main runs: both jobs skip any other ref.
 
 on:
   schedule:
@@ -19,6 +19,7 @@ concurrency:
 jobs:
   scan:
     name: Scan locked dependencies
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -49,7 +50,7 @@ jobs:
   report:
     name: Open, update, or close the advisory issue
     needs: scan
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
