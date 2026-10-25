@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import atexit
 import math
+import os
 import random
 import threading
 import time
+import weakref
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
@@ -33,6 +36,8 @@ MIN_DELIVERY_INTERVAL_SECONDS = 0.01
 DEFAULT_DELIVERY_INTERVAL_SECONDS = 1.0
 DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50
 MAX_DELIVERY_INTERVAL_SECONDS = 3600.0
+# Matches the process-error flush bound: enough for one intake round trip, short enough to keep exit prompt.
+EXIT_FLUSH_TIMEOUT_SECONDS = 2.0
 
 
 class DeliveryResponse(Protocol):
@@ -145,6 +150,10 @@ class AutomaticDeliveryController:
         self._consecutive_failures = 0
         self._delivery_attempts = 0
         self._accepted_events = 0
+        self._exit_hook: Callable[[], None] | None = None
+        if enabled:
+            self._exit_hook = _drain_at_exit(weakref.ref(self), os.getpid())
+            atexit.register(self._exit_hook)
 
     @property
     def enabled(self) -> bool:
@@ -224,6 +233,22 @@ class AutomaticDeliveryController:
             self._apply_failure_locked(error, time.monotonic())
             self._condition.notify_all()
 
+    def drain(self, timeout_seconds: float) -> None:
+        """Wake the worker and wait at most ``timeout_seconds`` until no event is pending."""
+        deadline = time.monotonic() + timeout_seconds
+        with self._condition:
+            if not self._enabled or self._closed or self._shutting_down:
+                return
+            self._ensure_worker_locked(time.monotonic())
+            while (self._has_pending or self._delivery_in_flight) and self._pause_reason == "none":
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or self._thread is None:
+                    return
+                if self._retry_due_at is None:
+                    self._wake_requested = True
+                self._condition.notify_all()
+                self._condition.wait(timeout=remaining)
+
     def begin_shutdown(self) -> threading.Thread | None:
         with self._condition:
             self._shutting_down = True
@@ -250,6 +275,8 @@ class AutomaticDeliveryController:
             self._condition.notify_all()
 
     def mark_closed(self) -> None:
+        if self._exit_hook is not None:
+            atexit.unregister(self._exit_hook)
         with self._condition:
             self._closed = True
             self._shutting_down = False
@@ -407,6 +434,18 @@ class AutomaticDeliveryController:
         if self._enabled and self._has_pending:
             return "scheduled"
         return "idle"
+
+
+def _drain_at_exit(controller_ref: weakref.ref[AutomaticDeliveryController], owner_pid: int) -> Callable[[], None]:
+    """Build the exit hook that gives automatic delivery a bounded last chance to send."""
+
+    def drain_at_exit() -> None:
+        controller = controller_ref()
+        # A forked child inherits the hook but not the parent's queue ownership.
+        if controller is not None and os.getpid() == owner_pid:
+            controller.drain(EXIT_FLUSH_TIMEOUT_SECONDS)
+
+    return drain_at_exit
 
 
 def resolve_automatic_delivery_options(

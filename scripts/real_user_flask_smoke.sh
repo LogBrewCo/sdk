@@ -285,6 +285,47 @@ check_json fields \
   "$tmp_dir/dependency.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/dependency.stdout.json" >/dev/null
 
+# The minimal setup must send a request captured just before the process exits.
+"$tmp_dir/app/bin/python" - "$tmp_dir/app/bin/python" <<'PY'
+import json
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+batches = []
+
+
+class Intake(BaseHTTPRequestHandler):
+    def do_POST(self):
+        batches.append(json.loads(self.rfile.read(int(self.headers["content-length"]))))
+        self.send_response(202)
+        self.end_headers()
+
+    def log_message(self, *args):
+        return
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Intake)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+endpoint = f"http://127.0.0.1:{server.server_address[1]}/v1/events"
+app = f"""
+from flask import Flask
+from logbrew_flask import init_logbrew
+from logbrew_sdk import HttpTransport
+
+app = Flask("exit-check")
+init_logbrew(app, api_key="LOGBREW_API_KEY", transport=HttpTransport(endpoint={endpoint!r}))
+app.add_url_rule("/health", "health", lambda: "ok")
+app.test_client().get("/health")
+"""
+subprocess.run([sys.argv[1], "-c", app], check=True, timeout=30)
+server.shutdown()
+spans = [event for batch in batches for event in batch["events"] if event["type"] == "span"]
+if len(spans) != 1:
+    raise SystemExit(f"expected the last request span to be sent at exit, got {len(spans)}")
+PY
+
 printf 'flask real-user smoke passed with %s\n' "$("$tmp_dir/app/bin/python" - <<'PY'
 from importlib.metadata import version
 

@@ -82,8 +82,10 @@ exceptions, metrics, shutdown hooks, and recovery, is in the
 
 The initializer owns an HTTP transport and sends on a background worker, so a
 telemetry request does not block the Flask response. The first accepted event
-wakes delivery immediately. Call `logbrew.client.shutdown()` from the normal
-graceful worker-shutdown hook to flush any retained tail. Repeated
+wakes delivery immediately. When the Python process exits normally, the
+client sends any events still queued, for at most 2 seconds. Call
+`logbrew.client.shutdown()` from your graceful worker-shutdown hook when you
+have one. Repeated
 `init_logbrew(app)` calls return the same app extension and do not install
 duplicate hooks.
 
