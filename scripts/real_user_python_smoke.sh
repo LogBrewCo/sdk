@@ -528,8 +528,13 @@ import inspect
 from typing import Annotated, get_args, get_origin, get_type_hints
 import logbrew_sdk
 
+read_back_note = (
+    "\n\nA 2xx response means LogBrew accepted the batch, not that you can read it. Read it back with a\n"
+    "project read key: ``LOGBREW_TOKEN=<read key> logbrew read traces --since 1h --json`` (or\n"
+    "``logbrew issues``). See https://docs.logbrew.co/guides/verify-setup."
+)
 expected_docs = (
-    ("module", logbrew_sdk, "Public Python client for building, validating, previewing, and flushing LogBrew event batches."),
+    ("module", logbrew_sdk, "Public Python client for building, validating, previewing, and flushing LogBrew event batches." + read_back_note),
     ("ReleaseAttributes", logbrew_sdk.ReleaseAttributes, "Public release event attributes."),
     ("EnvironmentAttributes", logbrew_sdk.EnvironmentAttributes, "Public environment event attributes."),
     ("IssueAttributes", logbrew_sdk.IssueAttributes, "Public issue event attributes."),
@@ -540,7 +545,7 @@ expected_docs = (
     ("LogBrewClient", logbrew_sdk.LogBrewClient, "Buffered public client for validating, previewing, and flushing LogBrew events."),
     ("LogBrewClient.create", logbrew_sdk.LogBrewClient.create, "Create a client from public SDK identity, retry, and API key settings."),
     ("RecordingTransport", logbrew_sdk.RecordingTransport, "Scripted transport for previewing, accepting, or failing queued event flushes."),
-    ("HttpTransport", logbrew_sdk.HttpTransport, "HTTP transport for sending queued batches with portable TLS verification."),
+    ("HttpTransport", logbrew_sdk.HttpTransport, "HTTP transport for sending queued batches with portable TLS verification." + read_back_note),
     ("HttpTransport.send", logbrew_sdk.HttpTransport.send, "POST one serialized event batch and return the HTTP status."),
     ("LogBrewClient.preview_json", logbrew_sdk.LogBrewClient.preview_json, "Return the queued event batch as stable, pretty-printed JSON."),
     ("LogBrewClient.flush", logbrew_sdk.LogBrewClient.flush, "Flush queued events through a transport while preserving retry semantics."),
