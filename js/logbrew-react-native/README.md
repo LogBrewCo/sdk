@@ -442,8 +442,8 @@ void replayLogBrewAppleNativeDiagnostics().catch((error) => {
 ```
 
 `fatalHandlerOwnership: "logbrew"` is an explicit process-lifetime ownership
-claim. Do not install these diagnostics while Sentry or another integration
-owns the native fatal signal or Mach exception handlers. Linking both SDKs is
+claim. Do not install these diagnostics while another crash reporter or
+integration owns the native fatal signal or Mach exception handlers. Linking both SDKs is
 allowed, but only one integration may install native fatal capture in a given
 process. LogBrew cannot transfer or remove that ownership before process
 restart.
@@ -542,8 +542,8 @@ reading the rejection value or emitting the runtime rejection identifier.
 `rejectionHealth()` returns bounded duplicate, eviction, and later-handled
 counters.
 
-Do not install this helper while Sentry or another integration owns the same
-tracker slot. Use the app-owned callback composition below when another
+Do not install this helper while another crash reporter or integration owns
+the same tracker slot. Use the app-owned callback composition below when another
 integration must remain the owner. Hermes does not expose a previous-owner
 restoration API. `deactivate()` therefore stops LogBrew capture through its
 installed callbacks but cannot reinstate an earlier tracker. Install

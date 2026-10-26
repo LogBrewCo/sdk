@@ -219,4 +219,4 @@ By default, transport failures do not break the Flask response path. Set `raise_
 
 ## Tradeoff
 
-Sentry, Datadog, and OpenTelemetry provide broader automatic Flask, outbound HTTP, and dependency instrumentation, including global patching and deeper view/template/client hooks. LogBrew starts with explicit app-owned Flask and dependency helpers because that keeps setup reversible, simple to reason about, and safer for privacy-sensitive services.
+Other tools, including OpenTelemetry instrumentation, provide broader automatic Flask, outbound HTTP, and dependency instrumentation, including global patching and deeper view/template/client hooks. LogBrew starts with explicit app-owned Flask and dependency helpers because that keeps setup reversible, simple to reason about, and safer for privacy-sensitive services.
