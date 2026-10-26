@@ -29,16 +29,17 @@ CATALOG = tomllib.loads(source_text("tools/toolchain-probe/release-catalog.toml"
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.34",
-            "js/logbrew-browser/package.json": "0.1.14",
-            "js/logbrew-express/package.json": "0.1.7",
-            "js/logbrew-fastify/package.json": "0.1.7",
-            "js/logbrew-node/package.json": "0.1.19",
-            "js/logbrew-nestjs/package.json": "0.1.8",
-            "js/logbrew-next/package.json": "0.1.11",
-            "js/logbrew-react/package.json": "0.1.2",
-            "js/logbrew-react-native/package.json": "0.1.37",
-            "js/logbrew-svelte/package.json": "0.1.5",
+            "js/logbrew-js/package.json": "0.1.35",
+            "js/logbrew-browser/package.json": "0.1.15",
+            "js/logbrew-express/package.json": "0.1.8",
+            "js/logbrew-fastify/package.json": "0.1.8",
+            "js/logbrew-node/package.json": "0.1.20",
+            "js/logbrew-nestjs/package.json": "0.1.9",
+            "js/logbrew-next/package.json": "0.1.12",
+            "js/logbrew-react/package.json": "0.1.3",
+            "js/logbrew-react-native/package.json": "0.1.38",
+            "js/logbrew-svelte/package.json": "0.1.6",
+            "js/logbrew-angular/package.json": "0.1.1",
         }
         for relative_path, expected in npm_versions.items():
             self.assertEqual(json_object(relative_path)["version"], expected)
@@ -54,11 +55,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((project["name"], project["version"]), expected)
 
         rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
-        self.assertEqual(rust["package"]["version"], "0.1.8")
+        self.assertEqual(rust["package"]["version"], "0.1.9")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{CATALOG["rubygems"]}"', ruby_version)
         self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.13")
-        for package, version in (("LogBrew", "0.1.11"), ("LogBrew.HttpClient", "0.1.6")):
+        for package, version in (("LogBrew", "0.1.12"), ("LogBrew.HttpClient", "0.1.7")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
                 self.assertEqual(xml_value(path, "./PropertyGroup/Version"), version)
@@ -225,7 +226,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(xml_value(ROOT / "kotlin/logbrew-kotlin-okhttp/pom.xml", "{*}version"), "0.2.3")
 
         expected = {
-            "LogBrew.AspNetCore": "0.1.3",
+            "LogBrew.AspNetCore": "0.1.4",
             "LogBrew.EntityFrameworkCore": "0.1.0",
             "LogBrew.Hangfire": "0.1.0",
             "LogBrew.StackExchangeRedis": "0.1.0",
@@ -236,17 +237,17 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
     def test_release_catalog_matches_the_affected_version_matrix(self) -> None:
-        self.assertEqual(CATALOG["rust"], "0.1.8")
-        self.assertEqual(CATALOG["rubygems"], "0.1.16")
+        self.assertEqual(CATALOG["rust"], "0.1.9")
+        self.assertEqual(CATALOG["rubygems"], "0.1.17")
         self.assertEqual(CATALOG["packagist"], "0.1.23")
         self.assertEqual(
             {package["id"]: package["version"] for package in CATALOG["nuget"]},
             {
-                "LogBrew": "0.1.11",
-                "LogBrew.AspNetCore": "0.1.3",
+                "LogBrew": "0.1.12",
+                "LogBrew.AspNetCore": "0.1.4",
                 "LogBrew.EntityFrameworkCore": "0.1.0",
                 "LogBrew.Hangfire": "0.1.0",
-                "LogBrew.HttpClient": "0.1.6",
+                "LogBrew.HttpClient": "0.1.7",
                 "LogBrew.StackExchangeRedis": "0.1.0",
                 "LogBrew.OpenTelemetry": "0.1.1",
             },

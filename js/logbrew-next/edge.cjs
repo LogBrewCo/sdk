@@ -25,7 +25,7 @@ function createLogBrewNextEdgeRequestErrorHandler(options = {}) {
       apiKey: authKey,
       context: deploymentContext,
       sdkName: options.sdkName ?? "logbrew-next",
-      sdkVersion: options.sdkVersion ?? "0.1.11",
+      sdkVersion: options.sdkVersion ?? "0.1.12",
       maxRetries: options.maxRetries ?? 2
     });
     const event = typeof options.errorEvent === "function"

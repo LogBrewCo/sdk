@@ -10,7 +10,7 @@ const {
 } = require("@logbrew/sdk");
 
 const DEFAULT_SDK_NAME = "logbrew-angular";
-const DEFAULT_SDK_VERSION = "0.1.0";
+const DEFAULT_SDK_VERSION = "0.1.1";
 
 const LOG_BREW_ANGULAR_CONTEXT = new InjectionToken("LogBrew Angular context");
 

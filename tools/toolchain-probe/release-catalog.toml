@@ -2,8 +2,8 @@
 # release-versions checks expect. Release preparation updates the versions here.
 
 public_version = "0.1.0"
-rust = "0.1.8"
-rubygems = "0.1.16"
+rust = "0.1.9"
+rubygems = "0.1.17"
 packagist = "0.1.23"
 unity = "0.2.2"
 maven = "0.2.3"
@@ -69,12 +69,12 @@ repo_wide = [
 # Each NuGet package lives at dotnet/logbrew-dotnet/src/<id>/<id>.csproj.
 [[nuget]]
 id = "LogBrew"
-version = "0.1.11"
+version = "0.1.12"
 version_output = "core_version"
 
 [[nuget]]
 id = "LogBrew.AspNetCore"
-version = "0.1.3"
+version = "0.1.4"
 version_output = "aspnetcore_version"
 
 [[nuget]]
@@ -89,7 +89,7 @@ version_output = "hangfire_version"
 
 [[nuget]]
 id = "LogBrew.HttpClient"
-version = "0.1.6"
+version = "0.1.7"
 version_output = "httpclient_version"
 
 [[nuget]]

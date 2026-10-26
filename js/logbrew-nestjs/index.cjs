@@ -14,7 +14,7 @@ const {
 } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
-const DEFAULT_SDK_VERSION = "0.1.8";
+const DEFAULT_SDK_VERSION = "0.1.9";
 
 function createLogBrewNestClient({
   serverApiKey,
