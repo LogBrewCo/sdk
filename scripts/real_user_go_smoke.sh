@@ -504,8 +504,6 @@ import (
 func main() {
 	client, err := logbrew.NewClient(logbrew.Config{
 		APIKey:               "LOGBREW_API_KEY",
-		SDKName:              "logbrew-go",
-		SDKVersion:           "0.1.0",
 		DisableRuntimeContext: true,
 	})
 	if err != nil {
@@ -1763,6 +1761,7 @@ grep -q '"type": "issue"' readme-example.stdout.json
 grep -q '"type": "log"' readme-example.stdout.json
 grep -q '"type": "span"' readme-example.stdout.json
 grep -q '"type": "action"' readme-example.stdout.json
+python3 -c 'import json, sys; sdk = json.load(open(sys.argv[1]))["sdk"]; sys.exit(0 if sdk == {"name": "logbrew-go", "language": "go", "version": "0.1.0"} else f"unexpected default SDK identity: {sdk!r}")' readme-example.stdout.json
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
 grep -q '"events":6' readme-example.stderr.json
@@ -1782,13 +1781,13 @@ grep -q '^package logbrew' package-doc.txt
 grep -q 'provides a small public client for building, validating,' package-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.NewClient > constructor-doc.txt
 grep -q '^func NewClient(config Config) (\*Client, error)$' constructor-doc.txt
-grep -q 'creates a public LogBrew client from user-supplied SDK identity' constructor-doc.txt
+grep -q 'creates a public LogBrew client from API key, optional SDK' constructor-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Config > config-doc.txt
 grep -q '^type Config struct {' config-doc.txt
 grep -q 'describes the public SDK identity, API key, and retry behavior' config-doc.txt
 grep -q 'APIKey is the public LogBrew API key sent to the transport' config-doc.txt
-grep -q 'SDKName identifies the calling SDK or application in emitted payloads' config-doc.txt
-grep -q 'SDKVersion identifies the calling SDK or application version' config-doc.txt
+grep -q 'SDKName identifies the SDK in emitted payloads. Empty defaults to' config-doc.txt
+grep -q "SDKVersion identifies the SDK version. Empty defaults to this module's" config-doc.txt
 grep -q 'MaxRetries sets the retry budget for retryable transport failures' config-doc.txt
 grep -q 'MaxQueueSize bounds the in-memory event queue' config-doc.txt
 grep -q 'OnEventDropped is an advisory callback for local queue overflow' config-doc.txt
