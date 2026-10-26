@@ -623,7 +623,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             "typing-extensions>=4.1; python_version < '3.11'",
             projects["logbrew_py"]["dependencies"],
         )
-        self.assertIn("Django>=4.2.30,<6", projects["logbrew_django"]["dependencies"])
+        self.assertIn("Django>=4.2.30,<7", projects["logbrew_django"]["dependencies"])
 
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("python-version: \"3.10\"", workflow)

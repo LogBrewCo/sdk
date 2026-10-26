@@ -105,11 +105,11 @@ version_output = "otel_version"
 [[pypi]]
 dir = "python/logbrew_django"
 name = "logbrew-django"
-version = "0.1.8"
+version = "0.1.9"
 package = "logbrew_django"
 description = "Django integration"
 requires_python = ">=3.10"
-dependencies = ["Django>=4.2.30,<6", "logbrew-sdk>=0.1.21,<0.2.0"]
+dependencies = ["Django>=4.2.30,<7", "logbrew-sdk>=0.1.21,<0.2.0"]
 
 [[pypi]]
 dir = "python/logbrew_fastapi"
