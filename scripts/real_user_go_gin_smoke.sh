@@ -125,7 +125,7 @@ if grep -q '^replace ' go.mod; then
 	exit 1
 fi
 go list -m all > "$tmp_dir/go-gin-modules-before-remove.txt"
-grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.15$' "$tmp_dir/go-gin-modules-before-remove.txt"
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.2.1$' "$tmp_dir/go-gin-modules-before-remove.txt"
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew/gin v0.1.2$' "$tmp_dir/go-gin-modules-before-remove.txt"
 grep -q '^github.com/gin-gonic/gin v1.12.0$' "$tmp_dir/go-gin-modules-before-remove.txt"
 go get github.com/LogBrewCo/sdk/go/logbrew/gin@none >/dev/null

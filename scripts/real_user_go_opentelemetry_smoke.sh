@@ -110,7 +110,7 @@ go mod edit -go=1.26.0
 go get github.com/LogBrewCo/sdk/go/logbrew/otel@v0.1.0 >/dev/null
 grep -q 'github.com/LogBrewCo/sdk/go/logbrew/otel v0.1.0' go.mod
 go list -m all > "$tmp_dir/go-otel-modules-before-remove.txt"
-grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.15$' "$tmp_dir/go-otel-modules-before-remove.txt"
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.2.1$' "$tmp_dir/go-otel-modules-before-remove.txt"
 grep -q '^github.com/LogBrewCo/sdk/go/logbrew/otel v0.1.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
 grep -q '^go.opentelemetry.io/otel v1.47.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
 grep -q '^go.opentelemetry.io/otel/sdk v1.47.0$' "$tmp_dir/go-otel-modules-before-remove.txt"
