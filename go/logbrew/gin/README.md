@@ -23,7 +23,13 @@ middleware after Gin's recovery middleware:
 package main
 
 import (
+  "context"
+  "errors"
+  "net/http"
   "os"
+  "os/signal"
+  "syscall"
+  "time"
 
   "github.com/LogBrewCo/sdk/go/logbrew"
   logbrewgin "github.com/LogBrewCo/sdk/go/logbrew/gin"
@@ -31,6 +37,9 @@ import (
 )
 
 func main() {
+  ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+  defer stop()
+
   transport, err := logbrew.NewHTTPTransport(logbrew.HTTPTransportConfig{})
   must(err)
   client, err := logbrew.NewAutomaticClient(logbrew.Config{
@@ -39,9 +48,6 @@ func main() {
     Transport: transport,
   })
   must(err)
-  defer func() {
-    _, _ = client.Shutdown(nil)
-  }()
 
   middleware, err := logbrewgin.NewMiddleware(logbrewgin.Config{
     Client:                   client,
@@ -66,7 +72,21 @@ func main() {
     ))
     c.Status(204)
   })
-  must(router.Run(":8080"))
+
+  server := &http.Server{Addr: ":8080", Handler: router}
+  go func() {
+    if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+      panic(err)
+    }
+  }()
+
+  <-ctx.Done()
+  stop()
+  shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+  defer cancel()
+  serverErr := server.Shutdown(shutdownCtx)
+  _, err = client.Shutdown(nil)
+  must(errors.Join(serverErr, err))
 }
 
 func must(err error) {
@@ -75,6 +95,13 @@ func must(err error) {
   }
 }
 ```
+
+Most hosts and container platforms stop a service with `SIGTERM`. Go does not
+run deferred calls when a signal ends the process, so a `defer
+client.Shutdown(nil)` around `router.Run` never runs and events still queued
+at that moment are lost. The example catches `SIGTERM` and `Ctrl+C`, lets
+in-flight requests finish with `http.Server.Shutdown`, then sends the
+remaining events with `client.Shutdown(nil)`.
 
 `gin.Default()` already installs Gin recovery before application-added
 middleware, so use `router.Use(middleware)` with that constructor. With
