@@ -43,7 +43,7 @@ from logbrew_sdk import (
 )
 
 LOGBREW_FLASK_EXTENSION_KEY = "logbrew"
-LOGBREW_FLASK_SDK_VERSION = "0.1.7"
+LOGBREW_FLASK_SDK_VERSION = "0.1.8"
 _CONFIGURATION_ERROR = "configuration_error"
 _REQUEST_STATE_KEY = "logbrew.request_state"
 _MAX_HTTP_STATUS = 599

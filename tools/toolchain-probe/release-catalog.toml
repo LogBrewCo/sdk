@@ -124,7 +124,7 @@ optional_dependencies = { celery = ["logbrew-sdk[celery]>=0.1.27,<0.2.0"] }
 [[pypi]]
 dir = "python/logbrew_flask"
 name = "logbrew-flask"
-version = "0.1.7"
+version = "0.1.8"
 package = "logbrew_flask"
 description = "Flask integration"
 requires_python = ">=3.10"
