@@ -145,7 +145,7 @@ It does not capture request or response bodies, concrete URLs, query strings,
 fragments, hosts, client IPs, user identity, cookies, authorization values,
 arbitrary headers, raw `traceparent`, baggage, tracestate, error messages,
 panic values, raw stack text, source lines, locals, or absolute frame paths.
-Generated frames contain only basename, coordinates, and bounded code identity.
+Generated frames contain only basename, coordinates, bounded code identity, and an in-app flag that marks your main module's frames.
 Custom metadata accepts primitive low-cardinality values and drops keys that
 suggest authentication material, payloads, URLs, headers, queries, or raw
 propagation.
