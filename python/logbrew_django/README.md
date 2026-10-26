@@ -48,8 +48,8 @@ Use a project `server` ingest key from the environment, never from source. Set
 `LOGBREW_ENVIRONMENT` and `LOGBREW_RELEASE` (for example `checkout-api@1.4.0`)
 in the app's environment; the client adds them to every event, so issues show
 which deploy they belong to. Keep `sdk_name` and `sdk_version` as the SDK's own
-name and version. In tests, pass `RecordingTransport.always_accept()` instead
-of `HttpTransport()` so nothing leaves the process, and a fixed
+name and version. To keep events in memory instead of sending them, pass
+`RecordingTransport.always_accept()` instead of `HttpTransport()`, and a fixed
 `span_id_factory` for stable span ids.
 
 `LogBrewDjangoMiddleware` records successful requests as span events, records unhandled view exceptions as issue plus error-span events, and flushes through the configured transport after each response. Exceptions that Django turns into 4xx responses (`Http404`, `PermissionDenied`, `BadRequest`, `SuspiciousOperation`, and `MultiPartParserError`) are client errors: their request span keeps the 4xx status and no issue is created. Exception issues include first-class exception type, `django.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Automatic capture never reads or sends exception messages: the issue uses the fixed summary `Unhandled exception`, and every exception-chain node is marked `redacted`. If no transport is provided, events stay queued on the core client so the project can flush them itself.
