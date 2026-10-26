@@ -77,4 +77,4 @@ await prismaOperationWithLogBrewSpan({
 
 ## Tradeoff
 
-Sentry and Datadog use deeper Prisma runtime instrumentation to capture engine spans automatically. LogBrew starts with explicit, reversible Prisma Client extensions because that keeps setup simple, works from installed package artifacts, and avoids SQL or connection-detail capture by default.
+Some tools use deeper Prisma runtime instrumentation to capture engine spans automatically. LogBrew starts with explicit, reversible Prisma Client extensions because that keeps setup simple, works from installed package artifacts, and avoids SQL or connection-detail capture by default.
