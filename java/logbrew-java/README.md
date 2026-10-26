@@ -16,7 +16,7 @@ Install from Maven Central:
 <dependency>
   <groupId>co.logbrew</groupId>
   <artifactId>logbrew-sdk</artifactId>
-  version>/version>
+  <version>0.1.13</version>
 </dependency>
 ```
 
