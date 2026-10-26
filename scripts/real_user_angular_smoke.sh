@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+angular_package_version="$(node -p "require('${repo_root}/js/logbrew-angular/package.json').version")"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -87,9 +88,9 @@ grep -q '"@logbrew/angular"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/angular @angular/core @angular/compiler rxjs zone.js >/dev/null
 npm explain @logbrew/angular > "$tmp_dir/npm-explain-angular.txt"
-grep -q '@logbrew/angular@0.1.0' "$tmp_dir/npm-explain-angular.txt"
+grep -q "@logbrew/angular@${angular_package_version}" "$tmp_dir/npm-explain-angular.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/angular@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/angular@${angular_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
