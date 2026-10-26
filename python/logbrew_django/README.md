@@ -79,9 +79,11 @@ logbrew read logs --since 1h --json
 logbrew issues --since 1h --json
 ```
 
-A read key reads 1 project and cannot send telemetry. Run `unset LOGBREW_TOKEN`
-when you finish. [Read your events back](https://docs.logbrew.co/guides/verify-setup)
-covers key kinds, empty results, and how to revoke the key.
+If you already have a project read key, export it as `LOGBREW_TOKEN` and skip
+the `keys create` step. A read key reads 1 project and cannot send telemetry.
+Run `unset LOGBREW_TOKEN` when you finish.
+[Read your events back](https://docs.logbrew.co/guides/verify-setup) covers key
+kinds, empty results, and how to revoke the key.
 
 ## Request User
 

@@ -454,5 +454,5 @@ tools/toolchain-probe/main.go	*	line	return "cleanup failed"
 scripts/advisory-issue.sh	*	line	# closes it. Needs GH_TOKEN with issues: write and the GitHub Actions run
 scripts/advisory-issue.sh	*	line	printf 'Authorization: Bearer %s\n' "$GH_TOKEN" |
 
-# README read-back steps name the CLI token variable, never a value.
-**/README.md	*	only	LOGBREW_TOKEN
+# README and Python docstring read-back steps name the CLI token variable, never a value.
+{**/README.md,python/logbrew_py/src/logbrew_sdk/__init__.py,python/logbrew_django/src/logbrew_django/__init__.py}	*	only	LOGBREW_TOKEN

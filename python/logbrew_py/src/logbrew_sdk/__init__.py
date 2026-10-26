@@ -1,4 +1,9 @@
-"""Public Python client for building, validating, previewing, and flushing LogBrew event batches."""
+"""Public Python client for building, validating, previewing, and flushing LogBrew event batches.
+
+A 2xx response means LogBrew accepted the batch, not that you can read it. Read it back with a
+project read key: ``LOGBREW_TOKEN=<read key> logbrew read traces --since 1h --json`` (or
+``logbrew issues``). See https://docs.logbrew.co/guides/verify-setup.
+"""
 
 from __future__ import annotations
 
@@ -432,7 +437,12 @@ class RecordingTransport:
 
 
 class HttpTransport:
-    """HTTP transport for sending queued batches with portable TLS verification."""
+    """HTTP transport for sending queued batches with portable TLS verification.
+
+    A 2xx response means LogBrew accepted the batch, not that you can read it. Read it back with a
+    project read key: ``LOGBREW_TOKEN=<read key> logbrew read traces --since 1h --json`` (or
+    ``logbrew issues``). See https://docs.logbrew.co/guides/verify-setup.
+    """
 
     def __init__(
         self,
