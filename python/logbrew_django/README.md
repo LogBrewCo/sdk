@@ -12,7 +12,7 @@ Django integration for capturing LogBrew request spans and exceptions with the p
 python3 -m pip install logbrew-sdk logbrew-django
 ```
 
-`logbrew-django` requires Python 3.10 or newer and supports `Django>=4.2.30,<6`.
+`logbrew-django` requires Python 3.10 or newer and supports `Django>=4.2.30,<7`, including Django 6.0 and 6.1.
 
 The package is typed, ships `py.typed`, depends on the core `logbrew-sdk`, and keeps Django as a normal framework dependency instead of owning the user's project layout.
 
