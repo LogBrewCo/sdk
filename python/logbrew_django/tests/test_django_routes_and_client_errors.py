@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from typing import Any
 
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
 from django.http import Http404, HttpRequest, HttpResponse
@@ -68,7 +69,7 @@ class RegexRouteAndClientErrorTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         setup_django()
 
-    def events(self, url: str) -> tuple[int, list[dict[str, object]]]:
+    def events(self, url: str) -> tuple[int, list[dict[str, Any]]]:
         transport = RecordingTransport.always_accept()
         configure_logbrew(client=make_client(), transport=transport)
         with override_settings(ROOT_URLCONF=__name__):
