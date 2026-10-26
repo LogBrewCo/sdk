@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/angular",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Angular providers and DI helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
