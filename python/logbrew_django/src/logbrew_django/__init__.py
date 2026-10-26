@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 import uuid
@@ -12,8 +13,9 @@ from typing import Any
 
 from django.conf import settings
 from django.core import signals
-from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
+from django.core.exceptions import BadRequest, ImproperlyConfigured, PermissionDenied, SuspiciousOperation
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
+from django.http.multipartparser import MultiPartParserError
 from logbrew_sdk import (
     LogBrewClient,
     LogBrewTraceContext,
@@ -168,13 +170,98 @@ def request_metadata(
     return metadata
 
 
+# Exceptions Django turns into 4xx responses; they are client errors, not issues.
+_CLIENT_ERROR_EXCEPTIONS = (Http404, PermissionDenied, BadRequest, SuspiciousOperation, MultiPartParserError)
+_REGEX_ROUTE_CHARACTERS = frozenset("^$()[]\\*+?{}|")
+_NAMED_GROUP = re.compile(r"\?P<(\w+)>")
+
+
 def request_route_template(request: HttpRequest) -> str:
     """Return a low-cardinality Django route template without query strings."""
 
     resolver_match = getattr(request, "resolver_match", None)
     route = getattr(resolver_match, "route", None)
-    template = route if isinstance(route, str) and route else request.path
+    if isinstance(route, str) and route:
+        template = _simplify_regex_route(route) if _REGEX_ROUTE_CHARACTERS.intersection(route) else route
+    else:
+        template = request.path
     return route_template_only(template)
+
+
+def _simplify_regex_route(route: str) -> str:
+    """Turn a ``re_path`` regex into a readable template: ``<name>`` for named groups, ``<var>`` otherwise."""
+
+    parts: list[str] = []
+    index = 1 if route.startswith("^") else 0
+    while index < len(route):
+        char = route[index]
+        if char == "(":
+            end = _group_end(route, index)
+            named = _NAMED_GROUP.match(route, index + 1)
+            parts.append(f"<{named.group(1)}>" if named else "<var>")
+            index = _skip_quantifier(route, end + 1)
+        elif char == "[":
+            parts.append("<var>")
+            index = _skip_quantifier(route, _class_end(route, index) + 1)
+        elif char == "\\" and index + 1 < len(route):
+            escaped = route[index + 1]
+            parts.append("<var>" if escaped.isalnum() else escaped)
+            index = _skip_quantifier(route, index + 2) if escaped.isalnum() else index + 2
+        elif char == ".":
+            parts.append("<var>")
+            index = _skip_quantifier(route, index + 1)
+        elif char in "$^*+?|":
+            index += 1
+        elif char == "{":
+            index = _skip_quantifier(route, index)
+        else:
+            parts.append(char)
+            index += 1
+    return "".join(parts)
+
+
+def _class_end(route: str, start: int) -> int:
+    index = start + 1
+    while index < len(route):
+        if route[index] == "\\":
+            index += 2
+            continue
+        if route[index] == "]" and index > start + 1:
+            return index
+        index += 1
+    return len(route) - 1
+
+
+def _group_end(route: str, start: int) -> int:
+    depth = 0
+    index = start
+    while index < len(route):
+        char = route[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            index = _class_end(route, index) + 1
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return len(route) - 1
+
+
+def _skip_quantifier(route: str, index: int) -> int:
+    if index < len(route) and route[index] == "{":
+        close = route.find("}", index)
+        index = len(route) if close < 0 else close + 1
+    elif index < len(route) and route[index] in "*+?":
+        index += 1
+    if index < len(route) and route[index] in "?+":
+        index += 1
+    return index
 
 
 def route_template_only(value: str) -> str:
@@ -456,7 +543,7 @@ class LogBrewDjangoMiddleware:
         """Capture Django view exceptions before Django converts them into responses."""
 
         config = get_logbrew_config()
-        if not config.capture_exceptions:
+        if not config.capture_exceptions or isinstance(exception, _CLIENT_ERROR_EXCEPTIONS):
             return None
         capture_exception(
             config.client, request, exception, trace=request_logbrew_trace(request), service_name=config.service_name,
