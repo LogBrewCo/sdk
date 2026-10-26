@@ -1,4 +1,9 @@
-"""Django integration helpers for capturing LogBrew request spans and exceptions."""
+"""Django integration helpers for capturing LogBrew request spans and exceptions.
+
+A 2xx response means LogBrew accepted the batch, not that you can read it. Read it back with a
+project read key: ``LOGBREW_TOKEN=<read key> logbrew read traces --since 1h --json`` (or
+``logbrew issues``). See https://docs.logbrew.co/guides/verify-setup.
+"""
 
 from __future__ import annotations
 
@@ -72,7 +77,12 @@ def configure_logbrew(
     request_metric_name: str = "http.server.duration",
     span_id_factory: Callable[[], str] | None = None,
 ) -> LogBrewDjangoConfig:
-    """Configure LogBrew Django middleware from application startup code."""
+    """Configure LogBrew Django middleware from application startup code.
+
+    A 2xx response means LogBrew accepted the batch, not that you can read it. Read it back with a
+    project read key: ``LOGBREW_TOKEN=<read key> logbrew read traces --since 1h --json`` (or
+    ``logbrew issues``). See https://docs.logbrew.co/guides/verify-setup.
+    """
 
     config = LogBrewDjangoConfig(
         client=client,
