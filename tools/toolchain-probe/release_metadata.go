@@ -638,9 +638,9 @@ func (check *metadataCheck) goModules() {
 		"go/logbrew/go.mod: unexpected module path")
 	check.require(regexp.MustCompile(goVersion).MatchString(content), "go/logbrew/go.mod: expected go 1.26.0")
 	for _, module := range [][3]string{
-		{"otel", "v0.2.1", "go.opentelemetry.io/otel/sdk v1.47.0"},
-		{"gin", "v0.2.1", "github.com/gin-gonic/gin v1.12.0"},
-		{"asynq", "v0.2.1", "github.com/hibiken/asynq v0.26.0"},
+		{"otel", "v0.2.2", "go.opentelemetry.io/otel/sdk v1.47.0"},
+		{"gin", "v0.2.2", "github.com/gin-gonic/gin v1.12.0"},
+		{"asynq", "v0.2.2", "github.com/hibiken/asynq v0.26.0"},
 	} {
 		location := "go/logbrew/" + module[0]
 		moduleFound := check.requirePaths(location + "/go.mod")
