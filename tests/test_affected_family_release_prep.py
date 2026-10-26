@@ -44,10 +44,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.26"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.13"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.27"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.14"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.7"),
-            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.10"),
+            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.11"),
         }
         for relative_path, expected in pypi_versions.items():
             project = tomllib.loads(source_text(relative_path))["project"]
@@ -137,21 +137,18 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         self.assertEqual(
             project["optional-dependencies"]["celery"],
-            ["logbrew-sdk[celery]>=0.1.21,<0.2.0"],
+            ["logbrew-sdk[celery]>=0.1.27,<0.2.0"],
         )
         self.assertNotIn("celery>=5,<6", project["dependencies"])
-        self.assertIn("logbrew-sdk>=0.1.21,<0.2.0", project["dependencies"])
+        self.assertIn("logbrew-sdk>=0.1.27,<0.2.0", project["dependencies"])
 
-        for relative_path in (
-            "python/logbrew_flask/pyproject.toml",
-            "python/logbrew_django/pyproject.toml",
+        for relative_path, core in (
+            ("python/logbrew_flask/pyproject.toml", "logbrew-sdk>=0.1.21,<0.2.0"),
+            ("python/logbrew_django/pyproject.toml", "logbrew-sdk>=0.1.27,<0.2.0"),
         ):
             integration = tomllib.loads(source_text(relative_path))["project"]
             with self.subTest(relative_path=relative_path):
-                self.assertIn(
-                    "logbrew-sdk>=0.1.21,<0.2.0",
-                    integration["dependencies"],
-                )
+                self.assertIn(core, integration["dependencies"])
 
     def test_react_native_bundle_smoke_reads_package_versions(self) -> None:
         smoke = source_text("scripts/real_user_react_native_bundle_smoke.sh")
@@ -259,10 +256,10 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(
             {package["name"]: package["version"] for package in CATALOG["pypi"]},
             {
-                "logbrew-sdk": "0.1.26",
-                "logbrew-fastapi": "0.1.13",
+                "logbrew-sdk": "0.1.27",
+                "logbrew-fastapi": "0.1.14",
                 "logbrew-flask": "0.1.7",
-                "logbrew-django": "0.1.10",
+                "logbrew-django": "0.1.11",
             },
         )
 

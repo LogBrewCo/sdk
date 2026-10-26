@@ -17,8 +17,6 @@ def main() -> int:
 
     client = LogBrewClient.create(
         api_key="LOGBREW_API_KEY",
-        sdk_name="logbrew-python",
-        sdk_version="0.1.0",
     )
 
     client.release(

@@ -27,7 +27,7 @@ Each framework integration installs a compatible `logbrew-sdk` dependency and
 owns the framework request lifecycle. Use this core package directly for
 workers, framework-neutral services, or explicit app-owned instrumentation.
 
-The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, `TelemetryContext`, and `TraceparentContext`, and copyable examples for wiring LogBrew into your Python service. Keep the real key in your app configuration and use `preview_json()` when you want to inspect queued JSON before sending.
+The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, `TelemetryContext`, and `TraceparentContext`, and copyable examples for wiring LogBrew into your Python service. Keep the real key in your app configuration and use `preview_json()` when you want to inspect queued JSON before sending. The client reports itself as `logbrew-sdk` with the installed package version; pass `sdk_name` and `sdk_version` only to override that.
 
 ## Example
 
@@ -39,8 +39,6 @@ from logbrew_sdk import LogBrewClient, RecordingTransport
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-python",
-    sdk_version="0.1.0",
 )
 
 client.release(
@@ -146,8 +144,6 @@ shared_context: TelemetryContext = {
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.4.0",
     context=shared_context,
 )
 
@@ -177,8 +173,6 @@ By default, the core client adds only the Python implementation/version, operati
 ```python
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.4.0",
     context={
         "schemaVersion": 1,
         "resource": {"service": {"name": "checkout-worker"}},
@@ -267,8 +261,6 @@ from logbrew_sdk import HttpTransport, LogBrewClient, install_process_error_capt
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.0.0",
     transport=HttpTransport(),
 )
 install_process_error_capture(client)
@@ -285,8 +277,6 @@ The previous hooks still run afterwards, so Python prints the traceback and exit
 ```python
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.4.0",
     max_queue_size=1000,
 )
 ```
@@ -296,8 +286,6 @@ When the queue is full, LogBrew drops the new event and keeps existing queued co
 ```python
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.4.0",
     on_event_dropped=lambda drop: print(drop.reason, drop.dropped_events),
 )
 if client.dropped_events() > 0:
@@ -319,8 +307,6 @@ from logbrew_sdk import HttpTransport, LogBrewClient
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.4.0",
     transport=HttpTransport(),
 )
 
@@ -363,8 +349,6 @@ route_template = "/checkout/:cart_id"
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.4.0",
 )
 client.release(
     "evt_release_checkout_api",
@@ -486,8 +470,6 @@ from logbrew_sdk import LogBrewClient
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-python",
-    sdk_version="0.1.0",
 )
 
 client.metric(
@@ -572,8 +554,6 @@ from opentelemetry.sdk.trace import TracerProvider
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 provider = TracerProvider()
 provider.add_span_processor(
@@ -595,8 +575,6 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 exporter = create_logbrew_open_telemetry_span_exporter(
     client=client,
@@ -623,8 +601,6 @@ from logbrew_sdk import LogBrewClient, urlopen_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 response = urlopen_with_logbrew_span(
@@ -648,8 +624,6 @@ from logbrew_sdk import LogBrewClient, requests_request_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 session = requests.Session()
 
@@ -679,8 +653,6 @@ from logbrew_sdk import LogBrewClient, instrument_requests_session_with_logbrew_
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 session = requests.Session()
 instrumentation = instrument_requests_session_with_logbrew_spans(
@@ -713,8 +685,6 @@ from logbrew_sdk import (
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 with httpx.Client() as session:
@@ -757,8 +727,6 @@ from logbrew_sdk import LogBrewClient, instrument_httpx_client_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 with httpx.Client() as session:
@@ -787,8 +755,6 @@ from logbrew_sdk import LogBrewClient, instrument_aiohttp_client_session_with_lo
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 async def submit_payment() -> int:
@@ -823,8 +789,6 @@ from logbrew_sdk import LogBrewClient, database_operation_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 result = database_operation_with_logbrew_span(
@@ -857,8 +821,6 @@ from logbrew_sdk import LogBrewClient, connect_dbapi_connection_with_logbrew_spa
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 db = connect_dbapi_connection_with_logbrew_spans(
@@ -891,8 +853,6 @@ from logbrew_sdk import LogBrewClient, instrument_sqlalchemy_engine_with_logbrew
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 engine = create_engine("sqlite:///:memory:")
 
@@ -920,8 +880,6 @@ from logbrew_sdk import LogBrewClient, cache_operation_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 profile = cache_operation_with_logbrew_span(
@@ -954,8 +912,6 @@ from logbrew_sdk import LogBrewClient, instrument_django_cache_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 instrumentation = instrument_django_cache_with_logbrew_spans(
@@ -984,8 +940,6 @@ from logbrew_sdk import LogBrewClient, instrument_flask_cache_with_logbrew_spans
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 app = Flask(__name__)
@@ -1016,8 +970,6 @@ from logbrew_sdk import LogBrewClient, instrument_pymemcache_client_with_logbrew
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 cache_client = Client(("localhost", 11211))
 
@@ -1046,8 +998,6 @@ from logbrew_sdk import LogBrewClient, instrument_redis_client_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 redis_client = redis.Redis.from_url("redis://localhost:6379/0")
 
@@ -1075,8 +1025,6 @@ from logbrew_sdk import LogBrewClient, queue_operation_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.0.0",
 )
 
 queued = queue_operation_with_logbrew_span(
@@ -1114,8 +1062,6 @@ from logbrew_sdk import LogBrewClient, instrument_rq_queue_with_logbrew_spans
 
 producer = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 queue_instrumentation = instrument_rq_queue_with_logbrew_spans(
     queue,
@@ -1137,8 +1083,6 @@ from logbrew_sdk import (
 def worker_client():
     return LogBrewClient.create(
         api_key="LOGBREW_API_KEY",
-        sdk_name="checkout-worker",
-        sdk_version="1.0.0",
         transport=HttpTransport(),
         automatic_delivery=False,
     )
@@ -1163,8 +1107,6 @@ from logbrew_sdk import LogBrewClient, rq_operation_with_logbrew_span
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.0.0",
 )
 
 job = queue.create_job(checkout_email_task, args=[order_id])
@@ -1199,8 +1141,6 @@ broker = RedisBroker()
 dramatiq.set_broker(broker)
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.0.0",
 )
 instrumentation = instrument_dramatiq_broker_with_logbrew_spans(
     broker,
@@ -1271,8 +1211,6 @@ from logbrew_sdk import (
 app = Celery("checkout")
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.0.0",
 )
 transport = HttpTransport()
 
@@ -1309,8 +1247,6 @@ worker_lifecycle = instrument_celery_worker_processes_with_logbrew(
     worker_app,
     client_factory=lambda: LogBrewClient.create(
         api_key="LOGBREW_API_KEY",
-        sdk_name="checkout-worker",
-        sdk_version="1.0.0",
         max_retries=2,
     ),
     transport_factory=HttpTransport,
@@ -1334,8 +1270,6 @@ def create_worker_client() -> LogBrewClient:
     persistence_key = bytes.fromhex(os.environ["LOGBREW_PERSISTENCE_KEY_HEX"])
     return LogBrewClient.create(
         api_key=os.environ["LOGBREW_API_KEY"],
-        sdk_name="checkout-worker",
-        sdk_version="1.0.0",
         max_retries=2,
         persistent_queue_directory=celery_worker_persistent_queue_directory(queue_root),
         persistent_queue_encryption_key=persistence_key,
@@ -1375,8 +1309,6 @@ from logbrew_sdk import (
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-worker",
-    sdk_version="1.0.0",
 )
 
 queued = celery_operation_with_logbrew_span(
@@ -1411,8 +1343,6 @@ from logbrew_sdk import (
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 
 client.action(
@@ -1465,8 +1395,6 @@ from logbrew_sdk import HttpTransport, LogBrewClient
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-python",
-    sdk_version="0.1.0",
 )
 transport = HttpTransport(
     endpoint="https://api.logbrew.co/v1/events",
@@ -1494,8 +1422,6 @@ from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-python",
-    sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
 handler = LogBrewLoggingHandler(

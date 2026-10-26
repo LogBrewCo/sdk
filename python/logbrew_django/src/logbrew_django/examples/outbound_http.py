@@ -27,8 +27,6 @@ class FakePaymentResponse:
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-django",
-    sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
 captured_outbound_headers: dict[str, str] = {}

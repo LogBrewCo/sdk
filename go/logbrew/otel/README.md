@@ -33,9 +33,7 @@ import (
 
 func main() {
   client, err := logbrew.NewClient(logbrew.Config{
-    APIKey:     "LOGBREW_API_KEY",
-    SDKName:    "checkout-api",
-    SDKVersion: "0.1.0",
+    APIKey: "LOGBREW_API_KEY",
   })
   if err != nil {
     panic(err)

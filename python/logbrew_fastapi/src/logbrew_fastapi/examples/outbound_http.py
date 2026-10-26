@@ -23,8 +23,6 @@ class FakePaymentResponse:
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-fastapi",
-    sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
 app = FastAPI()

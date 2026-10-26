@@ -34,9 +34,7 @@ func main() {
   transport, err := logbrew.NewHTTPTransport(logbrew.HTTPTransportConfig{})
   must(err)
   client, err := logbrew.NewAutomaticClient(logbrew.Config{
-    APIKey:     os.Getenv("LOGBREW_SERVER_API_KEY"),
-    SDKName:    "checkout-api",
-    SDKVersion: "1.0.0",
+    APIKey: os.Getenv("LOGBREW_SERVER_API_KEY"),
   }, logbrew.AutomaticDeliveryConfig{
     Transport: transport,
   })

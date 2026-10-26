@@ -59,7 +59,7 @@ unset project_result
 export LOGBREW_SERVER_API_KEY="$(< "$HOME/.logbrew/go-service.ingest")"
 ```
 
-Send one safe application-owned log through the hosted HTTP transport:
+Send one safe application-owned log through the hosted HTTP transport. The client reports itself as `logbrew-go` with the module version your build resolved; set `Config.SDKName` and `Config.SDKVersion` only to override that.
 
 ```go
 package main
@@ -82,9 +82,7 @@ func main() {
   transport, err := logbrew.NewHTTPTransport(logbrew.HTTPTransportConfig{})
   must(err)
   client, err := logbrew.NewClient(logbrew.Config{
-    APIKey:     apiKey,
-    SDKName:    "go-service",
-    SDKVersion: "1.0.0",
+    APIKey: apiKey,
   })
   must(err)
 
@@ -161,8 +159,6 @@ import (
 func main() {
   client, err := logbrew.NewClient(logbrew.Config{
     APIKey:               "LOGBREW_API_KEY",
-    SDKName:              "logbrew-go",
-    SDKVersion:           "0.1.0",
     DisableRuntimeContext: true, // Keep this language-neutral parity preview minimal.
   })
   if err != nil {
@@ -241,9 +237,7 @@ to apply the client/event rules without queueing an event.
 
 ```go
 client, err := logbrew.NewClient(logbrew.Config{
-  APIKey:     "LOGBREW_API_KEY",
-  SDKName:    "checkout-service",
-  SDKVersion: "1.2.3",
+  APIKey: "LOGBREW_API_KEY",
   Context: &logbrew.TelemetryContext{
     SchemaVersion: 1,
     Resource: &logbrew.TelemetryResource{
@@ -379,8 +373,6 @@ instead of emitting a weaker wrapper-only shape. See the shared
 ```go
 client, err := logbrew.NewClient(logbrew.Config{
   APIKey:       "LOGBREW_API_KEY",
-  SDKName:      "go-worker",
-  SDKVersion:   "0.1.0",
   MaxRetries:   1,
   MaxQueueSize: 1000,
   OnEventDropped: func(drop logbrew.EventDrop) {
@@ -403,9 +395,7 @@ transport, err := logbrew.NewHTTPTransport(logbrew.HTTPTransportConfig{})
 must(err)
 
 client, err := logbrew.NewAutomaticClient(logbrew.Config{
-  APIKey:     "LOGBREW_API_KEY",
-  SDKName:    "checkout-api",
-  SDKVersion: "0.1.0",
+  APIKey: "LOGBREW_API_KEY",
 }, logbrew.AutomaticDeliveryConfig{
   Transport: transport,
 })
@@ -430,8 +420,6 @@ persistenceKey := loadApplicationPersistenceKey()
 
 client, err := logbrew.NewPersistentAutomaticClient(logbrew.Config{
   APIKey:       "LOGBREW_API_KEY",
-  SDKName:      "checkout-api",
-  SDKVersion:   "0.1.0",
   MaxQueueSize: 1000,
 }, logbrew.AutomaticDeliveryConfig{
   Transport: transport,

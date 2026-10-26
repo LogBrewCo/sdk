@@ -15,9 +15,7 @@ import (
 
 func main() {
 	client, err := logbrew.NewClient(logbrew.Config{
-		APIKey:     "LOGBREW_API_KEY",
-		SDKName:    "checkout-api",
-		SDKVersion: "1.0.0",
+		APIKey: "LOGBREW_API_KEY",
 	})
 	must(err)
 

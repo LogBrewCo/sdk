@@ -161,8 +161,8 @@ func TestReleaseMetadataFindings(t *testing.T) {
 			[]string{flask + ": expected project.urls.Repository 'https://github.com/LogBrewCo/sdk', got 'https://example.com'"}},
 		{replaceOnce(`"LogBrew"`, `"Someone"`), flask, []string{flask + ": authors must include LogBrew"}},
 		{replaceOnce("celery = [", "worker = ["), fastapi, []string{
-			fastapi + ": expected project.optional-dependencies {'celery': {'logbrew-sdk[celery]>=0.1.21,<0.2.0'}}, " +
-				"got {'worker': {'logbrew-sdk[celery]>=0.1.21,<0.2.0'}}",
+			fastapi + ": expected project.optional-dependencies {'celery': {'logbrew-sdk[celery]>=0.1.27,<0.2.0'}}, " +
+				"got {'worker': {'logbrew-sdk[celery]>=0.1.27,<0.2.0'}}",
 		}},
 		{nil, "python/logbrew_flask/src/logbrew_flask/py.typed",
 			[]string{"missing required path: python/logbrew_flask/src/logbrew_flask/py.typed"}},

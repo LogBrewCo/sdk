@@ -1123,6 +1123,26 @@ class LogBrewSdkTests(unittest.TestCase):
         headers = {key.lower(): value for key, value in requests[0].header_items()}
         self.assertEqual(headers["user-agent"], "logbrew-sdk-python")
 
+    def test_client_defaults_sdk_identity_to_installed_package(self) -> None:
+        with patch("logbrew_sdk.distribution_version", return_value="9.8.7") as version:
+            client = LogBrewClient.create(api_key="LOGBREW_API_KEY")
+
+        version.assert_called_once_with("logbrew-sdk")
+        self.assertEqual(client.sdk, {"name": "logbrew-sdk", "language": "python", "version": "9.8.7"})
+
+    def test_client_defaults_sdk_version_without_package_metadata(self) -> None:
+        with patch("logbrew_sdk.distribution_version", side_effect=PackageNotFoundError):
+            client = LogBrewClient.create(api_key="LOGBREW_API_KEY")
+
+        self.assertEqual(client.sdk["version"], "0+unknown")
+
+    def test_client_keeps_explicit_sdk_identity(self) -> None:
+        client = LogBrewClient.create(api_key="LOGBREW_API_KEY", sdk_name="logbrew-custom", sdk_version="1.2.3")
+
+        self.assertEqual(client.sdk, {"name": "logbrew-custom", "language": "python", "version": "1.2.3"})
+        with self.assertRaises(SdkError):
+            LogBrewClient.create(api_key="LOGBREW_API_KEY", sdk_name=" ")
+
     def test_http_transport_uses_native_and_portable_trust_by_default(self) -> None:
         requests: list[tuple[Request, float, object]] = []
         tls_context = object()

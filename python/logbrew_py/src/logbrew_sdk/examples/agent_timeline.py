@@ -19,8 +19,6 @@ def main() -> int:
     headers = create_traceparent_headers(trace_id=trace_id, span_id="00f067aa0ba902b7")
     client = LogBrewClient.create(
         api_key="LOGBREW_API_KEY",
-        sdk_name="checkout-agent-timeline",
-        sdk_version="0.1.0",
     )
 
     client.action(
