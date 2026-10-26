@@ -27,28 +27,31 @@ MIDDLEWARE = [
 ```
 
 ```python
-# app startup code
+# app startup code, for example at the end of settings.py
 import logging
+import os
 
 from logbrew_django import configure_logbrew, get_active_logbrew_trace
-from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
+from logbrew_sdk import HttpTransport, LogBrewClient, LogBrewLoggingHandler
 
 client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
+    api_key=os.environ["LOGBREW_SERVER_API_KEY"],
     sdk_name="logbrew-django",
-    sdk_version="0.1.0",
+    sdk_version="0.1.10",
 )
-transport = RecordingTransport.always_accept()
 logger = logging.getLogger("checkout-api")
 logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout-api"}))
-configure_logbrew(
-    client=client,
-    transport=transport,
-    span_id_factory=lambda: "b7ad6b7169203331",
-)
+configure_logbrew(client=client, transport=HttpTransport(), service_name="checkout-api")
 ```
 
-`LogBrewDjangoMiddleware` records successful requests as span events, records unhandled view exceptions as issue plus error-span events, and flushes through the configured transport after each response. Exception issues include first-class exception type, `django.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Automatic capture never reads or sends exception messages: the issue uses the fixed summary `Unhandled exception`, and every exception-chain node is marked `redacted`. If no transport is provided, events stay queued on the core client so the project can flush them itself.
+Use a project `server` ingest key from the environment, never from source. Set
+`LOGBREW_ENVIRONMENT` and `LOGBREW_RELEASE` (for example `checkout-api@1.4.0`)
+in the app's environment; the client adds them to every event, so issues show
+which deploy they belong to. Keep `sdk_name` and `sdk_version` as the SDK's own
+name and version. In tests, pass `RecordingTransport.always_accept()` instead
+of `HttpTransport()` so nothing leaves the process.
+
+`LogBrewDjangoMiddleware` records successful requests as span events, records unhandled view exceptions as issue plus error-span events, and flushes through the configured transport after each response. Exceptions that Django turns into 4xx responses (`Http404`, `PermissionDenied`, `BadRequest`, `SuspiciousOperation`, and `MultiPartParserError`) are client errors: their request span keeps the 4xx status and no issue is created. Exception issues include first-class exception type, `django.middleware` mechanism, unhandled state, and up to 32 sanitized newest-first traceback frames. The frame projection contains basename and bounded code identity only; it omits raw traceback text, source code, local variables, and absolute paths. Automatic capture never reads or sends exception messages: the issue uses the fixed summary `Unhandled exception`, and every exception-chain node is marked `redacted`. If no transport is provided, events stay queued on the core client so the project can flush them itself.
 
 When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. The same request-local trace is available from `get_active_logbrew_trace()` while your view runs, and `LogBrewLoggingHandler` automatically adds `traceId`, `spanId`, `parentSpanId`, and `sampled` metadata to standard-library logs emitted inside that context:
 
@@ -61,7 +64,7 @@ def checkout_view(request):
 
 Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace so bad client headers do not break the project.
 
-Request spans use the Django resolver route template, such as `GET /orders/<int:order_id>/`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
+Request spans use the Django resolver route template, such as `GET /orders/<int:order_id>/`, for low-noise grouping. Regex routes from `re_path()` become readable templates: a named group becomes `<name>` and any other pattern becomes `<var>`, so Wagtail's page route `^((?:[\w\-]+/)*)$` is named `GET /<var>`. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
 ## Read Events Back
 

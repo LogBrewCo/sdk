@@ -47,7 +47,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.26"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.13"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.7"),
-            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.9"),
+            "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.10"),
         }
         for relative_path, expected in pypi_versions.items():
             project = tomllib.loads(source_text(relative_path))["project"]
@@ -262,7 +262,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "logbrew-sdk": "0.1.26",
                 "logbrew-fastapi": "0.1.13",
                 "logbrew-flask": "0.1.7",
-                "logbrew-django": "0.1.9",
+                "logbrew-django": "0.1.10",
             },
         )
 
