@@ -10,7 +10,30 @@ The package is source-only, targets Unity `2021.3` or newer through UPM, and has
 
 ## Install
 
-Add the package through Unity Package Manager from a Git URL or a local package path:
+Install from OpenUPM with the OpenUPM CLI:
+
+```sh
+openupm add co.logbrew.unity
+```
+
+Or add the OpenUPM scoped registry and the package to `Packages/manifest.json`:
+
+```json
+{
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": ["co.logbrew.unity"]
+    }
+  ],
+  "dependencies": {
+    "co.logbrew.unity": "0.2.2"
+  }
+}
+```
+
+You can also add the package through Unity Package Manager from a Git URL or a local package path:
 
 ```json
 {
