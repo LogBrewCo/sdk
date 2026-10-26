@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -667,22 +666,15 @@ func TestMavenDeploymentCapture(t *testing.T) {
 			t.Errorf("%q %s = %d, %q", test.stdin, test.path, code, diagnostic)
 		}
 	}
-	var limit syscall.Rlimit
-	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
-		t.Fatal(err)
-	}
-	small := limit
-	small.Cur = 8
-	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &small); err != nil {
-		t.Fatal(err)
-	}
-	code, _, diagnostic := runChecks(nil, testDeployment, "maven-deployment", "capture", "--deployment-id-file", path+"3")
-	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(path + "3"); code != exitFailure || !errors.Is(err, os.ErrNotExist) ||
-		diagnostic != "Maven Central deployment identifier could not be stored.\n" {
-		t.Fatalf("short write = %d, %q, %v", code, diagnostic, err)
+	// Only a child gets the 8-byte file limit; lowering it here would also
+	// fail the test binary's own buffered log writes.
+	command := exec.CommandContext(t.Context(), os.Args[0], limitedExecutionMode, "8", os.Args[0],
+		"fixture:"+releaseChecksMode, "maven-deployment", "capture", "--deployment-id-file", path+"3")
+	command.Stdin = strings.NewReader(testDeployment)
+	diagnostic, runError := command.CombinedOutput()
+	if _, err := os.Lstat(path + "3"); command.ProcessState.ExitCode() != exitFailure || !errors.Is(err, os.ErrNotExist) ||
+		string(diagnostic) != "Maven Central deployment identifier could not be stored.\n" {
+		t.Fatalf("short write = %v, %q, %v", runError, diagnostic, err)
 	}
 }
 

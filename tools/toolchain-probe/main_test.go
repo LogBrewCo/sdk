@@ -84,6 +84,9 @@ func runFixture(mode string) int {
 		return runChildFixture(mode)
 	case "sleep":
 		time.Sleep(time.Minute)
+	case releaseChecksMode:
+		os.Args[1] = mode
+		return run()
 	default:
 		return exitUsage
 	}
