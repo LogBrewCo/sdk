@@ -4,7 +4,9 @@ import (
 	"math"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -217,6 +219,7 @@ func captureIssueStackEvidence(skip int) issueStackEvidence {
 			Column:   1,
 			Function: functionName,
 			Module:   moduleName,
+			InApp:    issueFrameInApp(moduleName, mainModulePath()),
 		})
 		if len(frames) == maxIssueStackFrames && more {
 			truncated = true
@@ -983,6 +986,40 @@ func sanitizeIssueStackFilename(value string, alwaysBasename bool) string {
 		}
 	}
 	return filename
+}
+
+// mainModulePath is the application's main module from its build info, or ""
+// when the binary carries none.
+var mainModulePath = sync.OnceValue(func() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		return info.Main.Path
+	}
+	return ""
+})
+
+const issueSDKModulePrefix = "github.com/LogBrewCo/sdk/go/"
+
+// issueFrameInApp marks frames from the application's own packages as in-app,
+// and frames from the Go runtime, the standard library, this SDK, and other
+// dependencies as not, so the first in-app frame points at application code.
+// It returns nil when the frame's package or the main module is unknown.
+func issueFrameInApp(module string, mainModule string) *bool {
+	if module == "" {
+		return nil
+	}
+	inApp := false
+	switch {
+	case module == "main":
+		inApp = true
+	case strings.HasPrefix(module, issueSDKModulePrefix):
+	case !strings.Contains(strings.SplitN(module, "/", 2)[0], "."):
+		// The runtime and standard library have no domain in their first path element.
+	case mainModule == "" || mainModule == "command-line-arguments":
+		return nil
+	case module == mainModule || strings.HasPrefix(module, mainModule+"/"):
+		inApp = true
+	}
+	return &inApp
 }
 
 func issueRuntimeIdentity(value string) (functionName string, moduleName string) {
