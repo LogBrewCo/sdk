@@ -517,8 +517,8 @@ class LogBrewClient:
         cls,
         *,
         api_key: str,
-        sdk_name: str,
-        sdk_version: str,
+        sdk_name: str | None = None,
+        sdk_version: str | None = None,
         context: TelemetryContext | None = None,
         capture_runtime_context: bool = True,
         transport: Transport | None = None,
@@ -537,6 +537,10 @@ class LogBrewClient:
     ) -> LogBrewClient:
         """Create a client from public SDK identity, retry, and API key settings."""
         require_non_empty("api_key", api_key)
+        if sdk_name is None:
+            sdk_name = "logbrew-sdk"
+        if sdk_version is None:
+            sdk_version = _sdk_package_version() or "0+unknown"
         require_non_empty("sdk_name", sdk_name)
         require_non_empty("sdk_version", sdk_version)
         return cls(
@@ -1636,10 +1640,16 @@ def validate_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
     return safe_headers
 
 
-def _default_http_user_agent() -> str:
+def _sdk_package_version() -> str | None:
     try:
-        package_version = distribution_version("logbrew-sdk")
+        return distribution_version("logbrew-sdk")
     except PackageNotFoundError:
+        return None
+
+
+def _default_http_user_agent() -> str:
+    package_version = _sdk_package_version()
+    if package_version is None:
         return _HTTP_USER_AGENT_PRODUCT
     return f"{_HTTP_USER_AGENT_PRODUCT}/{package_version}"
 

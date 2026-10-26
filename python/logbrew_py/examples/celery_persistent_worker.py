@@ -20,8 +20,6 @@ def create_worker_client() -> LogBrewClient:
     persistence_key = bytes.fromhex(os.environ["LOGBREW_PERSISTENCE_KEY_HEX"])
     return LogBrewClient.create(
         api_key=os.environ["LOGBREW_API_KEY"],
-        sdk_name="checkout-worker",
-        sdk_version="1.0.0",
         max_retries=2,
         persistent_queue_directory=celery_worker_persistent_queue_directory(queue_root),
         persistent_queue_encryption_key=persistence_key,

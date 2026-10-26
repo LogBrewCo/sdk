@@ -23,8 +23,6 @@ from logbrew_django import configure_logbrew, get_active_logbrew_trace
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-django",
-    sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
 database = sqlite3.connect(":memory:", check_same_thread=False)

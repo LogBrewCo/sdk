@@ -28,8 +28,6 @@ def main() -> int:
     route_template = "/checkout/:cart_id"
     client = LogBrewClient.create(
         api_key="LOGBREW_API_KEY",
-        sdk_name="checkout-api",
-        sdk_version="1.4.0",
     )
 
     client.release(

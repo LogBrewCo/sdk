@@ -19,8 +19,6 @@ from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-fastapi",
-    sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
 app = FastAPI()

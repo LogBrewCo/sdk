@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -253,9 +254,11 @@ func (t *HTTPTransport) sendWithRetryAfter(apiKey string, body []byte, maximum t
 type Config struct {
 	// APIKey is the public LogBrew API key sent to the transport.
 	APIKey string
-	// SDKName identifies the calling SDK or application in emitted payloads.
+	// SDKName identifies the SDK in emitted payloads. Empty defaults to
+	// "logbrew-go".
 	SDKName string
-	// SDKVersion identifies the calling SDK or application version.
+	// SDKVersion identifies the SDK version. Empty defaults to this module's
+	// version from the application's build info.
 	SDKVersion string
 	// Context is explicit privacy-bounded resource, correlation, session,
 	// subject, and tag context merged into every event.
@@ -343,8 +346,8 @@ type Client struct {
 	reportClock   func() time.Time
 }
 
-// NewClient creates a public LogBrew client from user-supplied SDK identity
-// and API key configuration.
+// NewClient creates a public LogBrew client from API key, optional SDK
+// identity, and retry configuration.
 func NewClient(config Config) (*Client, error) {
 	return newClient(config, nil)
 }
@@ -358,6 +361,12 @@ func NewAutomaticClient(config Config, delivery AutomaticDeliveryConfig) (*Clien
 func newClient(config Config, delivery *AutomaticDeliveryConfig) (*Client, error) {
 	if err := requireNonEmpty("api_key", config.APIKey); err != nil {
 		return nil, err
+	}
+	if config.SDKName == "" {
+		config.SDKName = defaultSDKName
+	}
+	if config.SDKVersion == "" {
+		config.SDKVersion = defaultSDKVersion()
 	}
 	if err := requireNonEmpty("sdk_name", config.SDKName); err != nil {
 		return nil, err
@@ -415,6 +424,37 @@ func newClient(config Config, delivery *AutomaticDeliveryConfig) (*Client, error
 			backoffOutcome: DeliveryBackoffOutcomeNone,
 		},
 	}, nil
+}
+
+const (
+	defaultSDKName    = "logbrew-go"
+	sdkModulePath     = issueSDKModulePrefix + "logbrew"
+	unknownSDKVersion = "0+unknown"
+)
+
+// defaultSDKVersion is this module's version from the application's build
+// info, or "0+unknown" for local or untagged builds.
+var defaultSDKVersion = sync.OnceValue(func() string {
+	info, _ := debug.ReadBuildInfo()
+	return sdkVersionFromBuildInfo(info)
+})
+
+func sdkVersionFromBuildInfo(info *debug.BuildInfo) string {
+	if info == nil {
+		return unknownSDKVersion
+	}
+	for _, module := range append([]*debug.Module{&info.Main}, info.Deps...) {
+		if module.Path != sdkModulePath {
+			continue
+		}
+		if module.Replace != nil {
+			module = module.Replace
+		}
+		if version := strings.TrimPrefix(module.Version, "v"); version != "" && version != "(devel)" {
+			return version
+		}
+	}
+	return unknownSDKVersion
 }
 
 // PendingEvents returns the number of validated events currently buffered in

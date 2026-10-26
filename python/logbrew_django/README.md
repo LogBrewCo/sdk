@@ -36,8 +36,6 @@ from logbrew_sdk import HttpTransport, LogBrewClient, LogBrewLoggingHandler
 
 client = LogBrewClient.create(
     api_key=os.environ["LOGBREW_SERVER_API_KEY"],
-    sdk_name="logbrew-django",
-    sdk_version="0.1.10",
 )
 logger = logging.getLogger("checkout-api")
 logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout-api"}))
@@ -47,8 +45,8 @@ configure_logbrew(client=client, transport=HttpTransport(), service_name="checko
 Use a project `server` ingest key from the environment, never from source. Set
 `LOGBREW_ENVIRONMENT` and `LOGBREW_RELEASE` (for example `checkout-api@1.4.0`)
 in the app's environment; the client adds them to every event, so issues show
-which deploy they belong to. Keep `sdk_name` and `sdk_version` as the SDK's own
-name and version. To keep events in memory instead of sending them, pass
+which deploy they belong to. The client reports the SDK's own name and version,
+so leave out `sdk_name` and `sdk_version`. To keep events in memory instead of sending them, pass
 `RecordingTransport.always_accept()` instead of `HttpTransport()`, and a fixed
 `span_id_factory` for stable span ids.
 

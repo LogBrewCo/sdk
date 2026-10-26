@@ -108,8 +108,6 @@ from logbrew_sdk import LogBrewClient, RecordingTransport
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="checkout-api",
-    sdk_version="1.0.0",
 )
 transport = RecordingTransport.always_accept()
 add_logbrew_middleware(
