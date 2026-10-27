@@ -192,12 +192,6 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
     def test_public_verifier_runs_single_command_contract_gates(self) -> None:
         self.assert_step_sequence(
             (
-                "Backend contract report checks",
-                'source scripts/native_verifier.sh && run_native_verifier backend-reports \\"\\$PWD\\"',
-            ),
-        )
-        self.assert_step_sequence(
-            (
                 "GitHub release safety checks",
                 "source scripts/native_verifier.sh && run_native_verifier github-release-safety",
             ),

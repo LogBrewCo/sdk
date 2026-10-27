@@ -253,9 +253,6 @@ func run() int {
 	if os.Args[1] == markdownLinksMode {
 		return checkMarkdownLinks(os.Args[2:], os.Stdout, os.Stderr)
 	}
-	if os.Args[1] == backendReportsMode {
-		return checkBackendReports(os.Args[2:], os.Stdout, os.Stderr)
-	}
 	if os.Args[1] == generatedArtifactsMode {
 		return checkGeneratedArtifacts(os.Args[2:], os.Stdout, os.Stderr)
 	}
@@ -292,7 +289,7 @@ func run() int {
 	}
 	return writeText(os.Stderr,
 		"toolchain-probe accepts inventory, clock, summary, deadline, package-json, "+
-			"schema-check, event-batch-check, markdown-links, backend-reports, generated-artifacts, ci-select, github-release-safety, confidentiality-scan, release-metadata, release-versions, release-plan, release-artifacts, release-checks, or registry-publication mode\n", exitUsage)
+			"schema-check, event-batch-check, markdown-links, generated-artifacts, ci-select, github-release-safety, confidentiality-scan, release-metadata, release-versions, release-plan, release-artifacts, release-checks, or registry-publication mode\n", exitUsage)
 }
 
 func runDeadline(arguments []string) int {

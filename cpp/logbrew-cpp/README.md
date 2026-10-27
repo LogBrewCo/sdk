@@ -9,8 +9,8 @@ Public C++17 SDK for building, validating, previewing, and sending LogBrew event
 ## Install With CMake
 
 The core SDK is dependency-free and exports the `LogBrew::LogBrew` target.
-When using the CLI plan, update the installed CLI through the same package
-manager and use version 0.1.39 or newer. Homebrew needs both tap refresh and
+If you set up with the LogBrew CLI, update it through the same package manager
+to version 0.1.39 or newer. Homebrew needs both tap refresh and
 upgrade:
 
 ```bash
@@ -215,7 +215,7 @@ parent-first `IssueExceptionChainEntry` values. Relationships, message states,
 stack states, and the reported root are validated against the legacy
 exception/frames before queue admission, so the SDK preserves a useful graph
 without guessing from `what()` text. See the shared
-[exception-chain contract](../../docs/exception-chain-evidence.md).
+[exception-chain contract](../../README.md#exception-chains).
 
 ## Span Evidence
 

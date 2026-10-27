@@ -64,7 +64,7 @@ logbrew read logs --project "$LOGBREW_PROJECT_ID" \
   --json
 ```
 
-A successful ingest response proves submission. The authenticated read proves
+A successful ingest response confirms submission. The authenticated read confirms
 that the event is indexed for the same project. If you no longer need the
 temporary project, archive it and remove its revoked one-time key file:
 

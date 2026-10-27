@@ -96,7 +96,7 @@ Helpers generate a fresh opaque event ID by default. Explicit `id` and
 Call `verifyLogBrewSetup()` once from a development-only button or setup
 screen. A returned `hosted_accepted` receipt means the configured HTTPS intake
 accepted every batch in that flush. Then use an authenticated CLI session to
-confirm that the backend stored the event for the intended project:
+confirm that LogBrew stored the event for the intended project:
 
 ```bash
 logbrew read logs --project <project_id> \
@@ -377,8 +377,8 @@ Otherwise the crash is recorded as usual.
 handlers, stops the watchdog, and leaves queued events available. After closing
 the client, purge only for an explicit discard. Upload exact-release Android
 symbols with `logbrew debug-artifacts upload`, require build-ID/architecture
-lookup, and preserve the old integration until the target app proves crash
-replay, hang capture, and symbolicated hosted readback.
+lookup. Keep your existing crash reporter until you have confirmed crash
+replay, hang capture, and symbolicated issues in LogBrew.
 
 For Expo prebuild or development builds, add the config plugin:
 
@@ -650,8 +650,7 @@ when available. It strips query strings, hashes, hosts, and local absolute
 paths from React Native frame data. Grouping keeps an informative sanitized
 path, or falls back to a safe function name and then generated position for a
 root-only runtime URL; raw stack text is still opt-in with `includeStack: true`.
-Hosted source-map lookup remains backend-owned and requires the matching
-uploaded release artifact.
+LogBrew resolves source maps from the matching uploaded release artifact.
 
 ## Provider And Hooks
 
@@ -697,7 +696,7 @@ export function App({ client }) {
 }
 ```
 
-Screen views carry the versioned `screen_view` analytics classification, and explicit product actions carry `interaction`. The SDK uses the app-owned screen name as a bounded surface and does not inspect view hierarchies, selectors, or input values. Caller metadata cannot replace the reserved classification. See the repository [product analytics capture contract](../../docs/product-analytics-contract.md).
+Screen views carry the versioned `screen_view` analytics classification, and explicit product actions carry `interaction`. The SDK uses the app-owned screen name as a bounded surface and does not inspect view hierarchies, selectors, or input values. Caller metadata cannot replace the reserved classification. See the repository [product analytics capture contract](../../README.md#product-analytics-capture).
 
 The package ships a `react-native` entry that binds platform state and linked native services for Metro, while the default server entry accepts runtime dependencies explicitly. That keeps mobile setup explicit without treating a server process as a native runtime.
 

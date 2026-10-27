@@ -643,10 +643,10 @@ export type TimelineAttributesOptions = {
   metadata?: Metadata;
 };
 
-/** Planned backend support-ticket sources accepted by explicit draft helpers. */
+/** Support-ticket sources accepted by explicit draft helpers. */
 export type SupportTicketSource = "cli" | "sdk" | "website" | "docs" | "mobile";
 
-/** Planned backend support-ticket categories accepted by explicit draft helpers. */
+/** Support-ticket categories accepted by explicit draft helpers. */
 export type SupportTicketCategory =
   | "sdk_install_failure"
   | "ingest_failure"
@@ -686,7 +686,7 @@ export type SupportTicketDraftInput = {
   diagnostics?: Record<string, unknown>;
 };
 
-/** Planned backend create payload produced locally for explicit user or agent action. */
+/** Support-ticket create body built locally. It sends nothing. */
 export type SupportTicketDraft = {
   source: SupportTicketSource;
   category: SupportTicketCategory;

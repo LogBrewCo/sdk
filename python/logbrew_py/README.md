@@ -229,9 +229,9 @@ except CheckoutError as error:
     )
 ```
 
-Structured frames are newest-first, capped at 32, and retain only a basename, line, column, and bounded function/module identity. The helper follows `__cause__`, unsuppressed `__context__`, and exception-group members into a bounded parent-first chain. Per-node frame and message availability is explicit, and cycles, unreadable accessors, or the eight-node cap set `truncated`. Set `include_stack_frames=False` when even that code identity is not appropriate. The default top-level issue message remains `str(error)` for compatibility and troubleshooting. Passing an explicitly redacted `message=` prevents the helper from reading any exception message, omits messages from every chain node, and marks each one `redacted`. Explicit breadcrumbs are oldest-to-newest, capped at 64, and accept at most eight flat primitive data fields per entry. Explicit breadcrumbs replace the automatic ones described below. FastAPI, Flask, Django, and Celery integrations reuse this same graph. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
+Structured frames are newest-first, capped at 32, and retain only a basename, line, column, and bounded function/module identity. The helper follows `__cause__`, unsuppressed `__context__`, and exception-group members into a bounded parent-first chain. Per-node frame and message availability is explicit, and cycles, unreadable accessors, or the eight-node cap set `truncated`. Set `include_stack_frames=False` when even that code identity is not appropriate. The default top-level issue message remains `str(error)` for compatibility and troubleshooting. Passing an explicitly redacted `message=` prevents the helper from reading any exception message, omits messages from every chain node, and marks each one `redacted`. Explicit breadcrumbs are oldest-to-newest, capped at 64, and accept at most eight flat primitive data fields per entry. Explicit breadcrumbs replace the automatic ones described below. FastAPI, Flask, Django, and Celery integrations reuse this same graph. See the shared [exception-chain contract](../../README.md#exception-chains).
 
-`evidence` is explicit application knowledge, not an SDK inference. LogBrew labels `likelyRootCause` as a reported hypothesis and keeps `likelyFixArea` separate from observed frames. Field-state arrays preserve missing, redacted, and truncated evidence for API, CLI, dashboard, and agent consumers. Use repository-relative file paths and never put authentication material, request bodies, personal data, or raw user input in these fields. See the shared [issue evidence contract](../../docs/issue-diagnostic-evidence.md).
+`evidence` is explicit application knowledge, not an SDK inference. LogBrew labels `likelyRootCause` as a reported hypothesis and keeps `likelyFixArea` separate from observed frames. Field-state arrays preserve missing, redacted, and truncated evidence for API, CLI, dashboard, and agent consumers. Use repository-relative file paths and never put authentication material, request bodies, personal data, or raw user input in these fields. See the shared [issue evidence contract](../../README.md#diagnostic-evidence).
 
 ## Automatic Breadcrumbs
 
@@ -298,7 +298,7 @@ if client.dropped_events() > 0:
 
 LogBrew sees these drops too. The next request body carries the per-reason counts since the last accepted report, such as `"client_report":{"report_id":"5f0c6a1e9b2d4c7a8e3f1b6d0a9c2e4f","dropped_events":{"queue_overflow":3}}`. The counts keep one `report_id` until a `2xx` response acknowledges a request that carried them, and LogBrew counts every resend of one report ID once, even when the resend carries different events. Drops recorded while a request is in flight wait for the next report. A report never sends a request of its own, is left out when nothing was dropped, lists at most 16 reasons, caps each count at 1,000,000,000, and fits inside `max_batch_bytes`. With `persistent_queue_directory`, counts not yet reported survive a crash or restart inside the encrypted queue store, and a report that was already sent keeps its `report_id`, so LogBrew still counts it once. The client saves at once for a new report or drop reason and at most once a second during a drop burst; unreadable saved counts are ignored, and a failed save never blocks capture. Without persistence, counts live in memory only and drops not yet reported are lost when the process restarts.
 
-Usage, quota, and billing remain backend-owned and must not be inferred from queue size or drop counts.
+Queue size and drop counts do not reflect usage or billing. Run `logbrew usage` for those.
 
 ## Automatic Delivery
 
@@ -434,7 +434,7 @@ This path is intentionally app-owned. It uses Python's standard logging module, 
 
 ## Support Ticket Drafts
 
-Use `create_support_ticket_draft()` when a user or agent explicitly asks to prepare a support ticket payload. The helper is local-only: it validates the planned public support-ticket fields, redacts diagnostics, and returns a dictionary. It does not send data, open a ticket, use account/session API credentials, or call backend support routes.
+Use `create_support_ticket_draft()` to build the body for a LogBrew support ticket. The helper validates the ticket fields, redacts diagnostics, and returns a dictionary. It sends nothing. To open the ticket, send it to `POST /api/support/tickets` or run `logbrew support create`. See [Report a problem](https://docs.logbrew.co/guides/report-a-problem).
 
 ```python
 from logbrew_sdk import create_support_ticket_draft
@@ -1100,7 +1100,7 @@ worker.work()
 
 This creates one `queue.publish` span and one linked `queue.process` span per attempt. Logs from the explicitly named application loggers inherit the worker span. A terminal unhandled failure adds one linked issue with exception type and bounded structured stack frames; retried attempts stay spans rather than duplicate issues. The SDK stores only its reserved W3C trace carrier and enqueue time in RQ job metadata; it does not capture arguments, keyword arguments, job IDs, results, descriptions, exception messages, or raw traceback text. Capture failures are fail-open. Installation is instance-scoped, idempotent, and reversible with `uninstall()` after work drains.
 
-`Queue`, the default fork-based `Worker`, and `SimpleWorker` are supported on RQ 2.x. `SpawnWorker` is not instrumented because RQ recreates it in a separate interpreter; use a supported worker until a process-bootstrap contract is available.
+`Queue`, the default fork-based `Worker`, and `SimpleWorker` are supported on RQ 2.x. `SpawnWorker` is not instrumented because RQ recreates it in a separate interpreter; use `Worker` or `SimpleWorker` instead.
 
 For caller-owned or unsupported worker flows, use `rq_operation_with_logbrew_span()` to derive safe `func_name` and `origin` metadata without installing RQ or patching classes globally:
 

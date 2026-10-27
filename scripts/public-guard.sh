@@ -10,6 +10,9 @@
 #   public-guard.sh github                            GitHub Actions entry point
 #   public-guard.sh install [TERMS_FILE]              enable the local Git hooks
 #
+# Every scan also blocks tracked Markdown other than READMEs, licenses,
+# changelogs, security and contributing guides, and published skill files.
+#
 # The project term list comes from PUBLIC_GUARD_TERMS (content),
 # PUBLIC_GUARD_TERMS_FILE, or `git config logbrew.publicGuardTermsFile`.
 # Each line is: CATEGORY<TAB>PATTERN[<TAB>only:REPO,...|except:REPO,...].
@@ -186,6 +189,21 @@ add_text() {
   cp "$file" "$work/text/$label.txt"
 }
 
+# Tracked Markdown is limited to user documentation: READMEs, licenses,
+# changelogs, security and contributing guides, and published skill files.
+# The mcp operation reference stays while the hosted catalog links to it.
+check_markdown() {
+  local paths allowed='(^|/)(README|LICENSE|CHANGELOG|SECURITY|CONTRIBUTING)\.md$|^plugins/[^/]+/skills/[^/]+/(SKILL\.md|references/[^/]+\.md)$'
+  [[ "$(repository_name)" == mcp ]] && allowed+='|^docs/operations\.md$'
+  if [[ -n "${1:-}" ]]; then
+    paths="$(git ls-tree -r --name-only "$1")" || fail "cannot list the tree"
+  else
+    paths="$(git ls-files)" || fail "cannot list the index"
+  fi
+  { grep -iE '\.(md|markdown)$' <<<"$paths" || true; } | { grep -vE "$allowed" || true; } |
+    while IFS= read -r path; do printf 'markdown.1|%s|\n' "$path"; done >>"$work/findings"
+}
+
 scan_range() {
   local base="$1" head="$2" sha
   shift 2
@@ -198,6 +216,7 @@ scan_range() {
   for item in "$@"; do add_text "$item"; done
   [[ -n "$(git rev-list -1 "$base..$head")" ]] && run_gitleaks git --log-opts="$base..$head" .
   run_gitleaks dir "$work/text"
+  check_markdown "$head"
 }
 
 github_status() {
@@ -320,6 +339,7 @@ case "$command" in
     git stripspace --strip-comments <"$1" >"$work/text/new-commit-message.txt"
     run_gitleaks git --staged --pre-commit .
     run_gitleaks dir "$work/text"
+    check_markdown
     report
     ;;
   pre-push) pre_push "$@" ;;

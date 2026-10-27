@@ -560,7 +560,7 @@ source code, locals, arguments, or absolute paths. The raw Rails/Rack backtrace
 option is separate and remains off by default. Run
 `make -C examples run-issue-diagnostics` for a complete inspectable payload.
 Rails, Rack, and Sidekiq issue capture reuse this same graph. See the shared
-[exception-chain contract](../../docs/exception-chain-evidence.md).
+[exception-chain contract](../../README.md#exception-chains).
 
 ## Metrics
 
@@ -621,7 +621,7 @@ The helpers return normal `action` attributes, so they work with the existing qu
 
 ## Support Ticket Draft Diagnostics
 
-Use `LogBrew::SupportTicketDraft.create` when a developer or support agent explicitly asks for a local JSON payload for the planned LogBrew support-ticket routes. The helper validates the public source/category contract, normalizes W3C trace IDs, redacts diagnostics, and returns a plain Ruby hash:
+Use `LogBrew::SupportTicketDraft.create` to build the JSON body for a LogBrew support ticket. The helper validates the source and category, normalizes W3C trace IDs, redacts diagnostics, and returns a plain Ruby hash:
 
 ```ruby
 draft = LogBrew::SupportTicketDraft.create(
@@ -642,7 +642,7 @@ draft = LogBrew::SupportTicketDraft.create(
 puts JSON.generate(draft)
 ```
 
-This helper is local-only. It does not send data, open a ticket, call backend support-ticket routes, use account/session API credentials, or infer backend ownership. Diagnostics are bounded to JSON-like values; token-like keys and strings are redacted, HTTP URLs keep only the path, local filesystem paths are replaced, exceptions keep only the class name, and unsupported Ruby objects are omitted.
+The helper sends nothing. To open the ticket, send it to `POST /api/support/tickets` or run `logbrew support create`. See [Report a problem](https://docs.logbrew.co/guides/report-a-problem). Diagnostics are bounded to JSON-like values; token-like keys and strings are redacted, HTTP URLs keep only the path, local filesystem paths are replaced, exceptions keep only the class name, and unsupported Ruby objects are omitted.
 
 ## HTTP Delivery
 
@@ -925,7 +925,7 @@ unhandled request exceptions are not captured twice.
 - Queues default to 1,000 events and 4 MiB of compact serialized event data; `pending_event_bytes`, `dropped_events`, and `on_event_dropped` expose pressure locally. `TransportResponse#attempts` and `#batches` expose request work.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `LogBrew::ProductTimeline` builds explicit, application-owned product action and network milestone timeline events with primitive metadata and query/hash-free routes.
-- `LogBrew::SupportTicketDraft.create` builds explicit, local-only support-ticket create payload drafts with redacted diagnostics and no backend route calls.
+- `LogBrew::SupportTicketDraft.create` builds a redacted support-ticket body and sends nothing.
 - `LogBrew::IssueDiagnostics` builds typed exception identity, mechanism/handled state, basename-only structured frames, and bounded ordered breadcrumbs without raw exception internals.
 - `LogBrew::HttpTransport` sends queued batches through Ruby's standard `Net::HTTP` with configurable endpoint, headers, timeout, and app-owned HTTP client support.
 - `LogBrew::RackMiddleware` captures Rack request spans and unhandled app exceptions without requiring Rails or Rack at runtime.

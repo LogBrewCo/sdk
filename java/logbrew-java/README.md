@@ -230,7 +230,7 @@ try {
 }
 ```
 
-The automatic projection records the exception type plus at most 32 newest-first frames with basename, line, column, function, and module identity. It also walks `getCause()` and suppressed exceptions into a bounded parent-first graph, marks automatic messages redacted rather than copying them, and reports missing or truncated per-node stacks explicitly. Cycles and the eight-node cap set the graph's truncation receipt. It never records the exception message, raw stack text, source lines, local variables, or absolute paths. Add a display-safe issue message explicitly only when your application has approved it. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
+The automatic projection records the exception type plus at most 32 newest-first frames with basename, line, column, function, and module identity. It also walks `getCause()` and suppressed exceptions into a bounded parent-first graph, marks automatic messages redacted rather than copying them, and reports missing or truncated per-node stacks explicitly. Cycles and the eight-node cap set the graph's truncation receipt. It never records the exception message, raw stack text, source lines, local variables, or absolute paths. Add a display-safe issue message explicitly only when your application has approved it. See the shared [exception-chain contract](../../README.md#exception-chains).
 
 For app-owned diagnostics, `IssueException`, `IssueExceptionMechanism`, `IssueExceptionChain`, `IssueExceptionChainEntry`, `IssueStackFrame`, and `IssueBreadcrumb` expose the same validated event contract. Frame lists are capped at 32. Breadcrumb lists are capped at 64 and stay caller-supplied rather than process-global; each breadcrumb accepts an RFC 3339 timestamp, stable category/type, normalized level, bounded message, and at most eight flat finite primitive data fields. Use `breadcrumbsTruncated(true)` when older entries were evicted before the snapshot.
 
@@ -834,7 +834,7 @@ Set `logbrew.cache.enabled=false` to disable auto-wrapping. The auto-configurati
 
 ## Support Ticket Drafts
 
-Use `SupportTicketDraft` when a developer or support agent explicitly asks for a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, normalizes W3C trace IDs, redacts diagnostics, and returns a local draft:
+Use `SupportTicketDraft` to build the JSON body for a LogBrew support ticket. The helper validates the source and category, normalizes W3C trace IDs, redacts diagnostics, and returns a local draft:
 
 ```java
 import co.logbrew.sdk.SupportTicketDraft;
@@ -858,7 +858,7 @@ SupportTicketDraft draft = SupportTicketDraft.create(SupportTicketDraft.Input
 System.out.println(draft.toJson());
 ```
 
-This helper does not send data, open support tickets, call `POST /api/support/tickets`, use account/session API credentials, or infer backend usage/quota state. Support routes are backend-owned and should only be called by an explicit user or agent action after backend reports deployed support-ticket routes. Diagnostics are bounded to JSON-like values; auth values, cookies, tokens, local paths, URL origins, unsupported objects, and exception messages are redacted or omitted.
+The helper sends nothing. To open the ticket, send it to `POST /api/support/tickets` or run `logbrew support create`. See [Report a problem](https://docs.logbrew.co/guides/report-a-problem). Diagnostics are bounded to JSON-like values; auth values, cookies, tokens, local paths, URL origins, unsupported objects, and exception messages are redacted or omitted.
 
 ## HTTP Delivery
 

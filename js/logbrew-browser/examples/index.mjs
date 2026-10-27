@@ -11,7 +11,7 @@ const commands = {
     file: "readme-example.mjs"
   },
   "real-user-smoke": {
-    description: "Run the stronger browser capture smoke example.",
+    description: "Run the full browser capture example.",
     file: "real-user-smoke.mjs"
   }
 };

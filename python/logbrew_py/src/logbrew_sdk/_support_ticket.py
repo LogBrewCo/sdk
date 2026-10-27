@@ -27,7 +27,7 @@ SupportDiagnosticsValue: TypeAlias = (
 
 
 class SupportTicketDraft(TypedDict, total=False):
-    """Planned support-ticket create payload built locally without opening a ticket."""
+    """Support-ticket create payload built locally without opening a ticket."""
 
     project_id: str
     source: SupportTicketSource

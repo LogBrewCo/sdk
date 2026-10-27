@@ -150,7 +150,7 @@ and suppressed failures; message and stack states make captured, redacted,
 truncated, and missing evidence explicit. Entry zero must exactly match
 `details.exception` and `details.stack_frames`, so contradictory manual graphs
 fail before queue admission. See the shared
-[exception-chain contract](../../docs/exception-chain-evidence.md).
+[exception-chain contract](../../README.md#exception-chains).
 
 ### Span events and links
 

@@ -154,10 +154,6 @@ jobs:
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'
 
-      - name: Check backend contract reports
-        run: |
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" backend-reports .
-
       - name: Validate fixtures
         run: |
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" event-batch-check spec/event-batch.schema.json fixtures/valid-batch.json

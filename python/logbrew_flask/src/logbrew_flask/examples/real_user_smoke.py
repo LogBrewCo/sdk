@@ -12,7 +12,7 @@ from logbrew_flask.examples._support import example_app, named_spans, recorded_e
 
 app, client, transport = example_app(__name__)
 # This example must not change an embedding application's registered logger.
-# Reviewed 2026-09-05; the package test checks its handlers, level, propagation.
+# The package test checks its handlers, level, and propagation.
 logger = logging.Logger("flask.checkout.example", logging.INFO)  # noqa: LOG001
 logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout"}))
 

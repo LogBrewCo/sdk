@@ -159,7 +159,7 @@ import (
 func main() {
   client, err := logbrew.NewClient(logbrew.Config{
     APIKey:               "LOGBREW_API_KEY",
-    DisableRuntimeContext: true, // Keep this language-neutral parity preview minimal.
+    DisableRuntimeContext: true, // Omit runtime context to keep this preview short.
   })
   if err != nil {
     panic(err)
@@ -349,7 +349,7 @@ and likely fix area separate from observed runtime facts, while field-state
 lists preserve missing, redacted, and truncated evidence for API, CLI,
 dashboard, and agent consumers. Use repository-relative paths and do not place
 authentication material, request bodies, personal data, or raw user input in
-these fields. See the shared [issue evidence contract](../../docs/issue-diagnostic-evidence.md).
+these fields. See the shared [issue evidence contract](../../README.md#diagnostic-evidence).
 
 `CaptureIssueStackFrames()` snapshots the current goroutine in newest-first
 order with basename-only filenames and bounded function/module identities. Call
@@ -364,7 +364,7 @@ bounded parent-first cause or aggregate graph, records redacted/missing message
 and stack states, detects cycles, and validates entry zero against the legacy
 exception and frames. Panic, Gin, and `net/http` helpers use this same contract
 instead of emitting a weaker wrapper-only shape. See the shared
-[exception-chain contract](../../docs/exception-chain-evidence.md).
+[exception-chain contract](../../README.md#exception-chains).
 
 ## High-Load Behavior
 
@@ -453,7 +453,7 @@ The example uses a fake API key, emits a local `PreviewJSON` payload, and then f
 
 ## Support Ticket Drafts
 
-Use `CreateSupportTicketDraft` when a developer or support agent explicitly asks for a local JSON payload for the planned LogBrew support-ticket routes. The helper validates the public source/category contract, normalizes W3C trace IDs, redacts diagnostics, and returns a `SupportTicketDraft`. It does not send data, open a ticket, call backend support-ticket routes, use account/session API credentials, or infer backend ownership.
+Use `CreateSupportTicketDraft` to build the JSON body for a LogBrew support ticket. The helper validates the source and category, normalizes W3C trace IDs, redacts diagnostics, and returns a `SupportTicketDraft`. It sends nothing.
 
 ```go
 draft, err := logbrew.CreateSupportTicketDraft(logbrew.SupportTicketDraftInput{
@@ -482,7 +482,7 @@ if err != nil {
 _ = draft
 ```
 
-Diagnostics are bounded to JSON-like values. Auth-like keys, cookies, tokens, URL origins, local paths, unsupported objects, and raw error messages are redacted or omitted before the draft is returned. Network ticket creation should remain a separate explicit user or agent action only after backend reports deployed support-ticket storage and routes.
+Diagnostics are bounded to JSON-like values. Auth-like keys, cookies, tokens, URL origins, local paths, unsupported objects, and raw error messages are redacted or omitted before the draft is returned. To open the ticket, send it to `POST /api/support/tickets` or run `logbrew support create`. See [Report a problem](https://docs.logbrew.co/guides/report-a-problem).
 
 ## Metrics
 
