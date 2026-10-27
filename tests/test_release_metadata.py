@@ -595,19 +595,6 @@ class ReleaseMetadataTests(unittest.TestCase):
             resolve_script,
         )
 
-    def test_release_guide_documents_selected_maven_artifact_safety(self) -> None:
-        guide = (ROOT / "docs/github-actions.md").read_text(encoding="utf-8")
-
-        for expected in (
-            "`maven_artifacts`",
-            "immutable-version collision",
-            "exact dependency closure",
-            "bundle manifest",
-            "before upload",
-        ):
-            self.assertIn(expected, guide)
-
-
     def test_python_packages_publish_python_310_compatibility(self) -> None:
         projects = {
             package: tomllib.loads(

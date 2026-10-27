@@ -44,22 +44,6 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
                 self.assertIn("Run native release artifact upload smoke", text)
                 self.assertIn(f"run: {NATIVE_UPLOAD_SMOKE_COMMAND}", text)
 
-    def test_readiness_checklist_mentions_release_artifact_smoke(self) -> None:
-        checklist = (ROOT / "docs" / "sdk-readiness-checklist.md").read_text(encoding="utf-8")
-
-        self.assertIn(f"JavaScript release-artifact dry-run proof: `{JS_SMOKE_COMMAND}`", checklist)
-        self.assertIn(f"JavaScript release-artifact installed CLI prep/manifest/frame proof: `{JS_CLI_SMOKE_COMMAND}`", checklist)
-        self.assertIn(f"Vite release-artifact installed plugin proof: `{VITE_SMOKE_COMMAND}`", checklist)
-        self.assertIn(f"Next.js release-artifact installed helper proof: `{NEXT_SMOKE_COMMAND}`", checklist)
-        self.assertIn(f"React Native release-artifact installed helper/build proof: `{REACT_NATIVE_SMOKE_COMMAND}`", checklist)
-        self.assertIn(
-            f"React Native native release-artifact proof: `{REACT_NATIVE_NATIVE_SMOKE_COMMAND}`",
-            checklist,
-        )
-        self.assertIn(f"JavaScript release-artifact upload proof: `{JS_UPLOAD_SMOKE_COMMAND}`", checklist)
-        self.assertIn(f"Native/mobile release-artifact dry-run proof: `{NATIVE_SMOKE_COMMAND}`", checklist)
-        self.assertIn(f"Native/mobile release-artifact upload proof: `{NATIVE_UPLOAD_SMOKE_COMMAND}`", checklist)
-
     def test_native_upload_smoke_proves_unity_zip_transport(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_native_release_artifact_upload_smoke.sh").read_text(
             encoding="utf-8"

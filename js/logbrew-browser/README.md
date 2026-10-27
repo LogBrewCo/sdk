@@ -184,7 +184,7 @@ await captureBrowserNetwork({
 }, logbrew);
 ```
 
-Action and network metadata is sanitized to primitive values. Browser product actions carry the versioned `interaction` analytics classification; network milestones do not. Keep metadata low-cardinality and avoid raw selectors, full URLs, query strings, headers, request or response bodies, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy. `captureBrowserNetwork()` records route templates, methods, status codes, durations, trace IDs, session IDs, and your own primitive metadata; it does not patch `fetch` or inspect network payloads automatically. See the repository [product analytics capture contract](../../docs/product-analytics-contract.md) for the reserved fields and compatibility rules.
+Action and network metadata is sanitized to primitive values. Browser product actions carry the versioned `interaction` analytics classification; network milestones do not. Keep metadata low-cardinality and avoid raw selectors, full URLs, query strings, headers, request or response bodies, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy. `captureBrowserNetwork()` records route templates, methods, status codes, durations, trace IDs, session IDs, and your own primitive metadata; it does not patch `fetch` or inspect network payloads automatically. See the repository [product analytics capture contract](../../README.md#product-analytics-capture) for the reserved fields and compatibility rules.
 
 ## Resource Timing Spans
 

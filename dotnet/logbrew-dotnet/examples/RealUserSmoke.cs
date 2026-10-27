@@ -41,7 +41,7 @@ public static class Program
 
     private static LogBrewClient NewClient()
     {
-        // Keep this cross-SDK parity fixture exact; production clients normally retain safe runtime defaults.
+        // Runtime context is off to keep this output short; production clients keep the safe defaults.
         return LogBrewClient.Create(
             "LOGBREW_API_KEY",
             "logbrew-dotnet",

@@ -5,7 +5,7 @@ using System.Collections.ObjectModel;
 namespace LogBrew
 {
     /// <summary>
-    /// Inputs for creating a local-only support-ticket draft for planned backend routes.
+    /// Inputs for a local support-ticket draft.
     /// </summary>
     public sealed class SupportTicketDraftInput
     {
@@ -128,7 +128,7 @@ namespace LogBrew
     /// Local-only support-ticket payload draft for explicit user or agent handoff.
     /// </summary>
     /// <remarks>
-    /// This helper validates planned public support-ticket fields and redacts diagnostics.
+    /// This helper validates the support-ticket fields and redacts diagnostics.
     /// It does not send data, open a ticket, call backend support routes, or use
     /// account/session API credentials.
     /// </remarks>

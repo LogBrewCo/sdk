@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// SupportTicketDraftInput describes an explicit local-only draft for planned
-// backend support-ticket routes. It does not open a ticket or send telemetry.
+// SupportTicketDraftInput describes a local support-ticket draft. It does not open a ticket or send telemetry.
 type SupportTicketDraftInput struct {
 	ProjectID   string
 	Source      string
@@ -27,7 +26,7 @@ type SupportTicketDraftInput struct {
 	Diagnostics map[string]any
 }
 
-// SupportTicketDraft is the planned support-ticket create payload after local
+// SupportTicketDraft is the support-ticket create payload after local
 // validation and diagnostics redaction.
 type SupportTicketDraft struct {
 	ProjectID   string         `json:"project_id,omitempty"`

@@ -82,7 +82,7 @@ expect_commit "project term in upper case" 1 "infrastructure:" "$upper_term" src
 expect_commit "project term split by separators" 1 "infrastructure:" "$split_term" src/app.txt "host $split_term"
 expect_commit "project term split by zero-width space" 1 "infrastructure:" "" src/app.txt "host $zw_term"
 expect_commit "project term inside identifier" 1 "infrastructure:" "" src/app.txt "const my${upper_term}Client = 1"
-expect_commit "project term in file path" 1 "changed file path #1" "" "docs/$term.md" "public"
+expect_commit "project term in file path" 1 "changed file path #1" "" "docs/$term.txt" "public"
 expect_commit "project term in commit message" 1 "commit message" "$term" src/app.txt "public" "fix: move $term"
 expect_commit "exact project term" 1 "storage:" "" src/app.txt "see exact.$term now"
 expect_commit "regex project term" 1 "cost:" "" src/app.txt "fee-$term"
@@ -99,6 +99,19 @@ expect_commit "inline allow comment is ignored" 1 "infrastructure:" "" src/app.t
 expect_commit "public placeholders stay allowed" 0 "clean" "" src/app.txt "$(printf '%s\n' \
   "/Us""ers/example/app" "user@example.com" "trace_id=0123456789abcdef0123456789abcdef" \
   "localStorage retention storage ActivityKind.Internal" "Co-authored-by: Jane Roe <jane@roe.dev>")"
+
+expect_commit "unlisted Markdown file" 1 "markdown: docs/notes.md" "" docs/notes.md "public"
+expect_commit "Markdown with another extension" 1 "markdown: notes.markdown" "" notes.markdown "public"
+expect_commit "package README stays allowed" 0 "clean" "" pkg/README.md "public"
+expect_commit "changelog stays allowed" 0 "clean" "" CHANGELOG.md "public"
+expect_commit "published skill file stays allowed" 0 "clean" "" plugins/app/skills/use/references/cli.md "public"
+expect_commit "repository-scoped reference is not allowed elsewhere" 1 "markdown: docs/operations.md" "" docs/operations.md "public"
+git -C "$repo" checkout -q -B "case" "$base"
+printf 'public\n' >"$repo/notes.md"
+git -C "$repo" add notes.md
+printf 'docs: add notes\n' >"$work/message"
+expect "staged Markdown blocks the commit" 1 "markdown: notes.md" "" commit-msg "$work/message"
+git -C "$repo" rm -q --cached notes.md && rm "$repo/notes.md"
 
 # A removed line is not new content; history before BASE is not rescanned.
 git -C "$repo" checkout -q -B "case" "$base"

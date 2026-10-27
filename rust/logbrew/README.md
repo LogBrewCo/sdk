@@ -207,7 +207,7 @@ panicking accessor, cycle, or the eight-node cap marks the graph truncated.
 `IssueExceptionChain` and `IssueExceptionChainEntry` also accept manual
 normalized evidence with strict root parity. Tower error issues reuse this
 contract. See the shared
-[exception-chain contract](../../docs/exception-chain-evidence.md).
+[exception-chain contract](../../README.md#exception-chains).
 
 Pass a concrete error reference when exact type identity matters; a `dyn Error` trait object can expose only the trait-object type. Generated diagnostics never format the error or panic payload and never capture raw stack text, source lines, locals, arguments, or absolute paths. A frame retains only a basename, positive coordinates, and explicitly supplied bounded code identity. Frame lists are newest-first and capped at 32. Breadcrumbs are oldest-to-newest and capped at 64; each accepts at most eight flat finite primitive data fields. `IssueBreadcrumbBuffer` is caller-owned, retains the newest 64 entries, and marks the issue when older entries were evicted.
 
@@ -315,7 +315,7 @@ with_telemetry_context(request, || -> Result<(), logbrew::SdkError> {
 })??;
 ```
 
-Metrics answer questions across many events—rate, latency distribution, saturation, and change after a release—while a span explains one execution and logs/actions explain what happened inside it. Do not use a metric as a substitute for the trace or attach high-cardinality request, user, or session values as metric tags.
+Metrics answer questions across many events (rate, latency distribution, saturation, and change after a release), while a span explains one execution and logs/actions explain what happened inside it. Do not use a metric as a substitute for the trace or attach high-cardinality request, user, or session values as metric tags.
 
 The runnable [`first_useful_telemetry.rs`](examples/first_useful_telemetry.rs) example emits release, environment, log, product action, network milestone, request-duration metric, and request span as one schema-valid envelope. It uses route templates, primitive bounded metadata, and canonical severities (`info`, `warning`, `error`, `critical`), and excludes account-specific values, payloads, arbitrary headers, query strings, fragments, full URLs, direct PII, and sensitive values.
 

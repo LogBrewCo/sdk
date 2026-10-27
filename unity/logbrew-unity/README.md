@@ -162,7 +162,7 @@ explicit, and cycles or the eight-node cap mark truncation. Games with
 normalized IL2CPP evidence can build the same graph through
 `IssueExceptionChainEntry`; the reported root must match the legacy exception
 and frames. See the shared
-[exception-chain contract](../../docs/exception-chain-evidence.md).
+[exception-chain contract](../../README.md#exception-chains).
 
 ## Span Events and Links
 

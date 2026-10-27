@@ -664,16 +664,16 @@ if (!declarations.includes("App-owned product step input for agent-readable acti
 if (!declarations.includes("App-owned API milestone input for agent-readable network timelines.")) {
   throw new Error("missing installed NetworkMilestoneInput declaration docs");
 }
-if (!declarations.includes("Planned backend support-ticket sources accepted by explicit draft helpers.")) {
+if (!declarations.includes("Support-ticket sources accepted by explicit draft helpers.")) {
   throw new Error("missing installed SupportTicketSource declaration docs");
 }
-if (!declarations.includes("Planned backend support-ticket categories accepted by explicit draft helpers.")) {
+if (!declarations.includes("Support-ticket categories accepted by explicit draft helpers.")) {
   throw new Error("missing installed SupportTicketCategory declaration docs");
 }
 if (!declarations.includes("Explicit local-only support-ticket draft input. This does not open a ticket.")) {
   throw new Error("missing installed SupportTicketDraftInput declaration docs");
 }
-if (!declarations.includes("Planned backend create payload produced locally for explicit user or agent action.")) {
+if (!declarations.includes("Support-ticket create body built locally. It sends nothing.")) {
   throw new Error("missing installed SupportTicketDraft declaration docs");
 }
 if (!declarations.includes("Shared timeline helper options for primitive app metadata.")) {

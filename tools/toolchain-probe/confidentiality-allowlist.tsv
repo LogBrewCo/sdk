@@ -12,20 +12,6 @@
 #   expression), or any (text is "-").
 
 # Publishing and release workflows name their credential settings, never values.
-docs/github-actions.md	*	ihas	long-lived registry tokens
-.github/publishing/trusted-publishers.md	*	ihas	after adding packagist secrets
-.github/publishing/trusted-publishers.md	*	ihas	central portal credentials
-.github/publishing/trusted-publishers.md	*	ihas	central_portal_password
-.github/publishing/trusted-publishers.md	*	ihas	environment secrets
-.github/publishing/trusted-publishers.md	*	ihas	maven central signing
-.github/publishing/trusted-publishers.md	*	ihas	nuget_user
-.github/publishing/trusted-publishers.md	*	ihas	packagist_api_token
-.github/publishing/trusted-publishers.md	*	ihas	packagist_username
-.github/publishing/trusted-publishers.md	*	ihas	release environment secret
-.github/publishing/trusted-publishers.md	*	ihas	rubygems/configure-rubygems-credentials
-.github/publishing/trusted-publishers.md	*	ihas	signing keys
-.github/publishing/trusted-publishers.md	*	ihas	trusted publisher
-.github/publishing/trusted-publishers.md	*	ihas	trusted publishing
 {.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	/-/npm/v1/oidc/token/exchange/package/
 {.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	actions_id_token_request_token
 {.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	actions_id_token_request_url
@@ -138,13 +124,13 @@ js/logbrew-react-native/README.md	*	has	tokenEnv
 {scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	wrong-token
 {js/logbrew-js/test/release-artifacts-cli.test.js,scripts/real_user_js_release_artifact_cli_smoke.sh}	*	has	token=placeholder
 js/logbrew-js/test/release-artifacts-cli.test.js	*	has	tokenEnv: authEnvName
-{docs/backend-contracts/release-artifact-symbolication-2026-06-13.md,js/logbrew-js/README.md,js/logbrew-next/README.md}	*	re	(?i)upload.*artifact|artifact.*upload
+{js/logbrew-js/README.md,js/logbrew-next/README.md}	*	re	(?i)upload.*artifact|artifact.*upload
 
 # Privacy denylists name the keys they drop; fixtures use placeholder values.
-{**angular**,docs/sdk-readiness-checklist.md}	*	has	InjectionToken
-{**angular**,docs/sdk-readiness-checklist.md}	*	has	LOG_BREW_ANGULAR_CONTEXT
-{**angular**,docs/sdk-readiness-checklist.md}	*	has	injection token
-{**angular**,docs/sdk-readiness-checklist.md}	*	has	injection-token
+**angular**	*	has	InjectionToken
+**angular**	*	has	LOG_BREW_ANGULAR_CONTEXT
+**angular**	*	has	injection token
+**angular**	*	has	injection-token
 {scripts/real_user_**,js/logbrew-*/**/examples/real-user-smoke.mjs}	*	has	token=secret
 python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	arg
 python/logbrew_py/src/logbrew_sdk/**/{_cache_client,_celery_client,_db_client,_dbapi_client,_instrumentation,_queue_client,_redis_client,_rq_client,_sqlalchemy_client}.py	*	item	bind
@@ -438,7 +424,6 @@ tools/toolchain-probe/**/*.go	<=cleanup,credential,token	any	-
 js/**/*.{cjs,cts,js,mjs,ts}	restore	any	-
 {python/logbrew_py/src/logbrew_sdk/_arq_client.py,python/logbrew_py/src/logbrew_sdk/_queue_client.py,python/logbrew_py/src/logbrew_sdk/_rq_client.py}	restore	any	-
 scripts/real_user_**.sh	restore	any	-
-docs/github-actions.md	*	line	group during cleanup, including children left behind after command exit.
 python/logbrew_py/README.md	*	line	For Requests, HTTPX, and aiohttp, `uninstall()` restores the original method only if LogBrew's wrapper is still installed. If your application replaces that method afterward, removal preserves the replacement. Uninstall and reinstall instrumentation to capture calls through the new method.
 python/logbrew_py/src/logbrew_sdk/_http_instrumentation.py	*	line	self._restore_request = _instrumentation.patch_instance_attributes(
 python/logbrew_py/src/logbrew_sdk/_http_instrumentation.py	*	line	self._restore_request()

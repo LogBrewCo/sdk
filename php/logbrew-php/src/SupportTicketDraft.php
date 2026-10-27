@@ -9,7 +9,7 @@ use Throwable;
 /**
  * Local-only support-ticket draft helper for explicit user or agent handoff.
  *
- * This validates the planned public support-ticket create payload and redacts
+ * This validates the support-ticket create payload and redacts
  * diagnostics. It does not open a ticket, call backend routes, or send telemetry.
  *
  * @phpstan-type SupportDiagnosticsValue string|int|float|bool|null|array<string|int, mixed>
@@ -68,7 +68,7 @@ final class SupportTicketDraft
     private const MAX_STRING_LENGTH = 500;
 
     /**
-     * Build a planned support-ticket create payload locally without calling backend routes.
+     * Build a support-ticket create payload locally without calling backend routes.
      *
      * @param array<string|int, mixed>|null $diagnostics
      * @return SupportTicketPayload

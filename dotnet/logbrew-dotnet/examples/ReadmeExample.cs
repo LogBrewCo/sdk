@@ -5,7 +5,7 @@ public static class Program
 {
     public static void Main()
     {
-        // Keep this cross-SDK parity fixture exact; production clients normally retain safe runtime defaults.
+        // Runtime context is off to keep this output short; production clients keep the safe defaults.
         var client = LogBrewClient.Create(
             "LOGBREW_API_KEY",
             "logbrew-dotnet",

@@ -11,14 +11,23 @@ This repository contains the public SDK packages, framework integrations, event 
 ## What You Can Capture
 
 - Releases and environments for deployment context.
-- Issues and handled errors with a bounded parent-first exception graph, typed mechanism and handled state, explicit message/stack evidence states, structured frames, breadcrumbs, and optional [application-reported diagnostic evidence](docs/issue-diagnostic-evidence.md) without raw stack text by default.
+- Issues and handled errors with a bounded parent-first exception graph, typed mechanism and handled state, explicit message/stack evidence states, structured frames, breadcrumbs, and optional [application-reported diagnostic evidence](#diagnostic-evidence) without raw stack text by default.
 - Logs from direct calls or app-owned logger integrations.
 - Spans and W3C `traceparent` context for request tracing.
 - Actions for important user or system events.
 - Explicit metrics when your application already knows the measurement name, stable purpose, value, unit, kind, and temporality.
 - A shared, versioned context for privacy-bounded resource, deployment, trace, session, opaque subject, and low-cardinality tag correlation across every signal.
 
-User-facing severity categories are `info`, `warning`, `error`, and `critical`. SDKs keep accepting common runtime aliases where they are idiomatic, such as `trace`, `debug`, `warn`, and `fatal`, but queued payloads normalize those aliases to the canonical categories before they are sent. See the [LogBrew severity contract](docs/severity-contract.md) for the full mapping.
+User-facing severity categories are `info`, `warning`, `error`, and `critical`. SDKs keep accepting common runtime aliases where they are idiomatic, such as `trace`, `debug`, `warn`, and `fatal`, but queued payloads normalize those aliases to the canonical categories before they are sent:
+
+| Runtime alias | Sent as |
+| --- | --- |
+| `trace`, `debug`, `info` | `info` |
+| `warn`, `warning` | `warning` |
+| `error` | `error` |
+| `fatal`, `critical` | `critical` |
+
+Use `info` for normal progress and details useful in an investigation, `warning` for recoverable or degraded behavior, `error` for failed work and handled exceptions, and `critical` for fatal, outage-level, data-loss, or user-blocking failures.
 
 ## Packages
 
@@ -28,8 +37,7 @@ Install only the package your application needs. The package names below are reg
 - Add framework packages only when your app uses that framework, such as `@logbrew/react`, `@logbrew/express`, `logbrew-fastapi`, `logbrew-flask`, or `logbrew-django`.
 - Frontend and mobile packages use public `clientKey` setup. Server packages should use server-side keys from app configuration.
 - A change to one ecosystem package should not require developers in other ecosystems to update unless their package also changed.
-- Apple app setup should start from the Swift/SwiftPM path. Objective-C remains available as an advanced source/header variant for mixed or Objective-C-only apps, not a separate first-step platform choice.
-- Product setup pickers should show user-facing runtime/platform families instead of helper package names; see the [SDK setup picker guidance](docs/sdk-setup-picker-guidance.md).
+- For Apple apps, start with the Swift package. Use Objective-C only for Objective-C or mixed codebases.
 
 Node queue integrations are published as separate npm packages. For BullMQ,
 KafkaJS, RabbitMQ/amqplib, and Amazon SQS, install the matching `@logbrew/*`
@@ -235,12 +243,74 @@ Automatic issue helpers preserve native cause, context, aggregate, and
 suppressed relationships when their runtime exposes them. The root remains
 compatible with the existing `exception` and `stackFrames` fields; every
 missing, redacted, or truncated message/stack state is explicit and no SDK
-invents historical evidence. See the
-[exception-chain evidence contract](docs/exception-chain-evidence.md).
+invents historical evidence. See [Exception Chains](#exception-chains).
+
+## Exception Chains
+
+The reported exception is often only a wrapper. The failure that matters can be
+an earlier cause, a context exception, one member of an aggregate, or a
+suppressed exception, so issue events can carry a bounded `exceptionChain`
+next to the `exception` and `stackFrames` fields.
+
+- `exceptionChain.entries` is a parent-first array of 1 to 8 entries. Entry
+  IDs are their array indexes. Entry `0` is the `reported` exception and has
+  no parent. Every later entry names an earlier `parentId` and a relation:
+  `cause`, `context`, `aggregate_member`, or `suppressed`.
+- The reported entry repeats the `exception` type and mechanism and the
+  `stackFrames`, and must match them exactly.
+- `truncated: true` means a depth, width, cycle, unreadable runtime link, or
+  SDK limit cut the graph short.
+- `messageState` is `captured`, `truncated`, `redacted`, or `not_captured`. A
+  message is present only when it is `captured` or `truncated`.
+- `stackFramesState` is `captured`, `truncated`, or `not_captured`. Frames are
+  present only when they are `captured` or `truncated`, at most 32 per entry.
+
+SDKs reject a contradictory root, a forward parent reference, gaps, and
+oversized graphs before the event is queued. They never invent a cause,
+message, or frame. Automatic helpers mark messages `redacted` and leave the
+text out; a `captured` message is text your application approved for
+telemetry. Frames keep bounded code identity and never contain source lines,
+local variables, arguments, or raw stack text.
+
+Automatic helpers follow each runtime's own relationships: JavaScript `cause`
+and `AggregateError`, Python causes, context, and exception groups, JVM causes
+and suppressed exceptions, .NET inner and aggregate exceptions, Go `Unwrap`,
+Rust `Error::source`, PHP previous exceptions, Ruby causes, Swift and
+Objective-C underlying `NSError` values, and Unity inner and aggregate
+exceptions. C and C++ have no common cause API, so their issue types accept the
+same chain built by hand and send the same shape. Framework packages reuse
+their core helper and send the same chain.
+
+## Diagnostic Evidence
+
+An issue can include an optional `attributes.evidence` object when your
+application already knows something runtime inspection cannot find. The SDK
+never derives these values from an exception message.
+
+- `likelyRootCause` is up to 1,024 characters. LogBrew shows it as a reported
+  hypothesis, not a confirmed cause.
+- `likelyFixArea` has at least one of `component`, `module`, `function`,
+  repository-relative `file`, positive `line`, or positive `column`. Optional
+  `inApp` cannot be the only field. Paths are up to 256 characters and cannot
+  be absolute or contain `..`, a URL scheme, a query, or a fragment.
+- `impact` has at least one of `affectedUserSegment`, `failedAction`, or
+  `userVisibleOutcome`. Segment and action are short, low-cardinality names.
+  The outcome is display text up to 512 characters. None of them identify a
+  user.
+- `capturedFields`, `missingFields`, `redactedFields`, and `truncatedFields`
+  each hold 1 to 32 unique field names of up to 64 letters, digits, dots,
+  underscores, and hyphens. A name can appear under only one state.
+
+Unknown keys, empty objects, contradictory states, unsafe paths, control
+characters, and values outside these limits fail validation before the event
+is queued. Add evidence only when your application logic or a reviewed rule
+knows it. Never include authorization values, request or response
+bodies, personal data, raw user input, full URLs, headers, query strings, local
+absolute paths, or raw stack text.
 
 ## Metrics
 
-Metrics are explicit: core SDKs do not automatically collect runtime, framework, database, or host metrics. Opt-in framework request helpers may emit a bounded request-duration metric. Their purpose is to aggregate behavior over time—rates, latency distributions, saturation, and release-to-release change—while logs/actions describe discrete facts and traces explain individual executions.
+Metrics are explicit: core SDKs do not automatically collect runtime, framework, database, or host metrics. Opt-in framework request helpers may emit a bounded request-duration metric. Their purpose is to aggregate behavior over time (rates, latency distributions, saturation, and release-to-release change), while logs/actions describe discrete facts and traces explain individual executions.
 
 Use metric helpers when your application already has a bounded measurement:
 
@@ -254,7 +324,28 @@ Use metric helpers when your application already has a bounded measurement:
 
 Product analytics reuses explicit action events and existing page-view telemetry. Product-action helpers across the supported SDK families attach a reserved versioned `interaction` classification; browser page-view helpers attach `page_view`, and React Native plus Kotlin/Android screen helpers attach `screen_view`. These annotations do not install automatic click capture or collect user-entered values. Use explicit opaque subject and session IDs in the shared telemetry context when user- or session-level analysis is required.
 
-See the [product analytics capture contract](docs/product-analytics-contract.md) for the exact fields, privacy rules, and compatibility behavior.
+Classified events carry these reserved metadata fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `analyticsSchemaVersion` | integer | The schema version. `1` is the only current value. |
+| `analyticsKind` | string | `page_view`, `screen_view`, or `interaction`. |
+| `analyticsSurface` | string | Optional route template or screen name. |
+
+`analyticsSurface` is trimmed and left out when it is empty, longer than 256
+characters, or contains control characters. Browser surfaces never include
+query strings or hash fragments. Use route templates such as `/orders/:id`
+rather than concrete paths such as `/orders/8472`. The helpers write these
+fields after your metadata, so your metadata cannot change them.
+
+Network milestones, app lifecycle events, logs, issues, and ordinary spans are
+not product interactions and carry no classification. Events without these
+fields stay valid. Never use email addresses, names, phone numbers, IP
+addresses, authorization values, cookies, user-entered text, DOM selectors,
+full URLs, or query strings as identifiers, surfaces, action names, or
+metadata. Readers ignore an unknown `analyticsKind` or schema version. The
+JavaScript constants `PRODUCT_ANALYTICS_SCHEMA_VERSION` and
+`PRODUCT_ANALYTICS_KINDS` list the values the installed package supports.
 
 ## Trace Context
 
@@ -306,10 +397,3 @@ LogBrew SDKs favor conservative defaults:
 Every core SDK supports local JSON preview or recording transports so you can inspect the queued batch before sending anything to LogBrew. This is useful while deciding which logs, spans, issues, releases, actions, environments, or explicit metrics your application should send.
 
 The canonical schema is [`spec/event-batch.schema.json`](spec/event-batch.schema.json). Public fixtures live in [`fixtures/`](fixtures/).
-
-## Maintainer References
-
-- [`docs/sdk-readiness-checklist.md`](docs/sdk-readiness-checklist.md) describes public SDK quality expectations.
-- [`docs/github-actions.md`](docs/github-actions.md) describes the repository Actions layout.
-- [`docs/product-analytics-contract.md`](docs/product-analytics-contract.md) defines the versioned page-view, screen-view, and interaction vocabulary.
-- Package READMEs contain ecosystem-specific examples and install commands.

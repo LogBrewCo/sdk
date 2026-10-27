@@ -363,13 +363,6 @@ func TestReleaseWorkflowFindings(t *testing.T) {
 			publishNuGet + ": missing protected registry checker execution",
 			publishNuGet + ": both NuGet registry checks must use protected release control",
 		}},
-		{replaceAll("historical tags", "older tags"), "docs/github-actions.md",
-			[]string{"docs/github-actions.md: missing release workflow safety warning"}},
-		{nil, "docs/github-actions.md", []string{"missing required path: docs/github-actions.md"}},
-		{replaceAll("@logbrew/vue", "vue"), ".github/publishing/trusted-publishers.md",
-			[]string{".github/publishing/trusted-publishers.md: missing trusted publisher npm package @logbrew/vue"}},
-		{replaceAll("logbrew-flask", "flask"), ".github/publishing/trusted-publishers.md",
-			[]string{".github/publishing/trusted-publishers.md: missing trusted publisher PyPI package logbrew-flask"}},
 	} {
 		t.Run(test.path, func(t *testing.T) {
 			t.Parallel()

@@ -1397,22 +1397,6 @@ func (check *metadataCheck) releaseWorkflows() {
 	if check.requirePaths(publishPackagesWorkflow) {
 		check.publishPackagesWorkflow(check.read(publishPackagesWorkflow))
 	}
-	for _, relative := range []string{"docs/github-actions.md", ".github/publishing/trusted-publishers.md"} {
-		if !check.requirePaths(relative) {
-			continue
-		}
-		docs := check.read(relative)
-		check.require(strings.Contains(docs, "release tag's commit") && strings.Contains(docs, "historical tags") &&
-			strings.Contains(docs, "run_native_verifier release-versions"),
-			relative+": missing release workflow safety warning")
-		if relative == ".github/publishing/trusted-publishers.md" {
-			check.needles(docs, relative+": missing trusted publisher npm package ", check.catalog.npmNames()...)
-			for _, release := range check.catalog.PyPI {
-				check.require(strings.Contains(docs, release.Name),
-					relative+": missing trusted publisher PyPI package "+release.Name)
-			}
-		}
-	}
 }
 
 func (check *metadataCheck) reconcileWorkflow(text string) {

@@ -16,7 +16,7 @@ The public API is annotated with shaped-array PHPDoc, including `IssueAttributes
 
 ## Support Ticket Drafts
 
-Use `SupportTicketDraft` only when a user or agent explicitly wants a local payload draft for the planned support-ticket API. It validates the public create fields, normalizes W3C trace IDs, and redacts token-free diagnostics before handoff. It does not open a ticket, call backend support routes, send telemetry, or use account/session API credentials.
+Use `SupportTicketDraft` to build the body for a LogBrew support ticket. It validates the ticket fields, normalizes W3C trace IDs, and redacts diagnostics. It sends nothing. To open the ticket, send it to `POST /api/support/tickets` or run `logbrew support create`. See [Report a problem](https://docs.logbrew.co/guides/report-a-problem).
 
 ```php
 <?php
@@ -124,7 +124,7 @@ covers key kinds, empty results, and how to revoke the key.
 
 ## Typed Issue Diagnostics
 
-Use `IssueDiagnostics::fromThrowable(...)` when the application catches or reports a PHP failure and wants a useful issue rather than a title-only event. It builds first-class exception identity, mechanism and handled state, follows `getPrevious()` into a bounded parent-first exception chain, retains up to 32 newest-first frames with function/module identity, and keeps up to 64 application-supplied breadcrumbs in oldest-first order. Automatic node messages are redacted, missing per-node stacks are explicit, and cycles or the eight-node cap mark truncation. Symfony capture reuses the same projection. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
+Use `IssueDiagnostics::fromThrowable(...)` when the application catches or reports a PHP failure and wants a useful issue rather than a title-only event. It builds first-class exception identity, mechanism and handled state, follows `getPrevious()` into a bounded parent-first exception chain, retains up to 32 newest-first frames with function/module identity, and keeps up to 64 application-supplied breadcrumbs in oldest-first order. Automatic node messages are redacted, missing per-node stacks are explicit, and cycles or the eight-node cap mark truncation. Symfony capture reuses the same projection. See the shared [exception-chain contract](../../README.md#exception-chains).
 
 ```php
 <?php

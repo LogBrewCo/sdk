@@ -61,7 +61,7 @@ LogBrewTrace.use(LogBrewTrace.continueOrCreate(incomingTraceparent)).use {
 
 The timestamp provider runs before `chain.proceed(...)`. Its result remains the span start time when capture waits for body completion; elapsed duration uses a monotonic clock.
 
-The interceptor does not capture request or response bodies, arbitrary headers, full URLs, query strings, fragments, cookies, baggage, tracestate, visual replay, RUM resources, support tickets, backend usage/quota state, or symbolication data. Telemetry capture failures are reported to an optional `LogBrewOkHttpCaptureFailureHandler` and do not break the app-owned HTTP call.
+The interceptor does not capture request or response bodies, arbitrary headers, full URLs, query strings, fragments, cookies, baggage, tracestate, visual replay, or RUM resources. Telemetry capture failures are reported to an optional `LogBrewOkHttpCaptureFailureHandler` and do not break the app-owned HTTP call.
 
 When OkHttp returns a final response with a `priorResponse` chain, the interceptor adds bounded counts for `okhttp.priorResponseCount`, `okhttp.redirectCount`, and `okhttp.retryCount`. These help explain redirect/retry-heavy calls without recording prior response URLs, `Location` headers, arbitrary headers, bodies, query strings, fragments, trace headers, baggage, or tracestate.
 

@@ -14,9 +14,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Local-only support-ticket payload draft for planned backend support routes.
+ * Local support-ticket draft.
  *
- * <p>This helper validates the planned public support-ticket fields and redacts
+ * <p>This helper validates the support-ticket fields and redacts
  * diagnostics for explicit user or agent handoff. It does not send data, open a
  * ticket, call backend support-ticket routes, or use account/session API
  * credentials.</p>
@@ -175,14 +175,14 @@ public final class SupportTicketDraft {
     }
 
     /**
-     * Returns the planned source value.
+     * Returns the source value.
      */
     public String source() {
         return source;
     }
 
     /**
-     * Returns the planned category value.
+     * Returns the category value.
      */
     public String category() {
         return category;
@@ -266,7 +266,7 @@ public final class SupportTicketDraft {
     }
 
     /**
-     * Returns the planned backend create payload fields.
+     * Returns the support-ticket create body fields.
      */
     public Map<String, Object> toMap() {
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -290,7 +290,7 @@ public final class SupportTicketDraft {
     }
 
     /**
-     * Returns the planned backend create payload as JSON.
+     * Returns the support-ticket create body as JSON.
      */
     public String toJson() {
         return Json.write(toMap());
@@ -323,7 +323,7 @@ public final class SupportTicketDraft {
         }
 
         /**
-         * Creates input with the required planned support-ticket fields.
+         * Creates input with the required support-ticket fields.
          */
         public static Input create(String source, String category, String title, String description) {
             return new Input(source, category, title, description);

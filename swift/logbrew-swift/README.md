@@ -140,7 +140,7 @@ Context merge order is automatic, client, task-local, active trace, then event; 
 
 ## Issue Diagnostics and Breadcrumbs
 
-Use `IssueAttributes.fromError(...)` for a handled Swift error. It records the dynamic error type, a stable mechanism and handled state, and a safe call-site frame using `#fileID`, `#line`, `#column`, and `#function`. Bridged `NSError` underlying and aggregate errors become a bounded parent-first exception chain; automatic descriptions are marked redacted rather than copied, child stack absence is explicit, and cycles or the eight-node cap set the truncation receipt. It deliberately does not format the error, copy its description, capture raw stack text, read locals or arguments, or send an absolute source path. Pass an explicit `message` only when the application has approved that value for display. See the shared [exception-chain contract](../../docs/exception-chain-evidence.md).
+Use `IssueAttributes.fromError(...)` for a handled Swift error. It records the dynamic error type, a stable mechanism and handled state, and a safe call-site frame using `#fileID`, `#line`, `#column`, and `#function`. Bridged `NSError` underlying and aggregate errors become a bounded parent-first exception chain; automatic descriptions are marked redacted rather than copied, child stack absence is explicit, and cycles or the eight-node cap set the truncation receipt. It deliberately does not format the error, copy its description, capture raw stack text, read locals or arguments, or send an absolute source path. Pass an explicit `message` only when the application has approved that value for display. See the shared [exception-chain contract](../../README.md#exception-chains).
 
 ```swift
 enum CheckoutError: Error {
@@ -189,7 +189,7 @@ do {
 
 The client retains the newest 64 validated breadcrumbs, attaches a detached oldest-to-newest snapshot to each later issue, and sets `breadcrumbsTruncated` when older history was evicted. `clearBreadcrumbs()` affects only future issues. Breadcrumbs accept stable machine categories, an optional bounded message, and at most eight flat finite primitive data fields. Explicit issue frames are capped at 32 and keep only bounded filename, positive coordinates, optional function/module ownership, and an optional Debug ID. Absolute file prefixes and query or fragment data are removed before queue admission.
 
-`evidence` is explicit application knowledge, not an SDK diagnosis. LogBrew keeps the reported cause separate from observed frames and trace evidence, requires repository-relative fix paths, and preserves disjoint captured, missing, redacted, and truncated field states. Do not put authorization values, request bodies, user identities, raw input, full URLs, headers, absolute paths, or raw stack text in this object. See the shared [issue evidence contract](../../docs/issue-diagnostic-evidence.md).
+`evidence` is explicit application knowledge, not an SDK diagnosis. LogBrew keeps the reported cause separate from observed frames and trace evidence, requires repository-relative fix paths, and preserves disjoint captured, missing, redacted, and truncated field states. Do not put authorization values, request bodies, user identities, raw input, full URLs, headers, absolute paths, or raw stack text in this object. See the shared [issue evidence contract](../../README.md#diagnostic-evidence).
 
 ## Automatic Delivery (Opt-In)
 

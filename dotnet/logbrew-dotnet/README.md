@@ -132,7 +132,7 @@ are marked redacted rather than copied, per-node stack availability is explicit,
 and cycles or the eight-node cap set `truncated`. Manual
 `IssueExceptionChain` values are supported when the application owns richer
 normalized evidence. See the shared
-[exception-chain contract](../../docs/exception-chain-evidence.md).
+[exception-chain contract](../../README.md#exception-chains).
 
 ```csharp
 using System;
@@ -172,7 +172,7 @@ oldest-to-newest. Breadcrumb data accepts at most eight flat finite primitive
 fields. `WithBreadcrumbsTruncated(true)` records that older entries were
 evicted. Filenames, coordinates, exception/mechanism names, timestamps,
 breadcrumb fields, Debug IDs, and severity aliases are validated against the
-shared event contract. The packaged `examples/IssueDiagnostics.cs` file proves
+shared event contract. The packaged `examples/IssueDiagnostics.cs` file shows
 the same API from an installed package.
 
 ## Automatic Delivery
@@ -265,7 +265,7 @@ client.Metric(
                 .Build()));
 ```
 
-Use a `counter` for an amount that accumulates, such as completed jobs or failures; use a `gauge` for a point-in-time level, such as queue depth or active connections; and use a `histogram` sample for a distribution, such as request duration or payload size. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. An optional `WithDescription(...)` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Prefer stable route templates and low-cardinality dimensions—never raw user, session, trace, URL, or request IDs as metric tags. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
+Use a `counter` for an amount that accumulates, such as completed jobs or failures; use a `gauge` for a point-in-time level, such as queue depth or active connections; and use a `histogram` sample for a distribution, such as request duration or payload size. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. An optional `WithDescription(...)` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Prefer stable route templates and low-cardinality dimensions. Never use raw user, session, trace, URL, or request IDs as metric tags. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
 
 ## Product and Network Timelines
 
@@ -846,7 +846,7 @@ Span link summaries are capped at eight entries per span, store only trace ID/sp
 
 ## Support Ticket Diagnostics Drafts
 
-Use `SupportTicketDraft` when a developer or support agent needs a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, uses the planned backend create payload fields, and redacts token-like diagnostics before returning the draft.
+Use `SupportTicketDraft` to build the JSON body for a LogBrew support ticket. The helper validates the source and category, uses the ticket fields, and redacts token-like diagnostics before returning the draft.
 
 ```csharp
 using System;
@@ -879,7 +879,7 @@ var draft = SupportTicketDraft.Create(
 Console.WriteLine(draft.ToJson());
 ```
 
-This helper does not send data, open support tickets, call `POST /api/support/tickets`, use account/session API credentials, or infer backend usage/quota state. Support routes are backend-owned and should only be called by an explicit user or agent action after backend reports deployed support-ticket routes. Diagnostics are bounded to JSON-like values; auth values, cookies, tokens, local paths, URL origins, exception messages, exception stacks, hidden payloads, and unsupported objects are redacted or omitted.
+The helper sends nothing. To open the ticket, send it to `POST /api/support/tickets` or run `logbrew support create`. See [Report a problem](https://docs.logbrew.co/guides/report-a-problem). Diagnostics are bounded to JSON-like values; auth values, cookies, tokens, local paths, URL origins, exception messages, exception stacks, hidden payloads, and unsupported objects are redacted or omitted.
 
 ## HTTP Delivery
 
@@ -979,7 +979,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 
 - `PreviewJson()` returns the queued batch as pretty JSON.
 - `IssueAttributes.FromException(...)` creates typed mechanism/handled state and bounded basename-only frames without automatically copying exception messages or raw stack text.
-- The in-memory queue is capped at 1,000 events by default; tune it with `maxQueueSize`, observe local `queue_overflow` loss with `DroppedEvents()` or `onEventDropped`, and keep usage/quota/history backend-owned.
+- The in-memory queue is capped at 1,000 events by default; tune it with `maxQueueSize`, observe local `queue_overflow` loss with `DroppedEvents()` or `onEventDropped`.
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
 - `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.
@@ -990,7 +990,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `LogBrew.StackExchangeRedis` is an optional package for sync/async StackExchange.Redis command spans through app-owned `TraceLogBrewCommand(...)` calls, without capturing Redis keys, values, arguments, connection endpoints, exception messages, or stacks.
 - `LogBrew.OpenTelemetry` is an optional package for app-owned OpenTelemetry `TracerProviderBuilder.AddLogBrew(...)` span processing, without adding OpenTelemetry dependencies to the base `LogBrew` package.
 - `LogBrew.Hangfire` is an optional server filter that gives every performed Hangfire job one named `job.execute` root, correlates job-time `ILogger` records, and records escaped failures as typed unhandled issues without reading job arguments or exception messages.
-- `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
+- `SupportTicketDraft` builds a redacted support-ticket body and sends nothing.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.
 - `RecordingTransport.AlwaysAccept()` is useful when you want to inspect queued JSON before network delivery.

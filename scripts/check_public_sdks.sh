@@ -118,7 +118,6 @@ STEP_LABELS=(
   "Python package build checks"
   "Objective-C package checks"
   "Objective-C real-user smoke"
-  "Backend contract report checks"
   "Release metadata checks"
   "GitHub release safety checks"
   "Markdown link checks"
@@ -692,10 +691,6 @@ mark_step_complete
 
 begin_next_step "Objective-C real-user smoke"
 run_shell_step "bash scripts/real_user_objc_smoke.sh"
-mark_step_complete
-
-begin_next_step "Backend contract report checks"
-run_shell_step "source scripts/native_verifier.sh && run_native_verifier backend-reports \"\$PWD\""
 mark_step_complete
 
 begin_next_step "Release metadata checks"

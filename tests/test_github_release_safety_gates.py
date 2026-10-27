@@ -38,11 +38,6 @@ class GitHubReleaseSafetyGateTests(unittest.TestCase):
             docs_step.start(),
         )
 
-    def test_readiness_checklist_mentions_release_safety(self) -> None:
-        checklist = (ROOT / "docs" / "sdk-readiness-checklist.md").read_text(encoding="utf-8")
-
-        self.assertIn(f"GitHub release safety settings before publishing: `{COMMAND}`", checklist)
-
 
 if __name__ == "__main__":
     unittest.main()
