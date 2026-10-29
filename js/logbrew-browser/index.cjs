@@ -11,6 +11,7 @@ const {
 } = require("@logbrew/sdk");
 const { transportResponse } = require("./rate-limit-response.cjs");
 const { createBeaconTransport } = require("./beacon-transport.cjs");
+const { addBrowserAttributionContext, browserAttributionTags } = require("./attribution.cjs");
 const { addBrowserRuntimeContext } = require("./runtime-context.cjs");
 const {
   captureBrowserFetchSpan,
@@ -60,7 +61,7 @@ const {
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
-const DEFAULT_SDK_VERSION = "0.1.15";
+const DEFAULT_SDK_VERSION = "0.1.16";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -173,6 +174,9 @@ function installLogBrewBrowser(options = {}) {
 
   const client = options.client ?? createLogBrewBrowserClient({
     ...options,
+    context: options.captureAttribution === false
+      ? options.context
+      : addBrowserAttributionContext(options.context, browserAttributionTags(browserWindow)),
     browserNavigator: options.browserNavigator ?? browserWindow.navigator,
     [CLIENT_REPORT_STORE]: options.persistOffline
       ? createBrowserClientReportStore(sessionStorageOf(browserWindow), options.persistOffline.storageKey)

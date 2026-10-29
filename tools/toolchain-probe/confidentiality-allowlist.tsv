@@ -441,3 +441,6 @@ scripts/advisory-issue.sh	*	line	printf 'Authorization: Bearer %s\n' "$GH_TOKEN"
 
 # README, Python docstring, and docstring smoke read-back steps name the CLI token variable, never a value.
 {**/README.md,python/logbrew_py/src/logbrew_sdk/__init__.py,python/logbrew_django/src/logbrew_django/__init__.py,scripts/real_user_python_smoke.sh}	*	only	LOGBREW_TOKEN
+
+# Browser attribution reads the referring page URL's host name to tag where a visit came from.
+js/logbrew-browser/attribution.{js,cjs}	hostname	has	referrer.hostname

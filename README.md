@@ -338,6 +338,12 @@ query strings or hash fragments. Use route templates such as `/orders/:id`
 rather than concrete paths such as `/orders/8472`. The helpers write these
 fields after your metadata, so your metadata cannot change them.
 
+The browser SDK also tags each tab session with its first page's `utm_source`,
+`utm_medium`, and `utm_campaign` and the referring site's host name
+(`referrer_domain`), so analytics can compare acquisition sources. It reads no
+other part of the URL or the referrer; set `captureAttribution: false` to turn
+it off.
+
 Network milestones, app lifecycle events, logs, issues, and ordinary spans are
 not product interactions and carry no classification. Events without these
 fields stay valid. Never use email addresses, names, phone numbers, IP

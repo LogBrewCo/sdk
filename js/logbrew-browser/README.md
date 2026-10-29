@@ -41,11 +41,27 @@ Route changes in single-page apps are explicit. Use `installLogBrewBrowserNaviga
 
 For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
-By default, browser metadata keeps the current path without query string or hash. It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass a low-cardinality `metadata.routeTemplate` when a concrete path contains identifiers and should group under a stable analytics surface. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
+By default, browser metadata keeps the current path without query string or hash. The only query values the SDK reads are the three UTM campaign values described in [Campaign Attribution](#campaign-attribution). It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass a low-cardinality `metadata.routeTemplate` when a concrete path contains identifiers and should group under a stable analytics surface. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
 
 Set `flushOnOnline: false`, `flushOnPageHide: false`, or `flushOnVisibilityHidden: false` if your app wants to own lifecycle or connectivity delivery itself.
 
 Lifecycle delivery never uses `sendBeacon`, a custom transport, or a fetch transport configured with `keepalive: false`. Unsupported or oversized work remains in the existing queue; it is not silently dropped. After importing `createFetchTransport`, an app can deliver work that exceeds a deliberately lowered keepalive limit with `logbrew.client.flush(createFetchTransport({ keepalive: false }))`. Authentication, usage-limit, and nonretryable responses pause additional lifecycle sends until an explicit successful `flush()`. A short rate limit (a `429` with `Retry-After` or `code: "rate_limited"`) does not. The client key stays in the `Authorization` header and is never added to the endpoint, query string, request body, persistence metadata, or delivery health.
+
+## Campaign Attribution
+
+`installLogBrewBrowser()` records where a visit came from. On the first page of a browser tab session it reads `utm_source`, `utm_medium`, and `utm_campaign` from the page URL and the host name of the referring site, if that site is not your own. These values become the `utm_source`, `utm_medium`, `utm_campaign`, and `referrer_domain` tags on every event of that session, including page views, actions, and errors. Later pages in the same tab keep the first values.
+
+Nothing else from the URL or the referrer is read: no other query parameters, no referrer path, and no values longer than 100 characters. Tags you pass in `context.tags` win over these. Set `captureAttribution: false` to turn this off.
+
+Read the tags back as analytics properties, then compare sources:
+
+```bash
+logbrew analytics properties --project "<project_id>" --since 24h --json
+logbrew analytics compare --project "<project_id>" --since 24h \
+  --target-kind interaction --target-event signup_completed \
+  --segment newsletter=Newsletter --segment-property newsletter:tag.utm_source=newsletter \
+  --segment forum=Forum --segment-property forum:tag.referrer_domain=forum.example.org --json
+```
 
 ## Read Events Back
 
