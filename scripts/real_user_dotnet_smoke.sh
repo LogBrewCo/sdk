@@ -168,7 +168,7 @@ for needle in (
     "Microsoft.Extensions.Logging",
     "IncludeExceptionStackTrace",
     "SupportTicketDraft",
-    "This helper does not send data, open support tickets",
+    "The helper sends nothing.",
     "WithTraceparentHeaderSetter",
     "WithIncomingTraceparent",
     "WithLinkedMessageTraceparent",

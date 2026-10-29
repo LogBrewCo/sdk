@@ -21,7 +21,7 @@ readme_markers=(
   'Product And Network Timelines' 'captures `Net::HTTP` automatically' LogBrew::HttpTransport
   Net::HTTP LogBrew::Logger LogBrew::Trace.current 'HTTP Request Trace Correlation'
   LogBrew::RackMiddleware 'Rack And Rails Middleware' LogBrew::OperationTracing
-  'Support Ticket Draft Diagnostics' LogBrew::SupportTicketDraft.create 'support-ticket routes'
+  'Support Ticket Draft Diagnostics' LogBrew::SupportTicketDraft.create 'logbrew support create'
   'Typed Issue Diagnostics' LogBrew::IssueDiagnostics.from_exception 'Shared Telemetry Context'
   LogBrew::TelemetryContext LogBrew::Telemetry.with_context 'capture_runtime_context: false'
   'Dependency Operation Spans' exceptionEscaped LogBrew::RailsErrorSubscriber
