@@ -14,7 +14,7 @@ const {
 } = require("@logbrew/node");
 
 const DEFAULT_SDK_NAME = "logbrew-express";
-const DEFAULT_SDK_VERSION = "0.1.8";
+const DEFAULT_SDK_VERSION = "0.1.9";
 const requestLifecycles = new WeakMap();
 
 function createLogBrewExpressClient({
@@ -169,6 +169,9 @@ function logbrewErrorHandler(options = {}) {
     ? createNodeFetchTransport(options)
     : undefined;
   return function logBrewExpressErrorHandler(error, req, res, next) {
+    if (options.captureClientErrors !== true && isClientError(error)) {
+      return next(error);
+    }
     const existing = req.logbrew;
     const client = existing?.client ?? resolveClient(options, req, res);
     const transport = existing?.transport ?? resolveTransport(options, req, res, client, defaultTransport);
@@ -207,6 +210,13 @@ function logbrewErrorHandler(options = {}) {
       next(error);
     });
   };
+}
+
+// An error with a 4xx status, such as createError(404) for an unknown path, describes the request,
+// not an application failure. The request span keeps its status; it does not become an issue.
+function isClientError(error) {
+  const status = error?.status ?? error?.statusCode;
+  return Number.isInteger(status) && status >= 400 && status < 500;
 }
 
 function shutdownErrorClient(options, transport, context) {
