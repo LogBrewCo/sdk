@@ -8,7 +8,7 @@ Pod::Spec.new do |spec|
   spec.summary = package["description"]
   spec.homepage = "https://github.com/LogBrewCo/sdk"
   spec.license = package["license"]
-  spec.authors = { "LogBrew" => "opensource@logbrew.com" }
+  spec.authors = { "LogBrew" => "support@logbrew.co" }
   spec.platforms = { :ios => "13.0" }
   spec.source = {
     :git => "https://github.com/LogBrewCo/sdk.git",
