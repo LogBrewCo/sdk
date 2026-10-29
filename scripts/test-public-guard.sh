@@ -13,6 +13,8 @@ random_word() { printf 'zq%s' "$(od -An -N5 -tx1 /dev/urandom | tr -d ' \n')"; }
 term="$(random_word)"
 only_term="$(random_word)"
 except_term="$(random_word)"
+dir_term="$(random_word)"
+other_dir_term="$(random_word)"
 upper_term="$(printf '%s' "$term" | tr '[:lower:]' '[:upper:]')"
 split_term="${term:0:4}-${term:4:3}_${term:7}"
 # Build UTF-8 bytes from numbers: the scanner decodes escape sequences in files.
@@ -20,6 +22,8 @@ utf8() { printf '%b' "$(printf '\\0%03o' "$@")"; }
 zw_term="${term:0:5}$(utf8 226 128 139)${term:5}"
 terms="$(printf 'infrastructure\t%s\nstorage\t=exact.%s\ncost\tre:(?i)\\bfee-%s\\b\nprivate-repo\t%s\tonly:other-repo\ninternal-plan\t%s\texcept:sample\n' \
   "$term" "$term" "$term" "$only_term" "$except_term")"
+terms+="$(printf '\nproduct\t%s\texcept:other-repo,sample@bench.v2/\nproduct\t%s\texcept:other-repo@bench.v2/\n' \
+  "$dir_term" "$other_dir_term")"
 
 repo="$work/sample"
 git init -q --bare -b main "$work/sample.git"
@@ -88,6 +92,13 @@ expect_commit "exact project term" 1 "storage:" "" src/app.txt "see exact.$term 
 expect_commit "regex project term" 1 "cost:" "" src/app.txt "fee-$term"
 expect_commit "term scoped to another repository" 0 "clean" "" src/app.txt "$only_term"
 expect_commit "term excluded for this repository" 0 "clean" "" src/app.txt "$except_term"
+expect_commit "term excluded under a directory" 0 "clean" "" bench.v2/package.json "{\"$dir_term\": \"1.0.0\"}"
+expect_commit "directory exclusion stops at the directory" 1 "product: src/app.txt:1" "$dir_term" src/app.txt "$dir_term"
+expect_commit "directory exclusion is anchored at the root" 1 "product: src/bench.v2/a.txt:1" "" src/bench.v2/a.txt "$dir_term"
+expect_commit "directory exclusion escapes dots" 1 "product: benchxv2/a.txt:1" "" benchxv2/a.txt "$dir_term"
+expect_commit "directory exclusion skips commit messages" 1 "product: commit message" "$dir_term" bench.v2/a.txt "public" "fix: add $dir_term"
+expect_commit "directory exclusion skips file paths" 1 "product: changed file path #1" "" "bench.v2/$dir_term.txt" "public"
+expect_commit "directory exclusion for another repository" 1 "product: bench.v2/a.txt:1" "" bench.v2/a.txt "$other_dir_term"
 expect_commit "home directory path" 1 "local-path:" "$home_path" src/app.txt "path $home_path"
 expect_commit "agent session path" 1 "local-path:" "$agent_path" src/app.txt "path $agent_path"
 expect_commit "email address" 1 "personal-data:" "$email" src/app.txt "contact $email"
@@ -158,6 +169,8 @@ github_case "moved pull request head is left to the newer event" 0 "head moved" 
 terms="" expect "missing term list falls back to generic rules" 0 "generic rules only" "" text pr-body="$work/body"
 PUBLIC_GUARD_REQUIRE_TERMS=1 terms="" expect "required term list missing fails closed" 2 "required but unavailable" "" text pr-body="$work/body"
 terms="$(printf 'Bad Category\t%s\n' "$term")" expect "malformed term list fails closed" 2 "malformed line" "" text pr-body="$work/body"
+terms="$(printf 'product\t%s\texcept:sample@bench\n' "$term")" expect "directory scope without a slash fails closed" 2 "malformed scope" "" text pr-body="$work/body"
+terms="$(printf 'product\t%s\texcept:sample@../x/\n' "$term")" expect "directory scope outside the repository fails closed" 2 "malformed scope" "" text pr-body="$work/body"
 
 if ((failures > 0)); then
   printf '%d public guard check(s) failed\n' "$failures"
