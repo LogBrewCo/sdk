@@ -207,10 +207,8 @@ add_text() {
 
 # Tracked Markdown is limited to user documentation: READMEs, licenses,
 # changelogs, security and contributing guides, and published skill files.
-# The mcp operation reference stays while the hosted catalog links to it.
 check_markdown() {
   local paths allowed='(^|/)(README|LICENSE|CHANGELOG|SECURITY|CONTRIBUTING)\.md$|^plugins/[^/]+/skills/[^/]+/(SKILL\.md|references/[^/]+\.md)$'
-  [[ "$(repository_name)" == mcp ]] && allowed+='|^docs/operations\.md$'
   if [[ -n "${1:-}" ]]; then
     paths="$(git ls-tree -r --name-only "$1")" || fail "cannot list the tree"
   else

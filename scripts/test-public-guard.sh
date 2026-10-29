@@ -116,7 +116,6 @@ expect_commit "Markdown with another extension" 1 "markdown: notes.markdown" "" 
 expect_commit "package README stays allowed" 0 "clean" "" pkg/README.md "public"
 expect_commit "changelog stays allowed" 0 "clean" "" CHANGELOG.md "public"
 expect_commit "published skill file stays allowed" 0 "clean" "" plugins/app/skills/use/references/cli.md "public"
-expect_commit "repository-scoped reference is not allowed elsewhere" 1 "markdown: docs/operations.md" "" docs/operations.md "public"
 git -C "$repo" checkout -q -B "case" "$base"
 printf 'public\n' >"$repo/notes.md"
 git -C "$repo" add notes.md
