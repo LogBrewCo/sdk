@@ -36,6 +36,10 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 
 @property(nonatomic) NSInteger statusCode;
 @property(nonatomic) NSUInteger attempts;
+/// Readable `Retry-After` delay in seconds from a `429` response, or nil.
+@property(nonatomic, copy, nullable) NSNumber *retryAfter;
+/// String `code` field from a `429` JSON response body, or nil.
+@property(nonatomic, copy, nullable) NSString *errorCode;
 
 - (instancetype)initWithStatusCode:(NSInteger)statusCode attempts:(NSUInteger)attempts NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
@@ -134,6 +138,8 @@ typedef NS_ENUM(NSInteger, LBWDeliveryPauseReason) {
 @property(nonatomic, readonly) NSUInteger consecutiveFailures;
 @property(nonatomic, readonly) LBWDeliveryOutcome lastOutcome;
 @property(nonatomic, readonly) LBWDeliveryPauseReason pauseReason;
+/// Seconds until the scheduled automatic retry, or 0 when no retry is scheduled.
+@property(nonatomic, readonly) NSTimeInterval nextRetryDelay;
 
 - (NSDictionary<NSString *, id> *)dictionaryValue;
 - (instancetype)init NS_UNAVAILABLE;

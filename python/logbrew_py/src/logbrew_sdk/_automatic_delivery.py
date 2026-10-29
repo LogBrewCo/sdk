@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import atexit
+import email.utils
+import json
 import math
 import os
 import random
@@ -11,6 +13,7 @@ import time
 import weakref
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
 from logbrew_sdk._errors import SdkError
@@ -29,6 +32,11 @@ DeliveryPauseReason = Literal[
 
 MAX_HEALTH_COUNTER = (1 << 63) - 1
 MAX_RETRY_AFTER_MS = 300_000
+# A rate-limited send waits from 1 second to 1 hour before the same batch is sent again.
+MIN_RATE_LIMIT_WAIT_MS = 1_000
+MAX_RATE_LIMIT_WAIT_MS = 3_600_000
+RATE_LIMIT_BODY_LIMIT_BYTES = 4096
+RATE_LIMIT_CODES = frozenset({"rate_limited", "usage_limit_exceeded"})
 MAX_RETRY_DELAY_SECONDS = 300.0
 BASE_RETRY_DELAY_SECONDS = 1.0
 MIN_DELIVERY_INTERVAL_SECONDS = 0.01
@@ -102,6 +110,7 @@ class DeliverySendError(SdkError):
     retryable: bool
     retry_after_ms: int | None
     pause_reason: DeliveryPauseReason
+    rate_limited: bool
 
     def __init__(
         self,
@@ -111,10 +120,14 @@ class DeliverySendError(SdkError):
         retryable: bool,
         retry_after_ms: int | None = None,
         pause_reason: DeliveryPauseReason = "nonretryable",
+        rate_limited: bool = False,
     ) -> None:
         super().__init__(code=code, message=message)
         self.retryable = retryable
-        self.retry_after_ms = _bounded_retry_after_ms(retry_after_ms)
+        self.rate_limited = rate_limited
+        self.retry_after_ms = (
+            _bounded_rate_limit_ms(retry_after_ms) if rate_limited else _bounded_retry_after_ms(retry_after_ms)
+        )
         self.pause_reason = pause_reason
 
 
@@ -299,7 +312,7 @@ class AutomaticDeliveryController:
             now = time.monotonic()
             retry_delay_ms = 0
             if self._retry_due_at is not None:
-                retry_delay_ms = min(MAX_RETRY_AFTER_MS, max(0, math.ceil((self._retry_due_at - now) * 1000)))
+                retry_delay_ms = min(MAX_RATE_LIMIT_WAIT_MS, max(0, math.ceil((self._retry_due_at - now) * 1000)))
             return DeliveryHealthSnapshot(
                 lifecycle=self._lifecycle_locked(),
                 automatic_delivery=self._enabled,
@@ -408,7 +421,10 @@ class AutomaticDeliveryController:
     def _apply_failure_locked(self, error: BaseException, now: float) -> None:
         self._consecutive_failures = _saturating_add(self._consecutive_failures, 1)
         if isinstance(error, DeliverySendError) and error.retryable:
-            delay = _retry_delay_seconds(self._consecutive_failures, error.retry_after_ms)
+            if error.rate_limited:
+                delay = _rate_limit_delay_seconds(self._consecutive_failures, error.retry_after_ms)
+            else:
+                delay = _retry_delay_seconds(self._consecutive_failures, error.retry_after_ms)
             self._retry_due_at = now + delay
             self._due_at = self._retry_due_at
             self._last_outcome = "retry_scheduled"
@@ -509,6 +525,17 @@ def send_with_retry_policy(
                 pause_reason="authentication",
             )
         if response.status_code == 429:
+            error_code = getattr(response, "error_code", None)
+            if error_code != "usage_limit_exceeded" and (
+                response.retry_after_ms is not None or error_code == "rate_limited"
+            ):
+                raise DeliverySendError(
+                    "rate_limited",
+                    "transport rate limited delivery",
+                    retryable=True,
+                    retry_after_ms=response.retry_after_ms,
+                    rate_limited=True,
+                )
             raise DeliverySendError(
                 "rate_limited",
                 "transport rejected delivery because quota is unavailable",
@@ -551,6 +578,67 @@ def parse_retry_after_ms(headers: Any) -> int | None:
         return None
     value = int(raw_value)
     return value if value <= MAX_RETRY_AFTER_MS else None
+
+
+def parse_rate_limit_retry_after_ms(headers: Any, now: datetime | None = None) -> int | None:
+    """Read one ``Retry-After`` value as delta-seconds or an HTTP date, capped at one hour."""
+    raw_value = _single_retry_after(headers)
+    if raw_value is None:
+        return None
+    if raw_value.isascii() and raw_value.isdigit():
+        return MAX_RATE_LIMIT_WAIT_MS if len(raw_value) > 16 else min(MAX_RATE_LIMIT_WAIT_MS, int(raw_value) * 1000)
+    try:
+        date = email.utils.parsedate_to_datetime(raw_value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if date.tzinfo is None:
+        return None
+    delay_ms = math.ceil((date - (now or datetime.now(timezone.utc))).total_seconds() * 1000)
+    return min(MAX_RATE_LIMIT_WAIT_MS, max(0, delay_ms))
+
+
+def _single_retry_after(headers: Any) -> str | None:
+    get_all = getattr(headers, "get_all", None)
+    try:
+        if callable(get_all):
+            values = get_all("retry-after") or []
+        elif isinstance(headers, Mapping):
+            values = [item for name, item in headers.items() if str(name).lower() == "retry-after"]
+        else:
+            return None
+    except Exception:
+        return None
+    if len(values) != 1 or not isinstance(values[0], str):
+        return None
+    return values[0].strip()
+
+
+def read_rate_limit_code(body: Any) -> str | None:
+    """Read at most 4 KiB of a 429 body only to find a known ``code`` value."""
+    read = getattr(body, "read", None)
+    if not callable(read):
+        return None
+    try:
+        data = read(RATE_LIMIT_BODY_LIMIT_BYTES + 1)
+        if not isinstance(data, bytes) or len(data) > RATE_LIMIT_BODY_LIMIT_BYTES:
+            return None
+        parsed = json.loads(data)
+    except Exception:
+        return None
+    code = parsed.get("code") if isinstance(parsed, dict) else None
+    return code if code in RATE_LIMIT_CODES else None
+
+
+def _rate_limit_delay_seconds(consecutive_failures: int, retry_after_ms: int | None) -> float:
+    base_ms = _retry_delay_seconds(consecutive_failures, None) * 1000 if retry_after_ms is None else retry_after_ms
+    base_ms = min(MAX_RATE_LIMIT_WAIT_MS, max(MIN_RATE_LIMIT_WAIT_MS, base_ms))
+    return min(MAX_RATE_LIMIT_WAIT_MS, base_ms + random.uniform(0, base_ms / 10)) / 1000
+
+
+def _bounded_rate_limit_ms(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return min(value, MAX_RATE_LIMIT_WAIT_MS)
 
 
 def _retry_delay_seconds(consecutive_failures: int, retry_after_ms: int | None) -> float:

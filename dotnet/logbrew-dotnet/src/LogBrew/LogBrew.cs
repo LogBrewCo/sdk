@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace LogBrew
@@ -49,6 +51,15 @@ namespace LogBrew
         }
 
         public TransportResponse(int statusCode, int attempts, TimeSpan? retryAfter)
+            : this(statusCode, attempts, retryAfter, null)
+        {
+        }
+
+        /// <summary>
+        /// Creates a response that also carries the <c>code</c> string from a <c>429</c> response's JSON body,
+        /// so custom transports can request a timed wait. Either value may be null.
+        /// </summary>
+        public TransportResponse(int statusCode, int attempts, TimeSpan? retryAfter, string? code)
         {
             if (attempts < 0)
             {
@@ -63,6 +74,7 @@ namespace LogBrew
             StatusCode = statusCode;
             Attempts = attempts;
             RetryAfter = retryAfter;
+            Code = code;
         }
 
         public int StatusCode { get; }
@@ -70,6 +82,8 @@ namespace LogBrew
         public int Attempts { get; }
 
         public TimeSpan? RetryAfter { get; }
+
+        public string? Code { get; }
     }
 
     public interface ITransport
@@ -114,6 +128,11 @@ namespace LogBrew
         public static readonly Uri DefaultEndpoint = new Uri("https://api.logbrew.co/v1/events", UriKind.Absolute);
 
         public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
+        private const int MaxErrorBodyBytes = 4096;
+        private static readonly Regex RateLimitCode = new Regex(
+            "\"code\"\\s*:\\s*\"(rate_limited|usage_limit_exceeded)\"",
+            RegexOptions.CultureInvariant,
+            TimeSpan.FromSeconds(1));
 
         private static readonly HttpClient SharedHttpClient = new HttpClient
         {
@@ -178,17 +197,19 @@ namespace LogBrew
 
             try
             {
-                var responseTask = HttpClient.SendAsync(request);
+                var responseTask = HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
                 if (!responseTask.Wait(Timeout))
                 {
                     throw TransportException.Network("http transport failed: request timed out");
                 }
 
                 using var response = responseTask.GetAwaiter().GetResult();
+                var statusCode = (int)response.StatusCode;
                 return new TransportResponse(
-                    (int)response.StatusCode,
+                    statusCode,
                     1,
-                    ParseRetryAfter(response, DateTimeOffset.UtcNow));
+                    ParseRetryAfter(response, DateTimeOffset.UtcNow),
+                    statusCode == 429 ? ReadErrorCode(response) : null);
             }
             catch (AggregateException error) when (error.InnerException is HttpRequestException || error.InnerException is TaskCanceledException)
             {
@@ -349,7 +370,42 @@ namespace LogBrew
             }
 
             var delay = retryAt - now;
-            return delay > TimeSpan.Zero ? delay : null;
+            return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
+        }
+
+        // Reads at most 4 KiB of a 429 body only to find its JSON code; the body is never kept.
+        private string? ReadErrorCode(HttpResponseMessage response)
+        {
+            try
+            {
+                using var stream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
+                var buffer = new byte[MaxErrorBodyBytes + 1];
+                var length = 0;
+                while (length < buffer.Length)
+                {
+                    var read = stream.ReadAsync(buffer, length, buffer.Length - length);
+                    if (!read.Wait(Timeout))
+                    {
+                        return null;
+                    }
+
+                    if (read.Result == 0)
+                    {
+                        break;
+                    }
+
+                    length += read.Result;
+                }
+
+                var match = length > MaxErrorBodyBytes
+                    ? Match.Empty
+                    : RateLimitCode.Match(Encoding.UTF8.GetString(buffer, 0, length));
+                return match.Success ? match.Groups[1].Value : null;
+            }
+            catch (Exception error) when (error is IOException || error is HttpRequestException || error is AggregateException || error is ObjectDisposedException)
+            {
+                return null;
+            }
         }
     }
 
@@ -402,7 +458,7 @@ namespace LogBrew
 
             if (next is TransportResponse response)
             {
-                return new TransportResponse(response.StatusCode, 1, response.RetryAfter);
+                return new TransportResponse(response.StatusCode, 1, response.RetryAfter, response.Code);
             }
 
             if (next is int statusCode)

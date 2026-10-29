@@ -47,6 +47,7 @@ const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 const MAX_SPAN_EVENTS = 8;
 // Matches the process error capture default: one intake round trip, then Node exits.
 const EXIT_FLUSH_TIMEOUT_MS = 2000;
+const RATE_LIMIT_BODY_LIMIT_BYTES = 4096;
 const exitFlushes = new Set();
 const exitFlushRegistry = new FinalizationRegistry((entry) => {
   exitFlushes.delete(entry);
@@ -263,9 +264,13 @@ function createNodeFetchTransport({
           method: "POST"
         });
         const retryAfterMs = retryAfterMsFromHeaders(response.headers);
-        return retryAfterMs === undefined
-          ? { statusCode: response.status, attempts: 1 }
-          : { statusCode: response.status, attempts: 1, retryAfterMs };
+        const errorCode = response.status === 429 ? await rateLimitCode(response) : undefined;
+        return {
+          statusCode: response.status,
+          attempts: 1,
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          ...(errorCode === undefined ? {} : { errorCode })
+        };
       } catch (error) {
         throw TransportError.network(`fetch failed: ${errorMessage(error)}`);
       }
@@ -2224,8 +2229,39 @@ function retryAfterMsFromHeaders(headers) {
     const milliseconds = Number(trimmed) * 1000;
     return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
   }
-  const timestamp = Date.parse(trimmed);
+  // Only an HTTP date counts; a repeated header arrives comma-joined and is ignored.
+  const timestamp = /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/u.test(trimmed)
+    ? Date.parse(trimmed)
+    : Number.NaN;
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
+}
+
+// Reads at most 4 KiB of a 429 body, only to find a known `code`.
+async function rateLimitCode(response) {
+  try {
+    const reader = response.body?.getReader?.();
+    if (!reader) {
+      return undefined;
+    }
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      size += value.byteLength;
+      if (size > RATE_LIMIT_BODY_LIMIT_BYTES) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(value);
+    }
+    const code = JSON.parse(Buffer.concat(chunks).toString("utf8"))?.code;
+    return code === "rate_limited" || code === "usage_limit_exceeded" ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readEnvApiKey() {

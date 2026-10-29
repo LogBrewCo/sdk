@@ -40,10 +40,16 @@ public struct TransportError: Error, Equatable, Sendable, CustomStringConvertibl
 public struct TransportResponse: Codable, Equatable, Sendable {
     public let statusCode: Int
     public let attempts: Int
+    /// Readable `Retry-After` delay in seconds from a `429` response.
+    public let retryAfter: TimeInterval?
+    /// String `code` field from a `429` JSON response body.
+    public let errorCode: String?
 
-    public init(statusCode: Int, attempts: Int) {
+    public init(statusCode: Int, attempts: Int, retryAfter: TimeInterval? = nil, errorCode: String? = nil) {
         self.statusCode = statusCode
         self.attempts = attempts
+        self.retryAfter = retryAfter
+        self.errorCode = errorCode
     }
 }
 
@@ -93,13 +99,38 @@ public final class HTTPTransport: Transport {
             return try TransportResponse(statusCode: requester(request), attempts: 1)
         }
 
-        return try TransportResponse(statusCode: sendWithURLSession(request), attempts: 1)
+        return try sendWithURLSession(request)
     }
 
-    private func sendWithURLSession(_ request: URLRequest) throws -> Int {
+    /// Reads only `Retry-After` and at most 4 KiB of body for its `code` field, and only for a `429`.
+    static func transportResponse(_ response: HTTPURLResponse, body: Data?, now: Date = Date()) -> TransportResponse {
+        guard response.statusCode == 429 else {
+            return TransportResponse(statusCode: response.statusCode, attempts: 1)
+        }
+        let code = body.flatMap { body in
+            body.count <= 4096 ? try? JSONDecoder().decode(RateLimitBody.self, from: body).code : nil
+        }
+        let retryAfter = response.value(forHTTPHeaderField: "Retry-After").flatMap { retryAfterSeconds($0, now: now) }
+        return TransportResponse(statusCode: 429, attempts: 1, retryAfter: retryAfter, errorCode: code)
+    }
+
+    /// Parses delta-seconds or an IMF-fixdate; a past date waits 0 seconds and anything else is unreadable.
+    static func retryAfterSeconds(_ value: String, now: Date) -> TimeInterval? {
+        let value = value.trimmingCharacters(in: .whitespaces)
+        if !value.isEmpty, value.allSatisfy({ $0.isASCII && $0.isNumber }) {
+            return TimeInterval(value)
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        return formatter.date(from: value).map { max(0, $0.timeIntervalSince(now)) }
+    }
+
+    private func sendWithURLSession(_ request: URLRequest) throws -> TransportResponse {
         let semaphore = DispatchSemaphore(value: 0)
         let result = HTTPTransportResultBox()
-        let task = session.dataTask(with: request) { _, response, error in
+        let task = session.dataTask(with: request) { data, response, error in
             defer {
                 semaphore.signal()
             }
@@ -111,7 +142,7 @@ public final class HTTPTransport: Transport {
                 result.value = .failure(TransportError.network("http transport did not return an HTTP response"))
                 return
             }
-            result.value = .success(httpResponse.statusCode)
+            result.value = .success(Self.transportResponse(httpResponse, body: data))
         }
         task.resume()
 
@@ -155,7 +186,11 @@ public final class HTTPTransport: Transport {
 }
 
 private final class HTTPTransportResultBox: @unchecked Sendable {
-    var value: Result<Int, Error>?
+    var value: Result<TransportResponse, Error>?
+}
+
+private struct RateLimitBody: Decodable {
+    let code: String?
 }
 
 public enum ScriptedTransportResponse: Equatable, Sendable {

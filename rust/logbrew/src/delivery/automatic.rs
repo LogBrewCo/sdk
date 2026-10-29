@@ -352,19 +352,29 @@ impl AutomaticDelivery {
             Err(error) => {
                 state.consecutive_failures = state.consecutive_failures.saturating_add(1);
                 state.first_pending_at = (pending_events > 0).then(Instant::now);
-                let pause_reason = pause_reason(error, client.last_code());
+                let rate_limit_wait = client.rate_limit_wait();
+                let pause_reason = match rate_limit_wait {
+                    Some(_) => DeliveryPauseReason::None,
+                    None => pause_reason(error, client.last_code()),
+                };
                 if pause_reason != DeliveryPauseReason::None {
                     state.pause_reason = pause_reason;
                     state.retry_at = None;
                     state.next_retry_delay = Duration::ZERO;
                     client.record_automatic_outcome(DeliveryOutcome::Paused);
                 } else {
-                    let delay = retry_delay(
+                    let backoff = retry_delay(
                         self.config.retry_base_delay,
                         self.config.retry_max_delay,
                         state.consecutive_failures,
                         jitter_seed(),
                     );
+                    let delay = match rate_limit_wait {
+                        Some(retry_after) => {
+                            rate_limit_delay(retry_after.unwrap_or(backoff), jitter_seed())
+                        }
+                        None => backoff,
+                    };
                     match Instant::now().checked_add(delay) {
                         Some(deadline) => {
                             state.next_retry_delay = delay;
@@ -469,6 +479,14 @@ fn retry_delay(base: Duration, maximum: Duration, failures: u32, jitter: u64) ->
     half.saturating_add(Duration::from_nanos(jitter_nanos))
 }
 
+/// Bound a rate-limit wait to 1 second..1 hour, then add up to 10 percent jitter within 1 hour.
+fn rate_limit_delay(delay: Duration, jitter: u64) -> Duration {
+    const MAX_RATE_LIMIT_DELAY: Duration = Duration::from_secs(3_600);
+    let delay = delay.clamp(Duration::from_secs(1), MAX_RATE_LIMIT_DELAY);
+    let jitter = (delay / 10).mul_f64((jitter % 1_001) as f64 / 1_000.0);
+    delay.saturating_add(jitter).min(MAX_RATE_LIMIT_DELAY)
+}
+
 fn jitter_seed() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -477,7 +495,9 @@ fn jitter_seed() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{AutomaticDelivery, AutomaticDeliveryConfig, pause_reason, retry_delay};
+    use super::{
+        AutomaticDelivery, AutomaticDeliveryConfig, pause_reason, rate_limit_delay, retry_delay,
+    };
     use crate::{
         DeliveryCodeCategory, DeliveryOutcome, DeliveryPauseReason, LogBrewClient, SdkError,
         Transport, TransportError, TransportResponse,
@@ -588,6 +608,23 @@ mod tests {
             assert!(delay >= ceiling / 2);
             assert!(delay <= ceiling);
         }
+    }
+
+    #[test]
+    fn rate_limit_delay_is_clamped_with_bounded_jitter() {
+        let second = Duration::from_secs(1);
+        let hour = Duration::from_secs(3_600);
+        assert_eq!(rate_limit_delay(Duration::ZERO, 0), second);
+        assert_eq!(
+            rate_limit_delay(Duration::ZERO, 1_000),
+            second + second / 10
+        );
+        assert_eq!(
+            rate_limit_delay(Duration::from_secs(120), 500),
+            Duration::from_secs(126)
+        );
+        assert_eq!(rate_limit_delay(hour - second, 1_000), hour);
+        assert_eq!(rate_limit_delay(Duration::MAX, 1_000), hour);
     }
 
     #[test]

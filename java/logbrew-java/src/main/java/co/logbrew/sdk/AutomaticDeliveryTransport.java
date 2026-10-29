@@ -5,6 +5,7 @@ final class AutomaticDeliveryTransport implements Transport {
     enum FailureKind {
         NONE,
         RETRYABLE,
+        RATE_LIMITED,
         AUTHENTICATION,
         QUOTA,
         NON_RETRYABLE
@@ -25,7 +26,8 @@ final class AutomaticDeliveryTransport implements Transport {
         try {
             TransportResponse response = delegate.send(apiKey, body);
             failureKind = classify(response);
-            retryAfterDirective = failureKind == FailureKind.RETRYABLE && response != null
+            boolean timed = failureKind == FailureKind.RETRYABLE || failureKind == FailureKind.RATE_LIMITED;
+            retryAfterDirective = timed && response != null
                 ? response.retryAfterDirective()
                 : RetryAfterDirective.none();
             return response;
@@ -60,7 +62,11 @@ final class AutomaticDeliveryTransport implements Transport {
             return FailureKind.AUTHENTICATION;
         }
         if (status == 429) {
-            return FailureKind.QUOTA;
+            String code = response.rateLimitCode();
+            boolean timed = !"usage_limit_exceeded".equals(code)
+                && ("rate_limited".equals(code)
+                    || response.retryAfterDirective().outcome() == RetryAfterDirective.Outcome.ACCEPTED);
+            return timed ? FailureKind.RATE_LIMITED : FailureKind.QUOTA;
         }
         if (status == 408 || status >= 500) {
             return FailureKind.RETRYABLE;

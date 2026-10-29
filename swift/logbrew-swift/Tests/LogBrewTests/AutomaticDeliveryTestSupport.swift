@@ -4,13 +4,18 @@ import Testing
 
 final class ThreadSafeScriptedTransport: Transport, @unchecked Sendable {
     private let condition = NSCondition()
-    private var statuses: [Int]
+    private var responses: [TransportResponse]
     private var bodies: [String] = []
     private let onRequest: ((Int) -> Void)?
 
     init(statuses: [Int], onRequest: ((Int) -> Void)? = nil) {
-        self.statuses = statuses
+        responses = statuses.map { TransportResponse(statusCode: $0, attempts: 1) }
         self.onRequest = onRequest
+    }
+
+    init(responses: [TransportResponse]) {
+        self.responses = responses
+        onRequest = nil
     }
 
     var requestBodies: [String] {
@@ -24,11 +29,11 @@ final class ThreadSafeScriptedTransport: Transport, @unchecked Sendable {
         condition.lock()
         let index = bodies.count
         bodies.append(bodyText)
-        let status = statuses.isEmpty ? 202 : statuses.removeFirst()
+        let response = responses.isEmpty ? TransportResponse(statusCode: 202, attempts: 1) : responses.removeFirst()
         condition.broadcast()
         condition.unlock()
         onRequest?(index)
-        return TransportResponse(statusCode: status, attempts: 1)
+        return response
     }
 
     func waitForRequestCount(_ count: Int, timeout: TimeInterval) -> Bool {

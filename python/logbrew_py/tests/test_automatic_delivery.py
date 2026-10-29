@@ -8,6 +8,9 @@ import threading
 import time
 import unittest
 from dataclasses import FrozenInstanceError, asdict
+from datetime import datetime, timedelta, timezone
+from email.message import Message
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -20,7 +23,7 @@ from logbrew_sdk import (
     TransportError,
     TransportResponse,
 )
-from logbrew_sdk._automatic_delivery import MAX_HEALTH_COUNTER, _saturating_add
+from logbrew_sdk._automatic_delivery import MAX_HEALTH_COUNTER, _rate_limit_delay_seconds, _saturating_add
 
 HAS_PERSISTENCE_CRYPTO = importlib.util.find_spec("cryptography") is not None
 
@@ -130,6 +133,19 @@ class HeaderResponse:
     def __init__(self, status: int, retry_after_ms: str | None) -> None:
         self.status = status
         self.headers = {} if retry_after_ms is None else {"retry-after-ms": retry_after_ms}
+
+    def close(self) -> None:
+        return
+
+
+class RateLimitResponse:
+    def __init__(self, headers: Any, body: bytes) -> None:
+        self.status = 429
+        self.headers = headers
+        self._body = body
+
+    def read(self, size: int = -1) -> bytes:
+        return self._body if size < 0 else self._body[:size]
 
     def close(self) -> None:
         return
@@ -289,6 +305,70 @@ class AutomaticDeliveryPublicContractTests(unittest.TestCase):
                 self.assertEqual(client.delivery_health().pause_reason, "none")
                 self.assertEqual(client.delivery_health().consecutive_failures, 0)
                 client.shutdown()
+
+    def test_rate_limited_responses_wait_then_resume_without_an_application_call(self) -> None:
+        for response in (
+            TransportResponse(429, 1, retry_after_ms=0),
+            TransportResponse(429, 1, error_code="rate_limited"),
+        ):
+            with self.subTest(response=response):
+                transport = ScriptedTransport(response, 202)
+                client = create_client(
+                    transport,
+                    max_retries=3,
+                    delivery_interval_seconds=60,
+                    delivery_queue_threshold=1,
+                )
+                capture_log(client, "evt_limited")
+                wait_until(lambda current=client: current.delivery_health().last_outcome == "retry_scheduled")
+                health = client.delivery_health()
+                self.assertEqual(health.lifecycle, "scheduled")
+                self.assertEqual(health.pause_reason, "none")
+                self.assertGreater(health.retry_delay_ms, 900)
+                self.assertLessEqual(health.retry_delay_ms, 1100)
+                self.assertEqual(len(transport.sent_bodies), 1)
+
+                wait_until(lambda current=transport: len(current.sent_bodies) == 2, timeout=3)
+                self.assertEqual(transport.sent_bodies[0], transport.sent_bodies[1])
+                wait_until(lambda current=client: current.pending_events() == 0)
+                self.assertEqual(client.delivery_health().last_outcome, "accepted")
+                client.shutdown()
+
+    def test_usage_limit_exceeded_keeps_the_pause_even_with_retry_after(self) -> None:
+        transport = ScriptedTransport(TransportResponse(429, 1, retry_after_ms=1000, error_code="usage_limit_exceeded"))
+        client = create_client(transport, delivery_interval_seconds=60, delivery_queue_threshold=1)
+        capture_log(client, "evt_usage")
+        wait_until(lambda: client.delivery_health().lifecycle == "paused")
+        self.assertEqual(client.delivery_health().pause_reason, "quota")
+        self.assertEqual(client.delivery_health().retry_delay_ms, 0)
+        client.shutdown()
+
+    def test_manual_flush_raises_retryable_rate_limited_error(self) -> None:
+        client = create_client(automatic_delivery=False)
+        capture_log(client, "evt_manual")
+        transport = ScriptedTransport(TransportResponse(429, 1, retry_after_ms=2000))
+        with self.assertRaises(SdkError) as raised:
+            client.flush(transport)
+        self.assertEqual(raised.exception.code, "rate_limited")
+        self.assertTrue(getattr(raised.exception, "retryable", False))
+        self.assertEqual(client.pending_events(), 1)
+
+    def test_rate_limit_wait_is_bounded_with_jitter(self) -> None:
+        for retry_after_ms, jitter_share, expected in (
+            (0, 0.0, 1.0),
+            (0, 1.0, 1.1),
+            (20_000, 1.0, 22.0),
+            (3_600_000, 1.0, 3600.0),
+            (None, 0.0, 1.0),
+        ):
+            with (
+                self.subTest(retry_after_ms=retry_after_ms, jitter_share=jitter_share),
+                patch(
+                    "logbrew_sdk._automatic_delivery.random.uniform",
+                    side_effect=lambda low, high, share=jitter_share: low + (high - low) * share,
+                ),
+            ):
+                self.assertAlmostEqual(_rate_limit_delay_seconds(1, retry_after_ms), expected)
 
     def test_retryable_failure_reports_bounded_delay_without_failure_text(self) -> None:
         private_text = "private upstream response text"
@@ -505,6 +585,35 @@ class AutomaticDeliveryTransportContractTests(unittest.TestCase):
                     open_url=lambda *_args, current=raw, **_kwargs: HeaderResponse(503, current),
                 ).send("lb_test_key", "{}")
                 self.assertEqual(response.retry_after_ms, expected)
+
+    def test_http_transport_reads_retry_after_and_bounded_code_from_429(self) -> None:
+        duplicate = Message()
+        duplicate["Retry-After"] = "5"
+        duplicate["Retry-After"] = "6"
+        future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=120), usegmt=True)
+        for headers, body, expected_delay, expected_code in (
+            ({"Retry-After": "30"}, b'{"code":"rate_limited"}', 30_000, "rate_limited"),
+            ({"Retry-After": "86400"}, b"", 3_600_000, None),
+            ({"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}, b"", 0, None),
+            ({"retry-after": "soon"}, b'{"code":"usage_limit_exceeded"}', None, "usage_limit_exceeded"),
+            (duplicate, b'{"code":"other"}', None, None),
+            ({}, b'{"code":"rate_limited","pad":"' + b"x" * 4096 + b'"}', None, None),
+            ({}, b"not json", None, None),
+        ):
+            with self.subTest(headers=dict(headers), body=body[:40]):
+                response = HttpTransport(
+                    open_url=lambda *_args, current=headers, raw=body, **_kwargs: RateLimitResponse(current, raw),
+                ).send("lb_test_key", "{}")
+                self.assertEqual(response.status_code, 429)
+                self.assertEqual(response.retry_after_ms, expected_delay)
+                self.assertEqual(response.error_code, expected_code)
+
+        dated = HttpTransport(
+            open_url=lambda *_args, **_kwargs: RateLimitResponse({"Retry-After": future}, b""),
+        ).send("lb_test_key", "{}")
+        self.assertIsNotNone(dated.retry_after_ms)
+        self.assertGreater(dated.retry_after_ms or 0, 110_000)
+        self.assertLessEqual(dated.retry_after_ms or 0, 120_000)
 
 
 if __name__ == "__main__":

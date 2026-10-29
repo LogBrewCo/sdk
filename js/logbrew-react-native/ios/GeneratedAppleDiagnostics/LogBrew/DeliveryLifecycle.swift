@@ -67,4 +67,6 @@ public struct DeliveryHealth: Codable, Equatable, Sendable {
     public let consecutiveFailures: Int
     public let lastOutcome: DeliveryOutcome
     public let pauseReason: DeliveryPauseReason
+    /// Seconds until the scheduled automatic retry, or `nil` when no retry is scheduled.
+    public let nextRetryDelay: TimeInterval?
 }

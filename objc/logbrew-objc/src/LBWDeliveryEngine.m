@@ -7,6 +7,7 @@ static const NSUInteger LBWMaxQueuedBytes = 4U * 1024U * 1024U;
 static const NSUInteger LBWMaxRequestEvents = 100U;
 static const NSUInteger LBWMaxRequestBytes = 256U * 1024U;
 static const NSTimeInterval LBWMaxScheduleDelay = 24.0 * 60.0 * 60.0;
+static const NSTimeInterval LBWMaxRateLimitDelay = 60.0 * 60.0;
 static void *LBWDeliverySchedulerKey = &LBWDeliverySchedulerKey;
 
 @interface LBWDeliveryHealth ()
@@ -21,6 +22,7 @@ static void *LBWDeliverySchedulerKey = &LBWDeliverySchedulerKey;
 @property(nonatomic) NSUInteger consecutiveFailures;
 @property(nonatomic) LBWDeliveryOutcome lastOutcome;
 @property(nonatomic) LBWDeliveryPauseReason pauseReason;
+@property(nonatomic) NSTimeInterval nextRetryDelay;
 
 - (instancetype)initPrivate;
 
@@ -91,7 +93,8 @@ static NSString *LBWDeliveryPauseReasonValue(LBWDeliveryPauseReason reason) {
     @"deliveryAttempts": @(self.deliveryAttempts),
     @"consecutiveFailures": @(self.consecutiveFailures),
     @"lastOutcome": LBWDeliveryOutcomeValue(self.lastOutcome),
-    @"pauseReason": LBWDeliveryPauseReasonValue(self.pauseReason)
+    @"pauseReason": LBWDeliveryPauseReasonValue(self.pauseReason),
+    @"nextRetryDelay": @(self.nextRetryDelay)
   };
 }
 
@@ -115,6 +118,19 @@ static void LBWDeliverySetError(NSError *_Nullable *_Nullable error, NSError *va
 
 static NSTimeInterval LBWDeliveryUptime(void) {
   return [NSProcessInfo processInfo].systemUptime;
+}
+
+static BOOL LBWIsTimedRateLimit(LBWTransportResponse *response) {
+  if (response.statusCode != 429 || [response.errorCode isEqualToString:@"usage_limit_exceeded"]) {
+    return NO;
+  }
+  return response.retryAfter != nil || [response.errorCode isEqualToString:@"rate_limited"];
+}
+
+// Clamps a rate-limit wait to 1 second through 1 hour, then adds up to 10 percent jitter within 1 hour.
+static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
+  NSTimeInterval bounded = fmin(fmax(delay, 1.0), LBWMaxRateLimitDelay);
+  return fmin(bounded + bounded * 0.1 * jitter, LBWMaxRateLimitDelay);
 }
 
 @implementation LBWDeliveryEngine
@@ -242,6 +258,9 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   health.consecutiveFailures = self.consecutiveFailures;
   health.lastOutcome = self.lastOutcome;
   health.pauseReason = self.pauseReason;
+  if (self.state == LBWDeliveryStateRetrying && self.nextWakeUptime > 0) {
+    health.nextRetryDelay = fmax(0, self.nextWakeUptime - LBWDeliveryUptime());
+  }
   [self.stateLock unlock];
   return health;
 }
@@ -394,6 +413,9 @@ static NSTimeInterval LBWDeliveryUptime(void) {
         [NSError errorWithDomain:LBWDurableStoreErrorDomain code:LBWDurableStoreErrorCorrupt userInfo:nil]]);
     return nil;
   }
+  if (self.state == LBWDeliveryStateRetrying) {
+    self.state = LBWDeliveryStateRunning;
+  }
   self.nextWakeUptime = 0;
   [self.stateLock unlock];
 
@@ -514,6 +536,12 @@ static NSTimeInterval LBWDeliveryUptime(void) {
         accepted = YES;
         break;
       }
+      if (LBWIsTimedRateLimit(response)) {
+        [self recordManualRateLimit:response.retryAfter];
+        LBWDeliverySetError(error, LBWDeliveryError(
+            LBWErrorKindTransport, @"quota_exceeded", @"transport rejected delivery quota", YES));
+        return nil;
+      }
       BOOL retryable = response.statusCode == 408 || response.statusCode >= 500;
       if (retryable && attempt <= self.maxRetries) {
         continue;
@@ -633,6 +661,15 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   self.deliveryAttempts += 1U;
   BOOL retryable = response == nil ? [transportError.userInfo[LBWErrorRetryableKey] boolValue] :
       (response.statusCode == 408 || response.statusCode >= 500);
+  if (response != nil && LBWIsTimedRateLimit(response)) {
+    shouldSchedule = [self applyRateLimitLocked:response.retryAfter];
+    [self.stateLock unlock];
+    [self.flushLock unlock];
+    if (shouldSchedule) {
+      [self updateTimer];
+    }
+    return;
+  }
   self.consecutiveFailures += 1U;
   self.lastOutcome = retryable ? LBWDeliveryOutcomeRetryableFailure : LBWDeliveryOutcomeTerminalFailure;
   if (self.state != LBWDeliveryStateShuttingDown && retryable && self.retryAttempt < self.maxRetries) {
@@ -802,12 +839,42 @@ static NSTimeInterval LBWDeliveryUptime(void) {
 }
 
 - (BOOL)scheduleRetryLocked {
-  double multiplier = pow(2.0, (double)(self.retryAttempt > 0U ? self.retryAttempt - 1U : 0U));
+  return [self setWakeLocked:[self retryBackoffForAttempt:self.retryAttempt]];
+}
+
+- (NSTimeInterval)retryBackoffForAttempt:(NSUInteger)attempt {
+  double multiplier = pow(2.0, (double)(attempt > 0U ? attempt - 1U : 0U));
   NSTimeInterval candidate = self.automaticOptions.retryBaseDelay * multiplier;
   NSTimeInterval ceiling = candidate < self.automaticOptions.maxRetryDelay ? candidate
                                                                            : self.automaticOptions.maxRetryDelay;
   double fraction = 0.5 + ((double)arc4random_uniform(10001U) / 20000.0);
-  return [self setWakeLocked:ceiling * fraction];
+  return ceiling * fraction;
+}
+
+// Schedules a timed retry of the same prefix after a rate-limited response instead of pausing.
+- (BOOL)applyRateLimitLocked:(nullable NSNumber *)retryAfter {
+  self.consecutiveFailures += 1U;
+  self.lastOutcome = LBWDeliveryOutcomeRetryableFailure;
+  if (self.automaticTransport == nil || self.automaticOptions == nil ||
+      self.state == LBWDeliveryStateShuttingDown || self.state == LBWDeliveryStateClosed) {
+    return NO;
+  }
+  self.state = LBWDeliveryStateRetrying;
+  self.pauseReason = LBWDeliveryPauseReasonNone;
+  self.nextWakeUptime = 0;
+  NSTimeInterval wait = retryAfter != nil ? [retryAfter doubleValue]
+                                          : [self retryBackoffForAttempt:self.consecutiveFailures];
+  return [self setWakeLocked:LBWRateLimitDelay(wait, (double)arc4random_uniform(10001U) / 10000.0)];
+}
+
+- (void)recordManualRateLimit:(nullable NSNumber *)retryAfter {
+  [self.stateLock lock];
+  self.inFlight = NO;
+  BOOL shouldSchedule = [self applyRateLimitLocked:retryAfter];
+  [self.stateLock unlock];
+  if (shouldSchedule) {
+    [self updateTimer];
+  }
 }
 
 - (BOOL)setWakeLocked:(NSTimeInterval)delay {
@@ -837,7 +904,9 @@ static NSTimeInterval LBWDeliveryUptime(void) {
 - (void)rescheduleAfterManualFlush {
   [self.stateLock lock];
   BOOL shouldSchedule = NO;
-  if (self.automaticTransport != nil && self.state != LBWDeliveryStatePaused && !self.closed) {
+  if (self.state == LBWDeliveryStateRetrying && self.nextWakeUptime > 0) {
+    shouldSchedule = YES;
+  } else if (self.automaticTransport != nil && self.state != LBWDeliveryStatePaused && !self.closed) {
     self.state = LBWDeliveryStateRunning;
     self.retryAttempt = 0U;
     shouldSchedule = [self scheduleLiveQueueLocked];

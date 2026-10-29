@@ -244,8 +244,14 @@ func (t *HTTPTransport) sendWithRetryAfter(apiKey string, body []byte, maximum t
 		return nil, retryAfterDirective{}, NetworkError(fmt.Sprintf("http transport failed: %v", err))
 	}
 	defer response.Body.Close()
+	var directive retryAfterDirective
+	if response.StatusCode == http.StatusTooManyRequests {
+		directive = parseRateLimitRetryAfter(response.Header.Values("Retry-After"), time.Now())
+		directive.code = readRateLimitCode(response.Body)
+	} else {
+		directive = parseRetryAfter(response.Header.Values("Retry-After"), time.Now(), maximum)
+	}
 	_, _ = io.Copy(io.Discard, response.Body)
-	directive := parseRetryAfter(response.Header.Values("Retry-After"), time.Now(), maximum)
 	return &TransportResponse{StatusCode: response.StatusCode, Attempts: 1}, directive, nil
 }
 

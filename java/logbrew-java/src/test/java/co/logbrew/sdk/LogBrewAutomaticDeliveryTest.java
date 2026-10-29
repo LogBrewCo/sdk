@@ -1,10 +1,20 @@
 package co.logbrew.sdk;
 
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -55,6 +65,12 @@ public final class LogBrewAutomaticDeliveryTest {
         testSchedulerTerminationEscalates();
         testSchedulerTerminationFailureDoesNotRewriteAcceptedShutdown();
         testManualClientDefaultsRemainCallerDriven();
+        testRateLimitRetryAfterWaitsThenResumesWithoutAppCall();
+        testRateLimitedCodeWithoutRetryAfterUsesBackoff();
+        testUsageLimitPausesEvenWithRetryAfter();
+        testRateLimitWaitBounds();
+        testHttpTransportReadsRateLimitHeaderAndBoundedCode();
+        testHttpDateRetryAfterWaitsThenResumes();
         System.out.println("java automatic delivery tests ok (" + testsRun + " tests)");
     }
 
@@ -992,6 +1008,248 @@ public final class LogBrewAutomaticDeliveryTest {
         );
         assertEquals(1, client.shutdown(RecordingTransport.alwaysAccept()).acceptedEvents(), "manual shutdown API");
         testsRun++;
+    }
+
+    private void testRateLimitRetryAfterWaitsThenResumesWithoutAppCall() {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        List<String> bodies = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        LogBrewClient client = automaticClient(
+            (apiKey, body) -> {
+                bodies.add(body);
+                return calls.incrementAndGet() == 1
+                    ? new TransportResponse(429, 1, Duration.ofSeconds(120), null)
+                    : new TransportResponse(202, 1);
+            },
+            DeliveryOptions.builder().maxRetries(2).build(),
+            automaticOptions(1),
+            schedulers,
+            () -> true
+        );
+        enqueueLog(client, "evt_java_rate_limited", "rate limited");
+        schedulers.scheduler().runNext();
+
+        DeliveryHealth waiting = client.deliveryHealth();
+        assertEquals(1, bodies.size(), "Retry-After 429 is not retried in the same send");
+        assertEquals(DeliveryHealth.Activity.RETRYING, waiting.activity(), "Retry-After wait activity");
+        assertEquals(DeliveryHealth.PauseReason.NONE, waiting.pauseReason(), "Retry-After wait is not a pause");
+        assertEquals(DeliveryHealth.RetryDelaySource.SERVER, waiting.retryDelaySource(), "Retry-After source");
+        assertEquals(132_000L, waiting.scheduledDelayMillis(), "Retry-After delay plus jitter");
+        enqueueLog(client, "evt_java_rate_limited_later", "later");
+        assertEquals(132_000L, schedulers.scheduler().nextDelayMillis(), "capture keeps the timed wait");
+
+        schedulers.scheduler().runNext();
+        assertEquals(bodies.get(0), bodies.get(1), "rate limited batch is resent unchanged");
+        assertNotContains(bodies.get(1), "evt_java_rate_limited_later");
+        schedulers.scheduler().runNext();
+        assertContains(bodies.get(2), "evt_java_rate_limited_later");
+        assertEquals(0, client.deliveryHealth().queuedEvents(), "timed wait drains without an app call");
+        client.shutdown();
+        testsRun++;
+    }
+
+    private void testRateLimitedCodeWithoutRetryAfterUsesBackoff() {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        AtomicInteger calls = new AtomicInteger();
+        Transport transport = (apiKey, body) -> calls.incrementAndGet() <= 2
+            ? new TransportResponse(429, 1, (Duration) null, "rate_limited")
+            : new TransportResponse(202, 1);
+        LogBrewClient client = automaticClient(
+            transport,
+            DeliveryOptions.builder().maxRetries(0).build(),
+            AutomaticDeliveryOptions.builder()
+                .flushInterval(Duration.ofSeconds(1))
+                .queueThreshold(10)
+                .initialRetryDelay(Duration.ofMillis(1_500))
+                .maxRetryDelay(Duration.ofSeconds(4))
+                .build(),
+            schedulers,
+            () -> true
+        );
+        enqueueLog(client, "evt_java_rate_limited_code", "rate limited code");
+
+        SdkException error = expectSdkException(() -> client.flush(transport));
+        assertEquals("transport_error", error.code(), "rate limited flush keeps its public code");
+        DeliveryHealth first = client.deliveryHealth();
+        assertEquals(DeliveryHealth.Activity.RETRYING, first.activity(), "rate_limited wait activity");
+        assertEquals(DeliveryHealth.RetryDelaySource.CLIENT, first.retryDelaySource(), "rate_limited backoff source");
+        assertEquals(1_650L, schedulers.scheduler().nextDelayMillis(), "first rate_limited backoff");
+        schedulers.scheduler().runNext();
+        assertEquals(3_300L, schedulers.scheduler().nextDelayMillis(), "second rate_limited backoff");
+        schedulers.scheduler().runNext();
+        assertEquals(0, client.deliveryHealth().queuedEvents(), "rate_limited wait resumes on its own");
+        assertEquals(3, calls.get(), "rate_limited send count");
+        client.shutdown();
+        testsRun++;
+    }
+
+    private void testUsageLimitPausesEvenWithRetryAfter() {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        AtomicInteger calls = new AtomicInteger();
+        LogBrewClient client = automaticClient(
+            (apiKey, body) -> calls.incrementAndGet() == 1
+                ? new TransportResponse(429, 1, Duration.ofSeconds(30), "usage_limit_exceeded")
+                : new TransportResponse(202, 1),
+            DeliveryOptions.builder().maxRetries(0).build(),
+            automaticOptions(1),
+            schedulers,
+            () -> true
+        );
+        enqueueLog(client, "evt_java_usage_limit", "usage limit");
+        schedulers.scheduler().runNext();
+        DeliveryHealth paused = client.deliveryHealth();
+        assertEquals(DeliveryHealth.Activity.PAUSED, paused.activity(), "usage_limit_exceeded pauses");
+        assertEquals(DeliveryHealth.PauseReason.QUOTA, paused.pauseReason(), "usage_limit_exceeded reason");
+        assertEquals(0, schedulers.scheduler().pendingTasks(), "usage_limit_exceeded has no timed wake");
+        client.resumeAutomaticDelivery();
+        schedulers.scheduler().runNext();
+        assertEquals(0, client.deliveryHealth().queuedEvents(), "usage limit recovers after resume");
+        client.shutdown();
+        testsRun++;
+    }
+
+    private void testRateLimitWaitBounds() {
+        assertRateLimitDelay(Duration.ZERO, 1_000L, 1_100L, "Retry-After below 1 s");
+        assertRateLimitDelay(Duration.ofHours(2), 3_600_000L, 3_600_000L, "Retry-After above 1 h");
+        testsRun++;
+    }
+
+    private void testHttpTransportReadsRateLimitHeaderAndBoundedCode() {
+        HttpServer server = startRateLimitServer(Arrays.asList(
+            new String[] {"Tue, 02 Jun 2026 10:00:05 GMT", "{\"detail\":{\"items\":[1,true,null,\"x\"]},\"code\":\"rate_limited\"}"},
+            new String[] {"Tue, 02 Jun 2026 09:59:00 GMT", ""},
+            new String[] {"7200", "{\"code\":\"usage_limit_exceeded\"}"},
+            new String[] {null, "{\"code\":\"rate_limited\",\"pad\":\"" + "x".repeat(5_000) + "\"}"},
+            new String[] {"soon", "code=rate_limited"}
+        ));
+        try {
+            HttpTransport transport = rateLimitHttpTransport(server);
+            TransportResponse dated = sendOrFail(transport);
+            TransportResponse past = sendOrFail(transport);
+            TransportResponse capped = sendOrFail(transport);
+            TransportResponse oversized = sendOrFail(transport);
+            TransportResponse unreadable = sendOrFail(transport);
+
+            assertEquals(5_000L, dated.retryAfterDirective().delayMillis(), "GMT Retry-After delay");
+            assertEquals("rate_limited", dated.rateLimitCode(), "bounded body code");
+            assertEquals(RetryAfterDirective.Outcome.ACCEPTED, past.retryAfterDirective().outcome(), "past date");
+            assertEquals(0L, past.retryAfterDirective().delayMillis(), "past date counts as zero");
+            assertEquals(null, past.rateLimitCode(), "empty body has no code");
+            assertEquals(3_600_000L, capped.retryAfterDirective().delayMillis(), "Retry-After capped at 1 h");
+            assertEquals("usage_limit_exceeded", capped.rateLimitCode(), "usage limit code");
+            assertEquals(RetryAfterDirective.Outcome.NONE, oversized.retryAfterDirective().outcome(), "missing header");
+            assertEquals(null, oversized.rateLimitCode(), "body over 4 KiB has no code");
+            assertEquals(RetryAfterDirective.Outcome.REJECTED, unreadable.retryAfterDirective().outcome(), "unreadable");
+            assertEquals(null, unreadable.rateLimitCode(), "non-JSON body has no code");
+        } finally {
+            server.stop(0);
+        }
+        testsRun++;
+    }
+
+    private void testHttpDateRetryAfterWaitsThenResumes() {
+        HttpServer server = startRateLimitServer(Collections.singletonList(
+            new String[] {"Tue, 02 Jun 2026 10:00:05 GMT", ""}
+        ));
+        try {
+            ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+            LogBrewClient client = automaticClient(
+                rateLimitHttpTransport(server),
+                DeliveryOptions.builder().maxRetries(0).build(),
+                automaticOptions(1),
+                schedulers,
+                () -> true
+            );
+            enqueueLog(client, "evt_java_http_date", "http date");
+            schedulers.scheduler().runNext();
+            DeliveryHealth waiting = client.deliveryHealth();
+            assertEquals(DeliveryHealth.Activity.RETRYING, waiting.activity(), "HTTP date wait activity");
+            assertEquals(5_500L, waiting.scheduledDelayMillis(), "HTTP date delay plus jitter");
+            schedulers.scheduler().runNext();
+            assertEquals(0, client.deliveryHealth().queuedEvents(), "HTTP date wait resumes on its own");
+            client.shutdown();
+        } finally {
+            server.stop(0);
+        }
+        testsRun++;
+    }
+
+    private static void assertRateLimitDelay(Duration retryAfter, long minimum, long expected, String label) {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        AtomicInteger calls = new AtomicInteger();
+        List<Long> jitterRange = new ArrayList<>();
+        LogBrewClient client = LogBrewClient.createAutomatic(
+            API_KEY,
+            "logbrew-java",
+            "0.1.0",
+            (apiKey, body) -> calls.incrementAndGet() == 1
+                ? new TransportResponse(429, 1, retryAfter, null)
+                : new TransportResponse(202, 1),
+            DeliveryOptions.builder().maxRetries(0).build(),
+            automaticOptions(1),
+            schedulers,
+            (low, high) -> {
+                jitterRange.add(low);
+                jitterRange.add(high);
+                return high;
+            },
+            () -> true
+        );
+        enqueueLog(client, "evt_java_rate_limit_bounds", "bounds");
+        schedulers.scheduler().runNext();
+        assertEquals(minimum, jitterRange.get(0), label + " lower bound");
+        assertEquals(minimum + minimum / 10L, jitterRange.get(1), label + " jitter is at most 10%");
+        assertEquals(expected, client.deliveryHealth().scheduledDelayMillis(), label + " delay");
+        client.shutdown();
+    }
+
+    private static HttpServer startRateLimitServer(List<String[]> responses) {
+        AtomicInteger index = new AtomicInteger();
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/v1/events", exchange -> {
+                try {
+                    exchange.getRequestBody().readAllBytes();
+                    int current = index.getAndIncrement();
+                    if (current >= responses.size()) {
+                        exchange.sendResponseHeaders(202, -1L);
+                        return;
+                    }
+                    String[] response = responses.get(current);
+                    if (response[0] != null) {
+                        exchange.getResponseHeaders().add("Retry-After", response[0]);
+                    }
+                    byte[] body = response[1].getBytes(StandardCharsets.UTF_8);
+                    exchange.sendResponseHeaders(429, body.length == 0 ? -1L : body.length);
+                    if (body.length > 0) {
+                        try (OutputStream output = exchange.getResponseBody()) {
+                            output.write(body);
+                        }
+                    }
+                } finally {
+                    exchange.close();
+                }
+            });
+            server.start();
+            return server;
+        } catch (IOException error) {
+            throw new AssertionError(error);
+        }
+    }
+
+    private static HttpTransport rateLimitHttpTransport(HttpServer server) {
+        return HttpTransport.builder()
+            .endpoint(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1/events"))
+            .clock(Clock.fixed(Instant.parse("2026-06-02T10:00:00Z"), ZoneOffset.UTC))
+            .build();
+    }
+
+    private static TransportResponse sendOrFail(Transport transport) {
+        try {
+            return transport.send(API_KEY, "{}");
+        } catch (TransportException error) {
+            throw new AssertionError(error);
+        }
     }
 
     private static void assertTerminalPause(int status, DeliveryHealth.PauseReason expectedReason) {

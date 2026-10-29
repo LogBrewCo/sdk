@@ -4,6 +4,8 @@ namespace LogBrew
 {
     internal sealed class DeliveryRetryPolicy
     {
+        private static readonly TimeSpan MinimumRateLimitWait = TimeSpan.FromSeconds(1);
+        private static readonly TimeSpan MaximumRateLimitWait = TimeSpan.FromHours(1);
         private readonly Random random = new Random();
 
         internal TimeSpan Delay(
@@ -34,6 +36,27 @@ namespace LogBrew
             }
 
             return TimeSpan.FromTicks(selectedTicks);
+        }
+
+        // A 429 waits on its own when it has Retry-After or code "rate_limited", unless the usage limit was hit.
+        internal static bool IsTimedRateLimit(TransportResponse response)
+        {
+            return response.StatusCode == 429
+                && !string.Equals(response.Code, "usage_limit_exceeded", StringComparison.Ordinal)
+                && (response.RetryAfter.HasValue || string.Equals(response.Code, "rate_limited", StringComparison.Ordinal));
+        }
+
+        internal TimeSpan RateLimitDelay(
+            TimeSpan? retryAfter,
+            int consecutiveFailures,
+            AutomaticDeliverySettings settings,
+            out DeliveryRetrySource source)
+        {
+            var delay = retryAfter ?? Delay(null, consecutiveFailures, settings, out _);
+            source = retryAfter.HasValue ? DeliveryRetrySource.Server : DeliveryRetrySource.Local;
+            var ticks = Math.Min(Math.Max(delay.Ticks, MinimumRateLimitWait.Ticks), MaximumRateLimitWait.Ticks);
+            ticks += (long)(ticks / 10 * random.NextDouble());
+            return TimeSpan.FromTicks(Math.Min(ticks, MaximumRateLimitWait.Ticks));
         }
 
         internal static bool IsRetryableStatus(int statusCode)

@@ -100,21 +100,31 @@ module LogBrew
   end
 
   class TransportResponse
-    attr_reader :status_code, :attempts, :batches
+    attr_reader :status_code, :attempts, :batches, :retry_after, :code
 
-    def initialize(status_code, attempts, batches = 1)
+    # For a 429, +retry_after+ is the Retry-After delay in seconds and +code+ is the
+    # JSON body's code string; either may be nil.
+    def initialize(status_code, attempts, batches = 1, retry_after: nil, code: nil)
       @status_code = status_code
       @attempts = attempts
       @batches = batches
+      @retry_after = retry_after
+      @code = code
+    end
+
+    # A 429 waits on its own when it has Retry-After or code "rate_limited", unless the usage limit was hit.
+    def timed_rate_limit?
+      status_code == 429 && code != "usage_limit_exceeded" && (!retry_after.nil? || code == "rate_limited")
     end
   end
 
   class DeliveryFailure < SdkError
-    attr_reader :automatic_pause_reason
+    attr_reader :automatic_pause_reason, :automatic_rate_limit
 
-    def initialize(code, message, automatic_retryable: false, automatic_pause_reason: nil)
+    def initialize(code, message, automatic_retryable: false, automatic_pause_reason: nil, automatic_rate_limit: nil)
       @automatic_retryable = automatic_retryable
       @automatic_pause_reason = automatic_pause_reason
+      @automatic_rate_limit = automatic_rate_limit
       super(code, message)
     end
 
@@ -148,7 +158,9 @@ module LogBrew
       raise response if response.is_a?(TransportError)
       raise response if response.is_a?(SdkError)
 
-      status_code = response.is_a?(TransportResponse) ? response.status_code : response.to_i
+      return TransportResponse.new(response.status_code, 1, retry_after: response.retry_after, code: response.code) if response.is_a?(TransportResponse)
+
+      status_code = response.to_i
       TransportResponse.new(status_code.zero? ? 202 : status_code, 1)
     end
   end
@@ -156,6 +168,8 @@ module LogBrew
   class HttpTransport
     DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events"
     DEFAULT_TIMEOUT = 10
+    MAX_ERROR_BODY_BYTES = 4096
+    MAX_RATE_LIMIT_WAIT = 3600
 
     attr_reader :endpoint, :headers, :timeout, :http_client
 
@@ -176,17 +190,48 @@ module LogBrew
       @headers.each { |name, value| request[name] = value }
       request.body = body
 
-      response = HttpClientTracing.suppress do
-        @http_client ? @http_client.request(request) : request_with_default_client(request)
+      response, error_body = HttpClientTracing.suppress do
+        @http_client ? [@http_client.request(request), nil] : request_with_default_client(request)
       end
-      TransportResponse.new(response.code.to_i, 1)
+      status_code = response.code.to_i
+      return TransportResponse.new(status_code, 1) unless status_code == 429
+
+      TransportResponse.new(
+        status_code,
+        1,
+        retry_after: self.class.parse_retry_after(response.get_fields("retry-after")),
+        code: error_code(error_body || response.body)
+      )
     rescue TransportError
       raise
     rescue IOError, SystemCallError, SocketError, Timeout::Error, EOFError, Net::OpenTimeout, Net::ReadTimeout => error
       raise TransportError.network("http transport failed: #{error.message}")
     end
 
+    # Reads one Retry-After value as seconds: delta-seconds or an HTTP date, where a past date is 0.
+    # Missing, empty, repeated, or unreadable values return nil.
+    def self.parse_retry_after(values, now = Time.now)
+      return nil unless values.is_a?(Array) && values.length == 1
+
+      value = values.first.to_s.strip
+      return [value.to_i, MAX_RATE_LIMIT_WAIT].min if value.match?(/\A\d+\z/)
+
+      (Time.httpdate(value) - now).clamp(0, MAX_RATE_LIMIT_WAIT)
+    rescue ArgumentError
+      nil
+    end
+
     private
+
+    # Finds the JSON code of a 429 body of at most 4 KiB; the body is never kept.
+    def error_code(body)
+      return nil if body.nil? || body.bytesize > MAX_ERROR_BODY_BYTES
+
+      parsed = JSON.parse(body)
+      parsed.is_a?(Hash) && parsed["code"].is_a?(String) ? parsed["code"] : nil
+    rescue JSON::ParserError
+      nil
+    end
 
     def request_path
       path = @endpoint.path.empty? ? "/" : @endpoint.path
@@ -201,7 +246,26 @@ module LogBrew
       http.open_timeout = @timeout
       http.read_timeout = @timeout
       http.write_timeout = @timeout if http.respond_to?(:write_timeout=)
-      http.start { |client| client.request(request) }
+      http.start do |client|
+        catch(:logbrew_rate_limited) do
+          response = client.request(request) do |received|
+            throw :logbrew_rate_limited, [received, bounded_body(received)] if received.code == "429"
+          end
+          [response, nil]
+        end
+      end
+    end
+
+    # Leaves the request after at most 4 KiB plus one byte, so a larger 429 body is never read.
+    def bounded_body(response)
+      body = +""
+      catch(:logbrew_body_limit) do
+        response.read_body do |chunk|
+          body << chunk
+          throw :logbrew_body_limit if body.bytesize > MAX_ERROR_BODY_BYTES
+        end
+      end
+      body
     end
 
     def validate_endpoint(endpoint)
@@ -1210,6 +1274,15 @@ module LogBrew
               "transport_error",
               "unexpected transport status #{response.status_code}",
               automatic_retryable: true
+            )
+          end
+
+          if response.respond_to?(:timed_rate_limit?) && response.timed_rate_limit?
+            raise DeliveryFailure.new(
+              "transport_error",
+              "unexpected transport status 429",
+              automatic_retryable: true,
+              automatic_rate_limit: response.retry_after || :backoff
             )
           end
 

@@ -79,7 +79,12 @@ public final class RecordingTransport implements Transport {
         }
         if (next instanceof TransportResponse) {
             TransportResponse response = (TransportResponse) next;
-            return new TransportResponse(response.statusCode(), 1);
+            return new TransportResponse(
+                response.statusCode(),
+                1,
+                response.retryAfterDirective(),
+                response.rateLimitCode()
+            );
         }
         if (next instanceof TransportException) {
             throw (TransportException) next;
