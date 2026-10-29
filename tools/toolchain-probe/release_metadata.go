@@ -749,8 +749,8 @@ func (check *metadataCheck) objc() {
 	if !found {
 		return
 	}
-	check.require(strings.Contains(check.read(source), `LogBrewObjectiveCVersion = @"0.2.3"`),
-		source+": Objective-C source version must be 0.2.3")
+	check.require(strings.Contains(check.read(source), `LogBrewObjectiveCVersion = @"0.2.4"`),
+		source+": Objective-C source version must be 0.2.4")
 	check.needles(check.read(header), header+": missing public Objective-C SDK symbol ",
 		"LogBrewObjectiveCVersion", "LBWHTTPTransportDefaultEndpoint", "LBWClient", "LBWHTTPTransport",
 		"LBWRecordingTransport", "LBWErrorStableCodeKey", "LBWTelemetry", "LBWTelemetryScope", "LBWIssueDiagnostics",

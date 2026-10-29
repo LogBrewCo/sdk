@@ -372,9 +372,9 @@ func TestReleasePlanNuGet(t *testing.T) {
 		{nil, "nuget release plan ok\n", "", validate("plan.json"), exitOK},
 		{nil, "nuget release plan ok\n", "", validate("float.json"), exitOK},
 		{nil, "LogBrew.Hangfire\n", "", entries("plan.json", "ids"), exitOK},
-		{nil, "LogBrew=0.1.12\nLogBrew.HttpClient=0.1.7\n", "", entries("core.json", "versions"), exitOK},
-		{nil, "LogBrew\tdotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj\t0.1.12\nLogBrew.HttpClient\t" +
-			"dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj\t0.1.7\n", "",
+		{nil, "LogBrew=0.1.13\nLogBrew.HttpClient=0.1.8\n", "", entries("core.json", "versions"), exitOK},
+		{nil, "LogBrew\tdotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj\t0.1.13\nLogBrew.HttpClient\t" +
+			"dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj\t0.1.8\n", "",
 			entries("core.json", "projects"), exitOK},
 		{nil, "selected\n", "", entries("core.json", "mode"), exitOK},
 		{nil, "", invalidPlan, validate("extra.json"), exitFailure},
