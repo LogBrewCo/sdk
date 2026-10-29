@@ -37,3 +37,4 @@ objc/logbrew-objc/build/
 objc/logbrew-objc/examples/build/
 objc/logbrew-objc/**/*.o
 objc/logbrew-objc/**/*.a
+benchmarks/node_modules/

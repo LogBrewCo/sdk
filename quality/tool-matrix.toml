@@ -266,6 +266,22 @@ replaces = "none"
 checked = 2026-10-19
 
 [[tool]]
+id = "benchmarks"
+risk = "Benchmark scripts that stop running when a measured package changes"
+tool = "benchmarks/run.sh with esbuild, Node.js, and headless Chrome"
+version = "0.28.2"
+pins = ["benchmarks/package.json::\"esbuild\": \"@VERSION@\""]
+commands = ["benchmarks/run.sh"]
+runs_in = "Benchmarks workflow, only when benchmarks/ changes; it checks that the scripts run, not their results"
+config = "benchmarks/package.json and benchmarks/package-lock.json"
+conflicts = "none known"
+exceptions = "none"
+runtime = "quick mode, local: about 10 s"
+findings = "none yet: new on 2026-10-29"
+replaces = "none"
+checked = 2026-10-29
+
+[[tool]]
 id = "native-verifier"
 risk = "invalid event batches and package JSON; broken local Markdown links; build output left in the working tree; CI skipping a language job or Python unit test a change needs; publishing without branch protection or a protected release environment; non-public context, access values, or local paths in public files; package metadata, release workflows, or release docs that drift from the release catalog; packages released with peer ranges, Maven coordinates, or NuGet provenance that do not match the release"
 tool = "native SDK verifier (tools/toolchain-probe, Go); it replaces the Python repository checks one family at a time"
