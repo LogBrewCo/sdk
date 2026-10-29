@@ -81,6 +81,8 @@ export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & NodeFetch
   captureRequestMetrics?: boolean;
   /** Include raw stack text only when the app has explicitly approved it. Defaults to false. */
   includeErrorStack?: boolean;
+  /** Report errors with a 4xx `status` or `statusCode` as issues too. Defaults to false. */
+  captureClientErrors?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (req: Request, res: Response) => string;

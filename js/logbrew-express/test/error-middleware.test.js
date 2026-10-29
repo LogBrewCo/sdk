@@ -200,3 +200,43 @@ test("standalone factory failure delivers its earlier safe log", async (t) => {
   assert.equal(client.pendingEvents(), 0);
   assert.equal(client.deliveryHealth().lifecycle, "closed");
 });
+
+async function sendClientError(t, options) {
+  const batches = [];
+  let resolveFlushed;
+  const flushed = new Promise((resolve) => { resolveFlushed = resolve; });
+  const forwarded = [];
+  const app = express();
+  const middlewareOptions = {
+    serverApiKey: "LOGBREW_SERVER_API_KEY",
+    transport: { async send(_key, body) { batches.push(JSON.parse(body)); return { statusCode: 202 }; } },
+    onFlush() { resolveFlushed(); },
+    ...options
+  };
+  app.use(logbrewMiddleware(middlewareOptions));
+  app.use((_req, _res, next) => { next(Object.assign(new Error("Not Found"), { status: 404 })); });
+  app.use(logbrewErrorHandler(middlewareOptions));
+  app.use((error, _req, res, _next) => { forwarded.push(error); res.status(error.status).end("missing"); });
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await once(server, "listening");
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/no-such-page`);
+  assert.equal(response.status, 404);
+  await flushed;
+  assert.equal(forwarded.length, 1);
+  assert.equal(forwarded[0].status, 404);
+  return batches.flatMap(({ events }) => events);
+}
+
+test("errors with a 4xx status stay request spans, not issues", async (t) => {
+  const events = await sendClientError(t, {});
+  assert.equal(events.filter(({ type }) => type === "issue").length, 0);
+  const span = events.find(({ type }) => type === "span");
+  assert.equal(span.attributes.status, "ok");
+  assert.equal(span.attributes.metadata.statusCode, 404);
+});
+
+test("captureClientErrors reports errors with a 4xx status as issues", async (t) => {
+  const events = await sendClientError(t, { captureClientErrors: true });
+  assert.equal(events.filter(({ type }) => type === "issue").length, 1);
+});
