@@ -775,6 +775,8 @@ export type TransportResponse = {
   batches?: number;
   /** Optional retry delay from a rate-limit response, in milliseconds. */
   retryAfterMs?: number;
+  /** Optional `code` from a 429 response body, such as `rate_limited` or `usage_limit_exceeded`. */
+  errorCode?: string;
 };
 
 /** Minimal transport interface accepted by flush and shutdown operations. */
@@ -844,7 +846,7 @@ export declare class TransportError extends Error {
 
 /** Scripted transport for previewing, accepting, or failing queued event flushes. */
 export declare class RecordingTransport {
-  constructor(scriptedResponses?: Array<{ statusCode: number; retryAfterMs?: number } | Error>);
+  constructor(scriptedResponses?: Array<{ statusCode: number; retryAfterMs?: number; errorCode?: string } | Error>);
   /** Every request body sent through this transport instance. */
   sentBodies: string[];
   /** Create a transport that accepts queued flushes with a 202 response. */

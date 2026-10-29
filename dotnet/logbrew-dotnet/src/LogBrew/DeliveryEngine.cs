@@ -848,7 +848,7 @@ namespace LogBrew
             }
 
             EnsureWorkerStartedLocked();
-            if (frozenBatch != null && retryAttempt > 0)
+            if (frozenBatch != null && (retryAttempt > 0 || retryDelayMilliseconds > 0))
             {
                 activity = DeliveryActivityState.Retrying;
                 return;
@@ -912,7 +912,9 @@ namespace LogBrew
                                 break;
                             }
 
-                            activity = retryAttempt > 0 ? DeliveryActivityState.Retrying : DeliveryActivityState.Scheduled;
+                            activity = retryAttempt > 0 || retryDelayMilliseconds > 0
+                                ? DeliveryActivityState.Retrying
+                                : DeliveryActivityState.Scheduled;
                             Monitor.Wait(gate, DeliveryRuntimePolicy.RemainingMonotonicDelay(nextWakeTimestamp));
                         }
 
@@ -1087,6 +1089,13 @@ namespace LogBrew
                 ? DeliveryStatusClass.Network
                 : DeliveryRetryPolicy.StatusClass(response?.StatusCode ?? 0);
 
+            if (response != null && DeliveryRetryPolicy.IsTimedRateLimit(response))
+            {
+                var wait = retryPolicy.RateLimitDelay(response.RetryAfter, consecutiveFailures, automaticSettings!, out var waitSource);
+                ScheduleRetryLocked(wait, waitSource);
+                return;
+            }
+
             var retryable = response != null
                 ? DeliveryRetryPolicy.IsRetryableStatus(response.StatusCode)
                 : failure is TransportException transportFailure && transportFailure.Retryable;
@@ -1100,13 +1109,7 @@ namespace LogBrew
                 }
 
                 var delay = retryPolicy.Delay(response?.RetryAfter, retryAttempt, automaticSettings, out var source);
-                retryDelayMilliseconds = DeliveryRetryPolicy.BoundedMilliseconds(delay);
-                retrySource = source;
-                lastOutcome = DeliveryOutcome.RetryScheduled;
-                activity = DeliveryActivityState.Retrying;
-                wakeRequested = false;
-                nextWakeTimestamp = DeliveryRuntimePolicy.AddMonotonicDelay(delay);
-                Monitor.PulseAll(gate);
+                ScheduleRetryLocked(delay, source);
                 return;
             }
 
@@ -1114,6 +1117,17 @@ namespace LogBrew
                 ? DeliveryPauseReason.NonRetryable
                 : DeliveryRetryPolicy.PauseReason(response.StatusCode);
             PauseAutomaticLocked(reason, DeliveryOutcome.TerminalFailure);
+        }
+
+        private void ScheduleRetryLocked(TimeSpan delay, DeliveryRetrySource source)
+        {
+            retryDelayMilliseconds = DeliveryRetryPolicy.BoundedMilliseconds(delay);
+            retrySource = source;
+            lastOutcome = DeliveryOutcome.RetryScheduled;
+            activity = DeliveryActivityState.Retrying;
+            wakeRequested = false;
+            nextWakeTimestamp = DeliveryRuntimePolicy.AddMonotonicDelay(delay);
+            Monitor.PulseAll(gate);
         }
 
         private void PauseAutomaticLocked(DeliveryPauseReason reason, DeliveryOutcome outcome)

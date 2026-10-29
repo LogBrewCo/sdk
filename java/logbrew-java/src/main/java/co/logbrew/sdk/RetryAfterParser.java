@@ -29,6 +29,16 @@ final class RetryAfterParser {
         Instant now,
         long maximumDelayMillis
     ) {
+        return parse(values, now, maximumDelayMillis, false);
+    }
+
+    /** Parses guidance where a past HTTP date means "retry now" instead of a rejected value. */
+    static RetryAfterDirective parse(
+        List<String> values,
+        Instant now,
+        long maximumDelayMillis,
+        boolean pastIsZero
+    ) {
         Objects.requireNonNull(values, "values");
         Objects.requireNonNull(now, "now");
         if (maximumDelayMillis <= 0L) {
@@ -45,7 +55,7 @@ final class RetryAfterParser {
         if (isAsciiDigits(value)) {
             return parseDeltaSeconds(value, maximumDelayMillis);
         }
-        return parseImfFixdate(value, now, maximumDelayMillis);
+        return parseImfFixdate(value, now, maximumDelayMillis, pastIsZero);
     }
 
     private static RetryAfterDirective parseDeltaSeconds(String value, long maximumDelayMillis) {
@@ -67,7 +77,8 @@ final class RetryAfterParser {
     private static RetryAfterDirective parseImfFixdate(
         String value,
         Instant now,
-        long maximumDelayMillis
+        long maximumDelayMillis,
+        boolean pastIsZero
     ) {
         try {
             LocalDateTime parsed = LocalDateTime.parse(value, IMF_FIXDATE);
@@ -82,7 +93,7 @@ final class RetryAfterParser {
                 return RetryAfterDirective.accepted(maximumDelayMillis);
             }
             if (delayMillis <= 0L) {
-                return RetryAfterDirective.rejected();
+                return pastIsZero ? RetryAfterDirective.accepted(0L) : RetryAfterDirective.rejected();
             }
             return RetryAfterDirective.accepted(Math.min(delayMillis, maximumDelayMillis));
         } catch (DateTimeParseException error) {

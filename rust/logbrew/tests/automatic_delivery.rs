@@ -15,7 +15,7 @@ struct SharedTransport {
 }
 
 struct TransportState {
-    scripted: VecDeque<Result<u16, TransportError>>,
+    scripted: VecDeque<Result<TransportResponse, TransportError>>,
     bodies: Vec<Vec<u8>>,
     worker_threads: HashSet<thread::ThreadId>,
     block_next: bool,
@@ -24,6 +24,15 @@ struct TransportState {
 
 impl SharedTransport {
     fn scripted(results: Vec<Result<u16, TransportError>>) -> Self {
+        Self::responses(
+            results
+                .into_iter()
+                .map(|result| result.map(TransportResponse::new))
+                .collect(),
+        )
+    }
+
+    fn responses(results: Vec<Result<TransportResponse, TransportError>>) -> Self {
         Self {
             state: Arc::new((
                 Mutex::new(TransportState {
@@ -73,10 +82,10 @@ impl Transport for SharedTransport {
                 state = self.state.1.wait(state).unwrap();
             }
         }
-        match state.scripted.pop_front().unwrap_or(Ok(202)) {
-            Ok(status) => Ok(TransportResponse::new(status)),
-            Err(error) => Err(error),
-        }
+        state
+            .scripted
+            .pop_front()
+            .unwrap_or(Ok(TransportResponse::new(202)))
     }
 }
 
@@ -496,4 +505,97 @@ fn default_interval_sends_a_burst_as_one_request() {
 
     assert_eq!(event_count(&transport.bodies()[0]), 20);
     client.shutdown_owned().unwrap();
+}
+
+fn rate_limited(retry_after: Option<Duration>, code: Option<&str>) -> TransportResponse {
+    TransportResponse {
+        retry_after,
+        error_code: code.map(str::to_string),
+        ..TransportResponse::new(429)
+    }
+}
+
+fn wait_for_retry(client: &LogBrewClient) -> Duration {
+    wait_until(Duration::from_secs(1), || {
+        client.delivery_health().last_outcome == DeliveryOutcome::RetryScheduled
+    });
+    let health = client.delivery_health();
+    assert_eq!(health.pause_reason, DeliveryPauseReason::None);
+    assert_eq!(health.pending_events, 1);
+    health.next_retry_delay
+}
+
+#[test]
+fn retry_after_seconds_waits_then_resends_the_same_batch_without_an_app_call() {
+    // Retry-After: 1 (delta-seconds) from a 429 response.
+    let transport =
+        SharedTransport::responses(vec![Ok(rate_limited(Some(Duration::from_secs(1)), None))]);
+    let mut client = automatic_client(transport.clone(), config(Duration::from_millis(20), 1));
+    queue_log(&mut client, "evt_rate_limited");
+
+    let delay = wait_for_retry(&client);
+    assert!(delay >= Duration::from_secs(1) && delay <= Duration::from_millis(1_100));
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(transport.bodies().len(), 1);
+
+    wait_until(Duration::from_secs(3), || client.pending_events() == 0);
+    let bodies = transport.bodies();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0], bodies[1]);
+    assert_eq!(client.delivery_health().consecutive_failures, 0);
+}
+
+#[test]
+fn rate_limited_code_without_retry_after_uses_bounded_backoff() {
+    let code = Some("rate_limited");
+    let transport = SharedTransport::responses(vec![
+        Ok(rate_limited(None, code)),
+        Ok(rate_limited(None, code)),
+    ]);
+    let mut client = automatic_client(transport, config(Duration::from_millis(20), 1));
+    queue_log(&mut client, "evt_rate_limited_code");
+
+    let delay = wait_for_retry(&client);
+    assert!(delay >= Duration::from_secs(1) && delay <= Duration::from_millis(1_100));
+    let error = client.flush_owned().unwrap_err();
+    assert_eq!(error.code, "quota_exhausted");
+    assert_eq!(
+        client.delivery_health().last_outcome,
+        DeliveryOutcome::RetryScheduled
+    );
+}
+
+#[test]
+fn usage_limit_exceeded_pauses_even_with_retry_after() {
+    let transport = SharedTransport::responses(vec![Ok(rate_limited(
+        Some(Duration::from_secs(1)),
+        Some("usage_limit_exceeded"),
+    ))]);
+    let mut client = automatic_client(transport.clone(), config(Duration::from_millis(20), 1));
+    queue_log(&mut client, "evt_usage_limit");
+
+    wait_until(Duration::from_secs(1), || {
+        client.delivery_health().pause_reason == DeliveryPauseReason::Quota
+    });
+    let health = client.delivery_health();
+    assert_eq!(health.last_outcome, DeliveryOutcome::Paused);
+    assert_eq!(health.next_retry_delay, Duration::ZERO);
+    thread::sleep(Duration::from_millis(1_200));
+    assert_eq!(transport.bodies().len(), 1);
+}
+
+#[test]
+fn rate_limit_wait_is_bounded_between_one_second_and_one_hour() {
+    for (retry_after, minimum, maximum) in [
+        (Duration::ZERO, 1_000, 1_100),
+        (Duration::from_secs(7_200), 3_600_000, 3_600_000),
+    ] {
+        let transport = SharedTransport::responses(vec![Ok(rate_limited(Some(retry_after), None))]);
+        let mut client = automatic_client(transport, config(Duration::from_millis(20), 1));
+        queue_log(&mut client, "evt_rate_limit_bounds");
+
+        let delay = wait_for_retry(&client);
+        assert!(delay >= Duration::from_millis(minimum));
+        assert!(delay <= Duration::from_millis(maximum));
+    }
 }

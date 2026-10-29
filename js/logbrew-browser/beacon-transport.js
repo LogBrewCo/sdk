@@ -1,4 +1,5 @@
 import { SdkError, TransportError } from "@logbrew/sdk";
+import { transportResponse } from "./rate-limit-response.js";
 
 const DEFAULT_MAX_BEACON_BODY_BYTES = 60 * 1024;
 
@@ -73,10 +74,7 @@ async function sendWithFetch(fetchImpl, endpoint, body, keepalive) {
       keepalive,
       method: "POST"
     });
-    const retryAfterMs = retryAfterMsFromHeaders(response.headers);
-    return retryAfterMs === undefined
-      ? { statusCode: response.status, attempts: 1, queued: false }
-      : { statusCode: response.status, attempts: 1, queued: false, retryAfterMs };
+    return { ...(await transportResponse(response)), queued: false };
   } catch (error) {
     throw TransportError.network(`browser beacon fallback fetch failed: ${errorMessage(error)}`);
   }
@@ -103,26 +101,6 @@ function defaultSendBeacon() {
   return typeof navigatorObject?.sendBeacon === "function"
     ? navigatorObject.sendBeacon.bind(navigatorObject)
     : undefined;
-}
-
-function retryAfterMsFromHeaders(headers) {
-  if (!headers || typeof headers.get !== "function") {
-    return undefined;
-  }
-  return retryAfterMsFromHeader(headers.get("retry-after"));
-}
-
-function retryAfterMsFromHeader(value, now = Date.now()) {
-  if (typeof value !== "string" || value.trim() === "") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (/^\d+$/u.test(trimmed)) {
-    const milliseconds = Number(trimmed) * 1000;
-    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
-  }
-  const timestamp = Date.parse(trimmed);
-  return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : undefined;
 }
 
 function utf8ByteLength(value) {

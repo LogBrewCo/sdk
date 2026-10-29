@@ -744,10 +744,8 @@ impl ClientInner {
     ) -> DeliveryResult {
         let Some(snapshot_end) = snapshot_end else {
             return DeliveryResult::Accepted(TransportResponse {
-                status_code: 204,
                 attempts: 0,
-                batches: 0,
-                accepted_events: 0,
+                ..TransportResponse::new(204)
             });
         };
         let mut totals = DeliveryTotals::default();
@@ -758,10 +756,10 @@ impl ClientInner {
                 Ok(Some(prefix)) => prefix,
                 Ok(None) => {
                     return DeliveryResult::Accepted(TransportResponse {
-                        status_code: final_status,
                         attempts: totals.attempts,
                         batches: totals.batches,
                         accepted_events: totals.accepted_events,
+                        ..TransportResponse::new(final_status)
                     });
                 }
                 Err(error) => {
@@ -804,12 +802,21 @@ impl ClientInner {
                         });
                     }
                     Ok(response) if response.status_code == 429 => {
+                        let code = response.error_code.as_deref();
+                        let timed = code != Some("usage_limit_exceeded")
+                            && (response.retry_after.is_some() || code == Some("rate_limited"));
+                        self.state_even_if_poisoned().rate_limit_wait =
+                            timed.then_some(response.retry_after);
                         return DeliveryResult::Failed(DeliveryFailure {
                             error: SdkError::new(
                                 "quota_exhausted",
                                 "transport temporarily rejected delivery",
                             ),
-                            category: DeliveryCodeCategory::Rejected,
+                            category: if timed {
+                                DeliveryCodeCategory::Server
+                            } else {
+                                DeliveryCodeCategory::Rejected
+                            },
                             totals,
                         });
                     }
@@ -896,6 +903,10 @@ impl ClientInner {
         self.state_even_if_poisoned().last_code
     }
 
+    fn rate_limit_wait(&self) -> Option<Option<Duration>> {
+        self.state_even_if_poisoned().rate_limit_wait
+    }
+
     fn record_automatic_outcome(&self, outcome: DeliveryOutcome) {
         self.state_even_if_poisoned().last_outcome = outcome;
     }
@@ -930,6 +941,8 @@ struct ClientState {
     accepted_events: u64,
     last_outcome: DeliveryOutcome,
     last_code: DeliveryCodeCategory,
+    /// Set when the last delivery got a timed `429`, holding its readable `Retry-After`.
+    rate_limit_wait: Option<Option<Duration>>,
 }
 
 impl ClientState {
@@ -946,6 +959,7 @@ impl ClientState {
             accepted_events: 0,
             last_outcome: DeliveryOutcome::Idle,
             last_code: DeliveryCodeCategory::None,
+            rate_limit_wait: None,
         }
     }
 
@@ -969,6 +983,7 @@ impl ClientState {
         }
         self.delivery_in_flight = true;
         self.closing = close_on_success;
+        self.rate_limit_wait = None;
         Ok(())
     }
 

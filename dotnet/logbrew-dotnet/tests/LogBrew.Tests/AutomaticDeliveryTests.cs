@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -30,7 +32,13 @@ internal static class AutomaticDeliveryTests
         MalformedTransportFailureDoesNotEscapeCapture();
         DefaultIntervalDeliversASingleEventWithinAboutOneSecond();
         DefaultIntervalSendsABurstAsOneRequest();
-        return 15;
+        RateLimitRetryAfterWaitsThenResumes();
+        RateLimitedCodeWithoutRetryAfterWaits();
+        UsageLimitPausesEvenWithRetryAfter();
+        RateLimitWaitBounds();
+        HttpTransportReadsRateLimitHeaderAndBoundedCode();
+        HttpDateRetryAfterWaitsThenResumes();
+        return 21;
     }
 
     private static AutomaticDeliveryOptions Options(
@@ -368,6 +376,126 @@ internal static class AutomaticDeliveryTests
         AssertTrue(client.PendingEvents() == 1, "malformed transport lost event");
     }
 
+    private static void RateLimitRetryAfterWaitsThenResumes()
+    {
+        var transport = new ControlledTransport(new TransportResponse(429, 1, TimeSpan.FromSeconds(1), null), 202, 202);
+        var client = AutomaticClient(transport, Options(threshold: 1));
+        client.Log("evt_rate_limited", Timestamp, LogAttributes.Create("rate limited", "info"));
+        AssertTrue(transport.WaitForRequests(1, TimeSpan.FromSeconds(2)), "rate limited request missing");
+        AssertTrue(WaitUntil(() => client.DeliveryHealth().Activity == DeliveryActivityState.Retrying, TimeSpan.FromSeconds(1)), "Retry-After did not schedule a wait");
+        var waiting = client.DeliveryHealth();
+        AssertTrue(waiting.Lifecycle == DeliveryLifecycleState.Running, "Retry-After wait paused delivery");
+        AssertTrue(waiting.PauseReason == DeliveryPauseReason.None, "Retry-After wait set a pause reason");
+        AssertTrue(waiting.RetrySource == DeliveryRetrySource.Server, "Retry-After wait source changed");
+        AssertTrue(waiting.RetryDelayMilliseconds >= 1000 && waiting.RetryDelayMilliseconds <= 1100, "Retry-After wait delay out of range");
+
+        client.Log("evt_rate_limited_later", Timestamp, LogAttributes.Create("later", "info"));
+        AssertTrue(!transport.WaitForRequests(2, TimeSpan.FromMilliseconds(500)), "capture cut the rate limit wait short");
+        AssertTrue(transport.WaitForRequests(3, TimeSpan.FromSeconds(3)), "rate limit wait did not resume on its own");
+        AssertTrue(transport.Bodies[0] == transport.Bodies[1], "rate limited batch changed");
+        AssertTrue(!transport.Bodies[1].Contains("evt_rate_limited_later", StringComparison.Ordinal), "later capture entered the waiting batch");
+        AssertTrue(transport.Bodies[2].Contains("evt_rate_limited_later", StringComparison.Ordinal), "later capture was not retained");
+        AssertTrue(transport.RequestTimes[1] - transport.RequestTimes[0] >= TimeSpan.FromMilliseconds(950), "Retry-After wait was not honored");
+        AssertTrue(client.Shutdown().StatusCode == 204, "rate limited client shutdown failed");
+    }
+
+    private static void RateLimitedCodeWithoutRetryAfterWaits()
+    {
+        var transport = new ControlledTransport(new TransportResponse(429, 1, null, "rate_limited"), 202);
+        var client = AutomaticClient(transport, Options(threshold: 1));
+        client.Log("evt_rate_limited_code", Timestamp, LogAttributes.Create("rate limited code", "info"));
+        AssertTrue(WaitUntil(() => client.DeliveryHealth().Activity == DeliveryActivityState.Retrying, TimeSpan.FromSeconds(2)), "rate_limited did not schedule a wait");
+        var waiting = client.DeliveryHealth();
+        AssertTrue(waiting.RetrySource == DeliveryRetrySource.Local, "rate_limited wait did not use local backoff");
+        AssertTrue(waiting.RetryDelayMilliseconds >= 1000 && waiting.RetryDelayMilliseconds <= 1100, "rate_limited backoff was not raised to 1 s");
+        AssertTrue(transport.WaitForRequests(2, TimeSpan.FromSeconds(3)), "rate_limited wait did not resume on its own");
+        AssertTrue(transport.RequestTimes[1] - transport.RequestTimes[0] >= TimeSpan.FromMilliseconds(950), "rate_limited wait was shorter than 1 s");
+        AssertTrue(WaitUntil(() => client.PendingEvents() == 0, TimeSpan.FromSeconds(1)), "rate_limited wait did not drain");
+
+        AssertTrue(client.Shutdown().StatusCode == 204, "rate_limited client shutdown failed");
+
+        var flushClient = AutomaticClient(new ControlledTransport(202), Options(threshold: 100, interval: TimeSpan.FromSeconds(10)));
+        flushClient.Log("evt_rate_limited_flush", Timestamp, LogAttributes.Create("flush", "info"));
+        ExpectSdkError(
+            "transport_error",
+            () => flushClient.Flush(new ControlledTransport(new TransportResponse(429, 1, null, "rate_limited"))));
+        flushClient.Shutdown();
+    }
+
+    private static void UsageLimitPausesEvenWithRetryAfter()
+    {
+        var transport = new ControlledTransport(new TransportResponse(429, 1, TimeSpan.FromSeconds(1), "usage_limit_exceeded"), 202);
+        var client = AutomaticClient(transport, Options(threshold: 1));
+        client.Log("evt_usage_limit", Timestamp, LogAttributes.Create("usage limit", "info"));
+        AssertTrue(WaitUntil(() => client.DeliveryHealth().Lifecycle == DeliveryLifecycleState.Paused, TimeSpan.FromSeconds(2)), "usage_limit_exceeded did not pause");
+        AssertTrue(client.DeliveryHealth().PauseReason == DeliveryPauseReason.Quota, "usage_limit_exceeded pause reason changed");
+        AssertTrue(!transport.WaitForRequests(2, TimeSpan.FromMilliseconds(1300)), "usage_limit_exceeded resumed without recovery");
+        client.RecoverAutomaticDelivery();
+        AssertTrue(transport.WaitForRequests(2, TimeSpan.FromSeconds(2)), "usage limit recovery did not send");
+        AssertTrue(client.Shutdown().StatusCode == 204, "usage limit client shutdown failed");
+    }
+
+    private static void RateLimitWaitBounds()
+    {
+        var shortTransport = new ControlledTransport(new TransportResponse(429, 1, TimeSpan.Zero, null));
+        var shortClient = AutomaticClient(shortTransport, Options(threshold: 1));
+        shortClient.Log("evt_rate_limit_short", Timestamp, LogAttributes.Create("short", "info"));
+        AssertTrue(WaitUntil(() => shortClient.DeliveryHealth().RetryDelayMilliseconds > 0, TimeSpan.FromSeconds(2)), "short Retry-After did not wait");
+        var shortDelay = shortClient.DeliveryHealth().RetryDelayMilliseconds;
+        AssertTrue(shortDelay >= 1000 && shortDelay <= 1100, "Retry-After below 1 s was not raised to 1 s");
+        AssertTrue(shortClient.Shutdown().StatusCode == 202, "short wait shutdown failed");
+
+        var longTransport = new ControlledTransport(new TransportResponse(429, 1, TimeSpan.FromHours(2), null));
+        var longClient = AutomaticClient(longTransport, Options(threshold: 1));
+        longClient.Log("evt_rate_limit_long", Timestamp, LogAttributes.Create("long", "info"));
+        AssertTrue(WaitUntil(() => longClient.DeliveryHealth().RetryDelayMilliseconds > 0, TimeSpan.FromSeconds(2)), "long Retry-After did not wait");
+        AssertTrue(longClient.DeliveryHealth().RetryDelayMilliseconds == 3_600_000, "Retry-After above 1 h was not capped at 1 h");
+        AssertTrue(longClient.Shutdown().StatusCode == 202, "long wait shutdown failed");
+    }
+
+    private static void HttpTransportReadsRateLimitHeaderAndBoundedCode()
+    {
+        var future = DateTimeOffset.UtcNow.AddMinutes(5).ToString("r", CultureInfo.InvariantCulture);
+        using var handler = new RateLimitHandler(
+            (429, future, "{\"detail\":{\"items\":[1,true,null,\"x\"]},\"code\":\"rate_limited\"}"),
+            (429, "Tue, 02 Jun 2026 09:59:00 GMT", string.Empty),
+            (429, "7200", "{\"code\":\"usage_limit_exceeded\"}"),
+            (429, null, "{\"code\":\"rate_limited\",\"pad\":\"" + new string('x', 5000) + "\"}"),
+            (429, "soon", "code=rate_limited"),
+            (503, null, "{\"code\":\"rate_limited\"}"));
+        using var httpClient = new HttpClient(handler, disposeHandler: false);
+        using var transport = new HttpTransport(new HttpTransportOptions { Endpoint = new Uri("http://127.0.0.1:9/v1/events"), HttpClient = httpClient });
+
+        var dated = transport.Send(ApiKey, "{}");
+        var past = transport.Send(ApiKey, "{}");
+        var seconds = transport.Send(ApiKey, "{}");
+        var oversized = transport.Send(ApiKey, "{}");
+        var unreadable = transport.Send(ApiKey, "{}");
+        var serverError = transport.Send(ApiKey, "{}");
+
+        AssertTrue(dated.RetryAfter > TimeSpan.FromMinutes(4) && dated.Code == "rate_limited", "GMT Retry-After or bounded code was not read");
+        AssertTrue(past.RetryAfter == TimeSpan.Zero && past.Code == null, "past Retry-After date did not count as zero");
+        AssertTrue(seconds.RetryAfter == TimeSpan.FromSeconds(7200) && seconds.Code == "usage_limit_exceeded", "delta-seconds Retry-After was not read");
+        AssertTrue(oversized.RetryAfter == null && oversized.Code == null, "body over 4 KiB was read");
+        AssertTrue(unreadable.RetryAfter == null && unreadable.Code == null, "unreadable Retry-After or body was accepted");
+        AssertTrue(serverError.Code == null, "non-429 body was read");
+    }
+
+    private static void HttpDateRetryAfterWaitsThenResumes()
+    {
+        var retryAt = DateTimeOffset.UtcNow.AddSeconds(1).ToString("r", CultureInfo.InvariantCulture);
+        using var handler = new RateLimitHandler((429, retryAt, string.Empty), (202, null, string.Empty));
+        using var httpClient = new HttpClient(handler, disposeHandler: false);
+        using var transport = new HttpTransport(new HttpTransportOptions { Endpoint = new Uri("http://127.0.0.1:9/v1/events"), HttpClient = httpClient });
+        var client = AutomaticClient(transport, Options(threshold: 1));
+        client.Log("evt_http_date", Timestamp, LogAttributes.Create("http date", "info"));
+        AssertTrue(WaitUntil(() => client.DeliveryHealth().Activity == DeliveryActivityState.Retrying, TimeSpan.FromSeconds(2)), "HTTP date did not schedule a wait");
+        AssertTrue(client.DeliveryHealth().RetrySource == DeliveryRetrySource.Server, "HTTP date wait source changed");
+        AssertTrue(WaitUntil(() => client.PendingEvents() == 0, TimeSpan.FromSeconds(3)), "HTTP date wait did not resume on its own");
+        AssertTrue(handler.Requests == 2, "HTTP date wait sent an unexpected request count");
+        client.Shutdown();
+    }
+
     private static string EventId(string prefix, int index)
     {
         return prefix + "_" + index.ToString("D4", CultureInfo.InvariantCulture);
@@ -410,6 +538,47 @@ internal static class AutomaticDeliveryTests
         if (!condition)
         {
             throw new InvalidOperationException(message);
+        }
+    }
+
+    private sealed class RateLimitHandler : HttpMessageHandler
+    {
+        private readonly object gate = new object();
+        private readonly Queue<(int Status, string? RetryAfter, string Body)> responses;
+        private int requests;
+
+        internal RateLimitHandler(params (int Status, string? RetryAfter, string Body)[] responses)
+        {
+            this.responses = new Queue<(int Status, string? RetryAfter, string Body)>(responses);
+        }
+
+        internal int Requests
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return requests;
+                }
+            }
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            (int Status, string? RetryAfter, string Body) next;
+            lock (gate)
+            {
+                requests++;
+                next = responses.Count == 0 ? (202, null, string.Empty) : responses.Dequeue();
+            }
+
+            var response = new HttpResponseMessage((HttpStatusCode)next.Status) { Content = new StringContent(next.Body) };
+            if (next.RetryAfter != null)
+            {
+                response.Headers.TryAddWithoutValidation("Retry-After", next.RetryAfter);
+            }
+
+            return Task.FromResult(response);
         }
     }
 

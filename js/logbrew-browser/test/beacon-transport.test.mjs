@@ -53,6 +53,38 @@ test("beacon transport queues a headerless browser beacon envelope with the clie
   }
 });
 
+test("browser fetch transport reads Retry-After (seconds or GMT date) and a bounded 429 code", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  try {
+    const cases = [
+      [{ "retry-after": "30" }, JSON.stringify({ code: "rate_limited" }), { retryAfterMs: 30_000, errorCode: "rate_limited" }],
+      [{ "retry-after": new Date(Date.now() + 60_000).toUTCString() }, "", {}],
+      [{ "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" }, "", { retryAfterMs: 0 }],
+      [{ "retry-after": "5, 6" }, JSON.stringify({ code: "usage_limit_exceeded" }), { errorCode: "usage_limit_exceeded" }],
+      [{}, JSON.stringify({ code: "rate_limited", pad: "x".repeat(5000) }), {}],
+      [{}, JSON.stringify({ code: "private detail" }), {}]
+    ];
+    for (const [headers, body, expected] of cases) {
+      const transport = imported.createFetchTransport({
+        endpoint: ENDPOINT,
+        fetchImpl: async () => ({
+          headers: new globalThis.Headers({ ...headers, "content-length": String(body.length) }),
+          status: 429,
+          text: async () => body
+        })
+      });
+      const result = await transport.send(CLIENT_KEY, "{}");
+      if (headers["retry-after"]?.endsWith("GMT") && expected.retryAfterMs === undefined) {
+        assert.ok(result.retryAfterMs > 50_000 && result.retryAfterMs <= 60_000);
+        delete result.retryAfterMs;
+      }
+      assert.deepEqual(result, { statusCode: 429, attempts: 1, ...expected });
+    }
+  } finally {
+    await removeTempDir();
+  }
+});
+
 test("beacon transport falls back to fetch when beacon is refused, unavailable, or oversized", async () => {
   const { imported, removeTempDir } = await importBrowserPackage();
   const { createBeaconTransport } = imported;

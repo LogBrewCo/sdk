@@ -43,6 +43,7 @@ try {
       "pino-instrumentation.test.js",
       "breadcrumbs.test.js",
       "exit-flush.test.js",
+      "fetch-transport.test.js",
       "process-errors.test.js",
       "request-tracing.test.js",
       "runtime-context.test.js",

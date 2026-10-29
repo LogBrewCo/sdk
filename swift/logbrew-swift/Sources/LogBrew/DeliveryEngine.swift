@@ -25,10 +25,12 @@ final class DeliveryEngine: @unchecked Sendable {
         case accepted(statusCode: Int, attempts: Int)
         case retryable(attempts: Int, error: SdkError)
         case terminal(reason: DeliveryPauseReason, attempts: Int, error: SdkError)
+        case rateLimited(retryAfter: TimeInterval?, attempts: Int, error: SdkError)
 
         var attempts: Int {
             switch self {
-            case let .accepted(_, attempts), let .retryable(attempts, _), let .terminal(_, attempts, _):
+            case let .accepted(_, attempts), let .retryable(attempts, _), let .terminal(_, attempts, _),
+                 let .rateLimited(_, attempts, _):
                 attempts
             }
         }
@@ -102,6 +104,10 @@ final class DeliveryEngine: @unchecked Sendable {
                 consecutiveFailures: consecutiveFailures,
                 lastOutcome: lastOutcome,
                 pauseReason: pauseReason,
+                nextRetryDelay: state == .retrying ? nextWakeNanoseconds.map { deadline in
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    return TimeInterval(deadline > now ? deadline - now : 0) / 1_000_000_000
+                } : nil,
             )
         }
     }

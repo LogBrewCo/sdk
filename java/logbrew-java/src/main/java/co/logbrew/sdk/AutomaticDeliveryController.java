@@ -373,12 +373,16 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         RetryAfterDirective retryAfterDirective
     ) {
         consecutiveFailures = saturatedIncrement(consecutiveFailures);
+        if (failureKind == AutomaticDeliveryTransport.FailureKind.RATE_LIMITED) {
+            scheduleRateLimitWaitLocked(retryAfterDirective);
+            return;
+        }
         if (failureKind == AutomaticDeliveryTransport.FailureKind.RETRYABLE
             && retryAttempts < options.maxRetryAttempts()) {
             retryAttempts++;
             lastOutcome = DeliveryHealth.Outcome.RETRYABLE_FAILURE;
             pauseReason = DeliveryHealth.PauseReason.NONE;
-            long clientDelayMillis = retryDelayLocked();
+            long clientDelayMillis = retryDelayLocked(retryAttempts);
             long delayMillis = clientDelayMillis;
             retryDelaySource = DeliveryHealth.RetryDelaySource.CLIENT;
             if (retryAfterDirective.outcome() == RetryAfterDirective.Outcome.ACCEPTED) {
@@ -400,6 +404,24 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         pauseTerminalLocked(failureKind);
     }
 
+    /** Waits out a rate limit, then resends the same frozen batch without an application call. */
+    private void scheduleRateLimitWaitLocked(RetryAfterDirective retryAfterDirective) {
+        boolean server = retryAfterDirective.outcome() == RetryAfterDirective.Outcome.ACCEPTED;
+        long maximum = AutomaticDeliveryOptions.MAX_SCHEDULE_DELAY.toMillis();
+        long delayMillis = server ? retryAfterDirective.delayMillis() : retryDelayLocked(consecutiveFailures);
+        delayMillis = Math.min(Math.max(delayMillis, 1_000L), maximum);
+        long jittered = jitter.select(delayMillis, delayMillis + delayMillis / 10L);
+        if (server) {
+            acceptedServerRetryHints = saturatedAdd(acceptedServerRetryHints, 1L);
+        }
+        lastOutcome = DeliveryHealth.Outcome.RETRYABLE_FAILURE;
+        pauseReason = DeliveryHealth.PauseReason.NONE;
+        retryDelaySource = server
+            ? DeliveryHealth.RetryDelaySource.SERVER
+            : DeliveryHealth.RetryDelaySource.CLIENT;
+        scheduleSafelyLocked(Math.min(Math.max(jittered, delayMillis), maximum), DeliveryHealth.Activity.RETRYING);
+    }
+
     private void recordTerminalLocked(AutomaticDeliveryTransport.FailureKind failureKind) {
         consecutiveFailures = saturatedIncrement(consecutiveFailures);
         pauseTerminalLocked(failureKind);
@@ -418,7 +440,8 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         lastOutcome = DeliveryHealth.Outcome.TERMINAL_FAILURE;
         if (failureKind == AutomaticDeliveryTransport.FailureKind.AUTHENTICATION) {
             pauseReason = DeliveryHealth.PauseReason.AUTHENTICATION;
-        } else if (failureKind == AutomaticDeliveryTransport.FailureKind.QUOTA) {
+        } else if (failureKind == AutomaticDeliveryTransport.FailureKind.QUOTA
+            || failureKind == AutomaticDeliveryTransport.FailureKind.RATE_LIMITED) {
             pauseReason = DeliveryHealth.PauseReason.QUOTA;
         } else if (failureKind == AutomaticDeliveryTransport.FailureKind.RETRYABLE) {
             pauseReason = DeliveryHealth.PauseReason.RETRY_EXHAUSTED;
@@ -442,9 +465,9 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
     }
 
-    private long retryDelayLocked() {
+    private long retryDelayLocked(int attempts) {
         long cap = options.initialRetryDelayMillis();
-        for (int attempt = 1; attempt < retryAttempts; attempt++) {
+        for (int attempt = 1; attempt < attempts; attempt++) {
             if (cap >= options.maxRetryDelayMillis() / 2L) {
                 cap = options.maxRetryDelayMillis();
                 break;

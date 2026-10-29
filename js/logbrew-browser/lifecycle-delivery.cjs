@@ -104,7 +104,7 @@ function isTerminalLifecycleError(error) {
     return false;
   }
   return error.code === "unauthenticated"
-    || error.code === "rate_limited"
+    || (error.code === "rate_limited" && error.retryable !== true)
     || (error.code === "transport_error" && error.retryable !== true)
     || error.retryable === false;
 }

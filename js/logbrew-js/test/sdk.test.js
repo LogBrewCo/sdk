@@ -863,10 +863,10 @@ test("automatic authentication failure pauses retained work without a retry loop
   assert.equal(Object.hasOwn(authenticationHealth, "statusCode"), false);
 });
 
-test("automatic rate limit pauses until an explicit successful flush", async (t) => {
+test("automatic usage_limit_exceeded pauses until an explicit successful flush, even with Retry-After", async (t) => {
   const timers = fakeDeliveryTimers(t);
   const transport = new RecordingTransport([
-    { statusCode: 429, retryAfterMs: 120_000 },
+    { statusCode: 429, retryAfterMs: 120_000, errorCode: "usage_limit_exceeded" },
     { statusCode: 202 }
   ]);
   const client = sampleClient({
@@ -894,6 +894,52 @@ test("automatic rate limit pauses until an explicit successful flush", async (t)
   assert.equal(client.deliveryHealth().consecutiveFailures, 0);
   assert.equal(client.deliveryHealth().retryDelayMs, 0);
 });
+
+test("automatic 429 without Retry-After or a code pauses like before", async (t) => {
+  fakeDeliveryTimers(t);
+  const transport = new RecordingTransport([{ statusCode: 429 }]);
+  const client = sampleClient({ deliveryQueueThreshold: 1, transport });
+
+  client.log("evt_plain_429", "2026-06-02T10:00:00Z", { level: "info", message: "bounded" });
+  await waitForCondition(() => client.deliveryHealth().failures === 1, "rate limit was not recorded");
+
+  assert.equal(client.deliveryHealth().pausedReason, "rate_limit");
+  assert.equal(client.deliveryHealth().scheduled, false);
+});
+
+for (const [scripted, random, expectedDelay] of [
+  [{ statusCode: 429, retryAfterMs: 30_000 }, 0, 30_000],
+  [{ statusCode: 429, retryAfterMs: 30_000 }, 0.999999, 33_000],
+  [{ statusCode: 429, retryAfterMs: 0 }, 0, 1000],
+  [{ statusCode: 429, retryAfterMs: 86_400_000 }, 0.999999, 3_600_000],
+  [{ statusCode: 429, errorCode: "rate_limited" }, 0, 1000]
+]) {
+  test(`automatic 429 ${JSON.stringify(scripted)} waits ${expectedDelay} ms, then resends the same batch`, async (st) => {
+    const timers = fakeDeliveryTimers(st);
+    replaceMethod(st, Math, "random", () => random);
+    const transport = new RecordingTransport([scripted, { statusCode: 202 }]);
+    const client = sampleClient({ deliveryQueueThreshold: 1, transport });
+
+    client.log("evt_rate_limited", "2026-06-02T10:00:00Z", { level: "info", message: "bounded" });
+    await waitForCondition(() => client.deliveryHealth().failures === 1, "rate limit was not recorded");
+
+    assert.equal(client.deliveryHealth().pausedReason, "none");
+    assert.equal(client.deliveryHealth().deliveryState, "retrying");
+    assert.equal(client.deliveryHealth().retryDelayMs, expectedDelay);
+    const retryTimer = timers.findLast((timer) => !timer.cleared);
+    assert.equal(retryTimer.delay, expectedDelay);
+    client.log("evt_during_wait", "2026-06-02T10:00:01Z", { level: "info", message: "queued" });
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+    assert.equal(transport.sentBodies.length, 1);
+
+    retryTimer.callback();
+    await waitForCondition(() => client.pendingEvents() === 0, "rate-limited batch did not resend");
+    assert.equal(transport.sentBodies[0], transport.sentBodies[1]);
+    assert.equal(client.deliveryHealth().consecutiveFailures, 0);
+  });
+}
 
 test("manual flush clears backoff armed while it waited behind automatic delivery", async (t) => {
   const timers = fakeDeliveryTimers(t);
@@ -2452,6 +2498,7 @@ test("rate-limited response surfaces retry-after without retrying", async () => 
   assert.equal(error instanceof SdkError, true);
   assert.equal(error.code, "rate_limited");
   assert.equal(error.retryAfterMs, 120_000);
+  assert.equal(error.retryable, true);
   assert.equal(error.message, "transport rate limited the batch");
   assert.equal(client.pendingEvents(), EXPECTED_EVENT_COUNT);
   assert.equal(transport.sentBodies.length, 1);

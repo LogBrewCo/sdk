@@ -878,6 +878,43 @@ static void LBWExerciseTraceHelpers(void) {
   LBWAssert([LBWTrace currentContext] == nil, @"trace scope close failed");
 }
 
+LBWTransportResponse *_Nonnull LBWHTTPTransportResponse(NSInteger statusCode,
+                                                        NSString *_Nullable retryAfter,
+                                                        NSData *_Nullable body,
+                                                        NSDate *_Nonnull now);
+
+static void LBWExerciseHTTPRateLimitParsing(void) {
+  NSString *date = @"Wed, 21 Oct 2026 07:28:00 GMT";
+  NSDate *now = [NSDate dateWithTimeIntervalSince1970:1792567680.0 - 120.0];
+  NSData *codeBody = [@"{\"code\":\"rate_limited\",\"detail\":\"x\"}" dataUsingEncoding:NSUTF8StringEncoding];
+  LBWTransportResponse *response = LBWHTTPTransportResponse(429, date, codeBody, now);
+  LBWAssert([response.retryAfter doubleValue] == 120.0, @"Retry-After HTTP date failed");
+  LBWAssert([response.errorCode isEqualToString:@"rate_limited"], @"429 body code failed");
+  response = LBWHTTPTransportResponse(429, date, nil, [now dateByAddingTimeInterval:600.0]);
+  LBWAssert(response.retryAfter != nil && [response.retryAfter doubleValue] == 0.0, @"past Retry-After date failed");
+  response = LBWHTTPTransportResponse(429, @" 30 ", nil, now);
+  LBWAssert([response.retryAfter doubleValue] == 30.0, @"Retry-After seconds failed");
+  for (NSString *unreadable in @[ @"", @"-1", @"1.5", @"5, 6", @"soon", @"Wed, 21 Oct 2026 07:28:00 UTC" ]) {
+    LBWAssert(LBWHTTPTransportResponse(429, unreadable, nil, now).retryAfter == nil, @"unreadable Retry-After failed");
+  }
+  NSMutableString *oversized = [NSMutableString stringWithString:@"{\"code\":\"rate_limited\",\"padding\":\""];
+  for (NSUInteger index = 0U; index < 4096U; index += 1U) {
+    [oversized appendString:@"x"];
+  }
+  [oversized appendString:@"\"}"];
+  response = LBWHTTPTransportResponse(429, nil, [oversized dataUsingEncoding:NSUTF8StringEncoding], now);
+  LBWAssert(response.errorCode == nil, @"oversized 429 body was read");
+  NSData *usageBody = [@"{\"code\":\"usage_limit_exceeded\"}" dataUsingEncoding:NSUTF8StringEncoding];
+  LBWAssert([LBWHTTPTransportResponse(429, nil, usageBody, now).errorCode isEqualToString:@"usage_limit_exceeded"],
+            @"usage_limit_exceeded body code failed");
+  LBWAssert(LBWHTTPTransportResponse(429, nil, [@"not json" dataUsingEncoding:NSUTF8StringEncoding], now).errorCode ==
+                nil,
+            @"non-JSON 429 body failed");
+  response = LBWHTTPTransportResponse(503, @"5", codeBody, now);
+  LBWAssert(response.statusCode == 503 && response.retryAfter == nil && response.errorCode == nil,
+            @"non-429 response was parsed");
+}
+
 static void LBWExerciseHTTPTransportValidation(void) {
   NSError *error = nil;
   LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:@"ftp://example.com/v1/events"
@@ -928,6 +965,7 @@ int main(void) {
     LBWExerciseTimelineHelpers();
     LBWExerciseTraceHelpers();
     LBWExerciseHTTPTransportValidation();
+    LBWExerciseHTTPRateLimitParsing();
   }
   return 0;
 }

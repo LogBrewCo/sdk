@@ -26,6 +26,8 @@ module LogBrew
     STATES = %w[idle running retrying paused stopped closing closed].freeze
     OUTCOMES = %w[none empty accepted retryable_failure terminal_failure stopped].freeze
     PAUSE_REASONS = %w[authentication quota validation nonretryable].freeze
+    RATE_LIMIT_MIN_WAIT = 1.0
+    RATE_LIMIT_MAX_WAIT = 3600.0
 
     attr_reader :transport
 
@@ -263,7 +265,7 @@ module LogBrew
           @state = "retrying"
           @last_outcome = "retryable_failure"
           @pause_reason = nil
-          @retry_delay = bounded_retry_delay
+          @retry_delay = failure_retry_delay(error)
           @retry_deadline = monotonic_time + @retry_delay
           ensure_worker if @observed_queue_count.positive?
           @condition.signal
@@ -406,7 +408,7 @@ module LogBrew
       @next_interval_deadline = nil
       if retryable_failure?(error)
         @pause_reason = nil
-        @retry_delay = bounded_retry_delay
+        @retry_delay = failure_retry_delay(error)
         @retry_deadline = monotonic_time + @retry_delay
         @state = "retrying"
         @condition.signal
@@ -453,6 +455,15 @@ module LogBrew
       return "validation" if error.is_a?(SdkError) && error.code == "validation_error"
 
       "nonretryable"
+    end
+
+    # A rate limit waits for Retry-After, or the usual backoff, kept within 1 s and 1 h plus up to 10% jitter.
+    def failure_retry_delay(error)
+      wait = error.respond_to?(:automatic_rate_limit) ? error.automatic_rate_limit : nil
+      return bounded_retry_delay if wait.nil?
+
+      delay = (wait.is_a?(Numeric) ? wait.to_f : bounded_retry_delay).clamp(RATE_LIMIT_MIN_WAIT, RATE_LIMIT_MAX_WAIT)
+      [delay + (Random.rand * delay * 0.1), RATE_LIMIT_MAX_WAIT].min
     end
 
     def bounded_retry_delay

@@ -233,6 +233,46 @@ test("terminal auth, quota, and validation outcomes pause until an explicit succ
   }
 });
 
+test("a rate_limited 429 with Retry-After does not pause later lifecycle sends", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  try {
+    const browserWindow = createBrowserWindow();
+    const requests = [];
+    const errors = [];
+    const context = imported.installLogBrewBrowser({
+      browserWindow,
+      captureGlobalErrors: false,
+      capturePageViews: false,
+      captureUnhandledRejections: false,
+      clientKey: CLIENT_KEY,
+      fetchImpl: async (url, init) => {
+        requests.push({ init, url });
+        return requests.length === 1
+          ? { headers: new globalThis.Headers({ "retry-after": "1" }), status: 429 }
+          : response(202);
+      },
+      flushOnOnline: false,
+      maxRetries: 0,
+      onCaptureError(error) {
+        errors.push(error);
+      }
+    });
+
+    queueLog(context.client, "evt_browser_rate_limited");
+    browserWindow.dispatchEvent({ type: "pagehide" });
+    await waitFor(() => errors.length === 1);
+    assert.equal(errors[0].code, "rate_limited");
+    assert.equal(errors[0].retryable, true);
+
+    browserWindow.dispatchEvent({ type: "pagehide" });
+    await waitFor(() => requests.length === 2);
+    await waitFor(() => context.client.pendingEvents() === 0);
+    context.uninstall();
+  } finally {
+    await removeTempDir();
+  }
+});
+
 test("oversized lifecycle bodies remain queued for explicit non-keepalive delivery", async () => {
   const { imported, removeTempDir } = await importBrowserPackage();
   const browserWindow = createBrowserWindow();
