@@ -1,0 +1,27 @@
+{
+  "benchmark": "ingest-and-query-latency",
+  "api": "https://api.logbrew.co",
+  "package": "@logbrew/node@0.1.20",
+  "node": "v22.18.0",
+  "pollIntervalMs": 200,
+  "rateLimitedRequests": 0,
+  "unit": "ms",
+  "captureToAcknowledged": {
+    "p50": 260,
+    "p99": 415,
+    "max": 424,
+    "samples": 100
+  },
+  "captureToReadable": {
+    "p50": 402,
+    "p99": 644,
+    "max": 646,
+    "samples": 100
+  },
+  "searchQuery": {
+    "p50": 132,
+    "p99": 207,
+    "max": 230,
+    "samples": 100
+  }
+}

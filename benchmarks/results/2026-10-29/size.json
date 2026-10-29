@@ -1,0 +1,20 @@
+{
+  "benchmark": "browser-bundle-size",
+  "package": "@logbrew/browser@0.1.15",
+  "esbuild": "0.28.2",
+  "unit": "bytes",
+  "rows": [
+    {
+      "setup": "errors",
+      "minified": 127601,
+      "gzip": 36522,
+      "brotli": 31609
+    },
+    {
+      "setup": "errors and tracing",
+      "minified": 177005,
+      "gzip": 48078,
+      "brotli": 41192
+    }
+  ]
+}

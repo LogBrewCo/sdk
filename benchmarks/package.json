@@ -1,0 +1,17 @@
+{
+  "name": "logbrew-sdk-benchmarks",
+  "private": true,
+  "type": "module",
+  "description": "Rerunnable size, overhead, and latency benchmarks for the LogBrew JavaScript SDKs.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@logbrew/browser": "0.1.15",
+    "@logbrew/node": "0.1.20",
+    "@logbrew/sdk": "0.1.35",
+    "esbuild": "0.28.2",
+    "web-vitals": "6.2.3"
+  }
+}
