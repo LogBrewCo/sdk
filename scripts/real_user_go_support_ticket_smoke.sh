@@ -183,8 +183,8 @@ readme = (module_dir / "README.md").read_text()
 for needle in (
     "CreateSupportTicketDraft",
     "SupportTicketDraftInput",
-    "support-ticket routes",
-    "does not send data, open a ticket",
+    "logbrew support create",
+    "It sends nothing.",
 ):
     if needle not in readme:
         raise SystemExit(f"missing README support-ticket guidance: {needle}")
