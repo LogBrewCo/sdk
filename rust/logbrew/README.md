@@ -408,7 +408,7 @@ If your app already uses `ureq`, enable LogBrew's `http` feature and let the hel
 
 ```toml
 [dependencies]
-logbrew = { version = "0.1", features = ["http"] }
+logbrew = { version = "0.2", features = ["http"] }
 ureq = "3"
 ```
 
@@ -432,7 +432,7 @@ If your app already uses `reqwest`, enable LogBrew's `reqwest` feature and pass 
 
 ```toml
 [dependencies]
-logbrew = { version = "0.1", features = ["reqwest"] }
+logbrew = { version = "0.2", features = ["reqwest"] }
 reqwest = "0.12"
 ```
 
@@ -452,7 +452,7 @@ If your app uses Hyper or another client built on `http::Request`/`http::Respons
 
 ```toml
 [dependencies]
-logbrew = { version = "0.1", features = ["hyper"] }
+logbrew = { version = "0.2", features = ["hyper"] }
 hyper = "1"
 ```
 
