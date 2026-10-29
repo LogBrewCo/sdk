@@ -1,12 +1,12 @@
 // Runs one Node.js measurement in a fresh process and prints one JSON line.
-// Usage: node node-child.mjs logbrew <error|span> <count> <warmup>
+// Usage: node node-child.mjs <logbrew|comparison> <error|span> <count> <warmup>
 import { Session } from "node:inspector/promises";
 import { runLoop } from "./loop.js";
 
-const [sdk, signal, countText, warmupText] = process.argv.slice(2);
+const [adapter, signal, countText, warmupText] = process.argv.slice(2);
 const count = Number(countText);
 const warmup = Number(warmupText);
-const bench = (await import(`./${sdk}-node.mjs`)).default;
+const bench = (await import(`./${adapter}-node.mjs`)).default;
 const nextTask = () =>
   new Promise((resolve) => {
     setImmediate(resolve);
