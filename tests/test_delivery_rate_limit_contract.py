@@ -73,7 +73,7 @@ def tracked_sources() -> list[str]:
         for path in output.splitlines()
         if Path(path).suffix in SOURCE_SUFFIXES
         and not TEST_PARTS.intersection(Path(path).parts)
-        and not path.startswith(("scripts/", "tools/", "tests/", ".github/"))
+        and not path.startswith(("benchmarks/", "scripts/", "tools/", "tests/", ".github/"))
     ]
 
 
