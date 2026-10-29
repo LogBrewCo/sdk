@@ -84,7 +84,11 @@ function cleanValue(value) {
   if (!trimmed || Array.from(trimmed).length > MAX_VALUE_LENGTH) {
     return undefined;
   }
-  return /[\u0000-\u001f\u007f-\u009f]/u.test(trimmed) ? undefined : trimmed;
+  const control = Array.from(trimmed).some((character) => {
+    const code = character.codePointAt(0);
+    return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
+  });
+  return control ? undefined : trimmed;
 }
 
 function parseUrl(value) {
