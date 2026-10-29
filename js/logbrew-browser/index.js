@@ -7,6 +7,7 @@ import {
   createIssueAttributesFromError,
   installBrowserBreadcrumbs
 } from "@logbrew/sdk";
+import { transportResponse } from "./rate-limit-response.js";
 import { createBeaconTransport } from "./beacon-transport.js";
 import { addBrowserAttributionContext, browserAttributionTags } from "./attribution.js";
 import { addBrowserRuntimeContext } from "./runtime-context.js";
@@ -182,10 +183,7 @@ export function createFetchTransport({
           keepalive,
           method: "POST"
         });
-        const retryAfterMs = retryAfterMsFromHeaders(response.headers);
-        return retryAfterMs === undefined
-          ? { statusCode: response.status, attempts: 1 }
-          : { statusCode: response.status, attempts: 1, retryAfterMs };
+        return await transportResponse(response);
       } catch (error) {
         throw TransportError.network(`fetch failed: ${errorMessage(error)}`);
       }
@@ -1341,30 +1339,6 @@ function utf8ByteLength(value) {
     return new TextEncoderConstructor().encode(text).byteLength;
   }
   return fallbackUtf8ByteLength(text);
-}
-
-function retryAfterMsFromHeaders(headers) {
-  if (!headers || typeof headers.get !== "function") {
-    return undefined;
-  }
-  return retryAfterMsFromHeader(headers.get("retry-after"));
-}
-
-function retryAfterMsFromHeader(value, now = Date.now()) {
-  if (typeof value !== "string" || value.trim() === "") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (/^\d+$/u.test(trimmed)) {
-    const seconds = Number(trimmed);
-    const milliseconds = seconds * 1000;
-    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
-  }
-  const timestamp = Date.parse(trimmed);
-  if (!Number.isFinite(timestamp)) {
-    return undefined;
-  }
-  return Math.max(0, timestamp - now);
 }
 
 function fallbackUtf8ByteLength(text) {

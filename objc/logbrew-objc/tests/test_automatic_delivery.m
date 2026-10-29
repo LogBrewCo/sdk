@@ -325,9 +325,126 @@ static void LBWExerciseAutomaticDelivery(void) {
   }
 }
 
+@interface LBWRateLimitTransport : NSObject <LBWTransport>
+
+@property(nonatomic, copy) NSArray<LBWTransportResponse *> *responses;
+@property(nonatomic) NSMutableArray<NSString *> *bodies;
+
+@end
+
+@implementation LBWRateLimitTransport
+
+- (LBWTransportResponse *)sendWithAPIKey:(NSString *)apiKey body:(NSString *)body error:(NSError **)error {
+  (void)apiKey;
+  (void)error;
+  @synchronized(self) {
+    if (self.bodies == nil) {
+      self.bodies = [NSMutableArray array];
+    }
+    [self.bodies addObject:body];
+    NSUInteger index = [self.bodies count] - 1U;
+    return index < [self.responses count] ? self.responses[index]
+                                          : [[LBWTransportResponse alloc] initWithStatusCode:202 attempts:1U];
+  }
+}
+
+- (NSUInteger)requestCount {
+  @synchronized(self) {
+    return [self.bodies count];
+  }
+}
+
+@end
+
+static LBWTransportResponse *LBWRateLimited(NSNumber *_Nullable retryAfter, NSString *_Nullable code) {
+  LBWTransportResponse *response = [[LBWTransportResponse alloc] initWithStatusCode:429 attempts:1U];
+  response.retryAfter = retryAfter;
+  response.errorCode = code;
+  return response;
+}
+
+static LBWClient *LBWStartRateLimitClient(LBWRateLimitTransport *transport, NSString *eventID) {
+  NSError *error = nil;
+  LBWClient *client = LBWNewClient();
+  LBWAutomaticDeliveryOptions *options = [[LBWAutomaticDeliveryOptions alloc] init];
+  options.interval = 0.05;
+  options.threshold = 1U;
+  options.retryBaseDelay = 0.01;
+  options.maxRetryDelay = 0.02;
+  LBWAssert([client startAutomaticDeliveryWithTransport:transport options:options error:&error],
+            @"rate-limit automatic start failed");
+  LBWAssert([client logWithID:eventID
+                    timestamp:@"2026-07-18T12:00:08Z"
+                   attributes:@{ @"message": @"rate limited", @"level": @"info" }
+                        error:&error],
+            @"rate-limit capture failed");
+  return client;
+}
+
+static BOOL LBWWaitForRequests(LBWRateLimitTransport *transport, NSUInteger count, NSTimeInterval timeout) {
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
+  while ([transport requestCount] < count && [[NSDate date] compare:deadline] == NSOrderedAscending) {
+    [NSThread sleepForTimeInterval:0.005];
+  }
+  return [transport requestCount] >= count;
+}
+
+static void LBWExerciseRateLimitedDelivery(void) {
+  NSError *error = nil;
+
+  // Retry-After seconds: timed wait, then automatic resend of the same batch.
+  LBWRateLimitTransport *seconds = [[LBWRateLimitTransport alloc] init];
+  seconds.responses = @[ LBWRateLimited(@1, nil) ];
+  LBWClient *secondsClient = LBWStartRateLimitClient(seconds, @"objc-rate-seconds");
+  LBWAssert(LBWWaitForDeliveryState(secondsClient, LBWDeliveryStateRetrying, 2.0), @"Retry-After did not wait");
+  LBWDeliveryHealth *health = secondsClient.deliveryHealth;
+  LBWAssert(health.pauseReason == LBWDeliveryPauseReasonNone, @"Retry-After paused delivery");
+  LBWAssert(health.nextRetryDelay >= 0.5 && health.nextRetryDelay <= 1.1, @"Retry-After delay failed");
+  LBWAssert(!LBWWaitForRequests(seconds, 2U, 0.5), @"Retry-After resent too early");
+  LBWAssert(LBWWaitForRequests(seconds, 2U, 2.0), @"Retry-After did not resume");
+  LBWAssert([seconds.bodies[0] isEqualToString:seconds.bodies[1]], @"Retry-After resent a different batch");
+  LBWAssert(LBWWaitForDeliveryState(secondsClient, LBWDeliveryStateRunning, 2.0) && secondsClient.pendingEvents == 0U,
+            @"Retry-After resume did not deliver");
+  LBWAssert([secondsClient shutdownOwnedTransportWithError:&error] != nil, @"Retry-After shutdown failed");
+
+  // code rate_limited without Retry-After: bounded backoff raised to 1 second; manual flush error kept.
+  LBWRateLimitTransport *code = [[LBWRateLimitTransport alloc] init];
+  code.responses = @[ LBWRateLimited(nil, @"rate_limited"), LBWRateLimited(nil, @"rate_limited") ];
+  LBWClient *codeClient = LBWStartRateLimitClient(code, @"objc-rate-code");
+  LBWAssert(LBWWaitForDeliveryState(codeClient, LBWDeliveryStateRetrying, 2.0), @"rate_limited did not wait");
+  health = codeClient.deliveryHealth;
+  LBWAssert(health.nextRetryDelay >= 0.5 && health.nextRetryDelay <= 1.1, @"rate_limited minimum wait failed");
+  LBWAssert([codeClient flushOwnedTransportWithError:&error] == nil &&
+                [error.userInfo[LBWErrorStableCodeKey] isEqualToString:@"quota_exceeded"] &&
+                [error.userInfo[LBWErrorRetryableKey] boolValue],
+            @"rate_limited manual error failed");
+  LBWAssert(codeClient.deliveryHealth.state == LBWDeliveryStateRetrying, @"rate_limited manual flush paused");
+  LBWAssert([codeClient shutdownOwnedTransportWithError:&error] != nil, @"rate_limited shutdown failed");
+
+  // usage_limit_exceeded pauses even with Retry-After.
+  LBWRateLimitTransport *usage = [[LBWRateLimitTransport alloc] init];
+  usage.responses = @[ LBWRateLimited(@1, @"usage_limit_exceeded") ];
+  LBWClient *usageClient = LBWStartRateLimitClient(usage, @"objc-rate-usage");
+  LBWAssert(LBWWaitForDeliveryState(usageClient, LBWDeliveryStatePaused, 2.0), @"usage_limit_exceeded did not pause");
+  LBWAssert(usageClient.deliveryHealth.pauseReason == LBWDeliveryPauseReasonQuota, @"usage limit pause reason failed");
+  LBWAssert(usageClient.deliveryHealth.nextRetryDelay == 0, @"usage limit scheduled a retry");
+  LBWAssert(!LBWWaitForRequests(usage, 2U, 1.2), @"usage limit resumed without recovery");
+  [usageClient stopAutomaticDelivery];
+
+  // Bounds: waits above 1 hour are capped at 1 hour.
+  LBWRateLimitTransport *capped = [[LBWRateLimitTransport alloc] init];
+  capped.responses = @[ LBWRateLimited(@7200, nil) ];
+  LBWClient *cappedClient = LBWStartRateLimitClient(capped, @"objc-rate-cap");
+  LBWAssert(LBWWaitForDeliveryState(cappedClient, LBWDeliveryStateRetrying, 2.0), @"capped Retry-After did not wait");
+  health = cappedClient.deliveryHealth;
+  LBWAssert(health.nextRetryDelay > 3599.0 && health.nextRetryDelay <= 3600.0, @"Retry-After 1 hour cap failed");
+  [cappedClient stopAutomaticDelivery];
+}
+
 int main(void) {
   @autoreleasepool {
     LBWExerciseAutomaticDelivery();
+    LBWExerciseRateLimitedDelivery();
   }
   return 0;
 }

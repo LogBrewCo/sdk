@@ -162,6 +162,7 @@ struct AutomaticDeliveryLifecycleTests {
                 consecutiveFailures: 6,
                 lastOutcome: .retryableFailure,
                 pauseReason: .retryExhausted,
+                nextRetryDelay: nil,
             ),
         )
         let lifecycleJSON = try #require(String(data: lifecycleData, encoding: .utf8))

@@ -91,6 +91,9 @@ const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 // One second matches the OpenTelemetry log processor default, so a lone event becomes readable quickly.
 const DEFAULT_DELIVERY_INTERVAL_MS = 1000;
 const MAX_DELIVERY_INTERVAL_MS = 60 * 1000;
+// A rate-limited batch waits from 1 second to 1 hour, plus up to 10 percent jitter, before it is sent again.
+const MIN_RATE_LIMIT_WAIT_MS = 1000;
+const MAX_RATE_LIMIT_WAIT_MS = 60 * 60 * 1000;
 const DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50;
 const MAX_CLIENT_REPORT_REASONS = 16;
 const MAX_CLIENT_REPORT_COUNT = 1_000_000_000;
@@ -208,9 +211,12 @@ class RecordingTransport {
     }
 
     const retryAfterMs = retryAfterMsOrUndefined(next.retryAfterMs);
-    return retryAfterMs === undefined
-      ? { statusCode: next.statusCode, attempts: 1 }
-      : { statusCode: next.statusCode, attempts: 1, retryAfterMs };
+    return {
+      statusCode: next.statusCode,
+      attempts: 1,
+      ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      ...(typeof next.errorCode === "string" ? { errorCode: next.errorCode } : {})
+    };
   }
 }
 
@@ -1101,6 +1107,13 @@ class LogBrewClient {
       return;
     }
     if (error instanceof SdkError && error.code === "rate_limited") {
+      if (error.retryable === true) {
+        this.automaticPauseReason = "none";
+        this.retryDelayMs = rateLimitWaitMs(
+          error.retryAfterMs ?? automaticRetryDelayMs(this.deliveryIntervalMs, this.consecutiveDeliveryFailures)
+        );
+        return;
+      }
       this.automaticPauseReason = "rate_limit";
       return;
     }
@@ -1151,7 +1164,9 @@ class LogBrewClient {
         }
         if (response.statusCode === 429) {
           throw new SdkError("rate_limited", "transport rate limited the batch", {
-            retryAfterMs: response.retryAfterMs
+            retryAfterMs: response.retryAfterMs,
+            retryable: response.errorCode !== "usage_limit_exceeded"
+              && (retryAfterMsOrUndefined(response.retryAfterMs) !== undefined || response.errorCode === "rate_limited")
           });
         }
         if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -1189,6 +1204,11 @@ function automaticRetryDelayMs(deliveryIntervalMs, consecutiveFailures) {
   const maximumDelay = Math.min(MAX_DELIVERY_INTERVAL_MS, deliveryIntervalMs * (2 ** exponent));
   const minimumDelay = Math.ceil(maximumDelay / 2);
   return minimumDelay + Math.floor(Math.random() * (maximumDelay - minimumDelay + 1));
+}
+
+function rateLimitWaitMs(delayMs) {
+  const bounded = Math.min(MAX_RATE_LIMIT_WAIT_MS, Math.max(MIN_RATE_LIMIT_WAIT_MS, delayMs));
+  return Math.min(MAX_RATE_LIMIT_WAIT_MS, bounded + Math.floor(Math.random() * (Math.floor(bounded / 10) + 1)));
 }
 
 function statusClass(statusCode) {

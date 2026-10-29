@@ -1,6 +1,8 @@
 package logbrew
 
 import (
+	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"strings"
@@ -21,11 +23,22 @@ const (
 	DeliveryBackoffOutcomeFallback  = "fallback"
 )
 
+// A rate-limited batch waits from 1 second to 1 hour before it is sent again.
+const (
+	minRateLimitWait       = time.Second
+	maxRateLimitWait       = time.Hour
+	rateLimitBodyLimit     = 4096
+	rateLimitCodeLimited   = "rate_limited"
+	rateLimitCodeExhausted = "usage_limit_exceeded"
+)
+
 type retryAfterDirective struct {
 	present bool
 	valid   bool
 	delay   time.Duration
 	clamped bool
+	// code is a known `code` from a 429 response body.
+	code string
 }
 
 type retryAfterTransport interface {
@@ -65,6 +78,38 @@ func parseRetryAfter(values []string, now time.Time, maximum time.Duration) retr
 	}
 	directive.delay = delay
 	return directive
+}
+
+// parseRateLimitRetryAfter reads Retry-After on a 429, where a past date counts as zero.
+func parseRateLimitRetryAfter(values []string, now time.Time) retryAfterDirective {
+	directive := parseRetryAfter(values, now, maxRateLimitWait)
+	if directive.present && !directive.valid && len(values) == 1 {
+		if _, err := time.Parse(http.TimeFormat, strings.Trim(values[0], " \t")); err == nil {
+			directive.valid = true
+		}
+	}
+	return directive
+}
+
+// readRateLimitCode reads at most 4 KiB of a 429 body, only to find a known code.
+func readRateLimitCode(body io.Reader) string {
+	data, err := io.ReadAll(io.LimitReader(body, rateLimitBodyLimit+1))
+	if err != nil || len(data) > rateLimitBodyLimit {
+		return ""
+	}
+	var parsed struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(data, &parsed) != nil || (parsed.Code != rateLimitCodeLimited && parsed.Code != rateLimitCodeExhausted) {
+		return ""
+	}
+	return parsed.Code
+}
+
+// rateLimitDelay bounds a rate-limit wait to 1 second through 1 hour, then adds up to 10 percent jitter.
+func rateLimitDelay(delay time.Duration, jitter func(time.Duration) time.Duration) time.Duration {
+	delay = min(max(delay, minRateLimitWait), maxRateLimitWait)
+	return min(delay+jitter(delay/10), maxRateLimitWait)
 }
 
 func parseRetryAfterSeconds(value string, maximum time.Duration) (time.Duration, bool, bool) {

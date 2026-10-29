@@ -4,7 +4,7 @@ use logbrew::{
     SdkError, SpanEvent, Traceparent, TraceparentSpanInput, TransportError,
 };
 #[cfg(feature = "http")]
-use logbrew::{HttpTransport, HttpTransportConfig, Transport};
+use logbrew::{AutomaticDeliveryConfig, HttpTransport, HttpTransportConfig, Transport};
 use serde_json::Value;
 #[cfg(feature = "http")]
 use std::io::{Read, Write};
@@ -96,6 +96,20 @@ struct LocalHttpIntake {
 #[cfg(feature = "http")]
 impl LocalHttpIntake {
     fn start(statuses: Vec<u16>) -> Self {
+        Self::start_raw(
+            statuses
+                .into_iter()
+                .map(|status| {
+                    format!(
+                        "HTTP/1.1 {status} {}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                        status_reason(status)
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn start_raw(responses: Vec<String>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("local intake should bind");
         let endpoint = format!(
             "http://{}/v1/events",
@@ -103,7 +117,7 @@ impl LocalHttpIntake {
         );
         let handle = thread::spawn(move || {
             let mut requests = Vec::new();
-            for status in statuses {
+            for response in responses {
                 let (mut stream, _) = listener.accept().expect("local intake should accept");
                 let mut bytes = Vec::new();
                 let mut chunk = [0; 1024];
@@ -155,11 +169,6 @@ impl LocalHttpIntake {
                     body,
                 });
 
-                let response = format!(
-                    "HTTP/1.1 {} {}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                    status,
-                    status_reason(status)
-                );
                 stream
                     .write_all(response.as_bytes())
                     .expect("local intake should respond");
@@ -1082,6 +1091,98 @@ fn http_transport_returns_statuses_to_client_retry_logic() {
     assert_eq!(response.attempts, 2);
     assert_eq!(client.pending_events(), 0);
 
+    let requests = intake.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].body, requests[1].body);
+}
+
+#[cfg(feature = "http")]
+fn rate_limit_response(headers: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 429 Too Many Requests\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+#[cfg(feature = "http")]
+#[test]
+fn http_transport_reads_retry_after_and_bounded_429_body_code() {
+    let oversized = format!(
+        r#"{{"code":"rate_limited","padding":"{}"}}"#,
+        "x".repeat(4_096)
+    );
+    let intake = LocalHttpIntake::start_raw(vec![
+        rate_limit_response("Retry-After: 120\r\n", r#"{"code":"rate_limited","detail":"x"}"#),
+        rate_limit_response("Retry-After: Wed, 21 Oct 2015 07:28:00 GMT\r\n", ""),
+        rate_limit_response("Retry-After: 5\r\nRetry-After: 6\r\n", &oversized),
+        rate_limit_response("Retry-After: soon\r\n", r#"{"code":"usage_limit_exceeded"}"#),
+        rate_limit_response("", "not json"),
+        "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string(),
+    ]);
+    let mut transport = HttpTransport::new(HttpTransportConfig {
+        endpoint: intake.endpoint.clone(),
+        timeout: Some(Duration::from_secs(2)),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let mut send = || transport.send("LOGBREW_API_KEY", b"{}").unwrap();
+    let expected = [
+        (429, Some(Duration::from_secs(120)), Some("rate_limited")),
+        (429, Some(Duration::ZERO), None),
+        (429, None, None),
+        (429, None, Some("usage_limit_exceeded")),
+        (429, None, None),
+        (503, None, None),
+    ];
+    for (status_code, retry_after, error_code) in expected {
+        let response = send();
+        assert_eq!(response.status_code, status_code);
+        assert_eq!(response.retry_after, retry_after);
+        assert_eq!(response.error_code.as_deref(), error_code);
+    }
+    assert_eq!(intake.requests().len(), 6);
+}
+
+#[cfg(feature = "http")]
+#[test]
+fn http_transport_retry_after_date_resumes_automatic_delivery() {
+    let intake = LocalHttpIntake::start_raw(vec![
+        rate_limit_response("Retry-After: Wed, 21 Oct 2015 07:28:00 GMT\r\n", ""),
+        "HTTP/1.1 202 Accepted\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string(),
+    ]);
+    let transport = HttpTransport::new(HttpTransportConfig {
+        endpoint: intake.endpoint.clone(),
+        timeout: Some(Duration::from_secs(2)),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build_with_owned_transport(
+            transport,
+            AutomaticDeliveryConfig {
+                interval: Duration::from_millis(20),
+                ..AutomaticDeliveryConfig::default()
+            },
+        )
+        .unwrap();
+    client
+        .log(
+            "evt_rate_limited_http",
+            "2026-06-02T10:00:00Z",
+            LogEvent::new("rate limited", "info"),
+        )
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while client.pending_events() > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "delivery did not resume"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
     let requests = intake.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].body, requests[1].body);

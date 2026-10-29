@@ -236,13 +236,14 @@ rateLimitedClient.log("evt_auto_rate_limit_001", "2026-07-15T10:00:02Z", {
   level: "warning",
   message: "automatic rate limit"
 });
-await waitFor(() => rateLimitedClient.deliveryHealth().pausedReason === "rate_limit");
+await waitFor(() => rateLimitedClient.deliveryHealth().retryDelayMs >= 2000);
 await new Promise((resolve) => setTimeout(resolve, 75));
 const automaticRateLimitRequests = requests.filter((request) => request.path === "/v1/automatic-rate-limit");
-assert(automaticRateLimitRequests.length === 1, "automatic rate limit entered a retry loop");
+assert(automaticRateLimitRequests.length === 1, "automatic rate limit retried before Retry-After");
 assert(rateLimitedClient.pendingEvents() === 1, "rate-limited event was not retained");
-assert(rateLimitedClient.deliveryHealth().scheduled === false, "rate-limited delivery remained scheduled");
-assert(rateLimitedClient.deliveryHealth().retryDelayMs === 0, "rate limit exposed a misleading retry delay");
+assert(rateLimitedClient.deliveryHealth().pausedReason === "none", "a short rate limit paused delivery");
+assert(rateLimitedClient.deliveryHealth().scheduled === true, "rate-limited delivery was not rescheduled");
+assert(rateLimitedClient.deliveryHealth().retryDelayMs <= 2200, "rate-limit wait exceeded Retry-After and jitter");
 const rateLimitHealth = rateLimitedClient.deliveryHealth();
 const rateLimitHealthJson = JSON.stringify(rateLimitHealth);
 for (const forbidden of ["LOGBREW_SERVER_API_KEY", "evt_auto_rate_limit_001", "automatic rate limit", "127.0.0.1", "/v1/automatic-rate-limit"]) {

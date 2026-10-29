@@ -102,12 +102,13 @@ type deliveryHealthState struct {
 }
 
 type flushResult struct {
-	attempts   int
-	retryable  bool
-	pause      string
-	retryAfter retryAfterDirective
-	generation uint64
-	stale      bool
+	attempts    int
+	retryable   bool
+	rateLimited bool
+	pause       string
+	retryAfter  retryAfterDirective
+	generation  uint64
+	stale       bool
 }
 
 func configureAutomaticDelivery(config *AutomaticDeliveryConfig, maxQueueSize int) (*automaticDelivery, error) {
@@ -436,6 +437,16 @@ func (c *Client) scheduleRetryDelay(result flushResult, retryStreak uint64) (tim
 	}
 	clientDelay := c.automatic.jitter(delay)
 	selected, source, outcome := selectBackoff(clientDelay, result.retryAfter)
+	if result.rateLimited {
+		selected, source, outcome = clientDelay, DeliveryBackoffSourceClient, DeliveryBackoffOutcomeScheduled
+		if result.retryAfter.valid {
+			selected, source, outcome = result.retryAfter.delay, DeliveryBackoffSourceServer, DeliveryBackoffOutcomeHonored
+			if result.retryAfter.clamped || selected < minRateLimitWait {
+				outcome = DeliveryBackoffOutcomeClamped
+			}
+		}
+		selected = rateLimitDelay(selected, c.automatic.jitter)
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -617,6 +628,12 @@ func (c *Client) sendBody(transport Transport, body []byte) (*TransportResponse,
 		case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
 			result.pause = DeliveryOutcomeAuthenticationPause
 			return nil, result, &SdkError{Code: "unauthenticated", Message: "transport rejected the API key"}
+		case statusCode == http.StatusTooManyRequests && directive.code != rateLimitCodeExhausted &&
+			(directive.valid || directive.code == rateLimitCodeLimited):
+			result.retryable = true
+			result.rateLimited = true
+			result.retryAfter = directive
+			return nil, result, &SdkError{Code: "quota_exceeded", Message: "transport rate limited delivery"}
 		case statusCode == http.StatusPaymentRequired || statusCode == http.StatusTooManyRequests:
 			result.pause = DeliveryOutcomeQuotaPause
 			return nil, result, &SdkError{Code: "quota_exceeded", Message: "transport paused delivery for quota"}

@@ -136,7 +136,7 @@ test("React Native fetch transport performs hosted delivery with the configured 
   });
 });
 
-test("React Native fetch transport forwards Retry-After without exposing fetch failures", async () => {
+test("React Native fetch transport forwards Retry-After (seconds or GMT date) and the 429 code without exposing fetch failures", async () => {
   await withInstalledPackage(async ({
     createReactNativeFetchTransport
   }) => {
@@ -153,6 +153,44 @@ test("React Native fetch transport forwards Retry-After without exposing fetch f
     assert.deepEqual(
       await rateLimited.send("LOGBREW_CLIENT_KEY", "{}"),
       { attempts: 1, retryAfterMs: 3000, statusCode: 429 }
+    );
+
+    const body = JSON.stringify({ code: "rate_limited" });
+    const dated = createReactNativeFetchTransport({
+      fetchImpl: async () => ({
+        status: 429,
+        headers: {
+          get(name) {
+            const values = {
+              "content-length": String(body.length),
+              "retry-after": new Date(Date.now() + 60_000).toUTCString()
+            };
+            return values[name.toLowerCase()] ?? null;
+          }
+        },
+        text: async () => body
+      })
+    });
+    const datedResponse = await dated.send("LOGBREW_CLIENT_KEY", "{}");
+    assert.equal(datedResponse.errorCode, "rate_limited");
+    assert.ok(datedResponse.retryAfterMs > 50_000 && datedResponse.retryAfterMs <= 60_000);
+
+    const usageBody = JSON.stringify({ code: "usage_limit_exceeded" });
+    const usage = createReactNativeFetchTransport({
+      fetchImpl: async () => ({
+        status: 429,
+        headers: {
+          get(name) {
+            const values = { "content-length": String(usageBody.length), "retry-after": "5, 6 GMT" };
+            return values[name.toLowerCase()] ?? null;
+          }
+        },
+        text: async () => usageBody
+      })
+    });
+    assert.deepEqual(
+      await usage.send("LOGBREW_CLIENT_KEY", "{}"),
+      { attempts: 1, errorCode: "usage_limit_exceeded", statusCode: 429 }
     );
 
     const failed = createReactNativeFetchTransport({

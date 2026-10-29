@@ -2,6 +2,7 @@
 
 require "digest"
 require "json"
+require "socket"
 require "tmpdir"
 require_relative "../lib/logbrew"
 require_relative "blocking_transport"
@@ -59,6 +60,7 @@ class AutomaticScriptedTransport
     end
     @before_response&.call(index, body)
     raise status if status.is_a?(LogBrew::TransportError)
+    return status if status.is_a?(LogBrew::TransportResponse)
 
     LogBrew::TransportResponse.new(status, 1)
   end
@@ -519,6 +521,154 @@ burst_client = default_interval_client(burst_transport)
 wait_for_automatic("burst must be delivered within 1.5 s", timeout: 1.5) { !burst_transport.sent_bodies.empty? }
 assert(automatic_ids(burst_transport.sent_bodies.first).length == 20, "burst must go out as one request")
 burst_client.stop_automatic_delivery
+automatic_tests += 1
+
+# Serves scripted 429 responses with Retry-After headers and JSON bodies, then 202.
+class RateLimitIntake
+  attr_reader :endpoint, :request_count
+
+  def initialize(responses)
+    @responses = responses.dup
+    @server = TCPServer.new("127.0.0.1", 0)
+    @endpoint = "http://127.0.0.1:#{@server.addr[1]}/v1/events"
+    @request_count = 0
+    @thread = Thread.new { serve_all }
+  end
+
+  def close
+    @server.close
+    @thread.join(2)
+  end
+
+  private
+
+  def serve_all
+    loop { serve(@server.accept) }
+  rescue IOError, Errno::EBADF
+    nil
+  end
+
+  def serve(socket)
+    length = 0
+    while (line = socket.gets) && line != "\r\n"
+      length = line.split(":", 2)[1].to_i if line.downcase.start_with?("content-length:")
+    end
+    socket.read(length)
+    @request_count += 1
+    status, retry_after, body = @responses.shift || [202, nil, ""]
+    head = "HTTP/1.1 #{status} Status\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n"
+    head += "Retry-After: #{retry_after}\r\n" unless retry_after.nil?
+    socket.write("#{head}\r\n#{body}")
+  rescue Errno::EPIPE, Errno::ECONNRESET
+    nil
+  ensure
+    socket.close
+  end
+end
+
+def rate_limit_response(retry_after: nil, code: nil)
+  LogBrew::TransportResponse.new(429, 1, retry_after: retry_after, code: code)
+end
+
+transport = AutomaticScriptedTransport.new([rate_limit_response(retry_after: 1), 202, 202])
+rate_limited_client = automatic_client(transport: transport, flush_threshold: 1, flush_interval: 60)
+automatic_log(rate_limited_client, "evt_rate_limited")
+wait_for_automatic("Retry-After did not schedule a wait") { rate_limited_client.delivery_health.state == "retrying" }
+first_send_seen = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+rate_limited_health = rate_limited_client.delivery_health
+assert(rate_limited_health.pause_reason.nil?, "Retry-After wait must not pause")
+assert(rate_limited_health.last_outcome == "retryable_failure", "Retry-After wait outcome changed")
+assert(rate_limited_health.retry_delay_ms.between?(1000, 1100), "Retry-After wait delay out of range")
+automatic_log(rate_limited_client, "evt_rate_limited_later")
+sleep(0.5)
+assert(transport.sent_bodies.length == 1, "capture must not cut the rate limit wait short")
+wait_for_automatic("rate limit wait did not resume on its own") { transport.sent_bodies.length >= 2 }
+assert(Process.clock_gettime(Process::CLOCK_MONOTONIC) - first_send_seen >= 0.9, "Retry-After wait was not honored")
+assert(transport.sent_bodies[0] == transport.sent_bodies[1], "rate limited batch must be resent unchanged")
+wait_for_automatic("rate limit wait did not drain") { rate_limited_client.pending_events.zero? }
+assert(transport.sent_bodies.last.include?("evt_rate_limited_later"), "later capture was not retained")
+rate_limited_client.shutdown
+automatic_tests += 1
+
+transport = AutomaticScriptedTransport.new([rate_limit_response(code: "rate_limited"), 202])
+code_client = automatic_client(transport: transport, flush_threshold: 1, flush_interval: 60)
+automatic_log(code_client, "evt_rate_limited_code")
+wait_for_automatic("rate_limited did not schedule a wait") { code_client.delivery_health.state == "retrying" }
+assert(code_client.delivery_health.retry_delay_ms.between?(1000, 1100), "rate_limited backoff must be raised to 1 s")
+wait_for_automatic("rate_limited wait did not resume on its own") { code_client.pending_events.zero? }
+assert(transport.sent_bodies.length == 2, "rate_limited must not retry in the same send")
+code_client.shutdown
+flush_client = automatic_client(transport: AutomaticScriptedTransport.new, flush_threshold: 10, flush_interval: 60)
+automatic_log(flush_client, "evt_rate_limited_flush")
+expect_sdk_error("transport_error") do
+  flush_client.flush(AutomaticScriptedTransport.new([rate_limit_response(code: "rate_limited")]))
+end
+assert(flush_client.delivery_health.state == "retrying", "rate_limited flush must schedule a timed wait")
+flush_client.stop_automatic_delivery
+automatic_tests += 1
+
+transport = AutomaticScriptedTransport.new([rate_limit_response(retry_after: 1, code: "usage_limit_exceeded"), 202])
+usage_client = automatic_client(transport: transport, flush_threshold: 1, flush_interval: 60)
+automatic_log(usage_client, "evt_usage_limit")
+wait_for_automatic("usage_limit_exceeded did not pause") { usage_client.delivery_health.state == "paused" }
+assert(usage_client.delivery_health.pause_reason == "quota", "usage_limit_exceeded pause reason changed")
+sleep(1.3)
+assert(transport.sent_bodies.length == 1, "usage_limit_exceeded must wait for explicit recovery")
+usage_client.recover_automatic_delivery
+assert(usage_client.pending_events.zero?, "usage limit recovery did not send")
+usage_client.shutdown
+automatic_tests += 1
+
+[[0, 1000, 1100], [7200, 3_600_000, 3_600_000]].each do |retry_after, minimum, maximum|
+  bounds_client = automatic_client(
+    transport: AutomaticScriptedTransport.new([rate_limit_response(retry_after: retry_after)]),
+    flush_threshold: 1,
+    flush_interval: 60
+  )
+  automatic_log(bounds_client, "evt_rate_limit_bounds")
+  wait_for_automatic("bounded Retry-After did not wait") { bounds_client.delivery_health.state == "retrying" }
+  assert(
+    bounds_client.delivery_health.retry_delay_ms.between?(minimum, maximum),
+    "Retry-After #{retry_after} must be kept between 1 s and 1 h"
+  )
+  bounds_client.stop_automatic_delivery
+end
+automatic_tests += 1
+
+intake = RateLimitIntake.new(
+  [
+    [429, (Time.now + 300).httpdate, '{"detail":{"items":[1,true,null,"x"]},"code":"rate_limited"}'],
+    [429, "Tue, 02 Jun 2026 09:59:00 GMT", ""],
+    [429, "7200", '{"code":"usage_limit_exceeded"}'],
+    [429, nil, %({"code":"rate_limited","pad":"#{"x" * 5000}"})],
+    [429, "soon", "code=rate_limited"],
+    [503, nil, '{"code":"rate_limited"}']
+  ]
+)
+http_transport = LogBrew::HttpTransport.new(endpoint: intake.endpoint, timeout: 5)
+dated, past, seconds, oversized, unreadable, server_error = Array.new(6) { http_transport.send("LOGBREW_API_KEY", "{}") }
+intake.close
+assert(dated.retry_after > 240 && dated.code == "rate_limited", "GMT Retry-After or bounded code was not read")
+assert(past.retry_after.zero? && past.code.nil?, "past Retry-After date must count as zero")
+assert(seconds.retry_after == 3600 && seconds.code == "usage_limit_exceeded", "delta-seconds Retry-After was not read")
+assert(oversized.retry_after.nil? && oversized.code.nil?, "a body over 4 KiB must not be read")
+assert(unreadable.retry_after.nil? && unreadable.code.nil?, "unreadable Retry-After or body was accepted")
+assert(server_error.status_code == 503 && server_error.code.nil?, "a non-429 body must not be read")
+automatic_tests += 1
+
+intake = RateLimitIntake.new([[429, (Time.now + 1).httpdate, ""]])
+date_client = automatic_client(
+  transport: LogBrew::HttpTransport.new(endpoint: intake.endpoint, timeout: 5),
+  flush_threshold: 1,
+  flush_interval: 60
+)
+automatic_log(date_client, "evt_http_date")
+wait_for_automatic("HTTP date did not schedule a wait") { date_client.delivery_health.state == "retrying" }
+assert(date_client.delivery_health.retry_delay_ms.between?(1000, 1100), "HTTP date wait delay out of range")
+wait_for_automatic("HTTP date wait did not resume on its own", timeout: 4) { date_client.pending_events.zero? }
+assert(intake.request_count == 2, "HTTP date wait sent an unexpected request count")
+date_client.shutdown
+intake.close
 automatic_tests += 1
 
 puts "ruby automatic delivery tests ok (#{automatic_tests} tests)"

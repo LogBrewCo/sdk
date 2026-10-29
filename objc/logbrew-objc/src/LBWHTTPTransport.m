@@ -114,6 +114,41 @@ static NSDictionary<NSString *, NSString *> *_Nullable LBWValidatedHTTPHeaders(
   return clean;
 }
 
+static NSNumber *_Nullable LBWHTTPRetryAfterSeconds(NSString *_Nullable value, NSDate *_Nonnull now) {
+  NSString *trimmed = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+  if ([trimmed length] == 0U) {
+    return nil;
+  }
+  NSCharacterSet *nonDigits = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789"] invertedSet];
+  if ([trimmed rangeOfCharacterFromSet:nonDigits].location == NSNotFound) {
+    return @([trimmed doubleValue]);
+  }
+  NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+  formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+  formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"GMT"];
+  formatter.dateFormat = @"EEE, dd MMM yyyy HH:mm:ss 'GMT'";
+  NSDate *date = [formatter dateFromString:trimmed];
+  return date == nil ? nil : @(fmax(0.0, [date timeIntervalSinceDate:now]));
+}
+
+// Reads only Retry-After and at most 4 KiB of body for its code field, and only for a 429.
+LBWTransportResponse *_Nonnull LBWHTTPTransportResponse(NSInteger statusCode,
+                                                        NSString *_Nullable retryAfter,
+                                                        NSData *_Nullable body,
+                                                        NSDate *_Nonnull now) {
+  LBWTransportResponse *response = [[LBWTransportResponse alloc] initWithStatusCode:statusCode attempts:1U];
+  if (statusCode != 429) {
+    return response;
+  }
+  response.retryAfter = LBWHTTPRetryAfterSeconds(retryAfter, now);
+  if (body != nil && [body length] <= 4096U) {
+    id json = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+    id code = [json isKindOfClass:[NSDictionary class]] ? json[@"code"] : nil;
+    response.errorCode = [code isKindOfClass:[NSString class]] ? code : nil;
+  }
+  return response;
+}
+
 @implementation LBWHTTPTransport
 
 - (instancetype)init {
@@ -179,14 +214,18 @@ static NSDictionary<NSString *, NSString *> *_Nullable LBWValidatedHTTPHeaders(
   configuration.timeoutIntervalForResource = self.timeout;
   NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-  __block NSInteger statusCode = 0;
+  __block LBWTransportResponse *transportResponse = nil;
   __block NSError *requestError = nil;
   NSURLSessionDataTask *task = [session dataTaskWithRequest:request
                                           completionHandler:^(NSData *data, NSURLResponse *response, NSError *taskError) {
-                                            (void)data;
                                             requestError = taskError;
                                             if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
-                                              statusCode = [(NSHTTPURLResponse *)response statusCode];
+                                              NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                                              transportResponse = LBWHTTPTransportResponse(
+                                                  httpResponse.statusCode,
+                                                  [httpResponse valueForHTTPHeaderField:@"Retry-After"],
+                                                  data,
+                                                  [NSDate date]);
                                             }
                                             dispatch_semaphore_signal(semaphore);
                                           }];
@@ -199,12 +238,12 @@ static NSDictionary<NSString *, NSString *> *_Nullable LBWValidatedHTTPHeaders(
         LBWErrorKindTransport, @"network_failure", [requestError localizedDescription], YES));
     return nil;
   }
-  if (statusCode <= 0) {
+  if (transportResponse == nil || transportResponse.statusCode <= 0) {
     LBWHTTPSetError(error, LBWHTTPMakeError(
         LBWErrorKindTransport, @"network_failure", @"HTTP transport did not receive a response status", YES));
     return nil;
   }
-  return [[LBWTransportResponse alloc] initWithStatusCode:statusCode attempts:1U];
+  return transportResponse;
 }
 
 @end

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::VecDeque;
 use std::fmt;
-#[cfg(feature = "http")]
 use std::time::Duration;
 
 mod delivery;
@@ -136,6 +135,10 @@ pub struct TransportResponse {
     pub batches: u32,
     /// Number of queued events acknowledged by accepted request batches.
     pub accepted_events: usize,
+    /// Readable `Retry-After` delay from a `429` response.
+    pub retry_after: Option<Duration>,
+    /// String `code` field from a `429` JSON response body.
+    pub error_code: Option<String>,
 }
 
 impl TransportResponse {
@@ -146,6 +149,8 @@ impl TransportResponse {
             attempts: 1,
             batches: 0,
             accepted_events: 0,
+            retry_after: None,
+            error_code: None,
         }
     }
 }
@@ -272,13 +277,107 @@ impl Transport for HttpTransport {
             request = request.header(name.as_str(), value.as_str());
         }
 
-        match request.send(body) {
-            Ok(response) => Ok(TransportResponse::new(response.status().as_u16())),
-            Err(ureq::Error::StatusCode(status_code)) => Ok(TransportResponse::new(status_code)),
+        match request
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .send(body)
+        {
+            Ok(response) => Ok(http_transport_response(response)),
             Err(error) => Err(TransportError::network(format!(
                 "http transport failed: {error}"
             ))),
         }
+    }
+}
+
+#[cfg(feature = "http")]
+fn http_transport_response(mut response: ureq::http::Response<ureq::Body>) -> TransportResponse {
+    let mut result = TransportResponse::new(response.status().as_u16());
+    if result.status_code != 429 {
+        return result;
+    }
+    let mut values = response.headers().get_all("retry-after").iter();
+    if let (Some(value), None) = (values.next(), values.next()) {
+        result.retry_after = value
+            .to_str()
+            .ok()
+            .and_then(|value| parse_retry_after(value, std::time::SystemTime::now()));
+    }
+    result.error_code = response
+        .body_mut()
+        .with_config()
+        .limit(4096)
+        .read_to_vec()
+        .ok()
+        .and_then(|body| serde_json::from_slice::<Value>(&body).ok())
+        .and_then(|body| body.get("code")?.as_str().map(str::to_string));
+    result
+}
+
+/// Parse delta-seconds or an IMF-fixdate `Retry-After` value; past dates wait zero seconds.
+#[cfg(feature = "http")]
+fn parse_retry_after(value: &str, now: std::time::SystemTime) -> Option<Duration> {
+    let value = value.trim();
+    if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Some(Duration::from_secs(value.parse().unwrap_or(u64::MAX)));
+    }
+    let [_, day, month, year, time, "GMT"] = value.split(' ').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let month = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    .iter()
+    .position(|name| *name == month)? as i64
+        + 1;
+    let [hour, minute, second] = time.split(':').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let [day, year, hour, minute, second] =
+        [day, year, hour, minute, second].map(|part| part.parse::<i64>().ok());
+    let (day, year) = (
+        day.filter(|day| (1..=31).contains(day))?,
+        year.filter(|year| (1970..=9999).contains(year))?,
+    );
+    let (hour, minute, second) = (
+        hour.filter(|hour| *hour < 24)?,
+        minute.filter(|minute| *minute < 60)?,
+        second.filter(|second| *second < 61)?,
+    );
+    // Days since 1970-01-01 for the proleptic Gregorian calendar.
+    let shifted_year = if month <= 2 { year - 1 } else { year };
+    let era = shifted_year.div_euclid(400);
+    let year_of_era = shifted_year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let target = days * 86_400 + hour * 3_600 + minute * 60 + second;
+    let now = now.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some(Duration::from_secs(
+        u64::try_from(target).unwrap_or(0).saturating_sub(now),
+    ))
+}
+
+#[cfg(all(test, feature = "http"))]
+mod retry_after_tests {
+    use super::parse_retry_after;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn parses_delta_seconds_and_imf_fixdate() {
+        let now = UNIX_EPOCH + Duration::from_secs(1_792_567_680 - 120);
+        let parse = |value| parse_retry_after(value, now);
+        assert_eq!(
+            parse("Wed, 21 Oct 2026 07:28:00 GMT"),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(parse("Thu, 01 Jan 1970 00:00:00 GMT"), Some(Duration::ZERO));
+        assert_eq!(parse(" 30 "), Some(Duration::from_secs(30)));
+        for unreadable in ["", "-1", "1.5", "soon", "Wed, 21 Oct 2026 07:28:00 UTC"] {
+            assert_eq!(parse(unreadable), None);
+        }
+        assert!(parse_retry_after("Fri, 01 Jan 2100 00:00:00 GMT", SystemTime::now()).is_some());
     }
 }
 

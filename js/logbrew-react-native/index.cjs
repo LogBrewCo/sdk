@@ -18,6 +18,7 @@ const {
 const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.38";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
+const RATE_LIMIT_BODY_LIMIT_BYTES = 4096;
 const NATIVE_RANDOM_HEX = Symbol.for("co.logbrew.react-native.secure-random-hex");
 const MAX_ACTION_NAME_LENGTH = 64;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -97,9 +98,13 @@ function createReactNativeFetchTransport({
           method: "POST"
         });
         const retryAfterMs = retryAfterMsFromHeaders(response?.headers);
-        return retryAfterMs === undefined
-          ? { statusCode: response?.status, attempts: 1 }
-          : { statusCode: response?.status, attempts: 1, retryAfterMs };
+        const errorCode = response?.status === 429 ? await rateLimitCode(response) : undefined;
+        return {
+          statusCode: response?.status,
+          attempts: 1,
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          ...(errorCode === undefined ? {} : { errorCode })
+        };
       } catch {
         throw TransportError.network("LogBrew React Native delivery failed");
       }
@@ -865,6 +870,21 @@ function retryAfterMsFromHeaders(headers) {
   return retryAfterMsFromHeader(headers.get("retry-after"));
 }
 
+// Reads a 429 body only when it declares at most 4 KiB, and only to find a known `code`.
+async function rateLimitCode(response) {
+  try {
+    const length = Number(response.headers?.get?.("content-length"));
+    if (!Number.isSafeInteger(length) || length > RATE_LIMIT_BODY_LIMIT_BYTES || typeof response.text !== "function") {
+      return undefined;
+    }
+    const text = await response.text();
+    const code = text.length <= RATE_LIMIT_BODY_LIMIT_BYTES ? JSON.parse(text)?.code : undefined;
+    return code === "rate_limited" || code === "usage_limit_exceeded" ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function retryAfterMsFromHeader(value, now = Date.now()) {
   if (typeof value !== "string" || value.trim() === "") {
     return undefined;
@@ -874,7 +894,10 @@ function retryAfterMsFromHeader(value, now = Date.now()) {
     const milliseconds = Number(trimmed) * 1000;
     return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
   }
-  const timestamp = Date.parse(trimmed);
+  // Only an HTTP date counts; a repeated header arrives comma-joined and is ignored.
+  const timestamp = /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/u.test(trimmed)
+    ? Date.parse(trimmed)
+    : Number.NaN;
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : undefined;
 }
 

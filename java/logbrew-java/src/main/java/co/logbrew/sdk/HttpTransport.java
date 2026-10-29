@@ -1,6 +1,7 @@
 package co.logbrew.sdk;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -13,6 +14,8 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Dependency-free HTTP transport backed by Java 11's {@link HttpClient}.
@@ -24,6 +27,9 @@ public final class HttpTransport implements Transport {
     public static final URI DEFAULT_ENDPOINT = URI.create("https://api.logbrew.co/v1/events");
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
+    private static final int MAX_ERROR_BODY_BYTES = 4096;
+    private static final Pattern RATE_LIMIT_CODE =
+        Pattern.compile("\"code\"\\s*:\\s*\"(rate_limited|usage_limit_exceeded)\"");
     private static final HttpClient DEFAULT_CLIENT = HttpClient.newBuilder()
         .connectTimeout(DEFAULT_TIMEOUT)
         .build();
@@ -123,7 +129,25 @@ public final class HttpTransport implements Transport {
         }
 
         try {
-            HttpResponse<Void> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
+            HttpResponse<InputStream> response = client.send(
+                requestBuilder.build(),
+                info -> info.statusCode() == 429
+                    ? HttpResponse.BodySubscribers.ofInputStream()
+                    : HttpResponse.BodySubscribers.<InputStream>replacing(null)
+            );
+            if (response.statusCode() == 429) {
+                return new TransportResponse(
+                    429,
+                    1,
+                    RetryAfterParser.parse(
+                        response.headers().allValues("retry-after"),
+                        clock.instant(),
+                        AutomaticDeliveryOptions.MAX_SCHEDULE_DELAY.toMillis(),
+                        true
+                    ),
+                    readErrorCode(response.body())
+                );
+            }
             RetryAfterDirective retryAfter = isRetryable(response.statusCode())
                 ? RetryAfterParser.parse(
                     response.headers().allValues("retry-after"),
@@ -156,6 +180,23 @@ public final class HttpTransport implements Transport {
             throw new SdkException("configuration_error", "HTTP transport endpoint must include an authority");
         }
         return resolved;
+    }
+
+    /** Reads at most 4 KiB of a 429 body only to find a known JSON {@code code}; the body is never kept. */
+    private static String readErrorCode(InputStream body) {
+        if (body == null) {
+            return null;
+        }
+        try (InputStream stream = body) {
+            byte[] bytes = stream.readNBytes(MAX_ERROR_BODY_BYTES + 1);
+            if (bytes.length > MAX_ERROR_BODY_BYTES) {
+                return null;
+            }
+            Matcher match = RATE_LIMIT_CODE.matcher(new String(bytes, StandardCharsets.UTF_8));
+            return match.find() ? match.group(1) : null;
+        } catch (IOException error) {
+            return null;
+        }
     }
 
     private static boolean isRetryable(int statusCode) {

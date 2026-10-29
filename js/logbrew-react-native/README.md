@@ -84,8 +84,8 @@ Supplying `transport` enables the core SDK's bounded automatic delivery. On
 mobile it sends 5 seconds after the first queued event or at 50 queued events,
 which saves battery and radio wakeups; set `deliveryIntervalMs` to change it. It
 coalesces concurrent work, retries transient failures, retains rejected
-batches, and pauses repeated automatic sends after authentication, rate-limit,
-or non-retryable failures. Do not add a second app-owned flush interval.
+batches, waits out short rate limits on its own, and pauses repeated automatic
+sends after authentication, usage-limit, or non-retryable failures. Do not add a second app-owned flush interval.
 `flushOnBackground: true` requests one final flush when AppState becomes
 `inactive` or `background`; a failure never escapes the AppState callback.
 Helpers generate a fresh opaque event ID by default. Explicit `id` and
@@ -118,9 +118,12 @@ Use `client.deliveryHealth()` for content-free queue and delivery state. In
 particular, inspect `deliveryState`, `lastOutcome`, `lastStatusClass`,
 `pausedReason`, `queueEvents`, and `acceptedEvents`. A `401` pauses automatic
 delivery with `pausedReason: "authentication"`; rotate or correct the public
-client key before creating a new client. A `429` preserves the queue and
-reports `pausedReason: "rate_limit"` plus the bounded retry signal exposed by
-the failed flush.
+client key before creating a new client. A `429` always preserves the queue.
+When it carries `Retry-After` or `code: "rate_limited"`, delivery waits that
+long (1 second to 1 hour, plus a little jitter) and then resends on its own,
+with `deliveryState: "retrying"`. A `429` with `code: "usage_limit_exceeded"`,
+or with neither signal, reports `pausedReason: "rate_limit"` until a
+successful `flush()`.
 
 ## Read Events Back
 

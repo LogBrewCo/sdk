@@ -37,6 +37,8 @@
     "navigation-timing.js",
     "persistence.cjs",
     "persistence.js",
+    "rate-limit-response.cjs",
+    "rate-limit-response.js",
     "resource-timing.cjs",
     "resource-timing.js",
     "runtime-context.cjs",

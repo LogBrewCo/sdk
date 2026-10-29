@@ -109,6 +109,9 @@ extension DeliveryEngine {
             case let .terminal(reason, _, error):
                 recordManualFailure(outcome: .terminalFailure, pauseReason: reason)
                 throw error
+            case let .rateLimited(retryAfter, _, error):
+                recordManualRateLimit(retryAfter: retryAfter)
+                throw error
             }
         }
         throw SdkError(code: "transport_error", message: "exhausted retries")
@@ -254,6 +257,10 @@ extension DeliveryEngine {
             return .accepted(statusCode: response.statusCode, attempts: attempts)
         }
         let error = transportError(statusCode: response.statusCode)
+        let rateLimitSignal = response.retryAfter != nil || response.errorCode == "rate_limited"
+        if response.statusCode == 429, rateLimitSignal, response.errorCode != "usage_limit_exceeded" {
+            return .rateLimited(retryAfter: response.retryAfter, attempts: attempts, error: error)
+        }
         if response.statusCode == 408 || response.statusCode >= 500 {
             return .retryable(attempts: attempts, error: error)
         }
@@ -291,6 +298,16 @@ extension DeliveryEngine {
             nextWakeNanoseconds = nil
         }
         stateLock.unlock()
+    }
+
+    private func recordManualRateLimit(retryAfter: TimeInterval?) {
+        stateLock.lock()
+        inFlight = false
+        let shouldSchedule = applyRateLimitedResultLocked(retryAfter: retryAfter)
+        stateLock.unlock()
+        if shouldSchedule {
+            scheduleTimerUpdate()
+        }
     }
 
     private func recordManualAttempts(_ attempts: Int) {

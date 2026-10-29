@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -247,9 +248,9 @@ func TestServerDelayCannotBypassClientBackoffFloor(t *testing.T) {
 	}
 }
 
-func TestRetryAfterDoesNotOverrideTerminalQuotaPause(t *testing.T) {
+func TestRetryAfterDoesNotOverrideUsageLimitExceededPause(t *testing.T) {
 	transport := newRetryAfterTestTransport(
-		retryAfterTestResponse{status: http.StatusTooManyRequests, directive: retryAfterDirective{present: true, valid: true, delay: time.Millisecond}},
+		retryAfterTestResponse{status: http.StatusTooManyRequests, directive: retryAfterDirective{present: true, valid: true, delay: time.Millisecond, code: rateLimitCodeExhausted}},
 		retryAfterTestResponse{status: http.StatusAccepted},
 	)
 	client := newLifecycleClient(t, &AutomaticDeliveryConfig{
@@ -335,4 +336,111 @@ func waitForBackoffSource(t *testing.T, client *Client, expected string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for backoff source %q: %#v", expected, client.DeliveryHealth())
+}
+
+func TestRateLimitedResponsesWaitBoundedTimeThenResendSamePrefix(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		directive retryAfterDirective
+		source    string
+		outcome   string
+	}{
+		{name: "retry_after_raised_to_one_second", directive: retryAfterDirective{present: true, valid: true, delay: time.Millisecond}, source: DeliveryBackoffSourceServer, outcome: DeliveryBackoffOutcomeClamped},
+		{name: "rate_limited_code_without_retry_after", directive: retryAfterDirective{code: rateLimitCodeLimited}, source: DeliveryBackoffSourceClient, outcome: DeliveryBackoffOutcomeScheduled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			transport := newRetryAfterTestTransport(
+				retryAfterTestResponse{status: http.StatusTooManyRequests, directive: test.directive},
+				retryAfterTestResponse{status: http.StatusAccepted},
+				retryAfterTestResponse{status: http.StatusAccepted},
+			)
+			client := newLifecycleClient(t, &AutomaticDeliveryConfig{
+				Transport: transport, FlushInterval: time.Hour, FlushThreshold: 1,
+				RetryBaseDelay: 5 * time.Millisecond, RetryMaxDelay: 50 * time.Millisecond,
+			})
+			client.automatic.jitter = func(time.Duration) time.Duration { return 0 }
+			queueLifecycleLog(t, client, "evt_rate_limited_prefix")
+			transport.waitForSend(t)
+
+			queueLifecycleLog(t, client, "evt_rate_limited_later")
+			select {
+			case <-transport.sent:
+				t.Fatal("rate-limited batch was resent before the wait ended")
+			case <-time.After(900 * time.Millisecond):
+			}
+			health := client.DeliveryHealth()
+			if health.State != DeliveryStateRunning || health.BackoffDelayMillis != 1000 || health.BackoffSource != test.source || health.BackoffOutcome != test.outcome {
+				t.Fatalf("unexpected rate-limit health: %#v", health)
+			}
+			transport.waitForSend(t)
+			transport.waitForSend(t)
+			waitForPendingEvents(t, client, 0)
+			bodies := transport.bodiesSnapshot()
+			if len(bodies) != 3 || !bytes.Equal(bodies[0], bodies[1]) || !bytes.Contains(bodies[2], []byte("evt_rate_limited_later")) {
+				t.Fatalf("rate-limited prefix was not resent unchanged: %d", len(bodies))
+			}
+		})
+	}
+}
+
+func TestRateLimitDelayIsBoundedWithJitter(t *testing.T) {
+	full := func(delay time.Duration) time.Duration { return delay }
+	none := func(time.Duration) time.Duration { return 0 }
+	for _, test := range []struct {
+		delay  time.Duration
+		jitter func(time.Duration) time.Duration
+		want   time.Duration
+	}{
+		{delay: 0, jitter: none, want: time.Second},
+		{delay: 0, jitter: full, want: 1100 * time.Millisecond},
+		{delay: 20 * time.Second, jitter: full, want: 22 * time.Second},
+		{delay: 2 * time.Hour, jitter: full, want: time.Hour},
+	} {
+		if got := rateLimitDelay(test.delay, test.jitter); got != test.want {
+			t.Fatalf("rateLimitDelay(%v) = %v, want %v", test.delay, got, test.want)
+		}
+	}
+}
+
+func TestHTTPTransportReadsRetryAfterAndBoundedCodeFrom429(t *testing.T) {
+	now := time.Now()
+	for _, test := range []struct {
+		name       string
+		retryAfter string
+		body       string
+		wantValid  bool
+		wantMin    time.Duration
+		wantMax    time.Duration
+		wantCode   string
+	}{
+		{name: "seconds_and_rate_limited", retryAfter: "30", body: `{"code":"rate_limited"}`, wantValid: true, wantMin: 30 * time.Second, wantMax: 30 * time.Second, wantCode: rateLimitCodeLimited},
+		{name: "seconds_capped_at_one_hour", retryAfter: "86400", wantValid: true, wantMin: time.Hour, wantMax: time.Hour},
+		{name: "future_GMT_date", retryAfter: now.Add(2 * time.Minute).UTC().Format(http.TimeFormat), wantValid: true, wantMin: 100 * time.Second, wantMax: 2 * time.Minute},
+		{name: "past_GMT_date_is_zero", retryAfter: "Wed, 21 Oct 2015 07:28:00 GMT", wantValid: true},
+		{name: "usage_limit_exceeded", retryAfter: "soon", body: `{"code":"usage_limit_exceeded"}`, wantCode: rateLimitCodeExhausted},
+		{name: "oversized_body", body: `{"code":"rate_limited","pad":"` + strings.Repeat("x", 5000) + `"}`},
+		{name: "unknown_code", body: `{"code":"private detail"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				if test.retryAfter != "" {
+					response.Header().Set("Retry-After", test.retryAfter)
+				}
+				response.WriteHeader(http.StatusTooManyRequests)
+				_, _ = response.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			transport, err := NewHTTPTransport(HTTPTransportConfig{Endpoint: server.URL, Client: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, directive, err := transport.sendWithRetryAfter("LOGBREW_API_KEY", []byte(`{"events":[]}`), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if directive.valid != test.wantValid || directive.delay < test.wantMin || directive.delay > test.wantMax || directive.code != test.wantCode {
+				t.Fatalf("unexpected directive: %#v", directive)
+			}
+		})
+	}
 }

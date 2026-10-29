@@ -41,7 +41,9 @@ from logbrew_sdk._automatic_delivery import (
     AutomaticDeliveryController,
     DeliveryPrefix,
     DeliverySendError,
+    parse_rate_limit_retry_after_ms,
     parse_retry_after_ms,
+    read_rate_limit_code,
     resolve_automatic_delivery_options,
     send_with_retry_policy,
 )
@@ -283,6 +285,7 @@ class MetricAttributes(TypedDict, total=False):
 class ScriptedTransportResponse(TypedDict):
     status_code: int
     retry_after_ms: NotRequired[int]
+    error_code: NotRequired[str]
 
 
 class Transport(Protocol):
@@ -372,6 +375,10 @@ class TransportResponse:
         default=None,
         compare=False,
     )
+    error_code: Annotated[str | None, "Known `code` from a 429 response body, if any."] = field(
+        default=None,
+        compare=False,
+    )
 
 
 EventDropReason: TypeAlias = Literal["queue_overflow", "queue_bytes_overflow", "event_too_large", "evicted_for_fatal"]
@@ -433,6 +440,7 @@ class RecordingTransport:
             status_code=int(next_response["status_code"]),
             attempts=1,
             retry_after_ms=next_response.get("retry_after_ms"),
+            error_code=error_code if isinstance(error_code := next_response.get("error_code"), str) else None,
         )
 
 
@@ -497,26 +505,29 @@ class HttpTransport:
                 status = getattr(response, "status", None)
                 if status is None:
                     status = response.getcode()
-                return TransportResponse(
-                    status_code=int(status),
-                    attempts=1,
-                    retry_after_ms=parse_retry_after_ms(getattr(response, "headers", None)),
-                )
+                return _http_transport_response(int(status), getattr(response, "headers", None), response)
             finally:
                 close_response = getattr(response, "close", None)
                 if callable(close_response):
                     close_response()
         except HTTPError as error:
             try:
-                return TransportResponse(
-                    status_code=int(error.code),
-                    attempts=1,
-                    retry_after_ms=parse_retry_after_ms(error.headers),
-                )
+                return _http_transport_response(int(error.code), error.headers, error)
             finally:
                 error.close()
         except OSError as error:
             raise TransportError.network(f"http transport failed: {error}") from error
+
+
+def _http_transport_response(status_code: int, headers: Any, body: Any) -> TransportResponse:
+    if status_code != 429:
+        return TransportResponse(status_code=status_code, attempts=1, retry_after_ms=parse_retry_after_ms(headers))
+    return TransportResponse(
+        status_code=status_code,
+        attempts=1,
+        retry_after_ms=parse_rate_limit_retry_after_ms(headers),
+        error_code=read_rate_limit_code(body),
+    )
 
 
 class LogBrewClient:

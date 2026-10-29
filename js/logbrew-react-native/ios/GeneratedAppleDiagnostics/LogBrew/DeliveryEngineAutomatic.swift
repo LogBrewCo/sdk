@@ -135,7 +135,31 @@ extension DeliveryEngine {
         case let .terminal(reason, _, _):
             applyTerminalResultLocked(reason: reason)
             return false
+        case let .rateLimited(retryAfter, _, _):
+            return applyRateLimitedResultLocked(retryAfter: retryAfter)
         }
+    }
+
+    /// Schedules a timed retry of the same prefix after a rate-limited response instead of pausing.
+    func applyRateLimitedResultLocked(retryAfter: TimeInterval?) -> Bool {
+        consecutiveFailures += 1
+        lastOutcome = .retryableFailure
+        guard let options = automaticOptions, automaticTransport != nil, state != .shuttingDown, state != .closed
+        else {
+            return false
+        }
+        state = .retrying
+        pauseReason = .none
+        nextWakeNanoseconds = nil
+        let wait = retryAfter ?? retryBackoffDelay(options, attempt: consecutiveFailures)
+        return setWakeLocked(delay: Self.rateLimitDelay(wait), replaceLaterWake: true)
+    }
+
+    /// Clamps a rate-limit wait to 1 second through 1 hour, then adds up to 10 percent jitter within 1 hour.
+    static func rateLimitDelay(_ delay: TimeInterval, jitter: Double = .random(in: 0 ... 1)) -> TimeInterval {
+        let maximum: TimeInterval = 60 * 60
+        let bounded = delay.isNaN ? 1 : min(max(delay, 1), maximum)
+        return min(bounded + bounded * 0.1 * jitter, maximum)
     }
 
     private func applyAcceptedResultLocked(_ prefix: FrozenPrefix) -> Bool {
@@ -199,10 +223,13 @@ extension DeliveryEngine {
         guard let options = automaticOptions else {
             return false
         }
-        let multiplier = pow(2, Double(max(0, retryAttempt - 1)))
+        return setWakeLocked(delay: retryBackoffDelay(options, attempt: retryAttempt), replaceLaterWake: true)
+    }
+
+    private func retryBackoffDelay(_ options: AutomaticDeliveryOptions, attempt: Int) -> TimeInterval {
+        let multiplier = pow(2, Double(max(0, attempt - 1)))
         let ceiling = min(options.retryBaseDelay * multiplier, options.maxRetryDelay)
-        let delay = Double.random(in: (ceiling / 2) ... ceiling)
-        return setWakeLocked(delay: delay, replaceLaterWake: true)
+        return Double.random(in: (ceiling / 2) ... ceiling)
     }
 
     private func setWakeLocked(delay: TimeInterval, replaceLaterWake: Bool) -> Bool {
@@ -240,6 +267,9 @@ extension DeliveryEngine {
             stateLock.unlock()
             throw SdkError(code: "storage_corrupt", message: "durable delivery data requires explicit recovery")
         }
+        if state == .retrying {
+            state = .running
+        }
         nextWakeNanoseconds = nil
         stateLock.unlock()
     }
@@ -247,7 +277,9 @@ extension DeliveryEngine {
     func rescheduleAfterManualOperation() {
         stateLock.lock()
         let shouldSchedule: Bool
-        if automaticTransport != nil, state != .paused, state != .shuttingDown, state != .closed {
+        if state == .retrying, nextWakeNanoseconds != nil {
+            shouldSchedule = true
+        } else if automaticTransport != nil, state != .paused, state != .shuttingDown, state != .closed {
             state = .running
             retryAttempt = 0
             shouldSchedule = scheduleLiveQueueLocked()
