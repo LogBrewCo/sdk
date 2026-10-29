@@ -491,6 +491,12 @@ jobs:
         if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_django_smoke.sh
 
+      - name: Put the pinned Go first on PATH
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
+        env:
+          LOGBREW_GO_BIN: ${{ runner.tool_cache }}/go/${{ steps.setup-go.outputs.go-version }}/${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}/bin
+        run: printf '%s\n' "$LOGBREW_GO_BIN" >> "$GITHUB_PATH"
+
       - name: Run Go SDK tests
         if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/check_go_tests.sh
