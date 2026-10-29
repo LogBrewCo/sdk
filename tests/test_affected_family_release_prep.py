@@ -180,6 +180,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         workflow = source_text(".github/workflows/publish-packages.yml")
         publisher = source_text("tools/npm-publish/publish.mjs")
         publisher_manifest = json.loads(source_text("tools/npm-publish/package.json"))
+        self.assertIn("timeout: 60_000,", publisher)
         npm_job = workflow.split("\n  npm:\n", 1)[1].split("\n  pypi:\n", 1)[0]
         package_dirs = workflow.split("package_dirs=(", 1)[1].split("\n          )", 1)[0]
         selector = workflow.split("select_npm_package_dirs() {", 1)[1].split(

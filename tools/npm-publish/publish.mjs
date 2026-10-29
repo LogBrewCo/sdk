@@ -60,6 +60,9 @@ try {
       access: "public",
       npmVersion: `bun/${Bun.version}`,
       provenance: true,
+      // The provenance signer gives the transparency log 5 seconds by default. When the log is
+      // slower, the entry is still written and the retry fails with 409, so allow a minute.
+      timeout: 60_000,
       registry: "https://registry.npmjs.org/",
       forceAuth: { token: grants[index] },
     });
