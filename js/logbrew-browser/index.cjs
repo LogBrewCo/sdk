@@ -10,6 +10,7 @@ const {
   installBrowserBreadcrumbs
 } = require("@logbrew/sdk");
 const { createBeaconTransport } = require("./beacon-transport.cjs");
+const { addBrowserAttributionContext, browserAttributionTags } = require("./attribution.cjs");
 const { addBrowserRuntimeContext } = require("./runtime-context.cjs");
 const {
   captureBrowserFetchSpan,
@@ -175,6 +176,9 @@ function installLogBrewBrowser(options = {}) {
 
   const client = options.client ?? createLogBrewBrowserClient({
     ...options,
+    context: options.captureAttribution === false
+      ? options.context
+      : addBrowserAttributionContext(options.context, browserAttributionTags(browserWindow)),
     browserNavigator: options.browserNavigator ?? browserWindow.navigator,
     [CLIENT_REPORT_STORE]: options.persistOffline
       ? createBrowserClientReportStore(sessionStorageOf(browserWindow), options.persistOffline.storageKey)

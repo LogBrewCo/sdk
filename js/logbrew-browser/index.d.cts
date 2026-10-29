@@ -426,6 +426,11 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   captureGlobalErrors?: boolean;
   captureUnhandledRejections?: boolean;
   capturePageViews?: boolean;
+  /**
+   * Tag every event with the landing URL's utm_source, utm_medium, and utm_campaign and the referring
+   * site's host name, kept for the browser tab session. Defaults to true. App-supplied tags win.
+   */
+  captureAttribution?: boolean;
   flushOnCapture?: boolean;
   flushOnOnline?: boolean;
   /** Allow the built-in bounded keepalive transport to deliver on pagehide. Defaults to true. */

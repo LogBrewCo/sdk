@@ -19,6 +19,8 @@
     }
   },
   "files": [
+    "attribution.cjs",
+    "attribution.js",
     "beacon-transport.cjs",
     "beacon-transport.js",
     "fetch-spans.cjs",
