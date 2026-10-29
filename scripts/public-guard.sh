@@ -18,6 +18,8 @@
 # Each line is: CATEGORY<TAB>PATTERN[<TAB>only:REPO,...|except:REPO,...].
 # PATTERN is a word that also matches across case changes and up to two
 # separator characters between letters, `=TEXT` for exact text, or `re:RE2`.
+# An except: entry REPO@DIR/ allows the term only in file content under DIR/
+# in REPO. Commit messages, file paths, and other text are still scanned.
 # Exit status: 0 clean, 1 blocked, 2 guard failure.
 set -euo pipefail
 
@@ -115,7 +117,7 @@ term_regex() {
 }
 
 build_config() {
-  local config="$work/config.toml" repo terms count=0 category pattern scope regex
+  local config="$work/config.toml" repo terms count=0 category pattern scope regex items item skip paths
   cp "$guard_dir/public-guard.toml" "$config"
   repo="$(repository_name)"
   terms="$(load_terms)"
@@ -126,10 +128,23 @@ build_config() {
   while IFS=$'\t' read -r category pattern scope || [[ -n "$category" ]]; do
     [[ -z "$category" || "$category" == \#* ]] && continue
     [[ "$category" =~ ^[a-z][a-z-]*$ && -n "$pattern" ]] || fail "project term list has a malformed line"
+    paths=""
     case "$scope" in
       "") ;;
       only:*) [[ ",${scope#only:}," == *",$repo,"* ]] || continue ;;
-      except:*) [[ ",${scope#except:}," != *",$repo,"* ]] || continue ;;
+      except:*)
+        skip=0
+        IFS=, read -ra items <<<"${scope#except:}"
+        for item in "${items[@]}"; do
+          [[ "$item" =~ ^[a-z0-9-]+(@([a-z0-9_-][a-z0-9._-]*/)+)?$ ]] || fail "project term list has a malformed scope"
+          item="${item//./\\.}"
+          case "$item" in
+            "$repo") skip=1 ;;
+            "$repo@"*) paths+="${paths:+, }'''^${item#*@}'''" ;;
+          esac
+        done
+        ((skip == 0)) || continue
+        ;;
       *) fail "project term list has a malformed scope" ;;
     esac
     regex="$(term_regex "$pattern")" || fail "project term list has an empty term"
@@ -137,6 +152,7 @@ build_config() {
     count=$((count + 1))
     printf '\n[[rules]]\nid = "%s.term%d"\ndescription = "Project term"\nregex = '"'''%s'''"'\n' \
       "$category" "$count" "$regex" >>"$config"
+    [[ -z "$paths" ]] || printf '[[rules.allowlists]]\npaths = [%s]\n' "$paths" >>"$config"
   done <<<"$terms"
   printf '%s\n' "$count" >"$work/term-count"
   printf '%s\n' "$config"
