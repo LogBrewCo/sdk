@@ -28,7 +28,7 @@ logbrew projects keys create "<project_id>" --kind read --ingest-key-file ./benc
 LOGBREW_INGEST_KEY_FILE=./bench.ingest LOGBREW_READ_KEY_FILE=./bench.read bash benchmarks/run.sh
 ```
 
-The script reads the keys from the files and never prints them. Use a test
+The script reads the keys from the files and never prints them. Use a separate
 project, because the run adds 100 logs to it. Revoke both keys when you finish.
 
 ## Results
@@ -78,7 +78,7 @@ more than the browser runs.
 | Capture to returned by the read API | 402 ms | 644 ms | 646 ms | 100 |
 | One log search request | 132 ms | 207 ms | 230 ms | 100 |
 
-These times include the network round trip between the test computer and
+These times include the network round trip between the benchmark computer and
 `https://api.logbrew.co`.
 
 ## Method
@@ -158,5 +158,5 @@ p50 and p99 use the nearest-rank method over all 100 samples.
   It does not measure network time in your app.
 - With 15 runs, the cost table reports the median and the maximum of the runs.
   15 runs are too few for a p99.
-- The latency results depend on the network path from the test computer to the
-  API.
+- The latency results depend on the network path from the benchmark computer to
+  the API.
