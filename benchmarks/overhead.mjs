@@ -1,4 +1,4 @@
-// Measures LogBrew SDK cost per captured error and per span, with the transport replaced by an
+// Measures SDK cost per captured error and per span, with each SDK's transport replaced by an
 // in-memory stub, in Node.js and in headless Chrome. Every run starts a fresh Node.js process
 // or a fresh Chrome browser context. Prints every run and the median and maximum per case.
 // Usage: node overhead.mjs [--quick]
@@ -13,7 +13,9 @@ const quick = process.argv.includes("--quick");
 const RUNS = quick ? 1 : 15;
 const COUNT = quick ? 50 : 1000;
 const WARMUP = quick ? 10 : 200;
-const SDKS = ["logbrew"];
+const SDKS = ["logbrew", "sentry"];
+// The adapter files in overhead/ for each SDK.
+const ADAPTERS = { logbrew: "logbrew", sentry: "comparison" };
 const SIGNALS = ["error", "span"];
 const here = new URL(".", import.meta.url).pathname;
 const version = (name) => JSON.parse(readFileSync(`${here}node_modules/${name}/package.json`, "utf8")).version;
@@ -21,7 +23,7 @@ const version = (name) => JSON.parse(readFileSync(`${here}node_modules/${name}/p
 async function bundle(sdk) {
   const result = await build({
     stdin: {
-      contents: `import "./overhead/${sdk}-browser.js";
+      contents: `import "./overhead/${ADAPTERS[sdk]}-browser.js";
 import { runLoop } from "./overhead/loop.js";
 const channel = new MessageChannel();
 const nextTask = () => new Promise((resolve) => { channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
@@ -40,7 +42,7 @@ globalThis.measure = (signal, count, offset, withSdk) => runLoop(globalThis.benc
 }
 
 function nodeRun(sdk, signal) {
-  const output = execFileSync(process.execPath, [`${here}overhead/node-child.mjs`, sdk, signal, String(COUNT), String(WARMUP)], {
+  const output = execFileSync(process.execPath, [`${here}overhead/node-child.mjs`, ADAPTERS[sdk], signal, String(COUNT), String(WARMUP)], {
     cwd: here,
     encoding: "utf8"
   });
@@ -127,9 +129,9 @@ const cases = [];
 try {
   for (const runtime of ["node", "browser"]) {
     for (const signal of SIGNALS) {
-      const runs = Object.fromEntries(SDKS.map((sdk) => [sdk, []]));
+      const runs = { logbrew: [], sentry: [] };
       for (let run = 0; run < RUNS; run += 1) {
-        // With more than one SDK, alternate which goes first so that none always runs on a cooler machine.
+        // Alternate which SDK goes first so that neither always runs on a cooler machine.
         for (const sdk of run % 2 === 0 ? SDKS : [...SDKS].reverse()) {
           const result = runtime === "node" ? nodeRun(sdk, signal) : await browserRun(chrome, origin, sdk, signal);
           if (result.delivered !== result.expected) {
@@ -145,7 +147,9 @@ try {
           runtime,
           signal,
           sdk,
-          package: runtime === "node" ? `@logbrew/node@${version("@logbrew/node")}` : `@logbrew/browser@${version("@logbrew/browser")}`,
+          package: runtime === "node"
+            ? (sdk === "logbrew" ? `@logbrew/node@${version("@logbrew/node")}` : `@sentry/node@${version("@sentry/node")}`)
+            : (sdk === "logbrew" ? `@logbrew/browser@${version("@logbrew/browser")}` : `@sentry/browser@${version("@sentry/browser")}`),
           cpuMicrosPerEvent: { median: round(median(cpu)), max: round(Math.max(...cpu)), runs: cpu.map(round) },
           bytesPerEvent: { median: Math.round(median(bytes)), max: Math.round(Math.max(...bytes)), runs: bytes.map(Math.round) }
         });

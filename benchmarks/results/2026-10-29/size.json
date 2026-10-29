@@ -1,20 +1,19 @@
 {
   "benchmark": "browser-bundle-size",
-  "package": "@logbrew/browser@0.1.15",
   "esbuild": "0.28.2",
   "unit": "bytes",
   "rows": [
     {
-      "setup": "errors",
-      "minified": 127601,
-      "gzip": 36522,
-      "brotli": 31609
-    },
-    {
-      "setup": "errors and tracing",
-      "minified": 177005,
+      "sdk": "LogBrew",
+      "package": "@logbrew/browser@0.1.15",
       "gzip": 48078,
       "brotli": 41192
+    },
+    {
+      "sdk": "Comparison",
+      "package": "@sentry/browser@11.10.0",
+      "gzip": 55602,
+      "brotli": 48757
     }
   ]
 }
