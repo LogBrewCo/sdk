@@ -170,8 +170,7 @@ function logbrewErrorHandler(options = {}) {
     : undefined;
   return function logBrewExpressErrorHandler(error, req, res, next) {
     if (options.captureClientErrors !== true && isClientError(error)) {
-      next(error);
-      return;
+      return next(error);
     }
     const existing = req.logbrew;
     const client = existing?.client ?? resolveClient(options, req, res);
