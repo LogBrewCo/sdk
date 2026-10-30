@@ -1,30 +1,8 @@
 use super::*;
-use crate::{LogEvent, Transport, TransportError, TransportResponse};
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use alloc::collections::VecDeque;
+use std::collections::HashSet;
+use std::sync::{Condvar, mpsc};
 use std::thread;
-use std::time::{Duration, Instant};
-
-#[test]
-fn health_counters_saturate_without_wrapping() {
-    let mut state = ClientState::new(1, 1);
-    state.dropped_events = u64::MAX;
-    state.attempts = u64::MAX;
-    state.batches = u64::MAX;
-    state.accepted_events = u64::MAX;
-
-    state.record_drop(DeliveryCodeCategory::QueueFull);
-    state.add_totals(DeliveryTotals {
-        attempts: 1,
-        batches: 1,
-        accepted_events: 1,
-    });
-
-    assert_eq!(state.dropped_events, u64::MAX);
-    assert_eq!(state.attempts, u64::MAX);
-    assert_eq!(state.batches, u64::MAX);
-    assert_eq!(state.accepted_events, u64::MAX);
-}
 
 const TIMESTAMP: &str = "2026-06-02T10:00:00Z";
 
@@ -43,6 +21,25 @@ struct TransportState {
 }
 
 impl SharedTransport {
+    fn always_accept() -> Self {
+        Self::scripted(Vec::new())
+    }
+
+    fn block_next(&self) {
+        self.state.0.lock().unwrap().block_next = true;
+    }
+
+    fn bodies(&self) -> Vec<Vec<u8>> {
+        self.state.0.lock().unwrap().bodies.clone()
+    }
+
+    fn release(&self) {
+        let mut state = self.state.0.lock().unwrap();
+        state.released = true;
+        drop(state);
+        self.state.1.notify_all();
+    }
+
     fn scripted(results: Vec<Result<u16, TransportError>>) -> Self {
         Self {
             state: Arc::new((
@@ -65,44 +62,31 @@ impl SharedTransport {
         transport.state.0.lock().unwrap().dropped = Some(sender);
         (transport, receiver)
     }
-
-    fn always_accept() -> Self {
-        Self::scripted(Vec::new())
-    }
-
-    fn block_next(&self) {
-        self.state.0.lock().unwrap().block_next = true;
-    }
-
-    fn release(&self) {
-        let mut state = self.state.0.lock().unwrap();
-        state.released = true;
-        self.state.1.notify_all();
-    }
-
-    fn bodies(&self) -> Vec<Vec<u8>> {
-        self.state.0.lock().unwrap().bodies.clone()
-    }
 }
 
 impl Drop for SharedTransport {
     fn drop(&mut self) {
-        if let Some(sender) = self.state.0.lock().unwrap().dropped.take() {
-            let _ = sender.send(());
+        let dropped = self.state.0.lock().unwrap().dropped.take();
+        if let Some(sender) = dropped {
+            let _sent = sender.send(());
         }
     }
 }
 
 impl Transport for SharedTransport {
     fn send(&mut self, _api_key: &str, body: &[u8]) -> Result<TransportResponse, TransportError> {
-        let mut state = self.state.0.lock().unwrap();
+        let mut state = self.state.0.lock().unwrap_or_else(PoisonError::into_inner);
         state.bodies.push(body.to_vec());
-        state.worker_threads.insert(thread::current().id());
+        let _first_send_on_thread = state.worker_threads.insert(thread::current().id());
         self.state.1.notify_all();
         if state.block_next {
             state.block_next = false;
             while !state.released {
-                state = self.state.1.wait(state).unwrap();
+                state = self
+                    .state
+                    .1
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
             }
         }
         match state.scripted.pop_front().unwrap_or(Ok(202)) {
@@ -110,6 +94,27 @@ impl Transport for SharedTransport {
             Err(error) => Err(error),
         }
     }
+}
+
+#[test]
+fn health_counters_saturate_without_wrapping() {
+    let mut state = ClientState::new(1, 1);
+    state.dropped_events = u64::MAX;
+    state.attempts = u64::MAX;
+    state.batches = u64::MAX;
+    state.accepted_events = u64::MAX;
+
+    state.record_drop(DeliveryCodeCategory::QueueFull);
+    state.add_totals(DeliveryTotals {
+        attempts: 1,
+        batches: 1,
+        accepted_events: 1,
+    });
+
+    assert_eq!(state.dropped_events, u64::MAX);
+    assert_eq!(state.attempts, u64::MAX);
+    assert_eq!(state.batches, u64::MAX);
+    assert_eq!(state.accepted_events, u64::MAX);
 }
 
 fn automatic_client(transport: SharedTransport, config: AutomaticDeliveryConfig) -> LogBrewClient {
@@ -121,7 +126,7 @@ fn automatic_client(transport: SharedTransport, config: AutomaticDeliveryConfig)
 }
 
 fn wait_until(timeout: Duration, condition: impl Fn() -> bool) {
-    let deadline = Instant::now() + timeout;
+    let deadline = Instant::now().checked_add(timeout).unwrap();
     while !condition() {
         assert!(Instant::now() < deadline, "condition timed out");
         thread::sleep(Duration::from_millis(2));
@@ -141,7 +146,7 @@ fn retained_event_stays_successful_when_scheduler_notification_fails() {
             retry_max_delay: Duration::from_millis(40),
         },
     );
-    let automatic = client.inner.automatic.as_ref().unwrap().clone();
+    let automatic = Arc::clone(client.inner.automatic.as_ref().unwrap());
     automatic.poison_scheduler_for_test();
 
     client
@@ -210,11 +215,14 @@ fn external_flush_marks_manual_exclusion_until_it_finishes() {
         .log("evt_second", TIMESTAMP, LogEvent::new("automatic", "info"))
         .unwrap();
 
-    let automatic = client.inner.automatic.as_ref().unwrap().clone();
+    let automatic = Arc::clone(client.inner.automatic.as_ref().unwrap());
     wait_until(Duration::from_secs(1), || {
         automatic.manual_deliveries_for_test() == 1
     });
-    assert!(owned_transport.bodies().is_empty());
+    assert!(
+        owned_transport.bodies().is_empty(),
+        "owned transport must stay idle while manual delivery runs"
+    );
 
     external_transport.release();
     let response = handle.join().unwrap().unwrap();
@@ -244,11 +252,11 @@ fn final_owner_drop_requests_stop_without_waiting_for_blocked_transport() {
         client.delivery_health().delivery_in_flight
     });
 
-    let automatic = client.inner.automatic.as_ref().unwrap().clone();
+    let automatic = Arc::clone(client.inner.automatic.as_ref().unwrap());
     let (sender, receiver) = mpsc::channel();
     let handle = thread::spawn(move || {
         drop(client);
-        let _ = sender.send(());
+        let _sent = sender.send(());
     });
 
     let returned_promptly = receiver.recv_timeout(Duration::from_millis(50)).is_ok();

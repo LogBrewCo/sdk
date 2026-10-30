@@ -18,45 +18,7 @@ pub struct MetricEvent {
 }
 
 impl MetricEvent {
-    /// Create a metric event with name, kind, value, unit, and temporality fields.
-    pub fn new(
-        name: impl Into<String>,
-        kind: impl Into<String>,
-        value: f64,
-        unit: impl Into<String>,
-        temporality: impl Into<String>,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            description: None,
-            kind: kind.into(),
-            value,
-            unit: unit.into(),
-            temporality: temporality.into(),
-            metadata: None,
-            context: None,
-        }
-    }
-
-    /// Attach a stable display meaning; do not include identifiers or changing values.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Attach primitive, low-cardinality metadata to the metric payload.
-    pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
-        self.metadata = Some(metadata);
-        self
-    }
-
-    /// Attach an explicit shared telemetry context override.
-    pub fn with_context(mut self, context: TelemetryContext) -> Self {
-        self.context = Some(context);
-        self
-    }
-
-    pub(crate) fn attributes(self) -> Result<Map<String, Value>, SdkError> {
+    pub(super) fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("metric name", &self.name)?;
         require_allowed_value(
             "metric kind",
@@ -72,24 +34,78 @@ impl MetricEvent {
         }
         validate_metric_temporality(&self.kind, &self.temporality, self.value)?;
 
-        if let Some(metadata) = &self.metadata {
+        if let Some(metadata) = self.metadata.as_ref() {
             require_primitive_metadata(metadata)?;
         }
         let mut map = Map::new();
-        map.insert("name".to_string(), Value::String(self.name));
+        drop(map.insert("name".to_owned(), Value::String(self.name)));
         if let Some(description) = self.description {
-            map.insert(
-                "description".to_string(),
+            drop(map.insert(
+                "description".to_owned(),
                 Value::String(normalize_metric_description(&description)?),
-            );
+            ));
         }
-        map.insert("kind".to_string(), Value::String(self.kind));
-        map.insert("value".to_string(), Value::from(self.value));
-        map.insert("unit".to_string(), Value::String(self.unit));
-        map.insert("temporality".to_string(), Value::String(self.temporality));
+        drop(map.insert("kind".to_owned(), Value::String(self.kind)));
+        drop(map.insert("value".to_owned(), Value::from(self.value)));
+        drop(map.insert("unit".to_owned(), Value::String(self.unit)));
+        drop(map.insert("temporality".to_owned(), Value::String(self.temporality)));
         metadata_entry(&mut map, self.metadata);
         context_entry(&mut map, self.context)?;
         Ok(map)
+    }
+
+    /// Create a metric event with name, kind, value, unit, and temporality fields.
+    #[inline]
+    pub fn new<Name, Kind, Unit, Temporality>(
+        name: Name,
+        kind: Kind,
+        value: f64,
+        unit: Unit,
+        temporality: Temporality,
+    ) -> Self
+    where
+        Name: Into<String>,
+        Kind: Into<String>,
+        Unit: Into<String>,
+        Temporality: Into<String>,
+    {
+        Self {
+            name: name.into(),
+            description: None,
+            kind: kind.into(),
+            value,
+            unit: unit.into(),
+            temporality: temporality.into(),
+            metadata: None,
+            context: None,
+        }
+    }
+
+    /// Attach an explicit shared telemetry context override.
+    #[must_use]
+    #[inline]
+    pub fn with_context(mut self, context: TelemetryContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
+    /// Attach a stable display meaning; do not include identifiers or changing values.
+    #[must_use]
+    #[inline]
+    pub fn with_description<Description>(mut self, description: Description) -> Self
+    where
+        Description: Into<String>,
+    {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Attach primitive, low-cardinality metadata to the metric payload.
+    #[must_use]
+    #[inline]
+    pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
+        self.metadata = Some(metadata);
+        self
     }
 }
 
@@ -107,7 +123,7 @@ fn normalize_metric_description(value: &str) -> Result<String, SdkError> {
             "metric description must be a non-blank string of at most 1024 non-control characters",
         ));
     }
-    Ok(normalized.to_string())
+    Ok(normalized.to_owned())
 }
 
 fn validate_metric_temporality(kind: &str, temporality: &str, value: f64) -> Result<(), SdkError> {
@@ -115,7 +131,7 @@ fn validate_metric_temporality(kind: &str, temporality: &str, value: f64) -> Res
         return require_allowed_value("metric temporality", temporality, &["instant"]);
     }
     require_allowed_value("metric temporality", temporality, &["delta", "cumulative"])?;
-    if value < 0.0 {
+    if value < 0.0_f64 {
         return Err(SdkError::new(
             "validation_error",
             "counter and histogram metric values must be non-negative",
@@ -126,7 +142,7 @@ fn validate_metric_temporality(kind: &str, temporality: &str, value: f64) -> Res
 
 fn require_primitive_metadata(metadata: &Map<String, Value>) -> Result<(), SdkError> {
     for value in metadata.values() {
-        match value {
+        match *value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
             Value::Array(_) | Value::Object(_) => {
                 return Err(SdkError::new(

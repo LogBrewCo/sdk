@@ -1,11 +1,17 @@
+//! Integration tests for automatic delivery.
+#![cfg(test)]
+extern crate alloc;
+use alloc::collections::VecDeque;
+use alloc::sync::Arc;
+use core::time::Duration;
 use logbrew::{
     AutomaticDeliveryConfig, DeliveryOutcome, DeliveryPauseReason, LogBrewClient, LogEvent,
     Transport, TransportError, TransportResponse,
 };
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::collections::HashSet;
+use std::sync::{Condvar, Mutex, PoisonError, mpsc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const TIMESTAMP: &str = "2026-06-02T10:00:00Z";
 
@@ -23,13 +29,23 @@ struct TransportState {
 }
 
 impl SharedTransport {
-    fn scripted(results: Vec<Result<u16, TransportError>>) -> Self {
-        Self::responses(
-            results
-                .into_iter()
-                .map(|result| result.map(TransportResponse::new))
-                .collect(),
-        )
+    fn always_accept() -> Self {
+        Self::scripted(Vec::new())
+    }
+
+    fn block_next(&self) {
+        self.state.0.lock().unwrap().block_next = true;
+    }
+
+    fn bodies(&self) -> Vec<Vec<u8>> {
+        self.state.0.lock().unwrap().bodies.clone()
+    }
+
+    fn release(&self) {
+        let mut state = self.state.0.lock().unwrap();
+        state.released = true;
+        drop(state);
+        self.state.1.notify_all();
     }
 
     fn responses(results: Vec<Result<TransportResponse, TransportError>>) -> Self {
@@ -47,22 +63,13 @@ impl SharedTransport {
         }
     }
 
-    fn always_accept() -> Self {
-        Self::scripted(Vec::new())
-    }
-
-    fn block_next(&self) {
-        self.state.0.lock().unwrap().block_next = true;
-    }
-
-    fn release(&self) {
-        let mut state = self.state.0.lock().unwrap();
-        state.released = true;
-        self.state.1.notify_all();
-    }
-
-    fn bodies(&self) -> Vec<Vec<u8>> {
-        self.state.0.lock().unwrap().bodies.clone()
+    fn scripted(results: Vec<Result<u16, TransportError>>) -> Self {
+        Self::responses(
+            results
+                .into_iter()
+                .map(|result| result.map(TransportResponse::new))
+                .collect(),
+        )
     }
 
     fn worker_count(&self) -> usize {
@@ -72,14 +79,18 @@ impl SharedTransport {
 
 impl Transport for SharedTransport {
     fn send(&mut self, _api_key: &str, body: &[u8]) -> Result<TransportResponse, TransportError> {
-        let mut state = self.state.0.lock().unwrap();
+        let mut state = self.state.0.lock().unwrap_or_else(PoisonError::into_inner);
         state.bodies.push(body.to_vec());
-        state.worker_threads.insert(thread::current().id());
+        let _first_send_on_thread = state.worker_threads.insert(thread::current().id());
         self.state.1.notify_all();
         if state.block_next {
             state.block_next = false;
             while !state.released {
-                state = self.state.1.wait(state).unwrap();
+                state = self
+                    .state
+                    .1
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
             }
         }
         state
@@ -89,7 +100,7 @@ impl Transport for SharedTransport {
     }
 }
 
-fn config(interval: Duration, threshold: usize) -> AutomaticDeliveryConfig {
+const fn config(interval: Duration, threshold: usize) -> AutomaticDeliveryConfig {
     AutomaticDeliveryConfig {
         enabled: true,
         interval,
@@ -114,7 +125,7 @@ fn queue_log(client: &mut LogBrewClient, id: &str) {
 }
 
 fn wait_until(timeout: Duration, condition: impl Fn() -> bool) {
-    let deadline = Instant::now() + timeout;
+    let deadline = Instant::now().checked_add(timeout).unwrap();
     while !condition() {
         assert!(Instant::now() < deadline, "condition timed out");
         thread::sleep(Duration::from_millis(2));
@@ -131,7 +142,7 @@ fn worker_starts_lazily_and_threshold_wakes_once() {
     wait_until(Duration::from_secs(1), || {
         client.delivery_health().automatic_running
     });
-    assert!(transport.bodies().is_empty());
+    assert!(transport.bodies().is_empty(), "transport must stay idle");
 
     queue_log(&mut client, "evt_2");
     wait_until(Duration::from_secs(1), || client.pending_events() == 0);
@@ -260,7 +271,7 @@ fn disabled_automatic_mode_keeps_explicit_owned_transport_workflow() {
     queue_log(&mut client, "evt_manual");
     thread::sleep(Duration::from_millis(30));
     assert!(!client.delivery_health().automatic_running);
-    assert!(transport.bodies().is_empty());
+    assert!(transport.bodies().is_empty(), "transport must stay idle");
 
     assert_eq!(client.flush_owned().unwrap().accepted_events, 1);
 }
@@ -319,7 +330,7 @@ fn clones_share_one_worker_and_final_owner_stops_it_without_delivery() {
     assert!(second.delivery_health().automatic_running);
     drop(second);
     thread::sleep(Duration::from_millis(30));
-    assert!(transport.bodies().is_empty());
+    assert!(transport.bodies().is_empty(), "transport must stay idle");
 }
 
 #[test]
@@ -447,7 +458,7 @@ fn owned_transport_drop_releases_resources_after_final_client_owner() {
 
     impl Drop for DropTransport {
         fn drop(&mut self) {
-            let _ = self.0.send(());
+            let _sent = self.0.send(());
         }
     }
 
@@ -488,14 +499,14 @@ fn default_interval_delivers_a_single_event_within_about_one_second() {
     });
 
     assert!(captured_at.elapsed() >= Duration::from_millis(900));
-    client.shutdown_owned().unwrap();
+    drop(client.shutdown_owned().unwrap());
 }
 
 #[test]
 fn default_interval_sends_a_burst_as_one_request() {
     let transport = SharedTransport::always_accept();
     let mut client = automatic_client(transport.clone(), AutomaticDeliveryConfig::default());
-    for index in 0..20 {
+    for index in 0_i32..20_i32 {
         queue_log(&mut client, &format!("evt_burst_{index:03}"));
     }
 
@@ -504,13 +515,13 @@ fn default_interval_sends_a_burst_as_one_request() {
     });
 
     assert_eq!(event_count(&transport.bodies()[0]), 20);
-    client.shutdown_owned().unwrap();
+    drop(client.shutdown_owned().unwrap());
 }
 
 fn rate_limited(retry_after: Option<Duration>, code: Option<&str>) -> TransportResponse {
     TransportResponse {
         retry_after,
-        error_code: code.map(str::to_string),
+        error_code: code.map(str::to_owned),
         ..TransportResponse::new(429)
     }
 }
@@ -527,7 +538,6 @@ fn wait_for_retry(client: &LogBrewClient) -> Duration {
 
 #[test]
 fn retry_after_seconds_waits_then_resends_the_same_batch_without_an_app_call() {
-    // Retry-After: 1 (delta-seconds) from a 429 response.
     let transport =
         SharedTransport::responses(vec![Ok(rate_limited(Some(Duration::from_secs(1)), None))]);
     let mut client = automatic_client(transport.clone(), config(Duration::from_millis(20), 1));

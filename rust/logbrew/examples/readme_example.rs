@@ -1,9 +1,12 @@
+//! Example: the README quick start.
+use core::error::Error;
 use logbrew::{
     ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, RecordingTransport,
     ReleaseEvent, SpanEvent,
 };
+use std::io::{self, Write as _};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
         .api_key("LOGBREW_API_KEY")
         .build()?;
@@ -43,13 +46,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ActionEvent::new("deploy", "success"),
     )?;
 
-    println!("{}", client.preview_json()?);
+    writeln!(io::stdout(), "{}", client.preview_json()?)?;
 
     let mut transport = RecordingTransport::always_accept();
     let response = client.shutdown(&mut transport)?;
-    eprintln!(
+    writeln!(
+        io::stderr(),
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":6}}",
-        response.status_code, response.attempts
-    );
+        response.status_code,
+        response.attempts
+    )?;
     Ok(())
 }

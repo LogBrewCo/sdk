@@ -50,19 +50,19 @@ checked = 2026-10-23
 
 [[tool]]
 id = "clippy-rustfmt"
-risk = "Rust lints and formatting drift"
-tool = "Clippy and rustfmt"
+risk = "Rust lints, docs, and formatting drift"
+tool = "Clippy, rustdoc, and rustfmt"
 version = "the rust toolchain (rust-toolchain.toml installs clippy and rustfmt with it)"
 pins = ["rust-toolchain.toml::components = [\"clippy\", \"rustfmt\"]", "scripts/check_rust_static.sh::cargo clippy --all-targets --all-features -- -D warnings"]
-commands = ["cargo clippy", "cargo fmt", "scripts/check_rust_static.sh"]
+commands = ["cargo clippy", "cargo doc", "cargo fmt", "scripts/check_rust_static.sh"]
 runs_in = "CI Contract checks: Run Rust static analysis"
-config = "every warning fails, default and all features"
-conflicts = "none known"
-exceptions = "none"
-runtime = "push n=1, max 50 s; pull request n=2, max 51 s"
-findings = "unknown: findings are fixed before merge"
+config = "rust/logbrew/Cargo.toml [lints] denies every rustc lint group and opt-in lint, every rustdoc lint, the Clippy all, cargo, nursery, and pedantic groups, and every Clippy restriction lint not listed below, and forbids unsafe code; rust/logbrew/clippy.toml sets the thresholds and item ordering. The script checks no features, all features, and each feature alone, unused dependencies of the library, and the docs"
+conflicts = "one side of each pair stays off: implicit_return (needless_return), question_mark_used (question_mark), semicolon_outside_block (semicolon_inside_block), pub_with_shorthand (pub_without_shorthand), separated_literal_suffix (unseparated_literal_suffix), self_named_module_files (mod_module_files), ref_patterns (pattern_type_mismatch), single_call_fn (too_many_lines and cognitive_complexity), redundant_pub_crate (unreachable_pub), big_endian_bytes (host_endian_bytes and little_endian_bytes; network byte order stays available), missing_docs_in_private_items (only public API items carry doc comments). Struct field ordering is off because serde writes JSON fields in declaration order. unused_crate_dependencies runs on the library alone, since each test and example uses part of the dev-dependencies"
+exceptions = "exhaustive_structs, exhaustive_enums, and pub_use are off because non_exhaustive public types or public modules in place of re-exports would break callers; max-struct-bools = 5 because the public DeliveryHealthSnapshot has 5 flags; missing_trait_methods is off because it would copy every provided method of the tracing and tower traits; linker_info is off because it turns linker notes about prebuilt dependency objects into errors; serde_json::Value is not a disallowed type because it is the public metadata and event attribute type; tests may unwrap, expect, panic, print, and index (clippy.toml allow-*-in-tests)"
+runtime = "push n=1, max 50 s; pull request n=2, max 51 s (before the feature runs); local 2026-10-30 with the feature runs: 40 s after an edit, 3 s unchanged"
+findings = "2026-10-30: 3,725 findings with all features, 189 of them struct field order, now off; 0 remain, with no allow attributes"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-10-30
 
 [[tool]]
 id = "mypy"

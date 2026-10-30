@@ -933,7 +933,7 @@ test -f target/doc/logbrew/struct.TraceparentSpanInput.html
 grep -q 'Inputs for deriving a LogBrew span event from incoming W3C trace context\.' target/doc/logbrew/struct.TraceparentSpanInput.html
 grep -q 'Attach primitive, app-owned metadata to the derived span\.' target/doc/logbrew/struct.TraceparentSpanInput.html
 test -f target/doc/logbrew/struct.OpenTelemetrySpanContext.html
-grep -q 'Dependency-free copy of OpenTelemetry SpanContext fields needed for child span correlation\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
+grep -q 'Dependency-free copy of OpenTelemetry <code>SpanContext</code> fields needed for child span correlation\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
 grep -q 'Create a validated OpenTelemetry-compatible span context from W3C IDs and trace flags\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
 grep -q 'Create a context when the app has a sampled boolean but not a trace-flags string\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
 grep -q 'Whether the sampled bit is set\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html

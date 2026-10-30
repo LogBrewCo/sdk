@@ -1,19 +1,88 @@
+//! Integration tests for the SDK event flow.
+#![cfg(test)]
+#[cfg(feature = "http")]
+use core::time::Duration;
 use logbrew::{
     ActionEvent, EnvironmentEvent, HttpRequestTelemetry, IssueEvent, LogBrewClient, LogEvent,
     MetricEvent, OpenTelemetrySpanContext, ProductTimeline, RecordingTransport, ReleaseEvent,
     SdkError, SpanEvent, Traceparent, TraceparentSpanInput, TransportError,
 };
 #[cfg(feature = "http")]
-use logbrew::{AutomaticDeliveryConfig, HttpTransport, HttpTransportConfig, Transport};
+use logbrew::{AutomaticDeliveryConfig, HttpTransport, HttpTransportConfig, Transport as _};
 use serde_json::Value;
 #[cfg(feature = "http")]
-use std::io::{Read, Write};
+use std::io::{Read as _, Write as _};
 #[cfg(feature = "http")]
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 #[cfg(feature = "http")]
 use std::thread;
 #[cfg(feature = "http")]
-use std::time::Duration;
+use std::time::Instant;
+
+#[cfg(feature = "http")]
+#[derive(Debug)]
+struct RecordedHttpRequest {
+    path: String,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+#[cfg(feature = "http")]
+impl RecordedHttpRequest {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|header| header.0 == name)
+            .map(|header| header.1.as_str())
+    }
+}
+
+#[cfg(feature = "http")]
+struct LocalHttpIntake {
+    endpoint: String,
+    handle: thread::JoinHandle<Vec<RecordedHttpRequest>>,
+}
+
+#[cfg(feature = "http")]
+impl LocalHttpIntake {
+    fn requests(self) -> Vec<RecordedHttpRequest> {
+        self.handle.join().expect("local intake should finish")
+    }
+
+    fn start(statuses: Vec<u16>) -> Self {
+        Self::start_raw(
+            statuses
+                .into_iter()
+                .map(|status| {
+                    format!(
+                        "HTTP/1.1 {status} {}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                        status_reason(status)
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn start_raw(responses: Vec<String>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("local intake should bind");
+        let endpoint = format!(
+            "http://{}/v1/events",
+            listener.local_addr().expect("local intake address")
+        );
+        let handle = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for response in responses {
+                let (mut stream, _) = listener.accept().expect("local intake should accept");
+                requests.push(read_request(&mut stream));
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("local intake should respond");
+            }
+            requests
+        });
+        Self { endpoint, handle }
+    }
+}
 
 fn sample_client() -> LogBrewClient {
     LogBrewClient::builder("logbrew-rust", "0.1.0")
@@ -70,129 +139,64 @@ fn enqueue_all(client: &mut LogBrewClient) {
 }
 
 #[cfg(feature = "http")]
-#[derive(Debug)]
-struct RecordedHttpRequest {
-    path: String,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-}
-
-#[cfg(feature = "http")]
-impl RecordedHttpRequest {
-    fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(header_name, _)| header_name == name)
-            .map(|(_, value)| value.as_str())
-    }
-}
-
-#[cfg(feature = "http")]
-struct LocalHttpIntake {
-    endpoint: String,
-    handle: thread::JoinHandle<Vec<RecordedHttpRequest>>,
-}
-
-#[cfg(feature = "http")]
-impl LocalHttpIntake {
-    fn start(statuses: Vec<u16>) -> Self {
-        Self::start_raw(
-            statuses
-                .into_iter()
-                .map(|status| {
-                    format!(
-                        "HTTP/1.1 {status} {}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                        status_reason(status)
-                    )
-                })
-                .collect(),
-        )
+fn read_request(stream: &mut TcpStream) -> RecordedHttpRequest {
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 1024];
+    while header_end_index(&bytes).is_none() {
+        let read = stream.read(&mut chunk).expect("local intake should read");
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
     }
 
-    fn start_raw(responses: Vec<String>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("local intake should bind");
-        let endpoint = format!(
-            "http://{}/v1/events",
-            listener.local_addr().expect("local intake address")
-        );
-        let handle = thread::spawn(move || {
-            let mut requests = Vec::new();
-            for response in responses {
-                let (mut stream, _) = listener.accept().expect("local intake should accept");
-                let mut bytes = Vec::new();
-                let mut chunk = [0; 1024];
-                while header_end_index(&bytes).is_none() {
-                    let read = stream.read(&mut chunk).expect("local intake should read");
-                    if read == 0 {
-                        break;
-                    }
-                    bytes.extend_from_slice(&chunk[..read]);
-                }
-
-                let header_end = header_end_index(&bytes).expect("request headers should finish");
-                let head = String::from_utf8_lossy(&bytes[..header_end]);
-                let mut lines = head.split("\r\n");
-                let path = lines
-                    .next()
-                    .and_then(|request_line| request_line.split_whitespace().nth(1))
-                    .unwrap_or("")
-                    .to_string();
-                let mut headers = Vec::new();
-                let mut content_length = 0usize;
-                for line in lines {
-                    if line.is_empty() {
-                        continue;
-                    }
-                    if let Some((name, value)) = line.split_once(':') {
-                        let name = name.trim().to_ascii_lowercase();
-                        let value = value.trim().to_string();
-                        if name == "content-length" {
-                            content_length =
-                                value.parse().expect("content-length should be numeric");
-                        }
-                        headers.push((name, value));
-                    }
-                }
-
-                let mut body = bytes[header_end..].to_vec();
-                while body.len() < content_length {
-                    let read = stream.read(&mut chunk).expect("local intake body read");
-                    if read == 0 {
-                        break;
-                    }
-                    body.extend_from_slice(&chunk[..read]);
-                }
-                body.truncate(content_length);
-                requests.push(RecordedHttpRequest {
-                    path,
-                    headers,
-                    body,
-                });
-
-                stream
-                    .write_all(response.as_bytes())
-                    .expect("local intake should respond");
-            }
-            requests
+    let header_end = header_end_index(&bytes).expect("request headers should finish");
+    let (path, headers) = parse_request_head(&String::from_utf8_lossy(&bytes[..header_end]));
+    let content_length = headers
+        .iter()
+        .find(|header| header.0 == "content-length")
+        .map_or(0, |header| {
+            header.1.parse().expect("content-length should be numeric")
         });
-        Self { endpoint, handle }
+    let mut body = bytes[header_end..].to_vec();
+    while body.len() < content_length {
+        let read = stream.read(&mut chunk).expect("local intake body read");
+        if read == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..read]);
     }
+    body.truncate(content_length);
+    RecordedHttpRequest {
+        path,
+        headers,
+        body,
+    }
+}
 
-    fn requests(self) -> Vec<RecordedHttpRequest> {
-        self.handle.join().expect("local intake should finish")
-    }
+#[cfg(feature = "http")]
+fn parse_request_head(head: &str) -> (String, Vec<(String, String)>) {
+    let mut lines = head.split("\r\n");
+    let path = lines
+        .next()
+        .and_then(|request_line| request_line.split_whitespace().nth(1))
+        .unwrap_or("")
+        .to_owned();
+    let headers = lines
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_owned()))
+        .collect();
+    (path, headers)
 }
 
 #[cfg(feature = "http")]
 fn header_end_index(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4)
+    let index = bytes.windows(4).position(|window| window == b"\r\n\r\n")?;
+    index.checked_add(4)
 }
 
 #[cfg(feature = "http")]
-fn status_reason(status: u16) -> &'static str {
+const fn status_reason(status: u16) -> &'static str {
     match status {
         202 => "Accepted",
         503 => "Service Unavailable",
@@ -251,7 +255,7 @@ fn invalid_timestamp_fails_validation() {
         error,
         SdkError {
             code: "validation_error",
-            message: "timestamp must include a timezone offset: 2026-06-02T10:00:03".to_string()
+            message: "timestamp must include a timezone offset: 2026-06-02T10:00:03".to_owned()
         }
     );
 }
@@ -360,11 +364,11 @@ fn invalid_action_status_fails_validation() {
 fn metric_event_preview_and_validation() {
     let mut client = sample_client();
     let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "routeTemplate".to_string(),
-        Value::String("/checkout".to_string()),
-    );
-    metadata.insert("tier".to_string(), Value::String("api".to_string()));
+    drop(metadata.insert(
+        "routeTemplate".to_owned(),
+        Value::String("/checkout".to_owned()),
+    ));
+    drop(metadata.insert("tier".to_owned(), Value::String("api".to_owned())));
 
     client
         .metric(
@@ -390,92 +394,87 @@ fn metric_event_preview_and_validation() {
         event["attributes"]["description"],
         "Duration of one completed checkout request."
     );
-    assert_eq!(event["attributes"]["value"], 42.5);
+    assert_eq!(event["attributes"]["value"], 42.5_f64);
     assert_eq!(event["attributes"]["temporality"], "delta");
     assert_eq!(
         event["attributes"]["metadata"]["routeTemplate"],
         "/checkout"
     );
 
-    let error = sample_client()
-        .metric(
-            "evt_metric_invalid",
-            "2026-06-02T10:00:06Z",
-            MetricEvent::new("jobs.completed", "counter", -1.0, "1", "delta"),
-        )
-        .unwrap_err();
     assert_eq!(
-        error.message,
+        metric_error(MetricEvent::new(
+            "jobs.completed",
+            "counter",
+            -1.0,
+            "1",
+            "delta"
+        )),
         "counter and histogram metric values must be non-negative"
     );
-
-    let error = sample_client()
-        .metric(
-            "evt_metric_invalid",
-            "2026-06-02T10:00:06Z",
-            MetricEvent::new("queue.depth", "gauge", 3.0, "1", "delta"),
-        )
-        .unwrap_err();
-    assert_eq!(error.message, "metric temporality must be one of: instant");
-
-    let error = sample_client()
-        .metric(
-            "evt_metric_invalid",
-            "2026-06-02T10:00:06Z",
-            MetricEvent::new("queue.depth", "gauge", f64::INFINITY, "1", "instant"),
-        )
-        .unwrap_err();
-    assert_eq!(error.message, "metric value must be finite");
+    assert_eq!(
+        metric_error(MetricEvent::new("queue.depth", "gauge", 3.0, "1", "delta")),
+        "metric temporality must be one of: instant"
+    );
+    assert_eq!(
+        metric_error(MetricEvent::new(
+            "queue.depth",
+            "gauge",
+            f64::INFINITY,
+            "1",
+            "instant"
+        )),
+        "metric value must be finite"
+    );
 
     let mut nested_metadata = serde_json::Map::new();
-    nested_metadata.insert("user".to_string(), serde_json::json!({"id": "u_123"}));
-    let error = sample_client()
-        .metric(
-            "evt_metric_invalid",
-            "2026-06-02T10:00:06Z",
+    drop(nested_metadata.insert("user".to_owned(), serde_json::json!({"id": "u_123"})));
+    assert_eq!(
+        metric_error(
             MetricEvent::new("queue.depth", "gauge", 3.0, "1", "instant")
-                .with_metadata(nested_metadata),
-        )
-        .unwrap_err();
-    assert_eq!(error.message, "metric metadata values must be primitive");
+                .with_metadata(nested_metadata)
+        ),
+        "metric metadata values must be primitive"
+    );
 
     for description in [
-        "   ".to_string(),
+        "   ".to_owned(),
         "M".repeat(1025),
-        "request\u{0085}count".to_string(),
-        "request\u{2028}count".to_string(),
+        "request\u{0085}count".to_owned(),
+        "request\u{2028}count".to_owned(),
     ] {
-        let error = sample_client()
-            .metric(
-                "evt_metric_invalid",
-                "2026-06-02T10:00:06Z",
-                MetricEvent::new("queue.depth", "gauge", 3.0, "1", "instant")
-                    .with_description(description),
-            )
-            .unwrap_err();
         assert_eq!(
-            error.message,
+            metric_error(
+                MetricEvent::new("queue.depth", "gauge", 3.0, "1", "instant")
+                    .with_description(description)
+            ),
             "metric description must be a non-blank string of at most 1024 non-control characters"
         );
     }
+}
+
+fn metric_error(event: MetricEvent) -> String {
+    sample_client()
+        .metric("evt_metric_invalid", "2026-06-02T10:00:06Z", event)
+        .unwrap_err()
+        .message
 }
 
 #[test]
 fn product_timeline_builds_product_action_event() {
     let mut client = sample_client();
     let mut metadata = serde_json::Map::new();
-    metadata.insert("plan".to_string(), Value::String("pro".to_string()));
-    metadata.insert("attempt".to_string(), Value::from(2));
-    metadata.insert("source".to_string(), Value::String("caller".to_string()));
-    metadata.insert("analyticsSchemaVersion".to_string(), Value::from(99));
-    metadata.insert(
-        "analyticsKind".to_string(),
-        Value::String("page_view".to_string()),
-    );
-    metadata.insert(
-        "analyticsSurface".to_string(),
-        Value::String("/spoofed".to_string()),
-    );
+    drop(metadata.insert("plan".to_owned(), Value::String("pro".to_owned())));
+    drop(metadata.insert("attempt".to_owned(), Value::from(2_i32)));
+    drop(metadata.insert("source".to_owned(), Value::String("caller".to_owned())));
+    drop(metadata.insert("analyticsSchemaVersion".to_owned(), Value::from(99_i32)));
+    drop(metadata.insert(
+        "analyticsKind".to_owned(),
+        Value::String("page_view".to_owned()),
+    ));
+    drop(metadata.insert(
+        "analyticsSurface".to_owned(),
+        Value::String("/spoofed".to_owned()),
+    ));
 
     client
         .action(
@@ -498,29 +497,44 @@ fn product_timeline_builds_product_action_event() {
     let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
     let attributes = &payload["events"][0]["attributes"];
     let timeline_metadata = &attributes["metadata"];
-    assert_eq!(attributes["name"], "checkout.submit");
-    assert_eq!(attributes["status"], "running");
-    assert_eq!(timeline_metadata["source"], "product_timeline");
-    assert_eq!(timeline_metadata["routeTemplate"], "/checkout");
-    assert_eq!(timeline_metadata["sessionId"], "session_123");
-    assert_eq!(timeline_metadata["traceId"], "trace_123");
+    assert_fields(
+        attributes,
+        &[
+            ("/name", Value::from("checkout.submit")),
+            ("/status", Value::from("running")),
+        ],
+    );
+    assert_fields(
+        timeline_metadata,
+        &[
+            ("/source", Value::from("product_timeline")),
+            ("/routeTemplate", Value::from("/checkout")),
+            ("/sessionId", Value::from("session_123")),
+            ("/traceId", Value::from("trace_123")),
+        ],
+    );
     assert_eq!(attributes["context"]["session"]["id"], "session_123");
-    assert_eq!(timeline_metadata["screen"], "Checkout");
-    assert_eq!(timeline_metadata["funnel"], "purchase");
-    assert_eq!(timeline_metadata["step"], "submit");
-    assert_eq!(timeline_metadata["plan"], "pro");
-    assert_eq!(timeline_metadata["attempt"], 2);
-    assert_eq!(timeline_metadata["analyticsSchemaVersion"], 1);
-    assert_eq!(timeline_metadata["analyticsKind"], "interaction");
-    assert_eq!(timeline_metadata["analyticsSurface"], "/checkout");
+    assert_fields(
+        timeline_metadata,
+        &[
+            ("/screen", Value::from("Checkout")),
+            ("/funnel", Value::from("purchase")),
+            ("/step", Value::from("submit")),
+            ("/plan", Value::from("pro")),
+            ("/attempt", Value::from(2_i32)),
+            ("/analyticsSchemaVersion", Value::from(1_i32)),
+            ("/analyticsKind", Value::from("interaction")),
+            ("/analyticsSurface", Value::from("/checkout")),
+        ],
+    );
 }
 
 #[test]
 fn product_timeline_builds_network_milestone_event() {
     let mut client = sample_client();
     let mut metadata = serde_json::Map::new();
-    metadata.insert("region".to_string(), Value::String("iad".to_string()));
-    metadata.insert("cached".to_string(), Value::Bool(false));
+    drop(metadata.insert("region".to_owned(), Value::String("iad".to_owned())));
+    drop(metadata.insert("cached".to_owned(), Value::Bool(false)));
 
     client
         .action(
@@ -548,8 +562,8 @@ fn product_timeline_builds_network_milestone_event() {
     assert_eq!(timeline_metadata["source"], "network_timeline");
     assert_eq!(timeline_metadata["routeTemplate"], "/v1/checkout");
     assert_eq!(timeline_metadata["method"], "POST");
-    assert_eq!(timeline_metadata["statusCode"], 503);
-    assert_eq!(timeline_metadata["durationMs"], 42.5);
+    assert_eq!(timeline_metadata["statusCode"], 503_i32);
+    assert_eq!(timeline_metadata["durationMs"], 42.5_f64);
     assert_eq!(timeline_metadata["sessionId"], "session_123");
     assert_eq!(timeline_metadata["traceId"], "trace_123");
     assert_eq!(attributes["context"]["session"]["id"], "session_123");
@@ -623,7 +637,7 @@ fn product_timeline_validates_inputs_before_queueing() {
     );
 
     let mut metadata = serde_json::Map::new();
-    metadata.insert("nested".to_string(), serde_json::json!({"id": "u_123"}));
+    drop(metadata.insert("nested".to_owned(), serde_json::json!({"id": "u_123"})));
     assert_eq!(
         ProductTimeline::product_action("checkout.submit")
             .with_metadata(metadata)
@@ -658,11 +672,11 @@ fn traceparent_helpers_parse_create_and_build_child_span() {
     );
 
     let mut metadata = serde_json::Map::new();
-    metadata.insert("sampled".to_string(), Value::Bool(context.sampled));
-    metadata.insert(
-        "routeTemplate".to_string(),
-        Value::String("/checkout/:cart_id".to_string()),
-    );
+    drop(metadata.insert("sampled".to_owned(), Value::Bool(context.sampled)));
+    drop(metadata.insert(
+        "routeTemplate".to_owned(),
+        Value::String("/checkout/:cart_id".to_owned()),
+    ));
     let span = Traceparent::span_attributes_from_context(
         &context,
         TraceparentSpanInput::new("POST /checkout/:cart_id", child_span_id, "ok")
@@ -679,7 +693,7 @@ fn traceparent_helpers_parse_create_and_build_child_span() {
     assert_eq!(attributes["traceId"], context.trace_id);
     assert_eq!(attributes["spanId"], child_span_id);
     assert_eq!(attributes["parentSpanId"], context.parent_span_id);
-    assert_eq!(attributes["durationMs"], 183.4);
+    assert_eq!(attributes["durationMs"], 183.4_f64);
     assert_eq!(attributes["metadata"]["sampled"], true);
 }
 
@@ -702,10 +716,10 @@ fn traceparent_helpers_ingest_opentelemetry_span_context() {
     );
 
     let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "routeTemplate".to_string(),
-        Value::String("/checkout/:cart_id".to_string()),
-    );
+    drop(metadata.insert(
+        "routeTemplate".to_owned(),
+        Value::String("/checkout/:cart_id".to_owned()),
+    ));
     let span = Traceparent::span_attributes_from_opentelemetry_context(
         &context,
         TraceparentSpanInput::new("POST /checkout/:cart_id", child_span_id, "ok")
@@ -722,7 +736,7 @@ fn traceparent_helpers_ingest_opentelemetry_span_context() {
     assert_eq!(attributes["traceId"], context.trace_id());
     assert_eq!(attributes["spanId"], child_span_id);
     assert_eq!(attributes["parentSpanId"], context.span_id());
-    assert_eq!(attributes["durationMs"], 183.4);
+    assert_eq!(attributes["durationMs"], 183.4_f64);
 
     let unsampled = OpenTelemetrySpanContext::from_sampled(
         "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -751,30 +765,26 @@ fn traceparent_helpers_reject_invalid_context() {
     }
 
     assert!(
-        Traceparent::create("00000000000000000000000000000000", "b7ad6b7169203331", "01",).is_err()
+        Traceparent::create("00000000000000000000000000000000", "b7ad6b7169203331", "01").is_err(),
+        "zero trace id must fail"
     );
     assert!(
-        Traceparent::create("4bf92f3577b34da6a3ce929d0e0e4736", "0000000000000000", "01",).is_err()
+        Traceparent::create("4bf92f3577b34da6a3ce929d0e0e4736", "0000000000000000", "01").is_err(),
+        "zero span id must fail"
     );
     assert!(
-        OpenTelemetrySpanContext::new(
-            "00000000000000000000000000000000",
-            "00f067aa0ba902b7",
-            "01",
-        )
-        .is_err()
+        OpenTelemetrySpanContext::new("00000000000000000000000000000000", "00f067aa0ba902b7", "01")
+            .is_err(),
+        "zero OpenTelemetry trace id must fail"
     );
     assert!(
-        OpenTelemetrySpanContext::new(
-            "4bf92f3577b34da6a3ce929d0e0e4736",
-            "0000000000000000",
-            "01",
-        )
-        .is_err()
+        OpenTelemetrySpanContext::new("4bf92f3577b34da6a3ce929d0e0e4736", "0000000000000000", "01")
+            .is_err(),
+        "zero OpenTelemetry span id must fail"
     );
 
     let mut metadata = serde_json::Map::new();
-    metadata.insert("nested".to_string(), Value::Object(serde_json::Map::new()));
+    drop(metadata.insert("nested".to_owned(), Value::Object(serde_json::Map::new())));
     let context =
         Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
     let error = Traceparent::span_attributes_from_context(
@@ -794,8 +804,8 @@ fn traceparent_helpers_reject_invalid_context() {
 fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
     let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
     let mut metadata = serde_json::Map::new();
-    metadata.insert("framework".to_string(), Value::String("axum".to_string()));
-    metadata.insert("source".to_string(), Value::String("caller".to_string()));
+    drop(metadata.insert("framework".to_owned(), Value::String("axum".to_owned())));
+    drop(metadata.insert("source".to_owned(), Value::String("caller".to_owned())));
 
     let events = HttpRequestTelemetry::new(
         "https://api.example.invalid/checkout/:cart_id?cart=sample#debug",
@@ -833,15 +843,20 @@ fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
 
     let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
     let span = &payload["events"][0]["attributes"];
-    assert_eq!(span["name"], "POST /checkout/:cart_id");
-    assert_eq!(span["status"], "error");
-    assert_eq!(span["durationMs"], 183.4);
-    assert_eq!(span["metadata"]["source"], "rust_http_server");
-    assert_eq!(span["metadata"]["framework"], "axum");
-    assert_eq!(span["metadata"]["routeTemplate"], "/checkout/:cart_id");
-    assert_eq!(span["metadata"]["method"], "POST");
-    assert_eq!(span["metadata"]["statusCode"], 503);
-    assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
+    assert_fields(
+        span,
+        &[
+            ("/name", Value::from("POST /checkout/:cart_id")),
+            ("/status", Value::from("error")),
+            ("/durationMs", Value::from(183.4_f64)),
+            ("/metadata/source", Value::from("rust_http_server")),
+            ("/metadata/framework", Value::from("axum")),
+            ("/metadata/routeTemplate", Value::from("/checkout/:cart_id")),
+            ("/metadata/method", Value::from("POST")),
+            ("/metadata/statusCode", Value::from(503_i32)),
+            ("/metadata/statusCodeClass", Value::from("5xx")),
+        ],
+    );
     assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
     assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
     assert_eq!(
@@ -849,19 +864,24 @@ fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
         span["parentSpanId"]
     );
     assert_eq!(span["context"]["trace"]["sampled"], true);
-    assert!(client.preview_json().unwrap().find("cart=sample").is_none());
-    assert!(client.preview_json().unwrap().find("#debug").is_none());
+    assert!(!client.preview_json().unwrap().contains("cart=sample"));
+    assert!(!client.preview_json().unwrap().contains("#debug"));
 
     let metric = &payload["events"][1]["attributes"];
-    assert_eq!(metric["name"], "http.server.duration");
-    assert_eq!(
-        metric["description"],
-        "Duration of one completed server request."
+    assert_fields(
+        metric,
+        &[
+            ("/name", Value::from("http.server.duration")),
+            (
+                "/description",
+                Value::from("Duration of one completed server request."),
+            ),
+            ("/kind", Value::from("histogram")),
+            ("/value", Value::from(183.4_f64)),
+            ("/unit", Value::from("ms")),
+            ("/metadata/routeTemplate", Value::from("/checkout/:cart_id")),
+        ],
     );
-    assert_eq!(metric["kind"], "histogram");
-    assert_eq!(metric["value"], 183.4);
-    assert_eq!(metric["unit"], "ms");
-    assert_eq!(metric["metadata"]["routeTemplate"], "/checkout/:cart_id");
     assert_eq!(metric["context"], span["context"]);
 }
 
@@ -896,13 +916,7 @@ fn http_request_telemetry_falls_back_when_traceparent_is_missing_or_malformed() 
     assert_eq!(attributes["status"], "ok");
     assert_eq!(attributes["metadata"]["routeTemplate"], "/orders/:order_id");
     assert_eq!(attributes["metadata"]["statusCodeClass"], "4xx");
-    assert!(
-        client
-            .preview_json()
-            .unwrap()
-            .find("debug=sample")
-            .is_none()
-    );
+    assert!(!client.preview_json().unwrap().contains("debug=sample"));
 
     let error = HttpRequestTelemetry::new(
         "/orders/:order_id",
@@ -1038,7 +1052,7 @@ fn http_transport_sends_batch_with_expected_headers() {
     let intake = LocalHttpIntake::start(vec![202]);
     let mut transport = HttpTransport::new(HttpTransportConfig {
         endpoint: intake.endpoint.clone(),
-        headers: vec![("x-logbrew-test".to_string(), "rust".to_string())],
+        headers: vec![("x-logbrew-test".to_owned(), "rust".to_owned())],
         timeout: Some(Duration::from_secs(2)),
         agent: None,
     })
@@ -1052,7 +1066,7 @@ fn http_transport_sends_batch_with_expected_headers() {
     assert_eq!(transport.endpoint(), intake.endpoint);
     assert_eq!(
         transport.headers(),
-        &[("x-logbrew-test".to_string(), "rust".to_string())]
+        &[("x-logbrew-test".to_owned(), "rust".to_owned())]
     );
 
     let requests = intake.requests();
@@ -1117,7 +1131,7 @@ fn http_transport_reads_retry_after_and_bounded_429_body_code() {
         rate_limit_response("Retry-After: 5\r\nRetry-After: 6\r\n", &oversized),
         rate_limit_response("Retry-After: soon\r\n", r#"{"code":"usage_limit_exceeded"}"#),
         rate_limit_response("", "not json"),
-        "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string(),
+        "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_owned(),
     ]);
     let mut transport = HttpTransport::new(HttpTransportConfig {
         endpoint: intake.endpoint.clone(),
@@ -1149,7 +1163,7 @@ fn http_transport_reads_retry_after_and_bounded_429_body_code() {
 fn http_transport_retry_after_date_resumes_automatic_delivery() {
     let intake = LocalHttpIntake::start_raw(vec![
         rate_limit_response("Retry-After: Wed, 21 Oct 2015 07:28:00 GMT\r\n", ""),
-        "HTTP/1.1 202 Accepted\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string(),
+        "HTTP/1.1 202 Accepted\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_owned(),
     ]);
     let transport = HttpTransport::new(HttpTransportConfig {
         endpoint: intake.endpoint.clone(),
@@ -1175,12 +1189,9 @@ fn http_transport_retry_after_date_resumes_automatic_delivery() {
         )
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now().checked_add(Duration::from_secs(3)).unwrap();
     while client.pending_events() > 0 {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "delivery did not resume"
-        );
+        assert!(Instant::now() < deadline, "delivery did not resume");
         thread::sleep(Duration::from_millis(10));
     }
     let requests = intake.requests();
@@ -1192,7 +1203,7 @@ fn http_transport_retry_after_date_resumes_automatic_delivery() {
 #[test]
 fn http_transport_maps_network_failures_to_retryable_transport_error() {
     let mut transport = HttpTransport::new(HttpTransportConfig {
-        endpoint: "http://127.0.0.1:1/v1/events".to_string(),
+        endpoint: "http://127.0.0.1:1/v1/events".to_owned(),
         timeout: Some(Duration::from_millis(200)),
         ..Default::default()
     })
@@ -1207,32 +1218,39 @@ fn http_transport_maps_network_failures_to_retryable_transport_error() {
 #[cfg(feature = "http")]
 #[test]
 fn http_transport_rejects_invalid_config() {
-    let error = HttpTransport::new(HttpTransportConfig {
-        endpoint: "/v1/events".to_string(),
-        ..Default::default()
-    })
-    .unwrap_err();
-    assert_eq!(error.code, "config_error");
-    assert_eq!(
-        error.message,
-        "endpoint must start with http:// or https://"
-    );
+    for (config, message) in [
+        (
+            HttpTransportConfig {
+                endpoint: "/v1/events".to_owned(),
+                ..Default::default()
+            },
+            "endpoint must start with http:// or https://",
+        ),
+        (
+            HttpTransportConfig {
+                endpoint: "http://127.0.0.1/v1/events".to_owned(),
+                headers: vec![(String::new(), "rust".to_owned())],
+                ..Default::default()
+            },
+            "header name must be non-empty",
+        ),
+        (
+            HttpTransportConfig {
+                endpoint: "http://127.0.0.1/v1/events".to_owned(),
+                timeout: Some(Duration::ZERO),
+                ..Default::default()
+            },
+            "timeout must be positive",
+        ),
+    ] {
+        let error = HttpTransport::new(config).unwrap_err();
+        assert_eq!(error.code, "config_error");
+        assert_eq!(error.message, message);
+    }
+}
 
-    let error = HttpTransport::new(HttpTransportConfig {
-        endpoint: "http://127.0.0.1/v1/events".to_string(),
-        headers: vec![("".to_string(), "rust".to_string())],
-        ..Default::default()
-    })
-    .unwrap_err();
-    assert_eq!(error.code, "config_error");
-    assert_eq!(error.message, "header name must be non-empty");
-
-    let error = HttpTransport::new(HttpTransportConfig {
-        endpoint: "http://127.0.0.1/v1/events".to_string(),
-        timeout: Some(Duration::ZERO),
-        ..Default::default()
-    })
-    .unwrap_err();
-    assert_eq!(error.code, "config_error");
-    assert_eq!(error.message, "timeout must be positive");
+fn assert_fields(object: &Value, expected: &[(&str, Value)]) {
+    for field in expected {
+        assert_eq!(object.pointer(field.0), Some(&field.1), "field {}", field.0);
+    }
 }

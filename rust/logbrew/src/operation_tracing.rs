@@ -1,37 +1,39 @@
+use crate::http_fields::duration_millis;
 use crate::metadata_safety::sanitized_metadata;
 use crate::{
     Metadata, OpenTelemetrySpanContext, SdkError, SpanEvent, Traceparent, TraceparentContext,
 };
+use core::any::Any;
+use core::panic::UnwindSafe;
 use serde_json::{Map, Value};
-use std::any::Any;
-use std::panic::{UnwindSafe, catch_unwind, resume_unwind};
+use std::panic::{catch_unwind, resume_unwind};
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Dependency operation category used for low-cardinality span metadata.
 pub enum DependencyOperationKind {
-    /// Database, ORM, or query-like work owned by the app.
-    Database,
     /// Cache, key-value, or memoization work owned by the app.
     Cache,
+    /// Database, ORM, or query-like work owned by the app.
+    Database,
     /// Queue, job, stream, or broker work owned by the app.
     Queue,
 }
 
 impl DependencyOperationKind {
-    fn source(self) -> &'static str {
-        match self {
-            Self::Database => "database.operation",
-            Self::Cache => "cache.operation",
-            Self::Queue => "queue.operation",
-        }
-    }
-
-    fn prefix(self) -> &'static str {
+    const fn prefix(self) -> &'static str {
         match self {
             Self::Database => "db",
             Self::Cache => "cache",
             Self::Queue => "messaging",
+        }
+    }
+
+    const fn source(self) -> &'static str {
+        match self {
+            Self::Database => "database.operation",
+            Self::Cache => "cache.operation",
+            Self::Queue => "queue.operation",
         }
     }
 }
@@ -52,123 +54,34 @@ pub struct DependencyOperationSpan {
 }
 
 impl DependencyOperationSpan {
-    /// Create a database operation span builder with app-owned low-cardinality IDs.
-    pub fn database(name: impl Into<String>, span_id: impl Into<String>) -> Self {
-        Self::new(DependencyOperationKind::Database, name, span_id)
-    }
-
     /// Create a cache operation span builder with app-owned low-cardinality IDs.
-    pub fn cache(name: impl Into<String>, span_id: impl Into<String>) -> Self {
+    #[inline]
+    pub fn cache<NameInput, SpanIdInput>(name: NameInput, span_id: SpanIdInput) -> Self
+    where
+        NameInput: Into<String>,
+        SpanIdInput: Into<String>,
+    {
         Self::new(DependencyOperationKind::Cache, name, span_id)
     }
 
-    /// Create a queue operation span builder with app-owned low-cardinality IDs.
-    pub fn queue(name: impl Into<String>, span_id: impl Into<String>) -> Self {
-        Self::new(DependencyOperationKind::Queue, name, span_id)
-    }
-
-    fn new(
-        kind: DependencyOperationKind,
-        name: impl Into<String>,
-        span_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            kind,
-            name: name.into(),
-            span_id: span_id.into(),
-            status: "ok".to_string(),
-            duration_ms: None,
-            system: None,
-            operation: None,
-            target: None,
-            error_type: None,
-            metadata: Map::new(),
-        }
-    }
-
-    /// Override the operation status. Valid values are `ok` and `error`.
-    pub fn with_status(mut self, status: impl Into<String>) -> Self {
-        self.status = status.into();
-        self
-    }
-
-    /// Attach an optional non-negative duration in milliseconds.
-    pub fn with_duration_ms(mut self, duration_ms: f64) -> Self {
-        self.duration_ms = Some(duration_ms);
-        self
-    }
-
-    /// Attach the dependency system, such as `postgres`, `redis`, or `sqs`.
-    pub fn with_system(mut self, system: impl Into<String>) -> Self {
-        self.system = Some(system.into());
-        self
-    }
-
-    /// Attach the low-cardinality operation, such as `select`, `get`, or `publish`.
-    pub fn with_operation(mut self, operation: impl Into<String>) -> Self {
-        self.operation = Some(operation.into());
-        self
-    }
-
-    /// Attach a low-cardinality target, such as a table, cache region, or queue name.
-    pub fn with_target(mut self, target: impl Into<String>) -> Self {
-        self.target = Some(target.into());
-        self
-    }
-
-    /// Mark the span as failed and attach only the public exception type name.
-    pub fn with_error_type(mut self, error_type: impl Into<String>) -> Self {
-        self.status = "error".to_string();
-        self.error_type = Some(error_type.into());
-        self
-    }
-
-    /// Attach primitive app-owned metadata; unsafe key names and non-primitives are dropped.
-    pub fn with_metadata(mut self, metadata: Metadata) -> Self {
-        self.metadata = sanitized_metadata(metadata);
-        self
-    }
-
-    /// Build a normal LogBrew span event from an incoming W3C traceparent context.
-    pub fn from_traceparent_context(
-        self,
-        context: &TraceparentContext,
-    ) -> Result<SpanEvent, SdkError> {
-        let metadata = self.metadata();
-        let mut span = Traceparent::span_attributes_from_context(
-            context,
-            crate::TraceparentSpanInput::new(self.span_name(), self.span_id, self.status),
-        )?;
-        if let Some(duration_ms) = self.duration_ms {
-            span = span.with_duration_ms(duration_ms);
-        }
-        Ok(span.with_metadata(metadata))
-    }
-
-    /// Build a normal LogBrew span event from an OpenTelemetry-compatible current span.
-    pub fn from_opentelemetry_context(
-        self,
-        context: &OpenTelemetrySpanContext,
-    ) -> Result<SpanEvent, SdkError> {
-        let trace_context = Traceparent::context_from_opentelemetry_context(context);
-        self.from_traceparent_context(&trace_context)
-    }
-
     /// Run app-owned dependency work, queue one span, and resume the original unwind on panic.
-    pub fn capture_panic<F, R>(
+    #[inline]
+    pub fn capture_panic<F, R, EventId, Timestamp>(
         self,
         client: &mut crate::LogBrewClient,
-        event_id: impl AsRef<str>,
-        timestamp: impl AsRef<str>,
+        event_id: EventId,
+        timestamp: Timestamp,
         context: &TraceparentContext,
         operation: F,
     ) -> R
     where
         F: FnOnce() -> R + UnwindSafe,
+        EventId: AsRef<str>,
+        Timestamp: AsRef<str>,
     {
         let started = Instant::now();
         let result = catch_unwind(operation);
-        let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let duration_ms = duration_millis(started.elapsed());
 
         match result {
             Ok(value) => {
@@ -197,6 +110,105 @@ impl DependencyOperationSpan {
         }
     }
 
+    /// Create a database operation span builder with app-owned low-cardinality IDs.
+    #[inline]
+    pub fn database<NameInput, SpanIdInput>(name: NameInput, span_id: SpanIdInput) -> Self
+    where
+        NameInput: Into<String>,
+        SpanIdInput: Into<String>,
+    {
+        Self::new(DependencyOperationKind::Database, name, span_id)
+    }
+
+    /// Build a normal LogBrew span event from an OpenTelemetry-compatible current span.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`SdkError`] when an input fails validation.
+    #[inline]
+    pub fn from_opentelemetry_context(
+        self,
+        context: &OpenTelemetrySpanContext,
+    ) -> Result<SpanEvent, SdkError> {
+        let trace_context = Traceparent::context_from_opentelemetry_context(context);
+        self.from_traceparent_context(&trace_context)
+    }
+
+    /// Build a normal LogBrew span event from an incoming W3C traceparent context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`SdkError`] when an input fails validation.
+    #[inline]
+    pub fn from_traceparent_context(
+        self,
+        context: &TraceparentContext,
+    ) -> Result<SpanEvent, SdkError> {
+        let metadata = self.metadata();
+        let mut span = Traceparent::span_attributes_from_context(
+            context,
+            crate::TraceparentSpanInput::new(self.span_name(), self.span_id, self.status),
+        )?;
+        if let Some(duration_ms) = self.duration_ms {
+            span = span.with_duration_ms(duration_ms);
+        }
+        Ok(span.with_metadata(metadata))
+    }
+
+    fn metadata(&self) -> Metadata {
+        let mut metadata = self.metadata.clone();
+        drop(metadata.insert(
+            "source".to_owned(),
+            Value::String(self.kind.source().to_owned()),
+        ));
+        insert_string(
+            &mut metadata,
+            format!("{}.system", self.kind.prefix()),
+            self.system.as_deref(),
+        );
+        insert_string(
+            &mut metadata,
+            format!("{}.operation", self.kind.prefix()),
+            self.operation.as_deref(),
+        );
+        insert_string(
+            &mut metadata,
+            format!("{}.target", self.kind.prefix()),
+            self.target.as_deref(),
+        );
+        insert_string(&mut metadata, "exception.type", self.error_type.as_deref());
+        metadata
+    }
+
+    fn new(
+        kind: DependencyOperationKind,
+        name: impl Into<String>,
+        span_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            name: name.into(),
+            span_id: span_id.into(),
+            status: "ok".to_owned(),
+            duration_ms: None,
+            system: None,
+            operation: None,
+            target: None,
+            error_type: None,
+            metadata: Map::new(),
+        }
+    }
+
+    /// Create a queue operation span builder with app-owned low-cardinality IDs.
+    #[inline]
+    pub fn queue<Name, SpanId>(name: Name, span_id: SpanId) -> Self
+    where
+        Name: Into<String>,
+        SpanId: Into<String>,
+    {
+        Self::new(DependencyOperationKind::Queue, name, span_id)
+    }
+
     fn queue_capture_span(
         mut self,
         client: &mut crate::LogBrewClient,
@@ -207,17 +219,17 @@ impl DependencyOperationSpan {
         panic_type: Option<&'static str>,
     ) {
         self.duration_ms = Some(duration_ms);
-        if let Some(panic_type) = panic_type {
-            self.status = "error".to_string();
-            self.error_type = Some("panic".to_string());
-            self.metadata.insert("panic".to_string(), Value::Bool(true));
-            self.metadata.insert(
-                "panicType".to_string(),
-                Value::String(panic_type.to_string()),
+        if let Some(kind) = panic_type {
+            "error".clone_into(&mut self.status);
+            self.error_type = Some("panic".to_owned());
+            drop(self.metadata.insert("panic".to_owned(), Value::Bool(true)));
+            drop(
+                self.metadata
+                    .insert("panicType".to_owned(), Value::String(kind.to_owned())),
             );
         }
         if let Ok(span) = self.from_traceparent_context(context) {
-            let _ = client.span(event_id, timestamp, span);
+            drop(client.span(event_id, timestamp, span));
         }
     }
 
@@ -225,39 +237,82 @@ impl DependencyOperationSpan {
         format!("{}:{}", self.kind.source(), self.name.trim())
     }
 
-    fn metadata(&self) -> Metadata {
-        let mut metadata = self.metadata.clone();
-        metadata.insert(
-            "source".to_string(),
-            Value::String(self.kind.source().to_string()),
-        );
-        insert_string(
-            &mut metadata,
-            format!("{}.system", self.kind.prefix()),
-            &self.system,
-        );
-        insert_string(
-            &mut metadata,
-            format!("{}.operation", self.kind.prefix()),
-            &self.operation,
-        );
-        insert_string(
-            &mut metadata,
-            format!("{}.target", self.kind.prefix()),
-            &self.target,
-        );
-        insert_string(&mut metadata, "exception.type", &self.error_type);
-        metadata
+    /// Attach an optional non-negative duration in milliseconds.
+    #[must_use]
+    #[inline]
+    pub const fn with_duration_ms(mut self, duration_ms: f64) -> Self {
+        self.duration_ms = Some(duration_ms);
+        self
+    }
+
+    /// Mark the span as failed and attach only the public exception type name.
+    #[must_use]
+    #[inline]
+    pub fn with_error_type<ErrorType>(mut self, error_type: ErrorType) -> Self
+    where
+        ErrorType: Into<String>,
+    {
+        "error".clone_into(&mut self.status);
+        self.error_type = Some(error_type.into());
+        self
+    }
+
+    /// Attach primitive app-owned metadata; unsafe key names and non-primitives are dropped.
+    #[must_use]
+    #[inline]
+    pub fn with_metadata(mut self, metadata: Metadata) -> Self {
+        self.metadata = sanitized_metadata(metadata);
+        self
+    }
+
+    /// Attach the low-cardinality operation, such as `select`, `get`, or `publish`.
+    #[must_use]
+    #[inline]
+    pub fn with_operation<Operation>(mut self, operation: Operation) -> Self
+    where
+        Operation: Into<String>,
+    {
+        self.operation = Some(operation.into());
+        self
+    }
+
+    /// Override the operation status. Valid values are `ok` and `error`.
+    #[must_use]
+    #[inline]
+    pub fn with_status<Status>(mut self, status: Status) -> Self
+    where
+        Status: Into<String>,
+    {
+        self.status = status.into();
+        self
+    }
+
+    /// Attach the dependency system, such as `postgres`, `redis`, or `sqs`.
+    #[must_use]
+    #[inline]
+    pub fn with_system<System>(mut self, system: System) -> Self
+    where
+        System: Into<String>,
+    {
+        self.system = Some(system.into());
+        self
+    }
+
+    /// Attach a low-cardinality target, such as a table, cache region, or queue name.
+    #[must_use]
+    #[inline]
+    pub fn with_target<Target>(mut self, target: Target) -> Self
+    where
+        Target: Into<String>,
+    {
+        self.target = Some(target.into());
+        self
     }
 }
 
-fn insert_string(metadata: &mut Metadata, key: impl Into<String>, value: &Option<String>) {
-    if let Some(value) = value
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        metadata.insert(key.into(), Value::String(value.to_string()));
+fn insert_string(metadata: &mut Metadata, key: impl Into<String>, value: Option<&str>) {
+    if let Some(trimmed) = value.map(str::trim).filter(|text| !text.is_empty()) {
+        drop(metadata.insert(key.into(), Value::String(trimmed.to_owned())));
     }
 }
 

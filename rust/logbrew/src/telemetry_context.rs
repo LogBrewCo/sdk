@@ -1,16 +1,17 @@
 use crate::SdkError;
+use alloc::collections::BTreeMap;
+use alloc::rc::Rc;
+use core::cell::RefCell;
+use core::marker::PhantomData;
+use core::pin::Pin;
+use core::sync::atomic::{AtomicU64, Ordering};
+use core::task::{Context, Poll};
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::task::{Context, Poll};
+use std::env::consts;
 
 /// Current wire-contract version for shared LogBrew telemetry context.
 pub const TELEMETRY_CONTEXT_SCHEMA_VERSION: u8 = 1;
+
 const MAX_CONTEXT_STRING_CHARS: usize = 256;
 const MAX_CONTEXT_ID_CHARS: usize = 200;
 const MAX_TAG_KEY_CHARS: usize = 64;
@@ -18,24 +19,43 @@ const MAX_TAGS: usize = 32;
 const ZERO_TRACE_ID: &str = "00000000000000000000000000000000";
 const ZERO_SPAN_ID: &str = "0000000000000000";
 
+thread_local! {
+    static ACTIVE_CONTEXTS: RefCell<Vec<ActiveContext>> = const { RefCell::new(Vec::new()) };
+}
+
+static NEXT_CONTEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Bounded service, runtime, or framework identity.
 pub struct TelemetryNamedVersion {
+    /// Service, runtime, or framework name.
     pub name: String,
+    /// Version label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
 }
 
 impl TelemetryNamedVersion {
-    pub fn new(name: impl Into<String>) -> Self {
+    /// Create an identity with a name and no version.
+    #[inline]
+    pub fn new<NameInput>(name: NameInput) -> Self
+    where
+        NameInput: Into<String>,
+    {
         Self {
             name: name.into(),
             version: None,
         }
     }
 
-    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+    /// Set the version label.
+    #[must_use]
+    #[inline]
+    pub fn with_version<VersionInput>(mut self, version: VersionInput) -> Self
+    where
+        VersionInput: Into<String>,
+    {
         self.version = Some(version.into());
         self
     }
@@ -45,23 +65,40 @@ impl TelemetryNamedVersion {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Deployment environment and release identity.
 pub struct TelemetryDeployment {
+    /// Deployment environment, such as `production`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+    /// Release identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release: Option<String>,
 }
 
 impl TelemetryDeployment {
+    /// Create an empty deployment identity.
+    #[must_use]
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_environment(mut self, environment: impl Into<String>) -> Self {
+    /// Set the deployment environment.
+    #[must_use]
+    #[inline]
+    pub fn with_environment<Environment>(mut self, environment: Environment) -> Self
+    where
+        Environment: Into<String>,
+    {
         self.environment = Some(environment.into());
         self
     }
 
-    pub fn with_release(mut self, release: impl Into<String>) -> Self {
+    /// Set the release identifier.
+    #[must_use]
+    #[inline]
+    pub fn with_release<Release>(mut self, release: Release) -> Self
+    where
+        Release: Into<String>,
+    {
         self.release = Some(release.into());
         self
     }
@@ -71,15 +108,23 @@ impl TelemetryDeployment {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Operating-system family and optional safe version/build identity.
 pub struct TelemetryOperatingSystem {
+    /// Operating-system family, such as `linux`.
     pub name: String,
+    /// Operating-system version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Operating-system build identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build: Option<String>,
 }
 
 impl TelemetryOperatingSystem {
-    pub fn new(name: impl Into<String>) -> Self {
+    /// Create an operating-system identity from its family name.
+    #[inline]
+    pub fn new<NameInput>(name: NameInput) -> Self
+    where
+        NameInput: Into<String>,
+    {
         Self {
             name: name.into(),
             version: None,
@@ -87,13 +132,25 @@ impl TelemetryOperatingSystem {
         }
     }
 
-    pub fn with_version(mut self, version: impl Into<String>) -> Self {
-        self.version = Some(version.into());
+    /// Set the operating-system build identifier.
+    #[must_use]
+    #[inline]
+    pub fn with_build<BuildInput>(mut self, build: BuildInput) -> Self
+    where
+        BuildInput: Into<String>,
+    {
+        self.build = Some(build.into());
         self
     }
 
-    pub fn with_build(mut self, build: impl Into<String>) -> Self {
-        self.build = Some(build.into());
+    /// Set the operating-system version.
+    #[must_use]
+    #[inline]
+    pub fn with_version<VersionInput>(mut self, version: VersionInput) -> Self
+    where
+        VersionInput: Into<String>,
+    {
+        self.version = Some(version.into());
         self
     }
 }
@@ -102,31 +159,55 @@ impl TelemetryOperatingSystem {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Broad device or runtime-host class without unique host identity.
 pub struct TelemetryDevice {
+    /// Device family, such as `server` or `desktop`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub family: Option<String>,
+    /// Device model class.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// CPU architecture, such as `aarch64`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub architecture: Option<String>,
 }
 
 impl TelemetryDevice {
+    /// Create an empty device identity.
+    #[must_use]
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_family(mut self, family: impl Into<String>) -> Self {
+    /// Set the CPU architecture.
+    #[must_use]
+    #[inline]
+    pub fn with_architecture<Architecture>(mut self, architecture: Architecture) -> Self
+    where
+        Architecture: Into<String>,
+    {
+        self.architecture = Some(architecture.into());
+        self
+    }
+
+    /// Set the device family.
+    #[must_use]
+    #[inline]
+    pub fn with_family<Family>(mut self, family: Family) -> Self
+    where
+        Family: Into<String>,
+    {
         self.family = Some(family.into());
         self
     }
 
-    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+    /// Set the device model class.
+    #[must_use]
+    #[inline]
+    pub fn with_model<Model>(mut self, model: Model) -> Self
+    where
+        Model: Into<String>,
+    {
         self.model = Some(model.into());
-        self
-    }
-
-    pub fn with_architecture(mut self, architecture: impl Into<String>) -> Self {
-        self.architecture = Some(architecture.into());
         self
     }
 }
@@ -135,31 +216,55 @@ impl TelemetryDevice {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Instrumented application and build identity.
 pub struct TelemetryApplication {
+    /// Application name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Application version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Application build identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build: Option<String>,
 }
 
 impl TelemetryApplication {
+    /// Create an empty application identity.
+    #[must_use]
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+    /// Set the application build identifier.
+    #[must_use]
+    #[inline]
+    pub fn with_build<Build>(mut self, build: Build) -> Self
+    where
+        Build: Into<String>,
+    {
+        self.build = Some(build.into());
+        self
+    }
+
+    /// Set the application name.
+    #[must_use]
+    #[inline]
+    pub fn with_name<Name>(mut self, name: Name) -> Self
+    where
+        Name: Into<String>,
+    {
         self.name = Some(name.into());
         self
     }
 
-    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+    /// Set the application version.
+    #[must_use]
+    #[inline]
+    pub fn with_version<Version>(mut self, version: Version) -> Self
+    where
+        Version: Into<String>,
+    {
         self.version = Some(version.into());
-        self
-    }
-
-    pub fn with_build(mut self, build: impl Into<String>) -> Self {
-        self.build = Some(build.into());
         self
     }
 }
@@ -168,63 +273,31 @@ impl TelemetryApplication {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Shared service, deployment, runtime, framework, OS, device, and app identity.
 pub struct TelemetryResource {
+    /// Service name and version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<TelemetryNamedVersion>,
+    /// Deployment environment and release.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment: Option<TelemetryDeployment>,
+    /// Runtime name and version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<TelemetryNamedVersion>,
+    /// Framework name and version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub framework: Option<TelemetryNamedVersion>,
+    /// Operating-system identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operating_system: Option<TelemetryOperatingSystem>,
+    /// Device or host class.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<TelemetryDevice>,
+    /// Application identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application: Option<TelemetryApplication>,
 }
 
 impl TelemetryResource {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_service(mut self, service: TelemetryNamedVersion) -> Self {
-        self.service = Some(service);
-        self
-    }
-
-    pub fn with_deployment(mut self, deployment: TelemetryDeployment) -> Self {
-        self.deployment = Some(deployment);
-        self
-    }
-
-    pub fn with_runtime(mut self, runtime: TelemetryNamedVersion) -> Self {
-        self.runtime = Some(runtime);
-        self
-    }
-
-    pub fn with_framework(mut self, framework: TelemetryNamedVersion) -> Self {
-        self.framework = Some(framework);
-        self
-    }
-
-    pub fn with_operating_system(mut self, operating_system: TelemetryOperatingSystem) -> Self {
-        self.operating_system = Some(operating_system);
-        self
-    }
-
-    pub fn with_device(mut self, device: TelemetryDevice) -> Self {
-        self.device = Some(device);
-        self
-    }
-
-    pub fn with_application(mut self, application: TelemetryApplication) -> Self {
-        self.application = Some(application);
-        self
-    }
-
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.service.is_none()
             && self.deployment.is_none()
             && self.runtime.is_none()
@@ -233,23 +306,95 @@ impl TelemetryResource {
             && self.device.is_none()
             && self.application.is_none()
     }
+
+    /// Create an empty resource.
+    #[must_use]
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the application identity.
+    #[must_use]
+    #[inline]
+    pub fn with_application(mut self, application: TelemetryApplication) -> Self {
+        self.application = Some(application);
+        self
+    }
+
+    /// Set the deployment identity.
+    #[must_use]
+    #[inline]
+    pub fn with_deployment(mut self, deployment: TelemetryDeployment) -> Self {
+        self.deployment = Some(deployment);
+        self
+    }
+
+    /// Set the device identity.
+    #[must_use]
+    #[inline]
+    pub fn with_device(mut self, device: TelemetryDevice) -> Self {
+        self.device = Some(device);
+        self
+    }
+
+    /// Set the framework identity.
+    #[must_use]
+    #[inline]
+    pub fn with_framework(mut self, framework: TelemetryNamedVersion) -> Self {
+        self.framework = Some(framework);
+        self
+    }
+
+    /// Set the operating-system identity.
+    #[must_use]
+    #[inline]
+    pub fn with_operating_system(mut self, operating_system: TelemetryOperatingSystem) -> Self {
+        self.operating_system = Some(operating_system);
+        self
+    }
+
+    /// Set the runtime identity.
+    #[must_use]
+    #[inline]
+    pub fn with_runtime(mut self, runtime: TelemetryNamedVersion) -> Self {
+        self.runtime = Some(runtime);
+        self
+    }
+
+    /// Set the service identity.
+    #[must_use]
+    #[inline]
+    pub fn with_service(mut self, service: TelemetryNamedVersion) -> Self {
+        self.service = Some(service);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Exact W3C-compatible trace and span correlation.
 pub struct TelemetryTraceContext {
+    /// 32-character W3C trace ID.
     pub trace_id: String,
+    /// 16-character W3C span ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span_id: Option<String>,
+    /// Parent span ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_span_id: Option<String>,
+    /// Whether the trace is sampled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampled: Option<bool>,
 }
 
 impl TelemetryTraceContext {
-    pub fn new(trace_id: impl Into<String>) -> Self {
+    /// Create trace context from a trace ID.
+    #[inline]
+    pub fn new<TraceId>(trace_id: TraceId) -> Self
+    where
+        TraceId: Into<String>,
+    {
         Self {
             trace_id: trace_id.into(),
             span_id: None,
@@ -258,18 +403,33 @@ impl TelemetryTraceContext {
         }
     }
 
-    pub fn with_span_id(mut self, span_id: impl Into<String>) -> Self {
-        self.span_id = Some(span_id.into());
-        self
-    }
-
-    pub fn with_parent_span_id(mut self, parent_span_id: impl Into<String>) -> Self {
+    /// Set the parent span ID.
+    #[must_use]
+    #[inline]
+    pub fn with_parent_span_id<ParentSpanId>(mut self, parent_span_id: ParentSpanId) -> Self
+    where
+        ParentSpanId: Into<String>,
+    {
         self.parent_span_id = Some(parent_span_id.into());
         self
     }
 
-    pub fn with_sampled(mut self, sampled: bool) -> Self {
+    /// Set the sampled flag.
+    #[must_use]
+    #[inline]
+    pub const fn with_sampled(mut self, sampled: bool) -> Self {
         self.sampled = Some(sampled);
+        self
+    }
+
+    /// Set the span ID.
+    #[must_use]
+    #[inline]
+    pub fn with_span_id<SpanId>(mut self, span_id: SpanId) -> Self
+    where
+        SpanId: Into<String>,
+    {
+        self.span_id = Some(span_id.into());
         self
     }
 }
@@ -278,20 +438,33 @@ impl TelemetryTraceContext {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Opaque application-owned session identity.
 pub struct TelemetrySessionContext {
+    /// Session ID.
     pub id: String,
+    /// ID of the session this one replaced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_id: Option<String>,
 }
 
 impl TelemetrySessionContext {
-    pub fn new(id: impl Into<String>) -> Self {
+    /// Create session context from a session ID.
+    #[inline]
+    pub fn new<IdInput>(id: IdInput) -> Self
+    where
+        IdInput: Into<String>,
+    {
         Self {
             id: id.into(),
             previous_id: None,
         }
     }
 
-    pub fn with_previous_id(mut self, previous_id: impl Into<String>) -> Self {
+    /// Set the previous session ID.
+    #[must_use]
+    #[inline]
+    pub fn with_previous_id<PreviousId>(mut self, previous_id: PreviousId) -> Self
+    where
+        PreviousId: Into<String>,
+    {
         self.previous_id = Some(previous_id.into());
         self
     }
@@ -301,7 +474,9 @@ impl TelemetrySessionContext {
 #[serde(rename_all = "lowercase")]
 /// Privacy classification for an opaque telemetry subject identifier.
 pub enum TelemetrySubjectKind {
+    /// An anonymous visitor or device.
     Anonymous,
+    /// A signed-in user.
     User,
 }
 
@@ -309,19 +484,31 @@ pub enum TelemetrySubjectKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Explicit opaque user or anonymous identity without direct PII.
 pub struct TelemetrySubjectContext {
+    /// Subject ID.
     pub id: String,
+    /// Whether the subject is anonymous or a user.
     pub kind: TelemetrySubjectKind,
 }
 
 impl TelemetrySubjectContext {
-    pub fn anonymous(id: impl Into<String>) -> Self {
+    /// Create an anonymous subject.
+    #[inline]
+    pub fn anonymous<IdInput>(id: IdInput) -> Self
+    where
+        IdInput: Into<String>,
+    {
         Self {
             id: id.into(),
             kind: TelemetrySubjectKind::Anonymous,
         }
     }
 
-    pub fn user(id: impl Into<String>) -> Self {
+    /// Create a user subject.
+    #[inline]
+    pub fn user<Id>(id: Id) -> Self
+    where
+        Id: Into<String>,
+    {
         Self {
             id: id.into(),
             kind: TelemetrySubjectKind::User,
@@ -333,27 +520,41 @@ impl TelemetrySubjectContext {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Versioned privacy-bounded context available on every LogBrew signal.
 pub struct TelemetryContext {
+    /// Context schema version; always 1.
     pub schema_version: u8,
+    /// Service, runtime, and host identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource: Option<TelemetryResource>,
+    /// Trace context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<TelemetryTraceContext>,
+    /// Session context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<TelemetrySessionContext>,
+    /// Anonymous or user subject.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<TelemetrySubjectContext>,
+    /// Low-cardinality string tags.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tags: BTreeMap<String, String>,
 }
 
 impl Default for TelemetryContext {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl TelemetryContext {
-    pub fn new() -> Self {
+    fn into_validated(self, label: &str) -> Result<Self, SdkError> {
+        validate_context(&self, label)
+    }
+
+    /// Create an empty schema-v1 context.
+    #[must_use]
+    #[inline]
+    pub const fn new() -> Self {
         Self {
             schema_version: TELEMETRY_CONTEXT_SCHEMA_VERSION,
             resource: None,
@@ -364,31 +565,56 @@ impl TelemetryContext {
         }
     }
 
+    /// Conservative Rust runtime, target OS-family, and architecture identity.
+    #[must_use]
+    #[inline]
+    pub fn runtime_defaults() -> Self {
+        let resource = TelemetryResource::new()
+            .with_runtime(TelemetryNamedVersion::new("rust"))
+            .with_operating_system(TelemetryOperatingSystem::new(normalized_target_os()))
+            .with_device(TelemetryDevice::new().with_architecture(consts::ARCH));
+        Self::new().with_resource(resource)
+    }
+
+    /// Set the resource identity.
+    #[must_use]
+    #[inline]
     pub fn with_resource(mut self, resource: TelemetryResource) -> Self {
         self.resource = Some(resource);
         self
     }
 
-    pub fn with_trace(mut self, trace: TelemetryTraceContext) -> Self {
-        self.trace = Some(trace);
-        self
-    }
-
+    /// Set the session context.
+    #[must_use]
+    #[inline]
     pub fn with_session(mut self, session: TelemetrySessionContext) -> Self {
         self.session = Some(session);
         self
     }
 
+    /// Set the subject.
+    #[must_use]
+    #[inline]
     pub fn with_subject(mut self, subject: TelemetrySubjectContext) -> Self {
         self.subject = Some(subject);
         self
     }
 
-    pub fn with_tag(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.tags.insert(key.into(), value.into());
+    /// Add one tag.
+    #[must_use]
+    #[inline]
+    pub fn with_tag<Key, ValueInput>(mut self, key: Key, value: ValueInput) -> Self
+    where
+        Key: Into<String>,
+        ValueInput: Into<String>,
+    {
+        drop(self.tags.insert(key.into(), value.into()));
         self
     }
 
+    /// Add several tags.
+    #[must_use]
+    #[inline]
     pub fn with_tags<I, K, V>(mut self, tags: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -402,17 +628,101 @@ impl TelemetryContext {
         self
     }
 
-    /// Conservative Rust runtime, target OS-family, and architecture identity.
-    pub fn runtime_defaults() -> Self {
-        let resource = TelemetryResource::new()
-            .with_runtime(TelemetryNamedVersion::new("rust"))
-            .with_operating_system(TelemetryOperatingSystem::new(normalized_target_os()))
-            .with_device(TelemetryDevice::new().with_architecture(std::env::consts::ARCH));
-        Self::new().with_resource(resource)
+    /// Set the trace context.
+    #[must_use]
+    #[inline]
+    pub fn with_trace(mut self, trace: TelemetryTraceContext) -> Self {
+        self.trace = Some(trace);
+        self
+    }
+}
+
+#[derive(Clone)]
+struct ActiveContext {
+    token: u64,
+    context: TelemetryContext,
+}
+
+#[derive(Debug)]
+#[must_use = "the guard must be kept alive for the intended synchronous context scope"]
+/// Same-thread RAII guard returned by [`activate_telemetry_context`].
+pub struct TelemetryContextGuard {
+    token: Option<u64>,
+    not_send: PhantomData<Rc<()>>,
+}
+
+impl TelemetryContextGuard {
+    /// Restore this guard's context contribution. Repeated calls are harmless.
+    #[inline]
+    pub fn close(&mut self) {
+        let Some(token) = self.token.take() else {
+            return;
+        };
+        ACTIVE_CONTEXTS.with(|contexts| {
+            let mut active_contexts = contexts.borrow_mut();
+            if let Some(index) = active_contexts
+                .iter()
+                .position(|active| active.token == token)
+            {
+                drop(active_contexts.remove(index));
+            }
+        });
+    }
+}
+
+impl Drop for TelemetryContextGuard {
+    #[inline]
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+/// Executor-safe future wrapper returned by [`with_telemetry_context_async`].
+#[derive(Debug)]
+#[must_use = "futures do nothing unless polled or awaited"]
+pub struct TelemetryContextFuture<F> {
+    context: TelemetryContext,
+    future: Pin<Box<F>>,
+    completed: bool,
+}
+
+impl<F> Future for TelemetryContextFuture<F>
+where
+    F: Future,
+{
+    type Output = Result<F::Output, SdkError>;
+
+    #[inline]
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        assert!(
+            !self.completed,
+            "TelemetryContextFuture polled after completion"
+        );
+        let guard = match activate_telemetry_context(self.context.clone()) {
+            Ok(guard) => guard,
+            Err(error) => {
+                self.completed = true;
+                return Poll::Ready(Err(error));
+            }
+        };
+        let result = self.future.as_mut().poll(cx);
+        drop(guard);
+        match result {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(output) => {
+                self.completed = true;
+                Poll::Ready(Ok(output))
+            }
+        }
     }
 }
 
 /// Validate, normalize, and detach one schema-v1 telemetry context.
+///
+/// # Errors
+///
+/// Returns an [`SdkError`] when an input fails validation.
+#[inline]
 pub fn validate_telemetry_context(
     context: &TelemetryContext,
 ) -> Result<TelemetryContext, SdkError> {
@@ -420,17 +730,22 @@ pub fn validate_telemetry_context(
 }
 
 /// Merge base and override context using the same field-aware capture semantics as the client.
+///
+/// # Errors
+///
+/// Returns an [`SdkError`] when an input fails validation.
+#[inline]
 pub fn merge_telemetry_contexts(
     base: Option<&TelemetryContext>,
     override_context: Option<&TelemetryContext>,
 ) -> Result<Option<TelemetryContext>, SdkError> {
-    let base = base
+    let validated_base = base
         .map(|context| validate_context(context, "base telemetry context"))
         .transpose()?;
-    let override_context = override_context
+    let validated_override = override_context
         .map(|context| validate_context(context, "override telemetry context"))
         .transpose()?;
-    merge_normalized_contexts(base, override_context)
+    merge_normalized_contexts(validated_base, validated_override)
 }
 
 fn validate_context(context: &TelemetryContext, label: &str) -> Result<TelemetryContext, SdkError> {
@@ -548,7 +863,7 @@ fn validate_deployment(
     value: &TelemetryDeployment,
     label: &str,
 ) -> Result<TelemetryDeployment, SdkError> {
-    let value = TelemetryDeployment {
+    let normalized = TelemetryDeployment {
         environment: optional_string(
             value.environment.as_deref(),
             &format!("{label} environment"),
@@ -560,10 +875,10 @@ fn validate_deployment(
             MAX_CONTEXT_STRING_CHARS,
         )?,
     };
-    if value.environment.is_none() && value.release.is_none() {
+    if normalized.environment.is_none() && normalized.release.is_none() {
         return Err(invalid_context(format!("{label} must not be empty")));
     }
-    Ok(value)
+    Ok(normalized)
 }
 
 fn validate_operating_system(
@@ -590,7 +905,7 @@ fn validate_operating_system(
 }
 
 fn validate_device(value: &TelemetryDevice, label: &str) -> Result<TelemetryDevice, SdkError> {
-    let value = TelemetryDevice {
+    let normalized = TelemetryDevice {
         family: optional_string(
             value.family.as_deref(),
             &format!("{label} family"),
@@ -607,17 +922,20 @@ fn validate_device(value: &TelemetryDevice, label: &str) -> Result<TelemetryDevi
             MAX_CONTEXT_STRING_CHARS,
         )?,
     };
-    if value.family.is_none() && value.model.is_none() && value.architecture.is_none() {
+    if normalized.family.is_none()
+        && normalized.model.is_none()
+        && normalized.architecture.is_none()
+    {
         return Err(invalid_context(format!("{label} must not be empty")));
     }
-    Ok(value)
+    Ok(normalized)
 }
 
 fn validate_application(
     value: &TelemetryApplication,
     label: &str,
 ) -> Result<TelemetryApplication, SdkError> {
-    let value = TelemetryApplication {
+    let normalized = TelemetryApplication {
         name: optional_string(
             value.name.as_deref(),
             &format!("{label} name"),
@@ -634,10 +952,10 @@ fn validate_application(
             MAX_CONTEXT_STRING_CHARS,
         )?,
     };
-    if value.name.is_none() && value.version.is_none() && value.build.is_none() {
+    if normalized.name.is_none() && normalized.version.is_none() && normalized.build.is_none() {
         return Err(invalid_context(format!("{label} must not be empty")));
     }
-    Ok(value)
+    Ok(normalized)
 }
 
 fn validate_trace(
@@ -709,27 +1027,27 @@ fn validate_tags(
         if !valid_tag_key(key) {
             return Err(invalid_context(format!("{label} key is invalid")));
         }
-        normalized.insert(
+        drop(normalized.insert(
             key.clone(),
             required_string(
                 value,
                 &format!("{label} value for {key}"),
                 MAX_CONTEXT_STRING_CHARS,
             )?,
-        );
+        ));
     }
     Ok(normalized)
 }
 
 fn required_string(value: &str, label: &str, maximum: usize) -> Result<String, SdkError> {
-    let value = value.trim();
-    if value.is_empty()
-        || value.chars().count() > maximum
-        || value.chars().any(is_forbidden_control)
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.chars().count() > maximum
+        || trimmed.chars().any(is_forbidden_control)
     {
         return Err(invalid_context(format!("{label} is invalid")));
     }
-    Ok(value.to_string())
+    Ok(trimmed.to_owned())
 }
 
 fn optional_string(
@@ -738,13 +1056,13 @@ fn optional_string(
     maximum: usize,
 ) -> Result<Option<String>, SdkError> {
     value
-        .map(|value| required_string(value, label, maximum))
+        .map(|text| required_string(text, label, maximum))
         .transpose()
 }
 
 fn is_forbidden_control(value: char) -> bool {
-    let value = value as u32;
-    value <= 0x1f || (0x7f..=0x9f).contains(&value)
+    let code = u32::from(value);
+    code <= 0x1f || (0x7f..=0x9f).contains(&code)
 }
 
 fn valid_tag_key(value: &str) -> bool {
@@ -757,14 +1075,16 @@ fn valid_tag_key(value: &str) -> bool {
 }
 
 fn hex_id(value: &str, length: usize, zero: &str, label: &str) -> Result<String, SdkError> {
-    let value = value.trim().to_ascii_lowercase();
-    if value.len() != length || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) || value == zero
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.len() != length
+        || !normalized.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || normalized == zero
     {
         return Err(invalid_context(format!(
             "{label} must be {length} non-zero hex characters"
         )));
     }
-    Ok(value)
+    Ok(normalized)
 }
 
 fn optional_hex_id(
@@ -774,7 +1094,7 @@ fn optional_hex_id(
     label: &str,
 ) -> Result<Option<String>, SdkError> {
     value
-        .map(|value| hex_id(value, length, zero, label))
+        .map(|text| hex_id(text, length, zero, label))
         .transpose()
 }
 
@@ -789,15 +1109,15 @@ fn merge_normalized_contexts(
     let merged = match (base, override_context) {
         (None, None) => return Ok(None),
         (Some(context), None) | (None, Some(context)) => context,
-        (Some(base), Some(override_context)) => {
-            let mut tags = base.tags;
-            tags.extend(override_context.tags);
+        (Some(older), Some(newer)) => {
+            let mut tags = older.tags;
+            tags.extend(newer.tags);
             TelemetryContext {
                 schema_version: TELEMETRY_CONTEXT_SCHEMA_VERSION,
-                resource: merge_resources(base.resource, override_context.resource),
-                trace: override_context.trace.or(base.trace),
-                session: override_context.session.or(base.session),
-                subject: override_context.subject.or(base.subject),
+                resource: merge_resources(older.resource, newer.resource),
+                trace: newer.trace.or(older.trace),
+                session: newer.session.or(older.session),
+                subject: newer.subject.or(older.subject),
                 tags,
             }
         }
@@ -812,17 +1132,17 @@ fn merge_resources(
     match (base, override_resource) {
         (None, None) => None,
         (Some(resource), None) | (None, Some(resource)) => Some(resource),
-        (Some(base), Some(override_resource)) => Some(TelemetryResource {
-            service: merge_named_version(base.service, override_resource.service),
-            deployment: merge_deployment(base.deployment, override_resource.deployment),
-            runtime: merge_named_version(base.runtime, override_resource.runtime),
-            framework: merge_named_version(base.framework, override_resource.framework),
+        (Some(older), Some(newer)) => Some(TelemetryResource {
+            service: merge_named_version(older.service, newer.service),
+            deployment: merge_deployment(older.deployment, newer.deployment),
+            runtime: merge_named_version(older.runtime, newer.runtime),
+            framework: merge_named_version(older.framework, newer.framework),
             operating_system: merge_operating_system(
-                base.operating_system,
-                override_resource.operating_system,
+                older.operating_system,
+                newer.operating_system,
             ),
-            device: merge_device(base.device, override_resource.device),
-            application: merge_application(base.application, override_resource.application),
+            device: merge_device(older.device, newer.device),
+            application: merge_application(older.application, newer.application),
         }),
     }
 }
@@ -834,9 +1154,9 @@ fn merge_named_version(
     match (base, override_value) {
         (None, None) => None,
         (Some(value), None) | (None, Some(value)) => Some(value),
-        (Some(base), Some(override_value)) => Some(TelemetryNamedVersion {
-            name: override_value.name,
-            version: override_value.version.or(base.version),
+        (Some(older), Some(newer)) => Some(TelemetryNamedVersion {
+            name: newer.name,
+            version: newer.version.or(older.version),
         }),
     }
 }
@@ -848,9 +1168,9 @@ fn merge_deployment(
     match (base, override_value) {
         (None, None) => None,
         (Some(value), None) | (None, Some(value)) => Some(value),
-        (Some(base), Some(override_value)) => Some(TelemetryDeployment {
-            environment: override_value.environment.or(base.environment),
-            release: override_value.release.or(base.release),
+        (Some(older), Some(newer)) => Some(TelemetryDeployment {
+            environment: newer.environment.or(older.environment),
+            release: newer.release.or(older.release),
         }),
     }
 }
@@ -862,10 +1182,10 @@ fn merge_operating_system(
     match (base, override_value) {
         (None, None) => None,
         (Some(value), None) | (None, Some(value)) => Some(value),
-        (Some(base), Some(override_value)) => Some(TelemetryOperatingSystem {
-            name: override_value.name,
-            version: override_value.version.or(base.version),
-            build: override_value.build.or(base.build),
+        (Some(older), Some(newer)) => Some(TelemetryOperatingSystem {
+            name: newer.name,
+            version: newer.version.or(older.version),
+            build: newer.build.or(older.build),
         }),
     }
 }
@@ -877,10 +1197,10 @@ fn merge_device(
     match (base, override_value) {
         (None, None) => None,
         (Some(value), None) | (None, Some(value)) => Some(value),
-        (Some(base), Some(override_value)) => Some(TelemetryDevice {
-            family: override_value.family.or(base.family),
-            model: override_value.model.or(base.model),
-            architecture: override_value.architecture.or(base.architecture),
+        (Some(older), Some(newer)) => Some(TelemetryDevice {
+            family: newer.family.or(older.family),
+            model: newer.model.or(older.model),
+            architecture: newer.architecture.or(older.architecture),
         }),
     }
 }
@@ -892,34 +1212,24 @@ fn merge_application(
     match (base, override_value) {
         (None, None) => None,
         (Some(value), None) | (None, Some(value)) => Some(value),
-        (Some(base), Some(override_value)) => Some(TelemetryApplication {
-            name: override_value.name.or(base.name),
-            version: override_value.version.or(base.version),
-            build: override_value.build.or(base.build),
+        (Some(older), Some(newer)) => Some(TelemetryApplication {
+            name: newer.name.or(older.name),
+            version: newer.version.or(older.version),
+            build: newer.build.or(older.build),
         }),
     }
 }
 
 fn normalized_target_os() -> &'static str {
-    match std::env::consts::OS {
+    match consts::OS {
         "macos" => "darwin",
         value => value,
     }
 }
 
-#[derive(Clone)]
-struct ActiveContext {
-    token: u64,
-    context: TelemetryContext,
-}
-
-thread_local! {
-    static ACTIVE_CONTEXTS: RefCell<Vec<ActiveContext>> = const { RefCell::new(Vec::new()) };
-}
-
-static NEXT_CONTEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
-
 /// Return a detached snapshot of the current thread/poll-scoped telemetry context.
+#[must_use]
+#[inline]
 pub fn current_telemetry_context() -> Option<TelemetryContext> {
     ACTIVE_CONTEXTS.with(|contexts| {
         contexts
@@ -928,18 +1238,32 @@ pub fn current_telemetry_context() -> Option<TelemetryContext> {
             .try_fold(None, |merged, active| {
                 merge_normalized_contexts(merged, Some(active.context.clone()))
             })
-            .expect("active telemetry contexts were validated before insertion")
+            .ok()
+            .flatten()
     })
 }
 
 /// Activate context for the current synchronous thread until the guard closes or drops.
+///
+/// # Errors
+///
+/// Returns an [`SdkError`] when the context fails validation.
+#[inline]
 pub fn activate_telemetry_context(
     context: TelemetryContext,
 ) -> Result<TelemetryContextGuard, SdkError> {
-    let context = validate_context(&context, "active telemetry context")?;
-    merge_normalized_contexts(current_telemetry_context(), Some(context.clone()))?;
+    let validated = context.into_validated("active telemetry context")?;
+    drop(merge_normalized_contexts(
+        current_telemetry_context(),
+        Some(validated.clone()),
+    )?);
     let token = NEXT_CONTEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
-    ACTIVE_CONTEXTS.with(|contexts| contexts.borrow_mut().push(ActiveContext { token, context }));
+    ACTIVE_CONTEXTS.with(|contexts| {
+        contexts.borrow_mut().push(ActiveContext {
+            token,
+            context: validated,
+        });
+    });
     Ok(TelemetryContextGuard {
         token: Some(token),
         not_send: PhantomData,
@@ -947,6 +1271,11 @@ pub fn activate_telemetry_context(
 }
 
 /// Run one synchronous closure with context and restore the exact previous scope on unwind.
+///
+/// # Errors
+///
+/// Returns an [`SdkError`] when the context fails validation; the closure does not run.
+#[inline]
 pub fn with_telemetry_context<F, R>(context: TelemetryContext, operation: F) -> Result<R, SdkError>
 where
     F: FnOnce() -> R,
@@ -955,36 +1284,12 @@ where
     Ok(operation())
 }
 
-#[derive(Debug)]
-#[must_use = "the guard must be kept alive for the intended synchronous context scope"]
-/// Same-thread RAII guard returned by [`activate_telemetry_context`].
-pub struct TelemetryContextGuard {
-    token: Option<u64>,
-    not_send: PhantomData<Rc<()>>,
-}
-
-impl TelemetryContextGuard {
-    /// Restore this guard's context contribution. Repeated calls are harmless.
-    pub fn close(&mut self) {
-        let Some(token) = self.token.take() else {
-            return;
-        };
-        ACTIVE_CONTEXTS.with(|contexts| {
-            let mut contexts = contexts.borrow_mut();
-            if let Some(index) = contexts.iter().position(|active| active.token == token) {
-                contexts.remove(index);
-            }
-        });
-    }
-}
-
-impl Drop for TelemetryContextGuard {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
-
 /// Wrap a future so context is installed only while each poll runs.
+///
+/// # Errors
+///
+/// Returns an [`SdkError`] when the context fails validation.
+#[inline]
 pub fn with_telemetry_context_async<F>(
     context: TelemetryContext,
     future: F,
@@ -993,52 +1298,15 @@ where
     F: Future,
 {
     Ok(TelemetryContextFuture {
-        context: validate_context(&context, "async telemetry context")?,
+        context: context.into_validated("async telemetry context")?,
         future: Box::pin(future),
         completed: false,
     })
 }
 
-/// Executor-safe future wrapper returned by [`with_telemetry_context_async`].
-#[must_use = "futures do nothing unless polled or awaited"]
-pub struct TelemetryContextFuture<F> {
-    context: TelemetryContext,
-    future: Pin<Box<F>>,
-    completed: bool,
-}
-
-impl<F> Future for TelemetryContextFuture<F>
-where
-    F: Future,
-{
-    type Output = Result<F::Output, SdkError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.completed {
-            panic!("TelemetryContextFuture polled after completion");
-        }
-        let guard = match activate_telemetry_context(self.context.clone()) {
-            Ok(guard) => guard,
-            Err(error) => {
-                self.completed = true;
-                return Poll::Ready(Err(error));
-            }
-        };
-        let result = self.future.as_mut().poll(cx);
-        drop(guard);
-        match result {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(output) => {
-                self.completed = true;
-                Poll::Ready(Ok(output))
-            }
-        }
-    }
-}
-
 pub(crate) fn context_to_value(context: &TelemetryContext) -> Result<serde_json::Value, SdkError> {
-    let context = validate_context(context, "event telemetry context")?;
-    serde_json::to_value(context).map_err(|_| {
+    let validated = validate_context(context, "event telemetry context")?;
+    serde_json::to_value(validated).map_err(|_error| {
         SdkError::new(
             "serialization_error",
             "telemetry context could not be serialized",
@@ -1048,7 +1316,7 @@ pub(crate) fn context_to_value(context: &TelemetryContext) -> Result<serde_json:
 
 pub(crate) fn context_from_value(value: serde_json::Value) -> Result<TelemetryContext, SdkError> {
     let context: TelemetryContext = serde_json::from_value(value)
-        .map_err(|_| invalid_context("event context must be a TelemetryContext"))?;
+        .map_err(|_error| invalid_context("event context must be a TelemetryContext"))?;
     validate_context(&context, "event telemetry context")
 }
 

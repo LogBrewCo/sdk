@@ -1,8 +1,11 @@
+//! Integration tests for dependency operation spans.
+#![cfg(test)]
+use core::panic::AssertUnwindSafe;
 use logbrew::{
     DependencyOperationSpan, LogBrewClient, MetadataValue, OpenTelemetrySpanContext, Traceparent,
 };
 use serde_json::Value;
-use std::panic::{self, AssertUnwindSafe};
+use std::panic;
 
 fn sample_client() -> LogBrewClient {
     LogBrewClient::builder("logbrew-rust", "0.1.0")
@@ -16,24 +19,24 @@ fn dependency_operation_span_uses_parent_context_and_sanitizes_metadata() {
     let context =
         Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
     let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "pool".to_string(),
-        MetadataValue::String("primary".to_string()),
-    );
-    metadata.insert("row_count".to_string(), MetadataValue::from(3));
-    metadata.insert(
-        "sql.statement".to_string(),
-        MetadataValue::String("select * from users".to_string()),
-    );
-    metadata.insert(
-        "pass.word".to_string(),
-        MetadataValue::String("not-for-telemetry".to_string()),
-    );
-    metadata.insert(
-        "connection-string".to_string(),
-        MetadataValue::String("postgres://example".to_string()),
-    );
-    metadata.insert("nested".to_string(), serde_json::json!({"drop": true}));
+    drop(metadata.insert(
+        "pool".to_owned(),
+        MetadataValue::String("primary".to_owned()),
+    ));
+    drop(metadata.insert("row_count".to_owned(), MetadataValue::from(3_i32)));
+    drop(metadata.insert(
+        "sql.statement".to_owned(),
+        MetadataValue::String("select * from users".to_owned()),
+    ));
+    drop(metadata.insert(
+        "pass.word".to_owned(),
+        MetadataValue::String("not-for-telemetry".to_owned()),
+    ));
+    drop(metadata.insert(
+        "connection-string".to_owned(),
+        MetadataValue::String("postgres://example".to_owned()),
+    ));
+    drop(metadata.insert("nested".to_owned(), serde_json::json!({"drop": true})));
 
     let mut client = sample_client();
     client
@@ -53,17 +56,22 @@ fn dependency_operation_span_uses_parent_context_and_sanitizes_metadata() {
 
     let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
     let attributes = &payload["events"][0]["attributes"];
-    assert_eq!(attributes["name"], "database.operation:checkout lookup");
-    assert_eq!(attributes["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
-    assert_eq!(attributes["spanId"], "abcdef1234567890");
-    assert_eq!(attributes["parentSpanId"], "00f067aa0ba902b7");
-    assert_eq!(attributes["durationMs"], 8.25);
-    assert_eq!(attributes["metadata"]["source"], "database.operation");
-    assert_eq!(attributes["metadata"]["db.system"], "postgres");
-    assert_eq!(attributes["metadata"]["db.operation"], "select");
-    assert_eq!(attributes["metadata"]["db.target"], "orders");
-    assert_eq!(attributes["metadata"]["pool"], "primary");
-    assert_eq!(attributes["metadata"]["row_count"], 3);
+    assert_fields(
+        attributes,
+        &[
+            ("/name", Value::from("database.operation:checkout lookup")),
+            ("/traceId", Value::from("4bf92f3577b34da6a3ce929d0e0e4736")),
+            ("/spanId", Value::from("abcdef1234567890")),
+            ("/parentSpanId", Value::from("00f067aa0ba902b7")),
+            ("/durationMs", Value::from(8.25_f64)),
+            ("/metadata/source", Value::from("database.operation")),
+            ("/metadata/db.system", Value::from("postgres")),
+            ("/metadata/db.operation", Value::from("select")),
+            ("/metadata/db.target", Value::from("orders")),
+            ("/metadata/pool", Value::from("primary")),
+            ("/metadata/row_count", Value::from(3_i32)),
+        ],
+    );
     assert!(attributes["metadata"].get("sql.statement").is_none());
     assert!(attributes["metadata"].get("pass.word").is_none());
     assert!(attributes["metadata"].get("connection-string").is_none());
@@ -139,10 +147,10 @@ fn dependency_operation_capture_panic_records_success_span_and_returns_value() {
             "evt_dependency_success_001",
             "2026-06-02T10:00:23Z",
             &context,
-            || 3,
+            || 3_i32,
         );
 
-    assert_eq!(order_count, 3);
+    assert_eq!(order_count, 3_i32);
     let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
     let attributes = &payload["events"][0]["attributes"];
     assert_eq!(attributes["name"], "database.operation:checkout lookup");
@@ -158,14 +166,14 @@ fn dependency_operation_capture_panic_records_failed_span_and_resumes_unwind() {
     let context =
         Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
     let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "pool".to_string(),
-        MetadataValue::String("primary".to_string()),
-    );
-    metadata.insert(
-        "sql.statement".to_string(),
-        MetadataValue::String("select * from users".to_string()),
-    );
+    drop(metadata.insert(
+        "pool".to_owned(),
+        MetadataValue::String("primary".to_owned()),
+    ));
+    drop(metadata.insert(
+        "sql.statement".to_owned(),
+        MetadataValue::String("select * from users".to_owned()),
+    ));
     let mut client = sample_client();
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -199,4 +207,10 @@ fn dependency_operation_capture_panic_records_failed_span_and_resumes_unwind() {
     assert!(!preview.contains("do not capture this panic message"));
     assert!(!preview.contains("sql.statement"));
     assert!(!preview.contains("select * from users"));
+}
+
+fn assert_fields(object: &Value, expected: &[(&str, Value)]) {
+    for field in expected {
+        assert_eq!(object.pointer(field.0), Some(&field.1), "field {}", field.0);
+    }
 }
