@@ -87,7 +87,6 @@ on:
         default: ""
 
 permissions:
-  actions: write
   contents: read
 
 concurrency:
@@ -98,6 +97,9 @@ jobs:
   dispatch-publish:
     name: Dispatch package publishing
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
     steps:
       - name: Check out release ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
