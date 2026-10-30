@@ -23,7 +23,7 @@ thread_local! {
     static ACTIVE_CONTEXTS: RefCell<Vec<ActiveContext>> = const { RefCell::new(Vec::new()) };
 }
 
-static NEXT_CONTEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
+static NEXT_CONTEXT_SCOPE_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -639,7 +639,7 @@ impl TelemetryContext {
 
 #[derive(Clone)]
 struct ActiveContext {
-    token: u64,
+    scope_id: u64,
     context: TelemetryContext,
 }
 
@@ -647,7 +647,7 @@ struct ActiveContext {
 #[must_use = "the guard must be kept alive for the intended synchronous context scope"]
 /// Same-thread RAII guard returned by [`activate_telemetry_context`].
 pub struct TelemetryContextGuard {
-    token: Option<u64>,
+    scope_id: Option<u64>,
     not_send: PhantomData<Rc<()>>,
 }
 
@@ -655,14 +655,14 @@ impl TelemetryContextGuard {
     /// Restore this guard's context contribution. Repeated calls are harmless.
     #[inline]
     pub fn close(&mut self) {
-        let Some(token) = self.token.take() else {
+        let Some(scope_id) = self.scope_id.take() else {
             return;
         };
         ACTIVE_CONTEXTS.with(|contexts| {
             let mut active_contexts = contexts.borrow_mut();
             if let Some(index) = active_contexts
                 .iter()
-                .position(|active| active.token == token)
+                .position(|active| active.scope_id == scope_id)
             {
                 drop(active_contexts.remove(index));
             }
@@ -1257,15 +1257,15 @@ pub fn activate_telemetry_context(
         current_telemetry_context(),
         Some(validated.clone()),
     )?);
-    let token = NEXT_CONTEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
+    let scope_id = NEXT_CONTEXT_SCOPE_ID.fetch_add(1, Ordering::Relaxed);
     ACTIVE_CONTEXTS.with(|contexts| {
         contexts.borrow_mut().push(ActiveContext {
-            token,
+            scope_id,
             context: validated,
         });
     });
     Ok(TelemetryContextGuard {
-        token: Some(token),
+        scope_id: Some(scope_id),
         not_send: PhantomData,
     })
 }

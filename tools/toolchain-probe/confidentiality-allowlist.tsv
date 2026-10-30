@@ -354,13 +354,6 @@ rust/logbrew/README.md	restore	prefix	`activate_telemetry_context` returns a sam
 rust/logbrew/README.md	customer	prefix	Session and subject IDs must be application-owned opaque identifiers.
 rust/logbrew/src/telemetry_context.rs	restore	line	/// Restore this guard's context contribution. Repeated calls are harmless.
 rust/logbrew/src/telemetry_context.rs	restore	line	/// Run one synchronous closure with context and restore the exact previous scope on unwind.
-rust/logbrew/src/telemetry_context.rs	token	has	NEXT_CONTEXT_TOKEN
-rust/logbrew/src/telemetry_context.rs	token	has	active.token == token
-rust/logbrew/src/telemetry_context.rs	token	has	self.token.take()
-rust/logbrew/src/telemetry_context.rs	token	has	token: Option<u64>
-rust/logbrew/src/telemetry_context.rs	token	has	token: Some(token)
-rust/logbrew/src/telemetry_context.rs	token	has	token: u64
-rust/logbrew/src/telemetry_context.rs	token	has	{ token, context }
 rust/logbrew/tests/telemetry_context.rs	customer	has	"customer.tier"
 rust/logbrew/tests/telemetry_context.rs	hostname	line	"hostname",
 rust/logbrew/tests/telemetry_context.rs	restore	prefix	fn synchronous_scopes_restore_on_close_drop_panic_and_threads()
