@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Type declarations the JavaScript type gate checks the packages against.",
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "amqplib": "2.2.0"
+  }
+}

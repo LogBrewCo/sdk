@@ -1,21 +1,21 @@
-import { Buffer } from "node:buffer";
-import amqp from "amqplib";
-import { LogBrewClient } from "@logbrew/sdk";
 import {
   amqplibPublishWithLogBrewSpan,
   amqplibSendToQueueWithLogBrewSpan,
   withLogBrewAmqplibConsumer
-} from "../index.js";
+} from "@logbrew/amqplib";
+import { LogBrewClient } from "@logbrew/sdk";
+import amqp from "amqplib";
+
+/** @import { ConsumeMessage } from "amqplib" */
 
 const client = LogBrewClient.create({
-  apiKey: process.env.LOGBREW_SERVER_API_KEY ?? "LOGBREW_SERVER_API_KEY",
-  release: "checkout-worker@1.0.0",
-  environment: "production",
+  apiKey: process.env["LOGBREW_SERVER_API_KEY"] ?? "LOGBREW_SERVER_API_KEY",
+  context: { resource: { deployment: { environment: "production", release: "checkout-worker@1.0.0" } }, schemaVersion: 1 },
   sdkName: "checkout-worker",
   sdkVersion: "1.0.0"
 });
 
-const connection = await amqp.connect(process.env.AMQP_URL ?? "amqp://localhost");
+const connection = await amqp.connect(process.env["AMQP_URL"] ?? "amqp://localhost");
 const channel = await connection.createChannel();
 
 await amqplibSendToQueueWithLogBrewSpan(
@@ -35,17 +35,22 @@ await amqplibPublishWithLogBrewSpan(
   { client }
 );
 
-await channel.consume(
-  "checkout.created",
-  withLogBrewAmqplibConsumer(async (message) => {
-    if (!message) {
-      return;
-    }
-    await handleCheckoutMessage(message);
+/**
+ * @param {ConsumeMessage | null} message
+ * @returns {void}
+ */
+function acknowledgeCheckout(message) {
+  if (message !== null) {
     channel.ack(message);
-  }, { client, queueName: "checkout.created" })
-);
-
-async function handleCheckoutMessage() {
-  // Your app owns payload parsing, acknowledgement, retry, and shutdown.
+  }
 }
+
+const consumeCheckout = withLogBrewAmqplibConsumer(acknowledgeCheckout, { client, queueName: "checkout.created" });
+
+await channel.consume("checkout.created", (message) => {
+  consumeCheckout(message).catch(() => {
+    if (message !== null) {
+      channel.nack(message);
+    }
+  });
+});

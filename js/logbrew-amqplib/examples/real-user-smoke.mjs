@@ -1,9 +1,5 @@
-import { Buffer } from "node:buffer";
+import { amqplibSendToQueueWithLogBrewSpan, withLogBrewAmqplibConsumer } from "@logbrew/amqplib";
 import { LogBrewClient } from "@logbrew/sdk";
-import {
-  amqplibSendToQueueWithLogBrewSpan,
-  withLogBrewAmqplibConsumer
-} from "../index.js";
 
 const client = LogBrewClient.create({
   apiKey: "LOGBREW_SERVER_API_KEY",
@@ -25,11 +21,11 @@ await amqplibSendToQueueWithLogBrewSpan(
   { client }
 );
 
-await withLogBrewAmqplibConsumer(async () => undefined, {
+await withLogBrewAmqplibConsumer(() => "processed", {
   client,
   queueName: "checkout.created"
 })({
+  content: Buffer.from("example"),
   fields: { exchange: "", routingKey: "checkout.created" },
-  properties: { headers: {} },
-  content: Buffer.from("example")
+  properties: { headers: {} }
 });
