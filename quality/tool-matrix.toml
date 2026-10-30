@@ -360,3 +360,19 @@ runtime = "local n=1, 20 s for the whole repository"
 findings = "seeded 2026-10-25: a throwaway branch pinning golang.org/x/text v0.3.0 failed with GO-2020-0015 and opened issue #424 (run 40185016916; branch deleted); local run on main 2026-10-25: 17 advisories in 6 packages (Go: quic-go, golang.org/x/net, otel/sdk; Maven: spring-webflux, spring-webmvc, lz4-java) that Dependabot did not report; 2026-10-25 upgrades cleared the quic-go, Spring, and lz4-java findings (quic-go v0.59.1, Spring Framework 7.0.10, lz4-java 1.12.1) and the 5 Go findings (GO-2026-6603, GO-2026-6611, GO-2026-6612, GO-2026-6617, GO-2026-6505) became reviewed exceptions until the Go modules moved to Go 1.26.0 with golang.org/x/net v0.61.0 and go.opentelemetry.io/otel/sdk v1.47.0, which removed them; the scan is clean with no exceptions"
 replaces = "none"
 checked = 2026-10-25
+
+[[tool]]
+id = "openssf-scorecard"
+risk = "Supply chain practices drifting: unpinned actions, write permissions, branch protection, dangerous workflows"
+tool = "OpenSSF Scorecard action and the CodeQL SARIF upload"
+version = "pinned in the workflows"
+unpinned = "the scorecard workflow pins each action to a commit with a version comment; the check requires one such pin per action"
+uses = ["ossf/scorecard-action", "github/codeql-action/upload-sarif"]
+runs_in = "scorecard workflow: pushes to main, weekly, and branch protection changes"
+config = "publish_results: true; results go to the OpenSSF API and to code scanning"
+conflicts = "none known"
+exceptions = "none"
+runtime = "not yet recorded; the workflow is new"
+findings = "unknown: the first run publishes the baseline; record low checks at the next review"
+replaces = "none"
+checked = 2026-10-30
