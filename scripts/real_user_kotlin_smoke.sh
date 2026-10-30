@@ -338,8 +338,8 @@ repositories {
 
 dependencies {
     implementation 'co.logbrew:logbrew-kotlin:$kotlin_version'
-    implementation 'io.opentelemetry:opentelemetry-api:1.63.0'
-    implementation 'io.opentelemetry:opentelemetry-context:1.63.0'
+    implementation 'io.opentelemetry:opentelemetry-api:1.67.0'
+    implementation 'io.opentelemetry:opentelemetry-context:1.67.0'
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:$kotlin_stdlib_version'
 }
 EOF

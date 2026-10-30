@@ -26,7 +26,7 @@ If you attach the optional Logback appender, also include Logback in your app:
 <dependency>
   <groupId>ch.qos.logback</groupId>
   <artifactId>logback-classic</artifactId>
-  <version>1.5.34</version>
+  <version>1.6.6</version>
 </dependency>
 ```
 
@@ -36,17 +36,17 @@ If you copy live OpenTelemetry span context with `LogBrewOpenTelemetry`, include
 <dependency>
   <groupId>io.opentelemetry</groupId>
   <artifactId>opentelemetry-api</artifactId>
-  <version>1.63.0</version>
+  <version>1.67.0</version>
 </dependency>
 <dependency>
   <groupId>io.opentelemetry</groupId>
   <artifactId>opentelemetry-context</artifactId>
-  <version>1.63.0</version>
+  <version>1.67.0</version>
 </dependency>
 <dependency>
   <groupId>io.opentelemetry</groupId>
   <artifactId>opentelemetry-common</artifactId>
-  <version>1.63.0</version>
+  <version>1.67.0</version>
 </dependency>
 ```
 
@@ -56,7 +56,7 @@ If you also register the optional LogBrew OpenTelemetry span exporter or process
 <dependency>
   <groupId>io.opentelemetry</groupId>
   <artifactId>opentelemetry-sdk-trace</artifactId>
-  <version>1.63.0</version>
+  <version>1.67.0</version>
 </dependency>
 ```
 

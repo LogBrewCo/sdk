@@ -2,8 +2,8 @@
 
 fetch_java_logback_deps() {
   local deps_dir="$1"
-  local slf4j_version="${LOGBREW_SLF4J_VERSION:-2.0.18}"
-  local logback_version="${LOGBREW_LOGBACK_VERSION:-1.5.34}"
+  local slf4j_version="${LOGBREW_SLF4J_VERSION:-2.0.20}"
+  local logback_version="${LOGBREW_LOGBACK_VERSION:-1.6.6}"
 
   fetch_maven_jars "$deps_dir" \
     "org/slf4j/slf4j-api/$slf4j_version/slf4j-api-$slf4j_version" \
@@ -13,7 +13,7 @@ fetch_java_logback_deps() {
 
 fetch_java_opentelemetry_deps() {
   local deps_dir="$1"
-  local opentelemetry_version="${LOGBREW_OPENTELEMETRY_VERSION:-1.63.0}"
+  local opentelemetry_version="${LOGBREW_OPENTELEMETRY_VERSION:-1.67.0}"
 
   fetch_maven_jars "$deps_dir" \
     "io/opentelemetry/opentelemetry-api/$opentelemetry_version/opentelemetry-api-$opentelemetry_version" \
