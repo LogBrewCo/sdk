@@ -1,25 +1,29 @@
 import type { LogBrewClient } from "@logbrew/sdk";
 import type { QueueOperationWithLogBrewSpanOptions } from "@logbrew/node";
 
-export type LogBrewAmqplibHeaders = Record<string, unknown>;
-export type LogBrewAmqplibPublishOptionsLike = {
+type LogBrewAmqplibHeaders = Record<string, unknown>;
+type LogBrewAmqplibPublishOptionsLike = {
   headers?: LogBrewAmqplibHeaders;
   [key: string]: unknown;
 };
-export type LogBrewAmqplibChannel = {
-  publish(
+type ReadonlyPublishOptionsLike = {
+  readonly headers?: Readonly<LogBrewAmqplibHeaders>;
+  readonly [key: string]: unknown;
+};
+type LogBrewAmqplibChannel = {
+  publish: (
     exchange: string,
     routingKey: string,
     content: Buffer,
-    options?: LogBrewAmqplibPublishOptionsLike
-  ): boolean | Promise<boolean>;
-  sendToQueue(
+    options?: ReadonlyPublishOptionsLike
+  ) => boolean | Promise<boolean>;
+  sendToQueue: (
     queue: string,
     content: Buffer,
-    options?: LogBrewAmqplibPublishOptionsLike
-  ): boolean | Promise<boolean>;
+    options?: ReadonlyPublishOptionsLike
+  ) => boolean | Promise<boolean>;
 };
-export type LogBrewAmqplibMessageLike = {
+type LogBrewAmqplibMessageLike = {
   fields?: {
     exchange?: string;
     routingKey?: string;
@@ -32,48 +36,61 @@ export type LogBrewAmqplibMessageLike = {
   content?: Buffer;
   [key: string]: unknown;
 };
+type MessageShape = {
+  readonly fields?: {
+    readonly exchange?: string;
+    readonly routingKey?: string;
+  };
+  readonly properties?: {
+    readonly headers?: Readonly<LogBrewAmqplibHeaders> | undefined;
+  };
+  readonly content?: Buffer;
+};
 
-export type LogBrewAmqplibPublishOptions<Result = boolean> =
+type LogBrewAmqplibPublishOptions<Result = boolean> =
   Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
     client: LogBrewClient;
     destinationName?: string;
   };
 
-export type LogBrewAmqplibConsumeOptions<Result = unknown> =
+type LogBrewAmqplibConsumeOptions<Result = unknown> =
   Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
     client: LogBrewClient;
     queueName?: string;
   };
 
-export declare function amqplibPublishWithLogBrewSpan<Result = boolean>(
-  channel: Pick<LogBrewAmqplibChannel, "publish">,
+declare function amqplibPublishWithLogBrewSpan<Result = boolean>(
+  channel: Readonly<Pick<LogBrewAmqplibChannel, "publish">>,
   exchange: string,
   routingKey: string,
   content: Buffer,
-  publishOptions: LogBrewAmqplibPublishOptionsLike | undefined,
+  publishOptions: ReadonlyPublishOptionsLike | undefined,
   options: LogBrewAmqplibPublishOptions<Result>
 ): Promise<Awaited<Result>>;
 
-export declare function amqplibSendToQueueWithLogBrewSpan<Result = boolean>(
-  channel: Pick<LogBrewAmqplibChannel, "sendToQueue">,
+declare function amqplibSendToQueueWithLogBrewSpan<Result = boolean>(
+  channel: Readonly<Pick<LogBrewAmqplibChannel, "sendToQueue">>,
   queue: string,
   content: Buffer,
-  publishOptions: LogBrewAmqplibPublishOptionsLike | undefined,
+  publishOptions: ReadonlyPublishOptionsLike | undefined,
   options: LogBrewAmqplibPublishOptions<Result>
 ): Promise<Awaited<Result>>;
 
-export declare function withLogBrewAmqplibConsumer<Result = unknown>(
-  onMessage: (message: LogBrewAmqplibMessageLike | null) => Result | Promise<Result>,
+declare function withLogBrewAmqplibConsumer<
+  Result = unknown,
+  Message extends MessageShape = LogBrewAmqplibMessageLike
+>(
+  onMessage: (message: Message | null) => Result | Promise<Result>,
   options: LogBrewAmqplibConsumeOptions<Result>
-): (message: LogBrewAmqplibMessageLike | null) => Promise<Awaited<Result>>;
+): (message: Message | null) => Promise<Awaited<Result>>;
 
-export declare function createLogBrewAmqplibPublishOptions(
-  publishOptions?: LogBrewAmqplibPublishOptionsLike,
+declare function createLogBrewAmqplibPublishOptions(
+  publishOptions?: ReadonlyPublishOptionsLike,
   traceparent?: string
 ): LogBrewAmqplibPublishOptionsLike;
 
-export declare function extractLogBrewAmqplibTraceparent(
-  messageOrHeaders?: LogBrewAmqplibMessageLike | LogBrewAmqplibHeaders
+declare function extractLogBrewAmqplibTraceparent(
+  messageOrHeaders?: MessageShape | Readonly<LogBrewAmqplibHeaders>
 ): string | undefined;
 
 declare const api: {
@@ -84,4 +101,19 @@ declare const api: {
   withLogBrewAmqplibConsumer: typeof withLogBrewAmqplibConsumer;
 };
 
+export type {
+  LogBrewAmqplibChannel,
+  LogBrewAmqplibConsumeOptions,
+  LogBrewAmqplibHeaders,
+  LogBrewAmqplibMessageLike,
+  LogBrewAmqplibPublishOptions,
+  LogBrewAmqplibPublishOptionsLike
+};
+export {
+  amqplibPublishWithLogBrewSpan,
+  amqplibSendToQueueWithLogBrewSpan,
+  createLogBrewAmqplibPublishOptions,
+  extractLogBrewAmqplibTraceparent,
+  withLogBrewAmqplibConsumer
+};
 export default api;

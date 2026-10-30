@@ -437,3 +437,6 @@ scripts/advisory-issue.sh	*	line	printf 'Authorization: Bearer %s\n' "$GH_TOKEN"
 
 # Browser attribution reads the referring page URL's host name to tag where a visit came from.
 js/logbrew-browser/attribution.{js,cjs}	hostname	has	referrer.hostname
+
+# Lock files pin package integrity hashes, which can spell a listed word by chance.
+js/bun.lock	*	re	^    "[@a-z0-9/._-]+": \["[@a-z0-9/._-]+@[0-9][0-9a-z.+-]*", "", \{[^\[\]]*\}, "sha512-[A-Za-z0-9+/]{86}=="\],$

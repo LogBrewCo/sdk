@@ -1,0 +1,147 @@
+{
+  "plugins": [
+    "eslint",
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "jsdoc",
+    "promise",
+    "node"
+  ],
+  "categories": {
+    "correctness": "error",
+    "nursery": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "restriction": "error",
+    "style": "error",
+    "suspicious": "error"
+  },
+  "env": {
+    "builtin": true,
+    "es2022": true,
+    "node": true
+  },
+  "rules": {
+    "eslint/func-style": [
+      "error",
+      "declaration"
+    ],
+    "eslint/max-lines": [
+      "error",
+      {
+        "skipBlankLines": false,
+        "skipComments": true
+      }
+    ],
+    "eslint/no-redeclare": [
+      "error",
+      {
+        "builtinGlobals": false
+      }
+    ],
+    "eslint/no-ternary": "off",
+    "eslint/no-undefined": "off",
+    "eslint/one-var": [
+      "error",
+      "never"
+    ],
+    "eslint/require-await": "off",
+    "import/no-named-export": "off",
+    "import/prefer-default-export": "off",
+    "jsdoc/require-param-description": "off",
+    "jsdoc/require-property-description": "off",
+    "jsdoc/require-returns-description": "off",
+    "node/no-top-level-await": "off",
+    "oxc/no-async-await": "off",
+    "oxc/no-optional-chaining": "off",
+    "oxc/no-rest-spread-properties": "off",
+    "typescript/consistent-type-definitions": [
+      "error",
+      "type"
+    ],
+    "typescript/prefer-readonly-parameter-types": [
+      "error",
+      {
+        "allow": [
+          {
+            "from": "package",
+            "name": "Buffer",
+            "package": "@types/node"
+          },
+          {
+            "from": "package",
+            "name": "ConsumeMessage",
+            "package": "amqplib"
+          }
+        ]
+      }
+    ],
+    "unicorn/no-useless-undefined": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "logbrew-amqplib/index.cjs"
+      ],
+      "rules": {
+        "import/no-commonjs": "off",
+        "import/unambiguous": "off",
+        "typescript/no-require-imports": "off",
+        "typescript/no-var-requires": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-amqplib/index.cjs",
+        "logbrew-amqplib/index.d.cts",
+        "logbrew-amqplib/index.d.ts",
+        "logbrew-amqplib/index.js"
+      ],
+      "rules": {
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 6
+          }
+        ],
+        "import/no-default-export": "off",
+        "typescript/prefer-readonly-parameter-types": [
+          "error",
+          {
+            "allow": [
+              {
+                "from": "package",
+                "name": "Buffer",
+                "package": "@types/node"
+              },
+              {
+                "from": "package",
+                "name": "ConsumeMessage",
+                "package": "amqplib"
+              },
+              {
+                "from": "file",
+                "name": "LogBrewAmqplibConsumeOptions"
+              },
+              {
+                "from": "file",
+                "name": "LogBrewAmqplibPublishOptions"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "logbrew-amqplib/examples/index.mjs",
+        "logbrew-amqplib/examples/readme-example.mjs"
+      ],
+      "rules": {
+        "node/no-process-env": "off"
+      }
+    }
+  ]
+}
