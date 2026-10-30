@@ -373,7 +373,7 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_maven_metadata_matches_each_release_family(self) -> None:
         self.assertIn(
-            "<version>0.1.14</version>",
+            "<version>0.1.15</version>",
             (ROOT / "java" / "logbrew-java" / "pom.xml").read_text(encoding="utf-8"),
         )
         for pom_path in (

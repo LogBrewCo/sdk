@@ -7,7 +7,7 @@ rubygems = "0.1.18"
 packagist = "0.1.23"
 unity = "0.2.2"
 maven = "0.2.3"
-java_maven = "0.1.14"
+java_maven = "0.1.15"
 
 # [directory, npm package]
 npm = [

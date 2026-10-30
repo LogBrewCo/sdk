@@ -58,7 +58,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(rust["package"]["version"], "0.2.0")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{CATALOG["rubygems"]}"', ruby_version)
-        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.14")
+        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.15")
         for package, version in (("LogBrew", "0.1.13"), ("LogBrew.HttpClient", "0.1.8")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
@@ -253,7 +253,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "LogBrew.OpenTelemetry": "0.1.1",
             },
         )
-        self.assertEqual(CATALOG["java_maven"], "0.1.14")
+        self.assertEqual(CATALOG["java_maven"], "0.1.15")
         self.assertEqual(CATALOG["maven"], "0.2.3")
         self.assertEqual(
             {package["name"]: package["version"] for package in CATALOG["pypi"]},
