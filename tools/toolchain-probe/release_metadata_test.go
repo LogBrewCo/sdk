@@ -118,7 +118,7 @@ func TestReleaseMetadataFindings(t *testing.T) {
 			"missing required path: js/logbrew-vue/package.json",
 		}},
 		{replaceOnce(`"version": "`, `"version": "1.0`), amqplib,
-			[]string{amqplib + `: expected version to be a public semver, got '1.00.1.2'`}},
+			[]string{amqplib + `: expected version to be a public semver, got '1.00.1.3'`}},
 		{replaceOnce(`"type": "module",`, `"type": "module", "private": true, "module": "./x.js",`),
 			amqplib, []string{
 				amqplib + ": public SDK package must not be private",
