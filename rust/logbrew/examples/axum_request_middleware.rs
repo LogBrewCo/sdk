@@ -1,3 +1,6 @@
+//! Example: Axum request middleware built on the Tower layer.
+extern crate alloc;
+use alloc::sync::Arc;
 use axum::{
     Router,
     body::Body,
@@ -6,31 +9,33 @@ use axum::{
     response::IntoResponse,
     routing::post,
 };
+use core::error::Error;
 use logbrew::{
     LogBrewClient, RecordingTransport, TelemetryContext, TelemetryNamedVersion, TelemetryResource,
     TowerRequestIds, TowerRequestTelemetryLayer,
 };
-use std::sync::{Arc, Mutex};
-use tower::ServiceExt;
+use std::io::{self, Write as _};
+use std::sync::Mutex;
+use tower::ServiceExt as _;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = LogBrewClient::builder("checkout-service", "1.2.3")
-        .api_key("LOGBREW_API_KEY")
-        .build()?;
-    let client = Arc::new(Mutex::new(client));
+async fn main() -> Result<(), Box<dyn Error>> {
+    let client = Arc::new(Mutex::new(
+        LogBrewClient::builder("checkout-service", "1.2.3")
+            .api_key("LOGBREW_API_KEY")
+            .build()?,
+    ));
 
     let logbrew_layer = TowerRequestTelemetryLayer::new(
         Arc::clone(&client),
         |request: &Request<Body>| {
-            request
-                .extensions()
-                .get::<MatchedPath>()
-                .map(|path| path.as_str().to_string())
-                .unwrap_or_else(|| request.uri().path().to_string())
+            request.extensions().get::<MatchedPath>().map_or_else(
+                || request.uri().path().to_owned(),
+                |path| path.as_str().to_owned(),
+            )
         },
         || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
-        || "2026-06-02T10:00:00Z".to_string(),
+        || "2026-06-02T10:00:00Z".to_owned(),
     )
     .with_context(
         TelemetryContext::new().with_resource(
@@ -58,23 +63,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    if response.status() != StatusCode::ACCEPTED {
+        return Err("checkout should return 202 Accepted".into());
+    }
     let response_traceparent = response
         .headers()
         .get("traceparent")
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
-        .to_string();
+        .to_owned();
 
-    let mut client = client.lock().expect("client lock should not be poisoned");
-    println!("{}", client.preview_json()?);
+    let mut locked = client
+        .lock()
+        .map_err(|_error| "client lock should not be poisoned")?;
+    writeln!(io::stdout(), "{}", locked.preview_json()?)?;
 
     let mut transport = RecordingTransport::always_accept();
-    let delivery = client.shutdown(&mut transport)?;
-    eprintln!(
+    let delivery = locked.shutdown(&mut transport)?;
+    drop(locked);
+    writeln!(
+        io::stderr(),
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":2,\"responseTraceparent\":\"{}\"}}",
-        delivery.status_code, delivery.attempts, response_traceparent
-    );
+        delivery.status_code,
+        delivery.attempts,
+        response_traceparent
+    )?;
     Ok(())
 }
 

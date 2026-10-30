@@ -31,7 +31,7 @@ const UNSAFE_KEY_PARTS: &[&str] = &[
 pub(crate) fn sanitized_metadata(metadata: Metadata) -> Metadata {
     metadata
         .into_iter()
-        .filter(|(key, value)| is_safe_key(key) && value_is_primitive(value))
+        .filter(|entry| is_safe_key(&entry.0) && value_is_primitive(&entry.1))
         .collect()
 }
 
@@ -44,12 +44,12 @@ fn is_safe_key(key: &str) -> bool {
 
 fn normalized_key(key: &str) -> String {
     key.chars()
-        .filter(|character| character.is_ascii_alphanumeric())
+        .filter(char::is_ascii_alphanumeric)
         .flat_map(char::to_lowercase)
         .collect()
 }
 
-fn value_is_primitive(value: &Value) -> bool {
+const fn value_is_primitive(value: &Value) -> bool {
     matches!(
         value,
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)

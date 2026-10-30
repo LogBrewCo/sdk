@@ -1,8 +1,12 @@
+#[cfg(test)]
+mod tests;
+
 use crate::{Event, SdkError};
+use alloc::collections::VecDeque;
+use alloc::sync::Arc;
 use serde::Serialize;
-use std::collections::VecDeque;
-use std::io::{self, Write};
-use std::sync::Arc;
+use std::io;
+use std::io::Write;
 
 pub(super) const REQUEST_SUFFIX: &[u8] = b"]}";
 
@@ -22,62 +26,81 @@ pub(super) struct DeliveryQueue {
 }
 
 impl DeliveryQueue {
-    pub(super) fn new(max_events: usize, max_event_bytes: usize) -> Self {
-        Self {
-            events: VecDeque::new(),
-            event_bytes: 0,
-            next_sequence: 1,
-            max_events,
-            max_event_bytes,
+    pub(super) fn acknowledge(&mut self, prefix: &FrozenPrefix) -> Result<(), SdkError> {
+        if prefix.event_count == 0 || self.events.len() < prefix.event_count {
+            return Err(SdkError::new(
+                "queue_state_error",
+                "accepted delivery prefix is not retained",
+            ));
         }
-    }
-
-    pub(super) fn len(&self) -> usize {
-        self.events.len()
-    }
-
-    pub(super) fn event_bytes(&self) -> usize {
-        self.event_bytes
-    }
-
-    pub(super) fn last_sequence(&self) -> Option<u64> {
-        self.events.back().map(|event| event.sequence)
-    }
-
-    pub(super) fn push(&mut self, bytes: Vec<u8>) -> Result<(), QueueAdmissionError> {
-        let next_bytes = self
+        let mut expected = prefix.first_sequence;
+        for event in self.events.iter().take(prefix.event_count) {
+            if event.sequence != expected {
+                return Err(SdkError::new(
+                    "queue_state_error",
+                    "accepted delivery prefix order changed",
+                ));
+            }
+            expected = expected.checked_add(1).ok_or_else(|| {
+                SdkError::new("queue_state_error", "accepted delivery sequence overflowed")
+            })?;
+        }
+        let acknowledged_bytes = self
+            .events
+            .iter()
+            .take(prefix.event_count)
+            .try_fold(0_usize, |total, event| total.checked_add(event.bytes.len()))
+            .ok_or_else(|| {
+                SdkError::new(
+                    "queue_state_error",
+                    "accepted delivery byte count overflowed",
+                )
+            })?;
+        let last_sequence = self
+            .events
+            .get(prefix.event_count.saturating_sub(1))
+            .map(|event| event.sequence)
+            .ok_or_else(|| {
+                SdkError::new("queue_state_error", "accepted delivery prefix disappeared")
+            })?;
+        if last_sequence != prefix.last_sequence {
+            return Err(SdkError::new(
+                "queue_state_error",
+                "accepted delivery prefix boundary changed",
+            ));
+        }
+        let remaining_bytes = self
             .event_bytes
-            .checked_add(bytes.len())
-            .ok_or(QueueAdmissionError::Full)?;
-        if self.events.len() >= self.max_events || next_bytes > self.max_event_bytes {
-            return Err(QueueAdmissionError::Full);
+            .checked_sub(acknowledged_bytes)
+            .ok_or_else(|| {
+                SdkError::new("queue_state_error", "delivery queue byte count changed")
+            })?;
+
+        for _ in 0..prefix.event_count {
+            drop(self.events.pop_front().ok_or_else(|| {
+                SdkError::new("queue_state_error", "accepted delivery prefix disappeared")
+            })?);
         }
-        let next_sequence = self
-            .next_sequence
-            .checked_add(1)
-            .ok_or(QueueAdmissionError::Unavailable)?;
-        self.events
-            .try_reserve_exact(1)
-            .map_err(|_| QueueAdmissionError::Unavailable)?;
-        self.events.push_back(QueuedEvent {
-            sequence: self.next_sequence,
-            bytes,
-        });
-        self.next_sequence = next_sequence;
-        self.event_bytes = next_bytes;
+        self.event_bytes = remaining_bytes;
         Ok(())
+    }
+
+    pub(super) const fn event_bytes(&self) -> usize {
+        self.event_bytes
     }
 
     pub(super) fn events(&self) -> Result<Vec<Event>, SdkError> {
         let mut events = Vec::new();
-        events.try_reserve_exact(self.events.len()).map_err(|_| {
-            SdkError::new(
-                "serialization_error",
-                "queued events could not be previewed",
-            )
-        })?;
+        events
+            .try_reserve_exact(self.events.len())
+            .map_err(|_error| {
+                SdkError::new(
+                    "serialization_error",
+                    "queued events could not be previewed",
+                )
+            })?;
         for event in &self.events {
-            events.push(serde_json::from_slice(&event.bytes).map_err(|_| {
+            events.push(serde_json::from_slice(&event.bytes).map_err(|_error| {
                 SdkError::new("serialization_error", "queued event bytes are invalid")
             })?);
         }
@@ -99,11 +122,12 @@ impl DeliveryQueue {
         }
 
         let mut body = Vec::new();
-        body.try_reserve_exact(request_prefix.len()).map_err(|_| {
-            SdkError::new("serialization_error", "request body could not be allocated")
-        })?;
+        body.try_reserve_exact(request_prefix.len())
+            .map_err(|_error| {
+                SdkError::new("serialization_error", "request body could not be allocated")
+            })?;
         body.extend_from_slice(request_prefix);
-        let mut event_count = 0;
+        let mut event_count = 0_usize;
         let mut last_sequence = first.sequence;
         for event in self
             .events
@@ -129,20 +153,21 @@ impl DeliveryQueue {
                 }
                 break;
             }
-            body.try_reserve_exact(separator_bytes + event.bytes.len())
-                .map_err(|_| {
+            body.try_reserve_exact(separator_bytes.saturating_add(event.bytes.len()))
+                .map_err(|_error| {
                     SdkError::new("serialization_error", "request body could not be allocated")
                 })?;
             if event_count > 0 {
                 body.push(b',');
             }
             body.extend_from_slice(&event.bytes);
-            event_count += 1;
+            event_count = event_count.saturating_add(1);
             last_sequence = event.sequence;
         }
-        body.try_reserve_exact(REQUEST_SUFFIX.len()).map_err(|_| {
-            SdkError::new("serialization_error", "request body could not be allocated")
-        })?;
+        body.try_reserve_exact(REQUEST_SUFFIX.len())
+            .map_err(|_error| {
+                SdkError::new("serialization_error", "request body could not be allocated")
+            })?;
         body.extend_from_slice(REQUEST_SUFFIX);
         Ok(Some(Arc::new(FrozenPrefix {
             first_sequence: first.sequence,
@@ -152,62 +177,45 @@ impl DeliveryQueue {
         })))
     }
 
-    pub(super) fn acknowledge(&mut self, prefix: &FrozenPrefix) -> Result<(), SdkError> {
-        if prefix.event_count == 0 || self.events.len() < prefix.event_count {
-            return Err(SdkError::new(
-                "queue_state_error",
-                "accepted delivery prefix is not retained",
-            ));
-        }
-        let mut expected = prefix.first_sequence;
-        for event in self.events.iter().take(prefix.event_count) {
-            if event.sequence != expected {
-                return Err(SdkError::new(
-                    "queue_state_error",
-                    "accepted delivery prefix order changed",
-                ));
-            }
-            expected = expected.checked_add(1).ok_or_else(|| {
-                SdkError::new("queue_state_error", "accepted delivery sequence overflowed")
-            })?;
-        }
-        let acknowledged_bytes = self
-            .events
-            .iter()
-            .take(prefix.event_count)
-            .try_fold(0usize, |total, event| total.checked_add(event.bytes.len()))
-            .ok_or_else(|| {
-                SdkError::new(
-                    "queue_state_error",
-                    "accepted delivery byte count overflowed",
-                )
-            })?;
-        let last_sequence = self
-            .events
-            .get(prefix.event_count - 1)
-            .map(|event| event.sequence)
-            .ok_or_else(|| {
-                SdkError::new("queue_state_error", "accepted delivery prefix disappeared")
-            })?;
-        if last_sequence != prefix.last_sequence {
-            return Err(SdkError::new(
-                "queue_state_error",
-                "accepted delivery prefix boundary changed",
-            ));
-        }
-        let remaining_bytes = self
-            .event_bytes
-            .checked_sub(acknowledged_bytes)
-            .ok_or_else(|| {
-                SdkError::new("queue_state_error", "delivery queue byte count changed")
-            })?;
+    pub(super) fn last_sequence(&self) -> Option<u64> {
+        self.events.back().map(|event| event.sequence)
+    }
 
-        for _ in 0..prefix.event_count {
-            self.events.pop_front().ok_or_else(|| {
-                SdkError::new("queue_state_error", "accepted delivery prefix disappeared")
-            })?;
+    pub(super) fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    pub(super) const fn new(max_events: usize, max_event_bytes: usize) -> Self {
+        Self {
+            events: VecDeque::new(),
+            event_bytes: 0,
+            next_sequence: 1,
+            max_events,
+            max_event_bytes,
         }
-        self.event_bytes = remaining_bytes;
+    }
+
+    pub(super) fn push(&mut self, bytes: Vec<u8>) -> Result<(), QueueAdmissionError> {
+        let next_bytes = self
+            .event_bytes
+            .checked_add(bytes.len())
+            .ok_or(QueueAdmissionError::Full)?;
+        if self.events.len() >= self.max_events || next_bytes > self.max_event_bytes {
+            return Err(QueueAdmissionError::Full);
+        }
+        let next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(QueueAdmissionError::Unavailable)?;
+        self.events
+            .try_reserve_exact(1)
+            .map_err(|_error| QueueAdmissionError::Unavailable)?;
+        self.events.push_back(QueuedEvent {
+            sequence: self.next_sequence,
+            bytes,
+        });
+        self.next_sequence = next_sequence;
+        self.event_bytes = next_bytes;
         Ok(())
     }
 }
@@ -216,8 +224,18 @@ impl DeliveryQueue {
 pub(super) struct FrozenPrefix {
     first_sequence: u64,
     last_sequence: u64,
-    pub(super) event_count: usize,
-    pub(super) body: Vec<u8>,
+    event_count: usize,
+    body: Vec<u8>,
+}
+
+impl FrozenPrefix {
+    pub(super) fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    pub(super) const fn event_count(&self) -> usize {
+        self.event_count
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -233,7 +251,7 @@ struct BoundedJsonWriter {
 }
 
 impl BoundedJsonWriter {
-    fn new(limit: usize) -> Self {
+    const fn new(limit: usize) -> Self {
         Self {
             bytes: Vec::new(),
             limit,
@@ -243,8 +261,12 @@ impl BoundedJsonWriter {
 }
 
 impl Write for BoundedJsonWriter {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let Some(next_len) = self.bytes.len().checked_add(buffer.len()) else {
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let Some(next_len) = self.bytes.len().checked_add(buf.len()) else {
             self.exceeded = true;
             return Err(io::Error::new(io::ErrorKind::WriteZero, "bounded write"));
         };
@@ -253,21 +275,17 @@ impl Write for BoundedJsonWriter {
             return Err(io::Error::new(io::ErrorKind::WriteZero, "bounded write"));
         }
         self.bytes
-            .try_reserve_exact(buffer.len())
-            .map_err(|_| io::Error::other("bounded allocation"))?;
-        self.bytes.extend_from_slice(buffer);
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+            .try_reserve_exact(buf.len())
+            .map_err(|_error| io::Error::other("bounded allocation"))?;
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
     }
 }
 
-pub(super) fn serialize_bounded<T: Serialize>(
-    value: &T,
-    limit: usize,
-) -> Result<Vec<u8>, SdkError> {
+pub(super) fn serialize_bounded<T>(value: &T, limit: usize) -> Result<Vec<u8>, SdkError>
+where
+    T: Serialize,
+{
     let mut writer = BoundedJsonWriter::new(limit);
     match serde_json::to_writer(&mut writer, value) {
         Ok(()) => Ok(writer.bytes),
@@ -281,6 +299,3 @@ pub(super) fn serialize_bounded<T: Serialize>(
         )),
     }
 }
-
-#[cfg(test)]
-mod tests;

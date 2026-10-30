@@ -1,3 +1,7 @@
+//! Example: `tracing` spans linked to OpenTelemetry context.
+extern crate alloc;
+use alloc::sync::Arc;
+use core::error::Error;
 use logbrew::{
     EnvironmentEvent, LogBrewClient, Metadata, MetadataValue, RecordingTransport, ReleaseEvent,
     Traceparent, TraceparentSpanInput, opentelemetry_span_context_from_current_tracing_span,
@@ -9,11 +13,13 @@ use opentelemetry::{
         TracerProvider as _, noop::NoopTracerProvider,
     },
 };
-use std::sync::{Arc, Mutex};
+use std::io::{self, Write as _};
+use std::sync::Mutex;
+use tracing::subscriber::with_default;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use tracing_subscriber::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let client = Arc::new(Mutex::new(
         LogBrewClient::builder("checkout-service", "1.2.3")
             .api_key("LOGBREW_API_KEY")
@@ -21,15 +27,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     {
-        let mut client = client
+        let mut locked = client
             .lock()
-            .expect("LogBrew client lock should be healthy");
-        client.release(
+            .map_err(|_error| "LogBrew client lock should be healthy")?;
+        locked.release(
             "evt_release_checkout",
             "2026-06-02T10:00:00Z",
             ReleaseEvent::new("1.2.3"),
         )?;
-        client.environment(
+        locked.environment(
             "evt_environment_checkout",
             "2026-06-02T10:00:01Z",
             EnvironmentEvent::new("production"),
@@ -40,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber =
         tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
 
-    tracing::subscriber::with_default(subscriber, || -> Result<(), Box<dyn std::error::Error>> {
+    with_default(subscriber, || -> Result<(), Box<dyn Error>> {
         let remote_parent = SpanContext::new(
             TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736")?,
             SpanId::from_hex("00f067aa0ba902b7")?,
@@ -60,19 +66,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
 
         let mut span_metadata = Metadata::new();
-        span_metadata.insert(
-            "bridge".to_string(),
-            MetadataValue::String("tracing-opentelemetry".to_string()),
-        );
-        let outgoing_header_count = outgoing_headers.len() as u64;
-        span_metadata.insert(
-            "outgoingTraceHeaderCount".to_string(),
-            MetadataValue::from(outgoing_header_count),
-        );
-        span_metadata.insert(
-            "sampled".to_string(),
+        drop(span_metadata.insert(
+            "bridge".to_owned(),
+            MetadataValue::String("tracing-opentelemetry".to_owned()),
+        ));
+        drop(span_metadata.insert(
+            "outgoingTraceHeaderCount".to_owned(),
+            MetadataValue::from(outgoing_headers.len()),
+        ));
+        drop(span_metadata.insert(
+            "sampled".to_owned(),
             MetadataValue::Bool(otel_context.sampled()),
-        );
+        ));
 
         let span = Traceparent::span_attributes_from_opentelemetry_context(
             &otel_context,
@@ -81,20 +86,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         client
             .lock()
-            .expect("LogBrew client lock should be healthy")
+            .map_err(|_error| "LogBrew client lock should be healthy")?
             .span("evt_tracing_otel_child", "2026-06-02T10:00:02Z", span)?;
         Ok(())
     })?;
 
-    let mut client = client
+    let mut locked = client
         .lock()
-        .expect("LogBrew client lock should be healthy");
-    println!("{}", client.preview_json()?);
+        .map_err(|_error| "LogBrew client lock should be healthy")?;
+    writeln!(io::stdout(), "{}", locked.preview_json()?)?;
     let mut transport = RecordingTransport::always_accept();
-    let response = client.shutdown(&mut transport)?;
-    eprintln!(
+    let response = locked.shutdown(&mut transport)?;
+    drop(locked);
+    writeln!(
+        io::stderr(),
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":3}}",
-        response.status_code, response.attempts
-    );
+        response.status_code,
+        response.attempts
+    )?;
     Ok(())
 }

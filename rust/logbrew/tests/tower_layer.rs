@@ -1,22 +1,37 @@
+//! Integration tests for the Tower layers.
+#![cfg(test)]
 #![cfg(feature = "tower")]
 
+extern crate alloc;
+
+use alloc::sync::Arc;
 use axum::{
     body::Body,
     http::{Request, Response, StatusCode},
 };
+use core::convert::Infallible;
+use core::error::Error;
+use core::fmt;
 use logbrew::{
     LogBrewClient, LogEvent, TelemetryContext, TelemetryNamedVersion, TelemetryResource,
     TowerHttpClientSpanLayer, TowerRequestIds, TowerRequestTelemetryLayer,
     current_telemetry_context,
 };
 use serde_json::Value;
-use std::{
-    convert::Infallible,
-    error::Error,
-    fmt,
-    sync::{Arc, Mutex},
-};
-use tower::{Layer, ServiceExt, service_fn};
+use std::sync::Mutex;
+use tokio::task::yield_now;
+use tower::{Layer as _, ServiceExt as _, service_fn};
+
+#[derive(Debug, PartialEq, Eq)]
+struct CheckoutFailure;
+
+impl fmt::Display for CheckoutFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("private tower service error text")
+    }
+}
+
+impl Error for CheckoutFailure {}
 
 fn sample_client() -> LogBrewClient {
     LogBrewClient::builder("logbrew-rust", "0.1.0")
@@ -40,10 +55,10 @@ fn request_layer(
                 .extensions()
                 .get::<String>()
                 .cloned()
-                .unwrap_or_else(|| request.uri().path().to_string())
+                .unwrap_or_else(|| request.uri().path().to_owned())
         },
         || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
-        || "2026-06-02T10:00:00Z".to_string(),
+        || "2026-06-02T10:00:00Z".to_owned(),
     )
     .with_context(TelemetryContext::new().with_resource(
         TelemetryResource::new().with_service(TelemetryNamedVersion::new("checkout-service")),
@@ -60,9 +75,11 @@ fn checkout_request(query: &str) -> Request<Body> {
         )
         .body(Body::empty())
         .unwrap();
-    request
-        .extensions_mut()
-        .insert("/checkout/{cart_id}".to_string());
+    drop(
+        request
+            .extensions_mut()
+            .insert("/checkout/{cart_id}".to_owned()),
+    );
     request
 }
 
@@ -77,26 +94,15 @@ fn assert_omits(payload: &Value, values: &[&str]) {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct CheckoutFailure;
-
-impl fmt::Display for CheckoutFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("private tower service error text")
-    }
-}
-
-impl Error for CheckoutFailure {}
-
 #[tokio::test]
 async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
     let client = Arc::new(Mutex::new(sample_client()));
     let mut metadata = serde_json::Map::new();
-    metadata.insert("framework".to_string(), Value::String("tower".to_string()));
-    metadata.insert(
-        "service".to_string(),
-        Value::String("payments-client".to_string()),
-    );
+    drop(metadata.insert("framework".to_owned(), Value::String("tower".to_owned())));
+    drop(metadata.insert(
+        "service".to_owned(),
+        Value::String("payments-client".to_owned()),
+    ));
 
     let layer = TowerHttpClientSpanLayer::new(
         Arc::clone(&client),
@@ -105,7 +111,7 @@ async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
             TowerRequestIds::new("4bf92f3577b34da6a3ce929d0e0e4736", "2222222222222222")
                 .with_parent_span_id("00f067aa0ba902b7")
         },
-        || "2026-06-02T10:00:11Z".to_string(),
+        || "2026-06-02T10:00:11Z".to_owned(),
     )
     .with_metadata(metadata)
     .with_context(TelemetryContext::new().with_resource(
@@ -113,7 +119,7 @@ async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
     ))
     .with_event_id_prefix("evt_tower_http_client_span");
 
-    let service = service_fn(|request: Request<Body>| async move {
+    let service = service_fn(async move |request: Request<Body>| {
         assert_eq!(
             request
                 .headers()
@@ -150,7 +156,7 @@ async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
     assert_eq!(span["metadata"]["source"], "rust_http_client");
     assert_eq!(span["metadata"]["routeTemplate"], "/payments/:payment_id");
     assert_eq!(span["metadata"]["method"], "POST");
-    assert_eq!(span["metadata"]["statusCode"], 502);
+    assert_eq!(span["metadata"]["statusCode"], 502_i32);
     assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
     assert_eq!(span["metadata"]["framework"], "tower");
     assert_eq!(span["context"]["resource"]["framework"]["name"], "tower");
@@ -171,20 +177,20 @@ async fn tower_http_client_span_layer_injects_traceparent_and_queues_span() {
 async fn tower_request_layer_scopes_handler_logs_and_queues_span_and_metric() {
     let client = Arc::new(Mutex::new(sample_client()));
     let mut metadata = serde_json::Map::new();
-    metadata.insert("framework".to_string(), Value::String("tower".to_string()));
-    metadata.insert(
-        "service".to_string(),
-        Value::String("checkout-service".to_string()),
-    );
+    drop(metadata.insert("framework".to_owned(), Value::String("tower".to_owned())));
+    drop(metadata.insert(
+        "service".to_owned(),
+        Value::String("checkout-service".to_owned()),
+    ));
 
     let layer = request_layer(Arc::clone(&client)).with_metadata(metadata);
 
     let handler_client = Arc::clone(&client);
     let service = service_fn(move |_request: Request<Body>| {
-        let handler_client = Arc::clone(&handler_client);
+        let call_client = Arc::clone(&handler_client);
         async move {
-            tokio::task::yield_now().await;
-            handler_client
+            yield_now().await;
+            call_client
                 .lock()
                 .unwrap()
                 .log(
@@ -237,7 +243,7 @@ async fn tower_request_layer_scopes_handler_logs_and_queues_span_and_metric() {
     assert_eq!(span["spanId"], "b7ad6b7169203331");
     assert_eq!(span["metadata"]["routeTemplate"], "/checkout/{cart_id}");
     assert_eq!(span["metadata"]["method"], "POST");
-    assert_eq!(span["metadata"]["statusCode"], 202);
+    assert_eq!(span["metadata"]["statusCode"], 202_i32);
     assert_eq!(span["metadata"]["statusCodeClass"], "2xx");
     assert_eq!(span["metadata"]["framework"], "tower");
     assert_eq!(metric["name"], "http.server.duration");
@@ -271,7 +277,7 @@ async fn tower_request_error_capture_queues_correlated_issue_and_preserves_error
         .with_error_issues()
         .with_error_issue_event_id_prefix("evt_tower_request_issue");
 
-    let service = service_fn(|_request: Request<Body>| async {
+    let service = service_fn(async |_request: Request<Body>| {
         Err::<Response<Body>, CheckoutFailure>(CheckoutFailure)
     });
     let error = layer

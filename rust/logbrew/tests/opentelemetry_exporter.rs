@@ -1,18 +1,22 @@
+//! Integration tests for the OpenTelemetry exporter.
+#![cfg(test)]
 #![cfg(feature = "opentelemetry-exporter")]
 
+extern crate alloc;
+use alloc::sync::Arc;
 use logbrew::{
     LogBrewClient, LogBrewOpenTelemetrySpanExporter, LogBrewOpenTelemetrySpanExporterConfig,
 };
 use opentelemetry::{
     KeyValue,
-    trace::{Span, SpanKind, Status, Tracer, TracerProvider},
+    trace::{Span as _, SpanKind, Status, Tracer as _, TracerProvider as _},
 };
 use opentelemetry_sdk::{
     Resource,
     trace::{SdkTracerProvider, SimpleSpanProcessor},
 };
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 fn sample_client() -> Arc<Mutex<LogBrewClient>> {
     Arc::new(Mutex::new(
@@ -23,8 +27,7 @@ fn sample_client() -> Arc<Mutex<LogBrewClient>> {
     ))
 }
 
-#[test]
-fn opentelemetry_exporter_queues_privacy_bounded_spans_from_standard_processor() {
+fn export_checkout_root_span() -> Value {
     let client = sample_client();
     let exporter = LogBrewOpenTelemetrySpanExporter::new(
         Arc::clone(&client),
@@ -70,46 +73,70 @@ fn opentelemetry_exporter_queues_privacy_bounded_spans_from_standard_processor()
     provider.force_flush().expect("force flush should succeed");
     provider.shutdown().expect("shutdown should succeed");
 
-    let payload: Value =
-        serde_json::from_str(&client.lock().unwrap().preview_json().unwrap()).unwrap();
+    serde_json::from_str(&client.lock().unwrap().preview_json().unwrap()).unwrap()
+}
+
+#[test]
+fn opentelemetry_exporter_queues_privacy_bounded_spans_from_standard_processor() {
+    let payload = export_checkout_root_span();
     let events = payload["events"].as_array().unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0]["type"], "span");
-    assert_eq!(events[0]["id"], "evt_rust_otel_1");
-    assert_eq!(events[0]["timestamp"], "2026-06-02T10:00:30Z");
+    assert_fields(
+        &payload["events"],
+        &[
+            ("/0/type", Value::from("span")),
+            ("/0/id", Value::from("evt_rust_otel_1")),
+            ("/0/timestamp", Value::from("2026-06-02T10:00:30Z")),
+        ],
+    );
 
     let span = &events[0]["attributes"];
-    assert_eq!(span["name"], "GET /checkout/{cart_id}");
-    assert_eq!(span["status"], "ok");
-    assert!(span["traceId"].as_str().unwrap().len() == 32);
-    assert!(span["spanId"].as_str().unwrap().len() == 16);
-    assert!(span["durationMs"].as_f64().unwrap() >= 0.0);
+    assert_fields(
+        span,
+        &[
+            ("/name", Value::from("GET /checkout/{cart_id}")),
+            ("/status", Value::from("ok")),
+        ],
+    );
+    assert_eq!(span["traceId"].as_str().unwrap().len(), 32);
+    assert_eq!(span["spanId"].as_str().unwrap().len(), 16);
+    assert!(span["durationMs"].as_f64().unwrap() >= 0.0_f64);
     assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
     assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
-    assert_eq!(span["context"]["trace"]["sampled"], true);
-    assert_eq!(
-        span["context"]["resource"]["service"]["name"],
-        "checkout-api"
-    );
-    assert_eq!(span["context"]["resource"]["service"]["version"], "1.2.3");
-    assert_eq!(
-        span["context"]["resource"]["deployment"]["environment"],
-        "production"
+    assert_fields(
+        span,
+        &[
+            ("/context/trace/sampled", Value::Bool(true)),
+            (
+                "/context/resource/service/name",
+                Value::from("checkout-api"),
+            ),
+            ("/context/resource/service/version", Value::from("1.2.3")),
+            (
+                "/context/resource/deployment/environment",
+                Value::from("production"),
+            ),
+        ],
     );
 
     let metadata = &span["metadata"];
-    assert_eq!(metadata["source"], "opentelemetry.span_exporter");
-    assert_eq!(metadata["service.name"], "checkout-api");
-    assert_eq!(metadata["service.version"], "1.2.3");
-    assert_eq!(metadata["deployment.environment"], "production");
-    assert_eq!(metadata["otel.span.kind"], "server");
-    assert_eq!(
-        metadata["otel.instrumentation.scope.name"],
-        "checkout-instrumentation"
+    assert_fields(
+        metadata,
+        &[
+            ("/source", Value::from("opentelemetry.span_exporter")),
+            ("/service.name", Value::from("checkout-api")),
+            ("/service.version", Value::from("1.2.3")),
+            ("/deployment.environment", Value::from("production")),
+            ("/otel.span.kind", Value::from("server")),
+            (
+                "/otel.instrumentation.scope.name",
+                Value::from("checkout-instrumentation"),
+            ),
+            ("/http.request.method", Value::from("GET")),
+            ("/http.route", Value::from("/checkout/{cart_id}")),
+            ("/http.response.status_code", Value::from(202_i32)),
+        ],
     );
-    assert_eq!(metadata["http.request.method"], "GET");
-    assert_eq!(metadata["http.route"], "/checkout/{cart_id}");
-    assert_eq!(metadata["http.response.status_code"], 202);
     assert!(metadata.get("http.target").is_none());
     assert!(metadata.get("authorization").is_none());
     assert!(metadata.get("unsafe.debug").is_none());
@@ -154,10 +181,10 @@ fn opentelemetry_exporter_records_error_status_exception_type_and_drops_error_me
 
     let payload: Value =
         serde_json::from_str(&client.lock().unwrap().preview_json().unwrap()).unwrap();
-    let span = &payload["events"][0]["attributes"];
-    assert_eq!(span["name"], "SELECT checkout");
-    assert_eq!(span["status"], "error");
-    let metadata = &span["metadata"];
+    let queued_span = &payload["events"][0]["attributes"];
+    assert_eq!(queued_span["name"], "SELECT checkout");
+    assert_eq!(queued_span["status"], "error");
+    let metadata = &queued_span["metadata"];
     assert_eq!(metadata["otel.span.kind"], "client");
     assert_eq!(metadata["db.system"], "postgresql");
     assert_eq!(metadata["exception.type"], "DbTimeout");
@@ -167,4 +194,10 @@ fn opentelemetry_exporter_records_error_status_exception_type_and_drops_error_me
     let text = payload.to_string().to_ascii_lowercase();
     assert!(!text.contains("sample@example.com"));
     assert!(!text.contains("timeout talking to database"));
+}
+
+fn assert_fields(object: &Value, expected: &[(&str, Value)]) {
+    for field in expected {
+        assert_eq!(object.pointer(field.0), Some(&field.1), "field {}", field.0);
+    }
 }

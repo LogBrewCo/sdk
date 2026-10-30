@@ -1,10 +1,13 @@
+//! Example: an installed-app smoke run.
+use core::error::Error;
 use logbrew::{
     ActionEvent, DependencyOperationSpan, EnvironmentEvent, HttpClientSpan, IssueEvent,
     LogBrewClient, LogEvent, Metadata, MetadataValue, MetricEvent, RecordingTransport,
     ReleaseEvent, SpanEvent, Traceparent,
 };
+use std::io::{self, Write as _};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
         .api_key("LOGBREW_API_KEY")
         .build()?;
@@ -44,14 +47,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let preview = client.preview_json()?;
-    println!("{preview}");
+    writeln!(io::stdout(), "{preview}")?;
 
     let mut transport = RecordingTransport::always_accept();
     let response = client.shutdown(&mut transport)?;
-    eprintln!(
+    writeln!(
+        io::stderr(),
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":6}}",
-        response.status_code, response.attempts
-    );
+        response.status_code,
+        response.attempts
+    )?;
     exercise_metric_helper()?;
     exercise_http_client_span_helper()?;
     exercise_dependency_operation_span_helper()?;
@@ -59,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn exercise_metric_helper() -> Result<(), Box<dyn std::error::Error>> {
+fn exercise_metric_helper() -> Result<(), Box<dyn Error>> {
     let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
         .api_key("LOGBREW_API_KEY")
         .build()?;
@@ -75,28 +80,34 @@ fn exercise_metric_helper() -> Result<(), Box<dyn std::error::Error>> {
         ),
     )?;
     let preview = client.preview_json()?;
-    assert!(preview.contains("\"type\": \"metric\""));
-    assert!(preview.contains("\"checkout.request.duration\""));
-    assert!(
+    ensure(
+        preview.contains("\"type\": \"metric\""),
+        "preview should contain the metric event",
+    )?;
+    ensure(
+        preview.contains("\"checkout.request.duration\""),
+        "preview should contain the metric name",
+    )?;
+    ensure(
         client
             .metric(
                 "evt_metric_invalid",
                 "2026-06-02T10:00:06Z",
                 MetricEvent::new("jobs.completed", "counter", -1.0, "1", "delta"),
             )
-            .is_err()
-    );
-    Ok(())
+            .is_err(),
+        "a negative counter should be rejected",
+    )
 }
 
-fn exercise_http_client_span_helper() -> Result<(), Box<dyn std::error::Error>> {
+fn exercise_http_client_span_helper() -> Result<(), Box<dyn Error>> {
     let context = Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")?;
     let mut metadata = Metadata::new();
-    metadata.insert("retryAttempt".to_string(), MetadataValue::from(1));
-    metadata.insert(
-        "authorizationHeader".to_string(),
-        MetadataValue::String("Bearer not-for-telemetry".to_string()),
-    );
+    drop(metadata.insert("retryAttempt".to_owned(), MetadataValue::from(1_i32)));
+    drop(metadata.insert(
+        "authorizationHeader".to_owned(),
+        MetadataValue::String("Bearer not-for-telemetry".to_owned()),
+    ));
 
     let outbound = HttpClientSpan::new(
         "https://payments.example.invalid/api/payments/:payment_id?card=sample#debug",
@@ -108,36 +119,44 @@ fn exercise_http_client_span_helper() -> Result<(), Box<dyn std::error::Error>> 
     .with_metadata(metadata)
     .from_traceparent_context(&context)?;
 
-    assert_eq!(
-        outbound.outgoing_traceparent,
-        "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
-    );
+    ensure(
+        outbound.outgoing_traceparent == "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+        "outgoing traceparent should continue the trace with the child span",
+    )?;
 
     let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
         .api_key("LOGBREW_API_KEY")
         .build()?;
     client.span("evt_http_client_001", "2026-06-02T10:00:19Z", outbound.span)?;
     let preview = client.preview_json()?;
-    assert!(preview.contains("\"http.client:POST /api/payments/:payment_id\""));
-    assert!(preview.contains("\"source\": \"rust_http_client\""));
-    assert!(preview.contains("\"statusCode\": 503"));
-    assert!(preview.contains("\"retryAttempt\": 1"));
-    assert!(!preview.contains("card=sample"));
-    assert!(!preview.contains("authorizationHeader"));
-    Ok(())
+    for expected in [
+        "\"http.client:POST /api/payments/:payment_id\"",
+        "\"source\": \"rust_http_client\"",
+        "\"statusCode\": 503",
+        "\"retryAttempt\": 1",
+    ] {
+        ensure(
+            preview.contains(expected),
+            "preview should contain the HTTP client span",
+        )?;
+    }
+    ensure(
+        !preview.contains("card=sample") && !preview.contains("authorizationHeader"),
+        "preview should drop query values and unsafe metadata",
+    )
 }
 
-fn exercise_dependency_operation_span_helper() -> Result<(), Box<dyn std::error::Error>> {
+fn exercise_dependency_operation_span_helper() -> Result<(), Box<dyn Error>> {
     let context = Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")?;
     let mut metadata = Metadata::new();
-    metadata.insert(
-        "pool".to_string(),
-        MetadataValue::String("primary".to_string()),
-    );
-    metadata.insert(
-        "sql.statement".to_string(),
-        MetadataValue::String("select * from users".to_string()),
-    );
+    drop(metadata.insert(
+        "pool".to_owned(),
+        MetadataValue::String("primary".to_owned()),
+    ));
+    drop(metadata.insert(
+        "sql.statement".to_owned(),
+        MetadataValue::String("select * from users".to_owned()),
+    ));
 
     let span = DependencyOperationSpan::database("checkout lookup", "abcdef1234567890")
         .with_system("postgres")
@@ -152,8 +171,24 @@ fn exercise_dependency_operation_span_helper() -> Result<(), Box<dyn std::error:
         .build()?;
     client.span("evt_dependency_001", "2026-06-02T10:00:20Z", span)?;
     let preview = client.preview_json()?;
-    assert!(preview.contains("\"database.operation:checkout lookup\""));
-    assert!(preview.contains("\"db.system\": \"postgres\""));
-    assert!(!preview.contains("sql.statement"));
-    Ok(())
+    ensure(
+        preview.contains("\"database.operation:checkout lookup\""),
+        "preview should contain the dependency span",
+    )?;
+    ensure(
+        preview.contains("\"db.system\": \"postgres\""),
+        "preview should contain the database system",
+    )?;
+    ensure(
+        !preview.contains("sql.statement"),
+        "preview should drop the SQL statement",
+    )
+}
+
+fn ensure(condition: bool, message: &'static str) -> Result<(), Box<dyn Error>> {
+    if condition {
+        Ok(())
+    } else {
+        Err(message.into())
+    }
 }

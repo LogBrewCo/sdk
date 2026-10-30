@@ -1,34 +1,92 @@
+//! Integration tests for HTTP client spans.
+#![cfg(test)]
+#[cfg(any(feature = "http", feature = "reqwest"))]
+extern crate alloc;
+
+#[cfg(any(feature = "http", feature = "reqwest"))]
+use alloc::collections::BTreeMap;
+#[cfg(any(feature = "http", feature = "reqwest"))]
+use alloc::sync::Arc;
+#[cfg(feature = "hyper")]
+use core::convert::Infallible;
+#[cfg(any(feature = "http", feature = "reqwest"))]
+use core::time::Duration;
 #[cfg(feature = "hyper")]
 use logbrew::HttpRequestCaptureError;
 use logbrew::{HttpClientSpan, LogBrewClient, Metadata, MetadataValue, Traceparent};
 use serde_json::Value;
-#[cfg(feature = "hyper")]
-use std::convert::Infallible;
 #[cfg(any(feature = "http", feature = "reqwest"))]
-use std::time::Duration;
+use std::io::{Read as _, Write as _};
 #[cfg(any(feature = "http", feature = "reqwest"))]
-use std::{
-    collections::BTreeMap,
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
-    thread,
-};
+use std::net::{TcpListener, TcpStream};
+#[cfg(any(feature = "http", feature = "reqwest"))]
+use std::sync::Mutex;
+#[cfg(any(feature = "http", feature = "reqwest"))]
+use std::thread;
+
+#[cfg(any(feature = "http", feature = "reqwest"))]
+#[derive(Clone, Debug)]
+struct UreqRecordedRequest {
+    headers: BTreeMap<String, String>,
+}
+
+#[cfg(any(feature = "http", feature = "reqwest"))]
+impl UreqRecordedRequest {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .get(&name.to_ascii_lowercase())
+            .map(String::as_str)
+    }
+}
+
+#[cfg(any(feature = "http", feature = "reqwest"))]
+struct UreqIntake {
+    endpoint: String,
+    requests: Arc<Mutex<Vec<UreqRecordedRequest>>>,
+}
+
+#[cfg(any(feature = "http", feature = "reqwest"))]
+impl UreqIntake {
+    fn requests(&self) -> Vec<UreqRecordedRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+
+    fn start(status_code: u16) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&requests);
+        drop(thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let request = read_request(&mut stream);
+                captured.lock().unwrap().push(request);
+                let response = format!(
+                    "HTTP/1.1 {status_code} OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok"
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        }));
+        Self { endpoint, requests }
+    }
+}
 
 #[test]
 fn http_client_span_builds_sanitized_outbound_span_and_traceparent() {
     let context =
         Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
     let mut metadata = Metadata::new();
-    metadata.insert("retryAttempt".to_string(), MetadataValue::Number(1.into()));
-    metadata.insert(
-        "authorizationHeader".to_string(),
-        MetadataValue::String("Bearer not-for-telemetry".to_string()),
-    );
-    metadata.insert(
-        "requestBody".to_string(),
-        MetadataValue::String("card=sample".to_string()),
-    );
+    drop(metadata.insert(
+        "retryAttempt".to_owned(),
+        MetadataValue::Number(1_i32.into()),
+    ));
+    drop(metadata.insert(
+        "authorizationHeader".to_owned(),
+        MetadataValue::String("Bearer not-for-telemetry".to_owned()),
+    ));
+    drop(metadata.insert(
+        "requestBody".to_owned(),
+        MetadataValue::String("card=sample".to_owned()),
+    ));
 
     let events = HttpClientSpan::new(
         "https://payments.example.invalid/api/payments/:payment_id?card=sample#debug",
@@ -59,18 +117,26 @@ fn http_client_span_builds_sanitized_outbound_span_and_traceparent() {
     let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
     let span = &payload["events"][0]["attributes"];
 
-    assert_eq!(span["name"], "http.client:POST /api/payments/:payment_id");
-    assert_eq!(span["status"], "error");
-    assert_eq!(span["durationMs"], 183.4);
-    assert_eq!(span["metadata"]["source"], "rust_http_client");
-    assert_eq!(
-        span["metadata"]["routeTemplate"],
-        "/api/payments/:payment_id"
+    assert_fields(
+        span,
+        &[
+            (
+                "/name",
+                Value::from("http.client:POST /api/payments/:payment_id"),
+            ),
+            ("/status", Value::from("error")),
+            ("/durationMs", Value::from(183.4_f64)),
+            ("/metadata/source", Value::from("rust_http_client")),
+            (
+                "/metadata/routeTemplate",
+                Value::from("/api/payments/:payment_id"),
+            ),
+            ("/metadata/method", Value::from("POST")),
+            ("/metadata/statusCode", Value::from(503_i32)),
+            ("/metadata/statusCodeClass", Value::from("5xx")),
+            ("/metadata/retryAttempt", Value::from(1_i32)),
+        ],
     );
-    assert_eq!(span["metadata"]["method"], "POST");
-    assert_eq!(span["metadata"]["statusCode"], 503);
-    assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
-    assert_eq!(span["metadata"]["retryAttempt"], 1);
     assert_eq!(span["context"]["trace"]["traceId"], span["traceId"]);
     assert_eq!(span["context"]["trace"]["spanId"], span["spanId"]);
     assert_eq!(
@@ -188,16 +254,27 @@ fn http_client_span_captures_ureq_call_result_and_preserves_error() {
     assert!(matches!(error, ureq::Error::StatusCode(503)));
 
     let preview = client.preview_json().unwrap();
-    assert!(preview.contains("\"id\": \"evt_ureq_success\""));
-    assert!(preview.contains("\"name\": \"http.client:GET /api/payments/:payment_id\""));
-    assert!(preview.contains("\"statusCode\": 202"));
-    assert!(preview.contains("\"statusCodeClass\": \"2xx\""));
-    assert!(preview.contains("\"id\": \"evt_ureq_failure\""));
-    assert!(preview.contains("\"statusCode\": 503"));
-    assert!(preview.contains("\"statusCodeClass\": \"5xx\""));
-    assert!(preview.contains("\"status\": \"error\""));
-    assert!(!preview.contains("card=sample"));
-    assert!(!preview.contains("#debug"));
+    for expected in [
+        "\"id\": \"evt_ureq_success\"",
+        "\"name\": \"http.client:GET /api/payments/:payment_id\"",
+        "\"statusCode\": 202",
+        "\"statusCodeClass\": \"2xx\"",
+        "\"id\": \"evt_ureq_failure\"",
+        "\"statusCode\": 503",
+        "\"statusCodeClass\": \"5xx\"",
+        "\"status\": \"error\"",
+    ] {
+        assert!(
+            preview.contains(expected),
+            "preview must contain {expected}"
+        );
+    }
+    for unexpected in ["card=sample", "#debug"] {
+        assert!(
+            !preview.contains(unexpected),
+            "preview must omit {unexpected}"
+        );
+    }
 }
 
 #[cfg(feature = "reqwest")]
@@ -302,17 +379,15 @@ async fn http_client_span_captures_http_request_result_for_hyper_compatible_clie
         "2026-06-02T10:00:12Z",
         &context,
         request,
-        |request| async move {
+        async move |sent| {
             assert_eq!(
-                request
-                    .headers()
+                sent.headers()
                     .get("traceparent")
                     .and_then(|value| value.to_str().ok()),
                 Some("00-4bf92f3577b34da6a3ce929d0e0e4736-4444444444444444-01")
             );
             assert_eq!(
-                request
-                    .headers()
+                sent.headers()
                     .get("x-caller-owned")
                     .and_then(|value| value.to_str().ok()),
                 Some("kept")
@@ -345,7 +420,7 @@ async fn http_client_span_captures_http_request_result_for_hyper_compatible_clie
         "2026-06-02T10:00:13Z",
         &context,
         failing_request,
-        |_request| async move { Err::<http_types::Response<&'static str>, _>("hyper failure") },
+        async move |_request| Err::<http_types::Response<&'static str>, _>("hyper failure"),
     )
     .await
     .unwrap_err();
@@ -367,62 +442,22 @@ async fn http_client_span_captures_http_request_result_for_hyper_compatible_clie
 }
 
 #[cfg(any(feature = "http", feature = "reqwest"))]
-#[derive(Clone, Debug)]
-struct UreqRecordedRequest {
-    headers: BTreeMap<String, String>,
-}
-
-#[cfg(any(feature = "http", feature = "reqwest"))]
-impl UreqRecordedRequest {
-    fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .get(&name.to_ascii_lowercase())
-            .map(String::as_str)
-    }
-}
-
-#[cfg(any(feature = "http", feature = "reqwest"))]
-struct UreqIntake {
-    endpoint: String,
-    requests: Arc<Mutex<Vec<UreqRecordedRequest>>>,
-}
-
-#[cfg(any(feature = "http", feature = "reqwest"))]
-impl UreqIntake {
-    fn start(status_code: u16) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let captured = requests.clone();
-        thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let request = read_request(&mut stream);
-                captured.lock().unwrap().push(request);
-                let response = format!(
-                    "HTTP/1.1 {status_code} OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok"
-                );
-                stream.write_all(response.as_bytes()).unwrap();
-            }
-        });
-        Self { endpoint, requests }
-    }
-
-    fn requests(&self) -> Vec<UreqRecordedRequest> {
-        self.requests.lock().unwrap().clone()
-    }
-}
-
-#[cfg(any(feature = "http", feature = "reqwest"))]
 fn read_request(stream: &mut TcpStream) -> UreqRecordedRequest {
     let mut buffer = [0_u8; 4096];
     let bytes = stream.read(&mut buffer).unwrap();
     let request = String::from_utf8_lossy(&buffer[..bytes]);
-    let header_end = request.find("\r\n\r\n").unwrap_or(request.len());
+    let head = request.split("\r\n\r\n").next().unwrap_or_default();
     let mut headers = BTreeMap::new();
-    for line in request[..header_end].lines().skip(1) {
+    for line in head.lines().skip(1) {
         if let Some((name, value)) = line.split_once(':') {
-            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+            drop(headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_owned()));
         }
     }
     UreqRecordedRequest { headers }
+}
+
+fn assert_fields(object: &Value, expected: &[(&str, Value)]) {
+    for field in expected {
+        assert_eq!(object.pointer(field.0), Some(&field.1), "field {}", field.0);
+    }
 }

@@ -1,15 +1,20 @@
+//! Example: OpenTelemetry span exporter.
+extern crate alloc;
+use alloc::sync::Arc;
+use core::error::Error;
 use logbrew::{
     LogBrewClient, LogBrewOpenTelemetrySpanExporter, LogBrewOpenTelemetrySpanExporterConfig,
     RecordingTransport,
 };
 use opentelemetry::{
     KeyValue,
-    trace::{Span, SpanKind, Status, Tracer, TracerProvider},
+    trace::{Span as _, SpanKind, Status, Tracer as _, TracerProvider as _},
 };
 use opentelemetry_sdk::trace::{SdkTracerProvider, SimpleSpanProcessor};
-use std::sync::{Arc, Mutex};
+use std::io::{self, Write as _};
+use std::sync::Mutex;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let client = Arc::new(Mutex::new(
         LogBrewClient::builder("checkout-service", "1.2.3")
             .api_key("LOGBREW_API_KEY")
@@ -49,15 +54,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     span.end();
     provider.force_flush()?;
 
-    let mut client = client
+    let mut locked = client
         .lock()
-        .expect("LogBrew client lock should be healthy");
-    println!("{}", client.preview_json()?);
+        .map_err(|_error| "LogBrew client lock should be healthy")?;
+    writeln!(io::stdout(), "{}", locked.preview_json()?)?;
     let mut transport = RecordingTransport::always_accept();
-    let response = client.shutdown(&mut transport)?;
-    eprintln!(
+    let response = locked.shutdown(&mut transport)?;
+    drop(locked);
+    writeln!(
+        io::stderr(),
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":1}}",
-        response.status_code, response.attempts
-    );
+        response.status_code,
+        response.attempts
+    )?;
     Ok(())
 }

@@ -1,3 +1,9 @@
+//! Integration tests for telemetry context.
+#![cfg(test)]
+extern crate alloc;
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use core::panic::AssertUnwindSafe;
 use logbrew::{
     ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, MetricEvent, ReleaseEvent,
     SpanEvent, TelemetryApplication, TelemetryContext, TelemetryDeployment, TelemetryDevice,
@@ -7,9 +13,10 @@ use logbrew::{
     with_telemetry_context, with_telemetry_context_async,
 };
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Arc, Barrier};
+use std::panic;
+use std::sync::Barrier;
+use std::thread;
+use tokio::task::yield_now;
 
 const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
 const SPAN_ID: &str = "00f067aa0ba902b7";
@@ -119,7 +126,7 @@ fn all_seven_signals_receive_shared_context_and_event_overrides() {
     assert_eq!(events.len(), 7);
     for event in events {
         let context = &event["attributes"]["context"];
-        assert_eq!(context["schemaVersion"], 1);
+        assert_eq!(context["schemaVersion"], 1_i32);
         assert_eq!(context["resource"]["service"]["name"], "checkout-api");
         assert_eq!(context["resource"]["framework"]["name"], "axum");
         assert_eq!(context["trace"]["traceId"], TRACE_ID);
@@ -176,20 +183,25 @@ fn runtime_defaults_are_conservative_and_can_be_disabled() {
         );
     }
 
-    let mut disabled_client = LogBrewClient::builder("logbrew-rust", "0.1.0")
+    let mut opted_out_client = LogBrewClient::builder("logbrew-rust", "0.1.0")
         .api_key("LOGBREW_API_KEY")
         .capture_runtime_context(false)
         .build()
         .unwrap();
-    disabled_client
+    opted_out_client
         .log(
             "disabled",
             "2026-08-03T10:00:00Z",
             LogEvent::new("started", "info"),
         )
         .unwrap();
-    let payload: Value = serde_json::from_str(&disabled_client.preview_json().unwrap()).unwrap();
-    assert!(payload["events"][0]["attributes"].get("context").is_none());
+    let disabled_payload: Value =
+        serde_json::from_str(&opted_out_client.preview_json().unwrap()).unwrap();
+    assert!(
+        disabled_payload["events"][0]["attributes"]
+            .get("context")
+            .is_none()
+    );
 }
 
 #[test]
@@ -218,10 +230,13 @@ fn validation_normalizes_ids_and_rejects_unbounded_or_unsafe_values() {
     }
 
     let mut too_many_tags = TelemetryContext::new();
-    for index in 0..33 {
+    for index in 0_i32..33_i32 {
         too_many_tags = too_many_tags.with_tag(format!("tag{index}"), "value");
     }
-    assert!(validate_telemetry_context(&too_many_tags).is_err());
+    assert!(
+        validate_telemetry_context(&too_many_tags).is_err(),
+        "33 tags must fail validation"
+    );
 }
 
 #[test]
@@ -265,9 +280,11 @@ fn merge_is_field_aware_sorted_and_detached() {
     );
 
     let mut changed_base = base;
-    changed_base
-        .tags
-        .insert("alpha".to_string(), "changed".to_string());
+    drop(
+        changed_base
+            .tags
+            .insert("alpha".to_owned(), "changed".to_owned()),
+    );
     assert_eq!(merged.tags.get("alpha").map(String::as_str), Some("base"));
 }
 
@@ -296,17 +313,17 @@ fn synchronous_scopes_restore_on_close_drop_panic_and_threads() {
 
     let barrier = Arc::new(Barrier::new(2));
     let worker_barrier = Arc::clone(&barrier);
-    let worker = std::thread::spawn(move || {
+    let worker = thread::spawn(move || {
         let _guard =
             activate_telemetry_context(TelemetryContext::new().with_tag("thread", "worker"))
                 .unwrap();
-        worker_barrier.wait();
+        let _released = worker_barrier.wait();
         assert_eq!(
             current_telemetry_context().unwrap().tags["thread"],
             "worker"
         );
     });
-    barrier.wait();
+    let _released = barrier.wait();
     assert!(current_telemetry_context().is_none());
     worker.join().unwrap();
 }
@@ -315,31 +332,31 @@ fn synchronous_scopes_restore_on_close_drop_panic_and_threads() {
 async fn async_poll_scopes_are_isolated_across_concurrent_tasks() {
     let first =
         with_telemetry_context_async(TelemetryContext::new().with_tag("task", "first"), async {
-            tokio::task::yield_now().await;
+            yield_now().await;
             current_telemetry_context().unwrap().tags["task"].clone()
         })
         .unwrap();
     let second =
         with_telemetry_context_async(TelemetryContext::new().with_tag("task", "second"), async {
-            tokio::task::yield_now().await;
+            yield_now().await;
             current_telemetry_context().unwrap().tags["task"].clone()
         })
         .unwrap();
 
-    let (first, second) = tokio::join!(first, second);
-    assert_eq!(first.unwrap(), "first");
-    assert_eq!(second.unwrap(), "second");
+    let (first_tag, second_tag) = tokio::join!(first, second);
+    assert_eq!(first_tag.unwrap(), "first");
+    assert_eq!(second_tag.unwrap(), "second");
     assert!(current_telemetry_context().is_none());
 }
 
 #[test]
 fn tag_order_produces_byte_stable_queue_serialization() {
     let mut first_tags = BTreeMap::new();
-    first_tags.insert("zeta".to_string(), "2".to_string());
-    first_tags.insert("alpha".to_string(), "1".to_string());
+    drop(first_tags.insert("zeta".to_owned(), "2".to_owned()));
+    drop(first_tags.insert("alpha".to_owned(), "1".to_owned()));
     let mut second_tags = BTreeMap::new();
-    second_tags.insert("alpha".to_string(), "1".to_string());
-    second_tags.insert("zeta".to_string(), "2".to_string());
+    drop(second_tags.insert("alpha".to_owned(), "1".to_owned()));
+    drop(second_tags.insert("zeta".to_owned(), "2".to_owned()));
 
     let first_context = TelemetryContext::new().with_tags(first_tags);
     let second_context = TelemetryContext::new().with_tags(second_tags);

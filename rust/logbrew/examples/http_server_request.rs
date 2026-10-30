@@ -1,19 +1,22 @@
+//! Example: request telemetry from a plain HTTP server.
+use core::error::Error;
 use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue, RecordingTransport};
+use std::io::{self, Write as _};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
         .api_key("LOGBREW_API_KEY")
         .build()?;
 
     let mut metadata = Metadata::new();
-    metadata.insert(
-        "framework".to_string(),
-        MetadataValue::String("axum".to_string()),
-    );
-    metadata.insert(
-        "service".to_string(),
-        MetadataValue::String("checkout-service".to_string()),
-    );
+    drop(metadata.insert(
+        "framework".to_owned(),
+        MetadataValue::String("axum".to_owned()),
+    ));
+    drop(metadata.insert(
+        "service".to_owned(),
+        MetadataValue::String("checkout-service".to_owned()),
+    ));
 
     let request = HttpRequestTelemetry::new(
         "https://api.example.invalid/checkout/:cart_id?coupon=sample#review",
@@ -31,16 +34,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.metric(
         "evt_http_server_duration",
         "2026-06-02T10:00:00Z",
-        request.metric.expect("duration metric should exist"),
+        request.metric.ok_or("duration metric should exist")?,
     )?;
 
-    println!("{}", client.preview_json()?);
+    writeln!(io::stdout(), "{}", client.preview_json()?)?;
 
     let mut transport = RecordingTransport::always_accept();
     let response = client.shutdown(&mut transport)?;
-    eprintln!(
+    writeln!(
+        io::stderr(),
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":2,\"outgoingTraceparent\":\"{}\"}}",
-        response.status_code, response.attempts, request.outgoing_traceparent
-    );
+        response.status_code,
+        response.attempts,
+        request.outgoing_traceparent
+    )?;
     Ok(())
 }
