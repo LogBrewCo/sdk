@@ -137,7 +137,7 @@ if (packageDirs.length === NO_PACKAGES) {
   throw new Error("At least one package directory is required");
 }
 const manifests = await Promise.all(packageDirs.map(async (packageDir) => readManifest(packageDir)));
-const grants = await Promise.all(manifests.map(async (manifest) => exchangeGrant(manifest.name)));
+const grants = await Promise.all(manifests.map(async ({ name }) => exchangeGrant(name)));
 /** @type {readonly PublishTarget[]} */
 const targets = manifests.map((manifest, index) => ({ grant: grants[index] ?? "", manifest, packageDir: packageDirs[index] ?? "" }));
 const scratch = await mkdtemp(path.join(tmpdir(), "logbrew-npm-publish-"));

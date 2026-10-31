@@ -19,9 +19,8 @@
 {.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	central portal user-token credentials
 {.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	generated central portal publishing credentials
 {.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	generated central portal publishing values
-{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	return exchange.token
-{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	token: grants[index]
-{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	typeof exchange.token
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	readstring(exchange, "token")
+{.github/workflows/publish-packages.yml,tools/npm-publish/publish.mjs}	*	ihas	forceauth: { token: grant }
 tests/test_release_metadata.py	*	ihas	/-/npm/v1/oidc/token/exchange/package/
 tests/test_release_metadata.py	*	ihas	central portal credentials
 tests/test_release_metadata.py	*	ihas	central portal publishing credentials
@@ -439,4 +438,4 @@ scripts/advisory-issue.sh	*	line	printf 'Authorization: Bearer %s\n' "$GH_TOKEN"
 js/logbrew-browser/attribution.{js,cjs}	hostname	has	referrer.hostname
 
 # Lock files pin package integrity hashes, which can spell a listed word by chance.
-js/bun.lock	*	re	^    "[@a-z0-9/._-]+": \["[@a-z0-9/._-]+@[0-9][0-9a-z.+-]*", "", \{[^\[\]]*\}, "sha512-[A-Za-z0-9+/]{86}=="\],$
+{js/bun.lock,benchmarks/bun.lock,tools/npm-publish/bun.lock}	*	re	^    "[@a-z0-9/._-]+": \["[@a-z0-9/._-]+@[0-9][0-9a-z.+-]*", "", \{[^\[\]]*\}, "sha512-[A-Za-z0-9+/]{86}=="\],$
