@@ -399,6 +399,7 @@ if (dependency.version !== expectedSdkVersion) {
 const packageJsonPath = path.join("node_modules", "@logbrew", "sdk", "package.json");
 const readmePath = path.join("node_modules", "@logbrew", "sdk", "README.md");
 const declarationsPath = path.join("node_modules", "@logbrew", "sdk", "index.d.ts");
+const declarationTypesPath = path.join("node_modules", "@logbrew", "sdk", "types");
 const commonJsDeclarationsPath = path.join("node_modules", "@logbrew", "sdk", "index.d.cts");
 const telemetryContextRuntimePath = path.join("node_modules", "@logbrew", "sdk", "telemetry-context.cjs");
 const examplesPackageJsonPath = path.join("node_modules", "@logbrew", "sdk", "examples", "package.json");
@@ -449,7 +450,13 @@ if (!fs.existsSync(realUserCjsExamplePath)) {
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 const examplesPackageJson = JSON.parse(fs.readFileSync(examplesPackageJsonPath, "utf8"));
 const readme = fs.readFileSync(readmePath, "utf8");
-const declarations = fs.readFileSync(declarationsPath, "utf8");
+if (!fs.existsSync(path.join(declarationTypesPath, "client.d.ts"))) {
+  throw new Error("expected installed split declaration files");
+}
+const declarations = [
+  declarationsPath,
+  ...fs.readdirSync(declarationTypesPath).filter((name) => name.endsWith(".d.ts")).sort().map((name) => path.join(declarationTypesPath, name)),
+].map((file) => fs.readFileSync(file, "utf8")).join("\n");
 const commonJsDeclarations = fs.readFileSync(commonJsDeclarationsPath, "utf8");
 
 function assertPackageManifest(packageJson, label) {
@@ -1084,6 +1091,7 @@ grep -q '^package/package.json$' package-contents.txt
 grep -q '^package/README.md$' package-contents.txt
 grep -q '^package/index.d.ts$' package-contents.txt
 grep -q '^package/index.d.cts$' package-contents.txt
+grep -q '^package/types/client.d.ts$' package-contents.txt
 grep -q '^package/telemetry-context.cjs$' package-contents.txt
 grep -q '^package/issue-stack.cjs$' package-contents.txt
 grep -q '^package/support-ticket.cjs$' package-contents.txt
@@ -1095,6 +1103,9 @@ grep -q '^package/examples/readme-example.cjs$' package-contents.txt
 tar -xOf "$package_tgz" package/package.json > packed-package.json
 tar -xOf "$package_tgz" package/README.md > packed-README.md
 tar -xOf "$package_tgz" package/index.d.ts > packed-index.d.ts
+grep '^package/types/.*\.d\.ts$' package-contents.txt | sort | while IFS= read -r member; do
+  tar -xOf "$package_tgz" "$member"
+done > packed-types.d.ts
 tar -xOf "$package_tgz" package/index.d.cts > packed-index.d.cts
 tar -xOf "$package_tgz" package/examples/package.json > packed-examples-package.json
 node <<'EOF'
@@ -1124,7 +1135,7 @@ function validatePackMetadata(payload, label) {
     throw new Error(`missing ${label} file list`);
   }
   const packedPaths = new Set(entry.files.map((item) => item.path));
-  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "index.js", "index.cjs", "support-ticket.cjs", "telemetry-context.cjs", "examples/package.json", "examples/index.mjs", "examples/agent-timeline.mjs", "examples/agent-timeline.cjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
+  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "types/client.d.ts", "index.js", "index.cjs", "support-ticket.cjs", "telemetry-context.cjs", "examples/package.json", "examples/index.mjs", "examples/agent-timeline.mjs", "examples/agent-timeline.cjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
     if (!packedPaths.has(requiredPath)) {
       throw new Error(`missing ${label} file metadata for ${requiredPath}`);
     }
@@ -1153,7 +1164,7 @@ if (dryRunEntry.entryCount !== packEntry.entryCount) {
 const packageJson = JSON.parse(fs.readFileSync("packed-package.json", "utf8"));
 const examplesPackageJson = JSON.parse(fs.readFileSync("packed-examples-package.json", "utf8"));
 const readme = fs.readFileSync("packed-README.md", "utf8");
-const declarations = fs.readFileSync("packed-index.d.ts", "utf8");
+const declarations = [fs.readFileSync("packed-index.d.ts", "utf8"), fs.readFileSync("packed-types.d.ts", "utf8")].join("\n");
 const commonJsDeclarations = fs.readFileSync("packed-index.d.cts", "utf8");
 
 function assertPackageManifest(packageJson, label) {
