@@ -94,7 +94,7 @@ function createLogBrewNodeClient({
   fetchImpl,
   headers,
   sdkName = "logbrew-node",
-  sdkVersion = "0.1.21",
+  sdkVersion = "0.1.22",
   maxBatchBytes,
   maxBatchEvents,
   maxRetries = 2,
