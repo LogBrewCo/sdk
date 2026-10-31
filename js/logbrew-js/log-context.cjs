@@ -89,8 +89,9 @@ function normalizeLogTraceContext(trace) {
   const parentSpanId = normalizeHexId(trace["parentSpanId"], SPAN_ID_PATTERN, ZERO_SPAN_ID);
   const { sampled } = trace;
   return {
-    spanId,
     traceId,
+
+    spanId,
     ...(parentSpanId === undefined ? {} : { parentSpanId }),
     ...(typeof sampled === "boolean" ? { sampled } : {})
   };

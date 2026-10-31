@@ -79,7 +79,16 @@ function parseTraceparent(traceparent) {
   const traceFlags = String(parts["traceFlags"]).toLowerCase();
   rejectInvalidTraceparent(version, traceId, parentSpanId);
   const sampled = Number.parseInt(traceFlags, HEX_RADIX) % SAMPLED_FLAG_DIVISOR === SAMPLED_FLAG_REMAINDER;
-  return { parentSpanId, sampled, traceFlags, traceId, version };
+  return {
+    version,
+
+    traceId,
+
+    parentSpanId,
+    traceFlags,
+
+    sampled
+  };
 }
 
 /**
@@ -250,20 +259,26 @@ function normalizeTracestateEntries(entries) {
 }
 
 /**
+ * @param {unknown} entry
+ * @returns {BaggageEntry}
+ */
+function normalizeBaggageEntry(entry) {
+  if (!isRecord(entry)) {
+    throw new SdkError("validation_error", "baggage entry must be an object");
+  }
+  const key = validateBaggageKey(entry["key"]);
+  const value = validateBaggageValue(entry["value"]);
+  const properties = normalizeBaggageProperties(entry["properties"]);
+  return { key, value, ...(properties === undefined ? {} : { properties }) };
+}
+
+/**
  * @param {unknown} entries
  * @returns {BaggageEntry[]}
  */
 function normalizeBaggageEntries(entries) {
   const list = requireEntryList(entries, "baggage", MAX_BAGGAGE_ENTRIES);
-  const normalized = list.map((entry) => {
-    if (!isRecord(entry)) {
-      throw new SdkError("validation_error", "baggage entry must be an object");
-    }
-    const key = validateBaggageKey(entry["key"]);
-    const value = validateBaggageValue(entry["value"]);
-    const properties = normalizeBaggageProperties(entry["properties"]);
-    return properties === undefined ? { key, value } : { key, properties, value };
-  });
+  const normalized = list.map((entry) => normalizeBaggageEntry(entry));
   if (serializeBaggage(normalized).length > MAX_BAGGAGE_LENGTH) {
     throw new SdkError("validation_error", `baggage must be at most ${MAX_BAGGAGE_LENGTH} characters`);
   }
@@ -316,7 +331,12 @@ function parseBaggageEntry(entry) {
   const key = pair.slice(KEY_START, separator).trim();
   const value = decodeBaggageValue(pair.slice(separator + SEPARATOR_WIDTH).trim());
   const properties = rawProperties.map((property) => property.trim()).filter((property) => property !== "");
-  return { key, properties, value };
+  return {
+    key,
+    value,
+
+    properties
+  };
 }
 
 /**
