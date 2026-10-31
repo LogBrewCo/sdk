@@ -366,6 +366,53 @@
               "LogBrewSvelteKitHooksOptions",
               "LogBrewSvelteOptions"
             ]
+          },
+          {
+            "from": "file",
+            "name": [
+              "CacheOperationWithLogBrewSpanOptions",
+              "CreateLogBrewNodeClientConfig",
+              "DatabaseOperationWithLogBrewSpanOptions",
+              "FetchWithLogBrewSpanOptions",
+              "LogBrewAxiosInstrumentableInstance",
+              "LogBrewAxiosInstrumentationOptions",
+              "LogBrewAxiosSpanOptions",
+              "LogBrewBreadcrumbInput",
+              "LogBrewFetchInstrumentationContext",
+              "LogBrewFetchInstrumentationOptions",
+              "LogBrewFetchTimingContext",
+              "LogBrewHttpClientInstrumentationOptions",
+              "LogBrewHttpErrorEventOptions",
+              "LogBrewHttpRequestEventOptions",
+              "LogBrewMongoCollection",
+              "LogBrewMongoCollectionInstrumentationOptions",
+              "LogBrewMongooseModel",
+              "LogBrewMongooseModelInstrumentationOptions",
+              "LogBrewNodeContext",
+              "LogBrewNodeOptions",
+              "LogBrewPgClientInstrumentationOptions",
+              "LogBrewPgQueryable",
+              "LogBrewPinoInstrumentationConfig",
+              "LogBrewProcessErrorCaptureOptions",
+              "LogBrewQueueTraceCarrier",
+              "LogBrewQueueTraceCarriers",
+              "LogBrewRedisClientInstrumentationOptions",
+              "LogBrewRedisCommand",
+              "LogBrewRedisCommandClient",
+              "LogBrewUndiciInstrumentationOptions",
+              "NodeFetchTransportConfig",
+              "QueueBatchOperationWithLogBrewSpanOptions",
+              "QueueOperationWithLogBrewSpanOptions"
+            ]
+          },
+          {
+            "from": "package",
+            "name": [
+              "Request",
+              "RequestInit",
+              "URL"
+            ],
+            "package": "@types/node"
           }
         ]
       }
@@ -457,6 +504,7 @@
         "logbrew-fastify/**",
         "logbrew-nestjs/**",
         "logbrew-express/**",
+        "logbrew-node/**",
         "logbrew-js/release-artifacts*",
         "logbrew-js/test/release-artifacts*",
         "logbrew-js/vite-release-artifacts*.cjs",
@@ -555,7 +603,8 @@
       "files": [
         "logbrew-fastify/internal.cjs",
         "logbrew-nestjs/internal.cjs",
-        "logbrew-express/internal.cjs"
+        "logbrew-express/internal.cjs",
+        "logbrew-node/runtime-context.cjs"
       ],
       "rules": {
         "node/no-process-env": "off"
@@ -567,7 +616,8 @@
         "logbrew-nestjs/index.d.ts",
         "logbrew-express/index.d.ts",
         "logbrew-vue/index.d.cts",
-        "logbrew-vue/index.d.ts"
+        "logbrew-vue/index.d.ts",
+        "logbrew-node/index.d.ts"
       ],
       "rules": {
         "typescript/consistent-type-definitions": "off"
@@ -753,6 +803,19 @@
             "capIsNewExceptions": [
               "Router"
             ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "logbrew-node/http-types.d.ts"
+      ],
+      "rules": {
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 5
           }
         ]
       }
