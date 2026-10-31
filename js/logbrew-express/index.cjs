@@ -56,7 +56,7 @@ const { SdkError } = require("@logbrew/sdk");
  */
 
 const DEFAULT_SDK_NAME = "logbrew-express";
-const DEFAULT_SDK_VERSION = "0.1.9";
+const DEFAULT_SDK_VERSION = "0.1.10";
 const DEFAULT_MAX_RETRIES = 2;
 const NO_EVENTS = 0;
 
