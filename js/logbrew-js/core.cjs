@@ -1,5 +1,11 @@
-const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
-const { buildIssueDiagnosticsHelpers } = require("./issue-diagnostics.cjs");
+const {
+  MAX_ISSUE_BREADCRUMBS,
+  cloneIssueDiagnostics,
+  createIssueException,
+  validateIssueBreadcrumb,
+  validateIssueDiagnostics,
+  validateIssueEvidence
+} = require("./issue-diagnostics.cjs");
 const { javascriptStackEvidence, validateIssueStackFrames, validateNativeStackFrames } = require("./issue-stack.cjs");
 const {
   compactMetadata,
@@ -9,8 +15,13 @@ const {
   traceMetadataFromLogContext
 } = require("./log-context.cjs");
 const { buildOpenTelemetryHelpers } = require("./opentelemetry.cjs");
-const { buildTelemetryContextHelpers } = require("./telemetry-context.cjs");
+const {
+  cloneTelemetryContext,
+  mergeTelemetryContexts,
+  validateTelemetryContext
+} = require("./telemetry-context.cjs");
 const { SdkError, retryAfterMsOrUndefined } = require("./sdk-error.cjs");
+const { createSupportTicketDraft } = require("./support-ticket.cjs");
 const { TransportError } = require("./transport-error.cjs");
 const {
   createBaggage,
@@ -153,19 +164,6 @@ const EVENT_VALIDATORS = new Map([
   ["metric", validateMetric]
 ]);
 
-const {
-  MAX_ISSUE_BREADCRUMBS,
-  cloneIssueDiagnostics,
-  createIssueException,
-  validateIssueBreadcrumb,
-  validateIssueDiagnostics,
-  validateIssueEvidence
-} = buildIssueDiagnosticsHelpers({ SdkError, requireTimestamp, validateIssueStackFrames });
-const {
-  cloneTelemetryContext,
-  mergeTelemetryContexts,
-  validateTelemetryContext
-} = buildTelemetryContextHelpers({ SdkError });
 
 class RecordingTransport {
   constructor(scriptedResponses = [{ statusCode: 202 }]) {
@@ -2068,13 +2066,6 @@ function createNetworkMilestoneAttributes(request, options = {}) {
     })
   };
 }
-
-const createSupportTicketDraft = buildCreateSupportTicketDraft({
-  SdkError,
-  requireAllowedValue,
-  requireNonEmpty,
-  requireTraceId
-});
 
 const {
   createLogBrewOpenTelemetrySpanExporter,

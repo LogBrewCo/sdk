@@ -1,5 +1,12 @@
 const { SdkError } = require("./sdk-error.cjs");
 
+/**
+ * @template Value
+ * @typedef {Value extends readonly (infer Item)[]
+ *   ? readonly DeepReadonly<Item>[]
+ *   : Value extends object ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> } : Value} DeepReadonly
+ */
+
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
 const TRACE_ID_PATTERN = /^[0-9a-fA-F]{32}$/u;
@@ -13,6 +20,11 @@ const YEAR_ZERO = 0;
 const FIRST_MONTH = 1;
 const MIN_POSITIVE_INTEGER = 1;
 const MIN_NON_NEGATIVE_INTEGER = 0;
+const NO_UNKNOWN_KEYS = 0;
+const FIRST_CODE_POINT = 0;
+const LAST_C0_CONTROL = 31;
+const FIRST_C1_CONTROL = 127;
+const LAST_C1_CONTROL = 159;
 
 /**
  * @param {unknown} value
@@ -20,6 +32,67 @@ const MIN_NON_NEGATIVE_INTEGER = 0;
  */
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is readonly unknown[]}
+ */
+function isList(value) {
+  return Array.isArray(value);
+}
+
+/**
+ * @param {string} label
+ * @param {unknown} value
+ * @returns {Readonly<Record<string, unknown>>}
+ */
+function requireObject(label, value) {
+  if (!isRecord(value)) {
+    throw new SdkError("validation_error", `${label} must be an object`);
+  }
+  return value;
+}
+
+/**
+ * @param {string} label
+ * @param {Readonly<Record<string, unknown>>} value
+ * @param {Readonly<ReadonlySet<string>>} allowed
+ * @returns {void}
+ */
+function rejectUnknownKeys(label, value, allowed) {
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > NO_UNKNOWN_KEYS) {
+    unknown.sort();
+    throw new SdkError("validation_error", `${label} has unsupported fields: ${unknown.join(", ")}`);
+  }
+}
+
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function hasUnicodeControlCharacter(value) {
+  return [...value].some((character) => {
+    const code = character.codePointAt(FIRST_CODE_POINT);
+    return code !== undefined && (code <= LAST_C0_CONTROL || (code >= FIRST_C1_CONTROL && code <= LAST_C1_CONTROL));
+  });
+}
+
+/**
+ * @template Value
+ * @template {string} Key
+ * @param {Key} key
+ * @param {Value | undefined} value
+ * @returns {{ [Field in Key]?: Value }}
+ */
+function optionalEntry(key, value) {
+  /** @type {{ [Field in Key]?: Value }} */
+  const entry = {};
+  if (value !== undefined) {
+    entry[key] = value;
+  }
+  return entry;
 }
 
 /**
@@ -35,14 +108,27 @@ function requireNonEmpty(label, value) {
 }
 
 /**
+ * @template {string} Allowed
+ * @param {string} value
+ * @param {Readonly<ReadonlySet<Allowed>>} allowedValues
+ * @returns {value is Allowed}
+ */
+function isAllowedValue(value, allowedValues) {
+  /** @type {ReadonlySet<string>} */
+  const values = allowedValues;
+  return values.has(value);
+}
+
+/**
+ * @template {string} Allowed
  * @param {string} label
  * @param {unknown} value
- * @param {Readonly<ReadonlySet<string>>} allowedValues
- * @returns {string}
+ * @param {Readonly<ReadonlySet<Allowed>>} allowedValues
+ * @returns {Allowed}
  */
 function requireAllowedValue(label, value, allowedValues) {
   const text = requireNonEmpty(label, value);
-  if (!allowedValues.has(text)) {
+  if (!isAllowedValue(text, allowedValues)) {
     throw new SdkError("validation_error", `${label} must be one of: ${[...allowedValues].join(", ")}`);
   }
   return text;
@@ -174,11 +260,17 @@ function requireTimestamp(timestamp) {
 module.exports = {
   ZERO_SPAN_ID,
   ZERO_TRACE_ID,
+  hasUnicodeControlCharacter,
+  isAllowedValue,
+  isList,
   isRecord,
+  optionalEntry,
+  rejectUnknownKeys,
   requireAllowedValue,
   requireFiniteNumber,
   requireNonEmpty,
   requireNonNegativeInteger,
+  requireObject,
   requirePositiveInteger,
   requireSpanId,
   requireTimestamp,
