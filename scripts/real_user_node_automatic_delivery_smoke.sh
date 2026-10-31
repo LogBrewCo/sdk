@@ -26,10 +26,16 @@ node_tgz="$tmp_dir/$(pack_filename "$tmp_dir/node-pack.json")"
 core_digest="$(shasum -a 256 "$core_tgz" | awk '{print $1}')"
 node_digest="$(shasum -a 256 "$node_tgz" | awk '{print $1}')"
 
-tar -xOf "$core_tgz" package/index.d.ts > "$tmp_dir/core-types.d.ts"
+{
+  tar -xOf "$core_tgz" package/index.d.ts
+  tar -tzf "$core_tgz" | grep '^package/types/.*\.d\.ts$' | sort | while IFS= read -r member; do
+    tar -xOf "$core_tgz" "$member"
+  done
+} > "$tmp_dir/core-types.d.ts"
 tar -xOf "$node_tgz" package/index.d.ts > "$tmp_dir/node-types.d.ts"
 grep -q 'deliveryHealth(): DeliveryHealthSnapshot' "$tmp_dir/core-types.d.ts"
-grep -q 'schemaVersion: 1' "$tmp_dir/core-types.d.ts"
+grep -q 'declare const DELIVERY_HEALTH_SCHEMA_VERSION = 1;' "$tmp_dir/core-types.d.ts"
+grep -q 'schemaVersion: typeof DELIVERY_HEALTH_SCHEMA_VERSION;' "$tmp_dir/core-types.d.ts"
 grep -q 'lastStatusClass:' "$tmp_dir/core-types.d.ts"
 grep -q 'acceptedEvents: number' "$tmp_dir/core-types.d.ts"
 grep -q 'automaticDelivery?: boolean' "$tmp_dir/core-types.d.ts"

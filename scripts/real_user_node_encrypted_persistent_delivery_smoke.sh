@@ -43,7 +43,12 @@ grep -q '^package/index.d.ts$' "$tmp_dir/node-files.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/node-files.txt"
 grep -q '^package/examples/persistent-delivery.mjs$' "$tmp_dir/node-files.txt"
 tar -xOf "$node_tgz" package/index.d.ts > "$tmp_dir/node-types.d.ts"
-tar -xOf "$core_tgz" package/index.d.ts > "$tmp_dir/core-types.d.ts"
+{
+  tar -xOf "$core_tgz" package/index.d.ts
+  tar -tzf "$core_tgz" | grep '^package/types/.*\.d\.ts$' | sort | while IFS= read -r member; do
+    tar -xOf "$core_tgz" "$member"
+  done
+} > "$tmp_dir/core-types.d.ts"
 grep -q 'persistentQueue?: LogBrewNodePersistentQueueConfig' "$tmp_dir/node-types.d.ts"
 grep -q 'eventStore?: EventStore' "$tmp_dir/core-types.d.ts"
 
