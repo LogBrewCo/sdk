@@ -1,6 +1,6 @@
 "use strict";
 
-const { isFunction, isTruthy, readField } = require("./values.cjs");
+const { isFunction, readField } = require("./values.cjs");
 
 /**
  * @import { Transport } from "@logbrew/sdk"
@@ -22,8 +22,9 @@ function isSend(value) {
  * @param {unknown} [send]
  * @returns {TransportValue}
  */
-function markLifecycleTransport(transport, send = transport?.send) {
-  if (!isTruthy(transport) || !isFunction(send)) {
+function markLifecycleTransport(transport, send = readField(transport, "send")) {
+  const hasTransport = Boolean(transport);
+  if (!hasTransport || !isFunction(send)) {
     return transport;
   }
   Object.defineProperty(transport, LIFECYCLE_SEND, {
@@ -46,7 +47,7 @@ function lifecycleTransportFor(transport) {
   }
   /** @type {Transport} */
   const lifecycleTransport = {
-    send(apiKey, body) {
+    async send(apiKey, body) {
       return send.call(transport, apiKey, body);
     }
   };

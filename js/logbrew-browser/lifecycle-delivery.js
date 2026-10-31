@@ -1,5 +1,5 @@
-import { lifecycleTransportFor } from "./lifecycle-transport.js";
 import { callMethod, readField } from "./values.js";
+import { lifecycleTransportFor } from "./lifecycle-transport.js";
 
 /**
  * @import { LogBrewClient, Transport } from "@logbrew/sdk"
@@ -31,7 +31,7 @@ import { callMethod, readField } from "./values.js";
  * }} LifecycleCore
  * @typedef {{ readonly pagehide: () => void, readonly visibilitychange: () => void }} LifecycleListeners
  * @typedef {{ readonly core: LifecycleCore, readonly listeners: LifecycleListeners }} LifecycleDelivery
- * @typedef {{ readonly generation: number, readonly pending: Promise<unknown>, readonly token: object }} PendingDelivery
+ * @typedef {{ readonly generation: number, readonly marker: object, readonly pending: Promise<unknown> }} PendingDelivery
  * @typedef {{
  *   readonly destroy: () => void,
  *   readonly recover: () => void,
@@ -88,7 +88,7 @@ async function trackDelivery(state, pendingDelivery) {
       state.paused = true;
     }
   } finally {
-    if (state.inFlight === pendingDelivery.token) {
+    if (state.inFlight === pendingDelivery.marker) {
       state.inFlight = undefined;
     }
   }
@@ -105,9 +105,9 @@ function request(core, reason) {
   }
   const { generation } = core.state;
   const pending = Promise.resolve(core.options.deliver(core.lifecycleTransport, reason));
-  const token = {};
-  core.state.inFlight = token;
-  void trackDelivery(core.state, { generation, pending, token });
+  const marker = {};
+  core.state.inFlight = marker;
+  void trackDelivery(core.state, { generation, marker, pending });
 }
 
 /**
