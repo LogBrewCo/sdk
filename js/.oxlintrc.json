@@ -440,8 +440,10 @@
               "CacheOperationWithLogBrewSpanOptions",
               "CreateLogBrewNodeClientConfig",
               "DatabaseOperationWithLogBrewSpanOptions",
+              "ExitFlushEntry",
               "FetchHost",
               "FetchWithLogBrewSpanOptions",
+              "HandlerState",
               "HttpClientModule",
               "LeaseProgress",
               "LeaseState",
@@ -472,6 +474,7 @@
               "LogBrewRedisCommand",
               "LogBrewRedisCommandClient",
               "LogBrewUndiciInstrumentationOptions",
+              "NodeClientSettings",
               "NodeFetchTransportConfig",
               "QueueBatchOperationWithLogBrewSpanOptions",
               "QueueOperationWithLogBrewSpanOptions",
@@ -969,6 +972,7 @@
     },
     {
       "files": [
+        "logbrew-node/http-handler.cjs",
         "logbrew-node/http-types.d.ts"
       ],
       "rules": {
