@@ -101,7 +101,12 @@ function frameCoordinates(location, hermesBytecode) {
   if (filename === "" || lineNumber === undefined || column === undefined) {
     return undefined;
   }
-  return { column, filename, line: lineNumber };
+  return {
+    filename,
+    line: lineNumber,
+
+    column
+  };
 }
 
 /**

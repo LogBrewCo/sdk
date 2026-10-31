@@ -145,7 +145,13 @@ function validateIssueStackFrame(frame) {
   if (line === undefined || column === undefined) {
     throw new SdkError("validation_error", "issue stack frame coordinates must be positive integers");
   }
-  return { column, filename, line, ...optionalFrameFields(frame) };
+  return {
+    filename,
+    line,
+
+    column,
+    ...optionalFrameFields(frame)
+  };
 }
 
 /**
@@ -187,7 +193,12 @@ function validateNativeStackFrame(frame) {
   ) {
     throw new SdkError("validation_error", "issue native stack frame is invalid");
   }
-  return { architecture, imageUuid, instructionOffset };
+  return {
+    imageUuid,
+
+    architecture,
+    instructionOffset
+  };
 }
 
 /**

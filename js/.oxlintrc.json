@@ -48,6 +48,13 @@
       "never"
     ],
     "eslint/require-await": "off",
+    "eslint/sort-keys": [
+      "error",
+      "asc",
+      {
+        "allowLineSeparatedGroups": true
+      }
+    ],
     "import/no-named-export": "off",
     "import/prefer-default-export": "off",
     "jsdoc/require-param-description": "off",
