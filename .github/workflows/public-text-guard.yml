@@ -1,0 +1,48 @@
+name: Public text guard
+# A fixed run name, so the runs list never repeats an issue or pull request title.
+run-name: Public text guard
+
+# Scans new and edited issue, pull request, and comment text with the public
+# guard rules. A comment with a finding is hidden as off-topic; an issue or
+# pull request title or body with a finding gets its earlier text back. The run
+# then fails and names the link and the finding categories, never the text.
+# pull_request_target gives edits to fork pull requests the full term list. The
+# job runs the default branch copy of the guard and reads only the event
+# payload; it never checks out or runs pull request content. Edits this job
+# makes do not start new runs.
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request_target:
+    types: [edited]
+  pull_request_review_comment:
+    types: [created, edited]
+
+permissions: {}
+
+jobs:
+  scan:
+    name: Check issue, pull request, and comment text
+    if: github.event.sender.type != 'Bot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Hide comments and restore issue and pull request text.
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Scan the new text
+        env:
+          PUBLIC_GUARD_TERMS: ${{ secrets.PUBLIC_GUARD_TERMS }}
+          PUBLIC_GUARD_REQUIRE_TERMS: "1"
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/public-guard.sh github-text

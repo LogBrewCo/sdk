@@ -139,12 +139,19 @@ printf 'body without content\n' >"$work/body"
 expect "pull request title" 1 "infrastructure: pr-title line 1" "$term" text pr-title="$work/title" pr-body="$work/body"
 expect "guard sources pass their own rules" 0 "clean" "" text \
   guard-script="$guard_source/public-guard.sh" guard-rules="$guard_source/public-guard.toml" \
-  guard-test="$guard_source/test-public-guard.sh"
+  guard-test="$guard_source/test-public-guard.sh" guard-workflow="$guard_source/../.github/workflows/public-text-guard.yml"
 
 # The GitHub entry point reads the pull request from the event file, scans it
 # as Git objects, and reports a commit status through a stub gh command.
+# The stub logs its arguments and any --input body, and answers the hide
+# mutation the way GitHub does.
 mkdir "$work/bin"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\n' "$work/gh.log" >"$work/bin/gh"
+cat >"$work/bin/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >>"$work/gh.log"
+if [[ "\$*" == *"--input -"* ]]; then cat >>"$work/gh.log"; fi
+if [[ "\$*" == *minimizeComment* ]]; then printf 'true\\n'; fi
+STUB
 chmod +x "$work/bin/gh"
 github_case() {
   local name="$1" want_status="$2" want_text="$3" want_state="$4" body="$5" event_sha="${6:-}"
@@ -167,6 +174,48 @@ github_case() {
 github_case "pull request body blocks with a failure status" 1 "pr-body line 1" failure "Adds $term support"
 github_case "clean pull request gets a success status" 0 "clean" success "Adds support"
 github_case "moved pull request head is left to the newer event" 0 "head moved" "" "Adds support" "$base"
+
+# Issue, pull request, and comment events: EVENT_NAME, payload as JSON, the
+# expected status and output, and text the gh calls must contain.
+text_case() {
+  local name="$1" event_name="$2" payload="$3" want_status="$4" want_text="$5" want_call="$6"
+  printf '%s\n' "$payload" >"$work/event.json"
+  : >"$work/gh.log"
+  PATH="$work/bin:$PATH" GITHUB_EVENT_NAME="$event_name" GITHUB_EVENT_PATH="$work/event.json" \
+    GITHUB_REPOSITORY=org/sample PUBLIC_GUARD_REQUIRE_TERMS=1 \
+    expect "$name" "$want_status" "$want_text" "$term" github-text
+  if { [[ -z "$want_call" ]] && [[ -s "$work/gh.log" ]]; } ||
+    { [[ -n "$want_call" ]] && ! grep -qF -- "$want_call" "$work/gh.log"; }; then
+    printf 'FAIL %s: gh calls miss "%s"\n' "$name" "$want_call"
+    sed 's/^/  | /' "$work/gh.log"
+    failures=$((failures + 1))
+  elif grep -qF -- "$term" "$work/gh.log"; then
+    printf 'FAIL %s: gh calls repeat the matched text\n' "$name"
+    failures=$((failures + 1))
+  fi
+}
+url=https://example.com/org/sample/issues/9
+text_case "new comment with a finding is hidden" issue_comment \
+  "{\"action\": \"created\", \"comment\": {\"node_id\": \"IC_9\", \"html_url\": \"$url#c1\", \"body\": \"see $term\"}}" \
+  1 "Found infrastructure in $url#c1; hid the comment." "id=IC_9"
+text_case "clean comment is left alone" pull_request_review_comment \
+  "{\"action\": \"edited\", \"changes\": {\"body\": {\"from\": \"old\"}}, \"comment\": {\"node_id\": \"RC_9\", \"html_url\": \"$url\", \"body\": \"fine\"}}" \
+  0 "clean" ""
+text_case "edited issue body gets its earlier text back" issues \
+  "{\"action\": \"edited\", \"changes\": {\"body\": {\"from\": \"earlier words\"}}, \"issue\": {\"number\": 9, \"html_url\": \"$url\", \"title\": \"Crash\", \"body\": \"host $term\"}}" \
+  1 "Found infrastructure in $url; restored the earlier text." '{"body":"earlier words"}'
+text_case "earlier text with a finding becomes a notice" issues \
+  "{\"action\": \"edited\", \"changes\": {\"body\": {\"from\": \"old $term\"}}, \"issue\": {\"number\": 9, \"html_url\": \"$url\", \"title\": \"Crash\", \"body\": \"host $term\"}}" \
+  1 "replaced the text with a removal notice." "repos/org/sample/issues/9"
+text_case "new issue title with a finding becomes a notice" issues \
+  "{\"action\": \"opened\", \"issue\": {\"number\": 9, \"html_url\": \"$url\", \"title\": \"Crash in $term\", \"body\": \"steps\"}}" \
+  1 "replaced the text with a removal notice." '{"title":"Title removed by the public content check"}'
+text_case "edited pull request body is restored through the pulls API" pull_request_target \
+  "{\"action\": \"edited\", \"changes\": {\"body\": {\"from\": \"\"}}, \"pull_request\": {\"number\": 7, \"html_url\": \"$url\", \"title\": \"feat: x\", \"body\": \"$term\"}}" \
+  1 "restored the earlier text." "repos/org/sample/pulls/7"
+text_case "only the edited field is scanned" pull_request_target \
+  "{\"action\": \"edited\", \"changes\": {\"title\": {\"from\": \"feat: y\"}}, \"pull_request\": {\"number\": 7, \"html_url\": \"$url\", \"title\": \"feat: x\", \"body\": \"$term\"}}" \
+  0 "clean" ""
 
 terms="" expect "missing term list falls back to generic rules" 0 "generic rules only" "" text pr-body="$work/body"
 PUBLIC_GUARD_REQUIRE_TERMS=1 terms="" expect "required term list missing fails closed" 2 "required but unavailable" "" text pr-body="$work/body"
