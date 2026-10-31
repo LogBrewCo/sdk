@@ -2,9 +2,9 @@ import { SdkError } from "@logbrew/sdk";
 import {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext,
-  shouldPropagateTraceparent
+  optionalBrowserTraceContext
 } from "./trace-context.js";
+import { shouldPropagateTraceparent } from "./traceparent-fetch.js";
 
 export function createLogBrewBrowserFetch(context, options = {}) {
   assertBrowserContext(context, "createLogBrewBrowserFetch");

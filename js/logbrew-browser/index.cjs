@@ -44,10 +44,9 @@ const {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
   createBrowserTraceparent,
-  createTraceparentFetch,
-  optionalBrowserTraceContext,
-  shouldPropagateTraceparent
+  optionalBrowserTraceContext
 } = require("./trace-context.cjs");
+const { createTraceparentFetch, shouldPropagateTraceparent } = require("./traceparent-fetch.cjs");
 const {
   captureBrowserWebVital,
   createBrowserWebVitalEvent,

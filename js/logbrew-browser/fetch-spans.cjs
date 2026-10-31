@@ -4,9 +4,9 @@ const { SdkError } = require("@logbrew/sdk");
 const {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext,
-  shouldPropagateTraceparent
+  optionalBrowserTraceContext
 } = require("./trace-context.cjs");
+const { shouldPropagateTraceparent } = require("./traceparent-fetch.cjs");
 
 function createLogBrewBrowserFetch(context, options = {}) {
   assertBrowserContext(context, "createLogBrewBrowserFetch");

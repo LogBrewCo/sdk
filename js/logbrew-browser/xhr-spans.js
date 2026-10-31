@@ -3,9 +3,9 @@ import { createBrowserFetchSpanEvent } from "./fetch-spans.js";
 import {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext,
-  shouldPropagateTraceparent
+  optionalBrowserTraceContext
 } from "./trace-context.js";
+import { shouldPropagateTraceparent } from "./traceparent-fetch.js";
 
 export async function captureBrowserXhrSpan(request, context, options = {}) {
   assertBrowserContext(context, "captureBrowserXhrSpan");

@@ -42,10 +42,9 @@ import {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
   createBrowserTraceparent,
-  createTraceparentFetch,
-  optionalBrowserTraceContext,
-  shouldPropagateTraceparent
+  optionalBrowserTraceContext
 } from "./trace-context.js";
+import { createTraceparentFetch, shouldPropagateTraceparent } from "./traceparent-fetch.js";
 import {
   captureBrowserWebVital,
   createBrowserWebVitalEvent,

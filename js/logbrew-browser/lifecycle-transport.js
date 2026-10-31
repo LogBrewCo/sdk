@@ -1,7 +1,27 @@
+import { isFunction, isTruthy, readField } from "./values.js";
+
+/**
+ * @import { Transport } from "@logbrew/sdk"
+ */
+
 const LIFECYCLE_SEND = Symbol.for("co.logbrew.browser.lifecycleSend");
 
-export function markLifecycleTransport(transport, send = transport?.send) {
-  if (!transport || typeof send !== "function") {
+/**
+ * @param {unknown} value
+ * @returns {value is Transport["send"]}
+ */
+function isSend(value) {
+  return isFunction(value);
+}
+
+/**
+ * @template {Transport | undefined} TransportValue
+ * @param {TransportValue} transport
+ * @param {unknown} [send]
+ * @returns {TransportValue}
+ */
+function markLifecycleTransport(transport, send = transport?.send) {
+  if (!isTruthy(transport) || !isFunction(send)) {
     return transport;
   }
   Object.defineProperty(transport, LIFECYCLE_SEND, {
@@ -13,14 +33,22 @@ export function markLifecycleTransport(transport, send = transport?.send) {
   return transport;
 }
 
-export function lifecycleTransportFor(transport) {
-  const send = transport?.[LIFECYCLE_SEND];
-  if (typeof send !== "function") {
+/**
+ * @param {Transport | undefined} transport
+ * @returns {Transport | undefined}
+ */
+function lifecycleTransportFor(transport) {
+  const send = readField(transport, LIFECYCLE_SEND);
+  if (!isSend(send)) {
     return undefined;
   }
-  return Object.freeze({
+  /** @type {Transport} */
+  const lifecycleTransport = {
     send(apiKey, body) {
       return send.call(transport, apiKey, body);
     }
-  });
+  };
+  return Object.freeze(lifecycleTransport);
 }
+
+export { lifecycleTransportFor, markLifecycleTransport };
