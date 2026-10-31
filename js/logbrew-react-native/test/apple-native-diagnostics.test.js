@@ -515,7 +515,12 @@ async function withRuntime({ entry = "apple-native-diagnostics.js", nativeModule
       ? [
           "apple-native-diagnostics.js",
           "android-native-diagnostics.js",
+          "fatal-admission.cjs",
+          "fatal-record.cjs",
           "fatal-replay.cjs",
+          "global-errors-capture.cjs",
+          "global-errors-event.cjs",
+          "global-errors-support.cjs",
           "global-errors.cjs",
           "global-errors.js",
           "global-errors.native.js",
@@ -536,6 +541,7 @@ async function withRuntime({ entry = "apple-native-diagnostics.js", nativeModule
           "metadata.cjs",
           "null-value.cjs",
           "persistent-delivery.native.js",
+          "promise-rejection-handlers.cjs",
           "promise-rejections.cjs"
         ]
       : ["apple-native-diagnostics.js"];

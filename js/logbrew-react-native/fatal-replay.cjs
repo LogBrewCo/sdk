@@ -1,331 +1,55 @@
 "use strict";
 
-const FATAL_RECORD_SCHEMA_VERSION = 1;
-const MAX_ADMITTED_FATAL_IDS = 256;
-const MAX_FATAL_FILENAME_BYTES = 512;
-const MAX_FATAL_STACK_FRAMES = 24;
-const MAX_FATAL_ID_LENGTH = 128;
-const MAX_FATAL_RECORD_BYTES = 16 * 1024;
+const { emitDiagnostic, incrementBounded, safeReadProperty } = require("./global-errors-support.cjs");
+const { boundedResultCounter, createFatalRecord, resultStatus, validatedFatalRecord } = require("./fatal-record.cjs");
+const {
+  attempt,
+  captureIssueWithAdmission,
+  fatalStoreMethods,
+  rememberAdmittedFatalId,
+  wasAdmittedInRuntime
+} = require("./fatal-admission.cjs");
+
+/**
+ * @import { UnknownFunction } from "./global-errors-support.cjs"
+ * @import { FatalEventInput, FatalRecord } from "./fatal-record.cjs"
+ * @import { ReactNativeFatalReplayHealth } from "./global-errors.cjs"
+ * @import { Admission, FatalStoreMethods } from "./fatal-admission.cjs"
+ * @typedef {ReactNativeFatalReplayHealth["lastOutcome"]} FatalOutcome
+ * @typedef {Readonly<{
+ *   client: unknown,
+ *   createEvent: (error: unknown) => FatalEventInput,
+ *   eventMessage: string,
+ *   fatalStore: unknown,
+ *   isErrorName: (value: unknown) => boolean,
+ *   issue: UnknownFunction,
+ *   onDiagnostic: unknown
+ * }>} FatalControllerOptions
+ * @typedef {Readonly<{
+ *   available: boolean,
+ *   discard: () => boolean,
+ *   health: () => ReactNativeFatalReplayHealth,
+ *   replay: () => void,
+ *   store: (error: unknown) => boolean
+ * }>} FatalController
+ */
+
 const DURABLE_QUEUE = Symbol.for("co.logbrew.react-native.durable-event-queue");
+const NO_COUNT = 0;
 
-const admittedFatalIdsByClient = new WeakMap();
-
-function createFatalController({
-  client,
-  createEvent,
-  eventMessage,
-  fatalStore,
-  isErrorName,
-  issue,
-  onDiagnostic
-}) {
-  const methods = fatalStoreMethods(fatalStore);
-  const directAdmission = !methods && safeReadProperty(client, DURABLE_QUEUE) === true;
-  const state = {
-    acknowledgedRecords: 0,
-    available: methods !== undefined || directAdmission,
-    corruptRecords: 0,
-    droppedRecords: 0,
-    lastOutcome: methods || directAdmission ? "idle" : "unavailable",
-    replayedRecords: 0,
-    storedRecords: 0
-  };
-
-  return {
-    available: state.available,
-    discard() {
-      return discardPendingFatal(fatalStore, methods, state, onDiagnostic);
-    },
-    health() {
-      return fatalHealthSnapshot(state);
-    },
-    replay() {
-      if (!methods) {
-        return;
-      }
-      replayPendingFatal({
-        client,
-        eventMessage,
-        fatalStore,
-        isErrorName,
-        issue,
-        methods,
-        onDiagnostic,
-        state
-      });
-    },
-    store(error) {
-      if (!methods) {
-        return directAdmission
-          ? admitFatalError({ client, createEvent, error, issue, onDiagnostic, state })
-          : false;
-      }
-      return storeFatalError({
-        createEvent,
-        error,
-        fatalStore,
-        methods,
-        onDiagnostic,
-        state
-      });
-    }
-  };
-}
-
-function admitFatalError({ client, createEvent, error, issue, onDiagnostic, state }) {
-  let admission;
-  try {
-    const event = createEvent(error);
-    admission = captureIssueWithAdmission(client, issue, event.id, event.timestamp, event.attributes);
-  } catch {
-    state.lastOutcome = "storage_error";
-    emitDiagnostic(onDiagnostic, "fatal_store_failed");
-    return false;
-  }
-  if (admission === "unavailable") {
-    state.lastOutcome = "admission_unavailable";
-    emitDiagnostic(onDiagnostic, "fatal_admission_unavailable");
-    return false;
-  }
-  if (admission !== "admitted") {
-    state.lastOutcome = "storage_error";
-    emitDiagnostic(onDiagnostic, "fatal_store_failed");
-    return false;
-  }
-  state.storedRecords = incrementBounded(state.storedRecords);
-  state.lastOutcome = "stored";
-  return true;
-}
-
-function fatalStoreMethods(fatalStore) {
-  if (!isObjectLike(fatalStore)) {
-    return undefined;
-  }
-  const methods = {
-    acknowledge: safeFunction(fatalStore, "acknowledgeFatalRecord"),
-    discard: safeFunction(fatalStore, "discardFatalRecord"),
-    read: safeFunction(fatalStore, "readFatalRecord"),
-    write: safeFunction(fatalStore, "writeFatalRecord")
-  };
-  return Object.values(methods).every((method) => typeof method === "function")
-    ? methods
-    : undefined;
-}
-
-function discardPendingFatal(fatalStore, methods, state, onDiagnostic) {
-  if (!methods) {
-    return false;
-  }
-  let result;
-  try {
-    result = methods.discard.call(fatalStore);
-  } catch {
-    state.lastOutcome = "discard_failed";
-    emitDiagnostic(onDiagnostic, "fatal_discard_failed");
-    return false;
-  }
-  if (resultStatus(result) !== "discarded") {
-    state.lastOutcome = resultStatus(result) === "empty" ? "empty" : "discard_failed";
-    if (state.lastOutcome === "discard_failed") {
-      emitDiagnostic(onDiagnostic, "fatal_discard_failed");
-    }
-    return false;
-  }
-  state.lastOutcome = "discarded";
-  return true;
-}
-
-function storeFatalError({
-  createEvent,
-  error,
-  fatalStore,
-  methods,
-  onDiagnostic,
-  state
-}) {
-  if (!methods) {
-    return false;
-  }
-  let result;
-  try {
-    result = methods.write.call(fatalStore, createFatalRecord(createEvent(error)));
-  } catch {
-    result = undefined;
-  }
-  const status = resultStatus(result);
-  if (status === "stored" || status === "stored_after_corruption") {
-    state.storedRecords = incrementBounded(state.storedRecords);
-    state.corruptRecords = boundedResultCounter(result, "corruptRecords", state.corruptRecords);
-    state.lastOutcome = status;
-    return true;
-  }
-  if (status === "dropped_pending") {
-    state.droppedRecords = boundedResultCounter(
-      result,
-      "droppedRecords",
-      incrementBounded(state.droppedRecords)
-    );
-    state.lastOutcome = status;
-    emitDiagnostic(onDiagnostic, "fatal_record_dropped");
-    return false;
-  }
-  state.lastOutcome = "storage_error";
-  emitDiagnostic(onDiagnostic, "fatal_store_failed");
-  return false;
-}
-
-function replayPendingFatal({
-  client,
-  eventMessage,
-  fatalStore,
-  isErrorName,
-  issue,
-  methods,
-  onDiagnostic,
-  state
-}) {
-  if (!methods) {
-    return;
-  }
-  let result;
-  try {
-    result = methods.read.call(fatalStore);
-  } catch {
-    result = undefined;
-  }
-  const status = resultStatus(result);
-  if (status === "empty") {
-    state.lastOutcome = "empty";
-    return;
-  }
-  if (status === "corrupt_discarded") {
-    state.corruptRecords = boundedResultCounter(
-      result,
-      "corruptRecords",
-      incrementBounded(state.corruptRecords)
-    );
-    state.lastOutcome = status;
-    emitDiagnostic(onDiagnostic, "fatal_corrupt_record_discarded");
-    return;
-  }
-  const record = status === "pending"
-    ? validatedFatalRecord(safeReadProperty(result, "record"), isErrorName)
-    : undefined;
-  if (!record) {
-    state.lastOutcome = "replay_failed";
-    emitDiagnostic(onDiagnostic, "fatal_replay_failed");
-    return;
-  }
-
-  state.corruptRecords = Math.max(state.corruptRecords, record.corruptRecords);
-  state.droppedRecords = Math.max(state.droppedRecords, record.droppedRecords);
-  if (wasAdmittedInRuntime(client, record.id)) {
-    acknowledgeFatalRecord(fatalStore, methods, record.id, state, onDiagnostic);
-    return;
-  }
-
-  let admission;
-  try {
-    admission = captureIssueWithAdmission(
-      client, issue, record.id, record.timestamp, fatalEventAttributes(record, eventMessage)
-    );
-  } catch {
-    state.lastOutcome = "replay_failed";
-    emitDiagnostic(onDiagnostic, "fatal_replay_failed");
-    return;
-  }
-  if (admission === "unavailable") {
-    state.lastOutcome = "admission_unavailable";
-    emitDiagnostic(onDiagnostic, "fatal_replay_admission_unavailable");
-    return;
-  }
-  if (admission !== "admitted") {
-    state.lastOutcome = "replay_not_admitted";
-    emitDiagnostic(onDiagnostic, "fatal_replay_not_admitted");
-    return;
-  }
-
-  rememberAdmittedFatalId(client, record.id);
-  state.replayedRecords = incrementBounded(state.replayedRecords);
-  acknowledgeFatalRecord(fatalStore, methods, record.id, state, onDiagnostic);
-}
-
-function acknowledgeFatalRecord(fatalStore, methods, recordId, state, onDiagnostic) {
-  let result;
-  try {
-    result = methods.acknowledge.call(fatalStore, recordId);
-  } catch {
-    result = undefined;
-  }
-  if (resultStatus(result) === "acknowledged"
-    && safeReadProperty(result, "recordId") === recordId) {
-    state.acknowledgedRecords = incrementBounded(state.acknowledgedRecords);
-    state.lastOutcome = "acknowledged";
-    return;
-  }
-  state.lastOutcome = "acknowledge_failed";
-  emitDiagnostic(onDiagnostic, "fatal_acknowledge_failed");
-}
-
-function captureIssueWithAdmission(client, issue, id, timestamp, attributes) {
-  const capture = safeFunction(client, "issueWithAdmission");
-  if (!capture) {
-    issue.call(client, id, timestamp, attributes);
-    return "unavailable";
-  }
-  const status = resultStatus(capture.call(client, id, timestamp, attributes));
-  return status === "admitted" || status === "filtered" || status === "dropped"
-    ? status
-    : "unavailable";
-}
-
-function wasAdmittedInRuntime(client, recordId) {
-  return isObjectLike(client) && admittedFatalIdsByClient.get(client)?.has(recordId) === true;
-}
-
-function rememberAdmittedFatalId(client, recordId) {
-  if (!isObjectLike(client)) {
-    return;
-  }
-  let admittedIds = admittedFatalIdsByClient.get(client);
-  if (!admittedIds) {
-    admittedIds = new Set();
-    admittedFatalIdsByClient.set(client, admittedIds);
-  }
-  if (admittedIds.has(recordId)) {
-    return;
-  }
-  admittedIds.add(recordId);
-  if (admittedIds.size > MAX_ADMITTED_FATAL_IDS) {
-    admittedIds.delete(admittedIds.values().next().value);
-  }
-}
-
-function createFatalRecord(event) {
-  const record = {
-    corruptRecords: 0,
-    droppedRecords: 0,
-    errorName: event.attributes.exception.type,
-    id: event.id,
-    schemaVersion: FATAL_RECORD_SCHEMA_VERSION,
-    stackFrames: (event.attributes.stackFrames ?? []).flatMap(({ column, filename, line }) => {
-      const stored = normalizedStoredFatalFilename(filename);
-      return validFatalFilename(stored) ? [{ column, filename: stored, line }] : [];
-    }).slice(0, MAX_FATAL_STACK_FRAMES),
-    timestamp: event.timestamp
-  };
-  while (record.stackFrames.length > 0 && utf8ByteLength(JSON.stringify(record)) > MAX_FATAL_RECORD_BYTES) {
-    record.stackFrames.pop();
-  }
-  return record;
-}
-
+/**
+ * @param {FatalRecord} record
+ * @param {string} eventMessage
+ * @returns {Readonly<Record<string, unknown>>}
+ */
 function fatalEventAttributes(record, eventMessage) {
   return Object.freeze({
     exception: Object.freeze({
       type: record.errorName,
+
       mechanism: Object.freeze({
         type: "react_native_error_utils",
+
         handled: false
       })
     }),
@@ -341,221 +65,286 @@ function fatalEventAttributes(record, eventMessage) {
       replayed: true,
       source: "react-native.global_error"
     }),
-    ...(record.stackFrames.length === 0
+    ...(record.stackFrames.length === NO_COUNT
       ? {}
       : { stackFrames: record.stackFrames.map((frame) => Object.freeze({ ...frame })) }),
     title: eventMessage
   });
 }
 
-function validatedFatalRecord(value, isErrorName) {
-  try {
-    if (!isPlainObject(value)
-      || !hasExactKeys(value, [
-        "corruptRecords",
-        "droppedRecords",
-        "errorName",
-        "id",
-        "schemaVersion",
-        "stackFrames",
-        "timestamp"
-      ])) {
-      return undefined;
-    }
-    const { corruptRecords, droppedRecords, errorName, id, schemaVersion, stackFrames, timestamp } = value;
-    const frameCount = Array.isArray(stackFrames) ? stackFrames.length : undefined;
-    if (schemaVersion !== FATAL_RECORD_SCHEMA_VERSION
-      || typeof id !== "string"
-      || id.length > MAX_FATAL_ID_LENGTH
-      || !/^evt_rn_fatal_[a-z0-9]+(?:_[a-z0-9]+)*$/u.test(id)
-      || !isErrorName(errorName)
-      || !isBoundedCounter(corruptRecords)
-      || !isBoundedCounter(droppedRecords)
-      || !validFatalTimestamp(timestamp)
-      || !isBoundedCounter(frameCount)
-      || frameCount > MAX_FATAL_STACK_FRAMES) {
-      return undefined;
-    }
-    const frames = [];
-    for (let index = 0; index < frameCount; index += 1) {
-      const frame = validatedFatalFrame(stackFrames[index]);
-      if (!frame) {
-        return undefined;
-      }
-      frames.push(frame);
-    }
-    const record = {
-      corruptRecords,
-      droppedRecords,
-      errorName,
-      id,
-      schemaVersion: FATAL_RECORD_SCHEMA_VERSION,
-      stackFrames: frames,
-      timestamp
-    };
-    return utf8ByteLength(JSON.stringify(record)) <= MAX_FATAL_RECORD_BYTES ? record : undefined;
-  } catch {
-    return undefined;
+class FatalReplay {
+  /**
+   * @param {FatalControllerOptions} options
+   */
+  constructor(options) {
+    this.options = options;
+    this.methods = fatalStoreMethods(options.fatalStore);
+    this.directAdmission = !this.methods && safeReadProperty(options.client, DURABLE_QUEUE) === true;
+    this.acknowledgedRecords = NO_COUNT;
+    this.available = this.methods !== undefined || this.directAdmission;
+    this.corruptRecords = NO_COUNT;
+    this.droppedRecords = NO_COUNT;
+    /** @type {FatalOutcome} */
+    this.lastOutcome = this.methods || this.directAdmission ? "idle" : "unavailable";
+    this.replayedRecords = NO_COUNT;
+    this.storedRecords = NO_COUNT;
   }
-}
 
-function validatedFatalFrame(value) {
-  try {
-    if (!isPlainObject(value)
-      || !hasExactKeys(value, ["column", "filename", "line"])) {
-      return undefined;
-    }
-    const { column, filename, line } = value;
-    if (!validFatalFilename(filename)
-      || positiveInteger(line) === undefined
-      || positiveInteger(column) === undefined) {
-      return undefined;
-    }
-    return {
-      column,
-      filename,
-      line
-    };
-  } catch {
-    return undefined;
+  /**
+   * @returns {ReactNativeFatalReplayHealth}
+   */
+  health() {
+    return Object.freeze({
+      acknowledgedRecords: this.acknowledgedRecords,
+      available: this.available,
+      corruptRecords: this.corruptRecords,
+      droppedRecords: this.droppedRecords,
+      lastOutcome: this.lastOutcome,
+      replayedRecords: this.replayedRecords,
+      storedRecords: this.storedRecords
+    });
   }
-}
 
-function validFatalFilename(value) {
-  return typeof value === "string"
-    && value.length > 0
-    && utf8ByteLength(value) <= MAX_FATAL_FILENAME_BYTES
-    && !hasControlCharacter(value)
-    && !value.startsWith("/")
-    && !/^[A-Za-z]:/u.test(value)
-    && !value.includes("\\")
-    && !value.includes("://")
-    && !value.includes("?")
-    && !value.includes("#")
-    && !value.split("/").includes("..");
-}
-
-function normalizedStoredFatalFilename(value) {
-  return typeof value === "string"
-    && value.startsWith("/")
-    && value.length > 1
-    && value.indexOf("/", 1) === -1
-    ? value.slice(1)
-    : value;
-}
-
-function validFatalTimestamp(value) {
-  return typeof value === "string"
-    && value.length >= 20
-    && value.length <= 35
-    && /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z$/u.test(value);
-}
-
-function resultStatus(result) {
-  try {
-    const status = isPlainObject(result) ? result.status : undefined;
-    return typeof status === "string" ? status : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function boundedResultCounter(result, property, fallback) {
-  const value = isPlainObject(result) ? safeReadProperty(result, property) : undefined;
-  return isBoundedCounter(value) ? value : fallback;
-}
-
-function hasExactKeys(value, expected) {
-  try {
-    const keys = Object.keys(value).sort();
-    return keys.length === expected.length
-      && keys.every((key, index) => key === expected[index]);
-  } catch {
+  /**
+   * @param {FatalOutcome} outcome
+   * @param {string} code
+   * @returns {false}
+   */
+  fail(outcome, code) {
+    this.lastOutcome = outcome;
+    emitDiagnostic(this.options.onDiagnostic, code);
     return false;
   }
-}
 
-function isBoundedCounter(value) {
-  return Number.isSafeInteger(value) && value >= 0;
-}
-
-function isPlainObject(value) {
-  if (value === null || typeof value !== "object") {
-    return false;
+  /**
+   * @param {unknown} error
+   * @returns {Admission | undefined}
+   */
+  admission(error) {
+    const { client, createEvent, issue } = this.options;
+    try {
+      const event = createEvent(error);
+      return captureIssueWithAdmission(client, issue, event.id, event.timestamp, event.attributes);
+    } catch {
+      return undefined;
+    }
   }
-  try {
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-  } catch {
-    return false;
+
+  /**
+   * @param {unknown} error
+   * @returns {boolean}
+   */
+  admit(error) {
+    const admission = this.admission(error);
+    if (admission === "unavailable") {
+      return this.fail("admission_unavailable", "fatal_admission_unavailable");
+    }
+    if (admission !== "admitted") {
+      return this.fail("storage_error", "fatal_store_failed");
+    }
+    this.storedRecords = incrementBounded(this.storedRecords);
+    this.lastOutcome = "stored";
+    return true;
+  }
+
+  /**
+   * @returns {boolean}
+   */
+  discard() {
+    const { methods } = this;
+    if (!methods) {
+      return false;
+    }
+    return this.recordDiscardResult(attempt(() => methods.discard.call(this.options.fatalStore)));
+  }
+
+  /**
+   * @param {unknown} result
+   * @returns {boolean}
+   */
+  recordDiscardResult(result) {
+    if (resultStatus(result) === "discarded") {
+      this.lastOutcome = "discarded";
+      return true;
+    }
+    if (resultStatus(result) === "empty") {
+      this.lastOutcome = "empty";
+      return false;
+    }
+    return this.fail("discard_failed", "fatal_discard_failed");
+  }
+
+  /**
+   * @param {unknown} error
+   * @returns {boolean}
+   */
+  store(error) {
+    const { methods } = this;
+    if (!methods) {
+      return this.directAdmission ? this.admit(error) : false;
+    }
+    const { createEvent, fatalStore } = this.options;
+    return this.recordStoreResult(attempt(() => methods.write.call(fatalStore, createFatalRecord(createEvent(error)))));
+  }
+
+  /**
+   * @param {unknown} result
+   * @returns {boolean}
+   */
+  recordStoreResult(result) {
+    const status = resultStatus(result);
+    if (status === "stored" || status === "stored_after_corruption") {
+      this.storedRecords = incrementBounded(this.storedRecords);
+      this.corruptRecords = boundedResultCounter(result, "corruptRecords", this.corruptRecords);
+      this.lastOutcome = status;
+      return true;
+    }
+    if (status === "dropped_pending") {
+      this.droppedRecords = boundedResultCounter(result, "droppedRecords", incrementBounded(this.droppedRecords));
+      return this.fail(status, "fatal_record_dropped");
+    }
+    return this.fail("storage_error", "fatal_store_failed");
+  }
+
+  /**
+   * @param {FatalStoreMethods} methods
+   * @param {string} recordId
+   * @returns {void}
+   */
+  acknowledge(methods, recordId) {
+    const result = attempt(() => methods.acknowledge.call(this.options.fatalStore, recordId));
+    if (resultStatus(result) === "acknowledged"
+      && safeReadProperty(result, "recordId") === recordId) {
+      this.acknowledgedRecords = incrementBounded(this.acknowledgedRecords);
+      this.lastOutcome = "acknowledged";
+      return;
+    }
+    this.fail("acknowledge_failed", "fatal_acknowledge_failed");
+  }
+
+  /**
+   * @param {FatalRecord} record
+   * @returns {Admission | undefined}
+   */
+  replayAdmission(record) {
+    const { client, eventMessage, issue } = this.options;
+    try {
+      return captureIssueWithAdmission(client, issue, record.id, record.timestamp, fatalEventAttributes(record, eventMessage));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * @param {FatalStoreMethods} methods
+   * @param {FatalRecord} record
+   * @returns {void}
+   */
+  replayRecord(methods, record) {
+    this.corruptRecords = Math.max(this.corruptRecords, record.corruptRecords);
+    this.droppedRecords = Math.max(this.droppedRecords, record.droppedRecords);
+    if (wasAdmittedInRuntime(this.options.client, record.id)) {
+      this.acknowledge(methods, record.id);
+      return;
+    }
+    this.recordReplayAdmission(methods, record, this.replayAdmission(record));
+  }
+
+  /**
+   * @param {FatalStoreMethods} methods
+   * @param {FatalRecord} record
+   * @param {Admission | undefined} admission
+   * @returns {void}
+   */
+  recordReplayAdmission(methods, record, admission) {
+    if (admission === undefined) {
+      this.fail("replay_failed", "fatal_replay_failed");
+    } else if (admission === "unavailable") {
+      this.fail("admission_unavailable", "fatal_replay_admission_unavailable");
+    } else if (admission === "admitted") {
+      rememberAdmittedFatalId(this.options.client, record.id);
+      this.replayedRecords = incrementBounded(this.replayedRecords);
+      this.acknowledge(methods, record.id);
+    } else {
+      this.fail("replay_not_admitted", "fatal_replay_not_admitted");
+    }
+  }
+
+  /**
+   * @returns {void}
+   */
+  replay() {
+    const { methods } = this;
+    if (!methods) {
+      return;
+    }
+    this.recordReadResult(methods, attempt(() => methods.read.call(this.options.fatalStore)));
+  }
+
+  /**
+   * @param {FatalStoreMethods} methods
+   * @param {unknown} result
+   * @returns {void}
+   */
+  recordReadResult(methods, result) {
+    const status = resultStatus(result);
+    if (status === "empty") {
+      this.lastOutcome = "empty";
+      return;
+    }
+    if (status === "corrupt_discarded") {
+      this.corruptRecords = boundedResultCounter(result, "corruptRecords", incrementBounded(this.corruptRecords));
+      this.fail(status, "fatal_corrupt_record_discarded");
+      return;
+    }
+    this.replayResult(methods, status === "pending"
+      ? validatedFatalRecord(safeReadProperty(result, "record"), this.options.isErrorName)
+      : undefined);
+  }
+
+  /**
+   * @param {FatalStoreMethods} methods
+   * @param {FatalRecord | undefined} record
+   * @returns {void}
+   */
+  replayResult(methods, record) {
+    if (record) {
+      this.replayRecord(methods, record);
+    } else {
+      this.fail("replay_failed", "fatal_replay_failed");
+    }
   }
 }
 
-function safeReadProperty(value, property) {
-  if (!isObjectLike(value)) {
-    return undefined;
-  }
-  try {
-    return value[property];
-  } catch {
-    return undefined;
-  }
-}
-
-function safeFunction(value, property) {
-  const candidate = safeReadProperty(value, property);
-  return typeof candidate === "function" ? candidate : undefined;
-}
-
-function hasControlCharacter(value) {
-  return Array.from(value).some((character) => {
-    const code = character.codePointAt(0);
-    return code !== undefined && (code <= 31 || code === 127);
-  });
-}
-
-function positiveInteger(value) {
-  return Number.isSafeInteger(value) && value > 0 && value <= 2147483647 ? value : undefined;
-}
-
-function incrementBounded(value) {
-  return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
-}
-
-function emitDiagnostic(onDiagnostic, code) {
-  if (typeof onDiagnostic !== "function") {
-    return;
-  }
-  try {
-    onDiagnostic(Object.freeze({ code }));
-  } catch {
-    // Diagnostics must never interfere with application error handling.
-  }
-}
-
-function utf8ByteLength(value) {
-  let bytes = 0;
-  for (const character of value) {
-    const code = character.codePointAt(0);
-    bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
-  }
-  return bytes;
-}
-
-function fatalHealthSnapshot(state) {
-  return Object.freeze({
-    acknowledgedRecords: state.acknowledgedRecords,
-    available: state.available,
-    corruptRecords: state.corruptRecords,
-    droppedRecords: state.droppedRecords,
-    lastOutcome: state.lastOutcome,
-    replayedRecords: state.replayedRecords,
-    storedRecords: state.storedRecords
-  });
-}
-
-function isObjectLike(value) {
-  return value !== null && (typeof value === "object" || typeof value === "function");
+/**
+ * @param {FatalControllerOptions} options
+ * @returns {FatalController}
+ */
+function createFatalController({
+  client,
+  createEvent,
+  eventMessage,
+  fatalStore,
+  isErrorName,
+  issue,
+  onDiagnostic
+}) {
+  const fatal = new FatalReplay({ client, createEvent, eventMessage, fatalStore, isErrorName, issue, onDiagnostic });
+  return {
+    available: fatal.available,
+    discard() {
+      return fatal.discard();
+    },
+    health() {
+      return fatal.health();
+    },
+    replay() {
+      fatal.replay();
+    },
+    store(error) {
+      return fatal.store(error);
+    }
+  };
 }
 
 module.exports = { captureIssueWithAdmission, createFatalController };

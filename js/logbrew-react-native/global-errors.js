@@ -1,9 +1,14 @@
 import implementation from "./global-errors.cjs";
 
-export const {
+const {
   createLogBrewReactNativePromiseRejectionHandlers,
   installLogBrewReactNativeGlobalErrorHandler,
   installLogBrewReactNativePromiseRejectionTracker
 } = implementation;
 
-export default implementation;
+export {
+  createLogBrewReactNativePromiseRejectionHandlers,
+  installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker
+};
+export { default } from "./global-errors.cjs";

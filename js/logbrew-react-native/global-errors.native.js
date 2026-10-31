@@ -3,39 +3,62 @@ import {
   installLogBrewReactNativeGlobalErrorHandler as installPlatformNeutralHandler,
   installLogBrewReactNativePromiseRejectionTracker as installPlatformNeutralTracker
 } from "./global-errors.js";
+import support from "./global-errors-support.cjs";
 
-export {
-  createLogBrewReactNativePromiseRejectionHandlers
-};
+/**
+ * @import { UnknownFunction } from "./global-errors-support.cjs"
+ * @typedef {Readonly<{ enable: (options: unknown) => unknown }>} HermesTrackerAdapter
+ * @typedef {Readonly<{ forwarded: Readonly<Record<string, unknown>>, injected: boolean }>} ForwardedOptions
+ */
 
+const { isFunction, isObjectLike } = support;
+/** @type {(value: unknown) => boolean} */
+const isTruthy = Boolean;
+
+/** @type {WeakMap<object, HermesTrackerAdapter>} */
 const hermesTrackerAdapters = new WeakMap();
 
-function defaultPromiseRejectionTracker() {
-  let hermes;
-  let enable;
-  let hasPromise;
+/**
+ * @returns {Readonly<{ enable: UnknownFunction, hermes: object }> | undefined}
+ */
+function activeHermesTracker() {
   try {
-    hermes = globalThis?.HermesInternal;
-    if (hermes === null
-      || (typeof hermes !== "object" && typeof hermes !== "function")) {
+    /** @type {unknown} */
+    const hermes = Reflect.get(globalThis, "HermesInternal");
+    if (!isObjectLike(hermes)) {
       return undefined;
     }
-    enable = hermes.enablePromiseRejectionTracker;
-    hasPromise = hermes.hasPromise;
-    if (typeof enable !== "function"
-      || typeof hasPromise !== "function"
-      || hasPromise.call(hermes) !== true) {
+    /** @type {unknown} */
+    const enable = Reflect.get(hermes, "enablePromiseRejectionTracker");
+    /** @type {unknown} */
+    const hasPromise = Reflect.get(hermes, "hasPromise");
+    if (!isFunction(enable) || !isFunction(hasPromise) || hasPromise.call(hermes) !== true) {
       return undefined;
     }
+    return { enable, hermes };
   } catch {
     return undefined;
   }
+}
 
+/**
+ * @returns {HermesTrackerAdapter | undefined}
+ */
+function defaultPromiseRejectionTracker() {
+  const active = activeHermesTracker();
+  if (!active) {
+    return undefined;
+  }
+  const { enable, hermes } = active;
   const existing = hermesTrackerAdapters.get(hermes);
   if (existing) {
     return existing;
   }
   const adapter = Object.freeze({
+    /**
+     * @param {unknown} options
+     * @returns {unknown}
+     */
     enable(options) {
       return enable.call(hermes, options);
     }
@@ -44,46 +67,53 @@ function defaultPromiseRejectionTracker() {
   return adapter;
 }
 
-export function installLogBrewReactNativeGlobalErrorHandler(options = {}) {
-  let forwarded;
-  let hasInjectedStore = false;
+/**
+ * @param {unknown} options
+ * @param {string} key
+ * @returns {ForwardedOptions}
+ */
+function forwardedOptions(options, key) {
+  let injected = false;
   try {
-    const input = options !== null
-      && (typeof options === "object" || typeof options === "function")
-      ? options
-      : {};
-    hasInjectedStore = Object.prototype.hasOwnProperty.call(input, "fatalStore");
-    forwarded = { ...input };
+    const input = isObjectLike(options) ? options : {};
+    injected = Object.getOwnPropertyDescriptor(input, key) !== undefined;
+    return { forwarded: { ...input }, injected };
   } catch {
-    forwarded = {};
+    return { forwarded: {}, injected };
   }
-  return installPlatformNeutralHandler({
-    ...forwarded,
-    fatalStore: hasInjectedStore ? forwarded.fatalStore : undefined
-  });
 }
 
-export function installLogBrewReactNativePromiseRejectionTracker(options = {}) {
-  let forwarded;
-  let hasInjectedTracker = false;
-  try {
-    const input = options !== null
-      && (typeof options === "object" || typeof options === "function")
-      ? options
-      : {};
-    hasInjectedTracker = Object.prototype.hasOwnProperty.call(input, "tracker");
-    forwarded = { ...input };
-  } catch {
-    forwarded = {};
-  }
-  const tracker = hasInjectedTracker
-    ? forwarded.tracker
-    : defaultPromiseRejectionTracker();
-  return installPlatformNeutralTracker({
+/**
+ * @param {unknown} [options]
+ * @returns {unknown}
+ */
+function installLogBrewReactNativeGlobalErrorHandler(options = {}) {
+  const { forwarded, injected } = forwardedOptions(options, "fatalStore");
+  /** @type {unknown} */
+  const installation = Reflect.apply(installPlatformNeutralHandler, undefined, [{
     ...forwarded,
-    tracker,
-    trackerKind: hasInjectedTracker ? "custom" : tracker ? "hermes" : undefined
-  });
+    fatalStore: injected ? forwarded["fatalStore"] : undefined
+  }]);
+  return installation;
+}
+
+/**
+ * @param {unknown} [options]
+ * @returns {unknown}
+ */
+function installLogBrewReactNativePromiseRejectionTracker(options = {}) {
+  const { forwarded, injected } = forwardedOptions(options, "tracker");
+  const tracker = injected ? forwarded["tracker"] : defaultPromiseRejectionTracker();
+  /** @type {"custom" | "hermes" | undefined} */
+  let trackerKind = undefined;
+  if (injected) {
+    trackerKind = "custom";
+  } else if (isTruthy(tracker)) {
+    trackerKind = "hermes";
+  }
+  /** @type {unknown} */
+  const installation = Reflect.apply(installPlatformNeutralTracker, undefined, [{ ...forwarded, tracker, trackerKind }]);
+  return installation;
 }
 
 const logBrewReactNativeGlobalErrors = {
@@ -92,4 +122,9 @@ const logBrewReactNativeGlobalErrors = {
   installLogBrewReactNativePromiseRejectionTracker
 };
 
+export { createLogBrewReactNativePromiseRejectionHandlers } from "./global-errors.js";
+export {
+  installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker
+};
 export default logBrewReactNativeGlobalErrors;
