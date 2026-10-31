@@ -1,40 +1,44 @@
-import type { BulkJobOptions, FlowJob, FlowProducer, Job, JobsOptions, Queue } from "bullmq";
+import type { BulkJobOptions, FlowJob, FlowOpts, FlowProducer, Job, JobsOptions } from "bullmq";
 import type { LogBrewClient, SpanEventSummary, SpanLinkSummary } from "@logbrew/sdk";
 import type { LogBrewTraceContext } from "@logbrew/node";
 
-export type LogBrewBullMqJobOptions = JobsOptions & {
+type LogBrewBullMqJobOptions = JobsOptions & {
   telemetry?: {
     metadata?: string;
     [key: string]: unknown;
   };
 };
 
-export type LogBrewBullMqBulkJobOptions = BulkJobOptions & {
+type LogBrewBullMqBulkJobOptions = BulkJobOptions & {
   telemetry?: {
     metadata?: string;
     [key: string]: unknown;
   };
 };
 
-export type LogBrewBullMqQueueLike<Data = unknown, Result = unknown, Name extends string = string> =
-  Pick<Queue<Data, Result, Name>, "add" | "name">;
+type LogBrewBullMqQueueLike<Data = unknown, Result = unknown, Name extends string = string> = {
+  readonly name: string;
+  readonly add: (name: Name, data: Data, opts?: LogBrewBullMqJobOptions) => Promise<Job<Data, Result, Name>>;
+};
 
-export type LogBrewBullMqInstrumentableQueueLike<Data = unknown, Result = unknown, Name extends string = string> =
-  Pick<Queue<Data, Result, Name>, "add" | "name"> &
-  Partial<Pick<Queue<Data, Result, Name>, "addBulk">>;
+type LogBrewBullMqBulkQueueLike<Data = unknown, Result = unknown, Name extends string = string> = {
+  readonly name: string;
+  readonly addBulk: (jobs: never) => Promise<Job<Data, Result, Name>[]>;
+};
 
-export type LogBrewBullMqBulkQueueLike<Data = unknown, Result = unknown, Name extends string = string> =
-  Pick<Queue<Data, Result, Name>, "addBulk" | "name">;
+type LogBrewBullMqInstrumentableQueueLike<Data = unknown, Result = unknown, Name extends string = string> =
+  LogBrewBullMqQueueLike<Data, Result, Name> &
+  Partial<Pick<LogBrewBullMqBulkQueueLike<Data, Result, Name>, "addBulk">>;
 
-export type LogBrewBullMqFlowProducerLike = Pick<FlowProducer, "add">;
+type LogBrewBullMqFlowProducerLike = Pick<FlowProducer, "add">;
 
-export type LogBrewBullMqBulkJob<Data = unknown, Name extends string = string> = {
+type LogBrewBullMqBulkJob<Data = unknown, Name extends string = string> = {
   name: Name;
   data: Data;
   opts?: LogBrewBullMqBulkJobOptions;
 };
 
-export type LogBrewBullMqSpanOptions = {
+type LogBrewBullMqSpanOptions = {
   client: LogBrewClient;
   queueName?: string;
   traceparent?: string;
@@ -49,31 +53,31 @@ export type LogBrewBullMqSpanOptions = {
   traceIdFactory?: () => string;
   onCaptureError?: (
     error: unknown,
-    context: {
+    context: Readonly<{
       client: LogBrewClient;
       error?: unknown;
       trace: LogBrewTraceContext;
-    }
+    }>
   ) => void | Promise<void>;
 };
 
-export type LogBrewBullMqProcessor<Result = unknown, Data = unknown, Name extends string = string> = (
+type LogBrewBullMqProcessor<Result = unknown, Data = unknown, Name extends string = string> = (
   job: Job<Data, Result, Name>,
   lock?: string,
   signal?: AbortSignal
 ) => Result | Promise<Result>;
 
-export type LogBrewBullMqProcessorMethod = (...args: never[]) => unknown;
+type LogBrewBullMqProcessorMethod = (...args: readonly never[]) => unknown;
 
-export type LogBrewBullMqProcessorMethodTarget<MethodName extends string = "process"> =
+type LogBrewBullMqProcessorMethodTarget<MethodName extends string = "process"> =
   Record<MethodName, LogBrewBullMqProcessorMethod>;
 
-export type LogBrewBullMqInstrumentation = {
-  isInstalled(): boolean;
-  uninstall(): void;
+type LogBrewBullMqInstrumentation = {
+  readonly isInstalled: () => boolean;
+  readonly uninstall: () => void;
 };
 
-export declare function bullMqQueueAddWithLogBrewSpan<
+declare function bullMqQueueAddWithLogBrewSpan<
   Data = unknown,
   Result = unknown,
   Name extends string = string
@@ -85,40 +89,40 @@ export declare function bullMqQueueAddWithLogBrewSpan<
   options: LogBrewBullMqSpanOptions
 ): Promise<Job<Data, Result, Name>>;
 
-export declare function bullMqQueueAddBulkWithLogBrewSpan<
+declare function bullMqQueueAddBulkWithLogBrewSpan<
   Data = unknown,
   Result = unknown,
   Name extends string = string
 >(
   queue: LogBrewBullMqBulkQueueLike<Data, Result, Name>,
-  jobs: Array<LogBrewBullMqBulkJob<Data, Name>>,
+  jobs: readonly LogBrewBullMqBulkJob<NoInfer<Data>, NoInfer<Name>>[],
   options: LogBrewBullMqSpanOptions
-): Promise<Array<Job<Data, Result, Name>>>;
+): Promise<Job<Data, Result, Name>[]>;
 
-export declare function bullMqFlowProducerAddWithLogBrewSpan(
+declare function bullMqFlowProducerAddWithLogBrewSpan(
   flowProducer: LogBrewBullMqFlowProducerLike,
   flow: FlowJob,
-  flowOptions: Parameters<FlowProducer["add"]>[1] | undefined,
+  flowOptions: FlowOpts | undefined,
   options: LogBrewBullMqSpanOptions
 ): ReturnType<FlowProducer["add"]>;
 
-export declare function withLogBrewBullMqProcessor<
+declare function withLogBrewBullMqProcessor<
   Result = unknown,
   Data = unknown,
   Name extends string = string
 >(
   processor: LogBrewBullMqProcessor<Result, Data, Name>,
   options: LogBrewBullMqSpanOptions
-): LogBrewBullMqProcessor<Awaited<Result>, Data, Name>;
+): (job: Job<Data, Result, Name>, lock?: string, signal?: AbortSignal) => Promise<Awaited<Result>>;
 
-export declare function instrumentLogBrewBullMqProcessor<
-  Target extends LogBrewBullMqProcessorMethodTarget<"process">
+declare function instrumentLogBrewBullMqProcessor<
+  Target extends LogBrewBullMqProcessorMethodTarget
 >(
   target: Target,
   options: LogBrewBullMqSpanOptions
 ): LogBrewBullMqInstrumentation;
 
-export declare function instrumentLogBrewBullMqProcessor<
+declare function instrumentLogBrewBullMqProcessor<
   MethodName extends string,
   Target extends LogBrewBullMqProcessorMethodTarget<MethodName>
 >(
@@ -127,12 +131,12 @@ export declare function instrumentLogBrewBullMqProcessor<
   options: LogBrewBullMqSpanOptions
 ): LogBrewBullMqInstrumentation;
 
-export declare function instrumentLogBrewBullMqFlowProducer(
+declare function instrumentLogBrewBullMqFlowProducer(
   flowProducer: LogBrewBullMqFlowProducerLike,
   options: LogBrewBullMqSpanOptions
 ): LogBrewBullMqInstrumentation;
 
-export declare function instrumentLogBrewBullMqQueue<
+declare function instrumentLogBrewBullMqQueue<
   Data = unknown,
   Result = unknown,
   Name extends string = string
@@ -141,18 +145,18 @@ export declare function instrumentLogBrewBullMqQueue<
   options: LogBrewBullMqSpanOptions
 ): LogBrewBullMqInstrumentation;
 
-export declare function createLogBrewBullMqFlowJob(
+declare function createLogBrewBullMqFlowJob(
   flow: FlowJob,
   traceparent?: string
 ): FlowJob;
 
-export declare function createLogBrewBullMqJobOptions(
+declare function createLogBrewBullMqJobOptions(
   jobOptions?: LogBrewBullMqJobOptions,
   traceparent?: string
 ): LogBrewBullMqJobOptions;
 
-export declare function extractLogBrewBullMqTraceparent(job: {
-  opts?: LogBrewBullMqJobOptions;
+declare function extractLogBrewBullMqTraceparent(job: {
+  readonly opts?: LogBrewBullMqJobOptions;
 }): string | undefined;
 
 declare const defaultExport: {
@@ -168,4 +172,30 @@ declare const defaultExport: {
   withLogBrewBullMqProcessor: typeof withLogBrewBullMqProcessor;
 };
 
+export type {
+  LogBrewBullMqBulkJob,
+  LogBrewBullMqBulkJobOptions,
+  LogBrewBullMqBulkQueueLike,
+  LogBrewBullMqFlowProducerLike,
+  LogBrewBullMqInstrumentableQueueLike,
+  LogBrewBullMqInstrumentation,
+  LogBrewBullMqJobOptions,
+  LogBrewBullMqProcessor,
+  LogBrewBullMqProcessorMethod,
+  LogBrewBullMqProcessorMethodTarget,
+  LogBrewBullMqQueueLike,
+  LogBrewBullMqSpanOptions
+};
+export {
+  bullMqFlowProducerAddWithLogBrewSpan,
+  bullMqQueueAddBulkWithLogBrewSpan,
+  bullMqQueueAddWithLogBrewSpan,
+  createLogBrewBullMqFlowJob,
+  createLogBrewBullMqJobOptions,
+  extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqFlowProducer,
+  instrumentLogBrewBullMqProcessor,
+  instrumentLogBrewBullMqQueue,
+  withLogBrewBullMqProcessor
+};
 export default defaultExport;

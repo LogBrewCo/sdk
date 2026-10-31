@@ -1,70 +1,70 @@
+import type { LogBrewClient, SpanLinkSummary } from "@logbrew/sdk";
 import type {
   Message,
   MessageAttributeValue,
   ReceiveMessageCommandInput,
   ReceiveMessageCommandOutput,
+  SQSClient,
   SendMessageBatchCommandInput,
   SendMessageBatchCommandOutput,
   SendMessageCommandInput,
-  SendMessageCommandOutput,
-  SQSClient
+  SendMessageCommandOutput
 } from "@aws-sdk/client-sqs";
-import type { LogBrewClient, SpanLinkSummary } from "@logbrew/sdk";
 import type {
   QueueBatchOperationWithLogBrewSpanOptions,
   QueueOperationWithLogBrewSpanOptions
 } from "@logbrew/node";
 
-export type LogBrewSqsClientLike<Output> = {
-  send(command: unknown): Promise<Output> | Output;
+type LogBrewSqsClientLike<Output> = {
+  readonly send: (command: never) => Promise<Output> | Output;
 };
 
-export type LogBrewSqsCommandConstructor<Input> = new (input: Input) => unknown;
+type LogBrewSqsCommandConstructor<Input> = new (input: Input) => unknown;
 
-export type LogBrewSqsInstrumentableClient = Pick<SQSClient, "send">;
+type LogBrewSqsInstrumentableClient = Pick<SQSClient, "send">;
 
-export type LogBrewSqsInstrumentationCommands = {
-  ReceiveMessageCommand: LogBrewSqsCommandConstructor<ReceiveMessageCommandInput>;
-  SendMessageBatchCommand: LogBrewSqsCommandConstructor<SendMessageBatchCommandInput>;
-  SendMessageCommand: LogBrewSqsCommandConstructor<SendMessageCommandInput>;
+type LogBrewSqsInstrumentationCommands = {
+  readonly ReceiveMessageCommand: LogBrewSqsCommandConstructor<ReceiveMessageCommandInput>;
+  readonly SendMessageBatchCommand: LogBrewSqsCommandConstructor<SendMessageBatchCommandInput>;
+  readonly SendMessageCommand: LogBrewSqsCommandConstructor<SendMessageCommandInput>;
 };
 
-export type LogBrewSqsInstrumentation = {
-  isInstalled(): boolean;
-  uninstall(): void;
+type LogBrewSqsInstrumentation = {
+  readonly isInstalled: () => boolean;
+  readonly uninstall: () => void;
 };
 
-export type LogBrewSqsTraceExtractionOptions = {
-  extractEventBridgeEnvelopeTraceparent?: boolean;
-  extractSnsEnvelopeTraceparent?: boolean;
-  maxEnvelopeBytes?: number;
+type LogBrewSqsTraceExtractionOptions = {
+  readonly extractEventBridgeEnvelopeTraceparent?: boolean;
+  readonly extractSnsEnvelopeTraceparent?: boolean;
+  readonly maxEnvelopeBytes?: number;
 };
 
-export type LogBrewSqsOperationOptions<Result = unknown> =
+type LogBrewSqsOperationOptions<Result = unknown> =
   Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
     client: LogBrewClient;
     queueName?: string;
   } & LogBrewSqsTraceExtractionOptions;
 
-export type LogBrewSqsBatchOperationOptions<Result = unknown> =
+type LogBrewSqsBatchOperationOptions<Result = unknown> =
   Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messages" | "messageCount" | "linkMetadata"> & {
     client: LogBrewClient;
     queueName?: string;
   } & LogBrewSqsTraceExtractionOptions;
 
-export type LogBrewSnsOperationOptions<Result = unknown> =
+type LogBrewSnsOperationOptions<Result = unknown> =
   Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
     client: LogBrewClient;
     topicName?: string;
   };
 
-export type LogBrewSnsBatchOperationOptions<Result = unknown> =
+type LogBrewSnsBatchOperationOptions<Result = unknown> =
   Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messages" | "messageCount" | "linkMetadata"> & {
     client: LogBrewClient;
     topicName?: string;
   };
 
-export type LogBrewEventBridgeOperationOptions<Result = unknown> =
+type LogBrewEventBridgeOperationOptions<Result = unknown> =
   Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messages" | "messageCount" | "linkMetadata"> & {
     client: LogBrewClient;
     eventBusName?: string;
@@ -72,97 +72,97 @@ export type LogBrewEventBridgeOperationOptions<Result = unknown> =
     maxRequestBytes?: number;
   };
 
-export declare function sqsSendMessageWithLogBrewSpan(
+declare function sqsSendMessageWithLogBrewSpan(
   client: LogBrewSqsClientLike<SendMessageCommandOutput>,
   SendMessageCommand: LogBrewSqsCommandConstructor<SendMessageCommandInput>,
   input: SendMessageCommandInput,
   options: LogBrewSqsOperationOptions<SendMessageCommandOutput>
 ): Promise<Awaited<SendMessageCommandOutput>>;
 
-export declare function sqsSendMessageBatchWithLogBrewSpan(
+declare function sqsSendMessageBatchWithLogBrewSpan(
   client: LogBrewSqsClientLike<SendMessageBatchCommandOutput>,
   SendMessageBatchCommand: LogBrewSqsCommandConstructor<SendMessageBatchCommandInput>,
   input: SendMessageBatchCommandInput,
   options: LogBrewSqsBatchOperationOptions<SendMessageBatchCommandOutput>
 ): Promise<Awaited<SendMessageBatchCommandOutput>>;
 
-export declare function snsPublishWithLogBrewSpan<Input extends object, Output>(
+declare function snsPublishWithLogBrewSpan<Input extends object, Output>(
   client: LogBrewSqsClientLike<Output>,
   PublishCommand: LogBrewSqsCommandConstructor<Input>,
   input: Input,
   options: LogBrewSnsOperationOptions<Output>
 ): Promise<Awaited<Output>>;
 
-export declare function snsPublishBatchWithLogBrewSpan<Input extends object, Output>(
+declare function snsPublishBatchWithLogBrewSpan<Input extends object, Output>(
   client: LogBrewSqsClientLike<Output>,
   PublishBatchCommand: LogBrewSqsCommandConstructor<Input>,
   input: Input,
   options: LogBrewSnsBatchOperationOptions<Output>
 ): Promise<Awaited<Output>>;
 
-export declare function eventBridgePutEventsWithLogBrewSpan<Input extends object, Output>(
+declare function eventBridgePutEventsWithLogBrewSpan<Input extends object, Output>(
   client: LogBrewSqsClientLike<Output>,
   PutEventsCommand: LogBrewSqsCommandConstructor<Input>,
   input: Input,
   options: LogBrewEventBridgeOperationOptions<Output>
 ): Promise<Awaited<Output>>;
 
-export declare function sqsReceiveMessageWithLogBrewSpan(
+declare function sqsReceiveMessageWithLogBrewSpan(
   client: LogBrewSqsClientLike<ReceiveMessageCommandOutput>,
   ReceiveMessageCommand: LogBrewSqsCommandConstructor<ReceiveMessageCommandInput>,
   input: ReceiveMessageCommandInput,
   options: LogBrewSqsOperationOptions<ReceiveMessageCommandOutput>
 ): Promise<Awaited<ReceiveMessageCommandOutput>>;
 
-export declare function withLogBrewSqsMessageProcessor<Result = unknown>(
+declare function withLogBrewSqsMessageProcessor<Result = unknown>(
   processor: (message: Message) => Result | Promise<Result>,
   options: LogBrewSqsOperationOptions<Result>
 ): (message: Message) => Promise<Awaited<Result>>;
 
-export declare function instrumentLogBrewSqsClient(
+declare function instrumentLogBrewSqsClient(
   client: LogBrewSqsInstrumentableClient,
   commands: LogBrewSqsInstrumentationCommands,
-  options: LogBrewSqsOperationOptions<unknown>
+  options: LogBrewSqsOperationOptions
 ): LogBrewSqsInstrumentation;
 
-export declare function createLogBrewSqsSendMessageInput(
+declare function createLogBrewSqsSendMessageInput(
   input?: SendMessageCommandInput,
   traceparent?: string
 ): SendMessageCommandInput;
 
-export declare function createLogBrewSqsSendMessageBatchInput(
+declare function createLogBrewSqsSendMessageBatchInput(
   input?: SendMessageBatchCommandInput,
   traceparent?: string
 ): SendMessageBatchCommandInput;
 
-export declare function createLogBrewSqsReceiveMessageInput(
+declare function createLogBrewSqsReceiveMessageInput(
   input?: ReceiveMessageCommandInput
 ): ReceiveMessageCommandInput;
 
-export declare function createLogBrewSnsPublishInput<Input extends object = Record<string, unknown>>(
+declare function createLogBrewSnsPublishInput<Input extends object = Record<string, unknown>>(
   input?: Input,
   traceparent?: string
 ): Input & { MessageAttributes: Record<string, MessageAttributeValue> };
 
-export declare function createLogBrewSnsPublishBatchInput<Input extends object = Record<string, unknown>>(
+declare function createLogBrewSnsPublishBatchInput<Input extends object = Record<string, unknown>>(
   input?: Input,
   traceparent?: string
 ): Input;
 
-export declare function createLogBrewEventBridgePutEventsInput<Input extends object = Record<string, unknown>>(
+declare function createLogBrewEventBridgePutEventsInput<Input extends object = Record<string, unknown>>(
   input?: Input,
   traceparent?: string,
-  options?: { maxEventBridgeRequestBytes?: number; maxRequestBytes?: number }
+  options?: { readonly maxEventBridgeRequestBytes?: number; readonly maxRequestBytes?: number }
 ): Input;
 
-export declare function createLogBrewSqsTraceLinks(
-  messages?: Message | Message[],
-  metadata?: Record<string, string | number | boolean | null>,
+declare function createLogBrewSqsTraceLinks(
+  messages?: Message | readonly Message[],
+  metadata?: Readonly<Record<string, string | number | boolean | null>>,
   options?: LogBrewSqsTraceExtractionOptions
 ): SpanLinkSummary[];
 
-export declare function extractLogBrewSqsTraceparent(
-  messageOrAttributes?: Message | SendMessageCommandInput | Record<string, MessageAttributeValue | string | unknown>,
+declare function extractLogBrewSqsTraceparent(
+  messageOrAttributes?: Message | SendMessageCommandInput | Readonly<Record<string, unknown>>,
   options?: LogBrewSqsTraceExtractionOptions
 ): string | undefined;
 
@@ -185,4 +185,35 @@ declare const api: {
   withLogBrewSqsMessageProcessor: typeof withLogBrewSqsMessageProcessor;
 };
 
+export type {
+  LogBrewEventBridgeOperationOptions,
+  LogBrewSnsBatchOperationOptions,
+  LogBrewSnsOperationOptions,
+  LogBrewSqsBatchOperationOptions,
+  LogBrewSqsClientLike,
+  LogBrewSqsCommandConstructor,
+  LogBrewSqsInstrumentableClient,
+  LogBrewSqsInstrumentation,
+  LogBrewSqsInstrumentationCommands,
+  LogBrewSqsOperationOptions,
+  LogBrewSqsTraceExtractionOptions
+};
+export {
+  createLogBrewEventBridgePutEventsInput,
+  createLogBrewSnsPublishBatchInput,
+  createLogBrewSnsPublishInput,
+  createLogBrewSqsReceiveMessageInput,
+  createLogBrewSqsSendMessageBatchInput,
+  createLogBrewSqsSendMessageInput,
+  createLogBrewSqsTraceLinks,
+  eventBridgePutEventsWithLogBrewSpan,
+  extractLogBrewSqsTraceparent,
+  instrumentLogBrewSqsClient,
+  snsPublishBatchWithLogBrewSpan,
+  snsPublishWithLogBrewSpan,
+  sqsReceiveMessageWithLogBrewSpan,
+  sqsSendMessageBatchWithLogBrewSpan,
+  sqsSendMessageWithLogBrewSpan,
+  withLogBrewSqsMessageProcessor
+};
 export default api;

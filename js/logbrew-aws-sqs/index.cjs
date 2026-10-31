@@ -1,342 +1,73 @@
 "use strict";
 
-const { parseTraceparent, SdkError } = require("@logbrew/sdk");
 const {
-  createLogBrewQueueTraceHeaders,
-  createLogBrewQueueTraceLinks,
-  queueBatchOperationWithLogBrewSpan,
-  queueOperationWithLogBrewSpan
-} = require("@logbrew/node");
+  createLogBrewEventBridgePutEventsInput,
+  createLogBrewSnsPublishBatchInput,
+  createLogBrewSnsPublishInput,
+  createLogBrewSqsReceiveMessageInput,
+  createLogBrewSqsSendMessageBatchInput,
+  createLogBrewSqsSendMessageInput
+} = require("./inputs.cjs");
+const {
+  createLogBrewSqsTraceLinks,
+  extractLogBrewSqsTraceparent,
+  normalizeSqsTraceExtractionOptions
+} = require("./trace.cjs");
+const {
+  isCallable,
+  isObject,
+  mergeLinks,
+  readField,
+  readList,
+  requireAwsClient,
+  requireCommand,
+  requireSpanOptions,
+  resolveEventBridgeDestinationName,
+  resolveQueueName,
+  resolveSnsDestinationName
+} = require("./internal.cjs");
+const { queueBatchOperationWithLogBrewSpan, queueOperationWithLogBrewSpan } = require("@logbrew/node");
+const { SdkError } = require("@logbrew/sdk");
+
+/**
+ * @import { QueueOperationWithLogBrewSpanOptions } from "@logbrew/node"
+ * @import {
+ *   LogBrewEventBridgeOperationOptions,
+ *   LogBrewSnsBatchOperationOptions,
+ *   LogBrewSnsOperationOptions,
+ *   LogBrewSqsBatchOperationOptions,
+ *   LogBrewSqsInstrumentation,
+ *   LogBrewSqsOperationOptions,
+ *   LogBrewSqsTraceExtractionOptions
+ * } from "./index.cjs"
+ * @import { Callable, CommandConstructor, SendClient } from "./internal.cjs"
+ */
+
+/**
+ * @typedef {Omit<LogBrewSqsOperationOptions, keyof LogBrewSqsTraceExtractionOptions>} SqsSpanOptions
+ * @typedef {{
+ *   readonly ReceiveMessageCommand: CommandConstructor,
+ *   readonly SendMessageBatchCommand: CommandConstructor,
+ *   readonly SendMessageCommand: CommandConstructor
+ * }} InstrumentationCommands
+ */
 
 const DEFAULT_SYSTEM = "aws_sqs";
 const DEFAULT_EVENTBRIDGE_SYSTEM = "aws_eventbridge";
-const DEFAULT_QUEUE_NAME = "sqs";
 const DEFAULT_SNS_SYSTEM = "aws_sns";
-const DEFAULT_TOPIC_NAME = "sns";
-const DEFAULT_EVENT_BUS_NAME = "eventbridge";
-const TRACEPARENT_ATTRIBUTE = "traceparent";
-const MAX_MESSAGE_ATTRIBUTES = 10;
-const DEFAULT_MAX_ENVELOPE_BYTES = 256 * 1024;
-const MAX_ENVELOPE_BYTES = 1024 * 1024;
-const MAX_EVENTBRIDGE_PUT_EVENTS_BYTES = 1024 * 1024;
 const INSTRUMENTED_SEND = Symbol.for("@logbrew/aws-sqs.instrumentedSend");
 
-async function sqsSendMessageWithLogBrewSpan(client, SendMessageCommand, input = {}, options = {}) {
-  validateSqsClient(client, "sqsSendMessageWithLogBrewSpan");
-  validateCommand(SendMessageCommand, "sqsSendMessageWithLogBrewSpan", "SendMessageCommand");
-  const { spanOptions } = splitSqsOptions(options);
-
-  return queueOperationWithLogBrewSpan("SendMessage", {
-    ...spanOptions,
-    operation: () => client.send(new SendMessageCommand(createLogBrewSqsSendMessageInput(input))),
-    operationKind: "publish",
-    queueName: resolveQueueName(input, spanOptions.queueName),
-    system: DEFAULT_SYSTEM
-  });
-}
-
-async function sqsSendMessageBatchWithLogBrewSpan(client, SendMessageBatchCommand, input = {}, options = {}) {
-  validateSqsClient(client, "sqsSendMessageBatchWithLogBrewSpan");
-  validateCommand(SendMessageBatchCommand, "sqsSendMessageBatchWithLogBrewSpan", "SendMessageBatchCommand");
-  const { spanOptions } = splitSqsOptions(options);
-  const entries = Array.isArray(input?.Entries) ? input.Entries : [];
-
-  return queueBatchOperationWithLogBrewSpan("SendMessageBatch", {
-    ...spanOptions,
-    messageCount: entries.length,
-    operation: () => client.send(new SendMessageBatchCommand(createLogBrewSqsSendMessageBatchInput(input))),
-    operationKind: "publish",
-    queueName: resolveQueueName(input, spanOptions.queueName),
-    system: DEFAULT_SYSTEM
-  });
-}
-
-async function snsPublishWithLogBrewSpan(client, PublishCommand, input = {}, options = {}) {
-  validateAwsClient(client, "snsPublishWithLogBrewSpan", "SNS");
-  validateCommand(PublishCommand, "snsPublishWithLogBrewSpan", "PublishCommand");
-  const { spanOptions, topicName } = splitAwsProducerOptions(options);
-
-  return queueOperationWithLogBrewSpan("Publish", {
-    ...spanOptions,
-    operation: () => client.send(new PublishCommand(createLogBrewSnsPublishInput(input))),
-    operationKind: "publish",
-    queueName: resolveSnsDestinationName(input, topicName),
-    system: DEFAULT_SNS_SYSTEM
-  });
-}
-
-async function snsPublishBatchWithLogBrewSpan(client, PublishBatchCommand, input = {}, options = {}) {
-  validateAwsClient(client, "snsPublishBatchWithLogBrewSpan", "SNS");
-  validateCommand(PublishBatchCommand, "snsPublishBatchWithLogBrewSpan", "PublishBatchCommand");
-  const { spanOptions, topicName } = splitAwsProducerOptions(options);
-  const entries = Array.isArray(input?.PublishBatchRequestEntries) ? input.PublishBatchRequestEntries : [];
-
-  return queueBatchOperationWithLogBrewSpan("PublishBatch", {
-    ...spanOptions,
-    messageCount: entries.length,
-    operation: () => client.send(new PublishBatchCommand(createLogBrewSnsPublishBatchInput(input))),
-    operationKind: "publish",
-    queueName: resolveSnsDestinationName(input, topicName),
-    system: DEFAULT_SNS_SYSTEM
-  });
-}
-
-async function eventBridgePutEventsWithLogBrewSpan(client, PutEventsCommand, input = {}, options = {}) {
-  validateAwsClient(client, "eventBridgePutEventsWithLogBrewSpan", "EventBridge");
-  validateCommand(PutEventsCommand, "eventBridgePutEventsWithLogBrewSpan", "PutEventsCommand");
-  const { eventBusName, eventBridgeOptions, spanOptions } = splitAwsProducerOptions(options);
-  const entries = Array.isArray(input?.Entries) ? input.Entries : [];
-
-  return queueBatchOperationWithLogBrewSpan("PutEvents", {
-    ...spanOptions,
-    messageCount: entries.length,
-    operation: () => client.send(new PutEventsCommand(createLogBrewEventBridgePutEventsInput(input, undefined, eventBridgeOptions))),
-    operationKind: "publish",
-    queueName: resolveEventBridgeDestinationName(input, eventBusName),
-    system: DEFAULT_EVENTBRIDGE_SYSTEM
-  });
-}
-
-async function sqsReceiveMessageWithLogBrewSpan(client, ReceiveMessageCommand, input = {}, options = {}) {
-  validateSqsClient(client, "sqsReceiveMessageWithLogBrewSpan");
-  validateCommand(ReceiveMessageCommand, "sqsReceiveMessageWithLogBrewSpan", "ReceiveMessageCommand");
-  const { spanOptions, traceExtractionOptions } = splitSqsOptions(options);
-  const operationOptions = {
-    ...spanOptions,
-    operation: async () => {
-      const output = await client.send(new ReceiveMessageCommand(createLogBrewSqsReceiveMessageInput(input)));
-      const messages = Array.isArray(output?.Messages) ? output.Messages : [];
-      operationOptions.messageCount = messages.length;
-      operationOptions.links = mergeLinks(
-        createLogBrewSqsTraceLinks(messages, { relation: "sqs_receive" }, traceExtractionOptions),
-        spanOptions.links
-      );
-      return output;
-    },
-    operationKind: "receive",
-    queueName: resolveQueueName(input, spanOptions.queueName),
-    system: DEFAULT_SYSTEM
-  };
-
-  return queueOperationWithLogBrewSpan("ReceiveMessage", operationOptions);
-}
-
-function withLogBrewSqsMessageProcessor(processor, options = {}) {
-  if (typeof processor !== "function") {
-    throw new SdkError("configuration_error", "withLogBrewSqsMessageProcessor requires a message processor");
-  }
-  const { spanOptions, traceExtractionOptions } = splitSqsOptions(options);
-
-  return async function logBrewSqsMessageProcessor(message) {
-    return queueOperationWithLogBrewSpan("ProcessMessage", {
-      ...spanOptions,
-      operation: () => processor(message),
-      operationKind: "process",
-      queueName: resolveQueueName(message, spanOptions.queueName),
-      system: DEFAULT_SYSTEM,
-      traceparent: extractLogBrewSqsTraceparent(message, traceExtractionOptions)
-    });
-  };
-}
-
-function instrumentLogBrewSqsClient(client, commands, options = {}) {
-  validateSqsClient(client, "instrumentLogBrewSqsClient");
-  validateInstrumentationOptions(options);
-  const {
-    ReceiveMessageCommand,
-    SendMessageBatchCommand,
-    SendMessageCommand
-  } = validateInstrumentationCommands(commands);
-  const originalSend = client.send;
-  if (originalSend?.[INSTRUMENTED_SEND] === true) {
-    throw new SdkError(
-      "configuration_error",
-      "instrumentLogBrewSqsClient requires an uninstrumented SQS client; uninstall the existing LogBrew instrumentation first"
-    );
-  }
-
-  let installed = true;
-  function logBrewInstrumentedSqsSend(command, ...args) {
-    if (!installed) {
-      return originalSend.call(client, command, ...args);
-    }
-    const sendClient = {
-      send(nextCommand) {
-        return originalSend.call(client, nextCommand, ...args);
-      }
-    };
-
-    if (command instanceof SendMessageCommand) {
-      return sqsSendMessageWithLogBrewSpan(sendClient, SendMessageCommand, commandInput(command), options);
-    }
-    if (command instanceof SendMessageBatchCommand) {
-      return sqsSendMessageBatchWithLogBrewSpan(sendClient, SendMessageBatchCommand, commandInput(command), options);
-    }
-    if (command instanceof ReceiveMessageCommand) {
-      return sqsReceiveMessageWithLogBrewSpan(sendClient, ReceiveMessageCommand, commandInput(command), options);
-    }
-    return originalSend.call(client, command, ...args);
-  }
-
-  Object.defineProperty(logBrewInstrumentedSqsSend, INSTRUMENTED_SEND, {
-    value: true
-  });
-  client.send = logBrewInstrumentedSqsSend;
-
-  return {
-    isInstalled() {
-      return installed && client.send === logBrewInstrumentedSqsSend;
-    },
-    uninstall() {
-      installed = false;
-      if (client.send === logBrewInstrumentedSqsSend) {
-        client.send = originalSend;
-      }
-    }
-  };
-}
-
-function createLogBrewSqsSendMessageInput(input = {}, traceparent = undefined) {
-  const source = cloneObject(input);
-  return {
-    ...source,
-    MessageAttributes: withTraceparentAttribute(source.MessageAttributes, traceparent)
-  };
-}
-
-function createLogBrewSqsSendMessageBatchInput(input = {}, traceparent = undefined) {
-  const source = cloneObject(input);
-  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
-  const entries = Array.isArray(source.Entries)
-    ? source.Entries.map((entry) => {
-      const nextEntry = cloneObject(entry);
-      return {
-        ...nextEntry,
-        MessageAttributes: withTraceparentAttribute(nextEntry.MessageAttributes, normalizedTraceparent)
-      };
-    })
-    : source.Entries;
-
-  return {
-    ...source,
-    ...(entries !== undefined ? { Entries: entries } : {})
-  };
-}
-
-function createLogBrewSqsReceiveMessageInput(input = {}) {
-  const source = cloneObject(input);
-  return {
-    ...source,
-    MessageAttributeNames: withTraceparentAttributeName(source.MessageAttributeNames)
-  };
-}
-
-function createLogBrewSnsPublishInput(input = {}, traceparent = undefined) {
-  const source = cloneObject(input);
-  return {
-    ...source,
-    MessageAttributes: withTraceparentAttribute(source.MessageAttributes, traceparent)
-  };
-}
-
-function createLogBrewSnsPublishBatchInput(input = {}, traceparent = undefined) {
-  const source = cloneObject(input);
-  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
-  const entries = Array.isArray(source.PublishBatchRequestEntries)
-    ? source.PublishBatchRequestEntries.map((entry) => {
-      const nextEntry = cloneObject(entry);
-      return {
-        ...nextEntry,
-        MessageAttributes: withTraceparentAttribute(nextEntry.MessageAttributes, normalizedTraceparent)
-      };
-    })
-    : source.PublishBatchRequestEntries;
-
-  return {
-    ...source,
-    ...(entries !== undefined ? { PublishBatchRequestEntries: entries } : {})
-  };
-}
-
-function createLogBrewEventBridgePutEventsInput(input = {}, traceparent = undefined, options = {}) {
-  const source = cloneObject(input);
-  if (!Array.isArray(source.Entries)) {
-    return source;
-  }
-  const entries = source.Entries.map((entry) => cloneObject(entry));
-  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
-  if (!normalizedTraceparent) {
-    return { ...source, Entries: entries };
-  }
-
-  const nextEntries = entries.map((entry) => withEventBridgeDetailTraceparent(entry, normalizedTraceparent));
-  const maxRequestBytes = normalizeEventBridgeRequestByteLimit(options.maxEventBridgeRequestBytes ?? options.maxRequestBytes);
-  if (putEventsRequestSize(nextEntries) >= maxRequestBytes) {
-    return { ...source, Entries: entries };
-  }
-
-  return { ...source, Entries: nextEntries };
-}
-
-function createLogBrewSqsTraceLinks(messages, metadata = undefined, options = {}) {
-  const carriers = Array.isArray(messages)
-    ? messages.map((message) => sqsMessageTraceCarrier(message, options))
-    : [sqsMessageTraceCarrier(messages, options)];
-  return createLogBrewQueueTraceLinks(carriers, metadata);
-}
-
-function extractLogBrewSqsTraceparent(messageOrAttributes, options = {}) {
-  const traceparent = normalizeTraceparent(readSqsAttributeValue(readSqsAttributes(messageOrAttributes), TRACEPARENT_ATTRIBUTE));
-  if (traceparent) {
-    return traceparent;
-  }
-  const traceExtractionOptions = normalizeSqsTraceExtractionOptions(options);
-  if (!traceExtractionOptions.extractSnsEnvelopeTraceparent && !traceExtractionOptions.extractEventBridgeEnvelopeTraceparent) {
-    return undefined;
-  }
-  return extractEnvelopeTraceparent(messageOrAttributes, traceExtractionOptions);
-}
-
-function withTraceparentAttribute(attributes, traceparent = undefined) {
-  const nextAttributes = cloneObject(attributes);
-  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
-  if (!normalizedTraceparent) {
-    return nextAttributes;
-  }
-  if (!hasOwn(nextAttributes, TRACEPARENT_ATTRIBUTE) && Object.keys(nextAttributes).length >= MAX_MESSAGE_ATTRIBUTES) {
-    return nextAttributes;
-  }
-  return {
-    ...nextAttributes,
-    [TRACEPARENT_ATTRIBUTE]: {
-      DataType: "String",
-      StringValue: normalizedTraceparent
-    }
-  };
-}
-
-function withTraceparentAttributeName(attributeNames) {
-  const names = Array.isArray(attributeNames)
-    ? attributeNames.filter((name) => typeof name === "string" && name.trim() !== "")
-    : [];
-  if (names.includes("All") || names.includes(".*") || names.includes(TRACEPARENT_ATTRIBUTE)) {
-    return names.length > 0 ? names : [TRACEPARENT_ATTRIBUTE];
-  }
-  return [...names, TRACEPARENT_ATTRIBUTE];
-}
-
-function sqsMessageTraceCarrier(message, options = {}) {
-  const traceparent = extractLogBrewSqsTraceparent(message, options);
-  return traceparent ? { traceparent } : undefined;
-}
-
+/**
+ * @param {LogBrewSqsOperationOptions | LogBrewSqsBatchOperationOptions} options
+ * @returns {{ spanOptions: SqsSpanOptions, traceExtractionOptions: Required<LogBrewSqsTraceExtractionOptions> }}
+ */
 function splitSqsOptions(options) {
   const {
     extractEventBridgeEnvelopeTraceparent,
     extractSnsEnvelopeTraceparent,
     maxEnvelopeBytes,
     ...spanOptions
-  } = isObject(options) ? options : {};
+  } = options;
   return {
     spanOptions,
     traceExtractionOptions: normalizeSqsTraceExtractionOptions({
@@ -347,332 +78,288 @@ function splitSqsOptions(options) {
   };
 }
 
-function splitAwsProducerOptions(options) {
-  const {
-    eventBusName,
-    maxEventBridgeRequestBytes,
-    maxRequestBytes,
-    topicName,
-    ...spanOptions
-  } = isObject(options) ? options : {};
-  return {
-    eventBridgeOptions: { maxRequestBytes: maxEventBridgeRequestBytes ?? maxRequestBytes },
-    eventBusName,
-    spanOptions,
-    topicName
+/**
+ * @param {unknown} command
+ * @returns {Readonly<Record<string, unknown>>}
+ */
+function commandInput(command) {
+  const input = readField(command, "input");
+  return isObject(input) ? input : {};
+}
+
+/**
+ * @param {unknown} client
+ * @param {unknown} SendMessageCommand
+ * @param {unknown} [input]
+ * @param {LogBrewSqsOperationOptions} [options]
+ * @returns {Promise<unknown>}
+ */
+async function sqsSendMessageWithLogBrewSpan(client, SendMessageCommand, input, options) {
+  const sendClient = requireAwsClient(client, "sqsSendMessageWithLogBrewSpan", "SQS");
+  const Command = requireCommand(SendMessageCommand, "sqsSendMessageWithLogBrewSpan", "SendMessageCommand");
+  const { spanOptions } = splitSqsOptions(requireSpanOptions(options));
+
+  return queueOperationWithLogBrewSpan("SendMessage", {
+    ...spanOptions,
+    operation: () => sendClient.send(new Command(createLogBrewSqsSendMessageInput(input))),
+    operationKind: "publish",
+    queueName: resolveQueueName(input, spanOptions.queueName),
+    system: DEFAULT_SYSTEM
+  });
+}
+
+/**
+ * @param {unknown} client
+ * @param {unknown} SendMessageBatchCommand
+ * @param {unknown} [input]
+ * @param {LogBrewSqsBatchOperationOptions} [options]
+ * @returns {Promise<unknown>}
+ */
+async function sqsSendMessageBatchWithLogBrewSpan(client, SendMessageBatchCommand, input, options) {
+  const sendClient = requireAwsClient(client, "sqsSendMessageBatchWithLogBrewSpan", "SQS");
+  const Command = requireCommand(SendMessageBatchCommand, "sqsSendMessageBatchWithLogBrewSpan", "SendMessageBatchCommand");
+  const { spanOptions } = splitSqsOptions(requireSpanOptions(options));
+
+  return queueBatchOperationWithLogBrewSpan("SendMessageBatch", {
+    ...spanOptions,
+    messageCount: readList(readField(input, "Entries")).length,
+    operation: () => sendClient.send(new Command(createLogBrewSqsSendMessageBatchInput(input))),
+    operationKind: "publish",
+    queueName: resolveQueueName(input, spanOptions.queueName),
+    system: DEFAULT_SYSTEM
+  });
+}
+
+/**
+ * @param {unknown} client
+ * @param {unknown} PublishCommand
+ * @param {unknown} [input]
+ * @param {LogBrewSnsOperationOptions} [options]
+ * @returns {Promise<unknown>}
+ */
+async function snsPublishWithLogBrewSpan(client, PublishCommand, input, options) {
+  const sendClient = requireAwsClient(client, "snsPublishWithLogBrewSpan", "SNS");
+  const Command = requireCommand(PublishCommand, "snsPublishWithLogBrewSpan", "PublishCommand");
+  const { topicName, ...spanOptions } = requireSpanOptions(options);
+
+  return queueOperationWithLogBrewSpan("Publish", {
+    ...spanOptions,
+    operation: () => sendClient.send(new Command(createLogBrewSnsPublishInput(input))),
+    operationKind: "publish",
+    queueName: resolveSnsDestinationName(input, topicName),
+    system: DEFAULT_SNS_SYSTEM
+  });
+}
+
+/**
+ * @param {unknown} client
+ * @param {unknown} PublishBatchCommand
+ * @param {unknown} [input]
+ * @param {LogBrewSnsBatchOperationOptions} [options]
+ * @returns {Promise<unknown>}
+ */
+async function snsPublishBatchWithLogBrewSpan(client, PublishBatchCommand, input, options) {
+  const sendClient = requireAwsClient(client, "snsPublishBatchWithLogBrewSpan", "SNS");
+  const Command = requireCommand(PublishBatchCommand, "snsPublishBatchWithLogBrewSpan", "PublishBatchCommand");
+  const { topicName, ...spanOptions } = requireSpanOptions(options);
+
+  return queueBatchOperationWithLogBrewSpan("PublishBatch", {
+    ...spanOptions,
+    messageCount: readList(readField(input, "PublishBatchRequestEntries")).length,
+    operation: () => sendClient.send(new Command(createLogBrewSnsPublishBatchInput(input))),
+    operationKind: "publish",
+    queueName: resolveSnsDestinationName(input, topicName),
+    system: DEFAULT_SNS_SYSTEM
+  });
+}
+
+/**
+ * @param {unknown} client
+ * @param {unknown} PutEventsCommand
+ * @param {unknown} [input]
+ * @param {LogBrewEventBridgeOperationOptions} [options]
+ * @returns {Promise<unknown>}
+ */
+async function eventBridgePutEventsWithLogBrewSpan(client, PutEventsCommand, input, options) {
+  const sendClient = requireAwsClient(client, "eventBridgePutEventsWithLogBrewSpan", "EventBridge");
+  const Command = requireCommand(PutEventsCommand, "eventBridgePutEventsWithLogBrewSpan", "PutEventsCommand");
+  const { eventBusName, maxEventBridgeRequestBytes, maxRequestBytes, ...spanOptions } = requireSpanOptions(options);
+  const inputOptions = { maxRequestBytes: maxEventBridgeRequestBytes ?? maxRequestBytes };
+
+  return queueBatchOperationWithLogBrewSpan("PutEvents", {
+    ...spanOptions,
+    messageCount: readList(readField(input, "Entries")).length,
+    operation: () => sendClient.send(new Command(createLogBrewEventBridgePutEventsInput(input, undefined, inputOptions))),
+    operationKind: "publish",
+    queueName: resolveEventBridgeDestinationName(input, eventBusName),
+    system: DEFAULT_EVENTBRIDGE_SYSTEM
+  });
+}
+
+/**
+ * @param {unknown} client
+ * @param {unknown} ReceiveMessageCommand
+ * @param {unknown} [input]
+ * @param {LogBrewSqsOperationOptions} [options]
+ * @returns {Promise<unknown>}
+ */
+async function sqsReceiveMessageWithLogBrewSpan(client, ReceiveMessageCommand, input, options) {
+  const sendClient = requireAwsClient(client, "sqsReceiveMessageWithLogBrewSpan", "SQS");
+  const Command = requireCommand(ReceiveMessageCommand, "sqsReceiveMessageWithLogBrewSpan", "ReceiveMessageCommand");
+  const { spanOptions, traceExtractionOptions } = splitSqsOptions(requireSpanOptions(options));
+  /** @type {QueueOperationWithLogBrewSpanOptions} */
+  const operationOptions = {
+    ...spanOptions,
+    operation: async () => {
+      const output = await sendClient.send(new Command(createLogBrewSqsReceiveMessageInput(input)));
+      const messages = readList(readField(output, "Messages"));
+      operationOptions.messageCount = messages.length;
+      const links = mergeLinks(
+        createLogBrewSqsTraceLinks(messages, { relation: "sqs_receive" }, traceExtractionOptions),
+        spanOptions.links
+      );
+      if (links === undefined) {
+        delete operationOptions.links;
+      } else {
+        operationOptions.links = links;
+      }
+      return output;
+    },
+    operationKind: "receive",
+    queueName: resolveQueueName(input, spanOptions.queueName),
+    system: DEFAULT_SYSTEM
+  };
+
+  return queueOperationWithLogBrewSpan("ReceiveMessage", operationOptions);
+}
+
+/**
+ * @param {unknown} processor
+ * @param {LogBrewSqsOperationOptions} [options]
+ * @returns {(message: unknown) => Promise<unknown>}
+ */
+function withLogBrewSqsMessageProcessor(processor, options) {
+  if (!isCallable(processor)) {
+    throw new SdkError("configuration_error", "withLogBrewSqsMessageProcessor requires a message processor");
+  }
+  const split = isObject(options) ? splitSqsOptions(options) : undefined;
+
+  return async function logBrewSqsMessageProcessor(message) {
+    const { spanOptions, traceExtractionOptions } = requireSpanOptions(split);
+    const processOptions = { ...spanOptions };
+    Reflect.deleteProperty(processOptions, "traceparent");
+    const traceparent = extractLogBrewSqsTraceparent(message, traceExtractionOptions);
+    return queueOperationWithLogBrewSpan("ProcessMessage", {
+      ...processOptions,
+      operation: () => processor(message),
+      operationKind: "process",
+      queueName: resolveQueueName(message, spanOptions.queueName),
+      system: DEFAULT_SYSTEM,
+      ...(traceparent === undefined ? {} : { traceparent })
+    });
   };
 }
 
-function normalizeSqsTraceExtractionOptions(options = {}) {
-  return {
-    extractEventBridgeEnvelopeTraceparent: options.extractEventBridgeEnvelopeTraceparent === true,
-    extractSnsEnvelopeTraceparent: options.extractSnsEnvelopeTraceparent === true,
-    maxEnvelopeBytes: normalizeEnvelopeByteLimit(options.maxEnvelopeBytes)
-  };
-}
-
-function extractEnvelopeTraceparent(messageOrEnvelope, options) {
-  const envelope = readSqsEnvelope(messageOrEnvelope, options.maxEnvelopeBytes);
-  if (!isObject(envelope)) {
-    return undefined;
-  }
-  if (options.extractSnsEnvelopeTraceparent) {
-    const snsTraceparent = readSnsEnvelopeTraceparent(envelope);
-    if (snsTraceparent) {
-      return snsTraceparent;
-    }
-  }
-  if (options.extractEventBridgeEnvelopeTraceparent) {
-    return readEventBridgeEnvelopeTraceparent(envelope, options);
-  }
-  return undefined;
-}
-
-function readSqsEnvelope(messageOrEnvelope, maxEnvelopeBytes) {
-  if (typeof messageOrEnvelope === "string") {
-    return parseJsonEnvelope(messageOrEnvelope, maxEnvelopeBytes);
-  }
-  if (!isObject(messageOrEnvelope)) {
-    return undefined;
-  }
-  if (typeof messageOrEnvelope.Body === "string") {
-    return parseJsonEnvelope(messageOrEnvelope.Body, maxEnvelopeBytes);
-  }
-  return messageOrEnvelope;
-}
-
-function readSnsEnvelopeTraceparent(envelope) {
-  if (!isSnsEnvelope(envelope)) {
-    return undefined;
-  }
-  return normalizeTraceparent(readSqsAttributeValue(envelope.MessageAttributes, TRACEPARENT_ATTRIBUTE));
-}
-
-function readEventBridgeEnvelopeTraceparent(envelope, options) {
-  const direct = readEventBridgeDetailTraceparent(envelope);
-  if (direct) {
-    return direct;
-  }
-  if (!isSnsEnvelope(envelope) || typeof envelope.Message !== "string") {
-    return undefined;
-  }
-  return readEventBridgeDetailTraceparent(parseJsonEnvelope(envelope.Message, options.maxEnvelopeBytes));
-}
-
-function readEventBridgeDetailTraceparent(envelope) {
-  if (!isObject(envelope) || typeof envelope["detail-type"] !== "string" || !isObject(envelope.detail)) {
-    return undefined;
-  }
-  const detail = envelope.detail;
-  return normalizeTraceparent(detail.traceparent ?? detail.traceParent);
-}
-
-function parseJsonEnvelope(value, maxEnvelopeBytes) {
-  if (typeof value !== "string" || value.trim() === "" || utf8ByteLength(value) > maxEnvelopeBytes) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return isObject(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function normalizeEnvelopeByteLimit(value) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return DEFAULT_MAX_ENVELOPE_BYTES;
-  }
-  return Math.min(Math.floor(value), MAX_ENVELOPE_BYTES);
-}
-
-function normalizeEventBridgeRequestByteLimit(value) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return MAX_EVENTBRIDGE_PUT_EVENTS_BYTES;
-  }
-  return Math.min(Math.floor(value), MAX_EVENTBRIDGE_PUT_EVENTS_BYTES);
-}
-
-function utf8ByteLength(value) {
-  if (typeof globalThis.Buffer?.byteLength === "function") {
-    return globalThis.Buffer.byteLength(value, "utf8");
-  }
-  if (typeof globalThis.TextEncoder === "function") {
-    return new globalThis.TextEncoder().encode(value).byteLength;
-  }
-  return value.length;
-}
-
-function isSnsEnvelope(value) {
-  return isObject(value) && value.Type === "Notification";
-}
-
-function readSqsAttributes(messageOrAttributes) {
-  if (!isObject(messageOrAttributes)) {
-    return undefined;
-  }
-  if (isObject(messageOrAttributes.MessageAttributes)) {
-    return messageOrAttributes.MessageAttributes;
-  }
-  return messageOrAttributes;
-}
-
-function readSqsAttributeValue(attributes, name) {
-  if (!isObject(attributes)) {
-    return undefined;
-  }
-  const exact = attributes[name];
-  if (exact !== undefined) {
-    return readOneSqsAttributeValue(exact);
-  }
-  const lowerName = name.toLowerCase();
-  const matchedKey = Object.keys(attributes).find((key) => key.toLowerCase() === lowerName);
-  return matchedKey ? readOneSqsAttributeValue(attributes[matchedKey]) : undefined;
-}
-
-function readOneSqsAttributeValue(value) {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (!isObject(value)) {
-    return undefined;
-  }
-  if (typeof value.StringValue === "string") {
-    return value.StringValue;
-  }
-  if (typeof value.Value === "string") {
-    return value.Value;
-  }
-  return readBytesAsUtf8(value.BinaryValue);
-}
-
-function readBytesAsUtf8(value) {
-  if (isNodeBufferValue(value)) {
-    return value.toString("utf8");
-  }
-  if (value instanceof Uint8Array && typeof globalThis.TextDecoder === "function") {
-    return new globalThis.TextDecoder().decode(value);
-  }
-  return undefined;
-}
-
-function mergeLinks(generatedLinks, explicitLinks) {
-  const links = Array.isArray(generatedLinks) ? [...generatedLinks] : [];
-  if (Array.isArray(explicitLinks)) {
-    links.push(...explicitLinks);
-  }
-  return links.length > 0 ? links.slice(0, 8) : undefined;
-}
-
-function withEventBridgeDetailTraceparent(entry, traceparent) {
-  const nextEntry = cloneObject(entry);
-  if (typeof nextEntry.Detail !== "string" || nextEntry.Detail.trim() === "") {
-    return nextEntry;
-  }
-  const detail = parseJsonEnvelope(nextEntry.Detail, MAX_EVENTBRIDGE_PUT_EVENTS_BYTES);
-  if (!isObject(detail)) {
-    return nextEntry;
-  }
-  nextEntry.Detail = JSON.stringify({ ...detail, traceparent });
-  return nextEntry;
-}
-
-function putEventsRequestSize(entries) {
-  return entries.reduce((total, entry) => total + putEventEntrySize(entry), 0);
-}
-
-function putEventEntrySize(entry) {
-  if (!isObject(entry)) {
-    return 0;
-  }
-  let size = entry.Time === null || entry.Time === undefined ? 0 : 14;
-  size += byteLengthIfString(entry.Source);
-  size += byteLengthIfString(entry.DetailType);
-  size += byteLengthIfString(entry.Detail);
-  size += byteLengthIfString(entry.EventBusName);
-  if (Array.isArray(entry.Resources)) {
-    for (const resource of entry.Resources) {
-      size += byteLengthIfString(resource);
-    }
-  }
-  return size;
-}
-
-function byteLengthIfString(value) {
-  return typeof value === "string" ? utf8ByteLength(value) : 0;
-}
-
-function resolveQueueName(source, fallback) {
-  const explicit = normalizeLabel(fallback, "");
-  if (explicit) {
-    return explicit;
-  }
-  const queueUrl = normalizeLabel(source?.QueueUrl, "");
-  if (!queueUrl) {
-    return DEFAULT_QUEUE_NAME;
-  }
-  const parts = queueUrl.split("/").filter(Boolean);
-  return normalizeLabel(parts[parts.length - 1], DEFAULT_QUEUE_NAME);
-}
-
-function resolveSnsDestinationName(source, fallback) {
-  const explicit = normalizeLabel(fallback, "");
-  if (explicit) {
-    return explicit;
-  }
-  return normalizeArnLabel(source?.TopicArn, DEFAULT_TOPIC_NAME);
-}
-
-function resolveEventBridgeDestinationName(source, fallback) {
-  const explicit = normalizeLabel(fallback, "");
-  if (explicit) {
-    return explicit;
-  }
-  const firstEntry = Array.isArray(source?.Entries) ? source.Entries.find(isObject) : undefined;
-  return normalizeArnLabel(firstEntry?.EventBusName, DEFAULT_EVENT_BUS_NAME);
-}
-
-function normalizeArnLabel(value, fallback) {
-  const label = normalizeLabel(value, "");
-  if (!label) {
-    return fallback;
-  }
-  const parts = label.split(":").flatMap((part) => part.split("/")).filter(Boolean);
-  return normalizeLabel(parts[parts.length - 1], fallback);
-}
-
-function validateSqsClient(client, source) {
-  validateAwsClient(client, source, "SQS");
-}
-
-function validateAwsClient(client, source, service) {
-  if (!client || typeof client.send !== "function") {
-    throw new SdkError("configuration_error", `${source} requires an AWS SDK ${service} client`);
-  }
-}
-
-function validateCommand(Command, source, name) {
-  if (typeof Command !== "function") {
-    throw new SdkError("configuration_error", `${source} requires ${name}`);
-  }
-}
-
-function validateInstrumentationOptions(options) {
-  if (!options?.client) {
-    throw new SdkError("configuration_error", "instrumentLogBrewSqsClient requires client");
-  }
-}
-
-function validateInstrumentationCommands(commands) {
+/**
+ * @param {unknown} commands
+ * @returns {InstrumentationCommands}
+ */
+function requireInstrumentationCommands(commands) {
   if (!isObject(commands)) {
     throw new SdkError("configuration_error", "instrumentLogBrewSqsClient requires SQS command constructors");
   }
-  validateCommand(commands.SendMessageCommand, "instrumentLogBrewSqsClient", "SendMessageCommand");
-  validateCommand(commands.SendMessageBatchCommand, "instrumentLogBrewSqsClient", "SendMessageBatchCommand");
-  validateCommand(commands.ReceiveMessageCommand, "instrumentLogBrewSqsClient", "ReceiveMessageCommand");
-  return commands;
+  const source = "instrumentLogBrewSqsClient";
+  const SendMessageCommand = requireCommand(commands["SendMessageCommand"], source, "SendMessageCommand");
+  const SendMessageBatchCommand = requireCommand(commands["SendMessageBatchCommand"], source, "SendMessageBatchCommand");
+  const ReceiveMessageCommand = requireCommand(commands["ReceiveMessageCommand"], source, "ReceiveMessageCommand");
+  return { ReceiveMessageCommand, SendMessageBatchCommand, SendMessageCommand };
 }
 
-function commandInput(command) {
-  return isObject(command?.input) ? command.input : {};
-}
-
-function normalizeTraceparent(value) {
-  if (typeof value !== "string" || value.trim() === "") {
-    return undefined;
+/**
+ * @param {SendClient} client
+ * @param {InstrumentationCommands} commands
+ * @param {LogBrewSqsOperationOptions} options
+ * @returns {Callable}
+ */
+function createInstrumentedSend(client, commands, options) {
+  const originalSend = client.send;
+  const { ReceiveMessageCommand, SendMessageBatchCommand, SendMessageCommand } = commands;
+  /** @type {Callable} */
+  function instrumentedSqsSend(...args) {
+    const [command, ...sendArgs] = args;
+    /** @type {SendClient} */
+    const sendClient = {
+      send: (nextCommand) => originalSend.call(client, nextCommand, ...sendArgs)
+    };
+    if (command instanceof SendMessageCommand) {
+      return sqsSendMessageWithLogBrewSpan(sendClient, SendMessageCommand, commandInput(command), options);
+    }
+    if (command instanceof SendMessageBatchCommand) {
+      return sqsSendMessageBatchWithLogBrewSpan(sendClient, SendMessageBatchCommand, commandInput(command), options);
+    }
+    if (command instanceof ReceiveMessageCommand) {
+      return sqsReceiveMessageWithLogBrewSpan(sendClient, ReceiveMessageCommand, commandInput(command), options);
+    }
+    return originalSend.call(client, ...args);
   }
-  try {
-    const context = parseTraceparent(value);
-    return `${context.version}-${context.traceId}-${context.parentSpanId}-${context.traceFlags}`;
-  } catch {
-    return undefined;
+  return instrumentedSqsSend;
+}
+
+/**
+ * @param {unknown} client
+ * @param {LogBrewSqsOperationOptions | undefined} options
+ * @returns {SendClient}
+ */
+function requireUninstrumentedClient(client, options) {
+  const sqsClient = requireAwsClient(client, "instrumentLogBrewSqsClient", "SQS");
+  if (!options?.client) {
+    throw new SdkError("configuration_error", "instrumentLogBrewSqsClient requires client");
+  }
+  return sqsClient;
+}
+
+/**
+ * @param {Callable} originalSend
+ * @returns {void}
+ */
+function assertNotInstrumented(originalSend) {
+  if (Reflect.get(originalSend, INSTRUMENTED_SEND) === true) {
+    throw new SdkError(
+      "configuration_error",
+      "instrumentLogBrewSqsClient requires an uninstrumented SQS client; uninstall the existing LogBrew instrumentation first"
+    );
   }
 }
 
-function normalizeLabel(value, fallback) {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
-}
+/**
+ * @param {unknown} client
+ * @param {unknown} commands
+ * @param {LogBrewSqsOperationOptions} [options]
+ * @returns {LogBrewSqsInstrumentation}
+ */
+function instrumentLogBrewSqsClient(client, commands, options) {
+  const sqsClient = requireUninstrumentedClient(client, options);
+  const validCommands = requireInstrumentationCommands(commands);
+  const originalSend = sqsClient.send;
+  assertNotInstrumented(originalSend);
+  const state = { installed: true };
+  const instrumentedSend = createInstrumentedSend(sqsClient, validCommands, requireSpanOptions(options));
+  /** @type {Callable} */
+  function logBrewInstrumentedSqsSend(...args) {
+    return state.installed ? instrumentedSend(...args) : originalSend.call(sqsClient, ...args);
+  }
+  Object.defineProperty(logBrewInstrumentedSqsSend, INSTRUMENTED_SEND, { value: true });
+  Reflect.set(sqsClient, "send", logBrewInstrumentedSqsSend);
 
-function cloneObject(value) {
-  return isObject(value) ? { ...value } : {};
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function hasOwn(value, key) {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-function isNodeBufferValue(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    typeof value.toString === "function" &&
-    typeof value.constructor?.isBuffer === "function" &&
-    value.constructor.isBuffer(value)
-  );
+  return {
+    isInstalled: () => state.installed && sqsClient.send === logBrewInstrumentedSqsSend,
+    uninstall: () => {
+      state.installed = false;
+      if (sqsClient.send === logBrewInstrumentedSqsSend) {
+        Reflect.set(sqsClient, "send", originalSend);
+      }
+    }
+  };
 }
 
 const api = {

@@ -42,8 +42,15 @@ import {
 
 const logbrew = LogBrewClient.create({
   apiKey: process.env.LOGBREW_SERVER_API_KEY,
-  release: process.env.LOGBREW_RELEASE,
-  environment: process.env.NODE_ENV,
+  context: {
+    resource: {
+      deployment: {
+        environment: process.env.NODE_ENV ?? "production",
+        release: process.env.LOGBREW_RELEASE ?? "checkout-worker@1.0.0"
+      }
+    },
+    schemaVersion: 1
+  },
   sdkName: "checkout-worker",
   sdkVersion: "1.0.0"
 });
@@ -128,9 +135,7 @@ const processMessage = withLogBrewSqsMessageProcessor(async (message) => {
   extractSnsEnvelopeTraceparent: true
 });
 
-for (const message of output.Messages ?? []) {
-  await processMessage(message);
-}
+await Promise.all((output.Messages ?? []).map((message) => processMessage(message)));
 ```
 
 For teams that want client-level automatic coverage without global patching,

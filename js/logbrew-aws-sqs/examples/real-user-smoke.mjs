@@ -3,12 +3,12 @@ import {
   SendMessageBatchCommand,
   SendMessageCommand
 } from "@aws-sdk/client-sqs";
-import { LogBrewClient } from "@logbrew/sdk";
 import {
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan
-} from "../index.js";
+} from "@logbrew/aws-sqs";
+import { LogBrewClient } from "@logbrew/sdk";
 
 const logbrew = LogBrewClient.create({
   apiKey: "LOGBREW_SERVER_API_KEY",
@@ -16,42 +16,50 @@ const logbrew = LogBrewClient.create({
   sdkVersion: "0.1.0"
 });
 
-const sqs = {
-  async send(command) {
-    if (command instanceof SendMessageCommand) {
-      return { MessageId: "msg_001" };
+/**
+ * @template Output
+ * @param {new (input: never) => unknown} Command
+ * @param {Output} output
+ * @returns {{ send: (command: unknown) => Promise<Output> }}
+ */
+function createFakeSqsClient(Command, output) {
+  return {
+    send: async (command) => {
+      await Promise.resolve();
+      if (!(command instanceof Command)) {
+        throw new TypeError("unexpected command");
+      }
+      return output;
     }
-    if (command instanceof SendMessageBatchCommand) {
-      return { Successful: [{ Id: "one", MessageId: "msg_002" }] };
-    }
-    if (command instanceof ReceiveMessageCommand) {
-      return { Messages: [] };
-    }
-    throw new Error("unexpected command");
-  }
-};
+  };
+}
+
 const queueUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/orders";
 
 await sqsSendMessageWithLogBrewSpan(
-  sqs,
+  createFakeSqsClient(SendMessageCommand, { $metadata: {}, MessageId: "msg_001" }),
   SendMessageCommand,
-  { QueueUrl: queueUrl, MessageBody: "example" },
+  { MessageBody: "example", QueueUrl: queueUrl },
   { client: logbrew, queueName: "orders" }
 );
 
 await sqsSendMessageBatchWithLogBrewSpan(
-  sqs,
+  createFakeSqsClient(SendMessageBatchCommand, {
+    $metadata: {},
+    Failed: [],
+    Successful: [{ Id: "one", MD5OfMessageBody: "1a79a4d60de6718e8e5b326e338ae533", MessageId: "msg_002" }]
+  }),
   SendMessageBatchCommand,
   {
-    QueueUrl: queueUrl,
-    Entries: [{ Id: "one", MessageBody: "example" }]
+    Entries: [{ Id: "one", MessageBody: "example" }],
+    QueueUrl: queueUrl
   },
   { client: logbrew, queueName: "orders" }
 );
 
 await sqsReceiveMessageWithLogBrewSpan(
-  sqs,
+  createFakeSqsClient(ReceiveMessageCommand, { $metadata: {}, Messages: [] }),
   ReceiveMessageCommand,
-  { QueueUrl: queueUrl, MaxNumberOfMessages: 1 },
+  { MaxNumberOfMessages: 1, QueueUrl: queueUrl },
   { client: logbrew, queueName: "orders" }
 );
