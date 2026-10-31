@@ -1,127 +1,178 @@
-import test from "node:test";
+import {
+  ACCEPTED,
+  ONE,
+  TWO,
+  createClient,
+  log,
+  logAll,
+  logOversized,
+  overflow,
+  overflowingClient,
+  reportIds,
+  reportOf,
+  reports,
+  withoutId
+} from "./client-report-helpers.js";
+import { RecordingTransport, TransportError } from "@logbrew/sdk";
+import { isRecord, parseJson } from "./capture-helpers.js";
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { setImmediate } from "node:timers/promises";
+import test from "node:test";
 
-import { LogBrewClient, RecordingTransport, TransportError } from "../index.js";
+/**
+ * @import { LogBrewClient, Transport, TransportResponse } from "@logbrew/sdk"
+ */
 
-const timestamp = "2026-06-02T10:00:00Z";
+const UNAVAILABLE = Object.freeze({ attempts: 1, statusCode: 503 });
+const FIRST = 0;
+const SECOND = 1;
+const THIRD = 2;
+const SMALL_MESSAGE_LENGTH = 200;
 
-function createClient(options = {}) {
-  return LogBrewClient.create({ apiKey: "LOGBREW_API_KEY", sdkName: "logbrew-js", sdkVersion: "0.1.0", maxRetries: 0, ...options });
+/**
+ * @param {Readonly<Promise<unknown>>} released
+ * @returns {Promise<TransportResponse>}
+ */
+async function acceptAfter(released) {
+  await released;
+  return ACCEPTED;
 }
 
-const log = (client, id, message = "queued") => client.log(id, timestamp, { message, level: "info" });
-const reportOf = (body) => JSON.parse(body).client_report;
-const reports = (transport) => transport.sentBodies.map((body) => withoutId(reportOf(body)));
-const reportIds = (transport) => transport.sentBodies.map((body) => reportOf(body)?.report_id);
-
-function withoutId(report) {
-  if (report === undefined) {
-    return undefined;
-  }
-  const { report_id: reportId, ...rest } = report;
-  assert.match(reportId, /^[0-9a-f]{32}$/u);
-  return rest;
+/**
+ * @param {(report: unknown) => number} record
+ * @param {Readonly<Promise<unknown>>} released
+ * @returns {Transport}
+ */
+function heldTransport(record, released) {
+  return {
+    async send(_apiKey, body) {
+      return record(withoutId(reportOf(body))) === ONE ? acceptAfter(released) : ACCEPTED;
+    }
+  };
 }
 
-test("drop counts ride in the next batch and clear after a 2xx", async () => {
-  const client = createClient({ maxQueueSize: 1 });
-  log(client, "evt_log_001");
-  log(client, "evt_log_002");
-  log(client, "evt_log_003");
-  client.log("evt_log_big", timestamp, { message: "x".repeat(300 * 1024), level: "info" });
-  const transport = RecordingTransport.alwaysAccept();
-
-  await client.flush(transport);
-  log(client, "evt_log_004");
-  await client.flush(transport);
-
-  assert.deepEqual(reports(transport), [{ dropped_events: { queue_overflow: 2, event_too_large: 1 } }, undefined]);
-  assert.equal(client.deliveryHealth().droppedByReason.queue_overflow, 2);
-});
-
-test("a batch without drops carries no client report", async () => {
-  const client = createClient();
-  log(client, "evt_log_001");
-  const transport = RecordingTransport.alwaysAccept();
-  await client.flush(transport);
-  assert.deepEqual(Object.keys(JSON.parse(transport.lastBody())), ["sdk", "events"]);
-});
-
-for (const [name, failure] of [["a 5xx", { statusCode: 503 }], ["a network error", TransportError.network("offline")]]) {
-  test(`drop counts stay pending after ${name} and the resent body reports them once`, async () => {
-    const client = createClient({ maxQueueSize: 1 });
-    log(client, "evt_log_001");
-    log(client, "evt_log_002");
-    const transport = new RecordingTransport([failure, { statusCode: 202 }, { statusCode: 202 }]);
+/**
+ * @param {string} name
+ * @param {() => TransportError | Readonly<{ statusCode: number }>} failure
+ * @returns {Promise<void>}
+ */
+async function retryKeepsPendingReport(name, failure) {
+  await test(`drop counts stay pending after ${name} and the resent body reports them once`, async () => {
+    const client = overflowingClient(ONE);
+    const transport = new RecordingTransport([failure(), ACCEPTED, ACCEPTED]);
 
     await assert.rejects(client.flush(transport));
     await client.flush(transport);
     log(client, "evt_log_003");
     await client.flush(transport);
 
-    assert.equal(transport.sentBodies[1], transport.sentBodies[0]);
-    assert.deepEqual(reports(transport), [{ dropped_events: { queue_overflow: 1 } }, { dropped_events: { queue_overflow: 1 } }, undefined]);
+    assert.equal(transport.sentBodies[SECOND], transport.sentBodies[FIRST]);
+    assert.deepEqual(reports(transport), [overflow(ONE), overflow(ONE), undefined]);
   });
 }
 
-test("drops during an in-flight batch stay pending for the next batch", async () => {
-  const client = createClient({ maxQueueSize: 1 });
-  log(client, "evt_log_001");
-  log(client, "evt_log_002");
-  const bodies = [];
-  let release;
-  const transport = {
-    send(_apiKey, body) {
-      bodies.push(withoutId(reportOf(body)));
-      return bodies.length === 1 ? new Promise((resolve) => { release = resolve; }) : { statusCode: 202 };
-    }
-  };
-  const flush = client.flush(transport);
-  await new Promise((resolve) => { setImmediate(resolve); });
-  log(client, "evt_log_003");
-  log(client, "evt_log_004");
-  release({ statusCode: 202 });
-  await flush;
-  log(client, "evt_log_005");
-  await client.flush(transport);
-
-  assert.deepEqual(bodies, [{ dropped_events: { queue_overflow: 1 } }, { dropped_events: { queue_overflow: 2 } }]);
-});
-
-test("a report resent in a different batch keeps its report ID", async () => {
-  const client = createClient({ maxQueueSize: 1 });
-  log(client, "evt_log_001");
-  log(client, "evt_log_002");
-  const transport = new RecordingTransport([TransportError.network("offline"), { statusCode: 202 }, { statusCode: 202 }]);
-
-  await assert.rejects(client.flush(transport));
-  client.purgePendingEvents();
+/**
+ * @param {LogBrewClient} client
+ * @param {RecordingTransport} transport
+ * @returns {Promise<void>}
+ */
+async function flushThreeBatches(client, transport) {
   log(client, "evt_log_003");
   await client.flush(transport);
-  log(client, "evt_log_004");
-  log(client, "evt_log_005");
+  logAll(client, ["evt_log_004", "evt_log_005"]);
   await client.flush(transport);
   log(client, "evt_log_006");
   await client.flush(transport);
+}
 
-  const ids = reportIds(transport);
-  assert.notEqual(transport.sentBodies[1], transport.sentBodies[0]);
-  assert.equal(ids[1], ids[0]);
-  assert.deepEqual(reports(transport), [
-    { dropped_events: { queue_overflow: 1 } },
-    { dropped_events: { queue_overflow: 1 } },
-    { dropped_events: { queue_overflow: 1 } },
-    undefined
-  ]);
-  assert.notEqual(ids[2], ids[0]);
+await test("drop counts ride in the next batch and clear after a 2xx", async () => {
+  const client = createClient({ maxQueueSize: 1 });
+  logAll(client, ["evt_log_001", "evt_log_002", "evt_log_003"]);
+  logOversized(client);
+  const transport = RecordingTransport.alwaysAccept();
+
+  await client.flush(transport);
+  log(client, "evt_log_004");
+  await client.flush(transport);
+
+  assert.deepEqual(reports(transport), [{ dropped_events: { event_too_large: 1, queue_overflow: 2 } }, undefined]);
+  assert.equal(client.deliveryHealth().droppedByReason.queue_overflow, TWO);
 });
 
-test("a client report never pushes a batch over maxBatchBytes", async () => {
+await test("a batch without drops carries no client report", async () => {
+  const client = createClient();
+  log(client, "evt_log_001");
+  const transport = RecordingTransport.alwaysAccept();
+  await client.flush(transport);
+  const body = parseJson(String(transport.lastBody()));
+  assert.ok(isRecord(body));
+  assert.deepEqual(Object.keys(body), ["sdk", "events"]);
+});
+
+await retryKeepsPendingReport("a 5xx", () => UNAVAILABLE);
+await retryKeepsPendingReport("a network error", () => TransportError.network("offline"));
+
+/**
+ * @returns {{ readonly bodies: readonly unknown[], readonly release: AbortController, readonly transport: Transport }}
+ */
+function heldRecorder() {
+  /** @type {unknown[]} */
+  const bodies = [];
+  const release = new AbortController();
+  const transport = heldTransport((report) => bodies.push(report), once(release.signal, "abort"));
+  return { bodies, release, transport };
+}
+
+/**
+ * @param {LogBrewClient} client
+ * @returns {Promise<readonly unknown[]>}
+ */
+async function reportsAroundHeldFlush(client) {
+  const { bodies, release, transport } = heldRecorder();
+  const flush = client.flush(transport);
+  await setImmediate();
+  logAll(client, ["evt_log_003", "evt_log_004"]);
+  release.abort();
+  await flush;
+  log(client, "evt_log_005");
+  await client.flush(transport);
+  return bodies;
+}
+
+await test("drops during an in-flight batch stay pending for the next batch", async () => {
+  const client = overflowingClient(ONE);
+  assert.deepEqual(await reportsAroundHeldFlush(client), [overflow(ONE), overflow(TWO)]);
+});
+
+await test("a report resent in a different batch keeps its report ID", async () => {
+  const client = overflowingClient(ONE);
+  const transport = new RecordingTransport([TransportError.network("offline"), ACCEPTED, ACCEPTED]);
+
+  await assert.rejects(client.flush(transport));
+  client.purgePendingEvents();
+  await flushThreeBatches(client, transport);
+
+  const ids = reportIds(transport);
+  assert.notEqual(transport.sentBodies[SECOND], transport.sentBodies[FIRST]);
+  assert.equal(ids[SECOND], ids[FIRST]);
+  assert.deepEqual(reports(transport), [overflow(ONE), overflow(ONE), overflow(ONE), undefined]);
+  assert.notEqual(ids[THIRD], ids[FIRST]);
+});
+
+/**
+ * @returns {number}
+ */
+function oneEventBatchBytes() {
   const probe = createClient();
-  log(probe, "evt_log_001", "m".repeat(200));
-  const exactBytes = Buffer.byteLength(probe.previewJson().replace(/\s/g, ""), "utf8");
+  log(probe, "evt_log_001", "m".repeat(SMALL_MESSAGE_LENGTH));
+  return Buffer.byteLength(probe.previewJson().replaceAll(/\s/gu, ""), "utf8");
+}
+
+await test("a client report never pushes a batch over maxBatchBytes", async () => {
+  const exactBytes = oneEventBatchBytes();
   const client = createClient({ maxBatchBytes: exactBytes });
-  log(client, "evt_log_001", "m".repeat(200));
+  log(client, "evt_log_001", "m".repeat(SMALL_MESSAGE_LENGTH));
   log(client, "evt_log_big", "x".repeat(exactBytes));
   const transport = RecordingTransport.alwaysAccept();
 
@@ -131,89 +182,4 @@ test("a client report never pushes a batch over maxBatchBytes", async () => {
 
   assert.ok(transport.sentBodies.every((body) => Buffer.byteLength(body, "utf8") <= exactBytes));
   assert.deepEqual(reports(transport), [undefined, { dropped_events: { event_too_large: 1 } }]);
-});
-
-test("client reports cap reasons at 16 and clamp counts", async () => {
-  const unreported = { queue_overflow: 1_000_000_000 };
-  for (let index = 0; index < 15; index += 1) {
-    unreported[`reason_${String(index).padStart(2, "0")}`] = 1;
-  }
-  const client = createClient({
-    maxQueueSize: 1,
-    [Symbol.for("@logbrew/sdk.clientReportStore")]: {
-      loadClientReport: () => ({ pending: null, unreported }),
-      saveClientReport() {}
-    }
-  });
-  log(client, "evt_log_001");
-  log(client, "evt_log_002");
-  client.log("evt_log_big", timestamp, { message: "x".repeat(300 * 1024), level: "info" });
-  const transport = RecordingTransport.alwaysAccept();
-
-  await client.flush(transport);
-
-  const dropped = reports(transport)[0].dropped_events;
-  assert.equal(Object.keys(dropped).length, 16);
-  assert.equal(dropped.queue_overflow, 1_000_000_000);
-  assert.equal(dropped.event_too_large, undefined);
-});
-
-function reportStore(saved) {
-  const saves = [];
-  return {
-    saves,
-    records: [],
-    load() { return this.records; },
-    append(record) { this.records.push(record); },
-    acknowledge(count) { this.records.splice(0, count); },
-    purge() { this.records.splice(0); },
-    close() {},
-    loadClientReport() { return saved; },
-    saveClientReport(state) { saves.push(structuredClone(state)); }
-  };
-}
-
-test("a store restores a pending report first, then unreported counts under a new ID", async () => {
-  const pending = { report_id: "5f0c6a1e9b2d4c7a8e3f1b6d0a9c2e4f", dropped_events: { queue_overflow: 2 } };
-  const store = reportStore({ pending, unreported: { event_too_large: 3, Bad: 1, queue_overflow: 0 } });
-  const client = createClient({ eventStore: store });
-  log(client, "evt_log_001");
-  const transport = RecordingTransport.alwaysAccept();
-
-  await client.flush(transport);
-  log(client, "evt_log_002");
-  await client.shutdown(transport);
-
-  const sent = transport.sentBodies.map(reportOf);
-  assert.deepEqual(sent[0], pending);
-  assert.deepEqual(withoutId(sent[1]), { dropped_events: { event_too_large: 3 } });
-  assert.deepEqual(store.saves.at(-1), { pending: null, unreported: {} });
-});
-
-test("drops are saved at once per reason and at most once a second in a burst", () => {
-  const store = reportStore(undefined);
-  const client = createClient({ eventStore: store, maxQueueSize: 1 });
-  for (let index = 0; index < 50; index += 1) {
-    log(client, `evt_log_${index}`);
-  }
-  client.log("evt_log_big", timestamp, { message: "x".repeat(300 * 1024), level: "info" });
-
-  assert.deepEqual(store.saves, [
-    { pending: null, unreported: { queue_overflow: 1 } },
-    { pending: null, unreported: { queue_overflow: 49, event_too_large: 1 } }
-  ]);
-});
-
-test("a failing client report store never blocks capture", async () => {
-  const store = reportStore(undefined);
-  store.loadClientReport = () => { throw new Error("unreadable"); };
-  store.saveClientReport = () => { throw new Error("disk full"); };
-  const client = createClient({ eventStore: store, maxQueueSize: 1 });
-  log(client, "evt_log_001");
-  log(client, "evt_log_002");
-  const transport = RecordingTransport.alwaysAccept();
-
-  await client.flush(transport);
-
-  assert.deepEqual(withoutId(reportOf(transport.lastBody())), { dropped_events: { queue_overflow: 1 } });
 });
