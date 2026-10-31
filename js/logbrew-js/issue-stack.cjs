@@ -1,276 +1,234 @@
 "use strict";
 
+const { SdkError } = require("./sdk-error.cjs");
+const { isRecord } = require("./validation.cjs");
+const {
+  SAFE_DEBUG_ID_PATTERN,
+  basename,
+  frameCoordinateFromText,
+  frameIdentity,
+  sanitizeFrameFilename
+} = require("./issue-stack-text.cjs");
+const { validateIssueStackFrames, validateNativeStackFrames } = require("./issue-stack-frames.cjs");
+
+/**
+ * @import { IssueStackFrame } from "./index.cjs"
+ * @typedef {{ frames: IssueStackFrame[], truncated: boolean }} StackEvidence
+ * @typedef {readonly (readonly [string, unknown])[]} DebugIdEntries
+ * @typedef {{ functionName: string | undefined, location: string }} FrameLocation
+ * @typedef {{ readonly debugId: string, readonly path: string }} DebugIdCandidate
+ */
+
 const MAX_ISSUE_STACK_FRAMES = 32;
 const MAX_ISSUE_STACK_FUNCTION_LENGTH = 256;
-const MAX_ISSUE_STACK_MODULE_LENGTH = 512;
-const SAFE_DEBUG_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-const NATIVE_IMAGE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const NATIVE_OFFSET_PATTERN = /^[0-9a-f]{16}$/u;
-const NATIVE_ARCHITECTURES = new Set(["arm", "arm64", "arm64e", "x86", "x86_64"]);
-const LOCAL_ABSOLUTE_PATH_PATTERN = /(?:^|\s)(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
+const MAX_RUNTIME_DEBUG_IDS = 512;
+const MIN_FRAME_LOCATION_PARTS = 3;
+const NO_OFFSET = 0;
+const HERMES_BYTECODE_OFFSET = 1;
+const HERMES_BYTECODE_LINE = 1;
+const UNIQUE_MATCH = 1;
+const TEXT_START = 0;
+const MARKER_WIDTH = 1;
+const LAST_CHARACTER = -1;
+const CHROME_FRAME_PREFIX = "at ";
+const HERMES_BYTECODE_PREFIX = "address at ";
+const LINE_BREAK_PATTERN = /\r?\n/u;
+const LEADING_SLASHES_PATTERN = /^\/+/u;
 const DEBUG_ID_REGISTRY = Symbol.for("logbrew.release-artifact.debug-ids");
 
-function buildIssueStackHelpers({ SdkError }) {
-  function javascriptStackEvidence(stack, debugIdMap) {
-    if (typeof stack !== "string" || stack.trim() === "") {
-      return { frames: [], truncated: false };
-    }
-    const frames = [];
-    let truncated = false;
-    for (const rawLine of stack.split(/\r?\n/u)) {
-      const parsed = parseJavaScriptStackFrame(rawLine);
-      if (parsed) {
-        if (frames.length === MAX_ISSUE_STACK_FRAMES) {
-          truncated = true;
-          break;
-        }
-        const debugId = debugIdForFrame(parsed.filename, debugIdMap, SdkError);
-        frames.push({ ...parsed, ...(debugId ? { debugId } : {}) });
-      }
-    }
-    return { frames, truncated };
-  }
-
-  function validateIssueStackFrames(stackFrames) {
-    if (stackFrames === undefined) {
-      return undefined;
-    }
-    if (!Array.isArray(stackFrames) || stackFrames.length === 0 || stackFrames.length > MAX_ISSUE_STACK_FRAMES) {
-      throw new SdkError("validation_error", `issue stackFrames must contain 1-${MAX_ISSUE_STACK_FRAMES} frames`);
-    }
-    return stackFrames.map((frame) => {
-      if (!frame || Array.isArray(frame) || typeof frame !== "object") {
-        throw new SdkError("validation_error", "issue stack frame must be an object");
-      }
-      if (typeof frame.filename !== "string") {
-        throw new SdkError("validation_error", "issue stack frame filename is invalid");
-      }
-      const filename = sanitizeFrameFilename(frame.filename);
-      if (!filename || filename.length > 2048 || hasControlCharacter(filename)) {
-        throw new SdkError("validation_error", "issue stack frame filename is invalid");
-      }
-      const line = frameCoordinateFromText(frame.line);
-      const column = frameCoordinateFromText(frame.column);
-      if (line === null || column === null || line > 2147483647 || column > 2147483647) {
-        throw new SdkError("validation_error", "issue stack frame coordinates must be positive integers");
-      }
-      const debugId = frame.debugId === undefined
-        ? undefined
-        : typeof frame.debugId === "string" && SAFE_DEBUG_ID_PATTERN.test(frame.debugId.trim())
-          ? frame.debugId.trim().toLowerCase()
-          : null;
-      if (debugId === null) {
-        throw new SdkError("validation_error", "issue stack frame debugId is invalid");
-      }
-      const functionName = optionalFrameIdentity(frame.function, MAX_ISSUE_STACK_FUNCTION_LENGTH);
-      if (functionName === null) {
-        throw new SdkError("validation_error", "issue stack frame function is invalid");
-      }
-      const moduleName = optionalFrameIdentity(frame.module, MAX_ISSUE_STACK_MODULE_LENGTH, true);
-      if (moduleName === null) {
-        throw new SdkError("validation_error", "issue stack frame module is invalid");
-      }
-      const inApp = frame.inApp === undefined
-        ? undefined
-        : typeof frame.inApp === "boolean"
-          ? frame.inApp
-          : null;
-      if (inApp === null) {
-        throw new SdkError("validation_error", "issue stack frame inApp is invalid");
-      }
-      return {
-        filename,
-        line,
-        column,
-        ...(functionName ? { function: functionName } : {}),
-        ...(moduleName ? { module: moduleName } : {}),
-        ...(inApp !== undefined ? { inApp } : {}),
-        ...(debugId ? { debugId } : {})
-      };
-    });
-  }
-
-  function validateNativeStackFrames(frames) {
-    if (frames === undefined) {
-      return undefined;
-    }
-    if (!Array.isArray(frames) || frames.length === 0 || frames.length > MAX_ISSUE_STACK_FRAMES) {
-      throw new SdkError("validation_error", `issue nativeStackFrames must contain 1-${MAX_ISSUE_STACK_FRAMES} frames`);
-    }
-    return frames.map((frame) => {
-      const keys = frame && !Array.isArray(frame) && typeof frame === "object" ? Object.keys(frame) : [];
-      if (keys.length !== 3
-        || !keys.every((key) => ["imageUuid", "architecture", "instructionOffset"].includes(key))
-        || typeof frame.imageUuid !== "string" || !NATIVE_IMAGE_UUID_PATTERN.test(frame.imageUuid)
-        || !NATIVE_ARCHITECTURES.has(frame.architecture)
-        || typeof frame.instructionOffset !== "string" || !NATIVE_OFFSET_PATTERN.test(frame.instructionOffset)) {
-        throw new SdkError("validation_error", "issue native stack frame is invalid");
-      }
-      return {
-        imageUuid: frame.imageUuid,
-        architecture: frame.architecture,
-        instructionOffset: frame.instructionOffset
-      };
-    });
-  }
-
-  return { javascriptStackEvidence, validateIssueStackFrames, validateNativeStackFrames };
-}
-
-function parseJavaScriptStackFrame(rawLine) {
-  const line = typeof rawLine === "string" ? rawLine.trim() : "";
-  if (!line) {
-    return null;
-  }
-  let location = line;
-  let functionName;
-  if (location.startsWith("at ")) {
-    location = location.slice(3).trim();
-    if (location.endsWith(")") && location.includes("(")) {
-      const marker = location.lastIndexOf("(");
-      functionName = generatedFrameFunction(location.slice(0, marker));
-      location = location.slice(marker + 1, -1);
-    }
-  } else if (location.includes("@")) {
-    const marker = location.lastIndexOf("@");
-    functionName = generatedFrameFunction(location.slice(0, marker));
-    location = location.slice(marker + 1);
-  }
-  const hermesBytecode = location.startsWith("address at ");
-  location = location.replace(/^address at /u, "");
-  const parts = location.split(":");
-  if (parts.length < 3) {
-    return null;
-  }
-  const rawColumn = parts.pop();
-  const lineNumber = frameCoordinateFromText(parts.pop());
-  const column = frameCoordinateFromText(rawColumn, hermesBytecode && lineNumber === 1 ? 1 : 0);
-  const filename = sanitizeFrameFilename(parts.join(":"));
-  if (!filename || lineNumber === null || column === null) {
-    return null;
-  }
-  return {
-    filename,
-    line: lineNumber,
-    column,
-    ...(functionName ? { function: functionName } : {})
-  };
-}
-
-function optionalFrameIdentity(value, maxLength, rejectLocationText = false) {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "string") {
-    return null;
-  }
-  const identity = value.trim();
-  if (!identity
-    || Array.from(identity).length > maxLength
-    || hasControlCharacter(identity)
-    || (rejectLocationText && (identity.includes("?") || identity.includes("#")))) {
-    return null;
-  }
-  return identity;
-}
-
+/**
+ * @param {string} value
+ * @returns {string | undefined}
+ */
 function generatedFrameFunction(value) {
-  const functionName = optionalFrameIdentity(value, MAX_ISSUE_STACK_FUNCTION_LENGTH);
-  if (!functionName
+  const functionName = frameIdentity(value, MAX_ISSUE_STACK_FUNCTION_LENGTH, false);
+  if (
+    functionName === undefined
     || functionName.includes("@")
     || functionName.includes("/")
     || functionName.includes("\\")
     || functionName.includes("?")
-    || functionName.includes("#")) {
+    || functionName.includes("#")
+  ) {
     return undefined;
   }
   return functionName;
 }
 
-function frameCoordinateFromText(value, offset = 0) {
-  const text = String(value);
-  if (!/^(?:0|[1-9][0-9]*)$/u.test(text)) {
-    return null;
+/**
+ * @param {string} line
+ * @returns {FrameLocation}
+ */
+function splitFrameFunction(line) {
+  if (line.startsWith(CHROME_FRAME_PREFIX)) {
+    const location = line.slice(CHROME_FRAME_PREFIX.length).trim();
+    if (!location.endsWith(")") || !location.includes("(")) {
+      return { functionName: undefined, location };
+    }
+    const marker = location.lastIndexOf("(");
+    return {
+      functionName: generatedFrameFunction(location.slice(TEXT_START, marker)),
+      location: location.slice(marker + MARKER_WIDTH, LAST_CHARACTER)
+    };
   }
-  const parsed = Number(text) + offset;
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  if (!line.includes("@")) {
+    return { functionName: undefined, location: line };
+  }
+  const marker = line.lastIndexOf("@");
+  return {
+    functionName: generatedFrameFunction(line.slice(TEXT_START, marker)),
+    location: line.slice(marker + MARKER_WIDTH)
+  };
 }
 
-function sanitizeFrameFilename(value) {
-  let filename = String(value ?? "").trim();
-  if (!filename) {
-    return "";
+/**
+ * @param {string} location
+ * @param {boolean} hermesBytecode
+ * @returns {Omit<IssueStackFrame, "function"> | undefined}
+ */
+function frameCoordinates(location, hermesBytecode) {
+  const parts = location.split(":");
+  if (parts.length < MIN_FRAME_LOCATION_PARTS) {
+    return undefined;
   }
-  filename = filename.split("?", 1)[0].split("#", 1)[0];
-  if (filename.startsWith("file://")) {
-    filename = filename.slice("file://".length);
+  const rawColumn = parts.pop();
+  const lineNumber = frameCoordinateFromText(parts.pop());
+  const column = frameCoordinateFromText(
+    rawColumn,
+    hermesBytecode && lineNumber === HERMES_BYTECODE_LINE ? HERMES_BYTECODE_OFFSET : NO_OFFSET
+  );
+  const filename = sanitizeFrameFilename(parts.join(":"));
+  if (filename === "" || lineNumber === undefined || column === undefined) {
+    return undefined;
   }
-  if (LOCAL_ABSOLUTE_PATH_PATTERN.test(filename)) {
-    return basename(filename);
-  }
-  return filename;
+  return { column, filename, line: lineNumber };
 }
 
-function debugIdForFrame(filename, debugIdMap, SdkError) {
-  if (debugIdMap !== undefined && debugIdMap !== null
-    && (!debugIdMap || Array.isArray(debugIdMap) || typeof debugIdMap !== "object")) {
-    throw new SdkError("validation_error", "debugIdMap must be an object");
+/**
+ * @param {string} rawLine
+ * @returns {IssueStackFrame | undefined}
+ */
+function parseJavaScriptStackFrame(rawLine) {
+  const line = rawLine.trim();
+  if (line === "") {
+    return undefined;
   }
-  return debugIdFromEntries(filename, debugIdMap ? Object.entries(debugIdMap) : [])
-    ?? debugIdFromEntries(filename, runtimeDebugIdEntries());
+  const { functionName, location } = splitFrameFunction(line);
+  const hermesBytecode = location.startsWith(HERMES_BYTECODE_PREFIX);
+  const coordinates = frameCoordinates(
+    hermesBytecode ? location.slice(HERMES_BYTECODE_PREFIX.length) : location,
+    hermesBytecode
+  );
+  if (coordinates === undefined) {
+    return undefined;
+  }
+  return functionName === undefined ? coordinates : { ...coordinates, function: functionName };
 }
 
+/**
+ * @param {string} filename
+ * @param {string} candidate
+ * @returns {boolean}
+ */
+function matchesFramePath(filename, candidate) {
+  return filename === candidate
+    || (candidate.includes("/") && filename.endsWith(`/${candidate.replace(LEADING_SLASHES_PATTERN, "")}`));
+}
+
+/**
+ * @param {string} filename
+ * @param {DebugIdEntries} entries
+ * @returns {string | undefined}
+ */
 function debugIdFromEntries(filename, entries) {
   const normalizedFilename = sanitizeFrameFilename(filename);
   const frameBasename = basename(normalizedFilename);
-  let basenameMatch = null;
-  for (const [candidate, debugId] of entries) {
-    if (typeof debugId !== "string" || !SAFE_DEBUG_ID_PATTERN.test(debugId.trim())) {
-      continue;
-    }
-    const normalizedCandidate = sanitizeFrameFilename(candidate);
-    const normalizedDebugId = debugId.trim().toLowerCase();
-    if (normalizedFilename === normalizedCandidate
-      || (normalizedCandidate.includes("/")
-        && normalizedFilename.endsWith(`/${normalizedCandidate.replace(/^\/+/, "")}`))) {
-      return normalizedDebugId;
-    }
-    if (frameBasename === basename(normalizedCandidate)) {
-      basenameMatch = basenameMatch === null || basenameMatch === normalizedDebugId
-        ? normalizedDebugId
-        : false;
-    }
+  /** @type {readonly DebugIdCandidate[]} */
+  const candidates = entries.flatMap(([candidate, debugId]) =>
+    typeof debugId === "string" && SAFE_DEBUG_ID_PATTERN.test(debugId.trim())
+      ? [{ debugId: debugId.trim().toLowerCase(), path: sanitizeFrameFilename(candidate) }]
+      : []);
+  const exact = candidates.find((candidate) => matchesFramePath(normalizedFilename, candidate.path));
+  if (exact !== undefined) {
+    return exact.debugId;
   }
-  return typeof basenameMatch === "string" ? basenameMatch : null;
+  const basenameIds = new Set(
+    candidates.filter((candidate) => basename(candidate.path) === frameBasename).map((candidate) => candidate.debugId)
+  );
+  const [onlyId] = basenameIds;
+  return basenameIds.size === UNIQUE_MATCH ? onlyId : undefined;
 }
 
+/**
+ * @returns {DebugIdEntries}
+ */
 function runtimeDebugIdEntries() {
   try {
-    const registry = typeof globalThis === "object"
-      ? Object.getOwnPropertyDescriptor(globalThis, DEBUG_ID_REGISTRY)?.value
-      : null;
-    if (!registry || Array.isArray(registry) || typeof registry !== "object") {
+    /** @type {unknown} */
+    const registry = Object.getOwnPropertyDescriptor(globalThis, DEBUG_ID_REGISTRY)?.value;
+    if (!isRecord(registry)) {
       return [];
     }
-    return Object.entries(Object.getOwnPropertyDescriptors(registry)).slice(0, 512).flatMap(
-      ([candidate, descriptor]) => "value" in descriptor ? [[candidate, descriptor.value]] : []
-    );
+    return Object.getOwnPropertyNames(registry)
+      .slice(TEXT_START, MAX_RUNTIME_DEBUG_IDS)
+      .flatMap((candidate) => {
+        const descriptor = Object.getOwnPropertyDescriptor(registry, candidate);
+        /** @type {unknown} */
+        const value = descriptor?.value;
+        return descriptor !== undefined && "value" in descriptor ? [[candidate, value]] : [];
+      });
   } catch {
     return [];
   }
 }
 
-function basename(value) {
-  const normalized = String(value).replace(/\\/gu, "/").replace(/\/+$/u, "");
-  const marker = normalized.lastIndexOf("/");
-  return marker === -1 ? normalized : normalized.slice(marker + 1);
+/**
+ * @param {string} filename
+ * @param {unknown} debugIdMap
+ * @returns {string | undefined}
+ */
+function debugIdForFrame(filename, debugIdMap) {
+  if (debugIdMap === undefined || debugIdMap === null) {
+    return debugIdFromEntries(filename, runtimeDebugIdEntries());
+  }
+  if (!isRecord(debugIdMap)) {
+    throw new SdkError("validation_error", "debugIdMap must be an object");
+  }
+  return debugIdFromEntries(filename, Object.entries(debugIdMap))
+    ?? debugIdFromEntries(filename, runtimeDebugIdEntries());
 }
 
-function hasControlCharacter(value) {
-  return Array.from(value).some((character) => {
-    const code = character.codePointAt(0);
-    return code !== undefined && (code <= 31 || code === 127);
-  });
+/**
+ * @param {Readonly<IssueStackFrame>} frame
+ * @param {unknown} debugIdMap
+ * @returns {IssueStackFrame}
+ */
+function withDebugId(frame, debugIdMap) {
+  const debugId = debugIdForFrame(frame.filename, debugIdMap);
+  return debugId === undefined ? frame : { ...frame, debugId };
 }
 
-module.exports = { buildIssueStackHelpers };
+/**
+ * @param {unknown} stack
+ * @param {unknown} debugIdMap
+ * @returns {StackEvidence}
+ */
+function javascriptStackEvidence(stack, debugIdMap) {
+  if (typeof stack !== "string" || stack.trim() === "") {
+    return { frames: [], truncated: false };
+  }
+  /** @type {IssueStackFrame[]} */
+  const frames = [];
+  for (const rawLine of stack.split(LINE_BREAK_PATTERN)) {
+    const parsed = parseJavaScriptStackFrame(rawLine);
+    if (parsed !== undefined) {
+      if (frames.length === MAX_ISSUE_STACK_FRAMES) {
+        return { frames, truncated: true };
+      }
+      frames.push(withDebugId(parsed, debugIdMap));
+    }
+  }
+  return { frames, truncated: false };
+}
+
+module.exports = { javascriptStackEvidence, validateIssueStackFrames, validateNativeStackFrames };
