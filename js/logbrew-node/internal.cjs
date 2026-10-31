@@ -38,6 +38,28 @@ function readMember(value, name) {
   return Reflect.get(new Object(value), name);
 }
 
+/** @type {(value: unknown) => boolean} */
+const isTruthy = Boolean;
+
+/** @type {(value: unknown) => string} */
+const stringValue = String;
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown>}
+ */
+function ownEnumerableProperties(value) {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  const source = new Object(value);
+  return Object.fromEntries(
+    Reflect.ownKeys(source).flatMap((key) => (
+      Object.getOwnPropertyDescriptor(source, key)?.enumerable === true ? [[key, Reflect.get(source, key)]] : []
+    ))
+  );
+}
+
 /**
  * @param {() => void} operation
  * @returns {boolean}
@@ -96,6 +118,21 @@ function callMethod(target, name, args) {
 }
 
 /**
+ * @param {unknown} target
+ * @param {unknown} thisArg
+ * @param {readonly unknown[]} args
+ * @returns {unknown}
+ */
+function applyFunction(target, thisArg, args) {
+  if (typeof target !== "function") {
+    throw new TypeError(`${typeof target} is not a function`);
+  }
+  /** @type {unknown} */
+  const result = Reflect.apply(target, thisArg, args);
+  return result;
+}
+
+/**
  * @param {unknown} value
  * @returns {string}
  */
@@ -133,14 +170,18 @@ function sanitizeUrl(value) {
 }
 
 module.exports = {
+  applyFunction,
   attempt,
   boundedText,
   callMethod,
   callOptional,
   isObjectLike,
+  isTruthy,
   isWeakKey,
+  ownEnumerableProperties,
   readMember,
   readOptionalMember,
   sanitizeUrl,
+  stringValue,
   templateText
 };
