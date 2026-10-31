@@ -61,6 +61,17 @@
       "error",
       "type"
     ],
+    "typescript/no-misused-spread": [
+      "error",
+      {
+        "allow": [
+          {
+            "from": "lib",
+            "name": "string"
+          }
+        ]
+      }
+    ],
     "typescript/prefer-readonly-parameter-types": [
       "error",
       {

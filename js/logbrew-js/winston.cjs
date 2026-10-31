@@ -1,7 +1,12 @@
 const { Writable } = require("node:stream");
 
 const { LogBrewClient, SdkError } = require("./core.cjs");
-const { buildLogContextHelpers } = require("./log-context.cjs");
+const {
+  compactMetadata,
+  isMetadataValue,
+  traceFromProvider,
+  traceMetadataFromLogContext
+} = require("./log-context.cjs");
 
 // Runtime packages with request scopes (such as @logbrew/node) register a recorder that keeps
 // breadcrumbs with the active request instead of the whole client.
@@ -16,12 +21,6 @@ const WINSTON_RESERVED_FIELDS = new Set([
   "error",
   "stack"
 ]);
-const {
-  compactMetadata,
-  isMetadataValue,
-  traceFromProvider,
-  traceMetadataFromLogContext
-} = buildLogContextHelpers({ SdkError });
 
 function createLogBrewWinstonTransport(config) {
   if (!config || typeof config !== "object") {

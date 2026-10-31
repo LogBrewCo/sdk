@@ -1,10 +1,37 @@
 const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
 const { buildIssueDiagnosticsHelpers } = require("./issue-diagnostics.cjs");
-const { buildIssueStackHelpers } = require("./issue-stack.cjs");
-const { buildLogContextHelpers } = require("./log-context.cjs");
+const { javascriptStackEvidence, validateIssueStackFrames, validateNativeStackFrames } = require("./issue-stack.cjs");
+const {
+  compactMetadata,
+  isMetadataValue,
+  normalizeLogTraceContext,
+  traceFromProvider,
+  traceMetadataFromLogContext
+} = require("./log-context.cjs");
 const { buildOpenTelemetryHelpers } = require("./opentelemetry.cjs");
 const { buildTelemetryContextHelpers } = require("./telemetry-context.cjs");
-const { buildTraceContextHelpers } = require("./trace-context.cjs");
+const { SdkError, retryAfterMsOrUndefined } = require("./sdk-error.cjs");
+const { TransportError } = require("./transport-error.cjs");
+const {
+  createBaggage,
+  createTraceContextHeaders,
+  createTraceparent,
+  createTraceparentHeaders,
+  createTracestate,
+  parseBaggage,
+  parseTraceparent,
+  parseTracestate
+} = require("./trace-context.cjs");
+const {
+  requireAllowedValue,
+  requireFiniteNumber,
+  requireNonEmpty,
+  requireNonNegativeInteger,
+  requirePositiveInteger,
+  requireSpanId,
+  requireTimestamp,
+  requireTraceId
+} = require("./validation.cjs");
 
 const SEVERITY_ALIASES = new Map([
   ["trace", "info"],
@@ -80,10 +107,6 @@ const PINO_SENSITIVE_CONTEXT_FIELDS = new Set([
   "uri",
   "url"
 ]);
-const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$/u;
-const ZERO_TRACE_ID = "00000000000000000000000000000000";
-const ZERO_SPAN_ID = "0000000000000000";
-const RFC3339_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_EVENTS = 100;
@@ -129,34 +152,7 @@ const EVENT_VALIDATORS = new Map([
   ["action", validateAction],
   ["metric", validateMetric]
 ]);
-class SdkError extends Error {
-  constructor(code, message, details = {}) {
-    super(message);
-    this.name = "SdkError";
-    this.code = code;
-    const retryAfterMs = retryAfterMsOrUndefined(details?.retryAfterMs);
-    if (retryAfterMs !== undefined) {
-      this.retryAfterMs = retryAfterMs;
-    }
-    if (details?.retryable === true) {
-      this.retryable = true;
-    }
-  }
-}
 
-const {
-  compactMetadata,
-  isMetadataValue,
-  normalizeLogTraceContext,
-  traceFromProvider,
-  traceMetadataFromLogContext
-} = buildLogContextHelpers({ SdkError });
-
-const {
-  javascriptStackEvidence,
-  validateIssueStackFrames,
-  validateNativeStackFrames
-} = buildIssueStackHelpers({ SdkError });
 const {
   MAX_ISSUE_BREADCRUMBS,
   cloneIssueDiagnostics,
@@ -170,19 +166,6 @@ const {
   mergeTelemetryContexts,
   validateTelemetryContext
 } = buildTelemetryContextHelpers({ SdkError });
-
-class TransportError extends Error {
-  constructor(code, message, retryable = false) {
-    super(message);
-    this.name = "TransportError";
-    this.code = code;
-    this.retryable = retryable;
-  }
-
-  static network(message) {
-    return new TransportError("network_failure", message, true);
-  }
-}
 
 class RecordingTransport {
   constructor(scriptedResponses = [{ statusCode: 202 }]) {
@@ -2086,61 +2069,6 @@ function createNetworkMilestoneAttributes(request, options = {}) {
   };
 }
 
-function parseTraceparent(traceparent) {
-  if (typeof traceparent !== "string" || traceparent.trim() === "") {
-    throw new SdkError("validation_error", "traceparent must be non-empty");
-  }
-
-  const match = TRACEPARENT_PATTERN.exec(traceparent.trim());
-  if (!match) {
-    throw new SdkError("validation_error", "traceparent must use W3C version-traceId-parentSpanId-traceFlags format");
-  }
-
-  const version = match[1].toLowerCase();
-  const traceId = match[2].toLowerCase();
-  const parentSpanId = match[3].toLowerCase();
-  const traceFlags = match[4].toLowerCase();
-  if (version === "ff") {
-    throw new SdkError("validation_error", "traceparent version ff is not allowed");
-  }
-  if (traceId === ZERO_TRACE_ID) {
-    throw new SdkError("validation_error", "traceparent traceId must not be all zeros");
-  }
-  if (parentSpanId === ZERO_SPAN_ID) {
-    throw new SdkError("validation_error", "traceparent parentSpanId must not be all zeros");
-  }
-
-  return {
-    version,
-    traceId,
-    parentSpanId,
-    traceFlags,
-    sampled: (Number.parseInt(traceFlags, 16) & 1) === 1
-  };
-}
-
-function createTraceparent({ traceId, spanId, traceFlags = "01" }) {
-  requireTraceId(traceId);
-  requireSpanId("spanId", spanId);
-  requireTraceFlags(traceFlags);
-  return `00-${traceId.toLowerCase()}-${spanId.toLowerCase()}-${traceFlags.toLowerCase()}`;
-}
-
-function createTraceparentHeaders(input) {
-  return { traceparent: createTraceparent(input) };
-}
-
-const {
-  createBaggage,
-  createTraceContextHeaders,
-  createTracestate,
-  parseBaggage,
-  parseTracestate
-} = buildTraceContextHelpers({
-  SdkError,
-  createTraceparent
-});
-
 const createSupportTicketDraft = buildCreateSupportTicketDraft({
   SdkError,
   requireAllowedValue,
@@ -2441,94 +2369,6 @@ function addPinoErrorMetadata(metadata, error, includeErrorStack) {
   }
   if (typeof error === "string" && error.trim() !== "") {
     metadata.errorMessage = error;
-  }
-}
-
-function requireNonEmpty(label, value) {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new SdkError("validation_error", `${label} must be non-empty`);
-  }
-}
-
-function requireAllowedValue(label, value, allowedValues) {
-  requireNonEmpty(label, value);
-  if (!allowedValues.has(value)) {
-    throw new SdkError(
-      "validation_error",
-      `${label} must be one of: ${Array.from(allowedValues).join(", ")}`
-    );
-  }
-}
-
-function requireFiniteNumber(label, value) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new SdkError("validation_error", `${label} must be a finite number`);
-  }
-}
-
-function requirePositiveInteger(label, value) {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new SdkError("validation_error", `${label} must be a positive integer`);
-  }
-}
-
-function requireNonNegativeInteger(label, value) {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new SdkError("validation_error", `${label} must be a non-negative integer`);
-  }
-}
-
-function retryAfterMsOrUndefined(value) {
-  if (value === undefined) {
-    return undefined;
-  }
-  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-}
-
-function requireTraceId(traceId) {
-  if (typeof traceId !== "string" || !/^[0-9a-fA-F]{32}$/u.test(traceId)) {
-    throw new SdkError("validation_error", "traceId must be 32 lowercase or uppercase hex characters");
-  }
-  if (traceId.toLowerCase() === ZERO_TRACE_ID) {
-    throw new SdkError("validation_error", "traceId must not be all zeros");
-  }
-}
-
-function requireSpanId(label, spanId) {
-  if (typeof spanId !== "string" || !/^[0-9a-fA-F]{16}$/u.test(spanId)) {
-    throw new SdkError("validation_error", `${label} must be 16 lowercase or uppercase hex characters`);
-  }
-  if (spanId.toLowerCase() === ZERO_SPAN_ID) {
-    throw new SdkError("validation_error", `${label} must not be all zeros`);
-  }
-}
-
-function requireTraceFlags(traceFlags) {
-  if (typeof traceFlags !== "string" || !/^[0-9a-fA-F]{2}$/u.test(traceFlags)) {
-    throw new SdkError("validation_error", "traceFlags must be 2 lowercase or uppercase hex characters");
-  }
-}
-
-function requireTimestamp(timestamp) {
-  requireNonEmpty("timestamp", timestamp);
-  const timePortion = timestamp.split("T")[1];
-  if (!timestamp.endsWith("Z")
-    && !(timePortion && (timePortion.includes("+") || /.+-.+/.test(timePortion)))) {
-    throw new SdkError(
-      "validation_error",
-      `timestamp must include a timezone offset: ${timestamp}`
-    );
-  }
-  const match = timestamp.match(RFC3339_TIMESTAMP_PATTERN);
-  const calendar = new Date(0);
-  calendar.setUTCHours(0, 0, 0, 0);
-  calendar.setUTCFullYear(Number(match?.[1]), Number(match?.[2]) - 1, Number(match?.[3]));
-  if (!match
-    || Number(match[1]) === 0
-    || calendar.getUTCFullYear() !== Number(match[1])
-    || calendar.getUTCMonth() !== Number(match[2]) - 1
-    || calendar.getUTCDate() !== Number(match[3])) {
-    throw new SdkError("validation_error", `invalid timestamp: ${timestamp}`);
   }
 }
 
