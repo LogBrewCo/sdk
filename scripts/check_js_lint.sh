@@ -190,28 +190,57 @@ if [[ -n "$findings" ]]; then
   exit 1
 fi
 
+script_files() {
+  git ls-files --cached --others --exclude-standard -- "${@:-.}" |
+    { grep -E '\.(js|cjs|mjs|jsx|ts|cts|mts|tsx)$' || true; } | sort
+}
+
 joined=()
-pending=()
-for package_dir in js/logbrew-*/; do
-  package_dir="${package_dir%/}"
-  if [[ -f "$package_dir/tsconfig.json" ]]; then
-    joined+=("$package_dir")
-  else
-    pending+=("$package_dir")
+while IFS= read -r config; do
+  if grep -qE '"extends": "[./]*(js/)?tsconfig\.base\.json"' "$config"; then
+    joined+=("$(dirname "$config")")
   fi
+done < <(git ls-files --cached --others --exclude-standard -- '*tsconfig.json')
+pending=()
+while IFS= read -r entry; do
+  pending+=("$entry")
+done < <(sed -n 's/^pending = //p' quality/tool-matrix.toml | { grep -oE '"[^"]+"' || true; } | tr -d '"')
+
+covered_by() {
+  local unit
+  for unit in "$@"; do
+    if [[ "$file" == "$unit" || "$file" == "$unit/"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+coverage=""
+for entry in ${pending[@]+"${pending[@]}"}; do
+  if [[ -z "$(script_files "$entry")" ]]; then
+    coverage+="$entry: pending, but it holds no JavaScript or TypeScript; remove it from \`pending\`"$'\n'
+  fi
+  for unit in ${joined[@]+"${joined[@]}"}; do
+    if [[ "$entry" == "$unit" || "$entry" == "$unit/"* || "$unit" == "$entry/"* ]]; then
+      coverage+="$entry: pending, but $unit/tsconfig.json joined the strict gate; remove it from \`pending\`"$'\n'
+    fi
+  done
 done
-recorded_pending="$(sed -n 's/^pending = //p' quality/tool-matrix.toml | { grep -oE '"[^"]+"' || true; } | tr -d '"' | sort)"
-actual_pending="$(printf '%s\n' ${pending[@]+"${pending[@]}"} | sed '/^$/d' | sort)"
-if [[ "$recorded_pending" != "$actual_pending" ]]; then
-  printf 'quality/tool-matrix.toml `pending` must list exactly the packages without a strict tsconfig.json:\n%s\n' "$actual_pending" >&2
+while IFS= read -r file; do
+  if ! covered_by ${joined[@]+"${joined[@]}"} && ! covered_by ${pending[@]+"${pending[@]}"}; then
+    coverage+="$file: outside every strict project; add a tsconfig.json that extends js/tsconfig.base.json"$'\n'
+  fi
+done < <(script_files)
+if [[ -n "$coverage" ]]; then
+  printf '%s' "$coverage" >&2
   exit 1
 fi
 
 (cd js && bun install --frozen-lockfile --ignore-scripts --silent)
 
 source_files() {
-  find "$@" -type f \( -name '*.js' -o -name '*.cjs' -o -name '*.mjs' -o -name '*.d.ts' -o -name '*.d.cts' \) \
-    -not -path '*/node_modules/*' | sort
+  script_files "$@"
 }
 
 type_check() {
