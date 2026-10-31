@@ -50,7 +50,7 @@ const rxjs = require("rxjs");
  */
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
-const DEFAULT_SDK_VERSION = "0.1.9";
+const DEFAULT_SDK_VERSION = "0.1.10";
 const DEFAULT_MAX_RETRIES = 2;
 const MIN_DURATION_MS = 0;
 
