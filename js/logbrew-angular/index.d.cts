@@ -1,4 +1,4 @@
-import type { ErrorHandler, InjectionToken, Injector, Provider } from "@angular/core";
+import type { ErrorHandler, FactoryProvider, InjectionToken, Injector } from "@angular/core";
 import type {
   IssueAttributes,
   LogAttributes,
@@ -8,133 +8,140 @@ import type {
   TransportResponse
 } from "@logbrew/sdk";
 
-export type CreateLogBrewAngularClientConfig = {
-  apiKey?: string;
-  clientKey?: string;
-  context?: TelemetryContext;
-  sdkName?: string;
-  sdkVersion?: string;
-  maxRetries?: number;
+type CreateLogBrewAngularClientConfig = {
+  apiKey?: string | undefined;
+  clientKey?: string | undefined;
+  context?: TelemetryContext | undefined;
+  sdkName?: string | undefined;
+  sdkVersion?: string | undefined;
+  maxRetries?: number | undefined;
 };
 
-export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
+type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
 
-export type AngularTraceparentConfig = {
-  traceId?: string;
-  spanId?: string;
-  traceFlags?: string;
-  randomValues?: (length: number) => ArrayLike<number>;
+type AngularTraceparentConfig = {
+  traceId?: string | undefined;
+  spanId?: string | undefined;
+  traceFlags?: string | undefined;
+  randomValues?: ((length: number) => ArrayLike<number>) | undefined;
 };
 
-export type TraceparentFetchLike<TResponse = unknown> = (
-  input: any,
-  init?: any
+/** A fetch function: the global fetch or one with the same parameters. */
+type TraceparentFetchLike<TResponse = unknown> = (
+  input: RequestInfo | URL,
+  init?: RequestInit
 ) => Promise<TResponse> | TResponse;
 
-export type TraceparentFetchConfig<TResponse = unknown> = {
-  fetchImpl?: TraceparentFetchLike<TResponse>;
-  randomValues?: (length: number) => ArrayLike<number>;
-  traceFlags?: string;
-  traceparent?: string;
-  traceparentFactory?: (context: {
-    input: any;
-    init?: any;
-    url: string;
-  }) => string | undefined;
-  tracePropagationTargets?: TracePropagationTarget[];
+/** The request a traceparentFactory creates a traceparent for. */
+type TraceparentRequestContext = {
+  readonly input: RequestInfo | URL;
+  readonly init?: RequestInit | undefined;
+  readonly url: string;
 };
 
-export type LogBrewAngularContext = {
-  client: LogBrewClient;
-  logbrew: LogBrewClient;
-  transport: Transport;
-  previewJson(): string;
-  flush(): Promise<TransportResponse>;
-  shutdown(): Promise<TransportResponse>;
+type TraceparentFetchConfig<TResponse = unknown> = {
+  fetchImpl?: TraceparentFetchLike<TResponse> | undefined;
+  randomValues?: ((length: number) => ArrayLike<number>) | undefined;
+  traceFlags?: string | undefined;
+  traceparent?: string | undefined;
+  traceparentFactory?: ((context: TraceparentRequestContext) => string | undefined) | undefined;
+  tracePropagationTargets?: readonly TracePropagationTarget[] | undefined;
 };
 
-export type LogBrewAngularRuntimeContext = {
-  injector: Injector;
-  client: LogBrewClient;
+type LogBrewAngularContext = {
+  readonly client: LogBrewClient;
+  readonly logbrew: LogBrewClient;
+  readonly transport: Transport;
+  readonly previewJson: () => string;
+  readonly flush: () => Promise<TransportResponse>;
+  readonly shutdown: () => Promise<TransportResponse>;
 };
 
-export type LogBrewAngularCaptureContext = {
-  context: LogBrewAngularContext;
+type LogBrewAngularRuntimeContext = {
+  readonly injector: Injector;
+  readonly client: LogBrewClient;
 };
 
-export type LogBrewAngularErrorMetadata = {
-  component?: string;
-  info?: string;
-  path?: string;
-  route?: string;
+type LogBrewAngularCaptureContext = {
+  readonly context: LogBrewAngularContext;
 };
 
-export type LogBrewClientFactory = (context: { injector: Injector }) => LogBrewClient;
-export type LogBrewTransportFactory = (context: LogBrewAngularRuntimeContext) => Transport;
-export type LogBrewErrorDelegate = ErrorHandler | ((error: unknown) => void);
+type LogBrewAngularErrorMetadata = {
+  component?: string | undefined;
+  info?: string | undefined;
+  path?: string | undefined;
+  route?: string | undefined;
+};
 
-export type LogBrewAngularViewEvent = {
+type LogBrewClientFactory = (context: { readonly injector: Injector }) => LogBrewClient;
+type LogBrewTransportFactory = (context: LogBrewAngularRuntimeContext) => Transport;
+type LogBrewErrorDelegate = ErrorHandler | ((error: unknown) => void);
+
+type LogBrewAngularViewEvent = {
   id: string;
   timestamp: string;
   attributes: LogAttributes;
 };
 
-export type LogBrewAngularErrorEvent = {
+type LogBrewAngularErrorEvent = {
   id: string;
   timestamp: string;
   attributes: IssueAttributes;
 };
 
-export type LogBrewAngularOptions = CreateLogBrewAngularClientConfig & LogBrewAngularErrorMetadata & {
-  client?: LogBrewClient | LogBrewClientFactory;
-  transport?: Transport | LogBrewTransportFactory;
-  captureErrors?: boolean;
-  delegateErrorHandler?: LogBrewErrorDelegate;
-  now?: () => string;
-  errorEvent?: (error: unknown, context: LogBrewAngularCaptureContext) => LogBrewAngularErrorEvent;
-  onFlush?: (response: TransportResponse, context: LogBrewAngularCaptureContext) => void | Promise<void>;
-  onCaptureError?: (error: unknown, context: LogBrewAngularCaptureContext) => void | Promise<void>;
+type LogBrewAngularViewEventOptions = {
+  now?: (() => string) | undefined;
+  path?: string | undefined;
+  route?: string | undefined;
+  idFactory?: ((name: string, path: string) => string) | undefined;
+  metadata?: Readonly<Record<string, string | number | boolean | null>> | undefined;
 };
 
-export declare const LOG_BREW_ANGULAR_CONTEXT: InjectionToken<LogBrewAngularContext>;
-export declare function createLogBrewAngularClient(config?: CreateLogBrewAngularClientConfig): LogBrewClient;
-export declare function createAngularTraceparent(config?: AngularTraceparentConfig): string;
-export declare function createTraceparentFetch<TResponse = unknown>(
+type LogBrewAngularErrorEventOptions = {
+  now?: (() => string) | undefined;
+  idFactory?: ((error: unknown, context: LogBrewAngularErrorMetadata) => string) | undefined;
+};
+
+type LogBrewAngularOptions = CreateLogBrewAngularClientConfig & LogBrewAngularErrorMetadata & LogBrewAngularErrorEventOptions & {
+  client?: LogBrewClient | LogBrewClientFactory | undefined;
+  transport?: Transport | LogBrewTransportFactory | undefined;
+  captureErrors?: boolean | undefined;
+  delegateErrorHandler?: LogBrewErrorDelegate | undefined;
+  errorEvent?: ((error: unknown, context: LogBrewAngularCaptureContext) => LogBrewAngularErrorEvent) | undefined;
+  onFlush?: ((response: Readonly<TransportResponse>, context: LogBrewAngularCaptureContext) => void | Promise<void>) | undefined;
+  onCaptureError?: ((error: unknown, context: LogBrewAngularCaptureContext) => void | Promise<void>) | undefined;
+};
+
+declare const LOG_BREW_ANGULAR_CONTEXT: InjectionToken<LogBrewAngularContext>;
+declare function createLogBrewAngularClient(config?: CreateLogBrewAngularClientConfig): LogBrewClient;
+declare function createAngularTraceparent(config?: AngularTraceparentConfig): string;
+declare function createTraceparentFetch<TResponse = unknown>(
   config?: TraceparentFetchConfig<TResponse>
 ): TraceparentFetchLike<TResponse>;
-export declare function shouldPropagateTraceparent(
+declare function shouldPropagateTraceparent(
   url: string,
-  tracePropagationTargets?: TracePropagationTarget[]
+  tracePropagationTargets?: readonly TracePropagationTarget[]
 ): boolean;
-export declare function createLogBrewAngularContext(
+declare function createLogBrewAngularContext(
   client: LogBrewClient,
   transport: Transport
 ): LogBrewAngularContext;
-export declare function provideLogBrew(options?: LogBrewAngularOptions): Provider[];
-export declare function injectLogBrew(): LogBrewAngularContext;
-export declare class LogBrewErrorHandler implements ErrorHandler {
-  constructor(context: LogBrewAngularContext, options?: LogBrewAngularOptions, delegate?: ErrorHandler | null);
-  handleError(error: unknown): void;
+declare function provideLogBrew(options?: LogBrewAngularOptions): FactoryProvider[];
+declare function injectLogBrew(): LogBrewAngularContext;
+declare class LogBrewErrorHandler implements ErrorHandler {
+  public constructor(context: LogBrewAngularContext, options?: LogBrewAngularOptions, delegate?: ErrorHandler | null);
+  public handleError(error: unknown): void;
 }
-export declare function createAngularViewEvent(
+declare function createAngularViewEvent(
   name: string,
-  options?: {
-    now?: () => string;
-    path?: string;
-    route?: string;
-    idFactory?: (name: string, path: string) => string;
-    metadata?: Record<string, string | number | boolean | null>;
-  }
+  options?: LogBrewAngularViewEventOptions
 ): LogBrewAngularViewEvent;
-export declare function createAngularErrorEvent(
+declare function createAngularErrorEvent(
   error: unknown,
   context?: LogBrewAngularErrorMetadata,
-  options?: {
-    now?: () => string;
-    idFactory?: (error: unknown, context: LogBrewAngularErrorMetadata) => string;
-  }
+  options?: LogBrewAngularErrorEventOptions
 ): LogBrewAngularErrorEvent;
-export declare function captureAngularError(
+declare function captureAngularError(
   error: unknown,
   context: LogBrewAngularContext,
   options?: LogBrewAngularOptions
@@ -155,4 +162,38 @@ declare const defaultExport: {
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;
 };
 
+export type {
+  AngularTraceparentConfig,
+  CreateLogBrewAngularClientConfig,
+  LogBrewAngularCaptureContext,
+  LogBrewAngularContext,
+  LogBrewAngularErrorEvent,
+  LogBrewAngularErrorEventOptions,
+  LogBrewAngularErrorMetadata,
+  LogBrewAngularOptions,
+  LogBrewAngularRuntimeContext,
+  LogBrewAngularViewEvent,
+  LogBrewAngularViewEventOptions,
+  LogBrewClientFactory,
+  LogBrewErrorDelegate,
+  LogBrewTransportFactory,
+  TraceparentFetchConfig,
+  TraceparentFetchLike,
+  TraceparentRequestContext,
+  TracePropagationTarget
+};
+export {
+  LOG_BREW_ANGULAR_CONTEXT,
+  LogBrewErrorHandler,
+  captureAngularError,
+  createAngularErrorEvent,
+  createAngularTraceparent,
+  createAngularViewEvent,
+  createLogBrewAngularClient,
+  createLogBrewAngularContext,
+  createTraceparentFetch,
+  injectLogBrew,
+  provideLogBrew,
+  shouldPropagateTraceparent
+};
 export default defaultExport;

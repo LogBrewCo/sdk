@@ -1,138 +1,366 @@
+import { LogBrewClient, RecordingTransport, SdkError } from "@logbrew/sdk";
+import { createRandomTraceparent, createTracedFetch, shouldPropagateTraceparent as shouldPropagate } from "./trace-fetch.js";
 import { inject } from "vue";
-import {
-  createTraceparent,
-  LogBrewClient,
-  parseTraceparent,
-  RecordingTransport,
-  SdkError
-} from "@logbrew/sdk";
+
+/**
+ * @import { App, ComponentPublicInstance, InjectionKey } from "vue"
+ * @import { Transport, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   CreateLogBrewVueClientConfig,
+ *   LogBrewViewEvent,
+ *   LogBrewVueContext,
+ *   LogBrewVueErrorContext,
+ *   LogBrewVueErrorEvent,
+ *   LogBrewVueErrorEventOptions,
+ *   LogBrewVueOptions,
+ *   LogBrewVuePlugin,
+ *   LogBrewVueViewEventOptions,
+ *   TraceparentFetchConfig,
+ *   TraceparentFetchLike,
+ *   TracePropagationTarget,
+ *   VueTraceparentConfig
+ * } from "./index.js"
+ * @typedef {(error: unknown, instance: ComponentPublicInstance | null, info: string) => void} VueErrorHandler
+ */
 
 const DEFAULT_SDK_NAME = "logbrew-vue";
 const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_MAX_RETRIES = 2;
 
-export const LOG_BREW_VUE_KEY = Symbol.for("logbrew.vue");
+/** @type {InjectionKey<LogBrewVueContext>} */
+const LOG_BREW_VUE_KEY = Symbol.for("logbrew.vue");
 
-export function createLogBrewVueClient({
-  apiKey = readEnvApiKey(),
-  clientKey = readEnvClientKey(),
-  context,
-  sdkName = DEFAULT_SDK_NAME,
-  sdkVersion = DEFAULT_SDK_VERSION,
-  maxRetries = 2
-} = {}) {
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {unknown}
+ */
+function readField(value, key) {
+  return (typeof value === "object" && value !== null) || typeof value === "function" ? Reflect.get(value, key) : undefined;
+}
+
+/**
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function readEnv(name) {
+  const value = readField(readField(readField(globalThis, "process"), "env"), name);
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function slugify(value) {
+  return value
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, "_")
+    .replaceAll(/^_+|_+$/gu, "") || "event";
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * @returns {string}
+ */
+function currentTime() {
+  return new Date().toISOString();
+}
+
+/**
+ * @param {CreateLogBrewVueClientConfig} [config]
+ * @returns {LogBrewClient}
+ */
+function createLogBrewVueClient(config = {}) {
+  const {
+    apiKey = readEnv("LOGBREW_API_KEY"),
+    clientKey = readEnv("LOGBREW_CLIENT_KEY"),
+    context,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    sdkName = DEFAULT_SDK_NAME,
+    sdkVersion = DEFAULT_SDK_VERSION
+  } = config;
   const authKey = clientKey ?? apiKey;
-  if (!authKey) {
+  const hasAuthKey = Boolean(authKey);
+  if (authKey === undefined || !hasAuthKey) {
     throw new SdkError(
       "configuration_error",
       "createLogBrewVueClient requires clientKey, apiKey, LOGBREW_CLIENT_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({ apiKey: authKey, maxRetries, sdkName, sdkVersion, ...(context === undefined ? {} : { context }) });
 }
 
-export function createVueTraceparent({
-  randomValues = defaultRandomValues,
-  spanId,
-  traceFlags = "01",
-  traceId
-} = {}) {
-  return createTraceparent({
-    spanId: spanId ?? randomHex(8, randomValues),
-    traceFlags,
-    traceId: traceId ?? randomHex(16, randomValues)
-  });
+/**
+ * @param {VueTraceparentConfig} [config]
+ * @returns {string}
+ */
+function createVueTraceparent(config = {}) {
+  return createRandomTraceparent(config, "createVueTraceparent");
 }
 
-export function createTraceparentFetch({
-  fetchImpl = defaultFetch(),
-  randomValues = defaultRandomValues,
-  traceFlags = "01",
-  traceparent,
-  traceparentFactory,
-  tracePropagationTargets = []
-} = {}) {
-  if (typeof fetchImpl !== "function") {
-    throw new SdkError("configuration_error", "createTraceparentFetch requires fetch");
-  }
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  if (traceparentFactory !== undefined && typeof traceparentFactory !== "function") {
-    throw new SdkError("configuration_error", "traceparentFactory must be a function");
-  }
+/**
+ * @param {TraceparentFetchConfig} [config]
+ * @returns {TraceparentFetchLike}
+ */
+function createTraceparentFetch(config = {}) {
+  return createTracedFetch(config, createVueTraceparent);
+}
 
-  return async function tracedFetch(input, init) {
-    const url = requestUrl(input);
-    if (!shouldPropagateTraceparent(url, tracePropagationTargets)) {
-      return init === undefined ? fetchImpl(input) : fetchImpl(input, init);
-    }
+/**
+ * @param {string} url
+ * @param {readonly TracePropagationTarget[]} [tracePropagationTargets]
+ * @returns {boolean}
+ */
+function shouldPropagateTraceparent(url, tracePropagationTargets) {
+  return shouldPropagate(url, tracePropagationTargets);
+}
 
-    const requestInit = init ?? {};
-    const nextTraceparent = traceparentForRequest({
-      init,
-      input,
-      randomValues,
-      traceFlags,
-      traceparent,
-      traceparentFactory,
-      url
-    });
-    const nextInit = {
-      ...requestInit,
-      headers: headersWithTraceparent(requestHeaders(input, requestInit), nextTraceparent)
-    };
-    return fetchImpl(input, nextInit);
+/**
+ * @param {LogBrewClient} client
+ * @param {Transport} transport
+ * @returns {LogBrewVueContext}
+ */
+function createVueContext(client, transport) {
+  return {
+    client,
+    logbrew: client,
+    transport,
+
+    previewJson: () => client.previewJson(),
+
+    flush: async () => client.flush(transport),
+    shutdown: async () => client.shutdown(transport)
   };
 }
 
-export function shouldPropagateTraceparent(url, tracePropagationTargets = []) {
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  return tracePropagationTargets.some((target) => {
-    if (typeof target === "string") {
-      return shouldPropagateToStringTarget(url, target);
-    }
-    if (target instanceof RegExp) {
-      target.lastIndex = 0;
-      const matched = target.test(url);
-      target.lastIndex = 0;
-      return matched;
-    }
-    if (typeof target === "function") {
-      return target(url) === true;
-    }
-    throw new SdkError("configuration_error", "tracePropagationTargets entries must be strings, RegExp values, or functions");
-  });
+/**
+ * @param {ComponentPublicInstance | null} instance
+ * @returns {string}
+ */
+function getComponentName(instance) {
+  const type = readField(instance, "type");
+  const name = readField(type, "name") ?? readField(type, "__name") ?? readField(readField(instance, "$options"), "name") ?? "";
+  return typeof name === "string" ? name : "";
 }
 
-export function createLogBrewVuePlugin(options = {}) {
+/**
+ * @param {string} name
+ * @param {string} path
+ * @returns {string}
+ */
+function defaultViewEventId(name, path) {
+  return `evt_vue_view_${slugify(`${name}_${path}`)}`;
+}
+
+/**
+ * @param {unknown} error
+ * @param {ComponentPublicInstance | null} instance
+ * @param {string} info
+ * @returns {string}
+ */
+function defaultErrorEventId(error, instance, info) {
+  return `evt_vue_error_${slugify(`${getComponentName(instance)}_${info}_${errorMessage(error)}`)}`;
+}
+
+/**
+ * @param {string} name
+ * @param {LogBrewVueViewEventOptions} [options]
+ * @returns {LogBrewViewEvent}
+ */
+function createVueViewEvent(name, options = {}) {
+  const { idFactory = defaultViewEventId, metadata = {}, now = currentTime, path = "" } = options;
+  return {
+    id: idFactory(name, path),
+    timestamp: now(),
+
+    attributes: {
+      message: path ? `Vue view ${name} at ${path}` : `Vue view ${name}`,
+
+      level: "info",
+      logger: "vue",
+      metadata: { ...metadata, name, path }
+    }
+  };
+}
+
+/**
+ * @param {unknown} error
+ * @param {ComponentPublicInstance | null} instance
+ * @param {string} info
+ * @param {LogBrewVueErrorEventOptions} [options]
+ * @returns {LogBrewVueErrorEvent}
+ */
+function createVueErrorEvent(error, instance, info, options = {}) {
+  const { idFactory = defaultErrorEventId, now = currentTime } = options;
+  const message = errorMessage(error);
+  const component = getComponentName(instance);
+  return {
+    id: idFactory(error, instance, info),
+    timestamp: now(),
+
+    attributes: {
+      title: component ? `${component} failed` : "Vue component failed",
+
+      level: "error",
+      message,
+      metadata: { component, info }
+    }
+  };
+}
+
+/**
+ * @param {LogBrewVueOptions} options
+ * @param {Readonly<TransportResponse>} response
+ * @param {LogBrewVueErrorContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFlush(options, response, context) {
+  if (options.onFlush !== undefined && isFunction(options.onFlush)) {
+    await options.onFlush(response, context);
+  }
+}
+
+/**
+ * @param {LogBrewVueOptions} options
+ * @param {unknown} error
+ * @param {LogBrewVueErrorContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFailure(options, error, context) {
+  if (options.onCaptureError !== undefined && isFunction(options.onCaptureError)) {
+    await options.onCaptureError(error, context);
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @param {LogBrewVueErrorContext} errorContext
+ * @param {LogBrewVueOptions} options
+ * @returns {Promise<TransportResponse>}
+ */
+async function captureWithContext(error, errorContext, options) {
+  const { context, info, instance } = errorContext;
+  const event = options.errorEvent !== undefined && isFunction(options.errorEvent)
+    ? options.errorEvent(error, errorContext)
+    : createVueErrorEvent(error, instance, info, options);
+  try {
+    context.client.issue(event.id, event.timestamp, event.attributes);
+    const response = await context.client.flush(context.transport);
+    await notifyFlush(options, response, errorContext);
+    return response;
+  } catch (captureError) {
+    await notifyFailure(options, captureError, errorContext);
+    throw captureError;
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @param {ComponentPublicInstance | null} instance
+ * @param {string} info
+ * @param {LogBrewVueContext} context
+ * @param {LogBrewVueOptions} [options]
+ * @returns {Promise<TransportResponse>}
+ */
+async function captureVueError(error, instance, info, context, options = {}) {
+  return captureWithContext(error, { context, info, instance }, options);
+}
+
+/**
+ * @param {unknown} error
+ * @param {LogBrewVueErrorContext} errorContext
+ * @param {LogBrewVueOptions} options
+ * @returns {Promise<TransportResponse | undefined>}
+ */
+async function captureQuietly(error, errorContext, options) {
+  try {
+    return await captureWithContext(error, errorContext, options);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * @param {LogBrewVueOptions} options
+ * @param {App} app
+ * @returns {LogBrewClient}
+ */
+function resolveClient(options, app) {
+  if (typeof options.client === "function") {
+    return options.client({ app });
+  }
+  return options.client ?? createLogBrewVueClient(options);
+}
+
+/**
+ * @param {LogBrewVueOptions} options
+ * @param {App} app
+ * @param {LogBrewClient} client
+ * @returns {Transport}
+ */
+function resolveTransport(options, app, client) {
+  if (typeof options.transport === "function") {
+    return options.transport({ app, client });
+  }
+  return options.transport ?? RecordingTransport.alwaysAccept();
+}
+
+/**
+ * @param {LogBrewVueContext} context
+ * @param {LogBrewVueOptions} options
+ * @param {VueErrorHandler | undefined} previousErrorHandler
+ * @returns {VueErrorHandler}
+ */
+function createErrorHandler(context, options, previousErrorHandler) {
+  return (error, instance, info) => {
+    void captureQuietly(error, { context, info, instance }, options);
+    if (previousErrorHandler !== undefined && isFunction(previousErrorHandler)) {
+      return previousErrorHandler(error, instance, info);
+    }
+    return undefined;
+  };
+}
+
+/**
+ * @param {LogBrewVueOptions} [options]
+ * @returns {LogBrewVuePlugin}
+ */
+function createLogBrewVuePlugin(options = {}) {
   return {
     install(app) {
       const client = resolveClient(options, app);
-      const transport = resolveTransport(options, app, client);
-      const context = createVueContext(client, transport);
-
+      const context = createVueContext(client, resolveTransport(options, app, client));
       app.provide(LOG_BREW_VUE_KEY, context);
       app.config.globalProperties.$logbrew = context;
-
       if (options.captureErrors !== false) {
-        const previousErrorHandler = app.config.errorHandler;
-        app.config.errorHandler = (error, instance, info) => {
-          void captureVueError(error, instance, info, context, options).catch(() => undefined);
-          if (typeof previousErrorHandler === "function") {
-            return previousErrorHandler(error, instance, info);
-          }
-          return undefined;
-        };
+        app.config.errorHandler = createErrorHandler(context, options, app.config.errorHandler);
       }
     }
   };
 }
 
-export function useLogBrew() {
-  const context = inject(LOG_BREW_VUE_KEY, null);
-  if (!context) {
+/**
+ * @returns {LogBrewVueContext}
+ */
+function useLogBrew() {
+  const context = inject(LOG_BREW_VUE_KEY, undefined);
+  if (context === undefined) {
     throw new SdkError(
       "configuration_error",
       "useLogBrew requires createLogBrewVuePlugin to be installed on the Vue app"
@@ -141,269 +369,7 @@ export function useLogBrew() {
   return context;
 }
 
-export function createVueViewEvent(name, {
-  now = () => new Date().toISOString(),
-  path = "",
-  idFactory = defaultViewEventId,
-  metadata = {}
-} = {}) {
-  return {
-    id: idFactory(name, path),
-    timestamp: now(),
-    attributes: {
-      message: path ? `Vue view ${name} at ${path}` : `Vue view ${name}`,
-      level: "info",
-      logger: "vue",
-      metadata: {
-        ...metadata,
-        name,
-        path
-      }
-    }
-  };
-}
-
-export function createVueErrorEvent(error, instance, info, {
-  now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId
-} = {}) {
-  const message = error instanceof Error ? error.message : String(error);
-  const component = getComponentName(instance);
-  return {
-    id: idFactory(error, instance, info),
-    timestamp: now(),
-    attributes: {
-      title: component ? `${component} failed` : "Vue component failed",
-      level: "error",
-      message,
-      metadata: {
-        component,
-        info
-      }
-    }
-  };
-}
-
-export async function captureVueError(error, instance, info, context, options = {}) {
-  const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { context, info, instance })
-    : createVueErrorEvent(error, instance, info, options);
-
-  try {
-    context.client.issue(event.id, event.timestamp, event.attributes);
-    const response = await context.client.flush(context.transport);
-    await notifyFlush(options, response, { context, info, instance });
-    return response;
-  } catch (captureError) {
-    await notifyFailure(options, captureError, { context, info, instance });
-    throw captureError;
-  }
-}
-
-function createVueContext(client, transport) {
-  return {
-    client,
-    logbrew: client,
-    transport,
-    previewJson: () => client.previewJson(),
-    flush: () => client.flush(transport),
-    shutdown: () => client.shutdown(transport)
-  };
-}
-
-function resolveClient(options, app) {
-  if (typeof options.client === "function") {
-    return options.client({ app });
-  }
-  if (options.client) {
-    return options.client;
-  }
-  return createLogBrewVueClient(options);
-}
-
-function resolveTransport(options, app, client) {
-  if (typeof options.transport === "function") {
-    return options.transport({ app, client });
-  }
-  return options.transport ?? RecordingTransport.alwaysAccept();
-}
-
-async function notifyFlush(options, response, context) {
-  if (typeof options.onFlush === "function") {
-    await options.onFlush(response, context);
-  }
-}
-
-async function notifyFailure(options, error, context) {
-  if (typeof options.onCaptureError === "function") {
-    await options.onCaptureError(error, context);
-  }
-}
-
-function defaultViewEventId(name, path) {
-  return `evt_vue_view_${slugify(`${name}_${path}`)}`;
-}
-
-function defaultErrorEventId(error, instance, info) {
-  const message = error instanceof Error ? error.message : String(error);
-  const component = getComponentName(instance);
-  return `evt_vue_error_${slugify(`${component}_${info}_${message}`)}`;
-}
-
-function getComponentName(instance) {
-  const type = instance?.type;
-  return type?.name ?? type?.__name ?? instance?.$options?.name ?? "";
-}
-
-function defaultFetch() {
-  return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
-}
-
-function defaultRandomValues(length) {
-  if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== "function") {
-    throw new SdkError("configuration_error", "createVueTraceparent requires crypto.getRandomValues or randomValues");
-  }
-  const bytes = new Uint8Array(length);
-  return globalThis.crypto.getRandomValues(bytes);
-}
-
-function headersWithTraceparent(headers, traceparent) {
-  const nextHeaders = {};
-  for (const [key, value] of headerEntries(headers)) {
-    if (String(key).toLowerCase() !== "traceparent") {
-      nextHeaders[key] = value;
-    }
-  }
-  nextHeaders.traceparent = traceparent;
-  return nextHeaders;
-}
-
-function headerEntries(headers) {
-  if (headers === undefined || headers === null) {
-    return [];
-  }
-  const HeadersConstructor = globalThis.Headers;
-  if (typeof HeadersConstructor === "function" && headers instanceof HeadersConstructor) {
-    const entries = [];
-    headers.forEach((value, key) => {
-      entries.push([key, value]);
-    });
-    return entries;
-  }
-  if (Array.isArray(headers)) {
-    return headers;
-  }
-  if (typeof headers !== "string" && typeof headers[Symbol.iterator] === "function") {
-    return Array.from(headers);
-  }
-  if (typeof headers === "object") {
-    return Object.entries(headers);
-  }
-  return [];
-}
-
-function randomHex(length, randomValues) {
-  if (typeof randomValues !== "function") {
-    throw new SdkError("configuration_error", "randomValues must be a function");
-  }
-  const bytes = Array.from(randomValues(length));
-  if (bytes.length !== length || bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
-    throw new SdkError("configuration_error", "randomValues must return byte values for the requested length");
-  }
-  return bytes.map((value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-function readEnvApiKey() {
-  return globalThis.process?.env?.LOGBREW_API_KEY;
-}
-
-function readEnvClientKey() {
-  return globalThis.process?.env?.LOGBREW_CLIENT_KEY;
-}
-
-function shouldPropagateToStringTarget(url, target) {
-  const targetText = target.trim();
-  if (targetText === "") {
-    return false;
-  }
-  if (targetText.startsWith("/")) {
-    return url.startsWith(targetText);
-  }
-
-  const URLConstructor = globalThis.URL;
-  if (typeof URLConstructor === "function") {
-    try {
-      const targetUrl = new URLConstructor(targetText);
-      if (!hasUrlScheme(url)) {
-        return false;
-      }
-      const requestUrl = new URLConstructor(url, targetUrl.origin);
-      if (requestUrl.origin !== targetUrl.origin) {
-        return false;
-      }
-      const targetPath = targetUrl.pathname || "/";
-      return requestUrl.pathname === targetPath || requestUrl.pathname.startsWith(pathPrefix(targetPath));
-    } catch {
-      return url.startsWith(targetText);
-    }
-  }
-
-  return url.startsWith(targetText);
-}
-
-function pathPrefix(pathname) {
-  return pathname.endsWith("/") ? pathname : `${pathname}/`;
-}
-
-function hasUrlScheme(url) {
-  return /^[a-z][a-z0-9+.-]*:/iu.test(url);
-}
-
-function requestHeaders(input, init) {
-  if (init && init.headers !== undefined) {
-    return init.headers;
-  }
-  return input?.headers;
-}
-
-function requestUrl(input) {
-  if (typeof input === "string") {
-    return input;
-  }
-  const URLConstructor = globalThis.URL;
-  if (typeof URLConstructor === "function" && input instanceof URLConstructor) {
-    return input.toString();
-  }
-  if (typeof input?.url === "string") {
-    return input.url;
-  }
-  return String(input);
-}
-
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
-}
-
-function traceparentForRequest({
-  init,
-  input,
-  randomValues,
-  traceFlags,
-  traceparent,
-  traceparentFactory,
-  url
-}) {
-  const nextTraceparent = typeof traceparentFactory === "function"
-    ? traceparentFactory({ init, input, url })
-    : traceparent ?? createVueTraceparent({ randomValues, traceFlags });
-  parseTraceparent(nextTraceparent);
-  return nextTraceparent;
-}
-
-export default {
+const defaultExport = {
   captureVueError,
   createLogBrewVueClient,
   createLogBrewVuePlugin,
@@ -411,7 +377,22 @@ export default {
   createVueErrorEvent,
   createVueTraceparent,
   createVueViewEvent,
+
   LOG_BREW_VUE_KEY,
   shouldPropagateTraceparent,
   useLogBrew
 };
+
+export {
+  LOG_BREW_VUE_KEY,
+  captureVueError,
+  createLogBrewVueClient,
+  createLogBrewVuePlugin,
+  createTraceparentFetch,
+  createVueErrorEvent,
+  createVueTraceparent,
+  createVueViewEvent,
+  shouldPropagateTraceparent,
+  useLogBrew
+};
+export default defaultExport;

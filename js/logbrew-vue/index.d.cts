@@ -8,120 +8,126 @@ import type {
   TransportResponse
 } from "@logbrew/sdk";
 
-export type CreateLogBrewVueClientConfig = {
-  apiKey?: string;
-  clientKey?: string;
-  context?: TelemetryContext;
-  sdkName?: string;
-  sdkVersion?: string;
-  maxRetries?: number;
+type CreateLogBrewVueClientConfig = {
+  apiKey?: string | undefined;
+  clientKey?: string | undefined;
+  context?: TelemetryContext | undefined;
+  sdkName?: string | undefined;
+  sdkVersion?: string | undefined;
+  maxRetries?: number | undefined;
 };
 
-export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
+type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
 
-export type VueTraceparentConfig = {
-  traceId?: string;
-  spanId?: string;
-  traceFlags?: string;
-  randomValues?: (length: number) => ArrayLike<number>;
+type VueTraceparentConfig = {
+  traceId?: string | undefined;
+  spanId?: string | undefined;
+  traceFlags?: string | undefined;
+  randomValues?: ((length: number) => ArrayLike<number>) | undefined;
 };
 
-export type TraceparentFetchLike<TResponse = unknown> = (
-  input: any,
-  init?: any
+/** A fetch function: the global fetch or one with the same parameters. */
+type TraceparentFetchLike<TResponse = unknown> = (
+  input: RequestInfo | URL,
+  init?: RequestInit
 ) => Promise<TResponse> | TResponse;
 
-export type TraceparentFetchConfig<TResponse = unknown> = {
-  fetchImpl?: TraceparentFetchLike<TResponse>;
-  randomValues?: (length: number) => ArrayLike<number>;
-  traceFlags?: string;
-  traceparent?: string;
-  traceparentFactory?: (context: {
-    input: any;
-    init?: any;
-    url: string;
-  }) => string | undefined;
-  tracePropagationTargets?: TracePropagationTarget[];
+/** The request a traceparentFactory creates a traceparent for. */
+type TraceparentRequestContext = {
+  readonly input: RequestInfo | URL;
+  readonly init?: RequestInit | undefined;
+  readonly url: string;
 };
 
-export type LogBrewVueContext = {
-  client: LogBrewClient;
-  logbrew: LogBrewClient;
-  transport: Transport;
-  previewJson(): string;
-  flush(): Promise<TransportResponse>;
-  shutdown(): Promise<TransportResponse>;
+type TraceparentFetchConfig<TResponse = unknown> = {
+  fetchImpl?: TraceparentFetchLike<TResponse> | undefined;
+  randomValues?: ((length: number) => ArrayLike<number>) | undefined;
+  traceFlags?: string | undefined;
+  traceparent?: string | undefined;
+  traceparentFactory?: ((context: TraceparentRequestContext) => string | undefined) | undefined;
+  tracePropagationTargets?: readonly TracePropagationTarget[] | undefined;
 };
 
-export type LogBrewVueRuntimeContext = {
-  app: App;
-  client: LogBrewClient;
+type LogBrewVueContext = {
+  readonly client: LogBrewClient;
+  readonly logbrew: LogBrewClient;
+  readonly transport: Transport;
+  readonly previewJson: () => string;
+  readonly flush: () => Promise<TransportResponse>;
+  readonly shutdown: () => Promise<TransportResponse>;
 };
 
-export type LogBrewVueErrorContext = {
-  context: LogBrewVueContext;
-  info: string;
-  instance: ComponentPublicInstance | null;
+type LogBrewVueRuntimeContext = {
+  readonly app: App;
+  readonly client: LogBrewClient;
 };
 
-export type LogBrewClientFactory = (context: { app: App }) => LogBrewClient;
-export type LogBrewTransportFactory = (context: LogBrewVueRuntimeContext) => Transport;
+type LogBrewVueErrorContext = {
+  readonly context: LogBrewVueContext;
+  readonly info: string;
+  readonly instance: ComponentPublicInstance | null;
+};
 
-export type LogBrewViewEvent = {
+type LogBrewClientFactory = (context: { readonly app: App }) => LogBrewClient;
+type LogBrewTransportFactory = (context: LogBrewVueRuntimeContext) => Transport;
+
+type LogBrewViewEvent = {
   id: string;
   timestamp: string;
   attributes: LogAttributes;
 };
 
-export type LogBrewVueErrorEvent = {
+type LogBrewVueErrorEvent = {
   id: string;
   timestamp: string;
   attributes: IssueAttributes;
 };
 
-export type LogBrewVueOptions = CreateLogBrewVueClientConfig & {
-  client?: LogBrewClient | LogBrewClientFactory;
-  transport?: Transport | LogBrewTransportFactory;
-  captureErrors?: boolean;
-  now?: () => string;
-  errorEvent?: (error: unknown, context: LogBrewVueErrorContext) => LogBrewVueErrorEvent;
-  onFlush?: (response: TransportResponse, context: LogBrewVueErrorContext) => void | Promise<void>;
-  onCaptureError?: (error: unknown, context: LogBrewVueErrorContext) => void | Promise<void>;
+type LogBrewVueViewEventOptions = {
+  now?: (() => string) | undefined;
+  path?: string | undefined;
+  idFactory?: ((name: string, path: string) => string) | undefined;
+  metadata?: Readonly<Record<string, string | number | boolean | null>> | undefined;
 };
 
-export declare const LOG_BREW_VUE_KEY: InjectionKey<LogBrewVueContext>;
-export declare function createLogBrewVueClient(config?: CreateLogBrewVueClientConfig): LogBrewClient;
-export declare function createVueTraceparent(config?: VueTraceparentConfig): string;
-export declare function createTraceparentFetch<TResponse = unknown>(
+type LogBrewVueErrorEventOptions = {
+  now?: (() => string) | undefined;
+  idFactory?: ((error: unknown, instance: ComponentPublicInstance | null, info: string) => string) | undefined;
+};
+
+type LogBrewVueOptions = CreateLogBrewVueClientConfig & LogBrewVueErrorEventOptions & {
+  client?: LogBrewClient | LogBrewClientFactory | undefined;
+  transport?: Transport | LogBrewTransportFactory | undefined;
+  captureErrors?: boolean | undefined;
+  errorEvent?: ((error: unknown, context: LogBrewVueErrorContext) => LogBrewVueErrorEvent) | undefined;
+  onFlush?: ((response: Readonly<TransportResponse>, context: LogBrewVueErrorContext) => void | Promise<void>) | undefined;
+  onCaptureError?: ((error: unknown, context: LogBrewVueErrorContext) => void | Promise<void>) | undefined;
+};
+
+type LogBrewVuePlugin = {
+  readonly install: (app: App) => void;
+};
+
+declare const LOG_BREW_VUE_KEY: InjectionKey<LogBrewVueContext>;
+declare function createLogBrewVueClient(config?: CreateLogBrewVueClientConfig): LogBrewClient;
+declare function createVueTraceparent(config?: VueTraceparentConfig): string;
+declare function createTraceparentFetch<TResponse = unknown>(
   config?: TraceparentFetchConfig<TResponse>
 ): TraceparentFetchLike<TResponse>;
-export declare function shouldPropagateTraceparent(
+declare function shouldPropagateTraceparent(
   url: string,
-  tracePropagationTargets?: TracePropagationTarget[]
+  tracePropagationTargets?: readonly TracePropagationTarget[]
 ): boolean;
-export declare function createLogBrewVuePlugin(options?: LogBrewVueOptions): {
-  install(app: App): void;
-};
-export declare function useLogBrew(): LogBrewVueContext;
-export declare function createVueViewEvent(
-  name: string,
-  options?: {
-    now?: () => string;
-    path?: string;
-    idFactory?: (name: string, path: string) => string;
-    metadata?: Record<string, string | number | boolean | null>;
-  }
-): LogBrewViewEvent;
-export declare function createVueErrorEvent(
+declare function createLogBrewVuePlugin(options?: LogBrewVueOptions): LogBrewVuePlugin;
+declare function useLogBrew(): LogBrewVueContext;
+declare function createVueViewEvent(name: string, options?: LogBrewVueViewEventOptions): LogBrewViewEvent;
+declare function createVueErrorEvent(
   error: unknown,
   instance: ComponentPublicInstance | null,
   info: string,
-  options?: {
-    now?: () => string;
-    idFactory?: (error: unknown, instance: ComponentPublicInstance | null, info: string) => string;
-  }
+  options?: LogBrewVueErrorEventOptions
 ): LogBrewVueErrorEvent;
-export declare function captureVueError(
+declare function captureVueError(
   error: unknown,
   instance: ComponentPublicInstance | null,
   info: string,
@@ -148,4 +154,35 @@ declare const defaultExport: {
   useLogBrew: typeof useLogBrew;
 };
 
+export type {
+  CreateLogBrewVueClientConfig,
+  LogBrewClientFactory,
+  LogBrewTransportFactory,
+  LogBrewViewEvent,
+  LogBrewVueContext,
+  LogBrewVueErrorContext,
+  LogBrewVueErrorEvent,
+  LogBrewVueErrorEventOptions,
+  LogBrewVueOptions,
+  LogBrewVuePlugin,
+  LogBrewVueRuntimeContext,
+  LogBrewVueViewEventOptions,
+  TraceparentFetchConfig,
+  TraceparentFetchLike,
+  TraceparentRequestContext,
+  TracePropagationTarget,
+  VueTraceparentConfig
+};
+export {
+  LOG_BREW_VUE_KEY,
+  captureVueError,
+  createLogBrewVueClient,
+  createLogBrewVuePlugin,
+  createTraceparentFetch,
+  createVueErrorEvent,
+  createVueTraceparent,
+  createVueViewEvent,
+  shouldPropagateTraceparent,
+  useLogBrew
+};
 export default defaultExport;

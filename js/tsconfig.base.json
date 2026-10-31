@@ -23,6 +23,7 @@
     "noUnusedParameters": true,
     "paths": {
       "@logbrew/amqplib": ["./logbrew-amqplib/index.d.ts"],
+      "@logbrew/angular": ["./logbrew-angular/index.d.ts"],
       "@logbrew/aws-sqs": ["./logbrew-aws-sqs/index.d.ts"],
       "@logbrew/browser": ["./logbrew-browser/index.d.ts"],
       "@logbrew/bullmq": ["./logbrew-bullmq/index.d.ts"],
@@ -30,7 +31,8 @@
       "@logbrew/fastify": ["./logbrew-fastify/index.d.ts"],
       "@logbrew/nestjs": ["./logbrew-nestjs/index.d.ts"],
       "@logbrew/node": ["./logbrew-node/index.d.ts"],
-      "@logbrew/sdk": ["./logbrew-js/index.d.ts"]
+      "@logbrew/sdk": ["./logbrew-js/index.d.ts"],
+      "@logbrew/vue": ["./logbrew-vue/index.d.ts"]
     },
     "skipLibCheck": false,
     "strict": true,

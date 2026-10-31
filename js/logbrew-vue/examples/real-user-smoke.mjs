@@ -1,6 +1,3 @@
-import { createSSRApp, defineComponent, h } from "vue";
-import { renderToString } from "vue/server-renderer";
-import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureVueError,
   createLogBrewVueClient,
@@ -12,20 +9,125 @@ import {
   shouldPropagateTraceparent,
   useLogBrew
 } from "@logbrew/vue";
+import { createSSRApp, defineComponent, h } from "vue";
+import { RecordingTransport } from "@logbrew/sdk";
+import { renderToString } from "vue/server-renderer";
+import { setTimeout as sleep } from "node:timers/promises";
 
-const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
+/**
+ * @import { LogBrewClient } from "@logbrew/sdk"
+ * @import { LogBrewVueContext } from "@logbrew/vue"
+ * @typedef {{ readonly init: unknown, readonly input: unknown }} PropagatedRequest
+ */
+
+const UNAVAILABLE = 503;
+const ACCEPTED = 202;
+const NO_CONTENT = 204;
+const POLL_ATTEMPTS = 20;
+const POLL_DELAY_MS = 10;
+const ONE_BODY = 1;
+const FIRST = 0;
+const SECOND = 1;
+const THIRD = 2;
+const BYTE_OFFSET = 1;
+const FIRST_ATTEMPT = 0;
+
+/**
+ * @param {LogBrewClient} logbrew
+ * @returns {void}
+ */
+function addFullBatch(logbrew) {
+  logbrew.release("evt_release_001", "2026-06-02T10:00:00Z", {
+    commit: "abc123def456",
+    notes: "Public release marker",
+    version: "1.2.3"
+  });
+  logbrew.environment("evt_environment_001", "2026-06-02T10:00:01Z", {
+    name: "production",
+    region: "global"
+  });
+  logbrew.issue("evt_issue_001", "2026-06-02T10:00:02Z", {
+    level: "error",
+    message: "Request timed out after retry budget",
+    title: "Checkout timeout"
+  });
+  logbrew.log("evt_log_001", "2026-06-02T10:00:03Z", {
+    level: "info",
+    logger: "job-runner",
+    message: "worker started"
+  });
+  logbrew.span("evt_span_001", "2026-06-02T10:00:04Z", {
+    durationMs: 12.5,
+    name: "GET /health",
+    spanId: "span_001",
+    status: "ok",
+    traceId: "trace_001"
+  });
+  logbrew.action("evt_action_001", "2026-06-02T10:00:05Z", {
+    name: "deploy",
+    status: "success"
+  });
+}
+
+/**
+ * @param {() => boolean} predicate
+ * @param {number} [attempt]
+ * @returns {Promise<void>}
+ */
+async function waitFor(predicate, attempt = FIRST_ATTEMPT) {
+  if (predicate()) {
+    return;
+  }
+  if (attempt + ONE_BODY >= POLL_ATTEMPTS) {
+    throw new Error("timed out waiting for Vue capture");
+  }
+  await sleep(POLL_DELAY_MS);
+  await waitFor(predicate, attempt + ONE_BODY);
+}
+
+/**
+ * @param {number} length
+ * @returns {Uint8Array}
+ */
+function deterministicBytes(length) {
+  return Uint8Array.from({ length }, (_value, index) => index + BYTE_OFFSET);
+}
+
+/**
+ * @param {unknown} value
+ * @param {readonly (string | number)[]} path
+ * @returns {unknown}
+ */
+function readPath(value, path) {
+  /** @type {unknown} */
+  let current = value;
+  for (const key of path) {
+    current = typeof current === "object" && current !== null ? Reflect.get(current, key) : undefined;
+  }
+  return current;
+}
+
+/**
+ * @param {string | null} text
+ * @returns {unknown}
+ */
+function parseBody(text) {
+  return text === null ? undefined : JSON.parse(text);
+}
+
+const requestTransport = new RecordingTransport([{ statusCode: UNAVAILABLE }, { statusCode: ACCEPTED }]);
 const errorTransport = RecordingTransport.alwaysAccept();
 const manualErrorTransport = RecordingTransport.alwaysAccept();
 const client = createLogBrewVueClient({
   clientKey: "LOGBREW_CLIENT_KEY",
+  maxRetries: 1,
   sdkName: "vue-smoke-app",
-  sdkVersion: "0.1.1",
-  maxRetries: 1
+  sdkVersion: "0.1.1"
 });
 
 const App = defineComponent({
   name: "VueSmokeApp",
-  setup() {
+  setup: () => {
     const logbrew = useLogBrew();
     addFullBatch(logbrew.client);
     const event = createVueViewEvent("VueSmokeApp", {
@@ -33,7 +135,7 @@ const App = defineComponent({
       now: () => "2026-06-02T10:00:06Z",
       path: "/smoke"
     });
-    if (event.attributes.metadata.path !== "/smoke") {
+    if (event.attributes.metadata?.["path"] !== "/smoke") {
       throw new Error(`unexpected view event: ${JSON.stringify(event)}`);
     }
     return () => h("pre", "LogBrew Vue smoke");
@@ -58,19 +160,17 @@ const errorClient = createLogBrewVueClient({
 });
 const ErrorComponent = defineComponent({
   name: "ExplodingVueComponent",
-  setup() {
+  setup: () => {
     throw new Error("component exploded");
   }
 });
 const errorApp = createSSRApp(ErrorComponent);
 errorApp.use(createLogBrewVuePlugin({
   client: errorClient,
-  errorEvent(error, { instance, info }) {
-    return createVueErrorEvent(error, instance, info, {
-      idFactory: () => "evt_vue_error_001",
-      now: () => "2026-06-02T10:00:07Z"
-    });
-  },
+  errorEvent: (error, { instance, info }) => createVueErrorEvent(error, instance, info, {
+    idFactory: () => "evt_vue_error_001",
+    now: () => "2026-06-02T10:00:07Z"
+  }),
   transport: errorTransport
 }));
 try {
@@ -80,51 +180,50 @@ try {
     throw error;
   }
 }
-await waitFor(() => errorTransport.sentBodies.length === 1);
+await waitFor(() => errorTransport.sentBodies.length === ONE_BODY);
 
+const manualClient = createLogBrewVueClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "vue-manual-error-smoke",
+  sdkVersion: "0.1.1"
+});
+/** @type {LogBrewVueContext} */
 const manualContext = {
-  client: createLogBrewVueClient({
-    clientKey: "LOGBREW_CLIENT_KEY",
-    sdkName: "vue-manual-error-smoke",
-    sdkVersion: "0.1.1"
-  }),
-  logbrew: null,
+  client: manualClient,
+  logbrew: manualClient,
   transport: manualErrorTransport,
-  previewJson() {
-    return this.client.previewJson();
-  },
-  flush() {
-    return this.client.flush(this.transport);
-  },
-  shutdown() {
-    return this.client.shutdown(this.transport);
-  }
+
+  previewJson: () => manualClient.previewJson(),
+
+  flush: async () => manualClient.flush(manualErrorTransport),
+  shutdown: async () => manualClient.shutdown(manualErrorTransport)
 };
-manualContext.logbrew = manualContext.client;
 await captureVueError(new Error("manual vue failure"), null, "manual", manualContext, {
   idFactory: () => "evt_vue_error_manual",
   now: () => "2026-06-02T10:00:08Z"
 });
 
-const errorPayload = JSON.parse(errorTransport.lastBody());
-if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_vue_error_001") {
-  throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
+const errorPayload = parseBody(errorTransport.lastBody());
+const errorEvent = readPath(errorPayload, ["events", FIRST]);
+if (readPath(errorEvent, ["type"]) !== "issue" || readPath(errorEvent, ["id"]) !== "evt_vue_error_001") {
+  throw new Error(`unexpected error payload: ${String(errorTransport.lastBody())}`);
 }
-const manualErrorPayload = JSON.parse(manualErrorTransport.lastBody());
-if (manualErrorPayload.events[0].id !== "evt_vue_error_manual") {
-  throw new Error(`unexpected manual error payload: ${manualErrorTransport.lastBody()}`);
+const manualErrorPayload = parseBody(manualErrorTransport.lastBody());
+if (readPath(manualErrorPayload, ["events", FIRST, "id"]) !== "evt_vue_error_manual") {
+  throw new Error(`unexpected manual error payload: ${String(manualErrorTransport.lastBody())}`);
 }
 
+/** @type {PropagatedRequest[]} */
 const propagatedRequests = [];
 const tracedFetch = createTraceparentFetch({
   fetchImpl: async (input, init = {}) => {
-    propagatedRequests.push({ input, init });
-    return { status: 204 };
+    propagatedRequests.push({ init, input });
+    return { status: NO_CONTENT };
   },
+  tracePropagationTargets: ["https://api.example.test/", /^\/api\//u],
   traceparentFactory: () => createVueTraceparent({
     randomValues: deterministicBytes
-  }),
-  tracePropagationTargets: ["https://api.example.test/", /^\/api\//u]
+  })
 });
 if (!shouldPropagateTraceparent("https://api.example.test/checkout", ["https://api.example.test/"])) {
   throw new Error("expected API request to match trace propagation target");
@@ -139,76 +238,29 @@ await tracedFetch("https://cdn.example.test/app.js", {
   headers: { accept: "text/javascript" }
 });
 await tracedFetch("/api/cart");
-const propagatedTraceparent = propagatedRequests[0].init.headers.traceparent;
+const propagatedTraceparent = readPath(propagatedRequests, [FIRST, "init", "headers", "traceparent"]);
 if (propagatedTraceparent !== "00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01") {
-  throw new Error(`unexpected propagated traceparent: ${propagatedTraceparent}`);
+  throw new Error(`unexpected propagated traceparent: ${String(propagatedTraceparent)}`);
 }
-if (propagatedRequests[0].init.headers.accept !== "application/json") {
+if (readPath(propagatedRequests, [FIRST, "init", "headers", "accept"]) !== "application/json") {
   throw new Error("expected traced fetch to preserve existing headers");
 }
-if (propagatedRequests[1].init.headers?.traceparent !== undefined) {
+if (readPath(propagatedRequests, [SECOND, "init", "headers", "traceparent"]) !== undefined) {
   throw new Error("unmatched requests should not receive traceparent");
 }
-if (propagatedRequests[2].init.headers.traceparent !== propagatedTraceparent) {
+if (readPath(propagatedRequests, [THIRD, "init", "headers", "traceparent"]) !== propagatedTraceparent) {
   throw new Error("relative matched requests should receive traceparent");
 }
 
-console.log(payload);
-console.error(JSON.stringify({
+const eventCount = readPath(parseBody(payload), ["events", "length"]);
+process.stdout.write(`${payload}\n`);
+process.stderr.write(`${JSON.stringify({
   ok: true,
+
   attempts: requestTransport.sentBodies.length,
-  errorCaptured: errorPayload.events[0].attributes.title,
-  events: JSON.parse(payload).events.length,
-  manualErrorCaptured: manualErrorPayload.events[0].attributes.title,
+  errorCaptured: readPath(errorEvent, ["attributes", "title"]),
+  events: eventCount,
+  manualErrorCaptured: readPath(manualErrorPayload, ["events", FIRST, "attributes", "title"]),
   propagatedTraceparent,
   viewHelper: "evt_vue_view_001"
-}));
-
-function addFullBatch(logbrew) {
-  logbrew.release("evt_release_001", "2026-06-02T10:00:00Z", {
-    version: "1.2.3",
-    commit: "abc123def456",
-    notes: "Public release marker"
-  });
-  logbrew.environment("evt_environment_001", "2026-06-02T10:00:01Z", {
-    name: "production",
-    region: "global"
-  });
-  logbrew.issue("evt_issue_001", "2026-06-02T10:00:02Z", {
-    title: "Checkout timeout",
-    level: "error",
-    message: "Request timed out after retry budget"
-  });
-  logbrew.log("evt_log_001", "2026-06-02T10:00:03Z", {
-    message: "worker started",
-    level: "info",
-    logger: "job-runner"
-  });
-  logbrew.span("evt_span_001", "2026-06-02T10:00:04Z", {
-    name: "GET /health",
-    traceId: "trace_001",
-    spanId: "span_001",
-    status: "ok",
-    durationMs: 12.5
-  });
-  logbrew.action("evt_action_001", "2026-06-02T10:00:05Z", {
-    name: "deploy",
-    status: "success"
-  });
-}
-
-async function waitFor(predicate) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (predicate()) {
-      return;
-    }
-    await new Promise((resolve) => {
-      setTimeout(resolve, 10);
-    });
-  }
-  throw new Error("timed out waiting for Vue capture");
-}
-
-function deterministicBytes(length) {
-  return Uint8Array.from({ length }, (_value, index) => index + 1);
-}
+})}\n`);

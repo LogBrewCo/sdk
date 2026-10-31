@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "lib": ["es2022", "dom", "dom.iterable"] },
+  "files": ["index.cjs", "index.d.cts", "index.d.ts", "index.js"],
+  "include": ["**/*.js", "**/*.cjs", "**/*.mjs"]
+}

@@ -1,227 +1,253 @@
 import { ErrorHandler, InjectionToken, Injector, inject } from "@angular/core";
-import {
-  createTraceparent,
-  LogBrewClient,
-  parseTraceparent,
-  RecordingTransport,
-  SdkError
-} from "@logbrew/sdk";
+import { LogBrewClient, RecordingTransport, SdkError } from "@logbrew/sdk";
+import { createRandomTraceparent, createTracedFetch, shouldPropagateTraceparent as shouldPropagate } from "./trace-fetch.js";
+
+/**
+ * @import { FactoryProvider } from "@angular/core"
+ * @import { Transport, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   AngularTraceparentConfig,
+ *   TracePropagationTarget,
+ *   CreateLogBrewAngularClientConfig,
+ *   LogBrewAngularCaptureContext,
+ *   LogBrewAngularContext,
+ *   LogBrewAngularErrorEvent,
+ *   LogBrewAngularErrorEventOptions,
+ *   LogBrewAngularErrorMetadata,
+ *   LogBrewAngularOptions,
+ *   LogBrewAngularViewEvent,
+ *   LogBrewAngularViewEventOptions,
+ *   TraceparentFetchConfig,
+ *   TraceparentFetchLike
+ * } from "./index.js"
+ */
 
 const DEFAULT_SDK_NAME = "logbrew-angular";
 const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_MAX_RETRIES = 2;
 
-export const LOG_BREW_ANGULAR_CONTEXT = new InjectionToken("LogBrew Angular context");
+/** @type {InjectionToken<LogBrewAngularContext>} */
+const LOG_BREW_ANGULAR_CONTEXT = new InjectionToken("LogBrew Angular context");
 
-export function createLogBrewAngularClient({
-  apiKey = readEnvApiKey(),
-  clientKey = readEnvClientKey(),
-  context,
-  sdkName = DEFAULT_SDK_NAME,
-  sdkVersion = DEFAULT_SDK_VERSION,
-  maxRetries = 2
-} = {}) {
+
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {unknown}
+ */
+function readField(value, key) {
+  return (typeof value === "object" && value !== null) || typeof value === "function" ? Reflect.get(value, key) : undefined;
+}
+
+/**
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function readEnv(name) {
+  const value = readField(readField(readField(globalThis, "process"), "env"), name);
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function slugify(value) {
+  return value
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, "_")
+    .replaceAll(/^_+|_+$/gu, "") || "event";
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * @returns {string}
+ */
+function currentTime() {
+  return new Date().toISOString();
+}
+
+/**
+ * @param {CreateLogBrewAngularClientConfig} [config]
+ * @returns {LogBrewClient}
+ */
+function createLogBrewAngularClient(config = {}) {
+  const {
+    apiKey = readEnv("LOGBREW_API_KEY"),
+    clientKey = readEnv("LOGBREW_CLIENT_KEY"),
+    context,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    sdkName = DEFAULT_SDK_NAME,
+    sdkVersion = DEFAULT_SDK_VERSION
+  } = config;
   const authKey = clientKey ?? apiKey;
-  if (!authKey) {
+  const hasAuthKey = Boolean(authKey);
+  if (authKey === undefined || !hasAuthKey) {
     throw new SdkError(
       "configuration_error",
       "createLogBrewAngularClient requires clientKey, apiKey, LOGBREW_CLIENT_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({ apiKey: authKey, maxRetries, sdkName, sdkVersion, ...(context === undefined ? {} : { context }) });
 }
 
-export function createAngularTraceparent({
-  randomValues = defaultRandomValues,
-  spanId,
-  traceFlags = "01",
-  traceId
-} = {}) {
-  return createTraceparent({
-    spanId: spanId ?? randomHex(8, randomValues),
-    traceFlags,
-    traceId: traceId ?? randomHex(16, randomValues)
-  });
+/**
+ * @param {AngularTraceparentConfig} [config]
+ * @returns {string}
+ */
+function createAngularTraceparent(config = {}) {
+  return createRandomTraceparent(config, "createAngularTraceparent");
 }
 
-export function createTraceparentFetch({
-  fetchImpl = defaultFetch(),
-  randomValues = defaultRandomValues,
-  traceFlags = "01",
-  traceparent,
-  traceparentFactory,
-  tracePropagationTargets = []
-} = {}) {
-  if (typeof fetchImpl !== "function") {
-    throw new SdkError("configuration_error", "createTraceparentFetch requires fetch");
-  }
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  if (traceparentFactory !== undefined && typeof traceparentFactory !== "function") {
-    throw new SdkError("configuration_error", "traceparentFactory must be a function");
-  }
-
-  return async function tracedFetch(input, init) {
-    const url = requestUrl(input);
-    if (!shouldPropagateTraceparent(url, tracePropagationTargets)) {
-      return init === undefined ? fetchImpl(input) : fetchImpl(input, init);
-    }
-
-    const requestInit = init ?? {};
-    const nextTraceparent = traceparentForRequest({
-      init,
-      input,
-      randomValues,
-      traceFlags,
-      traceparent,
-      traceparentFactory,
-      url
-    });
-    const nextInit = {
-      ...requestInit,
-      headers: headersWithTraceparent(requestHeaders(input, requestInit), nextTraceparent)
-    };
-    return fetchImpl(input, nextInit);
-  };
+/**
+ * @param {TraceparentFetchConfig} [config]
+ * @returns {TraceparentFetchLike}
+ */
+function createTraceparentFetch(config = {}) {
+  return createTracedFetch(config, createAngularTraceparent);
 }
 
-export function shouldPropagateTraceparent(url, tracePropagationTargets = []) {
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  return tracePropagationTargets.some((target) => {
-    if (typeof target === "string") {
-      return shouldPropagateToStringTarget(url, target);
-    }
-    if (target instanceof RegExp) {
-      target.lastIndex = 0;
-      const matched = target.test(url);
-      target.lastIndex = 0;
-      return matched;
-    }
-    if (typeof target === "function") {
-      return target(url) === true;
-    }
-    throw new SdkError("configuration_error", "tracePropagationTargets entries must be strings, RegExp values, or functions");
-  });
+/**
+ * @param {string} url
+ * @param {readonly TracePropagationTarget[]} [tracePropagationTargets]
+ * @returns {boolean}
+ */
+function shouldPropagateTraceparent(url, tracePropagationTargets) {
+  return shouldPropagate(url, tracePropagationTargets);
 }
 
-export function provideLogBrew(options = {}) {
-  const providers = [
-    {
-      provide: LOG_BREW_ANGULAR_CONTEXT,
-      useFactory: () => {
-        const injector = inject(Injector);
-        const client = resolveClient(options, injector);
-        const transport = resolveTransport(options, injector, client);
-        return createLogBrewAngularContext(client, transport);
-      }
-    }
-  ];
-
-  if (options.captureErrors !== false) {
-    providers.push({
-      provide: ErrorHandler,
-      useFactory: () => new LogBrewErrorHandler(
-        inject(LOG_BREW_ANGULAR_CONTEXT),
-        options,
-        resolveDelegateErrorHandler(options)
-      )
-    });
-  }
-
-  return providers;
-}
-
-export function injectLogBrew() {
-  const context = inject(LOG_BREW_ANGULAR_CONTEXT, { optional: true });
-  if (!context) {
-    throw new SdkError(
-      "configuration_error",
-      "injectLogBrew requires provideLogBrew() in the Angular provider tree"
-    );
-  }
-  return context;
-}
-
-export class LogBrewErrorHandler {
-  constructor(context, options = {}, delegate = null) {
-    this.context = context;
-    this.options = options;
-    this.delegate = delegate;
-  }
-
-  handleError(error) {
-    void captureAngularError(error, this.context, this.options).catch(() => undefined);
-    if (this.delegate && typeof this.delegate.handleError === "function") {
-      this.delegate.handleError(error);
-    }
-  }
-}
-
-export function createLogBrewAngularContext(client, transport) {
+/**
+ * @param {LogBrewClient} client
+ * @param {Transport} transport
+ * @returns {LogBrewAngularContext}
+ */
+function createLogBrewAngularContext(client, transport) {
   return {
     client,
     logbrew: client,
     transport,
+
     previewJson: () => client.previewJson(),
-    flush: () => client.flush(transport),
-    shutdown: () => client.shutdown(transport)
+
+    flush: async () => client.flush(transport),
+    shutdown: async () => client.shutdown(transport)
   };
 }
 
-export function createAngularViewEvent(name, {
-  now = () => new Date().toISOString(),
-  path = "",
-  route = "",
-  idFactory = defaultViewEventId,
-  metadata = {}
-} = {}) {
+/**
+ * @param {string} name
+ * @param {string} path
+ * @returns {string}
+ */
+function defaultViewEventId(name, path) {
+  return `evt_angular_view_${slugify(`${name}_${path}`)}`;
+}
+
+/**
+ * @param {unknown} error
+ * @param {LogBrewAngularErrorMetadata} context
+ * @returns {string}
+ */
+function defaultErrorEventId(error, context) {
+  return `evt_angular_error_${slugify(`${context.component ?? ""}_${context.route ?? ""}_${errorMessage(error)}`)}`;
+}
+
+/**
+ * @param {string} name
+ * @param {LogBrewAngularViewEventOptions} [options]
+ * @returns {LogBrewAngularViewEvent}
+ */
+function createAngularViewEvent(name, options = {}) {
+  const { idFactory = defaultViewEventId, metadata = {}, now = currentTime, path = "", route = "" } = options;
   const viewPath = path || route;
   return {
     id: idFactory(name, viewPath),
     timestamp: now(),
+
     attributes: {
       message: viewPath ? `Angular view ${name} at ${viewPath}` : `Angular view ${name}`,
+
       level: "info",
       logger: "angular",
-      metadata: {
-        ...metadata,
-        name,
-        path: viewPath
-      }
+      metadata: { ...metadata, name, path: viewPath }
     }
   };
 }
 
-export function createAngularErrorEvent(error, context = {}, {
-  now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId
-} = {}) {
-  const message = error instanceof Error ? error.message : String(error);
+/**
+ * @param {unknown} error
+ * @param {LogBrewAngularErrorMetadata} [context]
+ * @param {LogBrewAngularErrorEventOptions} [options]
+ * @returns {LogBrewAngularErrorEvent}
+ */
+function createAngularErrorEvent(error, context = {}, options = {}) {
+  const { idFactory = defaultErrorEventId, now = currentTime } = options;
+  const message = errorMessage(error);
   const component = context.component ?? "";
   const route = context.route ?? context.path ?? "";
   return {
     id: idFactory(error, context),
     timestamp: now(),
+
     attributes: {
       title: component ? `${component} failed` : "Angular error",
+
       level: "error",
       message,
-      metadata: {
-        component,
-        info: context.info ?? "",
-        route
-      }
+      metadata: { component, info: context.info ?? "", route }
     }
   };
 }
 
-export async function captureAngularError(error, context, options = {}) {
-  const event = typeof options.errorEvent === "function"
+/**
+ * @param {LogBrewAngularOptions} options
+ * @param {Readonly<TransportResponse>} response
+ * @param {LogBrewAngularCaptureContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFlush(options, response, context) {
+  if (options.onFlush !== undefined && isFunction(options.onFlush)) {
+    await options.onFlush(response, context);
+  }
+}
+
+/**
+ * @param {LogBrewAngularOptions} options
+ * @param {unknown} error
+ * @param {LogBrewAngularCaptureContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFailure(options, error, context) {
+  if (options.onCaptureError !== undefined && isFunction(options.onCaptureError)) {
+    await options.onCaptureError(error, context);
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @param {LogBrewAngularContext} context
+ * @param {LogBrewAngularOptions} [options]
+ * @returns {Promise<TransportResponse>}
+ */
+async function captureAngularError(error, context, options = {}) {
+  const event = options.errorEvent !== undefined && isFunction(options.errorEvent)
     ? options.errorEvent(error, { context })
     : createAngularErrorEvent(error, options, options);
-
   try {
     context.client.issue(event.id, event.timestamp, event.attributes);
     const response = await context.client.shutdown(context.transport);
@@ -233,16 +259,66 @@ export async function captureAngularError(error, context, options = {}) {
   }
 }
 
+/**
+ * @param {unknown} error
+ * @param {LogBrewAngularContext} context
+ * @param {LogBrewAngularOptions | undefined} options
+ * @returns {Promise<TransportResponse | undefined>}
+ */
+async function captureQuietly(error, context, options) {
+  try {
+    return await captureAngularError(error, context, options);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * @implements {ErrorHandler}
+ */
+class LogBrewErrorHandler {
+  /**
+   * @param {LogBrewAngularContext} context
+   * @param {LogBrewAngularOptions} [options]
+   * @param {ErrorHandler | null} [delegate]
+   */
+  constructor(context, options, delegate) {
+    this.context = context;
+    this.options = options;
+    this.delegate = delegate;
+  }
+
+  /**
+   * @param {unknown} error
+   * @returns {void}
+   */
+  handleError(error) {
+    void captureQuietly(error, this.context, this.options);
+    const { delegate } = this;
+    if (delegate !== null && delegate !== undefined && isFunction(readField(delegate, "handleError"))) {
+      delegate.handleError(error);
+    }
+  }
+}
+
+/**
+ * @param {LogBrewAngularOptions} options
+ * @param {Injector} injector
+ * @returns {LogBrewClient}
+ */
 function resolveClient(options, injector) {
   if (typeof options.client === "function") {
     return options.client({ injector });
   }
-  if (options.client) {
-    return options.client;
-  }
-  return createLogBrewAngularClient(options);
+  return options.client ?? createLogBrewAngularClient(options);
 }
 
+/**
+ * @param {LogBrewAngularOptions} options
+ * @param {Injector} injector
+ * @param {LogBrewClient} client
+ * @returns {Transport}
+ */
 function resolveTransport(options, injector, client) {
   if (typeof options.transport === "function") {
     return options.transport({ client, injector });
@@ -250,183 +326,55 @@ function resolveTransport(options, injector, client) {
   return options.transport ?? RecordingTransport.alwaysAccept();
 }
 
+/**
+ * @param {LogBrewAngularOptions} options
+ * @returns {ErrorHandler | undefined}
+ */
 function resolveDelegateErrorHandler(options) {
-  if (typeof options.delegateErrorHandler === "function") {
-    return { handleError: options.delegateErrorHandler };
+  const { delegateErrorHandler } = options;
+  if (typeof delegateErrorHandler === "function") {
+    return { handleError: delegateErrorHandler };
   }
-  return options.delegateErrorHandler ?? null;
+  return delegateErrorHandler;
 }
 
-async function notifyFlush(options, response, context) {
-  if (typeof options.onFlush === "function") {
-    await options.onFlush(response, context);
-  }
-}
-
-async function notifyFailure(options, error, context) {
-  if (typeof options.onCaptureError === "function") {
-    await options.onCaptureError(error, context);
-  }
-}
-
-function defaultViewEventId(name, path) {
-  return `evt_angular_view_${slugify(`${name}_${path}`)}`;
-}
-
-function defaultErrorEventId(error, context) {
-  const message = error instanceof Error ? error.message : String(error);
-  return `evt_angular_error_${slugify(`${context.component ?? ""}_${context.route ?? ""}_${message}`)}`;
-}
-
-function defaultFetch() {
-  return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
-}
-
-function defaultRandomValues(length) {
-  if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== "function") {
-    throw new SdkError("configuration_error", "createAngularTraceparent requires crypto.getRandomValues or randomValues");
-  }
-  const bytes = new Uint8Array(length);
-  return globalThis.crypto.getRandomValues(bytes);
-}
-
-function headersWithTraceparent(headers, traceparent) {
-  const nextHeaders = {};
-  for (const [key, value] of headerEntries(headers)) {
-    if (String(key).toLowerCase() !== "traceparent") {
-      nextHeaders[key] = value;
+/**
+ * @param {LogBrewAngularOptions} [options]
+ * @returns {FactoryProvider[]}
+ */
+function provideLogBrew(options = {}) {
+  /** @type {FactoryProvider[]} */
+  const providers = [
+    {
+      provide: LOG_BREW_ANGULAR_CONTEXT,
+      useFactory: () => {
+        const injector = inject(Injector);
+        const client = resolveClient(options, injector);
+        return createLogBrewAngularContext(client, resolveTransport(options, injector, client));
+      }
     }
-  }
-  nextHeaders.traceparent = traceparent;
-  return nextHeaders;
-}
-
-function headerEntries(headers) {
-  if (headers === undefined || headers === null) {
-    return [];
-  }
-  const HeadersConstructor = globalThis.Headers;
-  if (typeof HeadersConstructor === "function" && headers instanceof HeadersConstructor) {
-    const entries = [];
-    headers.forEach((value, key) => {
-      entries.push([key, value]);
+  ];
+  if (options.captureErrors !== false) {
+    providers.push({
+      provide: ErrorHandler,
+      useFactory: () => new LogBrewErrorHandler(inject(LOG_BREW_ANGULAR_CONTEXT), options, resolveDelegateErrorHandler(options))
     });
-    return entries;
   }
-  if (Array.isArray(headers)) {
-    return headers;
-  }
-  if (typeof headers !== "string" && typeof headers[Symbol.iterator] === "function") {
-    return Array.from(headers);
-  }
-  if (typeof headers === "object") {
-    return Object.entries(headers);
-  }
-  return [];
+  return providers;
 }
 
-function randomHex(length, randomValues) {
-  if (typeof randomValues !== "function") {
-    throw new SdkError("configuration_error", "randomValues must be a function");
+/**
+ * @returns {LogBrewAngularContext}
+ */
+function injectLogBrew() {
+  const context = inject(LOG_BREW_ANGULAR_CONTEXT, { optional: true });
+  if (context === null) {
+    throw new SdkError("configuration_error", "injectLogBrew requires provideLogBrew() in the Angular provider tree");
   }
-  const bytes = Array.from(randomValues(length));
-  if (bytes.length !== length || bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
-    throw new SdkError("configuration_error", "randomValues must return byte values for the requested length");
-  }
-  return bytes.map((value) => value.toString(16).padStart(2, "0")).join("");
+  return context;
 }
 
-function readEnvApiKey() {
-  return globalThis.process?.env?.LOGBREW_API_KEY;
-}
-
-function readEnvClientKey() {
-  return globalThis.process?.env?.LOGBREW_CLIENT_KEY;
-}
-
-function shouldPropagateToStringTarget(url, target) {
-  const targetText = target.trim();
-  if (targetText === "") {
-    return false;
-  }
-  if (targetText.startsWith("/")) {
-    return url.startsWith(targetText);
-  }
-
-  const URLConstructor = globalThis.URL;
-  if (typeof URLConstructor === "function") {
-    try {
-      const targetUrl = new URLConstructor(targetText);
-      if (!hasUrlScheme(url)) {
-        return false;
-      }
-      const requestUrl = new URLConstructor(url, targetUrl.origin);
-      if (requestUrl.origin !== targetUrl.origin) {
-        return false;
-      }
-      const targetPath = targetUrl.pathname || "/";
-      return requestUrl.pathname === targetPath || requestUrl.pathname.startsWith(pathPrefix(targetPath));
-    } catch {
-      return url.startsWith(targetText);
-    }
-  }
-
-  return url.startsWith(targetText);
-}
-
-function pathPrefix(pathname) {
-  return pathname.endsWith("/") ? pathname : `${pathname}/`;
-}
-
-function hasUrlScheme(url) {
-  return /^[a-z][a-z0-9+.-]*:/iu.test(url);
-}
-
-function requestHeaders(input, init) {
-  if (init && init.headers !== undefined) {
-    return init.headers;
-  }
-  return input?.headers;
-}
-
-function requestUrl(input) {
-  if (typeof input === "string") {
-    return input;
-  }
-  const URLConstructor = globalThis.URL;
-  if (typeof URLConstructor === "function" && input instanceof URLConstructor) {
-    return input.toString();
-  }
-  if (typeof input?.url === "string") {
-    return input.url;
-  }
-  return String(input);
-}
-
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
-}
-
-function traceparentForRequest({
-  init,
-  input,
-  randomValues,
-  traceFlags,
-  traceparent,
-  traceparentFactory,
-  url
-}) {
-  const nextTraceparent = typeof traceparentFactory === "function"
-    ? traceparentFactory({ init, input, url })
-    : traceparent ?? createAngularTraceparent({ randomValues, traceFlags });
-  parseTraceparent(nextTraceparent);
-  return nextTraceparent;
-}
-
-export default {
+const defaultExport = {
   captureAngularError,
   createAngularErrorEvent,
   createAngularTraceparent,
@@ -435,8 +383,26 @@ export default {
   createLogBrewAngularContext,
   createTraceparentFetch,
   injectLogBrew,
+
   LogBrewErrorHandler,
+
   LOG_BREW_ANGULAR_CONTEXT,
   provideLogBrew,
   shouldPropagateTraceparent
 };
+
+export {
+  LOG_BREW_ANGULAR_CONTEXT,
+  LogBrewErrorHandler,
+  captureAngularError,
+  createAngularErrorEvent,
+  createAngularTraceparent,
+  createAngularViewEvent,
+  createLogBrewAngularClient,
+  createLogBrewAngularContext,
+  createTraceparentFetch,
+  injectLogBrew,
+  provideLogBrew,
+  shouldPropagateTraceparent
+};
+export default defaultExport;
