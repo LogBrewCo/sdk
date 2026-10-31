@@ -74,6 +74,41 @@
             "from": "package",
             "name": "ConsumeMessage",
             "package": "amqplib"
+          },
+          {
+            "from": "package",
+            "name": [
+              "EachBatchPayload",
+              "EachMessagePayload",
+              "ProducerBatch",
+              "ProducerRecord",
+              "TopicMessages"
+            ],
+            "package": "kafkajs"
+          },
+          {
+            "from": "file",
+            "name": "LogBrewAmqplibConsumeOptions"
+          },
+          {
+            "from": "file",
+            "name": "LogBrewAmqplibPublishOptions"
+          },
+          {
+            "from": "file",
+            "name": "LogBrewKafkaJsBatchProcessOptions"
+          },
+          {
+            "from": "file",
+            "name": "LogBrewKafkaJsInstrumentationOptions"
+          },
+          {
+            "from": "file",
+            "name": "LogBrewKafkaJsProcessOptions"
+          },
+          {
+            "from": "file",
+            "name": "LogBrewKafkaJsSendOptions"
           }
         ]
       }
@@ -83,7 +118,7 @@
   "overrides": [
     {
       "files": [
-        "logbrew-amqplib/index.cjs"
+        "logbrew-*/*.cjs"
       ],
       "rules": {
         "import/no-commonjs": "off",
@@ -94,8 +129,18 @@
     },
     {
       "files": [
+        "logbrew-*/index.cjs",
+        "logbrew-*/index.d.cts",
+        "logbrew-*/index.d.ts",
+        "logbrew-*/index.js"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": [
         "logbrew-amqplib/index.cjs",
-        "logbrew-amqplib/index.d.cts",
         "logbrew-amqplib/index.d.ts",
         "logbrew-amqplib/index.js"
       ],
@@ -105,42 +150,25 @@
           {
             "max": 6
           }
-        ],
-        "import/no-default-export": "off",
-        "typescript/prefer-readonly-parameter-types": [
-          "error",
-          {
-            "allow": [
-              {
-                "from": "package",
-                "name": "Buffer",
-                "package": "@types/node"
-              },
-              {
-                "from": "package",
-                "name": "ConsumeMessage",
-                "package": "amqplib"
-              },
-              {
-                "from": "file",
-                "name": "LogBrewAmqplibConsumeOptions"
-              },
-              {
-                "from": "file",
-                "name": "LogBrewAmqplibPublishOptions"
-              }
-            ]
-          }
         ]
       }
     },
     {
       "files": [
-        "logbrew-amqplib/examples/index.mjs",
-        "logbrew-amqplib/examples/readme-example.mjs"
+        "logbrew-*/examples/index.mjs",
+        "logbrew-*/examples/readme-example.mjs"
       ],
       "rules": {
         "node/no-process-env": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-amqplib/**",
+        "logbrew-kafkajs/**"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "off"
       }
     }
   ]

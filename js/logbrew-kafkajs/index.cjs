@@ -1,82 +1,238 @@
 "use strict";
 
-const { parseTraceparent, SdkError } = require("@logbrew/sdk");
-const {
-  createLogBrewQueueTraceHeaders,
-  queueBatchOperationWithLogBrewSpan,
-  queueOperationWithLogBrewSpan
-} = require("@logbrew/node");
+const { cloneObject, createInstrumentationState, installMethod, isBatchMessage, isCallable, isObjectLike, normalizeLabel, normalizeTraceparent, readField, readHeaderValue, readList, requireSpanOptions } = require("./internal.cjs");
+const { createLogBrewQueueTraceHeaders, queueBatchOperationWithLogBrewSpan, queueOperationWithLogBrewSpan } = require("@logbrew/node");
+const { SdkError } = require("@logbrew/sdk");
+
+/**
+ * @import { Callable } from "./internal.cjs"
+ * @import {
+ *   LogBrewKafkaJsBatchProcessOptions,
+ *   LogBrewKafkaJsInstrumentation,
+ *   LogBrewKafkaJsInstrumentationOptions,
+ *   LogBrewKafkaJsProcessOptions,
+ *   LogBrewKafkaJsSendOptions
+ * } from "./index.cjs"
+ */
 
 const DEFAULT_SYSTEM = "kafka";
 const DEFAULT_TOPIC = "kafka";
 const TRACEPARENT_HEADER = "traceparent";
 const PRODUCER_INSTRUMENTATION = Symbol("logbrew.kafkajs.producer.instrumentation");
 const CONSUMER_INSTRUMENTATION = Symbol("logbrew.kafkajs.consumer.instrumentation");
+const EMPTY_COUNT = 0;
+const SINGLE_TOPIC = 1;
 
-async function kafkaJsProducerSendWithLogBrewSpan(producer, record, options = {}) {
-  if (!producer || typeof producer.send !== "function") {
+/**
+ * @param {readonly unknown[]} topicMessages
+ * @returns {number}
+ */
+function countTopicMessages(topicMessages) {
+  let count = EMPTY_COUNT;
+  for (const topicMessage of topicMessages) {
+    count += readList(readField(topicMessage, "messages")).length;
+  }
+  return count;
+}
+
+/**
+ * @param {readonly unknown[]} topicMessages
+ * @param {unknown} fallback
+ * @returns {string}
+ */
+function resolveBatchTopicName(topicMessages, fallback) {
+  const explicit = normalizeLabel(fallback, "");
+  if (explicit !== "") {
+    return explicit;
+  }
+  const topics = new Set(
+    topicMessages.map((topicMessage) => normalizeLabel(readField(topicMessage, "topic"), "")).filter((topic) => topic !== "")
+  );
+  const [onlyTopic] = topics;
+  return topics.size === SINGLE_TOPIC && onlyTopic !== undefined ? onlyTopic : DEFAULT_TOPIC;
+}
+
+/**
+ * @param {unknown} [message]
+ * @param {unknown} [traceparent]
+ * @returns {Record<string, unknown>}
+ */
+function createLogBrewKafkaJsMessage(message, traceparent) {
+  const source = cloneObject(message);
+  const normalizedTraceparent = normalizeTraceparent(traceparent);
+  if (normalizedTraceparent === undefined) {
+    return source;
+  }
+  return {
+    ...source,
+    headers: {
+      ...cloneObject(source["headers"]),
+      [TRACEPARENT_HEADER]: normalizedTraceparent
+    }
+  };
+}
+
+/**
+ * @param {unknown} [record]
+ * @param {unknown} [traceparent]
+ * @returns {Record<string, unknown>}
+ */
+function createLogBrewKafkaJsProducerRecord(record, traceparent) {
+  const source = cloneObject(record);
+  const { messages } = source;
+  if (!Array.isArray(messages)) {
+    return source;
+  }
+  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
+  return {
+    ...source,
+    messages: messages.map((message) => createLogBrewKafkaJsMessage(message, normalizedTraceparent))
+  };
+}
+
+/**
+ * @param {unknown} [batch]
+ * @param {unknown} [traceparent]
+ * @returns {Record<string, unknown>}
+ */
+function createLogBrewKafkaJsProducerBatch(batch, traceparent) {
+  const source = cloneObject(batch);
+  const { topicMessages } = source;
+  if (!Array.isArray(topicMessages)) {
+    return source;
+  }
+  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
+  return {
+    ...source,
+    topicMessages: topicMessages.map((topicMessage) => {
+      const nextTopicMessage = cloneObject(topicMessage);
+      const { messages } = nextTopicMessage;
+      if (Array.isArray(messages)) {
+        nextTopicMessage["messages"] = messages.map((message) => createLogBrewKafkaJsMessage(message, normalizedTraceparent));
+      }
+      return nextTopicMessage;
+    })
+  };
+}
+
+/**
+ * @param {unknown} message
+ * @returns {string | undefined}
+ */
+function extractLogBrewKafkaJsTraceparent(message) {
+  return normalizeTraceparent(readHeaderValue(readField(message, "headers"), TRACEPARENT_HEADER));
+}
+
+/**
+ * @param {Callable} send
+ * @param {unknown} record
+ * @param {LogBrewKafkaJsSendOptions | undefined} options
+ * @returns {Promise<unknown>}
+ */
+async function sendWithSpan(send, record, options) {
+  const spanOptions = requireSpanOptions(options);
+  return queueBatchOperationWithLogBrewSpan("send", {
+    ...spanOptions,
+    messageCount: readList(readField(record, "messages")).length,
+    operation: () => send(createLogBrewKafkaJsProducerRecord(record)),
+    operationKind: "publish",
+    queueName: normalizeLabel(readField(record, "topic"), spanOptions.topicName ?? DEFAULT_TOPIC),
+    system: DEFAULT_SYSTEM
+  });
+}
+
+/**
+ * @param {Callable} sendBatch
+ * @param {unknown} batch
+ * @param {LogBrewKafkaJsSendOptions | undefined} options
+ * @returns {Promise<unknown>}
+ */
+async function sendBatchWithSpan(sendBatch, batch, options) {
+  const spanOptions = requireSpanOptions(options);
+  const topicMessages = readList(readField(batch, "topicMessages"));
+  return queueBatchOperationWithLogBrewSpan("sendBatch", {
+    ...spanOptions,
+    messageCount: countTopicMessages(topicMessages),
+    operation: () => sendBatch(createLogBrewKafkaJsProducerBatch(batch)),
+    operationKind: "publish",
+    queueName: resolveBatchTopicName(topicMessages, spanOptions.topicName),
+    system: DEFAULT_SYSTEM
+  });
+}
+
+/**
+ * @param {unknown} producer
+ * @param {unknown} record
+ * @param {LogBrewKafkaJsSendOptions | undefined} options
+ * @returns {Promise<unknown>}
+ */
+async function kafkaJsProducerSendWithLogBrewSpan(producer, record, options) {
+  const send = readField(producer, "send");
+  if (!isCallable(send)) {
     throw new SdkError("configuration_error", "kafkaJsProducerSendWithLogBrewSpan requires a KafkaJS producer");
   }
-  const topic = normalizeLabel(record?.topic, options.topicName ?? DEFAULT_TOPIC);
-  const messages = Array.isArray(record?.messages) ? record.messages : [];
-
-  return queueBatchOperationWithLogBrewSpan("send", {
-    ...options,
-    messageCount: messages.length,
-    operation: () => producer.send(createLogBrewKafkaJsProducerRecord(record)),
-    operationKind: "publish",
-    queueName: topic,
-    system: DEFAULT_SYSTEM
-  });
+  return sendWithSpan((nextRecord) => send.call(producer, nextRecord), record, options);
 }
 
-async function kafkaJsProducerSendBatchWithLogBrewSpan(producer, batch, options = {}) {
-  if (!producer || typeof producer.sendBatch !== "function") {
-    throw new SdkError("configuration_error", "kafkaJsProducerSendBatchWithLogBrewSpan requires a KafkaJS producer with sendBatch");
+/**
+ * @param {unknown} producer
+ * @param {unknown} batch
+ * @param {LogBrewKafkaJsSendOptions | undefined} options
+ * @returns {Promise<unknown>}
+ */
+async function kafkaJsProducerSendBatchWithLogBrewSpan(producer, batch, options) {
+  const sendBatch = readField(producer, "sendBatch");
+  if (!isCallable(sendBatch)) {
+    throw new SdkError(
+      "configuration_error",
+      "kafkaJsProducerSendBatchWithLogBrewSpan requires a KafkaJS producer with sendBatch"
+    );
   }
-  const topicMessages = Array.isArray(batch?.topicMessages) ? batch.topicMessages : [];
-
-  return queueBatchOperationWithLogBrewSpan("sendBatch", {
-    ...options,
-    messageCount: countTopicMessages(topicMessages),
-    operation: () => producer.sendBatch(createLogBrewKafkaJsProducerBatch(batch)),
-    operationKind: "publish",
-    queueName: resolveBatchTopicName(topicMessages, options.topicName),
-    system: DEFAULT_SYSTEM
-  });
+  return sendBatchWithSpan((nextBatch) => sendBatch.call(producer, nextBatch), batch, options);
 }
 
-function withLogBrewKafkaJsEachMessage(eachMessage, options = {}) {
-  if (typeof eachMessage !== "function") {
+/**
+ * @param {unknown} eachMessage
+ * @param {LogBrewKafkaJsProcessOptions | undefined} options
+ * @returns {(payload: unknown) => Promise<unknown>}
+ */
+function withLogBrewKafkaJsEachMessage(eachMessage, options) {
+  if (!isCallable(eachMessage)) {
     throw new SdkError("configuration_error", "withLogBrewKafkaJsEachMessage requires an eachMessage function");
   }
 
   return async function logBrewKafkaJsEachMessage(payload) {
-    const topic = normalizeLabel(payload?.topic, options.topicName ?? DEFAULT_TOPIC);
+    const spanOptions = requireSpanOptions(options);
+    const traceparent = extractLogBrewKafkaJsTraceparent(readField(payload, "message"));
     return queueOperationWithLogBrewSpan("eachMessage", {
-      ...options,
+      ...spanOptions,
       operation: () => eachMessage(payload),
       operationKind: "process",
-      queueName: topic,
+      queueName: normalizeLabel(readField(payload, "topic"), spanOptions.topicName ?? DEFAULT_TOPIC),
       system: DEFAULT_SYSTEM,
-      traceparent: extractLogBrewKafkaJsTraceparent(payload?.message)
+      ...(traceparent === undefined ? {} : { traceparent })
     });
   };
 }
 
-function withLogBrewKafkaJsEachBatch(eachBatch, options = {}) {
-  if (typeof eachBatch !== "function") {
+/**
+ * @param {unknown} eachBatch
+ * @param {LogBrewKafkaJsBatchProcessOptions | undefined} options
+ * @returns {(payload: unknown) => Promise<unknown>}
+ */
+function withLogBrewKafkaJsEachBatch(eachBatch, options) {
+  if (!isCallable(eachBatch)) {
     throw new SdkError("configuration_error", "withLogBrewKafkaJsEachBatch requires an eachBatch function");
   }
 
   return async function logBrewKafkaJsEachBatch(payload) {
-    const batch = payload?.batch;
-    const topic = normalizeLabel(batch?.topic, options.topicName ?? DEFAULT_TOPIC);
-    const messages = Array.isArray(batch?.messages) ? batch.messages : [];
+    const spanOptions = requireSpanOptions(options);
+    const batch = readField(payload, "batch");
+    const topic = normalizeLabel(readField(batch, "topic"), spanOptions.topicName ?? DEFAULT_TOPIC);
     return queueBatchOperationWithLogBrewSpan("eachBatch", {
-      ...options,
+      ...spanOptions,
       linkMetadata: { topic },
-      messages,
+      messages: readList(readField(batch, "messages")).map((message) => (isBatchMessage(message) ? message : {})),
       operation: () => eachBatch(payload),
       operationKind: "process",
       queueName: topic,
@@ -85,232 +241,66 @@ function withLogBrewKafkaJsEachBatch(eachBatch, options = {}) {
   };
 }
 
-function instrumentLogBrewKafkaJsProducer(producer, options = {}) {
-  if (!producer || (typeof producer.send !== "function" && typeof producer.sendBatch !== "function")) {
+/**
+ * @param {unknown} producer
+ * @param {LogBrewKafkaJsSendOptions | undefined} options
+ * @returns {LogBrewKafkaJsInstrumentation}
+ */
+function instrumentLogBrewKafkaJsProducer(producer, options) {
+  const send = readField(producer, "send");
+  const sendBatch = readField(producer, "sendBatch");
+  if (!isObjectLike(producer) || (!isCallable(send) && !isCallable(sendBatch))) {
     throw new SdkError("configuration_error", "instrumentLogBrewKafkaJsProducer requires an owned KafkaJS producer");
   }
 
   const state = createInstrumentationState(producer, PRODUCER_INSTRUMENTATION, "KafkaJS producer");
 
-  if (typeof producer.send === "function") {
-    state.undo.push(installMethod(producer, "send", (originalSend, receiver, [record, ...args]) => {
-      const topic = normalizeLabel(record?.topic, options.topicName ?? DEFAULT_TOPIC);
-      const messages = Array.isArray(record?.messages) ? record.messages : [];
-      return queueBatchOperationWithLogBrewSpan("send", {
-        ...options,
-        messageCount: messages.length,
-        operation: () => originalSend.apply(receiver, [createLogBrewKafkaJsProducerRecord(record), ...args]),
-        operationKind: "publish",
-        queueName: topic,
-        system: DEFAULT_SYSTEM
-      });
-    }));
+  if (isCallable(send)) {
+    state.undo.push(installMethod(producer, "send", async (receiver, [record, ...args]) =>
+      sendWithSpan((nextRecord) => send.call(receiver, nextRecord, ...args), record, options)));
   }
 
-  if (typeof producer.sendBatch === "function") {
-    state.undo.push(installMethod(producer, "sendBatch", (originalSendBatch, receiver, [batch, ...args]) => {
-      const topicMessages = Array.isArray(batch?.topicMessages) ? batch.topicMessages : [];
-      return queueBatchOperationWithLogBrewSpan("sendBatch", {
-        ...options,
-        messageCount: countTopicMessages(topicMessages),
-        operation: () => originalSendBatch.apply(receiver, [createLogBrewKafkaJsProducerBatch(batch), ...args]),
-        operationKind: "publish",
-        queueName: resolveBatchTopicName(topicMessages, options.topicName),
-        system: DEFAULT_SYSTEM
-      });
-    }));
+  if (isCallable(sendBatch)) {
+    state.undo.push(installMethod(producer, "sendBatch", async (receiver, [batch, ...args]) =>
+      sendBatchWithSpan((nextBatch) => sendBatch.call(receiver, nextBatch, ...args), batch, options)));
   }
 
   return state.handle;
 }
 
-function instrumentLogBrewKafkaJsConsumer(consumer, options = {}) {
-  if (!consumer || typeof consumer.run !== "function") {
+/**
+ * @param {unknown} consumer
+ * @param {LogBrewKafkaJsInstrumentationOptions | undefined} options
+ * @returns {LogBrewKafkaJsInstrumentation}
+ */
+function instrumentLogBrewKafkaJsConsumer(consumer, options) {
+  const run = readField(consumer, "run");
+  if (!isObjectLike(consumer) || !isCallable(run)) {
     throw new SdkError("configuration_error", "instrumentLogBrewKafkaJsConsumer requires an owned KafkaJS consumer");
   }
 
   const state = createInstrumentationState(consumer, CONSUMER_INSTRUMENTATION, "KafkaJS consumer");
-  state.undo.push(installMethod(consumer, "run", (originalRun, receiver, [config, ...args]) => {
-    if (!config || typeof config !== "object") {
-      return originalRun.apply(receiver, [config, ...args]);
+  state.undo.push(installMethod(consumer, "run", (receiver, [config, ...args]) => {
+    if (!isObjectLike(config)) {
+      return run.call(receiver, config, ...args);
     }
 
-    const nextConfig = { ...config };
-    let wrapped = false;
-    if (typeof config.eachMessage === "function") {
-      nextConfig.eachMessage = withLogBrewKafkaJsEachMessage(config.eachMessage, options);
-      wrapped = true;
+    const { eachBatch, eachMessage } = config;
+    if (!isCallable(eachMessage) && !isCallable(eachBatch)) {
+      return run.call(receiver, config, ...args);
     }
-    if (typeof config.eachBatch === "function") {
-      nextConfig.eachBatch = withLogBrewKafkaJsEachBatch(config.eachBatch, options);
-      wrapped = true;
-    }
-
-    return originalRun.apply(receiver, [wrapped ? nextConfig : config, ...args]);
+    return run.call(
+      receiver,
+      {
+        ...config,
+        ...(isCallable(eachMessage) ? { eachMessage: withLogBrewKafkaJsEachMessage(eachMessage, options) } : {}),
+        ...(isCallable(eachBatch) ? { eachBatch: withLogBrewKafkaJsEachBatch(eachBatch, options) } : {})
+      },
+      ...args
+    );
   }));
 
   return state.handle;
-}
-
-function createLogBrewKafkaJsProducerRecord(record = {}, traceparent = undefined) {
-  const source = cloneObject(record);
-  if (!Array.isArray(source.messages)) {
-    return source;
-  }
-  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
-  return {
-    ...source,
-    messages: source.messages.map((message) => createLogBrewKafkaJsMessage(message, normalizedTraceparent))
-  };
-}
-
-function createLogBrewKafkaJsProducerBatch(batch = {}, traceparent = undefined) {
-  const source = cloneObject(batch);
-  if (!Array.isArray(source.topicMessages)) {
-    return source;
-  }
-  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
-  return {
-    ...source,
-    topicMessages: source.topicMessages.map((topicMessage) => {
-      const nextTopicMessage = cloneObject(topicMessage);
-      if (!Array.isArray(nextTopicMessage.messages)) {
-        return nextTopicMessage;
-      }
-      return {
-        ...nextTopicMessage,
-        messages: nextTopicMessage.messages.map((message) => createLogBrewKafkaJsMessage(message, normalizedTraceparent))
-      };
-    })
-  };
-}
-
-function createLogBrewKafkaJsMessage(message = {}, traceparent = undefined) {
-  const source = cloneObject(message);
-  const normalizedTraceparent = normalizeTraceparent(traceparent);
-  if (!normalizedTraceparent) {
-    return source;
-  }
-  return {
-    ...source,
-    headers: {
-      ...cloneObject(source.headers),
-      [TRACEPARENT_HEADER]: normalizedTraceparent
-    }
-  };
-}
-
-function extractLogBrewKafkaJsTraceparent(message) {
-  return normalizeTraceparent(readHeaderValue(message?.headers, TRACEPARENT_HEADER));
-}
-
-function createInstrumentationState(target, key, label) {
-  if (target[key]) {
-    throw new SdkError("configuration_error", `${label} is already instrumented by LogBrew`);
-  }
-  const state = {
-    undo: [],
-    handle: {
-      uninstall() {
-        while (state.undo.length > 0) {
-          state.undo.pop()();
-        }
-        delete target[key];
-      }
-    }
-  };
-  Object.defineProperty(target, key, {
-    configurable: true,
-    value: state.handle
-  });
-  return state;
-}
-
-function installMethod(target, methodName, callWrapped) {
-  const original = target[methodName];
-  const hadOwnProperty = Object.prototype.hasOwnProperty.call(target, methodName);
-  target[methodName] = {
-    logBrewKafkaJsInstrumentedMethod(...args) {
-      return callWrapped(original, this, args);
-    }
-  }.logBrewKafkaJsInstrumentedMethod;
-  return () => {
-    if (hadOwnProperty) {
-      target[methodName] = original;
-      return;
-    }
-    delete target[methodName];
-  };
-}
-
-function countTopicMessages(topicMessages) {
-  return topicMessages.reduce((count, topicMessage) => {
-    const messages = Array.isArray(topicMessage?.messages) ? topicMessage.messages.length : 0;
-    return count + messages;
-  }, 0);
-}
-
-function resolveBatchTopicName(topicMessages, fallback) {
-  const explicit = normalizeLabel(fallback, "");
-  if (explicit) {
-    return explicit;
-  }
-  const topics = topicMessages
-    .map((topicMessage) => normalizeLabel(topicMessage?.topic, ""))
-    .filter(Boolean);
-  const uniqueTopics = Array.from(new Set(topics));
-  return uniqueTopics.length === 1 ? uniqueTopics[0] : DEFAULT_TOPIC;
-}
-
-function normalizeTraceparent(value) {
-  if (typeof value !== "string" || value.trim() === "") {
-    return undefined;
-  }
-  try {
-    const context = parseTraceparent(value);
-    return `${context.version}-${context.traceId}-${context.parentSpanId}-${context.traceFlags}`;
-  } catch {
-    return undefined;
-  }
-}
-
-function readHeaderValue(headers, name) {
-  if (!headers || typeof headers !== "object") {
-    return undefined;
-  }
-  const value = headers[name];
-  if (Array.isArray(value)) {
-    return readOneHeaderValue(value[0]);
-  }
-  return readOneHeaderValue(value);
-}
-
-function readOneHeaderValue(value) {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (isNodeBufferValue(value)) {
-    return value.toString("utf8");
-  }
-  return undefined;
-}
-
-function normalizeLabel(value, fallback) {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
-}
-
-function cloneObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
-}
-
-function isNodeBufferValue(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    typeof value.toString === "function" &&
-    typeof value.constructor?.isBuffer === "function" &&
-    value.constructor.isBuffer(value)
-  );
 }
 
 const defaultExport = {

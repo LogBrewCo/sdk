@@ -7,35 +7,43 @@ import type {
   ProducerRecord,
   RecordMetadata
 } from "kafkajs";
-import type { LogBrewClient } from "@logbrew/sdk";
 import type { QueueBatchOperationWithLogBrewSpanOptions, QueueOperationWithLogBrewSpanOptions } from "@logbrew/node";
+import type { LogBrewClient } from "@logbrew/sdk";
 
-export type LogBrewKafkaJsHeaderValue = Buffer | string | Array<Buffer | string> | undefined;
-export type LogBrewKafkaJsHeaders = Record<string, LogBrewKafkaJsHeaderValue>;
-export type LogBrewKafkaJsMessageLike = {
+type LogBrewKafkaJsHeaderValue = Buffer | string | (Buffer | string)[] | undefined;
+type LogBrewKafkaJsHeaders = Record<string, LogBrewKafkaJsHeaderValue>;
+type ReadonlyHeaders = Readonly<Record<string, Buffer | string | readonly (Buffer | string)[] | undefined>>;
+type DeepReadonly<Value> = Value extends Buffer
+  ? Value
+  : Value extends readonly (infer Item)[]
+    ? readonly DeepReadonly<Item>[]
+    : Value extends object
+      ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
+      : Value;
+type LogBrewKafkaJsMessageLike = {
   headers?: LogBrewKafkaJsHeaders;
   [key: string]: unknown;
 };
 
-export type LogBrewKafkaJsSendOptions<Result = RecordMetadata[]> =
+type LogBrewKafkaJsSendOptions<Result = RecordMetadata[]> =
   Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "messageCount"> & {
     topicName?: string;
     client: LogBrewClient;
   };
 
-export type LogBrewKafkaJsProcessOptions<Result = unknown> =
+type LogBrewKafkaJsProcessOptions<Result = unknown> =
   Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
     topicName?: string;
     client: LogBrewClient;
   };
 
-export type LogBrewKafkaJsBatchProcessOptions<Result = unknown> =
+type LogBrewKafkaJsBatchProcessOptions<Result = unknown> =
   Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "messages" | "linkMetadata"> & {
     topicName?: string;
     client: LogBrewClient;
   };
 
-export type LogBrewKafkaJsInstrumentationOptions<Result = unknown> =
+type LogBrewKafkaJsInstrumentationOptions<Result = unknown> =
   Omit<
     QueueBatchOperationWithLogBrewSpanOptions<Result>,
     "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messageCount" | "messages" | "linkMetadata"
@@ -44,58 +52,58 @@ export type LogBrewKafkaJsInstrumentationOptions<Result = unknown> =
     client: LogBrewClient;
   };
 
-export type LogBrewKafkaJsInstrumentation = {
-  uninstall(): void;
+type LogBrewKafkaJsInstrumentation = {
+  uninstall: () => void;
 };
 
-export declare function kafkaJsProducerSendWithLogBrewSpan(
-  producer: Pick<Producer, "send">,
+declare function kafkaJsProducerSendWithLogBrewSpan(
+  producer: Readonly<Pick<Producer, "send">>,
   record: ProducerRecord,
   options: LogBrewKafkaJsSendOptions
 ): Promise<RecordMetadata[]>;
 
-export declare function kafkaJsProducerSendBatchWithLogBrewSpan(
-  producer: Pick<Producer, "sendBatch">,
+declare function kafkaJsProducerSendBatchWithLogBrewSpan(
+  producer: Readonly<Pick<Producer, "sendBatch">>,
   batch: ProducerBatch,
   options: LogBrewKafkaJsSendOptions
 ): Promise<RecordMetadata[]>;
 
-export declare function withLogBrewKafkaJsEachMessage<Result = void>(
+declare function withLogBrewKafkaJsEachMessage<Result = void>(
   eachMessage: (payload: EachMessagePayload) => Result | Promise<Result>,
   options: LogBrewKafkaJsProcessOptions<Result>
 ): (payload: EachMessagePayload) => Promise<Awaited<Result>>;
 
-export declare function withLogBrewKafkaJsEachBatch<Result = void>(
+declare function withLogBrewKafkaJsEachBatch<Result = void>(
   eachBatch: (payload: EachBatchPayload) => Result | Promise<Result>,
   options: LogBrewKafkaJsBatchProcessOptions<Result>
 ): (payload: EachBatchPayload) => Promise<Awaited<Result>>;
 
-export declare function instrumentLogBrewKafkaJsProducer(
-  producer: Partial<Pick<Producer, "send" | "sendBatch">> & object,
+declare function instrumentLogBrewKafkaJsProducer(
+  producer: Readonly<Partial<Pick<Producer, "send" | "sendBatch">>> & object,
   options: LogBrewKafkaJsSendOptions
 ): LogBrewKafkaJsInstrumentation;
 
-export declare function instrumentLogBrewKafkaJsConsumer(
-  consumer: Pick<Consumer, "run">,
+declare function instrumentLogBrewKafkaJsConsumer(
+  consumer: Readonly<Pick<Consumer, "run">>,
   options: LogBrewKafkaJsInstrumentationOptions
 ): LogBrewKafkaJsInstrumentation;
 
-export declare function createLogBrewKafkaJsProducerRecord(
-  record?: Partial<ProducerRecord>,
+declare function createLogBrewKafkaJsProducerRecord(
+  record?: DeepReadonly<Partial<ProducerRecord>>,
   traceparent?: string
 ): Partial<ProducerRecord>;
 
-export declare function createLogBrewKafkaJsProducerBatch(
-  batch?: Partial<ProducerBatch>,
+declare function createLogBrewKafkaJsProducerBatch(
+  batch?: DeepReadonly<Partial<ProducerBatch>>,
   traceparent?: string
 ): Partial<ProducerBatch>;
 
-export declare function createLogBrewKafkaJsMessage<TMessage extends LogBrewKafkaJsMessageLike>(
+declare function createLogBrewKafkaJsMessage<TMessage extends LogBrewKafkaJsMessageLike>(
   message?: TMessage,
   traceparent?: string
 ): TMessage & { headers?: LogBrewKafkaJsHeaders };
 
-export declare function extractLogBrewKafkaJsTraceparent(message?: { headers?: LogBrewKafkaJsHeaders }): string | undefined;
+declare function extractLogBrewKafkaJsTraceparent(message?: { readonly headers?: ReadonlyHeaders }): string | undefined;
 
 declare const api: {
   createLogBrewKafkaJsMessage: typeof createLogBrewKafkaJsMessage;
@@ -110,4 +118,26 @@ declare const api: {
   withLogBrewKafkaJsEachMessage: typeof withLogBrewKafkaJsEachMessage;
 };
 
+export type {
+  LogBrewKafkaJsBatchProcessOptions,
+  LogBrewKafkaJsHeaders,
+  LogBrewKafkaJsHeaderValue,
+  LogBrewKafkaJsInstrumentation,
+  LogBrewKafkaJsInstrumentationOptions,
+  LogBrewKafkaJsMessageLike,
+  LogBrewKafkaJsProcessOptions,
+  LogBrewKafkaJsSendOptions
+};
+export {
+  createLogBrewKafkaJsMessage,
+  createLogBrewKafkaJsProducerBatch,
+  createLogBrewKafkaJsProducerRecord,
+  extractLogBrewKafkaJsTraceparent,
+  instrumentLogBrewKafkaJsConsumer,
+  instrumentLogBrewKafkaJsProducer,
+  kafkaJsProducerSendBatchWithLogBrewSpan,
+  kafkaJsProducerSendWithLogBrewSpan,
+  withLogBrewKafkaJsEachBatch,
+  withLogBrewKafkaJsEachMessage
+};
 export default api;
