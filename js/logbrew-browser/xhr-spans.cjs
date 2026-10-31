@@ -1,33 +1,87 @@
 "use strict";
 
-const { SdkError } = require("@logbrew/sdk");
-const { createBrowserFetchSpanEvent } = require("./fetch-spans.cjs");
+const {
+  assertBrowserContext,
+  defaultSanitizeMetadata,
+  defaultWindow,
+  flushAfterCapture,
+  optionsWithTraceContext,
+  safeMetadata
+} = require("./browser-events.cjs");
+const { callMethod, isRecord, readField } = require("./values.cjs");
+const {
+  contentLengthBytes,
+  durationSince,
+  errorType,
+  normalizeMethod,
+  nowMs,
+  shouldCaptureRequest,
+  traceparentFromTraceContext,
+  validateTargets
+} = require("./network-spans.cjs");
 const {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext
+  resolveTraceContext
 } = require("./trace-context.cjs");
+const { SdkError } = require("@logbrew/sdk");
+const { createBrowserFetchSpanEvent } = require("./fetch-spans.cjs");
 const { shouldPropagateTraceparent } = require("./traceparent-fetch.cjs");
 
-async function captureBrowserXhrSpan(request, context, options = {}) {
-  assertBrowserContext(context, "captureBrowserXhrSpan");
-  const event = createBrowserXhrSpanEvent(request, context.browserWindow, optionsWithTraceContext(
-    options,
-    resolveTraceContext(context, options)
-  ));
+/**
+ * @import { Metadata, SpanAttributes, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   BrowserEventIdContext,
+ *   BrowserTraceContext,
+ *   BrowserTraceContextInput,
+ *   BrowserXhrInput,
+ *   BrowserXhrInstrumentation,
+ *   BrowserXhrOptions,
+ *   LogBrewBrowserContext,
+ *   LogBrewBrowserEvent
+ * } from "./index.cjs"
+ * @typedef {BrowserXhrOptions & { readonly spanTraceContext?: BrowserTraceContextInput | undefined }} XhrSpanOptions
+ * @typedef {{ readonly method: string, readonly url: string }} XhrRequestState
+ * @typedef {{
+ *   readonly context: LogBrewBrowserContext,
+ *   readonly options: BrowserXhrOptions,
+ *   readonly states: WeakMap<object, XhrRequestState>
+ * }} XhrSetup
+ * @typedef {{
+ *   readonly parentTraceContext: BrowserTraceContext | undefined,
+ *   readonly shouldCapture: boolean,
+ *   readonly spanTraceContext: BrowserTraceContext,
+ *   readonly startMs: number,
+ *   readonly state: XhrRequestState,
+ *   readonly tracePropagated: boolean
+ * }} XhrCall
+ * @typedef {XhrCall & { readonly errorType: string | undefined }} XhrOutcome
+ * @typedef {(...args: readonly unknown[]) => unknown} XhrMethod
+ * @typedef {{ readonly open: XhrMethod, readonly send: XhrMethod }} XhrPrototype
+ */
 
-  context.client.span(event.id, event.timestamp, event.attributes);
-  return flushAfterCapture(context, options);
+const DECIMAL = 10;
+const NO_STATUS = 0;
+
+/**
+ * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @returns {string}
+ */
+function defaultXhrSpanEventId({ message, path }) {
+  return createAutomaticBrowserEventId("evt_browser_xhr", `${path}_${message}`);
 }
 
+/**
+ * @param {BrowserXhrInput} request
+ * @param {Window} [browserWindow]
+ * @param {XhrSpanOptions} [options]
+ * @returns {LogBrewBrowserEvent<SpanAttributes>}
+ */
 function createBrowserXhrSpanEvent(request, browserWindow = defaultWindow(), options = {}) {
-  if (!request || typeof request !== "object" || Array.isArray(request)) {
+  if (!isRecord(request)) {
     throw new SdkError("configuration_error", "createBrowserXhrSpanEvent requires an XHR request summary");
   }
-  const {
-    idFactory,
-    sanitizeMetadata = defaultSanitizeMetadata
-  } = options;
+  const { idFactory, sanitizeMetadata = defaultSanitizeMetadata } = options;
   const fetchLikeRequest = {
     durationMs: request.durationMs,
     errorType: request.errorType,
@@ -41,17 +95,25 @@ function createBrowserXhrSpanEvent(request, browserWindow = defaultWindow(), opt
   };
   const event = createBrowserFetchSpanEvent(fetchLikeRequest, browserWindow, {
     ...options,
+    /**
+     * @param {BrowserEventIdContext} context
+     * @returns {string}
+     */
     idFactory(context) {
       return typeof idFactory === "function"
         ? idFactory({ ...context, request, source: "xhr" })
         : defaultXhrSpanEventId({ message: context.message, path: context.path });
     },
-    spanTraceContext: request.spanTraceContext ?? options.spanTraceContext,
+    /**
+     * @param {Readonly<Metadata>} metadata
+     * @returns {Metadata}
+     */
     sanitizeMetadata(metadata) {
       return sanitizeMetadata(metadata, "xhr");
-    }
+    },
+    spanTraceContext: request.spanTraceContext ?? options.spanTraceContext
   });
-  const requestPath = event.attributes.metadata?.requestPath ?? "/";
+  const requestPath = event.attributes.metadata?.["requestPath"] ?? "/";
   return {
     ...event,
     attributes: {
@@ -60,83 +122,190 @@ function createBrowserXhrSpanEvent(request, browserWindow = defaultWindow(), opt
         ...safeMetadata(event.attributes.metadata),
         source: "browser.xhr"
       },
-      name: `browser.xhr ${xhrMethod(request.method)} ${requestPath}`
+      name: `browser.xhr ${normalizeMethod(request.method)} ${String(requestPath)}`
     }
   };
 }
 
-function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
-  assertBrowserContext(context, "installLogBrewBrowserXhrInstrumentation");
-  validateTargets(options.tracePropagationTargets ?? [], "tracePropagationTargets");
-  validateTargets(options.captureTargets, "captureTargets", { optional: true });
-  const browserWindow = options.browserWindow ?? context.browserWindow ?? defaultWindow();
-  const XhrConstructor = options.XMLHttpRequest ?? browserWindow?.XMLHttpRequest ?? defaultWindow()?.XMLHttpRequest;
-  const prototype = XhrConstructor?.prototype;
-  if (!prototype || typeof prototype.open !== "function" || typeof prototype.send !== "function") {
-    throw new SdkError(
-      "configuration_error",
-      "installLogBrewBrowserXhrInstrumentation requires XMLHttpRequest.open/send"
-    );
+/**
+ * @param {BrowserXhrInput} request
+ * @param {LogBrewBrowserContext} context
+ * @param {XhrSpanOptions} [options]
+ * @returns {Promise<TransportResponse | undefined>}
+ */
+async function captureBrowserXhrSpan(request, context, options = {}) {
+  assertBrowserContext(context, "captureBrowserXhrSpan");
+  const eventOptions = optionsWithTraceContext(options, resolveTraceContext(context, options));
+  const event = createBrowserXhrSpanEvent(request, context.browserWindow, eventOptions);
+
+  context.client.span(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
+}
+
+/**
+ * @param {object} xhr
+ * @param {string} url
+ * @param {XhrSetup & { readonly traceContext: BrowserTraceContext }} setup
+ * @returns {boolean}
+ */
+function setTraceparentHeader(xhr, url, { options, traceContext }) {
+  if (!shouldPropagateTraceparent(url, options.tracePropagationTargets ?? [])) {
+    return false;
   }
+  if (typeof readField(xhr, "setRequestHeader") !== "function") {
+    return false;
+  }
+  try {
+    callMethod(xhr, "setRequestHeader", ["traceparent", traceparentFromTraceContext(traceContext)]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  const originalOpen = prototype.open;
-  const originalSend = prototype.send;
-  const states = new WeakMap();
+/**
+ * @param {object} xhr
+ * @param {string} type
+ * @param {() => void} listener
+ * @returns {() => void}
+ */
+function addXhrListener(xhr, type, listener) {
+  if (typeof readField(xhr, "addEventListener") !== "function") {
+    return () => undefined;
+  }
+  callMethod(xhr, "addEventListener", [type, listener]);
+  return () => {
+    callMethod(xhr, "removeEventListener", [type, listener]);
+  };
+}
 
-  /** @this {XMLHttpRequest} */
-  const wrappedOpen = function logbrewXhrOpen(method, url, ...args) {
-    states.set(this, {
-      method: xhrMethod(method),
+/**
+ * @param {unknown} xhr
+ * @returns {number | undefined}
+ */
+function xhrStatus(xhr) {
+  const status = readField(xhr, "status");
+  const value = typeof status === "number" ? status : Number.parseInt(String(status), DECIMAL);
+  return Number.isInteger(value) && value >= NO_STATUS ? value : undefined;
+}
+
+/**
+ * @param {unknown} xhr
+ * @returns {number | undefined}
+ */
+function xhrResponseBodySize(xhr) {
+  if (typeof readField(xhr, "getResponseHeader") !== "function") {
+    return undefined;
+  }
+  return contentLengthBytes(callMethod(xhr, "getResponseHeader", ["content-length"]) ?? callMethod(xhr, "getResponseHeader", ["Content-Length"]));
+}
+
+/**
+ * @param {object} xhr
+ * @param {XhrSetup} setup
+ * @returns {XhrCall}
+ */
+function beginXhrCall(xhr, setup) {
+  const { context, options } = setup;
+  const state = setup.states.get(xhr) ?? { method: "GET", url: "" };
+  const startMs = nowMs(options);
+  const parentTraceContext = resolveTraceContext(context, options);
+  const spanTraceContext = createBrowserTraceContext({
+    randomValues: options.randomValues,
+    sampled: parentTraceContext?.sampled ?? options.sampled,
+    traceFlags: parentTraceContext?.traceFlags ?? options.traceFlags,
+    traceId: parentTraceContext?.traceId
+  });
+  const shouldCapture = shouldCaptureRequest(state.url, options.captureTargets);
+  const tracePropagated = setTraceparentHeader(xhr, state.url, { ...setup, traceContext: spanTraceContext });
+  return { parentTraceContext, shouldCapture, spanTraceContext, startMs, state, tracePropagated };
+}
+
+/**
+ * @param {object} xhr
+ * @param {XhrOutcome} call
+ * @param {XhrSetup} setup
+ * @returns {void}
+ */
+function captureXhrCall(xhr, call, { context, options }) {
+  void captureBrowserXhrSpan({
+    durationMs: durationSince(call.startMs, options),
+    errorType: call.errorType,
+    method: call.state.method,
+    responseBodySize: xhrResponseBodySize(xhr),
+    spanTraceContext: call.spanTraceContext,
+    statusCode: xhrStatus(xhr),
+    tracePropagated: call.tracePropagated,
+    url: call.state.url
+  }, context, optionsWithTraceContext(options, call.parentTraceContext));
+}
+
+/**
+ * @param {object} xhr
+ * @param {XhrCall} call
+ * @param {XhrSetup} setup
+ * @returns {(eventType: string | undefined) => void}
+ */
+function xhrCompletion(xhr, call, setup) {
+  const progress = { completed: false };
+  /** @type {(() => void)[]} */
+  const removeListeners = [];
+  /**
+   * @param {string | undefined} eventType
+   * @returns {void}
+   */
+  function complete(eventType) {
+    if (progress.completed) {
+      return;
+    }
+    progress.completed = true;
+    for (const removeListener of removeListeners) {
+      removeListener();
+    }
+    if (call.shouldCapture) {
+      captureXhrCall(xhr, { ...call, errorType: eventType }, setup);
+    }
+  }
+  removeListeners.push(
+    addXhrListener(xhr, "load", () => {
+      complete(undefined);
+    }),
+    addXhrListener(xhr, "error", () => {
+      complete("error");
+    }),
+    addXhrListener(xhr, "abort", () => {
+      complete("abort");
+    }),
+    addXhrListener(xhr, "timeout", () => {
+      complete("timeout");
+    })
+  );
+  return complete;
+}
+
+/**
+ * @param {XhrSetup} setup
+ * @param {XhrMethod} originalOpen
+ * @returns {(this: XMLHttpRequest, method: unknown, url: unknown, ...args: readonly unknown[]) => unknown}
+ */
+function createXhrOpen(setup, originalOpen) {
+  return function logbrewXhrOpen(method, url, ...args) {
+    setup.states.set(this, {
+      method: normalizeMethod(method),
       url: String(url)
     });
     return Reflect.apply(originalOpen, this, [method, url, ...args]);
   };
-  prototype.open = wrappedOpen;
+}
 
-  /** @this {XMLHttpRequest} */
-  const wrappedSend = function logbrewXhrSend(...args) {
-    const state = states.get(this) ?? {
-      method: "GET",
-      url: ""
-    };
-    const startMs = nowMs(options);
-    const parentTraceContext = resolveTraceContext(context, options);
-    const spanTraceContext = createBrowserTraceContext({
-      randomValues: options.randomValues,
-      sampled: parentTraceContext?.sampled ?? options.sampled,
-      traceFlags: parentTraceContext?.traceFlags ?? options.traceFlags,
-      traceId: parentTraceContext?.traceId
-    });
-    const shouldCapture = shouldCaptureRequest(state.url, options.captureTargets);
-    const tracePropagated = setTraceparentHeader(this, state.url, spanTraceContext, options);
-    let completed = false;
-    const complete = (eventType) => {
-      if (completed) {
-        return;
-      }
-      completed = true;
-      removeListeners.forEach((removeListener) => removeListener());
-      if (!shouldCapture) {
-        return;
-      }
-      void captureBrowserXhrSpan({
-        durationMs: durationSince(startMs, options),
-        errorType: eventType,
-        method: state.method,
-        responseBodySize: xhrResponseBodySize(this),
-        spanTraceContext,
-        statusCode: xhrStatus(this),
-        tracePropagated,
-        url: state.url
-      }, context, optionsWithTraceContext(options, parentTraceContext));
-    };
-    const removeListeners = [
-      addXhrListener(this, "load", () => complete(undefined)),
-      addXhrListener(this, "error", () => complete("error")),
-      addXhrListener(this, "abort", () => complete("abort")),
-      addXhrListener(this, "timeout", () => complete("timeout"))
-    ];
-
+/**
+ * @param {XhrSetup} setup
+ * @param {XhrMethod} originalSend
+ * @returns {(this: XMLHttpRequest, ...args: readonly unknown[]) => unknown}
+ */
+function createXhrSend(setup, originalSend) {
+  return function logbrewXhrSend(...args) {
+    const complete = xhrCompletion(this, beginXhrCall(this, setup), setup);
     try {
       return Reflect.apply(originalSend, this, args);
     } catch (error) {
@@ -144,179 +313,61 @@ function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
       throw error;
     }
   };
-  prototype.send = wrappedSend;
+}
 
+/**
+ * @param {unknown} value
+ * @returns {value is XhrPrototype}
+ */
+function isXhrPrototype(value) {
+  return Boolean(value) && typeof readField(value, "open") === "function" && typeof readField(value, "send") === "function";
+}
+
+/**
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserXhrOptions} options
+ * @returns {XhrPrototype}
+ */
+function xhrPrototype(context, options) {
+  const browserWindow = options.browserWindow ?? context.browserWindow ?? defaultWindow();
+  const XhrConstructor = options.XMLHttpRequest
+    ?? readField(browserWindow, "XMLHttpRequest")
+    ?? readField(defaultWindow(), "XMLHttpRequest");
+  const prototype = readField(XhrConstructor, "prototype");
+  if (!isXhrPrototype(prototype)) {
+    throw new SdkError(
+      "configuration_error",
+      "installLogBrewBrowserXhrInstrumentation requires XMLHttpRequest.open/send"
+    );
+  }
+  return prototype;
+}
+
+/**
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserXhrOptions} [options]
+ * @returns {BrowserXhrInstrumentation}
+ */
+function installLogBrewBrowserXhrInstrumentation(context, options = {}) {
+  assertBrowserContext(context, "installLogBrewBrowserXhrInstrumentation");
+  validateTargets(options.tracePropagationTargets ?? [], "tracePropagationTargets");
+  validateTargets(options.captureTargets, "captureTargets", { optional: true });
+  const prototype = xhrPrototype(context, options);
+  const { open: originalOpen, send: originalSend } = prototype;
+  const setup = { context, options, states: new WeakMap() };
+  const wrappedOpen = createXhrOpen(setup, originalOpen);
+  const wrappedSend = createXhrSend(setup, originalSend);
+  Object.assign(prototype, { open: wrappedOpen, send: wrappedSend });
   return {
     uninstall() {
       if (prototype.open === wrappedOpen) {
-        prototype.open = originalOpen;
+        Object.assign(prototype, { open: originalOpen });
       }
       if (prototype.send === wrappedSend) {
-        prototype.send = originalSend;
+        Object.assign(prototype, { send: originalSend });
       }
     }
   };
-}
-
-async function flushAfterCapture(context, options) {
-  if (options.flushOnCapture === false) {
-    return undefined;
-  }
-  try {
-    const response = await context.client.flush(context.transport);
-    if (typeof options.onFlush === "function") {
-      await options.onFlush(response, context, { reason: "capture" });
-    }
-    return response;
-  } catch (error) {
-    if (typeof options.onCaptureError === "function") {
-      await options.onCaptureError(error, context, { reason: "capture" });
-    }
-    if (options.raiseCaptureErrors === true) {
-      throw error;
-    }
-    return undefined;
-  }
-}
-
-function assertBrowserContext(context, functionName) {
-  if (!context || typeof context !== "object" || !context.client) {
-    throw new SdkError("configuration_error", `${functionName} requires a browser context`);
-  }
-}
-
-function validateTargets(targets, name, { optional = false } = {}) {
-  if (targets === undefined && optional) {
-    return;
-  }
-  if (!Array.isArray(targets)) {
-    throw new SdkError("configuration_error", `${name} must be an array`);
-  }
-}
-
-function shouldCaptureRequest(url, captureTargets) {
-  if (captureTargets === undefined) {
-    return true;
-  }
-  return shouldPropagateTraceparent(url, captureTargets);
-}
-
-function resolveTraceContext(context, options) {
-  if (options.traceContext !== undefined) {
-    return typeof options.traceContext === "function"
-      ? optionalBrowserTraceContext(options.traceContext())
-      : optionalBrowserTraceContext(options.traceContext);
-  }
-  return context.traceContext;
-}
-
-function optionsWithTraceContext(options, traceContext) {
-  return {
-    ...options,
-    traceContext
-  };
-}
-
-function setTraceparentHeader(xhr, url, traceContext, options) {
-  if (!shouldPropagateTraceparent(url, options.tracePropagationTargets ?? [])) {
-    return false;
-  }
-  if (typeof xhr.setRequestHeader !== "function") {
-    return false;
-  }
-  try {
-    xhr.setRequestHeader("traceparent", traceparentFromTraceContext(traceContext));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function traceparentFromTraceContext(traceContext) {
-  return `00-${traceContext.traceId}-${traceContext.spanId}-${traceContext.traceFlags}`;
-}
-
-function addXhrListener(xhr, type, listener) {
-  if (typeof xhr.addEventListener !== "function") {
-    return () => {};
-  }
-  xhr.addEventListener(type, listener);
-  return () => {
-    if (typeof xhr.removeEventListener === "function") {
-      xhr.removeEventListener(type, listener);
-    }
-  };
-}
-
-function xhrMethod(method) {
-  return typeof method === "string" && method.trim() !== ""
-    ? method.trim().toUpperCase()
-    : "GET";
-}
-
-function xhrStatus(xhr) {
-  const value = typeof xhr?.status === "number" ? xhr.status : Number.parseInt(String(xhr?.status), 10);
-  return Number.isInteger(value) && value >= 0 ? value : undefined;
-}
-
-function xhrResponseBodySize(xhr) {
-  if (typeof xhr?.getResponseHeader !== "function") {
-    return undefined;
-  }
-  const contentLength = xhr.getResponseHeader("content-length") ?? xhr.getResponseHeader("Content-Length");
-  if (typeof contentLength !== "string" || contentLength.trim() === "") {
-    return undefined;
-  }
-  const parsed = Number.parseInt(contentLength, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
-function durationSince(startMs, options) {
-  const endMs = nowMs(options);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
-    return 0;
-  }
-  return Number((endMs - startMs).toFixed(3));
-}
-
-function nowMs(options) {
-  if (typeof options.nowMs === "function") {
-    const value = options.nowMs();
-    return typeof value === "number" && Number.isFinite(value) ? value : Date.now();
-  }
-  if (typeof globalThis.performance?.now === "function") {
-    return globalThis.performance.now();
-  }
-  return Date.now();
-}
-
-function errorType(error) {
-  return typeof error?.name === "string" && error.name.trim() !== "" ? error.name : "Error";
-}
-
-function safeMetadata(metadata) {
-  if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") {
-    return {};
-  }
-  const compacted = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) {
-      compacted[key] = value;
-    }
-  }
-  return compacted;
-}
-
-function defaultSanitizeMetadata(metadata) {
-  return safeMetadata(metadata);
-}
-
-function defaultWindow() {
-  return typeof globalThis.window === "object" ? globalThis.window : undefined;
-}
-
-function defaultXhrSpanEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_xhr", `${path}_${message}`);
 }
 
 module.exports = {
