@@ -37,8 +37,8 @@ var (
 	registryTargets = []string{"all", "npm", "pypi", "rubygems", "nuget", "packagist", "crates", "maven", "openupm", "go"}
 	registryNPM     = []string{"@logbrew/amqplib", "@logbrew/angular", "@logbrew/aws-sqs", "@logbrew/browser",
 		"@logbrew/bullmq", "@logbrew/express", "@logbrew/fastify", "@logbrew/kafkajs", "@logbrew/nestjs",
-		"@logbrew/next", "@logbrew/node", "@logbrew/react", "@logbrew/react-native", "@logbrew/sdk",
-		"@logbrew/svelte", "@logbrew/vue"}
+		"@logbrew/next", "@logbrew/node", "@logbrew/prisma", "@logbrew/react", "@logbrew/react-native",
+		"@logbrew/sdk", "@logbrew/svelte", "@logbrew/vue"}
 	// registryPyPI lists the core package first, then the extras.
 	registryPyPI   = []string{"logbrew-sdk", "logbrew-fastapi", "logbrew-flask", "logbrew-django"}
 	registryMaven  = []string{"logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp"}
