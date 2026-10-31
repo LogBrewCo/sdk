@@ -1,51 +1,50 @@
-import { RecordingTransport } from "@logbrew/sdk";
-import { createNodeFetchTransport } from "@logbrew/node";
+import { LogBrewClient, RecordingTransport } from "@logbrew/sdk";
 import {
   bullMqQueueAddBulkWithLogBrewSpan,
   bullMqQueueAddWithLogBrewSpan,
   extractLogBrewBullMqTraceparent,
   withLogBrewBullMqProcessor
 } from "@logbrew/bullmq";
+import { Queue } from "bullmq";
 
 const transport = RecordingTransport.alwaysAccept();
-void createNodeFetchTransport;
-const client = {
-  span(id, timestamp, attributes) {
-    transport.sentBodies.push(JSON.stringify({ events: [{ id, timestamp, attributes, type: "span" }] }));
-  }
-};
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "bullmq-real-user-smoke",
+  sdkVersion: "0.1.0",
+  transport
+});
 
-const queue = {
-  name: "email",
-  async add(name, data, opts) {
-    return { data, name, opts, queueName: "email" };
-  },
-  async addBulk(jobs) {
-    return jobs.map((job) => ({ ...job, queueName: "email" }));
-  }
-};
-
+/** @type {Queue<{ template: string }, string, "welcome">} */
+const queue = new Queue("email", { connection: { host: "127.0.0.1", port: 6379 } });
 const job = await bullMqQueueAddWithLogBrewSpan(queue, "welcome", { template: "safe" }, {}, {
   client,
   spanIdFactory: () => "1111111111111111",
   traceIdFactory: () => "22222222222222222222222222222222"
 });
-const processor = withLogBrewBullMqProcessor(async (currentJob) => currentJob.name, {
+const processor = withLogBrewBullMqProcessor(async (currentJob) => {
+  await Promise.resolve();
+  return currentJob.name;
+}, {
   client,
   spanIdFactory: () => "3333333333333333"
 });
 await processor(job);
 await bullMqQueueAddBulkWithLogBrewSpan(queue, [
-  { name: "one", data: { ok: true } },
-  { name: "two", data: { ok: true } }
+  { data: { template: "one" }, name: "welcome" },
+  { data: { template: "two" }, name: "welcome" }
 ], {
   client,
   spanIdFactory: () => "4444444444444444",
   traceIdFactory: () => "55555555555555555555555555555555"
 });
 
-if (!extractLogBrewBullMqTraceparent(job)) {
+if (extractLogBrewBullMqTraceparent(job) === undefined) {
   throw new Error("expected BullMQ job traceparent");
 }
 
-console.log(JSON.stringify({ events: transport.sentBodies.length, ok: true }));
+await queue.close();
+const events = client.pendingEvents();
+await client.flush();
+
+process.stdout.write(`${JSON.stringify({ events, ok: transport.lastBody() !== null })}\n`);

@@ -176,6 +176,7 @@
             "name": [
               "LogBrewClient",
               "RecordingTransport",
+              "SpanLinkSummary",
               "Transport"
             ],
             "path": "../logbrew-js/index.d.ts"
@@ -191,6 +192,56 @@
             "from": "package",
             "name": "FastifyError",
             "package": "@fastify/error"
+          },
+          {
+            "from": "package",
+            "name": [
+              "Message",
+              "SendMessageBatchCommandInput",
+              "SendMessageCommandInput",
+              "ReceiveMessageCommandInput"
+            ],
+            "package": "@aws-sdk/client-sqs"
+          },
+          {
+            "from": "file",
+            "name": [
+              "LogBrewEventBridgeOperationOptions",
+              "LogBrewSnsBatchOperationOptions",
+              "LogBrewSnsOperationOptions",
+              "LogBrewSqsBatchOperationOptions",
+              "LogBrewSqsInstrumentableClient",
+              "LogBrewSqsOperationOptions"
+            ]
+          },
+          {
+            "from": "package",
+            "name": [
+              "FlowJob",
+              "FlowOpts",
+              "Job"
+            ],
+            "package": "bullmq"
+          },
+          {
+            "from": "file",
+            "name": [
+              "LogBrewBullMqBulkJob",
+              "LogBrewBullMqJobOptions",
+              "LogBrewBullMqSpanOptions"
+            ]
+          },
+          {
+            "from": "file",
+            "name": [
+              "LogBrewTraceContext"
+            ],
+            "path": "../logbrew-node/index.d.ts"
+          },
+          {
+            "from": "package",
+            "name": "AbortSignal",
+            "package": "@types/node"
           }
         ]
       }
@@ -331,6 +382,44 @@
       ],
       "rules": {
         "oxc/no-async-endpoint-handlers": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-aws-sqs/index.cjs",
+        "logbrew-aws-sqs/index.d.ts"
+      ],
+      "rules": {
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 4
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "logbrew-bullmq/index.cjs",
+        "logbrew-bullmq/index.d.cts",
+        "logbrew-bullmq/index.d.ts"
+      ],
+      "rules": {
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 5
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "logbrew-bullmq/index.d.cts",
+        "logbrew-bullmq/index.d.ts"
+      ],
+      "rules": {
+        "typescript/no-unnecessary-type-parameters": "off"
       }
     }
   ]

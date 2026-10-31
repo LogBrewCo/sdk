@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "types": ["node", "bun"] },
+  "files": ["index.cjs", "index.d.cts", "index.d.ts", "index.js"],
+  "include": ["**/*.js", "**/*.cjs", "**/*.mjs"]
+}

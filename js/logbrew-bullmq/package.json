@@ -21,6 +21,11 @@
   "files": [
     "index.cjs",
     "index.js",
+    "instrument.cjs",
+    "internal.cjs",
+    "jobs.cjs",
+    "process.cjs",
+    "producer.cjs",
     "index.d.ts",
     "index.d.cts",
     "README.md",
@@ -51,6 +56,6 @@
     "bullmq": ">=4"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check instrument.cjs && node --check internal.cjs && node --check jobs.cjs && node --check process.cjs && node --check producer.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }
