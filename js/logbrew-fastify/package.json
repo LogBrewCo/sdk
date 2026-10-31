@@ -23,6 +23,9 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "internal.cjs",
+    "events.cjs",
+    "application-logs.cjs",
     "README.md",
     "examples"
   ],
@@ -54,6 +57,6 @@
     "fastify-plugin": "^5.1.0"
   },
   "scripts": {
-    "test": "bun ../../scripts/check_js_package_sources.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check internal.cjs && node --check events.cjs && node --check application-logs.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }

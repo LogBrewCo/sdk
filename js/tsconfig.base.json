@@ -24,6 +24,7 @@
     "paths": {
       "@logbrew/amqplib": ["./logbrew-amqplib/index.d.ts"],
       "@logbrew/browser": ["./logbrew-browser/index.d.ts"],
+      "@logbrew/fastify": ["./logbrew-fastify/index.d.ts"],
       "@logbrew/node": ["./logbrew-node/index.d.ts"],
       "@logbrew/sdk": ["./logbrew-js/index.d.ts"]
     },

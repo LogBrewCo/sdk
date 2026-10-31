@@ -1,32 +1,77 @@
 "use strict";
 
-const fp = require("fastify-plugin");
+const { addApplicationLogCloseHook, installFastifyApplicationLogCapture } = require("./application-logs.cjs");
+const { readEnvApiKey, readEnvServerApiKey, readField } = require("./internal.cjs");
 const {
-  SdkError
-} = require("@logbrew/sdk");
+  createErrorEvent,
+  createRequestEvent,
+  createRequestMetricEvent,
+  createRequestTraceContext,
+  getRequestTraceContext
+} = require("./events.cjs");
 const {
   createLogBrewNodeClient,
-  createLogBrewTraceContext,
   createNodeFetchTransport,
   enterWithLogBrewTrace,
-  getActiveLogBrewTrace,
-  installLogBrewPinoInstrumentation
+  getActiveLogBrewTrace
 } = require("@logbrew/node");
+const { SdkError } = require("@logbrew/sdk");
+const fp = require("fastify-plugin");
+
+/**
+ * @import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
+ * @import { LogBrewTraceContext } from "@logbrew/node"
+ * @import { LogBrewClient, Transport, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   CreateLogBrewFastifyClientConfig,
+ *   LogBrewFastifyContext,
+ *   LogBrewFastifyOptions,
+ *   LogBrewFastifyRuntimeContext,
+ *   LogBrewRequestEvent,
+ *   LogBrewRequestMetricEvent
+ * } from "./index.cjs"
+ * @import { TransportSource } from "./internal.cjs"
+ */
+
+/**
+ * @typedef {{
+ *   readonly capturesRequestFinish: boolean,
+ *   readonly markStarted: (request: FastifyRequest) => void,
+ *   readonly options: LogBrewFastifyOptions,
+ *   readonly source: TransportSource,
+ *   readonly startedAt: (request: FastifyRequest) => number
+ * }} PluginState
+ * @typedef {{ readonly error: unknown, readonly reply: FastifyReply, readonly request: FastifyRequest }} RequestFailure
+ * @typedef {{
+ *   readonly client: LogBrewClient,
+ *   readonly durationMs: number,
+ *   readonly reply: FastifyReply,
+ *   readonly request: FastifyRequest,
+ *   readonly trace: Readonly<LogBrewTraceContext> | undefined
+ * }} FinishedRequest
+ * @typedef {LogBrewFastifyRuntimeContext & { readonly transport: Transport }} FailureTarget
+ */
 
 const DEFAULT_SDK_NAME = "logbrew-fastify";
 const DEFAULT_SDK_VERSION = "0.1.8";
+const DEFAULT_MAX_RETRIES = 2;
+const MIN_DURATION_MS = 0;
 
+/**
+ * @param {CreateLogBrewFastifyClientConfig} [config]
+ * @returns {LogBrewClient}
+ */
 function createLogBrewFastifyClient({
-  serverApiKey,
   apiKey,
   captureRuntimeContext = true,
   context,
+  maxRetries = DEFAULT_MAX_RETRIES,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
-  maxRetries = 2
+  serverApiKey
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();
-  if (!authKey) {
+  if (authKey === undefined || authKey === "") {
     throw new SdkError(
       "configuration_error",
       "createLogBrewFastifyClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
@@ -34,73 +79,287 @@ function createLogBrewFastifyClient({
   }
   return createLogBrewNodeClient({
     serverApiKey: authKey,
+
     automaticDelivery: false,
     captureRuntimeContext,
-    context,
+    ...(context === undefined ? {} : { context }),
     sdkName,
     sdkVersion,
+
     maxRetries
   });
 }
 
-async function logbrewFastifyPluginImpl(fastify, options = {}) {
-  ensureRequestDecorator(fastify);
-
-  const defaultTransport = options.transport === undefined
-    ? createNodeFetchTransport(options)
-    : undefined;
-  const applicationLogCapture = installFastifyApplicationLogCapture(
-    fastify,
-    options,
-    defaultTransport
-  );
-  const startedAtByRequest = new WeakMap();
-  const capturesRequestFinish = options.captureRequests !== false
-    || options.captureRequestMetrics === true;
-
-  if (applicationLogCapture) {
-    fastify.addHook("onClose", async () => {
-      applicationLogCapture.uninstall();
-      try {
-        await applicationLogCapture.client.shutdown(applicationLogCapture.transport);
-      } catch (error) {
-        await notifyApplicationLogFailure(options, error, {
-          client: applicationLogCapture.client
-        });
-      }
-    });
+/**
+ * @param {LogBrewFastifyOptions} options
+ * @returns {number}
+ */
+function nowMs(options) {
+  if (typeof options.nowMs === "function") {
+    return options.nowMs();
   }
+  return performance.now();
+}
 
+/**
+ * @param {FastifyInstance} fastify
+ * @returns {void}
+ */
+function ensureRequestDecorator(fastify) {
+  if (typeof fastify.hasRequestDecorator === "function" && fastify.hasRequestDecorator("logbrew")) {
+    return;
+  }
+  try {
+    fastify.decorateRequest("logbrew", undefined);
+  } catch (error) {
+    if (readField(error, "code") !== "FST_ERR_DEC_ALREADY_PRESENT") {
+      throw error;
+    }
+  }
+}
+
+/**
+ * @param {LogBrewFastifyOptions} options
+ * @returns {TransportSource}
+ */
+function createTransportSource(options) {
+  const { transport } = options;
+  if (typeof transport === "function") {
+    return { factory: transport };
+  }
+  return { transport: transport ?? createNodeFetchTransport(options) };
+}
+
+/**
+ * @param {TransportSource} source
+ * @param {LogBrewFastifyRuntimeContext} runtime
+ * @returns {Transport}
+ */
+function resolveTransport(source, runtime) {
+  return "factory" in source ? source.factory(runtime) : source.transport;
+}
+
+/**
+ * @param {LogBrewFastifyOptions} options
+ * @param {FastifyRequest} request
+ * @param {FastifyReply} reply
+ * @returns {LogBrewClient}
+ */
+function resolveClient(options, request, reply) {
+  if (typeof options.client === "function") {
+    return options.client({ reply, request });
+  }
+  if (options.client) {
+    return options.client;
+  }
+  return createLogBrewFastifyClient(options);
+}
+
+/**
+ * @param {LogBrewClient} client
+ * @param {Transport} transport
+ * @param {Readonly<LogBrewTraceContext>} trace
+ * @returns {LogBrewFastifyContext}
+ */
+function createRequestContext(client, transport, trace) {
+  return {
+    client,
+    flush: async () => client.flush(transport),
+    logbrew: client,
+    previewJson: () => client.previewJson(),
+    shutdown: async () => client.shutdown(transport),
+    trace,
+    transport
+  };
+}
+
+/**
+ * @param {FastifyRequest} request
+ * @returns {void}
+ */
+function enterRequestTraceContext(request) {
+  const trace = getRequestTraceContext(request);
+  if (trace) {
+    enterWithLogBrewTrace(trace);
+  }
+}
+
+/**
+ * @param {LogBrewFastifyOptions} options
+ * @param {Readonly<TransportResponse>} response
+ * @param {LogBrewFastifyRuntimeContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFlush(options, response, context) {
+  if (typeof options.onFlush === "function") {
+    await options.onFlush(response, context);
+  }
+}
+
+/**
+ * @param {LogBrewFastifyOptions} options
+ * @param {unknown} error
+ * @param {LogBrewFastifyRuntimeContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFailure(options, error, context) {
+  if (typeof options.onCaptureError === "function") {
+    await options.onCaptureError(error, context);
+  }
+}
+
+/**
+ * @param {LogBrewFastifyOptions} options
+ * @param {FinishedRequest} finished
+ * @returns {void}
+ */
+function captureFinishedRequest(options, finished) {
+  const { client, durationMs, reply, request, trace } = finished;
+  if (options.captureRequests !== false) {
+    /** @type {LogBrewRequestEvent} */
+    const event =
+      typeof options.requestEvent === "function"
+        ? options.requestEvent(request, reply, { client, durationMs, trace })
+        : createRequestEvent(request, reply, { ...options, durationMs, trace });
+    if (event.type === "span") {
+      client.span(event.id, event.timestamp, event.attributes);
+    } else {
+      client.log(event.id, event.timestamp, event.attributes);
+    }
+  }
+  if (options.captureRequestMetrics === true) {
+    /** @type {LogBrewRequestMetricEvent} */
+    const metricEvent =
+      typeof options.requestMetricEvent === "function"
+        ? options.requestMetricEvent(request, reply, { client, durationMs, trace })
+        : createRequestMetricEvent(request, reply, { ...options, durationMs, idFactory: options.metricIdFactory });
+    client.metric(metricEvent.id, metricEvent.timestamp, metricEvent.attributes);
+  }
+}
+
+/**
+ * @param {PluginState} state
+ * @param {FastifyRequest} request
+ * @param {FastifyReply} reply
+ * @returns {Promise<void>}
+ */
+async function captureRequestFinish(state, request, reply) {
+  const startedAt = state.startedAt(request);
+  const existing = request.logbrew;
+  if (!existing) {
+    return;
+  }
+  const { client, trace } = existing;
+  try {
+    const durationMs = Math.max(MIN_DURATION_MS, Math.round(nowMs(state.options) - startedAt));
+    captureFinishedRequest(state.options, { client, durationMs, reply, request, trace });
+    await notifyFlush(state.options, await client.shutdown(existing.transport), { client, reply, request, trace });
+  } catch (error) {
+    await notifyFailure(state.options, error, { client, reply, request, trace });
+  }
+}
+
+/**
+ * @param {PluginState} state
+ * @param {RequestFailure} failure
+ * @returns {FailureTarget}
+ */
+function resolveFailureTarget(state, failure) {
+  const { reply, request } = failure;
+  const existing = request.logbrew;
+  const client = existing?.client ?? resolveClient(state.options, request, reply);
+  const transport = existing?.transport ?? resolveTransport(state.source, { client, reply, request });
+  return { client, reply, request, trace: existing?.trace ?? getActiveLogBrewTrace(), transport };
+}
+
+/**
+ * @param {PluginState} state
+ * @param {RequestFailure} failure
+ * @returns {Promise<void>}
+ */
+async function captureRequestError(state, failure) {
+  const { options } = state;
+  const { transport, ...runtime } = resolveFailureTarget(state, failure);
+  const event =
+    typeof options.errorEvent === "function"
+      ? options.errorEvent(failure.error, runtime)
+      : createErrorEvent(failure.error, runtime.request, { now: options.now, trace: runtime.trace });
+  try {
+    runtime.client.issue(event.id, event.timestamp, event.attributes);
+    if (!state.capturesRequestFinish) {
+      await notifyFlush(options, await runtime.client.shutdown(transport), runtime);
+    }
+  } catch (captureError) {
+    await notifyFailure(options, captureError, runtime);
+  }
+}
+
+/**
+ * @param {FastifyInstance} fastify
+ * @param {PluginState} state
+ * @returns {void}
+ */
+function addRequestHooks(fastify, state) {
+  const { options } = state;
   fastify.addHook("onRequest", async (request, reply) => {
     const client = resolveClient(options, request, reply);
-    const transport = resolveTransport(options, request, reply, client, defaultTransport);
+    const transport = resolveTransport(state.source, { client, reply, request });
     const trace = createRequestTraceContext(request, reply, options);
-    startedAtByRequest.set(request, nowMs(options));
+    state.markStarted(request);
     request.logbrew = createRequestContext(client, transport, trace);
     enterRequestTraceContext(request);
   });
-
   fastify.addHook("preHandler", async (request) => {
     enterRequestTraceContext(request);
   });
-
-  if (capturesRequestFinish) {
+  if (state.capturesRequestFinish) {
     fastify.addHook("onResponse", async (request, reply) => {
       enterRequestTraceContext(request);
-      const startedAt = startedAtByRequest.get(request) ?? nowMs(options);
-      await captureRequestFinish(options, { request, reply, startedAt });
+      await captureRequestFinish(state, request, reply);
     });
   }
-
   fastify.addHook("onError", async (request, reply, error) => {
     enterRequestTraceContext(request);
-    await captureRequestError(options, {
-      request,
-      reply,
-      error,
-      defaultTransport,
-      deferShutdown: capturesRequestFinish
-    });
+    await captureRequestError(state, { error, reply, request });
+  });
+}
+
+/**
+ * @param {LogBrewFastifyOptions} options
+ * @returns {Pick<PluginState, "markStarted" | "startedAt">}
+ */
+function createRequestTiming(options) {
+  /** @type {WeakMap<FastifyRequest, number>} */
+  const startedAtByRequest = new WeakMap();
+  return {
+    markStarted: (request) => {
+      startedAtByRequest.set(request, nowMs(options));
+    },
+    startedAt: (request) => startedAtByRequest.get(request) ?? nowMs(options)
+  };
+}
+
+/**
+ * @param {FastifyInstance} fastify
+ * @param {LogBrewFastifyOptions} options
+ * @returns {Promise<void>}
+ */
+async function logbrewFastifyPluginImpl(fastify, options = {}) {
+  ensureRequestDecorator(fastify);
+  const source = createTransportSource(options);
+  const applicationLogCapture = installFastifyApplicationLogCapture(fastify, {
+    identity: { sdkName: DEFAULT_SDK_NAME, sdkVersion: DEFAULT_SDK_VERSION },
+    options,
+    source
+  });
+  if (applicationLogCapture) {
+    addApplicationLogCloseHook(fastify, options, applicationLogCapture);
+  }
+  addRequestHooks(fastify, {
+    ...createRequestTiming(options),
+    capturesRequestFinish: options.captureRequests !== false || options.captureRequestMetrics === true,
+    options,
+    source
   });
 }
 
@@ -110,442 +369,18 @@ const logbrewFastifyPlugin = fp(logbrewFastifyPluginImpl, {
 });
 const logbrewPlugin = logbrewFastifyPlugin;
 
-function createRequestEvent(request, reply, {
-  now = () => new Date().toISOString(),
-  durationMs = 0,
-  idFactory = defaultRequestEventId,
-  spanIdFactory,
-  traceIdFactory,
-  trace = undefined
-} = {}) {
-  const method = request.method ?? "GET";
-  const path = getRouteTemplate(request);
-  const statusCode = Number(reply.statusCode ?? 0);
-  const id = idFactory(request, reply);
-  return createTraceparentRequestSpan(
-    trace ?? getRequestTraceContext(request) ?? createRequestTraceContext(request, reply, {
-      spanIdFactory,
-      traceIdFactory
-    }),
-    { durationMs, id, method, now, path, statusCode }
-  );
-}
-
-function createErrorEvent(error, request, {
-  now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId,
-  trace = undefined
-} = {}) {
-  const method = request.method ?? "GET";
-  const path = getRequestPath(request);
-  const message = error instanceof Error ? error.message : String(error);
-  const traceContext = trace ?? getRequestTraceContext(request) ?? getActiveLogBrewTrace();
-  return {
-    id: idFactory(error, request),
-    timestamp: now(),
-    attributes: {
-      title: `${method} ${path} failed`,
-      level: "error",
-      message,
-      metadata: {
-        method,
-        path,
-        ...traceMetadata(traceContext)
-      }
-    }
-  };
-}
-
-function createRequestMetricEvent(request, reply, {
-  now = () => new Date().toISOString(),
-  durationMs = 0,
-  idFactory = defaultRequestMetricEventId,
-  metricName = "http.server.duration"
-} = {}) {
-  const method = request.method ?? "GET";
-  const routeTemplate = getRouteTemplate(request);
-  const statusCode = Number(reply.statusCode ?? 0);
-  return {
-    id: idFactory(request, reply),
-    timestamp: now(),
-    attributes: {
-      name: metricName,
-      description: "Duration of one completed server request.",
-      kind: "histogram",
-      value: durationMs,
-      unit: "ms",
-      temporality: "delta",
-      metadata: {
-        framework: "fastify",
-        method,
-        routeTemplate,
-        statusCode,
-        statusCodeClass: statusCodeClass(statusCode)
-      }
-    }
-  };
-}
-
-function ensureRequestDecorator(fastify) {
-  if (typeof fastify.hasRequestDecorator === "function" && fastify.hasRequestDecorator("logbrew")) {
-    return;
-  }
-  try {
-    fastify.decorateRequest("logbrew", null);
-  } catch (error) {
-    const code = typeof error === "object" && error !== null ? error.code : "";
-    if (code !== "FST_ERR_DEC_ALREADY_PRESENT") {
-      throw error;
-    }
-  }
-}
-
-function createRequestContext(client, transport, trace) {
-  return {
-    client,
-    logbrew: client,
-    ...(trace ? { trace } : {}),
-    transport,
-    previewJson: () => client.previewJson(),
-    flush: () => client.flush(transport),
-    shutdown: () => client.shutdown(transport)
-  };
-}
-
-async function captureRequestFinish(options, { request, reply, startedAt }) {
-  const existing = request.logbrew;
-  if (!existing) {
-    return;
-  }
-  const trace = existing.trace;
-  try {
-    const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
-    if (options.captureRequests !== false) {
-      const event = typeof options.requestEvent === "function"
-        ? options.requestEvent(request, reply, { client: existing.client, durationMs, trace })
-        : createRequestEvent(request, reply, { ...options, durationMs, trace });
-      captureRequestEvent(existing.client, event);
-    }
-    if (options.captureRequestMetrics === true) {
-      const metricEvent = typeof options.requestMetricEvent === "function"
-        ? options.requestMetricEvent(request, reply, { client: existing.client, durationMs, trace })
-        : createRequestMetricEvent(request, reply, {
-          ...options,
-          durationMs,
-          idFactory: options.metricIdFactory
-        });
-      captureRequestMetricEvent(existing.client, metricEvent);
-    }
-    const response = await existing.client.shutdown(existing.transport);
-    await notifyFlush(options, response, { request, reply, client: existing.client, trace });
-  } catch (error) {
-    await notifyFailure(options, error, { request, reply, client: existing.client, trace });
-  }
-}
-
-async function captureRequestError(options, {
-  request,
-  reply,
-  error,
-  defaultTransport,
-  deferShutdown = false
-}) {
-  const existing = request.logbrew;
-  const client = existing?.client ?? resolveClient(options, request, reply);
-  const transport = existing?.transport ?? resolveTransport(options, request, reply, client, defaultTransport);
-  const trace = existing?.trace ?? getActiveLogBrewTrace();
-  const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { request, reply, client, trace })
-    : createErrorEvent(error, request, { ...options, trace });
-
-  try {
-    client.issue(event.id, event.timestamp, event.attributes);
-    if (deferShutdown) {
-      return;
-    }
-    const response = await client.shutdown(transport);
-    await notifyFlush(options, response, { request, reply, client, trace });
-  } catch (captureError) {
-    await notifyFailure(options, captureError, { request, reply, client, trace });
-  }
-}
-
-function resolveClient(options, request, reply) {
-  if (typeof options.client === "function") {
-    return options.client({ request, reply });
-  }
-  if (options.client) {
-    return options.client;
-  }
-  return createLogBrewFastifyClient(options);
-}
-
-function resolveTransport(options, request, reply, client, defaultTransport) {
-  if (typeof options.transport === "function") {
-    return options.transport({ request, reply, client });
-  }
-  return options.transport ?? defaultTransport;
-}
-
-function installFastifyApplicationLogCapture(fastify, options, defaultTransport) {
-  if (
-    options.captureApplicationLogs !== undefined
-    && typeof options.captureApplicationLogs !== "boolean"
-  ) {
-    throw new SdkError("configuration_error", "captureApplicationLogs must be a boolean");
-  }
-  if (
-    options.onApplicationLogCaptureError !== undefined
-    && typeof options.onApplicationLogCaptureError !== "function"
-  ) {
-    throw new SdkError(
-      "configuration_error",
-      "onApplicationLogCaptureError must be a function"
-    );
-  }
-  if (options.captureApplicationLogs !== true) {
-    return undefined;
-  }
-
-  assertCompatibleFastifyPino(fastify.log?.version);
-  const transport = options.applicationLogTransport
-    ?? (typeof options.transport === "function" ? undefined : options.transport)
-    ?? defaultTransport;
-  const client = options.applicationLogClient
-    ?? createLogBrewNodeClient({
-      ...options,
-      sdkName: options.sdkName ?? DEFAULT_SDK_NAME,
-      sdkVersion: options.sdkVersion ?? DEFAULT_SDK_VERSION,
-      transport
-    });
-  const capture = installLogBrewPinoInstrumentation({
-    client,
-    metadata: { framework: "fastify" },
-    onError(error) {
-      return notifyApplicationLogFailure(options, error, { client });
-    },
-    shouldCapture: shouldCaptureFastifyApplicationLog,
-    traceProvider: getActiveLogBrewTrace,
-    transport
-  });
-  return { ...capture, client, transport };
-}
-
-function assertCompatibleFastifyPino(version) {
-  if (typeof version !== "string") {
-    throw new SdkError(
-      "configuration_error",
-      "captureApplicationLogs requires Fastify's Pino logger to be enabled"
-    );
-  }
-  const match = /^(\d+)\.(\d+)(?:\.|$)/u.exec(version);
-  const major = Number(match?.[1]);
-  const minor = Number(match?.[2]);
-  if (
-    !Number.isInteger(major)
-    || !Number.isInteger(minor)
-    || major < 9
-    || (major === 9 && minor < 11)
-    || (major === 10 && minor < 1)
-  ) {
-    throw new SdkError(
-      "configuration_error",
-      `captureApplicationLogs requires Pino 9.11+ or 10.1+; Fastify is using ${version}`
-    );
-  }
-}
-
-function shouldCaptureFastifyApplicationLog(record) {
-  return !isObjectRecord(record?.req) && !isObjectRecord(record?.res);
-}
-
-function isObjectRecord(value) {
-  return value !== null && typeof value === "object";
-}
-
-async function notifyFlush(options, response, context) {
-  if (typeof options.onFlush === "function") {
-    await options.onFlush(response, context);
-  }
-}
-
-async function notifyFailure(options, error, context) {
-  if (typeof options.onCaptureError === "function") {
-    await options.onCaptureError(error, context);
-  }
-}
-
-async function notifyApplicationLogFailure(options, error, context) {
-  if (typeof options.onApplicationLogCaptureError !== "function") {
-    return;
-  }
-  try {
-    await options.onApplicationLogCaptureError(error, context);
-  } catch {
-    // Application-log capture diagnostics must never interrupt the app lifecycle.
-  }
-}
-
-function defaultRequestEventId(request, reply) {
-  return `evt_fastify_request_${slugify(`${request.method ?? "GET"}_${getRequestPath(request)}_${reply.statusCode ?? 0}`)}`;
-}
-
-function defaultRequestMetricEventId(request, reply) {
-  return `evt_fastify_metric_${slugify(`${request.method ?? "GET"}_${getRouteTemplate(request)}_${reply.statusCode ?? 0}`)}`;
-}
-
-function defaultErrorEventId(error, request) {
-  const message = error instanceof Error ? error.message : String(error);
-  return `evt_fastify_error_${slugify(`${request.method ?? "GET"}_${getRequestPath(request)}_${message}`)}`;
-}
-
-function getRequestPath(request) {
-  return pathOnly(request.url ?? "/");
-}
-
-function getRouteTemplate(request) {
-  return pathOnly(
-    request.routeOptions?.url
-    ?? request.routerPath
-    ?? request.routeConfig?.url
-    ?? request.url
-    ?? "/"
-  );
-}
-
-function pathOnly(value) {
-  const rawValue = typeof value === "string" ? value : String(value);
-  try {
-    return new URL(rawValue, "http://localhost").pathname || "/";
-  } catch {
-    return rawValue.split("?")[0] || "/";
-  }
-}
-
-function getTraceparentHeader(request) {
-  const value = request.headers?.traceparent;
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return typeof value === "string" ? value : undefined;
-}
-
-function createTraceparentRequestSpan(traceContext, {
-  durationMs,
-  id,
-  method,
-  now,
-  path,
-  statusCode
-}) {
-  if (!traceContext) {
-    return undefined;
-  }
-
-  return {
-    id,
-    timestamp: now(),
-    type: "span",
-    attributes: {
-      name: `${method} ${path}`,
-      traceId: traceContext.traceId,
-      spanId: traceContext.spanId,
-      parentSpanId: traceContext.parentSpanId,
-      status: statusCode >= 500 ? "error" : "ok",
-      durationMs,
-      metadata: {
-        framework: "fastify",
-        method,
-        path,
-        sampled: traceContext.sampled,
-        statusCode
-      }
-    }
-  };
-}
-
-function captureRequestEvent(client, event) {
-  if (event.type === "span") {
-    client.span(event.id, event.timestamp, event.attributes);
-    return;
-  }
-  client.log(event.id, event.timestamp, event.attributes);
-}
-
-function captureRequestMetricEvent(client, event) {
-  client.metric(event.id, event.timestamp, event.attributes);
-}
-
-function createRequestTraceContext(request, reply, {
-  spanIdFactory,
-  traceIdFactory
-} = {}) {
-  return createLogBrewTraceContext(getTraceparentHeader(request), {
-    spanIdFactory: () => spanIdFactory?.(request, reply),
-    traceIdFactory: () => traceIdFactory?.(request, reply)
-  });
-}
-
-function enterRequestTraceContext(request) {
-  enterWithLogBrewTrace(getRequestTraceContext(request));
-}
-
-function getRequestTraceContext(request) {
-  return request.logbrew?.trace;
-}
-
-function traceMetadata(trace) {
-  if (!trace) {
-    return {};
-  }
-  return {
-    parentSpanId: trace.parentSpanId,
-    sampled: trace.sampled,
-    spanId: trace.spanId,
-    traceId: trace.traceId
-  };
-}
-
-function nowMs(options) {
-  if (typeof options.nowMs === "function") {
-    return options.nowMs();
-  }
-  return performance.now();
-}
-
-function readEnvApiKey() {
-  return globalThis.process?.env?.LOGBREW_API_KEY;
-}
-
-function readEnvServerApiKey() {
-  return globalThis.process?.env?.LOGBREW_SERVER_API_KEY;
-}
-
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
-}
-
-function statusCodeClass(statusCode) {
-  if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 999) {
-    return "unknown";
-  }
-  return `${Math.floor(statusCode / 100)}xx`;
-}
-
 module.exports = {
   createErrorEvent,
   createLogBrewFastifyClient,
-  createRequestMetricEvent,
   createRequestEvent,
+  createRequestMetricEvent,
   getActiveLogBrewTrace,
+
   default: {
     createErrorEvent,
     createLogBrewFastifyClient,
-    createRequestMetricEvent,
     createRequestEvent,
+    createRequestMetricEvent,
     getActiveLogBrewTrace,
     logbrewFastifyPlugin,
     logbrewPlugin
