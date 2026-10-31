@@ -27,6 +27,8 @@
     "browser-events.js",
     "fetch-spans.cjs",
     "fetch-spans.js",
+    "interaction-details.cjs",
+    "interaction-details.js",
     "interaction-timing.cjs",
     "interaction-timing.js",
     "index.cjs",
