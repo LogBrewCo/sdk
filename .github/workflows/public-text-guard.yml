@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      # Hide comments and restore issue and pull request text.
+      # Hide comments and put back earlier issue and pull request text.
       issues: write
       pull-requests: write
     steps:
