@@ -1088,6 +1088,41 @@
       "rules": {
         "import/no-default-export": "off"
       }
+    },
+    {
+      "files": [
+        "logbrew-react-native/apple-native-diagnostics.js",
+        "logbrew-react-native/index.native.js"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/native-null.js"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/index.native.js"
+      ],
+      "rules": {
+        "import/export": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/scripts/sync-apple-native-sources.mjs"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "off",
+        "node/no-sync": "off",
+        "unicorn/prefer-import-meta-properties": "off"
+      }
     }
   ]
 }

@@ -138,7 +138,7 @@ async function withRuntime(nativeModule, callback) {
     const nodeModules = path.join(root, "node_modules");
     const installedPackage = path.join(nodeModules, "@logbrew", "react-native");
     fs.mkdirSync(installedPackage, { recursive: true });
-    for (const file of ["android-native-diagnostics.js"]) {
+    for (const file of ["android-native-diagnostics.js", "native-diagnostics-values.js", "native-module-lookup.js"]) {
       fs.copyFileSync(path.join(packageRoot, file), path.join(installedPackage, file));
     }
     fs.writeFileSync(

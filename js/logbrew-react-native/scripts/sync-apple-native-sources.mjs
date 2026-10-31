@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(scriptDirectory, "..");
@@ -15,16 +15,89 @@ const generatedHeader = [
   "// Edit the canonical Swift source, then regenerate this package boundary.",
   ""
 ].join("\n");
-const mode = process.argv[2] ?? "--check";
+const MODE_ARGUMENT = 2;
+const JSON_INDENT = 2;
+const mode = process.argv[MODE_ARGUMENT] ?? "--check";
 
-assert.ok(
-  generatedRoot.startsWith(`${packageRoot}${path.sep}`)
-    && path.basename(generatedRoot) === "GeneratedAppleDiagnostics",
-  "refusing to operate outside the package-generated source directory"
-);
+/**
+ * @param {string} root
+ * @returns {string[]}
+ */
+function listFiles(root) {
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+  /** @type {string[]} */
+  const files = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+    files.push(...(entry.isDirectory() ? listFiles(entryPath) : [entryPath]));
+  }
+  files.sort();
+  return files;
+}
 
-const expected = expectedFiles();
-if (mode === "--write") {
+/**
+ * @param {string} canonical
+ * @returns {string}
+ */
+function transformCanonicalSource(canonical) {
+  return canonical
+    .replaceAll("@_spi(CrashReplay) import LogBrew\n", "")
+    .replaceAll("@objc(LBW", "@objc(LBRNApple")
+    .replaceAll("@preconcurrency import KSCrashRecording\n", "@preconcurrency import KSCrash\n")
+    .replaceAll("@preconcurrency import KSCrashRecordingCore\n", "@preconcurrency import KSCrash\n");
+}
+
+/**
+ * @param {string} moduleName
+ * @returns {Readonly<{ contents: string, digest: string, manifestPath: string, relativePath: string }>[]}
+ */
+function moduleEntries(moduleName) {
+  const moduleRoot = path.join(sourceRoot, moduleName);
+  return listFiles(moduleRoot).filter(filePath => filePath.endsWith(".swift")).map(sourcePath => {
+    const moduleRelativePath = path.relative(moduleRoot, sourcePath);
+    const relativePath = path.join(moduleName, moduleRelativePath);
+    const canonical = fs.readFileSync(sourcePath, "utf8");
+    const transformed = transformCanonicalSource(canonical);
+    return {
+      contents: `${generatedHeader}${transformed}`,
+      digest: crypto.createHash("sha256").update(canonical).digest("hex"),
+      manifestPath: path.join("swift", "logbrew-swift", "Sources", relativePath),
+      relativePath
+    };
+  });
+}
+
+/**
+ * @param {readonly [string, string]} left
+ * @param {readonly [string, string]} right
+ * @returns {number}
+ */
+function byPath([leftPath], [rightPath]) {
+  return leftPath.localeCompare(rightPath);
+}
+
+/**
+ * @returns {Map<string, string>}
+ */
+function expectedFiles() {
+  const entries = sourceModules.flatMap(moduleName => moduleEntries(moduleName));
+  const manifest = Object.fromEntries(entries.map(entry => [entry.manifestPath, entry.digest]));
+  /** @type {[string, string][]} */
+  const files = entries.map(entry => [entry.relativePath, entry.contents]);
+  files.push([
+    "SOURCE-MANIFEST.json",
+    `${JSON.stringify({ schemaVersion: 1, sources: manifest }, undefined, JSON_INDENT)}\n`
+  ]);
+  files.sort(byPath);
+  return new Map(files);
+}
+
+/**
+ * @param {Readonly<ReadonlyMap<string, string>>} expected
+ */
+function writeExpected(expected) {
   fs.rmSync(generatedRoot, { force: true, recursive: true });
   for (const [relativePath, contents] of expected) {
     const destination = path.join(generatedRoot, relativePath);
@@ -32,8 +105,13 @@ if (mode === "--write") {
     fs.writeFileSync(destination, contents, "utf8");
   }
   process.stdout.write(`generated ${expected.size} Apple diagnostics source files\n`);
-} else if (mode === "--check") {
-  const actualPaths = listFiles(generatedRoot).map((filePath) =>
+}
+
+/**
+ * @param {Readonly<ReadonlyMap<string, string>>} expected
+ */
+function checkExpected(expected) {
+  const actualPaths = listFiles(generatedRoot).map(filePath =>
     path.relative(generatedRoot, filePath)
   );
   assert.deepEqual(actualPaths, [...expected.keys()]);
@@ -45,49 +123,19 @@ if (mode === "--write") {
     );
   }
   process.stdout.write(`verified ${expected.size} Apple diagnostics source files\n`);
+}
+
+assert.ok(
+  generatedRoot.startsWith(`${packageRoot}${path.sep}`)
+    && path.basename(generatedRoot) === "GeneratedAppleDiagnostics",
+  "refusing to operate outside the package-generated source directory"
+);
+
+const expected = expectedFiles();
+if (mode === "--write") {
+  writeExpected(expected);
+} else if (mode === "--check") {
+  checkExpected(expected);
 } else {
   throw new Error("usage: sync-apple-native-sources.mjs [--check|--write]");
-}
-
-function expectedFiles() {
-  const files = new Map();
-  const manifest = {};
-  for (const moduleName of sourceModules) {
-    const moduleRoot = path.join(sourceRoot, moduleName);
-    for (const sourcePath of listFiles(moduleRoot).filter((filePath) => filePath.endsWith(".swift"))) {
-      const moduleRelativePath = path.relative(moduleRoot, sourcePath);
-      const relativePath = path.join(moduleName, moduleRelativePath);
-      const canonical = fs.readFileSync(sourcePath, "utf8");
-      const transformed = transformCanonicalSource(canonical);
-      const contents = `${generatedHeader}${transformed}`;
-      files.set(relativePath, contents);
-      manifest[path.join("swift", "logbrew-swift", "Sources", relativePath)] =
-        crypto.createHash("sha256").update(canonical).digest("hex");
-    }
-  }
-  files.set(
-    "SOURCE-MANIFEST.json",
-    `${JSON.stringify({ schemaVersion: 1, sources: manifest }, null, 2)}\n`
-  );
-  return new Map([...files].sort(([left], [right]) => left.localeCompare(right)));
-}
-
-function transformCanonicalSource(canonical) {
-  return canonical
-    .replaceAll("@_spi(CrashReplay) import LogBrew\n", "")
-    .replaceAll("@objc(LBW", "@objc(LBRNApple")
-    .replaceAll("@preconcurrency import KSCrashRecording\n", "@preconcurrency import KSCrash\n")
-    .replaceAll("@preconcurrency import KSCrashRecordingCore\n", "@preconcurrency import KSCrash\n");
-}
-
-function listFiles(root) {
-  if (!fs.existsSync(root)) {
-    return [];
-  }
-  return fs.readdirSync(root, { withFileTypes: true })
-    .flatMap((entry) => {
-      const entryPath = path.join(root, entry.name);
-      return entry.isDirectory() ? listFiles(entryPath) : [entryPath];
-    })
-    .sort();
 }
