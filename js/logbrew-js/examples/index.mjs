@@ -8,131 +8,159 @@ const installedHelperPrefix = "npm --prefix node_modules/@logbrew/sdk/examples r
 const installedPnpmHelperPrefix = "pnpm --dir node_modules/@logbrew/sdk/examples run";
 const installedLauncherPrefix = "node node_modules/@logbrew/sdk/examples/index.mjs";
 const repoLauncherPrefix = "node examples/index.mjs";
+const defaultExample = "real-user-smoke";
+const FIRST_ARGUMENT = 2;
+const EXIT_OK = 0;
+const EXIT_UNKNOWN_EXAMPLE = 1;
 
-const examples = {
-  "agent-timeline": new URL("./agent-timeline.mjs", import.meta.url),
-  "agent-timeline:esm": new URL("./agent-timeline.mjs", import.meta.url),
-  "agent-timeline:cjs": new URL("./agent-timeline.cjs", import.meta.url),
-  "readme-example": new URL("./readme-example.mjs", import.meta.url),
-  "readme-example:esm": new URL("./readme-example.mjs", import.meta.url),
-  "readme-example:cjs": new URL("./readme-example.cjs", import.meta.url),
-  "real-user-smoke": new URL("./real-user-smoke.mjs", import.meta.url),
-  "real-user-smoke:esm": new URL("./real-user-smoke.mjs", import.meta.url),
-  "real-user-smoke:cjs": new URL("./real-user-smoke.cjs", import.meta.url)
-};
+const exampleNames = Object.freeze([
+  "agent-timeline",
+  "agent-timeline:esm",
+  "agent-timeline:cjs",
+  "readme-example",
+  "readme-example:esm",
+  "readme-example:cjs",
+  "real-user-smoke",
+  "real-user-smoke:esm",
+  "real-user-smoke:cjs"
+]);
 
+/**
+ * @param {string} name
+ * @returns {URL}
+ */
+function exampleUrl(name) {
+  const [file = name, format = "esm"] = name.split(":");
+  return new URL(`${file}.${format === "cjs" ? "cjs" : "mjs"}`, import.meta.url);
+}
+
+const examples = new Map(exampleNames.map((name) => [name, exampleUrl(name)]));
+
+/**
+ * @param {string} name
+ * @param {string} command
+ * @returns {readonly [string, string]}
+ */
+function commandEntry(name, command) {
+  return [name, command];
+}
+
+/**
+ * @returns {boolean}
+ */
 function isInstalledPackageContext() {
   return import.meta.url.includes("/node_modules/@logbrew/sdk/examples/");
 }
 
+/**
+ * @returns {readonly (readonly [string, string])[]}
+ */
 function exampleCommands() {
-  if (!isInstalledPackageContext()) {
-    return {
-      "agent-timeline": `${repoPrefix} && ${repoLauncherPrefix} agent-timeline`,
-      "agent-timeline:esm": `${repoPrefix} && ${repoLauncherPrefix} agent-timeline:esm`,
-      "agent-timeline:cjs": `${repoPrefix} && ${repoLauncherPrefix} agent-timeline:cjs`,
-      "readme-example": `${repoPrefix} && ${repoLauncherPrefix} readme-example`,
-      "readme-example:esm": `${repoPrefix} && ${repoLauncherPrefix} readme-example:esm`,
-      "readme-example:cjs": `${repoPrefix} && ${repoLauncherPrefix} readme-example:cjs`,
-      "real-user-smoke": `${repoPrefix} && ${repoLauncherPrefix} real-user-smoke`,
-      "real-user-smoke:esm": `${repoPrefix} && ${repoLauncherPrefix} real-user-smoke:esm`,
-      "real-user-smoke:cjs": `${repoPrefix} && ${repoLauncherPrefix} real-user-smoke:cjs`,
-      "default (real-user-smoke)": `${repoPrefix} && ${repoLauncherPrefix}`
-    };
-  }
-
-  return {
-    "agent-timeline": `${installedLauncherPrefix} agent-timeline`,
-    "agent-timeline:esm": `${installedLauncherPrefix} agent-timeline:esm`,
-    "agent-timeline:cjs": `${installedLauncherPrefix} agent-timeline:cjs`,
-    "readme-example": `${installedLauncherPrefix} readme-example`,
-    "readme-example:esm": `${installedLauncherPrefix} readme-example:esm`,
-    "readme-example:cjs": `${installedLauncherPrefix} readme-example:cjs`,
-    "real-user-smoke": `${installedLauncherPrefix} real-user-smoke`,
-    "real-user-smoke:esm": `${installedLauncherPrefix} real-user-smoke:esm`,
-    "real-user-smoke:cjs": `${installedLauncherPrefix} real-user-smoke:cjs`,
-    "default (real-user-smoke)": installedLauncherPrefix
-  };
+  const launcher = isInstalledPackageContext() ? installedLauncherPrefix : `${repoPrefix} && ${repoLauncherPrefix}`;
+  return [
+    ...exampleNames.map((name) => commandEntry(name, `${launcher} ${name}`)),
+    commandEntry(`default (${defaultExample})`, launcher)
+  ];
 }
 
+/**
+ * @returns {readonly (readonly [string, string])[]}
+ */
 function helperCommands() {
-  if (!isInstalledPackageContext()) {
-    return {
-      "agent-timeline": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} agent-timeline | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} agent-timeline`,
-      "agent-timeline:esm": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} agent-timeline:esm | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} agent-timeline:esm`,
-      "agent-timeline:cjs": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} agent-timeline:cjs | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} agent-timeline:cjs`,
-      "readme-example": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} readme-example | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} readme-example`,
-      "readme-example:esm": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} readme-example:esm | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} readme-example:esm`,
-      "readme-example:cjs": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} readme-example:cjs | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} readme-example:cjs`,
-      "real-user-smoke": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} real-user-smoke | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} real-user-smoke`,
-      "real-user-smoke:esm": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} real-user-smoke:esm | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} real-user-smoke:esm`,
-      "real-user-smoke:cjs": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} real-user-smoke:cjs | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} real-user-smoke:cjs`
-    };
-  }
-
-  return {
-    "agent-timeline": `${installedHelperPrefix} agent-timeline | ${installedPnpmHelperPrefix} agent-timeline`,
-    "agent-timeline:esm": `${installedHelperPrefix} agent-timeline:esm | ${installedPnpmHelperPrefix} agent-timeline:esm`,
-    "agent-timeline:cjs": `${installedHelperPrefix} agent-timeline:cjs | ${installedPnpmHelperPrefix} agent-timeline:cjs`,
-    "readme-example": `${installedHelperPrefix} readme-example | ${installedPnpmHelperPrefix} readme-example`,
-    "readme-example:esm": `${installedHelperPrefix} readme-example:esm | ${installedPnpmHelperPrefix} readme-example:esm`,
-    "readme-example:cjs": `${installedHelperPrefix} readme-example:cjs | ${installedPnpmHelperPrefix} readme-example:cjs`,
-    "real-user-smoke": `${installedHelperPrefix} real-user-smoke | ${installedPnpmHelperPrefix} real-user-smoke`,
-    "real-user-smoke:esm": `${installedHelperPrefix} real-user-smoke:esm | ${installedPnpmHelperPrefix} real-user-smoke:esm`,
-    "real-user-smoke:cjs": `${installedHelperPrefix} real-user-smoke:cjs | ${installedPnpmHelperPrefix} real-user-smoke:cjs`
-  };
-}
-
-function printList() {
-  for (const [name, command] of Object.entries(exampleCommands())) {
-    console.log(`${name} -> ${command}`);
-  }
-}
-
-function printHelp() {
   if (isInstalledPackageContext()) {
-    console.log("Usage: node node_modules/@logbrew/sdk/examples/index.mjs [--list] [example]");
-    console.log("Run the packaged LogBrew SDK JavaScript examples that ship with the installed package.");
-  } else {
-    console.log("Usage: node examples/index.mjs [--list] [example]");
-    console.log("Run the repo-checkout LogBrew SDK JavaScript examples before install.");
+    return exampleNames.map((name) => commandEntry(name, `${installedHelperPrefix} ${name} | ${installedPnpmHelperPrefix} ${name}`));
   }
-  console.log("");
-  console.log("Launcher commands:");
-  for (const [name, command] of Object.entries(exampleCommands())) {
-    console.log(`  ${name} -> ${command}`);
-  }
-  console.log("");
-  console.log("Package-manager helper commands:");
-  for (const [name, command] of Object.entries(helperCommands())) {
-    console.log(`  ${name} -> ${command}`);
+  return exampleNames.map((name) => commandEntry(
+    name,
+    `${repoExamplesPrefix} && ${repoNpmHelperPrefix} ${name} | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} ${name}`
+  ));
+}
+
+/**
+ * @param {string} line
+ * @returns {void}
+ */
+function print(line) {
+  process.stdout.write(`${line}\n`);
+}
+
+/**
+ * @returns {void}
+ */
+function printList() {
+  for (const [name, command] of exampleCommands()) {
+    print(`${name} -> ${command}`);
   }
 }
 
-async function main(argv = process.argv.slice(2)) {
+/**
+ * @returns {void}
+ */
+function printUsage() {
+  if (isInstalledPackageContext()) {
+    print("Usage: node node_modules/@logbrew/sdk/examples/index.mjs [--list] [example]");
+    print("Run the packaged LogBrew SDK JavaScript examples that ship with the installed package.");
+  } else {
+    print("Usage: node examples/index.mjs [--list] [example]");
+    print("Run the repo-checkout LogBrew SDK JavaScript examples before install.");
+  }
+}
+
+/**
+ * @param {string} title
+ * @param {readonly (readonly [string, string])[]} commands
+ * @returns {void}
+ */
+function printSection(title, commands) {
+  print("");
+  print(title);
+  for (const [name, command] of commands) {
+    print(`  ${name} -> ${command}`);
+  }
+}
+
+/**
+ * @returns {void}
+ */
+function printHelp() {
+  printUsage();
+  printSection("Launcher commands:", exampleCommands());
+  printSection("Package-manager helper commands:", helperCommands());
+}
+
+/**
+ * @param {string} example
+ * @returns {Promise<number>}
+ */
+async function runExample(example) {
+  const target = examples.get(example);
+  if (target === undefined) {
+    process.stderr.write(`unknown example: ${example}\n`);
+    printHelp();
+    return EXIT_UNKNOWN_EXAMPLE;
+  }
+  await import(target.href);
+  return EXIT_OK;
+}
+
+/**
+ * @param {readonly string[]} argv
+ * @returns {Promise<number>}
+ */
+async function main(argv) {
   if (argv.includes("--help") || argv.includes("-h")) {
     printHelp();
-    return 0;
+    return EXIT_OK;
   }
-
   if (argv.includes("--list")) {
     printList();
-    return 0;
+    return EXIT_OK;
   }
-
-  const [example = "real-user-smoke"] = argv;
-  const target = examples[example];
-  if (!target) {
-    console.error(`unknown example: ${example}`);
-    printHelp();
-    return 1;
-  }
-
-  await import(target.href);
-  return 0;
+  const [example = defaultExample] = argv;
+  return runExample(example);
 }
 
-const exitCode = await main();
-if (exitCode !== 0) {
-  process.exit(exitCode);
+const exitCode = await main(process.argv.slice(FIRST_ARGUMENT));
+if (exitCode !== EXIT_OK) {
+  process.exitCode = exitCode;
 }
