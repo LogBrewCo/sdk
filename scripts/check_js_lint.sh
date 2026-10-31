@@ -238,6 +238,11 @@ if [[ -n "$coverage" ]]; then
 fi
 
 (cd js && bun install --frozen-lockfile --ignore-scripts --silent)
+for unit in ${joined[@]+"${joined[@]}"}; do
+  if [[ -f "$unit/bun.lock" ]]; then
+    (cd "$unit" && bun install --frozen-lockfile --ignore-scripts --silent)
+  fi
+done
 
 source_files() {
   script_files "$@"

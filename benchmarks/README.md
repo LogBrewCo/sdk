@@ -9,13 +9,13 @@ rerun all of them with one command and check every number below.
 
 ## Run them
 
-You need Node.js 22 or newer and Google Chrome or Chromium.
+You need Node.js 22 or newer, Bun, and Google Chrome or Chromium.
 
 ```bash
 bash benchmarks/run.sh
 ```
 
-The script installs the exact package versions from `package-lock.json`, then
+The script installs the exact package versions from `bun.lock`, then
 prints one JSON result for each benchmark. The size and cost benchmarks take
 about 3 minutes, and the latency benchmark about 2 more. `--quick` runs a few
 events only. CI uses it to check that the scripts still work, and it does not

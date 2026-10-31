@@ -1,38 +1,59 @@
-// LogBrew browser SDK with its transport replaced by an in-memory stub.
 import { captureBrowserError, createBrowserTraceContext, installLogBrewBrowser } from "@logbrew/browser";
+import { countLogBrewDelivered } from "./delivered.js";
 
+/**
+ * @import { LogBrewBrowserContext } from "@logbrew/browser"
+ * @import { TransportResponse } from "@logbrew/sdk"
+ * @import { Bench } from "./loop.js"
+ */
+
+/** @type {string[]} */
 const bodies = [];
-const transport = {
-  async send(_key, body) {
-    bodies.push(body);
-    return { statusCode: 202, attempts: 1 };
-  }
-};
-let logbrew;
+const DELIVERED = { attempts: 1, statusCode: 202 };
+/** @type {{ logbrew: LogBrewBrowserContext | undefined }} */
+const state = { logbrew: undefined };
 
-globalThis.bench = {
-  init() {
-    logbrew = installLogBrewBrowser({ clientKey: "LOGBREW_BROWSER_KEY", transport });
-  },
+/**
+ * @param {string} _key
+ * @param {string} body
+ * @returns {Promise<TransportResponse>}
+ */
+async function send(_key, body) {
+  bodies.push(body);
+  return DELIVERED;
+}
+
+/**
+ * @returns {LogBrewBrowserContext}
+ */
+function requireLogBrew() {
+  if (state.logbrew === undefined) {
+    throw new Error("call init first");
+  }
+  return state.logbrew;
+}
+
+/** @type {Bench} */
+const bench = {
+  delivered: (signal) => countLogBrewDelivered(bodies, signal),
   error(error) {
-    void captureBrowserError(error, logbrew);
+    void captureBrowserError(error, requireLogBrew());
+  },
+  flush: async () => requireLogBrew().flush(),
+  init() {
+    state.logbrew = installLogBrewBrowser({ clientKey: "LOGBREW_BROWSER_KEY", transport: { send } });
   },
   span(name) {
     const trace = createBrowserTraceContext();
     const start = performance.now();
-    logbrew.client.span(crypto.randomUUID(), new Date().toISOString(), {
+    requireLogBrew().client.span(crypto.randomUUID(), new Date().toISOString(), {
+      durationMs: performance.now() - start,
       name,
-      traceId: trace.traceId,
       spanId: trace.spanId,
       status: "ok",
-      durationMs: performance.now() - start
+      traceId: trace.traceId
     });
-  },
-  flush: () => logbrew.flush(),
-  delivered: (signal) =>
-    bodies.reduce((count, body) => count + JSON.parse(body).events.filter((event) => counted(event, signal)).length, 0)
+  }
 };
 
-// The benchmark's own error events or spans; the initial page view is not counted.
-const counted = (event, signal) =>
-  signal === "error" ? event.type === "issue" : event.type === "span" && event.attributes.name === "checkout.step";
+export { bench };

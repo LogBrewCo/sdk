@@ -43,6 +43,12 @@
     ],
     "eslint/no-ternary": "off",
     "eslint/no-undefined": "off",
+    "eslint/no-void": [
+      "error",
+      {
+        "allowAsStatement": true
+      }
+    ],
     "eslint/one-var": [
       "error",
       "never"
@@ -127,10 +133,31 @@
           {
             "from": "file",
             "name": "LogBrewKafkaJsSendOptions"
+          },
+          {
+            "from": "package",
+            "name": "PackageJson",
+            "package": "@npm/types"
+          },
+          {
+            "from": "package",
+            "name": [
+              "IncomingMessage",
+              "ServerResponse"
+            ],
+            "package": "@types/node"
+          },
+          {
+            "from": "lib",
+            "name": [
+              "MessageEvent",
+              "Response"
+            ]
           }
         ]
       }
     ],
+    "typescript/require-await": "off",
     "unicorn/no-useless-undefined": "off"
   },
   "overrides": [
@@ -187,6 +214,52 @@
       ],
       "rules": {
         "import/no-nodejs-modules": "off"
+      }
+    },
+    {
+      "files": [
+        "**/tools/npm-publish/**"
+      ],
+      "rules": {
+        "eslint/no-await-in-loop": "off",
+        "import/no-nodejs-modules": "off",
+        "node/no-process-env": "off"
+      }
+    },
+    {
+      "files": [
+        "**/benchmarks/*.mjs",
+        "**/benchmarks/overhead/*.mjs"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "off"
+      }
+    },
+    {
+      "files": [
+        "**/benchmarks/**"
+      ],
+      "rules": {
+        "eslint/no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": [
+        "**/benchmarks/latency.mjs",
+        "**/benchmarks/overhead/cdp.mjs"
+      ],
+      "rules": {
+        "node/no-process-env": "off"
+      }
+    },
+    {
+      "files": [
+        "**/benchmarks/size/**"
+      ],
+      "rules": {
+        "eslint/require-unicode-regexp": "off",
+        "eslint/sort-imports": "off",
+        "import/no-namespace": "off"
       }
     }
   ]
