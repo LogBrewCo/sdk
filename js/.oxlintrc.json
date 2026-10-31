@@ -360,6 +360,7 @@
         "logbrew-fastify/**",
         "logbrew-nestjs/**",
         "logbrew-js/release-artifacts*",
+        "logbrew-js/test/release-artifacts*",
         "logbrew-js/vite-release-artifacts*.cjs"
       ],
       "rules": {
@@ -378,6 +379,7 @@
     {
       "files": [
         "logbrew-js/release-artifacts-manifest-artifact.js",
+        "logbrew-js/test/release-artifacts-vite.test.js",
         "logbrew-js/vite-release-artifacts-config.cjs"
       ],
       "rules": {

@@ -137,8 +137,8 @@ js/logbrew-js/release-artifacts-common.js	token	re	\b(?:readTokens?|OptionToken|
 {scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	containsToken
 {scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	expected_token
 {scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	wrong-token
-{js/logbrew-js/test/release-artifacts-cli.test.js,scripts/real_user_js_release_artifact_cli_smoke.sh}	*	has	token=placeholder
-js/logbrew-js/test/release-artifacts-cli.test.js	*	has	tokenEnv: authEnvName
+scripts/real_user_js_release_artifact_cli_smoke.sh	*	has	token=placeholder
+js/logbrew-js/test/release-artifacts-vite.test.js	*	has	tokenEnv: authEnvName
 {js/logbrew-js/README.md,js/logbrew-next/README.md}	*	re	(?i)upload.*artifact|artifact.*upload
 
 # Privacy denylists name the keys they drop; fixtures use placeholder values.
