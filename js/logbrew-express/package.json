@@ -23,6 +23,10 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "events.cjs",
+    "internal.cjs",
+    "lifecycle.cjs",
+    "observers.cjs",
     "README.md",
     "examples"
   ],
@@ -51,6 +55,6 @@
     "express": ">=4"
   },
   "scripts": {
-    "test": "bun ../../scripts/check_js_package_sources.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check events.cjs && node --check internal.cjs && node --check lifecycle.cjs && node --check observers.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/handler-wrapper.mjs && node --check examples/real-user-smoke.mjs"
   }
 }

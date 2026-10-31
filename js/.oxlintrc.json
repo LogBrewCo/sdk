@@ -91,7 +91,10 @@
         "allow": [
           {
             "from": "package",
-            "name": "Buffer",
+            "name": [
+              "Buffer",
+              "NonSharedBuffer"
+            ],
             "package": "@types/node"
           },
           {
@@ -254,6 +257,7 @@
           {
             "from": "package",
             "name": [
+              "NextFunction",
               "Request",
               "Response"
             ],
@@ -271,6 +275,20 @@
             "from": "package",
             "name": "Subscriber",
             "package": "rxjs"
+          },
+          {
+            "from": "file",
+            "name": [
+              "CreateLogBrewExpressClientConfig",
+              "LogBrewExpressErrorHandlerOptions",
+              "LogBrewExpressOptions",
+              "LogBrewExpressSharedOptions"
+            ]
+          },
+          {
+            "from": "package",
+            "name": "TestContext",
+            "package": "@types/node"
           }
         ]
       }
@@ -306,7 +324,8 @@
     },
     {
       "files": [
-        "logbrew-*/*.cjs"
+        "logbrew-*/*.cjs",
+        "logbrew-express/test/*.cjs"
       ],
       "rules": {
         "import/no-commonjs": "off",
@@ -359,6 +378,7 @@
         "logbrew-kafkajs/**",
         "logbrew-fastify/**",
         "logbrew-nestjs/**",
+        "logbrew-express/**",
         "logbrew-js/release-artifacts*",
         "logbrew-js/test/release-artifacts*",
         "logbrew-js/vite-release-artifacts*.cjs"
@@ -443,7 +463,8 @@
     {
       "files": [
         "logbrew-fastify/internal.cjs",
-        "logbrew-nestjs/internal.cjs"
+        "logbrew-nestjs/internal.cjs",
+        "logbrew-express/internal.cjs"
       ],
       "rules": {
         "node/no-process-env": "off"
@@ -452,7 +473,8 @@
     {
       "files": [
         "logbrew-fastify/index.d.ts",
-        "logbrew-nestjs/index.d.ts"
+        "logbrew-nestjs/index.d.ts",
+        "logbrew-express/index.d.ts"
       ],
       "rules": {
         "typescript/consistent-type-definitions": "off"
@@ -471,7 +493,11 @@
         "logbrew-aws-sqs/index.cjs",
         "logbrew-aws-sqs/index.d.ts",
         "logbrew-nestjs/index.d.ts",
-        "logbrew-nestjs/logger.cjs"
+        "logbrew-nestjs/logger.cjs",
+        "logbrew-express/index.cjs",
+        "logbrew-express/index.d.ts",
+        "logbrew-express/examples/real-user-smoke.mjs",
+        "logbrew-express/test/support.js"
       ],
       "rules": {
         "eslint/max-params": [
@@ -556,6 +582,39 @@
           "error",
           {
             "allowEmpty": true
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "logbrew-express/test/support.js"
+      ],
+      "rules": {
+        "unicorn/no-thenable": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-express/test/error-middleware.test.js",
+        "logbrew-express/test/handler-wrapper-unit.test.js"
+      ],
+      "rules": {
+        "node/callback-return": "off",
+        "promise/prefer-await-to-callbacks": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-express/test/mounted-app.js"
+      ],
+      "rules": {
+        "eslint/new-cap": [
+          "error",
+          {
+            "capIsNewExceptions": [
+              "Router"
+            ]
           }
         ]
       }

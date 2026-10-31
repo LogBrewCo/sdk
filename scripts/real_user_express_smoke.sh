@@ -883,7 +883,8 @@ run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" 
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
-cp "$repo_root"/js/logbrew-express/test/*.test.js "$app_dir/"
-node --test "$app_dir"/*.test.js >/dev/null
+mkdir -p "$app_dir/express-tests"
+cp "$repo_root"/js/logbrew-express/test/*.js "$repo_root"/js/logbrew-express/test/*.cjs "$app_dir/express-tests/"
+node --test "$app_dir"/express-tests/*.test.js >/dev/null
 
 echo "express real-user smoke passed with express@$express_version @types/express@$types_express_version"
