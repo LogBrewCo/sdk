@@ -18,7 +18,7 @@ const { createLogBrewSvelteKitHooks } = require("./sveltekit.cjs");
  */
 
 const DEFAULT_SDK_NAME = "logbrew-svelte";
-const DEFAULT_SDK_VERSION = "0.1.6";
+const DEFAULT_SDK_VERSION = "0.1.7";
 const DEFAULT_MAX_RETRIES = 2;
 
 const LOG_BREW_SVELTE_KEY = Symbol.for("logbrew.svelte");
