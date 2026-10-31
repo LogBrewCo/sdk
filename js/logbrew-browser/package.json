@@ -23,6 +23,8 @@
     "attribution.js",
     "beacon-transport.cjs",
     "beacon-transport.js",
+    "browser-events.cjs",
+    "browser-events.js",
     "fetch-spans.cjs",
     "fetch-spans.js",
     "interaction-timing.cjs",
