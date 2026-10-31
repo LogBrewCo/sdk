@@ -304,6 +304,7 @@
           {
             "from": "lib",
             "name": [
+              "Blob",
               "RegExp",
               "Request",
               "RequestInit",
@@ -343,6 +344,10 @@
             "from": "file",
             "name": [
               "AngularTraceparentConfig",
+              "BrowserTraceContext",
+              "BrowserTraceContextConfig",
+              "BrowserTraceContextSource",
+              "BrowserTraceparentConfig",
               "CreateLogBrewAngularClientConfig",
               "LogBrewAngularCaptureContext",
               "LogBrewAngularContext",
@@ -352,6 +357,7 @@
               "LogBrewAngularRuntimeContext",
               "LogBrewAngularViewEventOptions",
               "TraceparentFetchConfig",
+              "TraceparentRequest",
               "TraceparentRequestContext"
             ]
           },

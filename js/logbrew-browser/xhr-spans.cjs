@@ -5,9 +5,9 @@ const { createBrowserFetchSpanEvent } = require("./fetch-spans.cjs");
 const {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext,
-  shouldPropagateTraceparent
+  optionalBrowserTraceContext
 } = require("./trace-context.cjs");
+const { shouldPropagateTraceparent } = require("./traceparent-fetch.cjs");
 
 async function captureBrowserXhrSpan(request, context, options = {}) {
   assertBrowserContext(context, "captureBrowserXhrSpan");

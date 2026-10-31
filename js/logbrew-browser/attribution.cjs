@@ -1,70 +1,102 @@
 "use strict";
 
-// First-touch campaign attribution for one browser tab session: the landing URL's UTM source,
-// medium, and campaign, plus the referring site's host name. Nothing else from the URL or the
-// referrer is read or kept.
+const { callMethod, isRecord, readField } = require("./values.cjs");
+
+/**
+ * @import { TelemetryContext } from "@logbrew/sdk"
+ */
+
 const SESSION_ITEM = "logbrew.attribution.v1";
 const CAMPAIGN_KEYS = ["utm_source", "utm_medium", "utm_campaign"];
 const MAX_VALUE_LENGTH = 100;
 const MAX_CONTEXT_TAGS = 32;
+const NO_TAGS = 0;
+const CONTEXT_SCHEMA_VERSION = 1;
+const LAST_CONTROL_CODE = 31;
+const FIRST_DELETE_CODE = 127;
+const LAST_C1_CONTROL_CODE = 159;
 
-function browserAttributionTags(browserWindow) {
-  const storage = sessionStorageOf(browserWindow);
-  const saved = readSaved(storage);
-  if (saved !== undefined) {
-    return saved;
+/**
+ * @param {string} character
+ * @returns {boolean}
+ */
+function isControlCharacter(character) {
+  const code = character.codePointAt(NO_TAGS);
+  return code !== undefined && (code <= LAST_CONTROL_CODE || (code >= FIRST_DELETE_CODE && code <= LAST_C1_CONTROL_CODE));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function cleanValue(value) {
+  if (typeof value !== "string") {
+    return undefined;
   }
-  const tags = {};
-  const location = parseUrl(safeProperty(browserWindow, "location")?.href);
-  for (const key of CAMPAIGN_KEYS) {
-    const value = cleanValue(location?.searchParams.get(key));
-    if (value !== undefined) {
-      tags[key] = value;
-    }
+  const trimmed = value.trim();
+  if (!trimmed || Array.from(trimmed).length > MAX_VALUE_LENGTH) {
+    return undefined;
   }
-  const referrer = parseUrl(safeProperty(safeProperty(browserWindow, "document"), "referrer"));
-  if (referrer && (referrer.protocol === "https:" || referrer.protocol === "http:")
-    && referrer.hostname && referrer.hostname !== location?.hostname) {
-    tags.referrer_domain = referrer.hostname.toLowerCase();
+  return Array.from(trimmed).some((character) => isControlCharacter(character)) ? undefined : trimmed;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {URL | undefined}
+ */
+function parseUrl(value) {
+  if (typeof value !== "string" || value === "") {
+    return undefined;
   }
   try {
-    storage?.setItem(SESSION_ITEM, JSON.stringify(tags));
+    return new URL(value);
   } catch {
-    // Without session storage, every page reads its own landing URL and referrer.
+    return undefined;
   }
-  return tags;
 }
 
-// App-supplied tags win; attribution is left out when the merged tags would exceed the limit.
-function addBrowserAttributionContext(context, tags) {
-  if (Object.keys(tags).length === 0) {
-    return context;
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {unknown}
+ */
+function safeProperty(value, key) {
+  try {
+    return readField(value, key);
+  } catch {
+    return undefined;
   }
-  if (context === undefined) {
-    return { schemaVersion: 1, tags };
-  }
-  if (!isRecord(context) || context.schemaVersion !== 1 || (context.tags !== undefined && !isRecord(context.tags))) {
-    return context;
-  }
-  const merged = { ...tags, ...context.tags };
-  return Object.keys(merged).length > MAX_CONTEXT_TAGS ? context : { ...context, tags: merged };
 }
 
+/**
+ * @param {unknown} storage
+ * @returns {string | undefined}
+ */
+function savedText(storage) {
+  try {
+    const text = callMethod(storage, "getItem", [SESSION_ITEM]);
+    return typeof text === "string" ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * @param {unknown} storage
+ * @returns {Record<string, string> | undefined}
+ */
 function readSaved(storage) {
-  let text;
-  try {
-    text = storage?.getItem(SESSION_ITEM);
-  } catch {
-    return undefined;
-  }
-  if (typeof text !== "string") {
+  const text = savedText(storage);
+  if (text === undefined) {
     return undefined;
   }
   try {
+    /** @type {unknown} */
     const parsed = JSON.parse(text);
     if (!isRecord(parsed)) {
       return undefined;
     }
+    /** @type {Record<string, string>} */
     const tags = {};
     for (const key of [...CAMPAIGN_KEYS, "referrer_domain"]) {
       const value = cleanValue(parsed[key]);
@@ -78,50 +110,77 @@ function readSaved(storage) {
   }
 }
 
-function cleanValue(value) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (!trimmed || Array.from(trimmed).length > MAX_VALUE_LENGTH) {
-    return undefined;
-  }
-  const control = Array.from(trimmed).some((character) => {
-    const code = character.codePointAt(0);
-    return code !== undefined && (code <= 31 || (code >= 127 && code <= 159));
-  });
-  return control ? undefined : trimmed;
+/**
+ * @param {URL | undefined} referrer
+ * @param {URL | undefined} location
+ * @returns {boolean}
+ */
+function isOutsideReferrer(referrer, location) {
+  return referrer !== undefined
+    && (referrer.protocol === "https:" || referrer.protocol === "http:")
+    && referrer.hostname !== ""
+    && referrer.hostname !== location?.hostname;
 }
 
-function parseUrl(value) {
-  if (typeof value !== "string" || value === "") {
-    return undefined;
+/**
+ * @param {unknown} browserWindow
+ * @returns {Record<string, string>}
+ */
+function landingTags(browserWindow) {
+  /** @type {Record<string, string>} */
+  const tags = {};
+  const location = parseUrl(readField(safeProperty(browserWindow, "location"), "href"));
+  for (const key of CAMPAIGN_KEYS) {
+    const value = cleanValue(location?.searchParams.get(key));
+    if (value !== undefined) {
+      tags[key] = value;
+    }
   }
+  const referrer = parseUrl(safeProperty(safeProperty(browserWindow, "document"), "referrer"));
+  if (referrer !== undefined && isOutsideReferrer(referrer, location)) {
+    tags["referrer_domain"] = referrer.hostname.toLowerCase();
+  }
+  return tags;
+}
+
+/**
+ * @param {unknown} browserWindow
+ * @returns {Record<string, string>}
+ */
+function browserAttributionTags(browserWindow) {
+  const storage = safeProperty(browserWindow, "sessionStorage");
+  const saved = readSaved(storage);
+  if (saved !== undefined) {
+    return saved;
+  }
+  const tags = landingTags(browserWindow);
   try {
-    return new URL(value);
+    callMethod(storage, "setItem", [SESSION_ITEM, JSON.stringify(tags)]);
   } catch {
-    return undefined;
+    return tags;
   }
+  return tags;
 }
 
-function sessionStorageOf(browserWindow) {
-  try {
-    return browserWindow?.sessionStorage;
-  } catch {
-    return undefined;
+/**
+ * @param {TelemetryContext | undefined} context
+ * @param {Readonly<Record<string, string>>} tags
+ * @returns {TelemetryContext | undefined}
+ */
+function addBrowserAttributionContext(context, tags) {
+  if (Object.keys(tags).length === NO_TAGS) {
+    return context;
   }
-}
-
-function safeProperty(value, key) {
-  try {
-    return value?.[key];
-  } catch {
-    return undefined;
+  if (context === undefined) {
+    return { schemaVersion: CONTEXT_SCHEMA_VERSION, tags };
   }
-}
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!isRecord(context)
+    || readField(context, "schemaVersion") !== CONTEXT_SCHEMA_VERSION
+    || (readField(context, "tags") !== undefined && !isRecord(readField(context, "tags")))) {
+    return context;
+  }
+  const merged = { ...tags, ...context.tags };
+  return Object.keys(merged).length > MAX_CONTEXT_TAGS ? context : { ...context, tags: merged };
 }
 
 module.exports = { addBrowserAttributionContext, browserAttributionTags };
