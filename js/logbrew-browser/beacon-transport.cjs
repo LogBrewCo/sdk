@@ -1,7 +1,7 @@
 "use strict";
 
 const { SdkError, TransportError } = require("@logbrew/sdk");
-const { defaultFetch, errorMessage, isFunction, isTruthy, readField } = require("./values.cjs");
+const { defaultFetch, errorMessage, isFunction, readField } = require("./values.cjs");
 const { transportResponse } = require("./rate-limit-response.cjs");
 
 /**
@@ -157,14 +157,14 @@ function defaultSendBeacon() {
 }
 
 /**
- * @param {SendBeacon} sendBeacon
+ * @param {(endpoint: string, payload: string | Blob) => unknown} sendBeacon
  * @param {string} endpoint
  * @param {string} body
  * @returns {boolean}
  */
 function queuedByBeacon(sendBeacon, endpoint, body) {
   try {
-    return isTruthy(sendBeacon(endpoint, createBeaconPayload(body)));
+    return Boolean(sendBeacon(endpoint, createBeaconPayload(body)));
   } catch {
     return false;
   }

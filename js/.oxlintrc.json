@@ -187,7 +187,12 @@
           },
           {
             "from": "file",
-            "name": "SpanLinkSummary",
+            "name": [
+              "SpanLinkSummary",
+              "TelemetryContext",
+              "TelemetryNamedVersion",
+              "TelemetryResource"
+            ],
             "path": "../logbrew-js/types/telemetry.d.ts"
           },
           {
@@ -349,6 +354,9 @@
               "BrowserTraceContextSource",
               "BrowserTraceparentConfig",
               "CreateLogBrewAngularClientConfig",
+              "LifecycleCore",
+              "LifecycleDelivery",
+              "LifecycleDeliveryState",
               "LogBrewAngularCaptureContext",
               "LogBrewAngularContext",
               "LogBrewAngularErrorEventOptions",
@@ -356,6 +364,7 @@
               "LogBrewAngularOptions",
               "LogBrewAngularRuntimeContext",
               "LogBrewAngularViewEventOptions",
+              "PendingDelivery",
               "TraceparentFetchConfig",
               "TraceparentRequest",
               "TraceparentRequestContext"

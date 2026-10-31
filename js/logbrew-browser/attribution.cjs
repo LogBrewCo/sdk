@@ -34,10 +34,10 @@ function cleanValue(value) {
     return undefined;
   }
   const trimmed = value.trim();
-  if (!trimmed || Array.from(trimmed).length > MAX_VALUE_LENGTH) {
+  if (!trimmed || [...trimmed].length > MAX_VALUE_LENGTH) {
     return undefined;
   }
-  return Array.from(trimmed).some((character) => isControlCharacter(character)) ? undefined : trimmed;
+  return [...trimmed].some((character) => isControlCharacter(character)) ? undefined : trimmed;
 }
 
 /**
@@ -82,6 +82,22 @@ function savedText(storage) {
 }
 
 /**
+ * @param {Readonly<Record<string, unknown>>} saved
+ * @returns {Record<string, string>}
+ */
+function savedTags(saved) {
+  /** @type {Record<string, string>} */
+  const tags = {};
+  for (const key of [...CAMPAIGN_KEYS, "referrer_domain"]) {
+    const value = cleanValue(saved[key]);
+    if (value !== undefined) {
+      tags[key] = value;
+    }
+  }
+  return tags;
+}
+
+/**
  * @param {unknown} storage
  * @returns {Record<string, string> | undefined}
  */
@@ -93,18 +109,7 @@ function readSaved(storage) {
   try {
     /** @type {unknown} */
     const parsed = JSON.parse(text);
-    if (!isRecord(parsed)) {
-      return undefined;
-    }
-    /** @type {Record<string, string>} */
-    const tags = {};
-    for (const key of [...CAMPAIGN_KEYS, "referrer_domain"]) {
-      const value = cleanValue(parsed[key]);
-      if (value !== undefined) {
-        tags[key] = value;
-      }
-    }
-    return tags;
+    return isRecord(parsed) ? savedTags(parsed) : undefined;
   } catch {
     return undefined;
   }

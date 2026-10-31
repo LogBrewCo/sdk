@@ -67,14 +67,6 @@ function slugify(value) {
 }
 
 /**
- * @param {unknown} value
- * @returns {boolean}
- */
-function isTruthy(value) {
-  return Boolean(value);
-}
-
-/**
  * @param {unknown} target
  * @param {PropertyKey} name
  * @param {readonly unknown[]} args
@@ -109,7 +101,6 @@ export {
   isList,
   isObjectLike,
   isRecord,
-  isTruthy,
   readField,
   slugify,
   stringOrUndefined

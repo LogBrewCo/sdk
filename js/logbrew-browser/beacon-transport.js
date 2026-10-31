@@ -1,5 +1,5 @@
 import { SdkError, TransportError } from "@logbrew/sdk";
-import { defaultFetch, errorMessage, isFunction, isTruthy, readField } from "./values.js";
+import { defaultFetch, errorMessage, isFunction, readField } from "./values.js";
 import { transportResponse } from "./rate-limit-response.js";
 
 /**
@@ -155,14 +155,14 @@ function defaultSendBeacon() {
 }
 
 /**
- * @param {SendBeacon} sendBeacon
+ * @param {(endpoint: string, payload: string | Blob) => unknown} sendBeacon
  * @param {string} endpoint
  * @param {string} body
  * @returns {boolean}
  */
 function queuedByBeacon(sendBeacon, endpoint, body) {
   try {
-    return isTruthy(sendBeacon(endpoint, createBeaconPayload(body)));
+    return Boolean(sendBeacon(endpoint, createBeaconPayload(body)));
   } catch {
     return false;
   }

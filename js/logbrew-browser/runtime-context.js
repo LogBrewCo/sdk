@@ -46,10 +46,10 @@ function boundedProbe(probe) {
       return undefined;
     }
     const normalized = value.trim();
-    if (!normalized || Array.from(normalized).length > MAX_CONTEXT_STRING_LENGTH) {
+    if (!normalized || [...normalized].length > MAX_CONTEXT_STRING_LENGTH) {
       return undefined;
     }
-    return Array.from(normalized).some((character) => isControlCharacter(character)) ? undefined : normalized;
+    return [...normalized].some((character) => isControlCharacter(character)) ? undefined : normalized;
   } catch {
     return undefined;
   }
