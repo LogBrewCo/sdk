@@ -39,6 +39,8 @@
     "lifecycle-transport.js",
     "navigation-timing.cjs",
     "navigation-timing.js",
+    "network-spans.cjs",
+    "network-spans.js",
     "persistence.cjs",
     "persistence.js",
     "rate-limit-response.cjs",

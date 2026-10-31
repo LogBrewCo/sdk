@@ -1,6 +1,18 @@
 import type { ActionAttributes, IssueAttributes, LogBrewClient, Metadata, SpanAttributes, Transport, TransportResponse } from "@logbrew/sdk";
-import type { BrowserActionInput, BrowserInteractionTimingInput, BrowserIssueSuppressionRule, BrowserIssueSuppressionSummary, BrowserMetadataKind, BrowserNetworkInput, BrowserWebVitalInput, LogBrewBrowserEvent } from "./types-signals.js";
+import type { BrowserActionInput, BrowserFetchInput, BrowserInteractionTimingInput, BrowserIssueSuppressionRule, BrowserIssueSuppressionSummary, BrowserMetadataKind, BrowserNetworkInput, BrowserWebVitalInput, BrowserXhrInput, LogBrewBrowserEvent } from "./types-signals.js";
 import type { BrowserPersistedReplay, BrowserTraceContext, BrowserTraceContextInput, BrowserTraceContextSource, CreateLogBrewBrowserClientConfig, FetchTransportConfig, PersistentBrowserTransportConfig } from "./types-transport.js";
+
+type BrowserEventIdContext = {
+  action?: BrowserActionInput | undefined;
+  browserWindow?: Window | undefined;
+  entry?: BrowserInteractionTimingInput | undefined;
+  error?: unknown;
+  message?: string | undefined;
+  metric?: BrowserWebVitalInput | undefined;
+  request?: BrowserFetchInput | BrowserNetworkInput | BrowserXhrInput | undefined;
+  path: string;
+  source?: string | undefined;
+};
 
 type LogBrewBrowserContext = {
   browserWindow?: Window | undefined;
@@ -104,17 +116,7 @@ type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportCo
     request: BrowserNetworkInput,
     context: { browserWindow?: Window; client: LogBrewClient; traceContext?: BrowserTraceContext }
   ) => LogBrewBrowserEvent<ActionAttributes>);
-  idFactory?: undefined | ((context: {
-    action?: BrowserActionInput | undefined;
-    browserWindow?: Window | undefined;
-    entry?: BrowserInteractionTimingInput | undefined;
-    error?: unknown;
-    message?: string | undefined;
-    metric?: BrowserWebVitalInput | undefined;
-    request?: BrowserNetworkInput | undefined;
-    path: string;
-    source?: string | undefined;
-  }) => string);
+  idFactory?: undefined | ((context: BrowserEventIdContext) => string);
   onFlush?: undefined | ((
     response: TransportResponse,
     context: LogBrewBrowserContext,
@@ -133,6 +135,7 @@ type BrowserInstrumentationOptions = Omit<LogBrewBrowserOptions, "traceContext">
 };
 
 export type {
+  BrowserEventIdContext,
   BrowserFlushDetails,
   BrowserFlushReason,
   BrowserInstrumentationOptions,

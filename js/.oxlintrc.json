@@ -154,8 +154,15 @@
           {
             "from": "lib",
             "name": [
+              "Blob",
               "MessageEvent",
-              "Response"
+              "RegExp",
+              "Request",
+              "RequestInit",
+              "Response",
+              "URL",
+              "Window",
+              "XMLHttpRequest"
             ]
           },
           {
@@ -354,6 +361,10 @@
             "from": "file",
             "name": [
               "AngularTraceparentConfig",
+              "BrowserEventIdContext",
+              "BrowserFetchInput",
+              "BrowserFetchOptions",
+              "BrowserFetchPathTemplate",
               "BrowserInteractionTimingInput",
               "BrowserInteractionTimingObserver",
               "BrowserInteractionTimingOptions",
@@ -373,8 +384,14 @@
               "BrowserWebVitalInput",
               "BrowserWebVitalPathTemplate",
               "BrowserWebVitalsOptions",
+              "BrowserXhrInput",
+              "BrowserXhrOptions",
+              "BrowserXhrPathTemplate",
               "CaptureFlushOptions",
               "CreateLogBrewAngularClientConfig",
+              "FetchCall",
+              "FetchRequest",
+              "FetchSpanOptions",
               "InteractionObserverSetup",
               "InteractionTimingSettings",
               "InteractionToNextPaintSettings",
@@ -396,7 +413,12 @@
               "TraceparentFetchConfig",
               "TraceparentRequest",
               "TraceparentRequestContext",
-              "WebVitalsState"
+              "WebVitalsState",
+              "XhrCall",
+              "XhrOutcome",
+              "XhrPrototype",
+              "XhrSetup",
+              "XhrSpanOptions"
             ]
           },
           {
