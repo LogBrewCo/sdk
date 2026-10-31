@@ -1,511 +1,362 @@
-import fs from "node:fs";
-import path from "node:path";
-
 import {
   fileReference,
+  findInOrder,
+  isJsonList,
+  isJsonObject,
   readJsonObject,
   relativeTo,
   safeResolve,
   sourceMapDebugId
 } from "./release-artifacts-common.js";
+import {
+  metadataFromIssueEvent,
+  requireMetadataMatchesManifest,
+  requireMetadataString,
+  stackFrameFromIssueMetadata
+} from "./release-artifacts-issue-event.js";
+import { originalPositionFor } from "./release-artifacts-mappings.js";
+import path from "node:path";
+import { sourceContextForOriginalPosition } from "./release-artifacts-source-context.js";
+
+/**
+ * @import { JsonObject } from "./release-artifacts-common.js"
+ * @import { ValidSourceMap } from "./release-artifacts-mappings.js"
+ * @import { SourceContextOptions } from "./release-artifacts-source-context.js"
+ * @typedef {{ readonly column: number, readonly filename: string, readonly function?: string, readonly line: number }} StackFrame
+ * @typedef {{ readonly buildDir: string, readonly manifest: JsonObject, readonly sourceContext: SourceContextOptions | undefined }} SymbolicationInput
+ * @typedef {{
+ *   readonly artifact: JsonObject,
+ *   readonly buildDir: string,
+ *   readonly frame: StackFrame,
+ *   readonly manifest: JsonObject,
+ *   readonly sourceContext: SourceContextOptions | undefined
+ * }} ArtifactSymbolicationInput
+ */
 
 const SCRIPT_VERSION = "0.1.0";
-const MAX_SOURCE_CONTEXT_FILE_BYTES = 1024 * 1024;
-const VLQ_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const VLQ_VALUES = new Map([...VLQ_CHARS].map((char, index) => [char, index]));
+const FRAME_PREFIX = "at ";
+const FUNCTION_LOCATION_OPENER = " (";
+const LOCATION_PARTS = 3;
+const LINE_AND_COLUMN_PARTS = -2;
+const FIRST_LINE = 1;
+const START_INDEX = 0;
+const NO_MATCHES = 0;
+const ONE_MATCH = 1;
+const DECIMAL = 10;
+const CLOSING_PARENTHESIS_WIDTH = -1;
+const EDGE_SLASHES_RE = /^\/+|\/+$/gu;
 
-function parseStackFrame(stackFrame) {
-  let line = stackFrame.trim();
-  if (line.startsWith("at ")) {
-    line = line.slice(3).trim();
+/**
+ * @param {string} stackFrame
+ * @returns {{ readonly functionName: string | undefined, readonly location: string }}
+ */
+function splitStackFrame(stackFrame) {
+  const trimmed = stackFrame.trim();
+  const line = trimmed.startsWith(FRAME_PREFIX) ? trimmed.slice(FRAME_PREFIX.length).trim() : trimmed;
+  if (!line.endsWith(")") || !line.includes(FUNCTION_LOCATION_OPENER)) {
+    return { functionName: undefined, location: line };
   }
-  let functionName = null;
-  let location = line;
-  if (line.endsWith(")") && line.includes(" (")) {
-    const marker = line.lastIndexOf(" (");
-    functionName = line.slice(0, marker);
-    location = line.slice(marker + 2, -1);
-  }
-  const parts = location.split(":");
-  if (parts.length < 3) {
-    throw new Error("stack frame must end with :line:column");
-  }
-  const columnText = parts.pop();
-  const lineText = parts.pop();
-  const filename = parts.join(":");
-  const generatedLine = Number.parseInt(lineText, 10);
-  const generatedColumn = Number.parseInt(columnText, 10);
-  if (!Number.isInteger(generatedLine) || !Number.isInteger(generatedColumn)) {
-    throw new Error("stack frame line and column must be integers");
-  }
-  if (generatedLine < 1 || generatedColumn < 1) {
-    throw new Error("stack frame line and column must be one-based positive integers");
-  }
+  const marker = line.lastIndexOf(FUNCTION_LOCATION_OPENER);
   return {
-    filename,
-    line: generatedLine,
-    column: generatedColumn,
-    ...(functionName ? { function: functionName } : {})
+    functionName: line.slice(START_INDEX, marker),
+    location: line.slice(marker + FUNCTION_LOCATION_OPENER.length, CLOSING_PARENTHESIS_WIDTH)
   };
 }
 
-function normalizeReference(value) {
-  let normalized = fileReference(value.trim());
-  if (normalized.startsWith("file://")) {
-    normalized = normalized.slice("file://".length);
+/**
+ * @param {readonly string[]} parts
+ * @returns {{ readonly column: number, readonly line: number }}
+ */
+function framePosition(parts) {
+  const [lineText = "", columnText = ""] = parts.slice(LINE_AND_COLUMN_PARTS);
+  const line = Number.parseInt(lineText, DECIMAL);
+  const column = Number.parseInt(columnText, DECIMAL);
+  const integers = Number.isInteger(line) && Number.isInteger(column);
+  if (!integers) {
+    throw new Error("stack frame line and column must be integers");
   }
-  return normalized;
+  if (line < FIRST_LINE || column < FIRST_LINE) {
+    throw new Error("stack frame line and column must be one-based positive integers");
+  }
+  return { column, line };
 }
 
-function artifactMatchesFrame(artifact, frame, buildDir) {
-  if (!artifact.minifiedSource || typeof artifact.minifiedSource !== "object") {
+/**
+ * @param {string} stackFrame
+ * @returns {StackFrame}
+ */
+function parseStackFrame(stackFrame) {
+  const { functionName, location } = splitStackFrame(stackFrame);
+  const parts = location.split(":");
+  if (parts.length < LOCATION_PARTS) {
+    throw new Error("stack frame must end with :line:column");
+  }
+  const { column, line } = framePosition(parts);
+  return {
+    column,
+    filename: parts.slice(START_INDEX, LINE_AND_COLUMN_PARTS).join(":"),
+    ...(functionName === undefined || functionName === "" ? {} : { function: functionName }),
+    line
+  };
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizeReference(value) {
+  const normalized = fileReference(value.trim());
+  return normalized.startsWith("file://") ? normalized.slice("file://".length) : normalized;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {unknown}
+ */
+function objectField(value, key) {
+  return isJsonObject(value) ? value[key] : undefined;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function jsonText(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return isJsonList(value) ? value.map((item) => jsonText(item)).join(",") : "[object Object]";
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {string}
+ */
+function fieldText(value, key) {
+  return jsonText(objectField(value, key));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isObjectLike(value) {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * @param {string} normalizedFrame
+ * @param {string} artifactPath
+ * @param {string} buildDir
+ * @returns {Promise<boolean>}
+ */
+async function pathMatchesArtifact(normalizedFrame, artifactPath, buildDir) {
+  const resolved = path.isAbsolute(normalizedFrame) ? await safeResolve(normalizedFrame, buildDir) : undefined;
+  return resolved !== undefined && relativeTo(buildDir, resolved) === artifactPath;
+}
+
+/**
+ * @param {JsonObject} artifact
+ * @param {StackFrame} frame
+ * @param {string} buildDir
+ * @returns {Promise<boolean>}
+ */
+async function artifactMatchesFrame(artifact, frame, buildDir) {
+  const { minifiedSource } = artifact;
+  if (!isObjectLike(minifiedSource)) {
     return false;
   }
-  const artifactPath = String(artifact.minifiedSource.path ?? "");
-  const artifactUrl = String(artifact.minifiedSource.minifiedUrl ?? "");
-  const normalizedFrame = normalizeReference(String(frame.filename));
-  if (normalizedFrame === normalizeReference(artifactUrl)) {
+  const artifactPath = fieldText(minifiedSource, "path");
+  const normalizedFrame = normalizeReference(frame.filename);
+  if (normalizedFrame === normalizeReference(fieldText(minifiedSource, "minifiedUrl"))) {
     return true;
   }
-  if (normalizedFrame.replace(/^\/+|\/+$/gu, "") === artifactPath.replace(/^\/+|\/+$/gu, "")) {
+  if (normalizedFrame.replaceAll(EDGE_SLASHES_RE, "") === artifactPath.replaceAll(EDGE_SLASHES_RE, "")) {
     return true;
   }
-  if (path.isAbsolute(normalizedFrame)) {
-    const resolved = safeResolve(normalizedFrame, buildDir);
-    if (resolved) {
-      return relativeTo(buildDir, resolved) === artifactPath;
-    }
-  }
-  return false;
+  return pathMatchesArtifact(normalizedFrame, artifactPath, buildDir);
 }
 
+/**
+ * @param {JsonObject} manifest
+ * @returns {readonly JsonObject[]}
+ */
 function requireReadyArtifacts(manifest) {
-  if (manifest.artifactType !== "javascript_source_map_manifest") {
+  const { artifacts } = manifest;
+  if (manifest["artifactType"] !== "javascript_source_map_manifest") {
     throw new Error("only javascript_source_map_manifest symbolication proof is supported");
   }
-  if (manifest.validation?.status !== "ready") {
+  if (objectField(manifest["validation"], "status") !== "ready") {
     throw new Error("manifest validation status must be ready");
   }
-  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
+  if (!Array.isArray(artifacts) || artifacts.length === NO_MATCHES) {
     throw new Error("manifest must contain at least one JavaScript source-map artifact");
   }
-  for (const artifact of manifest.artifacts) {
-    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+  /** @type {readonly unknown[]} */
+  const entries = artifacts;
+  return entries.map((artifact) => {
+    if (!isJsonObject(artifact)) {
       throw new Error("artifact entries must be JSON objects");
     }
-    if (artifact.validation?.status !== "ready") {
+    if (objectField(artifact["validation"], "status") !== "ready") {
       throw new Error("all artifact validation statuses must be ready");
     }
-  }
-  return manifest.artifacts;
-}
-
-function findMatchingArtifact(manifest, frame, buildDir) {
-  const artifact = requireReadyArtifacts(manifest).find((candidate) => artifactMatchesFrame(candidate, frame, buildDir));
-  if (!artifact) {
-    throw new Error("no manifest artifact matches the minified stack frame filename");
-  }
-  return artifact;
-}
-
-function findArtifactByDebugId(manifest, debugId) {
-  const normalizedDebugId = String(debugId).toLowerCase();
-  const matches = requireReadyArtifacts(manifest).filter((candidate) => {
-    const candidateDebugId = candidate.debugId;
-    return typeof candidateDebugId === "string" && candidateDebugId.toLowerCase() === normalizedDebugId;
+    return artifact;
   });
-  if (matches.length === 0) {
+}
+
+/**
+ * @param {JsonObject} manifest
+ * @param {string} debugId
+ * @returns {JsonObject}
+ */
+function findArtifactByDebugId(manifest, debugId) {
+  const matches = requireReadyArtifacts(manifest).filter((candidate) => {
+    const candidateDebugId = candidate["debugId"];
+    return typeof candidateDebugId === "string" && candidateDebugId.toLowerCase() === debugId;
+  });
+  const [match] = matches;
+  if (match === undefined) {
     throw new Error("no manifest artifact matches the issue event debug ID");
   }
-  if (matches.length > 1) {
+  if (matches.length > ONE_MATCH) {
     throw new Error("multiple manifest artifacts match the issue event debug ID");
   }
-  return matches[0];
+  return match;
 }
 
-function loadManifestSourceMap(artifact, buildDir) {
-  if (!artifact.sourceMap || typeof artifact.sourceMap !== "object" || !artifact.sourceMap.path) {
+/**
+ * @param {JsonObject} artifact
+ * @param {string} buildDir
+ * @returns {Promise<string>}
+ */
+async function resolveManifestSourceMapPath(artifact, buildDir) {
+  const { sourceMap } = artifact;
+  const hasPath = Boolean(objectField(sourceMap, "path"));
+  if (!isObjectLike(sourceMap) || !hasPath) {
     throw new Error("matched artifact is missing source map metadata");
   }
-  const sourceMapPath = safeResolve(path.join(buildDir, String(artifact.sourceMap.path)), buildDir);
-  if (!sourceMapPath) {
+  const joined = path.join(buildDir, fieldText(sourceMap, "path"));
+  const sourceMapPath = await safeResolve(joined, buildDir);
+  if (sourceMapPath === undefined) {
     throw new Error("source map path resolves outside the build directory");
   }
-  const payload = readJsonObject(sourceMapPath, "source map");
+  return sourceMapPath;
+}
+
+/**
+ * @param {JsonObject} artifact
+ * @param {JsonObject} payload
+ * @returns {void}
+ */
+function requireMatchingSourceMap(artifact, payload) {
   if ("sourcesContent" in payload) {
     throw new Error("source map still contains sourcesContent; strip it before symbolication proof");
   }
-  const artifactDebugId = artifact.debugId;
+  const artifactDebugId = artifact["debugId"];
   const mapDebugId = sourceMapDebugId(payload);
-  if (artifactDebugId && mapDebugId && artifactDebugId !== mapDebugId) {
+  if (Boolean(artifactDebugId) && mapDebugId !== undefined && artifactDebugId !== mapDebugId) {
     throw new Error("matched artifact debug ID does not match source map debug ID");
   }
-  if (!Array.isArray(payload.sources) || payload.sources.length === 0) {
+}
+
+/**
+ * @param {JsonObject} artifact
+ * @param {string} buildDir
+ * @returns {Promise<{ readonly path: string, readonly payload: ValidSourceMap }>}
+ */
+async function loadManifestSourceMap(artifact, buildDir) {
+  const sourceMapPath = await resolveManifestSourceMapPath(artifact, buildDir);
+  const payload = await readJsonObject(sourceMapPath, "source map");
+  requireMatchingSourceMap(artifact, payload);
+  const { mappings, names, sources } = payload;
+  if (!Array.isArray(sources) || sources.length === NO_MATCHES) {
     throw new Error("source map sources must be a non-empty array");
   }
-  if (typeof payload.mappings !== "string" || payload.mappings === "") {
+  if (typeof mappings !== "string" || mappings === "") {
     throw new Error("source map mappings must be a non-empty string");
   }
-  return { path: sourceMapPath, payload };
+  return { path: sourceMapPath, payload: { mappings, names, sources } };
 }
 
-function decodeVlqValues(segment) {
-  const values = [];
-  let value = 0;
-  let shift = 0;
-  for (const char of segment) {
-    const digit = VLQ_VALUES.get(char);
-    if (digit === undefined) {
-      throw new Error("source map mappings contain an invalid base64 VLQ character");
-    }
-    const continuation = digit & 32;
-    value += (digit & 31) << shift;
-    if (continuation) {
-      shift += 5;
-      continue;
-    }
-    values.push((value & 1 ? -1 : 1) * (value >> 1));
-    value = 0;
-    shift = 0;
-  }
-  if (shift) {
-    throw new Error("source map mappings contain an unterminated base64 VLQ value");
-  }
-  return values;
-}
-
-function decodedMappingSegments(mappings) {
-  const lines = [];
-  let previousSource = 0;
-  let previousOriginalLine = 0;
-  let previousOriginalColumn = 0;
-  let previousName = 0;
-  for (const rawLine of mappings.split(";")) {
-    let generatedColumn = 0;
-    const lineSegments = [];
-    if (rawLine) {
-      for (const rawSegment of rawLine.split(",")) {
-        if (!rawSegment) {
-          continue;
-        }
-        const values = decodeVlqValues(rawSegment);
-        if (![1, 4, 5].includes(values.length)) {
-          throw new Error("source map segment must contain 1, 4, or 5 VLQ fields");
-        }
-        generatedColumn += values[0];
-        if (values.length === 1) {
-          lineSegments.push([generatedColumn, null, null, null, null]);
-          continue;
-        }
-        previousSource += values[1];
-        previousOriginalLine += values[2];
-        previousOriginalColumn += values[3];
-        let nameIndex = null;
-        if (values.length === 5) {
-          previousName += values[4];
-          nameIndex = previousName;
-        }
-        lineSegments.push([generatedColumn, previousSource, previousOriginalLine, previousOriginalColumn, nameIndex]);
-      }
-    }
-    lines.push(lineSegments);
-  }
-  return lines;
-}
-
-function safeOriginalSourceForReport(source) {
-  if (typeof source !== "string") {
-    throw new Error("source map segment references an invalid source value");
-  }
-  const value = fileReference(source.trim());
-  if (!value) {
-    throw new Error("source map segment references an invalid source value");
-  }
-  if (value.startsWith("file://") || path.isAbsolute(value) || /^[A-Za-z]:[\\/]/u.test(value)) {
-    throw new Error("source map source path must be stripped before symbolication proof");
-  }
-  return value;
-}
-
-function originalPositionFor(payload, generatedLine, generatedColumn) {
-  const generatedLineIndex = generatedLine - 1;
-  const generatedColumnIndex = generatedColumn - 1;
-  const lines = decodedMappingSegments(payload.mappings);
-  if (generatedLineIndex >= lines.length) {
-    throw new Error("generated line is outside source map mappings");
-  }
-  let bestSegment = null;
-  for (const segment of lines[generatedLineIndex]) {
-    if (segment[0] <= generatedColumnIndex) {
-      bestSegment = segment;
-    } else {
-      break;
-    }
-  }
-  if (!bestSegment || bestSegment[1] === null || bestSegment[2] === null || bestSegment[3] === null) {
-    throw new Error("no original source mapping found for generated frame");
-  }
-  const sourceIndex = bestSegment[1];
-  if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= payload.sources.length) {
-    throw new Error("source map segment references an invalid source index");
-  }
-  const original = {
-    source: safeOriginalSourceForReport(payload.sources[sourceIndex]),
-    line: bestSegment[2] + 1,
-    column: bestSegment[3] + 1
-  };
-  const nameIndex = bestSegment[4];
-  if (Array.isArray(payload.names) && Number.isInteger(nameIndex) && nameIndex >= 0 && nameIndex < payload.names.length) {
-    const name = payload.names[nameIndex];
-    if (typeof name === "string" && name) {
-      original.name = name;
-    }
-  }
-  return original;
-}
-
-function requireContextLineCount(value) {
-  if (value === undefined || value === null) {
-    return 2;
-  }
-  if (!Number.isInteger(value) || value < 0 || value > 10) {
-    throw new Error("source context line count must be an integer from 0 to 10");
-  }
-  return value;
-}
-
-function sourceRootRelativeCandidates(source) {
-  const values = [];
-  const add = (candidate) => {
-    const cleaned = fileReference(String(candidate ?? "").trim()).replace(/\\/gu, "/");
-    if (!cleaned || cleaned.startsWith("file://") || /^[A-Za-z]:[\\/]/u.test(cleaned)) {
-      return;
-    }
-    const normalized = path.posix.normalize(cleaned.replace(/^\/+/u, ""));
-    if (!normalized || normalized === "." || normalized.startsWith("../") || normalized === "..") {
-      return;
-    }
-    values.push(normalized);
-  };
-  const addBundlerSuffixes = (candidate) => {
-    const cleaned = fileReference(String(candidate ?? "").trim()).replace(/\\/gu, "/");
-    for (const marker of ["/./", "!./"]) {
-      const markerIndex = cleaned.lastIndexOf(marker);
-      if (markerIndex >= 0) {
-        add(cleaned.slice(markerIndex + marker.length));
-      }
-    }
-    const parts = cleaned.replace(/^\/+/u, "").split("/");
-    if (parts.length > 1 && /^\[[^\]/]+\]$/u.test(parts[0])) {
-      add(parts.slice(1).join("/"));
-    }
-  };
-
-  add(source);
-  addBundlerSuffixes(source);
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(source)) {
-    try {
-      const url = new URL(source);
-      add(url.pathname);
-      addBundlerSuffixes(url.pathname);
-    } catch {
-      // Non-standard bundler schemes should still use the direct candidate.
-    }
-  }
-  return [...new Set(values)];
-}
-
-function sourceContextPathCandidates(source, sourceRoot, sourceMapPath) {
-  const candidates = [];
-  if (sourceMapPath) {
-    candidates.push(path.resolve(path.dirname(sourceMapPath), source));
-  }
-  candidates.push(path.join(sourceRoot, source));
-  for (const relativeSource of sourceRootRelativeCandidates(source)) {
-    candidates.push(path.join(sourceRoot, relativeSource));
-  }
-  return [...new Set(candidates)];
-}
-
-function sourceContextForOriginalPosition(original, options = {}) {
-  if (!options.sourceRoot) {
-    return null;
-  }
-  if (typeof options.sourceRoot !== "string" || options.sourceRoot.trim() === "") {
-    throw new Error("source context root must be a non-empty directory path");
-  }
-  const requestedSourceRoot = path.resolve(options.sourceRoot);
-  if (!fs.existsSync(requestedSourceRoot) || !fs.statSync(requestedSourceRoot).isDirectory()) {
-    throw new Error("source context root must resolve to an existing directory");
-  }
-  const sourceRoot = fs.realpathSync(requestedSourceRoot);
-  let sourcePath = null;
-  for (const candidate of sourceContextPathCandidates(original.source, sourceRoot, options.sourceMapPath)) {
-    const resolved = safeResolve(candidate, sourceRoot);
-    if (resolved && fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
-      sourcePath = resolved;
-      break;
-    }
-  }
-  if (!sourcePath) {
-    throw new Error("original source file is not readable under the source context root");
-  }
-
-  const contextLines = requireContextLineCount(options.contextLines);
-  if (fs.statSync(sourcePath).size > MAX_SOURCE_CONTEXT_FILE_BYTES) {
-    throw new Error("source context file is too large for local report output");
-  }
-  const sourceLines = fs.readFileSync(sourcePath, "utf8").split(/\r?\n/u);
-  const startLine = Math.max(1, original.line - contextLines);
-  const endLine = Math.min(sourceLines.length, original.line + contextLines);
-  const lines = [];
-  for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
-    lines.push({
-      line: lineNumber,
-      text: sourceLines[lineNumber - 1] ?? "",
-      highlighted: lineNumber === original.line
-    });
-  }
-
-  return {
-    source: relativeTo(sourceRoot, sourcePath),
-    startLine,
-    lines
-  };
-}
-
-function isJsonObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringOrNull(value) {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
-}
-
-function metadataFromIssueEvent(issueEvent) {
-  if (!isJsonObject(issueEvent)) {
-    throw new Error("issue event must be a JSON object");
-  }
-  if (isJsonObject(issueEvent.attributes) && isJsonObject(issueEvent.attributes.metadata)) {
-    return {
-      metadata: issueEvent.attributes.metadata,
-      input: {
-        type: "sdk_issue_event",
-        ...(stringOrNull(issueEvent.id) ? { issueId: stringOrNull(issueEvent.id) } : {}),
-        metadataSource: "attributes.metadata"
-      }
-    };
-  }
-  if (isJsonObject(issueEvent.metadata)) {
-    return {
-      metadata: issueEvent.metadata,
-      input: {
-        type: "issue_attributes",
-        metadataSource: "metadata"
-      }
-    };
-  }
-  throw new Error("issue event must contain attributes.metadata or metadata");
-}
-
-function requireMetadataString(metadata, name) {
-  const value = stringOrNull(metadata[name]);
-  if (!value) {
-    throw new Error(`issue event metadata is missing ${name}`);
-  }
-  return value;
-}
-
-function requireMetadataPositiveInteger(metadata, name) {
-  const value = metadata[name];
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`issue event metadata ${name} must be a one-based positive integer`);
-  }
-  return value;
-}
-
-function requireMetadataMatchesManifest(metadata, manifest, name) {
-  const value = requireMetadataString(metadata, name);
-  if (manifest[name] !== value) {
-    throw new Error(`issue event metadata ${name} does not match the manifest`);
-  }
-}
-
-function stackFrameFromIssueMetadata(metadata) {
-  const releaseArtifactType = requireMetadataString(metadata, "releaseArtifactType");
-  if (releaseArtifactType !== "sourcemap") {
-    throw new Error("issue event releaseArtifactType must be sourcemap");
-  }
-  const codeFile = stringOrNull(metadata.releaseArtifactCodeFile) ?? stringOrNull(metadata.errorFrameFile);
-  if (!codeFile) {
-    throw new Error("issue event metadata is missing releaseArtifactCodeFile");
-  }
-  const line = requireMetadataPositiveInteger(metadata, "errorFrameLine");
-  const column = requireMetadataPositiveInteger(metadata, "errorFrameColumn");
-  return `${codeFile}:${line}:${column}`;
-}
-
-function symbolicationReportForArtifact({ buildDir, manifest, frame, artifact, sourceContext }) {
-  const sourceMap = loadManifestSourceMap(artifact, buildDir);
+/**
+ * @param {ArtifactSymbolicationInput} input
+ * @returns {Promise<JsonObject>}
+ */
+async function symbolicationReportForArtifact({ artifact, buildDir, frame, manifest, sourceContext }) {
+  const sourceMap = await loadManifestSourceMap(artifact, buildDir);
   const original = originalPositionFor(sourceMap.payload, frame.line, frame.column);
-  const resolvedSourceContext = sourceContextForOriginalPosition(original, {
-    ...sourceContext,
-    sourceMapPath: sourceMap.path
-  });
+  const resolvedSourceContext = await sourceContextForOriginalPosition(
+    original,
+    sourceContext === undefined ? undefined : { ...sourceContext, sourceMapPath: sourceMap.path }
+  );
+  const { minifiedSource } = artifact;
+  if (minifiedSource === undefined || minifiedSource === null) {
+    throw new Error("matched artifact is missing minified source metadata");
+  }
   return {
-    status: "resolved",
-    verifier: { name: "logbrew-js-release-artifact-symbolication-verifier", version: SCRIPT_VERSION },
-    release: manifest.release,
-    environment: manifest.environment,
-    service: manifest.service,
-    debugId: artifact.debugId,
+    debugId: artifact["debugId"],
+    environment: manifest["environment"],
     generated: {
-      path: artifact.minifiedSource.path,
-      minifiedUrl: artifact.minifiedSource.minifiedUrl,
-      line: frame.line,
       column: frame.column,
-      ...(frame.function ? { function: frame.function } : {})
-    },
-    sourceMap: {
-      path: artifact.sourceMap.path,
-      hasSourcesContent: false
+      ...(frame.function === undefined ? {} : { function: frame.function }),
+      line: frame.line,
+      minifiedUrl: objectField(minifiedSource, "minifiedUrl"),
+      path: objectField(minifiedSource, "path")
     },
     original,
-    ...(resolvedSourceContext ? { sourceContext: resolvedSourceContext } : {})
+    release: manifest["release"],
+    service: manifest["service"],
+    ...(resolvedSourceContext === undefined ? {} : { sourceContext: resolvedSourceContext }),
+    sourceMap: { hasSourcesContent: false, path: objectField(artifact["sourceMap"], "path") },
+    status: "resolved",
+    verifier: { name: "logbrew-js-release-artifact-symbolication-verifier", version: SCRIPT_VERSION }
   };
 }
 
-export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame, sourceContext }) {
+/**
+ * @param {SymbolicationInput & { readonly stackFrame: string }} input
+ * @returns {Promise<JsonObject>}
+ */
+async function verifyJavaScriptSymbolication({ buildDir, manifest, sourceContext, stackFrame }) {
   const frame = parseStackFrame(stackFrame);
-  return symbolicationReportForArtifact({
-    buildDir,
-    manifest,
-    frame,
-    artifact: findMatchingArtifact(manifest, frame, buildDir),
-    sourceContext
-  });
+  const artifact = await findInOrder(requireReadyArtifacts(manifest), async (candidate) =>
+    artifactMatchesFrame(candidate, frame, buildDir));
+  if (artifact === undefined) {
+    throw new Error("no manifest artifact matches the minified stack frame filename");
+  }
+  return symbolicationReportForArtifact({ artifact, buildDir, frame, manifest, sourceContext });
 }
 
-export function verifyJavaScriptIssueSymbolication({ buildDir, manifest, issueEvent, sourceContext }) {
-  const { metadata, input } = metadataFromIssueEvent(issueEvent);
-  requireMetadataMatchesManifest(metadata, manifest, "release");
-  requireMetadataMatchesManifest(metadata, manifest, "environment");
-  requireMetadataMatchesManifest(metadata, manifest, "service");
-
+/**
+ * @param {SymbolicationInput & { readonly issueEvent: JsonObject }} input
+ * @returns {Promise<JsonObject>}
+ */
+async function verifyJavaScriptIssueSymbolication({ buildDir, issueEvent, manifest, sourceContext }) {
+  const { input, metadata } = metadataFromIssueEvent(issueEvent);
+  requireMetadataMatchesManifest(metadata, manifest);
   const expectedDebugId = requireMetadataString(metadata, "releaseArtifactDebugId").toLowerCase();
   const artifact = findArtifactByDebugId(manifest, expectedDebugId);
-  const report = symbolicationReportForArtifact({
-    buildDir,
-    manifest,
-    frame: parseStackFrame(stackFrameFromIssueMetadata(metadata)),
+  const report = await symbolicationReportForArtifact({
     artifact,
+    buildDir,
+    frame: parseStackFrame(stackFrameFromIssueMetadata(metadata)),
+    manifest,
     sourceContext
   });
-  if (typeof report.debugId !== "string" || report.debugId.toLowerCase() !== expectedDebugId) {
+  const { debugId } = report;
+  if (typeof debugId !== "string" || debugId.toLowerCase() !== expectedDebugId) {
     throw new Error("issue event releaseArtifactDebugId does not match the resolved artifact");
   }
-  return {
-    ...report,
-    input
-  };
+  return { ...report, input };
 }
+
+export { verifyJavaScriptIssueSymbolication, verifyJavaScriptSymbolication };
