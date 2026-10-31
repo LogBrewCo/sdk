@@ -1079,6 +1079,15 @@
           }
         ]
       }
+    },
+    {
+      "files": [
+        "logbrew-react-native/global-errors.js",
+        "logbrew-react-native/global-errors.native.js"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
     }
   ]
 }
