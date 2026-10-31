@@ -1,10 +1,14 @@
-import type { TelemetrySessionContext, TelemetrySubjectContext, TelemetryTraceContext } from "@logbrew/sdk";
+import type {
+  TelemetrySessionContext,
+  TelemetrySubjectContext,
+  TelemetryTraceContext
+} from "@logbrew/sdk";
 
 type LogBrewAppleNativeDiagnosticsAuth =
   | { apiKey: string; clientKey?: never }
   | { clientKey: string; apiKey?: never };
 
-export type LogBrewAppleNativeDiagnosticsConfiguration =
+type LogBrewAppleNativeDiagnosticsConfiguration =
   LogBrewAppleNativeDiagnosticsAuth & {
     projectId: string;
     release: string;
@@ -18,7 +22,7 @@ export type LogBrewAppleNativeDiagnosticsConfiguration =
     endpoint?: string;
   };
 
-export type LogBrewAppleNativeDiagnosticsStatus = Readonly<{
+type LogBrewAppleNativeDiagnosticsStatus = Readonly<{
   status: "already_installed" | "installed" | "not_installed" | "ready";
   lifecycle: "failed" | "idle" | "installed" | "replaying" | "stopped" | "unknown";
   pending: number;
@@ -26,7 +30,7 @@ export type LogBrewAppleNativeDiagnosticsStatus = Readonly<{
   discarded: number;
 }>;
 
-export type LogBrewAppleNativeDiagnosticsReplayResult = Readonly<{
+type LogBrewAppleNativeDiagnosticsReplayResult = Readonly<{
   status: "replayed";
   attempted: number;
   acknowledged: number;
@@ -34,8 +38,10 @@ export type LogBrewAppleNativeDiagnosticsReplayResult = Readonly<{
   pending: number;
 }>;
 
-export type LogBrewAppleNativeCrashContext = {
-  schemaVersion: 1;
+declare const CRASH_CONTEXT_SCHEMA_VERSION = 1;
+
+type LogBrewAppleNativeCrashContext = {
+  schemaVersion: typeof CRASH_CONTEXT_SCHEMA_VERSION;
   /** App-reported failed action and optional user-visible result. Never include raw input or identity. */
   impact?: {
     failedAction: string;
@@ -48,22 +54,22 @@ export type LogBrewAppleNativeCrashContext = {
   tags?: never;
 };
 
-export type LogBrewAppleNativeCrashContextResult = Readonly<{
+type LogBrewAppleNativeCrashContextResult = Readonly<{
   status: "cleared" | "updated";
 }>;
 
-export declare function installLogBrewAppleNativeDiagnostics(
+declare function installLogBrewAppleNativeDiagnostics(
   configuration: LogBrewAppleNativeDiagnosticsConfiguration
 ): LogBrewAppleNativeDiagnosticsStatus;
 
-export declare function replayLogBrewAppleNativeDiagnostics(): Promise<
+declare function replayLogBrewAppleNativeDiagnostics(): Promise<
   LogBrewAppleNativeDiagnosticsReplayResult
 >;
 
-export declare function getLogBrewAppleNativeDiagnosticsStatus():
+declare function getLogBrewAppleNativeDiagnosticsStatus():
   LogBrewAppleNativeDiagnosticsStatus;
 
-export declare function setLogBrewAppleNativeCrashContext(
+declare function setLogBrewAppleNativeCrashContext(
   context: LogBrewAppleNativeCrashContext | null
 ): LogBrewAppleNativeCrashContextResult;
 
@@ -74,4 +80,17 @@ declare const defaultExport: {
   setLogBrewAppleNativeCrashContext: typeof setLogBrewAppleNativeCrashContext;
 };
 
+export type {
+  LogBrewAppleNativeCrashContext,
+  LogBrewAppleNativeCrashContextResult,
+  LogBrewAppleNativeDiagnosticsConfiguration,
+  LogBrewAppleNativeDiagnosticsReplayResult,
+  LogBrewAppleNativeDiagnosticsStatus
+};
+export {
+  installLogBrewAppleNativeDiagnostics,
+  replayLogBrewAppleNativeDiagnostics,
+  getLogBrewAppleNativeDiagnosticsStatus,
+  setLogBrewAppleNativeCrashContext
+};
 export default defaultExport;

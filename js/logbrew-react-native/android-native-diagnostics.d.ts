@@ -1,4 +1,4 @@
-export type LogBrewAndroidNativeDiagnosticsConfiguration = Readonly<{
+type LogBrewAndroidNativeDiagnosticsConfiguration = Readonly<{
   anrThresholdMs?: number;
   clientKey: string;
   environment: string;
@@ -8,7 +8,7 @@ export type LogBrewAndroidNativeDiagnosticsConfiguration = Readonly<{
   service: string;
 }>;
 
-export type LogBrewAndroidNativeDiagnosticsReceipt = Readonly<{
+type LogBrewAndroidNativeDiagnosticsReceipt = Readonly<{
   pending: number;
   status:
     | "already_installed"
@@ -18,12 +18,22 @@ export type LogBrewAndroidNativeDiagnosticsReceipt = Readonly<{
     | "uninstalled";
 }>;
 
-export declare function installLogBrewAndroidNativeDiagnostics(
+declare function installLogBrewAndroidNativeDiagnostics(
   configuration: LogBrewAndroidNativeDiagnosticsConfiguration
 ): LogBrewAndroidNativeDiagnosticsReceipt;
 
-export declare function getLogBrewAndroidNativeDiagnosticsStatus():
+declare function getLogBrewAndroidNativeDiagnosticsStatus():
   LogBrewAndroidNativeDiagnosticsReceipt;
 
-export declare function uninstallLogBrewAndroidNativeDiagnostics():
+declare function uninstallLogBrewAndroidNativeDiagnostics():
   LogBrewAndroidNativeDiagnosticsReceipt;
+
+export type {
+  LogBrewAndroidNativeDiagnosticsConfiguration,
+  LogBrewAndroidNativeDiagnosticsReceipt
+};
+export {
+  installLogBrewAndroidNativeDiagnostics,
+  getLogBrewAndroidNativeDiagnosticsStatus,
+  uninstallLogBrewAndroidNativeDiagnostics
+};

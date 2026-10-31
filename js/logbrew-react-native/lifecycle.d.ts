@@ -5,7 +5,7 @@ import type {
   ReactNativeSpanEvent
 } from "./index.js";
 
-export type ReactNativeLifecycleSpanInput = ReactNativeContextOptions & {
+type ReactNativeLifecycleSpanInput = ReactNativeContextOptions & {
   durationMs?: number;
   fromState?: string;
   id?: string;
@@ -20,13 +20,13 @@ export type ReactNativeLifecycleSpanInput = ReactNativeContextOptions & {
   toState?: string;
 };
 
-export type ReactNativeLifecycleSpanIdFactoryContext = {
+type ReactNativeLifecycleSpanIdFactoryContext = {
   fromState?: string;
   screen?: string;
   toState?: string;
 };
 
-export type AppStateLifecycleSpanListenerOptions = ReactNativeContextOptions & {
+type AppStateLifecycleSpanListenerOptions = ReactNativeContextOptions & {
   captureInitialState?: boolean;
   metadata?: Metadata;
   now?: () => string;
@@ -36,15 +36,26 @@ export type AppStateLifecycleSpanListenerOptions = ReactNativeContextOptions & {
   sessionId?: string;
 };
 
-export declare function createReactNativeLifecycleSpanEvent(
+declare function createReactNativeLifecycleSpanEvent(
   input?: ReactNativeLifecycleSpanInput
 ): ReactNativeSpanEvent;
-export declare function captureReactNativeLifecycleSpan(
+declare function captureReactNativeLifecycleSpan(
   client: LogBrewClient,
   input?: ReactNativeLifecycleSpanInput
 ): ReactNativeSpanEvent;
-export declare function createAppStateLifecycleSpanListener(
+declare function createAppStateLifecycleSpanListener(
   client: LogBrewClient,
   appState: ReactNativeAppStateLike,
   options?: AppStateLifecycleSpanListenerOptions
 ): () => void;
+
+export type {
+  AppStateLifecycleSpanListenerOptions,
+  ReactNativeLifecycleSpanIdFactoryContext,
+  ReactNativeLifecycleSpanInput
+};
+export {
+  createReactNativeLifecycleSpanEvent,
+  captureReactNativeLifecycleSpan,
+  createAppStateLifecycleSpanListener
+};

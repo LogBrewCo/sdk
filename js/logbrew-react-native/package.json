@@ -156,6 +156,7 @@
     "index.native.d.ts",
     "index.d.ts",
     "index.d.cts",
+    "types",
     "apollo.cjs",
     "apollo.js",
     "apollo.d.ts",

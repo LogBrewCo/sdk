@@ -1,18 +1,18 @@
 import type { LogBrewClient } from "@logbrew/sdk";
 
-export type ReactNativeGlobalErrorHandler = (error: unknown, isFatal?: boolean) => void;
+type ReactNativeGlobalErrorHandler = (error: unknown, isFatal?: boolean) => void;
 
-export type ReactNativeErrorUtilsLike = {
+type ReactNativeErrorUtilsLike = {
   getGlobalHandler(): ReactNativeGlobalErrorHandler | undefined;
   setGlobalHandler(handler: ReactNativeGlobalErrorHandler | undefined): void;
 };
 
-export type ReactNativeIssueCaptureClient = Pick<LogBrewClient, "issue"> & {
+type ReactNativeIssueCaptureClient = Pick<LogBrewClient, "issue"> & {
   /** Optional synchronous receipt for this call. Older clients remain supported. */
   issueWithAdmission?: (...args: Parameters<LogBrewClient["issue"]>) => unknown;
 };
 
-export type ReactNativePromiseRejectionDiagnosticCode =
+type ReactNativePromiseRejectionDiagnosticCode =
   | "promise_rejection_admission_unavailable"
   | "promise_rejection_capture_failed"
   | "promise_rejection_configuration_invalid"
@@ -26,11 +26,11 @@ export type ReactNativePromiseRejectionDiagnosticCode =
   | "promise_rejection_tracker_unavailable"
   | "promise_rejection_tracking_evicted";
 
-export type ReactNativePromiseRejectionDiagnostic = Readonly<{
+type ReactNativePromiseRejectionDiagnostic = Readonly<{
   code: ReactNativePromiseRejectionDiagnosticCode;
 }>;
 
-export type ReactNativeGlobalErrorDiagnosticCode =
+type ReactNativeGlobalErrorDiagnosticCode =
   | "capture_admission_unavailable"
   | "capture_failed"
   | "capture_filtered"
@@ -48,11 +48,11 @@ export type ReactNativeGlobalErrorDiagnosticCode =
   | "handler_unavailable"
   | "recursive_capture_suppressed";
 
-export type ReactNativeGlobalErrorDiagnostic = Readonly<{
+type ReactNativeGlobalErrorDiagnostic = Readonly<{
   code: ReactNativeGlobalErrorDiagnosticCode;
 }>;
 
-export type ReactNativeGlobalErrorHealth = Readonly<{
+type ReactNativeGlobalErrorHealth = Readonly<{
   active: boolean;
   capturedEvents: number;
   lastOutcome:
@@ -73,7 +73,7 @@ export type ReactNativeGlobalErrorHealth = Readonly<{
   suppressedEvents: number;
 }>;
 
-export type ReactNativePromiseRejectionHealth = Readonly<{
+type ReactNativePromiseRejectionHealth = Readonly<{
   available: boolean;
   capturedEvents: number;
   evictedRejections: number;
@@ -98,7 +98,7 @@ export type ReactNativePromiseRejectionHealth = Readonly<{
   untrackedEvents: number;
 }>;
 
-export type CreateLogBrewReactNativePromiseRejectionHandlersOptions = {
+type CreateLogBrewReactNativePromiseRejectionHandlersOptions = {
   client: ReactNativeIssueCaptureClient;
   /**
    * Maximum number of safe runtime rejection identifiers retained for duplicate
@@ -108,13 +108,13 @@ export type CreateLogBrewReactNativePromiseRejectionHandlersOptions = {
   onDiagnostic?: (diagnostic: ReactNativePromiseRejectionDiagnostic) => void;
 };
 
-export type LogBrewReactNativePromiseRejectionHandlers = Readonly<{
+type LogBrewReactNativePromiseRejectionHandlers = Readonly<{
   health(): ReactNativePromiseRejectionHealth;
   onHandled(runtimeRejectionId: unknown): void;
   onUnhandled(runtimeRejectionId: unknown, rejection?: unknown): void;
 }>;
 
-export type ReactNativePromiseRejectionTrackerLike = {
+type ReactNativePromiseRejectionTrackerLike = {
   enable(options: Readonly<{
     allRejections: true;
     onHandled(runtimeRejectionId: unknown): void;
@@ -122,7 +122,7 @@ export type ReactNativePromiseRejectionTrackerLike = {
   }>): void;
 };
 
-export type InstallLogBrewReactNativePromiseRejectionTrackerOptions = {
+type InstallLogBrewReactNativePromiseRejectionTrackerOptions = {
   client: ReactNativeIssueCaptureClient;
   /**
    * Confirms that LogBrew may claim the runtime's single Promise rejection
@@ -138,7 +138,7 @@ export type InstallLogBrewReactNativePromiseRejectionTrackerOptions = {
   onDiagnostic?: (diagnostic: ReactNativePromiseRejectionDiagnostic) => void;
 };
 
-export type ReactNativePromiseRejectionTrackerHealth = Readonly<{
+type ReactNativePromiseRejectionTrackerHealth = Readonly<{
   active: boolean;
   available: boolean;
   engine: "custom" | "hermes" | "unavailable";
@@ -152,7 +152,7 @@ export type ReactNativePromiseRejectionTrackerHealth = Readonly<{
   restoration: "deactivate_only";
 }>;
 
-export type LogBrewReactNativePromiseRejectionTrackerInstallation = Readonly<{
+type LogBrewReactNativePromiseRejectionTrackerInstallation = Readonly<{
   /**
    * Stops LogBrew capture through the installed callbacks. Hermes does not
    * expose a previous-owner restoration API, so this cannot restore one.
@@ -162,21 +162,23 @@ export type LogBrewReactNativePromiseRejectionTrackerInstallation = Readonly<{
   rejectionHealth(): ReactNativePromiseRejectionHealth;
 }>;
 
-export type ReactNativeFatalRecord = Readonly<{
+declare const FATAL_RECORD_SCHEMA_VERSION = 1;
+
+type ReactNativeFatalRecord = Readonly<{
   corruptRecords: number;
   droppedRecords: number;
   errorName: string;
   id: string;
-  schemaVersion: 1;
-  stackFrames: ReadonlyArray<Readonly<{
+  schemaVersion: typeof FATAL_RECORD_SCHEMA_VERSION;
+  stackFrames: readonly Readonly<{
     column: number;
     filename: string;
     line: number;
-  }>>;
+  }>[];
   timestamp: string;
 }>;
 
-export type ReactNativeFatalStoreResult = Readonly<{
+type ReactNativeFatalStoreResult = Readonly<{
   corruptRecords?: number;
   droppedRecords?: number;
   record?: ReactNativeFatalRecord;
@@ -184,14 +186,14 @@ export type ReactNativeFatalStoreResult = Readonly<{
   status: string;
 }>;
 
-export type ReactNativeFatalStoreLike = {
+type ReactNativeFatalStoreLike = {
   writeFatalRecord(record: ReactNativeFatalRecord): ReactNativeFatalStoreResult;
   readFatalRecord(): ReactNativeFatalStoreResult;
   acknowledgeFatalRecord(recordId: string): ReactNativeFatalStoreResult;
   discardFatalRecord(): ReactNativeFatalStoreResult;
 };
 
-export type ReactNativeFatalReplayHealth = Readonly<{
+type ReactNativeFatalReplayHealth = Readonly<{
   acknowledgedRecords: number;
   available: boolean;
   corruptRecords: number;
@@ -216,7 +218,7 @@ export type ReactNativeFatalReplayHealth = Readonly<{
   storedRecords: number;
 }>;
 
-export type InstallLogBrewReactNativeGlobalErrorHandlerOptions = {
+type InstallLogBrewReactNativeGlobalErrorHandlerOptions = {
   client: ReactNativeIssueCaptureClient
     & Partial<Pick<LogBrewClient, "droppedEvents" | "pendingEvents">>;
   errorUtils?: ReactNativeErrorUtilsLike;
@@ -224,7 +226,7 @@ export type InstallLogBrewReactNativeGlobalErrorHandlerOptions = {
   onDiagnostic?: (diagnostic: ReactNativeGlobalErrorDiagnostic) => void;
 };
 
-export type LogBrewReactNativeGlobalErrorHandlerInstallation = Readonly<{
+type LogBrewReactNativeGlobalErrorHandlerInstallation = Readonly<{
   discardPendingFatalRecord(): boolean;
   fatalHealth(): ReactNativeFatalReplayHealth;
   health(): ReactNativeGlobalErrorHealth;
@@ -240,7 +242,7 @@ export type LogBrewReactNativeGlobalErrorHandlerInstallation = Readonly<{
  * Capture counts and tracking require an admitted receipt. Without a receipt, each report
  * calls issue once, reports admission_unavailable, and remains eligible for a later report.
  */
-export declare function createLogBrewReactNativePromiseRejectionHandlers(
+declare function createLogBrewReactNativePromiseRejectionHandlers(
   options: CreateLogBrewReactNativePromiseRejectionHandlersOptions
 ): LogBrewReactNativePromiseRejectionHandlers;
 
@@ -251,7 +253,7 @@ export declare function createLogBrewReactNativePromiseRejectionHandlers(
  * The React Native conditional export discovers Hermes without replacing the
  * global Promise. Other runtimes can inject a compatible tracker explicitly.
  */
-export declare function installLogBrewReactNativePromiseRejectionTracker(
+declare function installLogBrewReactNativePromiseRejectionTracker(
   options: InstallLogBrewReactNativePromiseRejectionTrackerOptions
 ): LogBrewReactNativePromiseRejectionTrackerInstallation;
 
@@ -265,7 +267,7 @@ export declare function installLogBrewReactNativePromiseRejectionTracker(
  * Older clients receive each report once and report admission_unavailable.
  * This helper does not claim local exactly-once delivery or install Promise rejection handling.
  */
-export declare function installLogBrewReactNativeGlobalErrorHandler(
+declare function installLogBrewReactNativeGlobalErrorHandler(
   options: InstallLogBrewReactNativeGlobalErrorHandlerOptions
 ): LogBrewReactNativeGlobalErrorHandlerInstallation;
 
@@ -275,4 +277,32 @@ declare const logBrewReactNativeGlobalErrors: {
   installLogBrewReactNativePromiseRejectionTracker: typeof installLogBrewReactNativePromiseRejectionTracker;
 };
 
+export type {
+  CreateLogBrewReactNativePromiseRejectionHandlersOptions,
+  InstallLogBrewReactNativeGlobalErrorHandlerOptions,
+  InstallLogBrewReactNativePromiseRejectionTrackerOptions,
+  LogBrewReactNativeGlobalErrorHandlerInstallation,
+  LogBrewReactNativePromiseRejectionHandlers,
+  LogBrewReactNativePromiseRejectionTrackerInstallation,
+  ReactNativeErrorUtilsLike,
+  ReactNativeFatalRecord,
+  ReactNativeFatalReplayHealth,
+  ReactNativeFatalStoreLike,
+  ReactNativeFatalStoreResult,
+  ReactNativeGlobalErrorDiagnostic,
+  ReactNativeGlobalErrorDiagnosticCode,
+  ReactNativeGlobalErrorHandler,
+  ReactNativeGlobalErrorHealth,
+  ReactNativeIssueCaptureClient,
+  ReactNativePromiseRejectionDiagnostic,
+  ReactNativePromiseRejectionDiagnosticCode,
+  ReactNativePromiseRejectionHealth,
+  ReactNativePromiseRejectionTrackerHealth,
+  ReactNativePromiseRejectionTrackerLike
+};
+export {
+  createLogBrewReactNativePromiseRejectionHandlers,
+  installLogBrewReactNativePromiseRejectionTracker,
+  installLogBrewReactNativeGlobalErrorHandler
+};
 export default logBrewReactNativeGlobalErrors;

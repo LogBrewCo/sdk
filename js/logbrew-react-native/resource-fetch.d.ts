@@ -6,7 +6,7 @@ import type {
   TracePropagationTarget
 } from "./index.js";
 
-export type ReactNativeResourceFetchOptions<TInput = unknown, TInit = unknown, TResponse = unknown> = {
+type ReactNativeResourceFetchOptions<TInput = unknown, TInit = unknown, TResponse = unknown> = {
   appState?: ReactNativeAppStateLike;
   fetchImpl?: (input: TInput, init?: TInit) => Promise<TResponse> | TResponse;
   measureResponseBodySize?: boolean;
@@ -25,7 +25,7 @@ export type ReactNativeResourceFetchOptions<TInput = unknown, TInit = unknown, T
   tracePropagationTargets?: TracePropagationTarget[];
 };
 
-export type ReactNativeResourceFetchMetadataContext<TInput = unknown, TInit = unknown, TResponse = unknown> = {
+type ReactNativeResourceFetchMetadataContext<TInput = unknown, TInit = unknown, TResponse = unknown> = {
   readonly durationMs?: number;
   readonly error?: unknown;
   readonly init?: TInit;
@@ -40,21 +40,32 @@ export type ReactNativeResourceFetchMetadataContext<TInput = unknown, TInit = un
   readonly url: string;
 };
 
-export type ReactNativeGraphQLMetadataFactoryOptions<TInput = unknown, TInit = unknown, TResponse = unknown> = {
+type ReactNativeGraphQLMetadataFactoryOptions<TInput = unknown, TInit = unknown, TResponse = unknown> = {
   endpoint?: ReactNativeGraphQLEndpointMatcher<TInput, TInit, TResponse> | ReactNativeGraphQLEndpointMatcher<TInput, TInit, TResponse>[];
   metadataFactory?: (context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => Metadata | undefined;
 };
 
-export type ReactNativeGraphQLEndpointMatcher<TInput = unknown, TInit = unknown, TResponse = unknown> =
+type ReactNativeGraphQLEndpointMatcher<TInput = unknown, TInit = unknown, TResponse = unknown> =
   | string
   | RegExp
   | ((context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => boolean);
 
-export declare function createReactNativeGraphQLMetadataFactory<TInput = unknown, TInit = unknown, TResponse = unknown>(
+declare function createReactNativeGraphQLMetadataFactory<TInput = unknown, TInit = unknown, TResponse = unknown>(
   options?: ReactNativeGraphQLMetadataFactoryOptions<TInput, TInit, TResponse>
 ): (context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => Metadata;
 
-export declare function createReactNativeResourceFetch<TInput = unknown, TInit = unknown, TResponse = unknown>(
+declare function createReactNativeResourceFetch<TInput = unknown, TInit = unknown, TResponse = unknown>(
   client: LogBrewClient,
   options?: ReactNativeResourceFetchOptions<TInput, TInit, TResponse>
 ): (input: TInput, init?: TInit) => Promise<TResponse>;
+
+export type {
+  ReactNativeGraphQLEndpointMatcher,
+  ReactNativeGraphQLMetadataFactoryOptions,
+  ReactNativeResourceFetchMetadataContext,
+  ReactNativeResourceFetchOptions
+};
+export {
+  createReactNativeGraphQLMetadataFactory,
+  createReactNativeResourceFetch
+};
