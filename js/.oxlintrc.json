@@ -483,6 +483,7 @@
           {
             "from": "package",
             "name": [
+              "Headers",
               "Request",
               "RequestInit",
               "URL"
@@ -506,6 +507,28 @@
             "from": "package",
             "name": "ExportedConfigWithProps",
             "package": "@expo/config-plugins"
+          },
+          {
+            "from": "file",
+            "name": [
+              "IssueAttributes",
+              "IssueExceptionChain",
+              "IssueExceptionChainEntry"
+            ],
+            "path": "../logbrew-js/types/issues.d.ts"
+          },
+          {
+            "from": "lib",
+            "name": "Uint8Array"
+          },
+          {
+            "from": "package",
+            "name": "ReactNode",
+            "package": "@types/react"
+          },
+          {
+            "from": "file",
+            "name": "CreateLogBrewReactNativeClientConfig"
           }
         ]
       }
@@ -524,7 +547,8 @@
   "overrides": [
     {
       "files": [
-        "logbrew-js/null-value.cjs"
+        "logbrew-js/null-value.cjs",
+        "logbrew-react-native/null-value.cjs"
       ],
       "rules": {
         "unicorn/no-null": "off"
