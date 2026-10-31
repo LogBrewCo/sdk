@@ -116,6 +116,12 @@ js/logbrew-js/README.md	*	has	--token-env LOGBREW_RELEASE_ARTIFACT_AUTH
 {js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts}	*	has	tokenEnv
 {js/logbrew-js/release-artifacts-build.cjs,js/logbrew-js/release-artifacts-upload.js,js/logbrew-js/vite-release-artifacts.d.cts,js/logbrew-js/vite-release-artifacts.d.ts,js/logbrew-next/release-artifacts.d.cts,js/logbrew-next/release-artifacts.d.ts,js/logbrew-react-native/release-artifacts.cjs,js/logbrew-react-native/release-artifacts.d.cts,js/logbrew-react-native/release-artifacts.d.ts}	*	has	tokenEnv?: string
 js/logbrew-react-native/README.md	*	has	tokenEnv
+js/logbrew-js/release-artifacts-build.cjs	hostname	has	uploadEndpointHostname
+js/logbrew-js/release-artifacts-build.cjs	hostname	has	{ hostname, protocol }
+js/logbrew-js/release-artifacts-build.cjs	hostname	has	return hostname;
+js/logbrew-js/release-artifacts-build.cjs	hostname	has	endpointHostname
+js/logbrew-js/release-artifacts-build.cjs	hostname	has	isLoopbackEndpoint(hostname)
+js/logbrew-js/release-artifacts-build.cjs	token	has	optionalTokenEnv
 {scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	--token-env LOGBREW_RELEASE_ARTIFACT_TOKEN_BAD
 {scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	LOGBREW_RELEASE_ARTIFACT_TOKEN
 {scripts/real_user_js_release_artifact_upload_smoke.sh,scripts/real_user_native_release_artifact_upload_smoke.sh,scripts/real_user_next_release_artifact_smoke.sh,scripts/real_user_react_native_release_artifact_smoke.sh,scripts/real_user_vite_release_artifact_smoke.sh}	*	has	containsToken

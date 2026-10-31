@@ -1,44 +1,69 @@
-export interface LogBrewViteReleaseArtifactUploadOptions {
-  endpoint: string;
-  allowHostedUpload?: boolean;
-  tokenEnv?: string;
-  dryRun?: boolean;
-  maxRetries?: number;
-  retryDelay?: number;
-  timeout?: number;
-}
+type LogBrewViteReleaseArtifactUploadOptions = {
+  readonly endpoint: string;
+  readonly allowHostedUpload?: boolean;
+  readonly tokenEnv?: string;
+  readonly dryRun?: boolean;
+  readonly maxRetries?: number;
+  readonly retryDelay?: number;
+  readonly timeout?: number;
+};
 
-export interface LogBrewViteReleaseArtifactsPluginOptions {
-  release: string;
-  environment: string;
-  service: string;
-  projectId?: string;
-  minifiedPathPrefix: string;
-  buildDir?: string;
-  manifestPath?: string;
-  repositoryUrl?: string;
-  commitSha?: string;
-  stripSourcesContent?: boolean;
-  stripSourcePrefix?: string[];
-  enableSourceMaps?: boolean;
-  upload?: LogBrewViteReleaseArtifactUploadOptions;
-}
+type LogBrewViteReleaseArtifactsPluginOptions = {
+  readonly release: string;
+  readonly environment: string;
+  readonly service: string;
+  readonly projectId?: string;
+  readonly minifiedPathPrefix: string;
+  readonly buildDir?: string;
+  readonly manifestPath?: string;
+  readonly repositoryUrl?: string;
+  readonly commitSha?: string;
+  readonly stripSourcesContent?: boolean;
+  readonly stripSourcePrefix?: readonly string[];
+  readonly enableSourceMaps?: boolean;
+  readonly upload?: LogBrewViteReleaseArtifactUploadOptions;
+};
 
-export interface LogBrewViteReleaseArtifactsPlugin {
-  name: "logbrew-vite-release-artifacts";
-  apply: "build";
-  enforce: "post";
-  config(config?: { root?: string; build?: { sourcemap?: unknown; minify?: unknown; rolldownOptions?: { output?: { keepNames?: boolean } | Array<{ keepNames?: boolean }> } }; esbuild?: false | { keepNames?: boolean } }): null | { build?: { sourcemap?: "hidden"; rolldownOptions?: { output: { keepNames: true } } }; esbuild?: { keepNames: true } };
-  configResolved(config: {
-    root?: string;
-    build?: { outDir?: string };
-    logger?: { info(message: string): void };
-  }): void;
-  writeBundle(): Promise<void>;
-}
+type ViteKeepNamesOutput = { readonly keepNames?: boolean };
 
-export declare function createLogBrewViteReleaseArtifactsPlugin(
+type ViteUserConfigInput = {
+  readonly root?: string;
+  readonly build?: {
+    readonly sourcemap?: unknown;
+    readonly minify?: unknown;
+    readonly rolldownOptions?: { readonly output?: ViteKeepNamesOutput | readonly ViteKeepNamesOutput[] };
+  };
+  readonly esbuild?: false | { readonly keepNames?: boolean };
+};
+
+type ViteConfigChanges = {
+  build?: { sourcemap?: "hidden"; rolldownOptions?: { output: { keepNames: true } } };
+  esbuild?: { keepNames: true };
+};
+
+type ViteResolvedConfigInput = {
+  readonly root?: string;
+  readonly build?: { readonly outDir?: string };
+  readonly logger?: { readonly info: (message: string) => void };
+};
+
+type LogBrewViteReleaseArtifactsPlugin = {
+  readonly name: "logbrew-vite-release-artifacts";
+  readonly apply: "build";
+  readonly enforce: "post";
+  readonly config: (config?: ViteUserConfigInput) => null | ViteConfigChanges;
+  readonly configResolved: (config: ViteResolvedConfigInput) => void;
+  readonly writeBundle: () => Promise<void>;
+};
+
+declare function createLogBrewViteReleaseArtifactsPlugin(
   options: LogBrewViteReleaseArtifactsPluginOptions
 ): LogBrewViteReleaseArtifactsPlugin;
 
+export type {
+  LogBrewViteReleaseArtifactsPlugin,
+  LogBrewViteReleaseArtifactsPluginOptions,
+  LogBrewViteReleaseArtifactUploadOptions
+};
+export { createLogBrewViteReleaseArtifactsPlugin };
 export default createLogBrewViteReleaseArtifactsPlugin;

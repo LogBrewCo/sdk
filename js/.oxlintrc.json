@@ -274,7 +274,10 @@
         "logbrew-*/index.cjs",
         "logbrew-*/index.d.cts",
         "logbrew-*/index.d.ts",
-        "logbrew-*/index.js"
+        "logbrew-*/index.js",
+        "logbrew-js/vite-release-artifacts.d.cts",
+        "logbrew-js/vite-release-artifacts.d.ts",
+        "logbrew-js/vite-release-artifacts.js"
       ],
       "rules": {
         "import/no-default-export": "off"
@@ -308,10 +311,29 @@
       "files": [
         "logbrew-amqplib/**",
         "logbrew-kafkajs/**",
-        "logbrew-fastify/**"
+        "logbrew-fastify/**",
+        "logbrew-js/release-artifacts*",
+        "logbrew-js/vite-release-artifacts*.cjs"
       ],
       "rules": {
         "import/no-nodejs-modules": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/release-artifacts-build.cjs",
+        "logbrew-js/vite-release-artifacts-config.cjs"
+      ],
+      "rules": {
+        "node/no-sync": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/vite-release-artifacts-config.cjs"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
       }
     },
     {

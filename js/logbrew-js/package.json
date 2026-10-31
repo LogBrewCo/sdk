@@ -73,6 +73,7 @@
     "release-artifacts-upload.js",
     "release-artifacts-symbolication.js",
     "vite-release-artifacts.cjs",
+    "vite-release-artifacts-config.cjs",
     "vite-release-artifacts.js",
     "vite-release-artifacts.d.ts",
     "vite-release-artifacts.d.cts",
