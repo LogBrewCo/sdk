@@ -11,4 +11,4 @@ export const {
   withLogBrewExpressHandler
 } = express;
 
-export default express;
+export default express.default;

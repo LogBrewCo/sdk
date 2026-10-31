@@ -9,11 +9,9 @@ import type {
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
-import type { LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
+import type { LogBrewNodeContext, LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
 
-export type { LogBrewTraceContext } from "@logbrew/node";
-
-export type CreateLogBrewExpressClientConfig = {
+type CreateLogBrewExpressClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
   captureRuntimeContext?: boolean;
@@ -23,57 +21,61 @@ export type CreateLogBrewExpressClientConfig = {
   maxRetries?: number;
 };
 
-export type LogBrewExpressContext = {
-  client: LogBrewClient;
-  logbrew: LogBrewClient;
-  trace?: LogBrewTraceContext;
-  /** Tag every event of this request with an opaque app-owned user ID, such as after authentication. */
-  setUser(id: string, options?: { kind?: "user" | "anonymous" }): boolean;
-  transport: Transport;
-  previewJson(): string;
-  flush(): Promise<TransportResponse>;
-  shutdown(): Promise<TransportResponse>;
+/** Request context; the same type as the Node package's request context, so both declarations of `logbrew` agree. */
+type LogBrewExpressContext = LogBrewNodeContext;
+
+type LogBrewExpressRuntimeContext = {
+  readonly req: Request;
+  readonly res: Response;
+  readonly client: LogBrewClient;
+  readonly trace?: Readonly<LogBrewTraceContext> | undefined;
 };
 
-export type LogBrewExpressRuntimeContext = {
-  req: Request;
-  res: Response;
-  client: LogBrewClient;
-  trace?: LogBrewTraceContext;
+/** The request fields the event helpers read; an Express request has all of them. */
+type LogBrewExpressRequestLike = {
+  readonly method?: string;
+  readonly route?: unknown;
 };
 
-export type LogBrewClientFactory = (context: Omit<LogBrewExpressRuntimeContext, "client">) => LogBrewClient;
-export type LogBrewTransportFactory = (context: LogBrewExpressRuntimeContext) => Transport;
+type LogBrewExpressRequestHookContext = {
+  readonly client: LogBrewClient;
+  readonly durationMs: number;
+  readonly trace?: Readonly<LogBrewTraceContext> | undefined;
+};
 
-export type LogBrewLogRequestEvent = {
+type LogBrewClientFactory = (context: Omit<LogBrewExpressRuntimeContext, "client">) => LogBrewClient;
+type LogBrewTransportFactory = (context: LogBrewExpressRuntimeContext) => Transport;
+
+type LogBrewLogRequestEvent = {
   id: string;
   timestamp: string;
   type?: "log";
   attributes: LogAttributes;
 };
 
-export type LogBrewSpanRequestEvent = {
+type LogBrewSpanRequestEvent = {
   id: string;
   timestamp: string;
   type: "span";
   attributes: SpanAttributes;
 };
 
-export type LogBrewRequestEvent = LogBrewLogRequestEvent | LogBrewSpanRequestEvent;
+type LogBrewRequestEvent = LogBrewLogRequestEvent | LogBrewSpanRequestEvent;
 
-export type LogBrewErrorEvent = {
+type LogBrewErrorEvent = {
   id: string;
   timestamp: string;
   attributes: IssueAttributes;
 };
 
-export type LogBrewRequestMetricEvent = {
+type LogBrewRequestMetricEvent = {
   id: string;
   timestamp: string;
   attributes: MetricAttributes;
 };
 
-export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & NodeFetchTransportConfig & {
+/** Options that both the middleware and the error handler accept. */
+type LogBrewExpressSharedOptions = CreateLogBrewExpressClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory;
@@ -85,70 +87,82 @@ export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & NodeFetch
   captureClientErrors?: boolean;
   now?: () => string;
   nowMs?: () => number;
-  idFactory?: (req: Request, res: Response) => string;
   spanIdFactory?: (req: Request, res: Response) => string;
   traceIdFactory?: (req: Request, res: Response) => string;
   metricName?: string;
   metricIdFactory?: (req: Request, res: Response) => string;
-  requestEvent?: (
-    req: Request,
-    res: Response,
-    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
-  ) => LogBrewRequestEvent;
+  requestEvent?: (req: Request, res: Response, context: LogBrewExpressRequestHookContext) => LogBrewRequestEvent;
   requestMetricEvent?: (
     req: Request,
     res: Response,
-    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
+    context: LogBrewExpressRequestHookContext
   ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewExpressRuntimeContext) => LogBrewErrorEvent;
-  onFlush?: (response: TransportResponse, context: LogBrewExpressRuntimeContext) => void | Promise<void>;
+  onFlush?: (response: Readonly<TransportResponse>, context: LogBrewExpressRuntimeContext) => void | Promise<void>;
   onCaptureError?: (error: unknown, context: LogBrewExpressRuntimeContext) => void | Promise<void>;
 };
 
-export declare function createLogBrewExpressClient(config?: CreateLogBrewExpressClientConfig): LogBrewClient;
-export declare function logbrewMiddleware(options?: LogBrewExpressOptions): RequestHandler;
-export declare function logbrewErrorHandler(options?: LogBrewExpressOptions): ErrorRequestHandler;
-export type LogBrewExpressHandler<Result = unknown, Receiver = unknown> = (
+type LogBrewExpressOptions = LogBrewExpressSharedOptions & {
+  /** ID of each request span, from the request and the response. */
+  idFactory?: (req: Request, res: Response) => string;
+};
+
+type LogBrewExpressErrorHandlerOptions = LogBrewExpressSharedOptions & {
+  /** ID of each captured issue, from the error and the request. */
+  idFactory?: (error: unknown, req: Request) => string;
+};
+
+type LogBrewExpressHandler<Result = unknown, Receiver = unknown> = (
   this: Receiver,
   req: Request,
   res: Response,
   next: NextFunction
 ) => Result;
+
+declare function createLogBrewExpressClient(config?: CreateLogBrewExpressClientConfig): LogBrewClient;
+declare function logbrewMiddleware(options?: LogBrewExpressOptions): RequestHandler;
+declare function logbrewErrorHandler(options?: LogBrewExpressErrorHandlerOptions): ErrorRequestHandler;
 /** Track returned handler work; forward promise rejections to next once on Express 4 and 5. */
-export declare function withLogBrewExpressHandler<Receiver, Result>(
+declare function withLogBrewExpressHandler<Receiver, Result>(
   handler: LogBrewExpressHandler<Result, Receiver>
-): LogBrewExpressHandler<Result extends PromiseLike<unknown> ? Promise<Awaited<Result> | void> : Result, Receiver>;
-export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
-export declare function createRequestEvent(
-  req: Request,
-  res: Response,
+): LogBrewExpressHandler<Result extends PromiseLike<unknown> ? Promise<Awaited<Result> | undefined> : Result, Receiver>;
+declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
+declare function createRequestEvent<
+  RequestType extends LogBrewExpressRequestLike = Request,
+  ResponseType = Response
+>(
+  req: RequestType,
+  res: ResponseType,
   options?: {
-    now?: () => string;
-    durationMs?: number;
-    idFactory?: (req: Request, res: Response) => string;
-    spanIdFactory?: (req: Request, res: Response) => string;
-    traceIdFactory?: (req: Request, res: Response) => string;
-    trace?: LogBrewTraceContext;
+    readonly now?: (() => string) | undefined;
+    readonly durationMs?: number | undefined;
+    readonly idFactory?: ((req: RequestType, res: ResponseType) => string) | undefined;
+    readonly spanIdFactory?: ((req: RequestType, res: ResponseType) => string) | undefined;
+    readonly traceIdFactory?: ((req: RequestType, res: ResponseType) => string) | undefined;
+    readonly trace?: Readonly<LogBrewTraceContext> | undefined;
   }
 ): LogBrewSpanRequestEvent;
-export declare function createErrorEvent(
+declare function createErrorEvent<RequestType extends LogBrewExpressRequestLike = Request>(
   error: unknown,
-  req: Request,
+  req: RequestType,
   options?: {
-    now?: () => string;
-    idFactory?: (error: unknown, req: Request) => string;
-    trace?: LogBrewTraceContext;
-    includeErrorStack?: boolean;
+    readonly now?: (() => string) | undefined;
+    readonly idFactory?: ((error: unknown, req: RequestType) => string) | undefined;
+    readonly trace?: Readonly<LogBrewTraceContext> | undefined;
+    readonly includeErrorStack?: boolean | undefined;
   }
 ): LogBrewErrorEvent;
-export declare function createRequestMetricEvent(
-  req: Request,
-  res: Response,
+declare function createRequestMetricEvent<
+  RequestType extends LogBrewExpressRequestLike = Request,
+  ResponseType = Response
+>(
+  req: RequestType,
+  res: ResponseType,
   options?: {
-    now?: () => string;
-    durationMs?: number;
-    idFactory?: (req: Request, res: Response) => string;
-    metricName?: string;
+    readonly now?: (() => string) | undefined;
+    readonly durationMs?: number | undefined;
+    readonly idFactory?: ((req: RequestType, res: ResponseType) => string) | undefined;
+    readonly metricName?: string | undefined;
   }
 ): LogBrewRequestMetricEvent;
 
@@ -171,4 +185,33 @@ declare const defaultExport: {
   withLogBrewExpressHandler: typeof withLogBrewExpressHandler;
 };
 
+export type {
+  CreateLogBrewExpressClientConfig,
+  LogBrewClientFactory,
+  LogBrewErrorEvent,
+  LogBrewExpressContext,
+  LogBrewExpressErrorHandlerOptions,
+  LogBrewExpressHandler,
+  LogBrewExpressOptions,
+  LogBrewExpressRequestHookContext,
+  LogBrewExpressRequestLike,
+  LogBrewExpressRuntimeContext,
+  LogBrewExpressSharedOptions,
+  LogBrewLogRequestEvent,
+  LogBrewRequestEvent,
+  LogBrewRequestMetricEvent,
+  LogBrewSpanRequestEvent,
+  LogBrewTransportFactory
+};
+export {
+  createErrorEvent,
+  createLogBrewExpressClient,
+  createRequestEvent,
+  createRequestMetricEvent,
+  getActiveLogBrewTrace,
+  logbrewErrorHandler,
+  logbrewMiddleware,
+  withLogBrewExpressHandler
+};
+export type { LogBrewTraceContext } from "@logbrew/node";
 export default defaultExport;

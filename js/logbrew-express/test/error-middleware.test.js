@@ -1,242 +1,314 @@
-import assert from "node:assert/strict";
-import { once } from "node:events";
-import test from "node:test";
-import express from "express";
 import {
-  createLogBrewExpressClient,
-  createErrorEvent,
-  getActiveLogBrewTrace,
-  logbrewErrorHandler,
-  logbrewMiddleware
-} from "@logbrew/express";
+  ANY_PORT,
+  HOST,
+  SERVER_ERROR,
+  assertExcludes,
+  assertSameMembers,
+  createFlushLatch,
+  createLatch,
+  createRecorder,
+  eventOfType,
+  eventType,
+  eventsOf,
+  eventsOfType,
+  expectedTraceIds,
+  finalErrorHandler,
+  readPath,
+  serve,
+  traceField,
+  traceparentFor
+} from "./support.js";
+import { createErrorEvent, getActiveLogBrewTrace, logbrewErrorHandler, logbrewMiddleware } from "@logbrew/express";
+import assert from "node:assert/strict";
+import express from "express";
+import test from "node:test";
+
+/**
+ * @import { TestContext } from "node:test"
+ * @import { Express, NextFunction, Request, Response } from "express"
+ * @import { LogBrewExpressErrorHandlerOptions } from "@logbrew/express"
+ * @import { LogBrewTraceContext } from "@logbrew/node"
+ * @import { LogBrewClient } from "@logbrew/sdk"
+ * @import { FlushLatch, Recorder } from "./support.js"
+ * @typedef {{
+ *   readonly aborted?: boolean,
+ *   readonly concurrency?: number,
+ *   readonly failFactory?: boolean,
+ *   readonly failObserver?: boolean
+ * }} Scenario
+ * @typedef {{ readonly factory: unknown, readonly original: unknown }} Failures
+ * @typedef {{
+ *   readonly active: LogBrewTraceContext | undefined,
+ *   readonly error: unknown,
+ *   readonly trace: Readonly<LogBrewTraceContext> | undefined
+ * }} CaptureFailure
+ * @typedef {{
+ *   readonly captureFailures: readonly CaptureFailure[],
+ *   readonly clients: readonly LogBrewClient[],
+ *   readonly factoryTraces: readonly (LogBrewTraceContext | undefined)[],
+ *   readonly options: LogBrewExpressErrorHandlerOptions
+ * }} ErrorHooks
+ * @typedef {{
+ *   readonly forwarded: readonly unknown[],
+ *   readonly handle: (error: unknown, res: Response) => void,
+ *   readonly responseTraces: readonly (LogBrewTraceContext | undefined)[]
+ * }} FinalRecorder
+ * @typedef {{
+ *   readonly handle: (req: Request, res: Response, next: NextFunction) => void,
+ *   readonly ready: () => Promise<void>,
+ *   readonly release: () => void
+ * }} DeferredRoute
+ * @typedef {{
+ *   readonly count: number,
+ *   readonly failures: Failures,
+ *   readonly final: FinalRecorder,
+ *   readonly flushes: FlushLatch,
+ *   readonly hooks: ErrorHooks,
+ *   readonly recorder: Recorder,
+ *   readonly route: DeferredRoute,
+ *   readonly scenario: Scenario
+ * }} FailureView
+ */
 
 const SPAN_ID = "2222222222222222";
 const TIMESTAMP = "2026-08-29T12:00:00Z";
+const SERVER_API_KEY = "LOGBREW_SERVER_API_KEY";
+const SAMPLED = "01";
+const PRIVATE_MARKERS = Object.freeze(["private-id", "private-query", "private-authorization"]);
+const ONE = 1;
+const NONE = 0;
+const FACTORY_FAILURE_EVENTS = 3;
+const CAPTURED_EVENTS = 4;
+const CONCURRENT_REQUESTS = 3;
 
-async function checkErrorMiddleware(t, { failFactory = false, aborted = false, concurrency = 1, failObserver = false } = {}) {
-  const originalError = new TypeError("application failure");
-  const factoryError = new RangeError("event factory failure");
-  const batches = [];
-  const failures = [];
-  const factoryTraces = [];
-  const responseTraces = [];
-  const forwarded = [];
+/**
+ * @param {Scenario} scenario
+ * @param {Failures} failures
+ * @returns {ErrorHooks}
+ */
+function createErrorHooks(scenario, failures) {
+  /** @type {CaptureFailure[]} */
+  const captureFailures = [];
+  /** @type {LogBrewClient[]} */
   const clients = [];
-  const callbacks = [];
-  let resolveReady;
-  const ready = new Promise((resolve) => { resolveReady = resolve; });
-  let flushes = 0;
-  let resolveFlushed;
-  const flushed = new Promise((resolve) => { resolveFlushed = resolve; });
+  /** @type {(LogBrewTraceContext | undefined)[]} */
+  const factoryTraces = [];
+  return {
+    captureFailures,
+    clients,
+    factoryTraces,
+    options: {
+      errorEvent: (error, { client, req, trace }) => {
+        clients.push(client);
+        factoryTraces.push(getActiveLogBrewTrace());
+        client.log(`factory-log-${String(factoryTraces.length)}`, TIMESTAMP, { level: "info", message: "error factory called" });
+        if (scenario.failFactory === true) {
+          throw failures.factory;
+        }
+        return createErrorEvent(error, req, { now: () => TIMESTAMP, trace });
+      },
+      onCaptureError: (error, { trace }) => {
+        captureFailures.push({ active: getActiveLogBrewTrace(), error, trace });
+        if (scenario.failObserver === true) {
+          throw new Error("observer failure");
+        }
+      }
+    }
+  };
+}
+
+/**
+ * @param {boolean} aborted
+ * @returns {FinalRecorder}
+ */
+function createFinalRecorder(aborted) {
+  /** @type {unknown[]} */
+  const forwarded = [];
+  /** @type {(LogBrewTraceContext | undefined)[]} */
+  const responseTraces = [];
+  return {
+    forwarded,
+    handle: (error, res) => {
+      forwarded.push(error);
+      responseTraces.push(getActiveLogBrewTrace());
+      if (aborted) {
+        res.destroy();
+      } else {
+        res.status(SERVER_ERROR).end("failed");
+      }
+    },
+    responseTraces
+  };
+}
+
+/**
+ * @param {number} count
+ * @param {unknown} error
+ * @returns {DeferredRoute}
+ */
+function createDeferredRoute(count, error) {
+  /** @type {(() => void)[]} */
+  const pending = [];
+  const ready = createLatch();
+  return {
+    handle: (_req, _res, next) => {
+      pending.push(() => {
+        next(error);
+      });
+      if (pending.length === count) {
+        ready.open();
+      }
+    },
+    ready: ready.wait,
+    release: () => {
+      for (const resume of pending) {
+        resume();
+      }
+    }
+  };
+}
+
+/**
+ * @param {Scenario} scenario
+ * @returns {{ readonly app: Express, readonly view: FailureView }}
+ */
+function createFailureRun(scenario) {
+  const count = scenario.concurrency ?? ONE;
+  const failures = { factory: new RangeError("event factory failure"), original: new TypeError("application failure") };
+  const view = {
+    count,
+    failures,
+    final: createFinalRecorder(scenario.aborted === true),
+    flushes: createFlushLatch(count),
+    hooks: createErrorHooks(scenario, failures),
+    recorder: createRecorder(),
+    route: createDeferredRoute(count, failures.original),
+    scenario
+  };
   const app = express();
   app.use(logbrewMiddleware({
-    serverApiKey: "LOGBREW_SERVER_API_KEY",
     captureRequestMetrics: true,
+    onFlush: view.flushes.onFlush,
+    serverApiKey: SERVER_API_KEY,
     spanIdFactory: () => SPAN_ID,
-    transport: { async send(_key, body) { batches.push(JSON.parse(body)); return { statusCode: 202 }; } },
-    onFlush() { flushes += 1; if (flushes === concurrency) { resolveFlushed(); } }
+    transport: view.recorder.transport
   }));
-  app.get("/fail/:id", (_req, _res, next) => {
-    callbacks.push(() => next(originalError));
-    if (callbacks.length === concurrency) { resolveReady(); }
-  });
-  app.use(logbrewErrorHandler({
-    errorEvent(error, { req, client, trace }) {
-      clients.push(client);
-      factoryTraces.push(getActiveLogBrewTrace());
-      client.log(`factory-log-${factoryTraces.length}`, TIMESTAMP, { message: "error factory called", level: "info" });
-      if (failFactory) { throw factoryError; }
-      return createErrorEvent(error, req, { trace, now: () => TIMESTAMP });
-    },
-    onCaptureError(error, { trace }) {
-      failures.push({ error, trace, active: getActiveLogBrewTrace() });
-      if (failObserver) { throw new Error("observer failure"); }
-    }
-  }));
-  app.use((error, _req, res, _next) => {
-    forwarded.push(error);
-    responseTraces.push(getActiveLogBrewTrace());
-    if (aborted) {
-      res.destroy();
-    } else {
-      res.status(500).end("failed");
-    }
-  });
-  const server = app.listen(0, "127.0.0.1");
-  t.after(() => { server.closeAllConnections(); server.close(); });
-  await once(server, "listening");
-  const responses = Array.from({ length: concurrency }, (_value, index) => fetch(
-    `http://127.0.0.1:${server.address().port}/fail/private-id?search=private-query`,
-    { headers: { traceparent: `00-${String(index + 1).repeat(32)}-4444444444444444-01`, authorization: "private-authorization" } }
-  ).then(async (response) => {
-    assert.equal(response.status, 500);
+  app.get("/fail/:id", view.route.handle);
+  app.use(logbrewErrorHandler(view.hooks.options));
+  app.use(finalErrorHandler(view.final.handle));
+  return { app, view };
+}
+
+/**
+ * @param {string} origin
+ * @param {number} index
+ * @param {boolean} aborted
+ * @returns {Promise<void>}
+ */
+async function sendFailure(origin, index, aborted) {
+  try {
+    const response = await fetch(`${origin}/fail/private-id?search=private-query`, {
+      headers: { authorization: "private-authorization", traceparent: traceparentFor(index, SAMPLED) }
+    });
+    assert.equal(response.status, SERVER_ERROR);
     assert.equal(await response.text(), "failed");
-  }).catch((error) => { if (!aborted) { throw error; } }));
-  await ready;
-  assert.equal(getActiveLogBrewTrace(), undefined);
-  for (const callback of callbacks) { callback(); }
-  assert.equal(getActiveLogBrewTrace(), undefined);
-  await Promise.all(responses);
-  await flushed;
-  for (const client of clients) { assert.equal(client.deliveryHealth().lifecycle, "closed"); }
-  assert.equal(forwarded.length, concurrency);
-  for (const error of forwarded) { assert.equal(error, originalError); }
-  assert.equal(failures.length, failFactory ? concurrency : 0);
-  for (const failure of failures) {
-    assert.equal(failure.error, factoryError);
+  } catch (error) {
+    if (!aborted) {
+      throw error;
+    }
+  }
+}
+
+/**
+ * @param {FailureView} view
+ * @returns {void}
+ */
+function assertForwarded(view) {
+  for (const client of view.hooks.clients) {
+    assert.equal(client.deliveryHealth().lifecycle, "closed");
+  }
+  assert.equal(view.final.forwarded.length, view.count);
+  for (const error of view.final.forwarded) {
+    assert.equal(error, view.failures.original);
+  }
+  assert.equal(view.hooks.captureFailures.length, view.scenario.failFactory === true ? view.count : NONE);
+  for (const failure of view.hooks.captureFailures) {
+    assert.equal(failure.error, view.failures.factory);
     assert.deepEqual(failure.active, failure.trace);
   }
-  const traces = factoryTraces.map((trace) => trace?.traceId).sort();
-  assert.deepEqual(traces, Array.from({ length: concurrency }, (_value, index) => String(index + 1).repeat(32)));
-  assert.deepEqual(responseTraces.map((trace) => trace?.traceId).sort(), traces);
-  assert.equal(batches.length, concurrency);
-  for (const { events } of batches) {
-    assert.equal(events.length, failFactory ? 3 : 4);
-    const span = events.find(({ type }) => type === "span");
-    assert.equal(span.attributes.status, "error");
-    assert.equal(span.attributes.name, "GET /fail/:id");
-    for (const event of events.filter(({ type }) => type !== "span")) {
-      assert.equal(event.attributes.context.trace.traceId, span.attributes.traceId);
-      assert.equal(event.attributes.context.trace.spanId, SPAN_ID);
-    }
-    assert.equal(events.filter(({ type }) => type === "issue").length, failFactory ? 0 : 1);
-    const serialized = JSON.stringify(events);
-    for (const marker of ["private-id", "private-query", "private-authorization"]) {
-      assert.equal(serialized.includes(marker), false);
-    }
+}
+
+/**
+ * @param {FailureView} view
+ * @returns {void}
+ */
+function assertTraces(view) {
+  const expected = expectedTraceIds(view.count);
+  assertSameMembers(view.hooks.factoryTraces.map((trace) => trace?.traceId), expected);
+  assertSameMembers(view.final.responseTraces.map((trace) => trace?.traceId), expected);
+}
+
+/**
+ * @param {string} body
+ * @param {boolean} failFactory
+ * @returns {void}
+ */
+function assertFailureBatch(body, failFactory) {
+  const events = eventsOf(body);
+  const span = eventOfType(events, "span");
+  assert.equal(events.length, failFactory ? FACTORY_FAILURE_EVENTS : CAPTURED_EVENTS);
+  assert.equal(readPath(span, ["attributes", "status"]), "error");
+  assert.equal(readPath(span, ["attributes", "name"]), "GET /fail/:id");
+  for (const event of events.filter((candidate) => eventType(candidate) !== "span")) {
+    assert.equal(traceField(event, "traceId"), readPath(span, ["attributes", "traceId"]));
+    assert.equal(traceField(event, "spanId"), SPAN_ID);
+  }
+  assert.equal(eventsOfType(events, "issue").length, failFactory ? NONE : ONE);
+  assertExcludes(JSON.stringify(events), PRIVATE_MARKERS);
+}
+
+/**
+ * @param {FailureView} view
+ * @returns {void}
+ */
+function assertFailureRun(view) {
+  assertForwarded(view);
+  assertTraces(view);
+  assert.equal(view.recorder.bodies.length, view.count);
+  for (const body of view.recorder.bodies) {
+    assertFailureBatch(body, view.scenario.failFactory === true);
   }
 }
 
-test("error factory failure preserves the original Express error", async (t) => {
-  await checkErrorMiddleware(t, { failFactory: true });
-});
-test("out-of-band errors restore request trace through factory and response middleware", async (t) => {
-  await checkErrorMiddleware(t);
-});
-test("concurrent out-of-band errors keep independent traces", async (t) => {
-  await checkErrorMiddleware(t, { concurrency: 3 });
-});
-test("aborted error responses preserve capture and the original application error", async (t) => {
-  await checkErrorMiddleware(t, { failFactory: true, aborted: true });
-});
-test("a rejecting capture observer cannot replace the application error", async (t) => {
-  await checkErrorMiddleware(t, { failFactory: true, failObserver: true });
-});
-
-test("standalone error middleware retains rejected delivery despite a rejecting observer", async (t) => {
-  const app = express();
-  const client = createLogBrewExpressClient({ serverApiKey: "LOGBREW_SERVER_API_KEY" });
-  const originalError = new TypeError("application failure");
-  let forwarded;
-  let captureFailure;
-  let resolveReported;
-  const reported = new Promise((resolve) => { resolveReported = resolve; });
-  app.get("/fail", (_req, _res, next) => { next(originalError); });
-  app.use(logbrewErrorHandler({
-    client,
-    transport: { async send() { return { statusCode: 400 }; } },
-    async onCaptureError(error) {
-      captureFailure = error;
-      resolveReported();
-      throw new Error("observer failure");
-    }
-  }));
-  app.use((error, _req, res, _next) => { forwarded = error; res.status(500).end("failed"); });
-  const server = app.listen(0, "127.0.0.1");
-  t.after(() => { server.closeAllConnections(); server.close(); });
-  await once(server, "listening");
-  const response = await fetch(`http://127.0.0.1:${server.address().port}/fail`);
-  assert.equal(response.status, 500);
-  await response.text();
-  await reported;
-  assert.equal(forwarded, originalError);
-  assert.ok(captureFailure);
-  assert.equal(client.pendingEvents(), 1);
-  assert.equal(client.deliveryHealth().lifecycle, "active");
-});
-
-test("standalone factory failure delivers its earlier safe log", async (t) => {
-  const app = express();
-  const client = createLogBrewExpressClient({ serverApiKey: "LOGBREW_SERVER_API_KEY" });
-  const originalError = new TypeError("application failure");
-  const factoryError = new RangeError("factory failure");
-  const failures = [];
-  const batches = [];
-  let forwarded;
-  let resolveFlushed;
-  const flushed = new Promise((resolve) => { resolveFlushed = resolve; });
-  app.get("/fail", (_req, _res, next) => { next(originalError); });
-  app.use(logbrewErrorHandler({
-    client,
-    transport: { async send(_key, body) { batches.push(JSON.parse(body)); return { statusCode: 202 }; } },
-    errorEvent() {
-      client.log("factory-log", TIMESTAMP, { message: "factory called", level: "info" });
-      throw factoryError;
-    },
-    onCaptureError(error) { failures.push(error); },
-    onFlush: resolveFlushed
-  }));
-  app.use((error, _req, res, _next) => { forwarded = error; res.status(500).end("failed"); });
-  const server = app.listen(0, "127.0.0.1");
-  t.after(() => { server.closeAllConnections(); server.close(); });
-  await once(server, "listening");
-  const response = await fetch(`http://127.0.0.1:${server.address().port}/fail`);
-  await response.text();
-  let timer;
-  try {
-    await Promise.race([
-      flushed,
-      new Promise((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("factory log never flushed")), 500);
-      })
-    ]);
-  } finally {
-    globalThis.clearTimeout(timer);
-  }
-  assert.equal(response.status, 500);
-  assert.equal(forwarded, originalError);
-  assert.deepEqual(failures, [factoryError]);
-  assert.deepEqual(batches.flatMap(({ events }) => events.map(({ id }) => id)), ["factory-log"]);
-  assert.equal(client.pendingEvents(), 0);
-  assert.equal(client.deliveryHealth().lifecycle, "closed");
-});
-
-async function sendClientError(t, options) {
-  const batches = [];
-  let resolveFlushed;
-  const flushed = new Promise((resolve) => { resolveFlushed = resolve; });
-  const forwarded = [];
-  const app = express();
-  const middlewareOptions = {
-    serverApiKey: "LOGBREW_SERVER_API_KEY",
-    transport: { async send(_key, body) { batches.push(JSON.parse(body)); return { statusCode: 202 }; } },
-    onFlush() { resolveFlushed(); },
-    ...options
-  };
-  app.use(logbrewMiddleware(middlewareOptions));
-  app.use((_req, _res, next) => { next(Object.assign(new Error("Not Found"), { status: 404 })); });
-  app.use(logbrewErrorHandler(middlewareOptions));
-  app.use((error, _req, res, _next) => { forwarded.push(error); res.status(error.status).end("missing"); });
-  const server = app.listen(0, "127.0.0.1");
-  t.after(() => { server.closeAllConnections(); server.close(); });
-  await once(server, "listening");
-  const response = await fetch(`http://127.0.0.1:${server.address().port}/no-such-page`);
-  assert.equal(response.status, 404);
-  await flushed;
-  assert.equal(forwarded.length, 1);
-  assert.equal(forwarded[0].status, 404);
-  return batches.flatMap(({ events }) => events);
+/**
+ * @param {TestContext} testContext
+ * @param {Scenario} [scenario]
+ * @returns {Promise<void>}
+ */
+async function checkErrorMiddleware(testContext, scenario = {}) {
+  const { app, view } = createFailureRun(scenario);
+  const server = await serve(testContext, () => app.listen(ANY_PORT, HOST));
+  const responses = Array.from({ length: view.count }, async (_value, index) => sendFailure(server.origin, index, scenario.aborted === true));
+  await view.route.ready();
+  assert.equal(getActiveLogBrewTrace(), undefined);
+  view.route.release();
+  assert.equal(getActiveLogBrewTrace(), undefined);
+  await Promise.all(responses);
+  await view.flushes.wait();
+  assertFailureRun(view);
 }
 
-test("errors with a 4xx status stay request spans, not issues", async (t) => {
-  const events = await sendClientError(t, {});
-  assert.equal(events.filter(({ type }) => type === "issue").length, 0);
-  const span = events.find(({ type }) => type === "span");
-  assert.equal(span.attributes.status, "ok");
-  assert.equal(span.attributes.metadata.statusCode, 404);
-});
+/** @type {ReadonlyArray<readonly [string, Scenario]>} */
+const SCENARIOS = [
+  ["error factory failure preserves the original Express error", { failFactory: true }],
+  ["out-of-band errors restore request trace through factory and response middleware", {}],
+  ["concurrent out-of-band errors keep independent traces", { concurrency: CONCURRENT_REQUESTS }],
+  ["aborted error responses preserve capture and the original application error", { aborted: true, failFactory: true }],
+  ["a rejecting capture observer cannot replace the application error", { failFactory: true, failObserver: true }]
+];
 
-test("captureClientErrors reports errors with a 4xx status as issues", async (t) => {
-  const events = await sendClientError(t, { captureClientErrors: true });
-  assert.equal(events.filter(({ type }) => type === "issue").length, 1);
-});
+for (const [name, scenario] of SCENARIOS) {
+  void test(name, async (testContext) => {
+    await checkErrorMiddleware(testContext, scenario);
+  });
+}

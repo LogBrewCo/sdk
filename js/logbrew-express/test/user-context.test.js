@@ -1,42 +1,92 @@
+import {
+  ANY_PORT,
+  HOST,
+  SERVER_ERROR,
+  assertSameMembers,
+  createFlushLatch,
+  createRecorder,
+  eventOfType,
+  eventType,
+  eventsOf,
+  finalErrorHandler,
+  readPath,
+  requestContext,
+  serve
+} from "./support.js";
+import { logbrewErrorHandler, logbrewMiddleware, withLogBrewExpressHandler } from "@logbrew/express";
 import assert from "node:assert/strict";
-import { once } from "node:events";
-import test from "node:test";
 import express from "express";
-import { logbrewErrorHandler, logbrewMiddleware } from "@logbrew/express";
+import test from "node:test";
 
-test("req.logbrew.setUser tags every event of its own request and no other request", async (t) => {
-  const batches = [];
-  let flushes = 0;
-  let resolveFlushed;
-  const flushed = new Promise((resolve) => { resolveFlushed = resolve; });
+/**
+ * @import { TestContext } from "node:test"
+ * @import { Express, Request, Response } from "express"
+ * @import { FlushLatch, Recorder } from "./support.js"
+ */
+
+const SERVER_API_KEY = "LOGBREW_SERVER_API_KEY";
+const USER_ID = "user-42";
+const REQUESTS = 2;
+
+/**
+ * @param {Request} req
+ * @returns {Promise<never>}
+ */
+async function failAccount(req) {
+  assert.equal(requestContext(req).setUser(USER_ID), true);
+  await Promise.resolve();
+  throw new Error("account failed");
+}
+
+/**
+ * @param {Request} _req
+ * @param {Response} res
+ * @returns {void}
+ */
+function sendHealth(_req, res) {
+  res.json({ ok: true });
+}
+
+/**
+ * @param {Recorder} recorder
+ * @param {FlushLatch} flushes
+ * @returns {Express}
+ */
+function createAccountApp(recorder, flushes) {
   const app = express();
-  app.use(logbrewMiddleware({
-    serverApiKey: "LOGBREW_SERVER_API_KEY",
-    transport: { async send(_key, body) { batches.push(JSON.parse(body)); return { statusCode: 202 }; } },
-    onFlush() { flushes += 1; if (flushes === 2) { resolveFlushed(); } }
+  app.use(logbrewMiddleware({ onFlush: flushes.onFlush, serverApiKey: SERVER_API_KEY, transport: recorder.transport }));
+  app.get("/account", withLogBrewExpressHandler(failAccount));
+  app.get("/health", sendHealth);
+  app.use(logbrewErrorHandler({ serverApiKey: SERVER_API_KEY }));
+  app.use(finalErrorHandler((_error, res) => {
+    res.status(SERVER_ERROR).end();
   }));
-  app.get("/account", async (req) => {
-    assert.equal(req.logbrew.setUser("user-42"), true);
-    await Promise.resolve();
-    throw new Error("account failed");
-  });
-  app.get("/health", (_req, res) => { res.json({ ok: true }); });
-  app.use(logbrewErrorHandler({ serverApiKey: "LOGBREW_SERVER_API_KEY" }));
-  app.use((_error, _req, res, _next) => { res.status(500).end(); });
-  const server = app.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => new Promise((resolve) => { server.close(resolve); }));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  return app;
+}
 
-  await fetch(`${origin}/account`);
-  await fetch(`${origin}/health`);
-  await flushed;
+/**
+ * @param {TestContext} testContext
+ * @returns {Promise<readonly string[]>}
+ */
+async function serveAccountAndHealth(testContext) {
+  const recorder = createRecorder();
+  const flushes = createFlushLatch(REQUESTS);
+  const app = createAccountApp(recorder, flushes);
+  const server = await serve(testContext, () => app.listen(ANY_PORT, HOST));
+  await fetch(`${server.origin}/account`);
+  await fetch(`${server.origin}/health`);
+  await flushes.wait();
+  return recorder.bodies;
+}
 
-  const account = batches.find((batch) => batch.events.some((event) => event.type === "issue"));
-  const health = batches.find((batch) => batch !== account);
-  assert.deepEqual(account.events.map((event) => event.type).sort(), ["issue", "span"]);
-  for (const event of account.events) {
-    assert.deepEqual(event.attributes.context.subject, { id: "user-42", kind: "user" });
+void test("req.logbrew.setUser tags every event of its own request and no other request", async (testContext) => {
+  const bodies = await serveAccountAndHealth(testContext);
+  const account = bodies.find((body) => eventOfType(eventsOf(body), "issue") !== undefined);
+  const health = bodies.find((body) => body !== account);
+  assert.ok(account !== undefined && health !== undefined);
+  assertSameMembers(eventsOf(account).map((event) => eventType(event)), ["issue", "span"]);
+  for (const event of eventsOf(account)) {
+    assert.deepEqual(readPath(event, ["attributes", "context", "subject"]), { id: USER_ID, kind: "user" });
   }
-  assert.equal(JSON.stringify(health).includes("subject"), false);
+  assert.equal(health.includes("subject"), false);
 });
