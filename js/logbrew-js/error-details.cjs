@@ -26,6 +26,15 @@ function isObjectLike(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {unknown}
+ */
+function propertyOf(value, key) {
+  return isObjectLike(value) ? Reflect.get(value, key) : undefined;
+}
+
+/**
  * @param {object} value
  * @param {string} name
  * @returns {PropertyRead}
@@ -112,4 +121,4 @@ function errorCauseType(value) {
   return builtinName ?? constructorName ?? "Error";
 }
 
-module.exports = { errorCauseType, errorDetails, isObjectLike, safeProperty };
+module.exports = { errorCauseType, errorDetails, isObjectLike, propertyOf, safeProperty };

@@ -5,7 +5,7 @@ const { NULL_VALUE } = require("./null-value.cjs");
  * @import { Metadata } from "./index.cjs"
  * @typedef {(reason: unknown) => void} ErrorHandler
  * @typedef {Readonly<{
- *   log: (id: string, timestamp: unknown, attributes: unknown) => void,
+ *   log: (id: string, timestamp: unknown, attributes: Readonly<Record<string, unknown>>) => void,
  *   flush: (transport: unknown) => Promise<unknown>,
  *   pendingEvents: () => number
  * }>} CaptureClient
