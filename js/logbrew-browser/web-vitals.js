@@ -1,11 +1,65 @@
-import { SdkError } from "@logbrew/sdk";
+import {
+  assertBrowserContext,
+  browserMetadata,
+  browserPath,
+  compactMetadata,
+  defaultSanitizeMetadata,
+  defaultWindow,
+  finiteNonNegativeNumber,
+  flushAfterCapture,
+  mergeMetadata,
+  nonNegativeNumberOrUndefined,
+  optionsWithTraceContext,
+  roundedNumber,
+  routeTemplatePath,
+  sanitizeSourcePath
+} from "./browser-events.js";
 import {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext
+  optionalBrowserTraceContext,
+  resolveTraceContext
 } from "./trace-context.js";
+import { isList, isRecord, readField, stringOrUndefined } from "./values.js";
+import { SdkError } from "@logbrew/sdk";
+
+/**
+ * @import { SpanAttributes, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   BrowserWebVitalCallback,
+ *   BrowserWebVitalInput,
+ *   BrowserWebVitalPathTemplate,
+ *   BrowserWebVitalsInstrumentation,
+ *   BrowserWebVitalsModule,
+ *   BrowserWebVitalsOptions,
+ *   LogBrewBrowserContext,
+ *   LogBrewBrowserEvent
+ * } from "./index.js"
+ * @typedef {{
+ *   readonly delta: number | undefined,
+ *   readonly durationMs: number | undefined,
+ *   readonly elementRenderDelayMs: number | undefined,
+ *   readonly inputDelayMs: number | undefined,
+ *   readonly loadState: string | undefined,
+ *   readonly metricId: string | undefined,
+ *   readonly metricName: string,
+ *   readonly metricUnit: "millisecond" | "score",
+ *   readonly metricValue: number | undefined,
+ *   readonly navigationType: string | undefined,
+ *   readonly presentationDelayMs: number | undefined,
+ *   readonly processingDurationMs: number | undefined,
+ *   readonly rating: string | undefined,
+ *   readonly resourceLoadDelayMs: number | undefined,
+ *   readonly resourceLoadDurationMs: number | undefined,
+ *   readonly timeToFirstByteMs: number | undefined,
+ *   readonly vitalPath: string
+ * }} WebVitalDetails
+ * @typedef {(callback: BrowserWebVitalCallback) => unknown} WebVitalRegister
+ * @typedef {{ installed: boolean }} WebVitalsState
+ */
 
 const DEFAULT_WEB_VITAL_METRICS = ["LCP", "CLS", "INP", "FCP", "TTFB"];
+/** @type {ReadonlyMap<string, keyof BrowserWebVitalsModule>} */
 const METRIC_CALLBACKS = new Map([
   ["CLS", "onCLS"],
   ["FCP", "onFCP"],
@@ -15,220 +69,70 @@ const METRIC_CALLBACKS = new Map([
   ["TTFB", "onTTFB"]
 ]);
 const MILLISECOND_METRICS = new Set(["FCP", "FID", "INP", "LCP", "TTFB"]);
+const METRIC_NAME = /^[A-Z][A-Z0-9_]{0,31}$/u;
+const SCORE_DIGITS = 4;
+const NO_CALLBACKS = 0;
 
-export async function captureBrowserWebVital(metric, context, options = {}) {
-  assertBrowserContext(context, "captureBrowserWebVital");
-  const event = createBrowserWebVitalEvent(metric, context.browserWindow, optionsWithTraceContext(
-    options,
-    resolveTraceContext(context, options)
-  ));
-
-  context.client.span(event.id, event.timestamp, event.attributes);
-  return flushAfterCapture(context, options);
+/**
+ * @returns {string}
+ */
+function currentTimestamp() {
+  return new Date().toISOString();
 }
 
-export function installLogBrewBrowserWebVitalsInstrumentation(context, options = {}) {
-  assertBrowserContext(context, "installLogBrewBrowserWebVitalsInstrumentation");
-  const registrations = webVitalRegistrations(options);
-  let installed = true;
-  const uninstallCallbacks = [];
-  const metricNames = configuredMetricNames(options.metricNames);
-  const captureMetric = (metric) => {
-    if (installed) {
-      void captureBrowserWebVital(metric, context, options);
-    }
-  };
-
-  for (const metricName of metricNames) {
-    const register = registrations.get(metricName);
-    if (typeof register !== "function") {
-      continue;
-    }
-    const unregister = register(captureMetric);
-    if (typeof unregister === "function") {
-      uninstallCallbacks.push(unregister);
-    }
-  }
-
-  if (uninstallCallbacks.length === 0 && !metricNames.some((metricName) => typeof registrations.get(metricName) === "function")) {
-    throw new SdkError(
-      "configuration_error",
-      "installLogBrewBrowserWebVitalsInstrumentation requires web-vitals callbacks such as onLCP or options.webVitals"
-    );
-  }
-
-  return {
-    uninstall() {
-      if (!installed) {
-        return;
-      }
-      installed = false;
-      for (const unregister of uninstallCallbacks) {
-        unregister();
-      }
-    }
-  };
+/**
+ * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @returns {string}
+ */
+function defaultWebVitalEventId({ message, path }) {
+  return createAutomaticBrowserEventId("evt_browser_web_vital", `${path}_${message}`);
 }
 
-export function createBrowserWebVitalEvent(metric, browserWindow = defaultWindow(), {
-  idFactory = defaultWebVitalEventId,
-  includeDocumentTitle = false,
-  includeHash = false,
-  includeQueryString = false,
-  includeUserAgent = false,
-  metadata,
-  now = () => new Date().toISOString(),
-  randomValues,
-  sampled,
-  sanitizeMetadata = defaultSanitizeMetadata,
-  traceContext,
-  traceFlags,
-  webVitalPathTemplate
-} = {}) {
-  const details = webVitalDetails(metric, webVitalPathTemplate);
-  const path = browserPath(browserWindow, { includeHash, includeQueryString });
-  const parentTraceContext = optionalBrowserTraceContext(traceContext);
-  const spanTraceContext = createBrowserTraceContext({
-    randomValues,
-    sampled: parentTraceContext?.sampled ?? sampled,
-    traceFlags: parentTraceContext?.traceFlags ?? traceFlags,
-    traceId: parentTraceContext?.traceId
-  });
-  const baseMetadata = browserMetadata(browserWindow, {
-    includeDocumentTitle,
-    includeUserAgent,
-    path,
-    source: "browser.web_vital"
-  });
-  const metricMetadata = compactMetadata({
-    delta: details.delta,
-    elementRenderDelayMs: details.elementRenderDelayMs,
-    inputDelayMs: details.inputDelayMs,
-    loadState: details.loadState,
-    metricId: details.metricId,
-    metricName: details.metricName,
-    metricUnit: details.metricUnit,
-    metricValue: details.metricValue,
-    navigationType: details.navigationType,
-    presentationDelayMs: details.presentationDelayMs,
-    processingDurationMs: details.processingDurationMs,
-    resourceLoadDelayMs: details.resourceLoadDelayMs,
-    resourceLoadDurationMs: details.resourceLoadDurationMs,
-    timeToFirstByteMs: details.timeToFirstByteMs,
-    vitalPath: details.vitalPath,
-    rating: details.rating
-  });
-  const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(baseMetadata, metadata), metricMetadata),
-    "web_vital"
-  );
-  return {
-    id: idFactory({ browserWindow, message: `${details.metricName} ${details.vitalPath}`, metric, path, source: "web_vital" }),
-    timestamp: now(),
-    attributes: {
-      ...(details.durationMs !== undefined ? { durationMs: details.durationMs } : {}),
-      metadata: safeMetadata,
-      name: `browser.web_vital ${details.metricName} ${details.vitalPath}`,
-      parentSpanId: parentTraceContext?.spanId,
-      spanId: spanTraceContext.spanId,
-      status: "ok",
-      traceId: spanTraceContext.traceId
-    }
-  };
+/**
+ * @param {unknown} metricName
+ * @returns {string}
+ */
+function normalizeMetricName(metricName) {
+  const normalized = stringOrUndefined(metricName)?.toUpperCase();
+  if (normalized === undefined || !METRIC_NAME.test(normalized)) {
+    throw new SdkError("configuration_error", "Web Vital metric name must be a short string such as LCP, CLS, INP, FCP, or TTFB");
+  }
+  return normalized;
 }
 
-async function flushAfterCapture(context, options) {
-  if (options.flushOnCapture === false) {
-    return undefined;
-  }
-  try {
-    const response = await context.client.flush(context.transport);
-    if (typeof options.onFlush === "function") {
-      await options.onFlush(response, context, { reason: "capture" });
-    }
-    return response;
-  } catch (error) {
-    if (typeof options.onCaptureError === "function") {
-      await options.onCaptureError(error, context, { reason: "capture" });
-    }
-    if (options.raiseCaptureErrors === true) {
-      throw error;
-    }
-    return undefined;
-  }
+/**
+ * @param {string} metricName
+ * @returns {"millisecond" | "score"}
+ */
+function metricUnitForName(metricName) {
+  return MILLISECOND_METRICS.has(metricName) ? "millisecond" : "score";
 }
 
-function assertBrowserContext(context, functionName) {
-  if (!context || typeof context !== "object" || !context.client) {
-    throw new SdkError("configuration_error", `${functionName} requires a browser context`);
-  }
+/**
+ * @param {string} metricName
+ * @param {number} value
+ * @returns {number | undefined}
+ */
+function roundedMetricValue(metricName, value) {
+  return metricName === "CLS" ? Number(value.toFixed(SCORE_DIGITS)) : roundedNumber(value);
 }
 
-function resolveTraceContext(context, options) {
-  if (options.traceContext !== undefined) {
-    return typeof options.traceContext === "function"
-      ? optionalBrowserTraceContext(options.traceContext())
-      : optionalBrowserTraceContext(options.traceContext);
-  }
-  return context.traceContext;
+/**
+ * @param {unknown} metric
+ * @returns {string}
+ */
+function metricPath(metric) {
+  const url = stringOrUndefined(readField(metric, "url"))
+    ?? stringOrUndefined(readField(readField(metric, "attribution"), "url"));
+  return sanitizeSourcePath(url) ?? "/";
 }
 
-function optionsWithTraceContext(options, traceContext) {
-  return {
-    ...options,
-    traceContext
-  };
-}
-
-function webVitalRegistrations(options) {
-  const source = options.webVitals ?? options;
-  const registrations = new Map();
-  for (const [metricName, callbackName] of METRIC_CALLBACKS) {
-    registrations.set(metricName, source?.[callbackName]);
-  }
-  return registrations;
-}
-
-function configuredMetricNames(metricNames) {
-  if (metricNames === undefined) {
-    return DEFAULT_WEB_VITAL_METRICS;
-  }
-  if (!Array.isArray(metricNames)) {
-    throw new SdkError("configuration_error", "metricNames must be an array");
-  }
-  return metricNames.map((metricName) => normalizeMetricName(metricName));
-}
-
-function webVitalDetails(metric, webVitalPathTemplate) {
-  if (!metric || typeof metric !== "object" || Array.isArray(metric)) {
-    throw new SdkError("configuration_error", "createBrowserWebVitalEvent requires a Web Vital metric object");
-  }
-  const metricName = normalizeMetricName(metric.name);
-  const metricValue = roundedMetricValue(metricName, finiteNonNegativeNumber("Web Vital metric value", metric.value));
-  const metricUnit = metricUnitForName(metricName);
-  const vitalPath = webVitalTemplatePath(metric, metricName, webVitalPathTemplate);
-  const attribution = safeObject(metric.attribution);
-  return {
-    delta: roundedNumber(numberOrUndefined(metric.delta)),
-    durationMs: metricUnit === "millisecond" ? metricValue : undefined,
-    elementRenderDelayMs: roundedNumber(numberOrUndefined(attribution.elementRenderDelay)),
-    inputDelayMs: roundedNumber(numberOrUndefined(attribution.inputDelay)),
-    loadState: stringOrUndefined(attribution.loadState),
-    metricId: stringOrUndefined(metric.id),
-    metricName,
-    metricUnit,
-    metricValue,
-    navigationType: stringOrUndefined(metric.navigationType),
-    presentationDelayMs: roundedNumber(numberOrUndefined(attribution.presentationDelay)),
-    processingDurationMs: roundedNumber(numberOrUndefined(attribution.processingDuration)),
-    resourceLoadDelayMs: roundedNumber(numberOrUndefined(attribution.resourceLoadDelay)),
-    resourceLoadDurationMs: roundedNumber(numberOrUndefined(attribution.resourceLoadDuration)),
-    timeToFirstByteMs: roundedNumber(numberOrUndefined(attribution.timeToFirstByte)),
-    vitalPath,
-    rating: stringOrUndefined(metric.rating)
-  };
-}
-
+/**
+ * @param {BrowserWebVitalInput} metric
+ * @param {string} metricName
+ * @param {BrowserWebVitalPathTemplate | undefined} webVitalPathTemplate
+ * @returns {string}
+ */
 function webVitalTemplatePath(metric, metricName, webVitalPathTemplate) {
   if (typeof webVitalPathTemplate === "function") {
     return routeTemplatePath(webVitalPathTemplate({
@@ -244,140 +148,225 @@ function webVitalTemplatePath(metric, metricName, webVitalPathTemplate) {
   return metricPath(metric);
 }
 
-function metricPath(metric) {
-  const url = stringOrUndefined(metric?.url) ?? stringOrUndefined(metric?.attribution?.url);
-  return sanitizeSourcePath(url) ?? "/";
+/**
+ * @param {unknown} source
+ * @param {string} key
+ * @returns {number | undefined}
+ */
+function roundedField(source, key) {
+  return roundedNumber(nonNegativeNumberOrUndefined(readField(source, key)));
 }
 
-function browserMetadata(browserWindow, {
-  includeDocumentTitle,
-  includeUserAgent,
-  path,
-  source
-}) {
-  return compactMetadata({
-    documentTitle: includeDocumentTitle ? browserWindow?.document?.title : undefined,
-    path,
-    source,
-    userAgent: includeUserAgent ? browserWindow?.navigator?.userAgent : undefined,
-    visibilityState: browserWindow?.document?.visibilityState
+/**
+ * @param {BrowserWebVitalInput} metric
+ * @param {BrowserWebVitalPathTemplate | undefined} webVitalPathTemplate
+ * @returns {WebVitalDetails}
+ */
+function webVitalDetails(metric, webVitalPathTemplate) {
+  if (!isRecord(metric)) {
+    throw new SdkError("configuration_error", "createBrowserWebVitalEvent requires a Web Vital metric object");
+  }
+  const metricName = normalizeMetricName(readField(metric, "name"));
+  const metricValue = roundedMetricValue(metricName, finiteNonNegativeNumber("Web Vital metric value", readField(metric, "value")));
+  const metricUnit = metricUnitForName(metricName);
+  const vitalPath = webVitalTemplatePath(metric, metricName, webVitalPathTemplate);
+  const rawAttribution = readField(metric, "attribution");
+  const attribution = isRecord(rawAttribution) ? rawAttribution : {};
+  return {
+    delta: roundedField(metric, "delta"),
+    durationMs: metricUnit === "millisecond" ? metricValue : undefined,
+    elementRenderDelayMs: roundedField(attribution, "elementRenderDelay"),
+    inputDelayMs: roundedField(attribution, "inputDelay"),
+    loadState: stringOrUndefined(readField(attribution, "loadState")),
+    metricId: stringOrUndefined(readField(metric, "id")),
+    metricName,
+    metricUnit,
+    metricValue,
+    navigationType: stringOrUndefined(readField(metric, "navigationType")),
+    presentationDelayMs: roundedField(attribution, "presentationDelay"),
+    processingDurationMs: roundedField(attribution, "processingDuration"),
+    resourceLoadDelayMs: roundedField(attribution, "resourceLoadDelay"),
+    resourceLoadDurationMs: roundedField(attribution, "resourceLoadDuration"),
+    timeToFirstByteMs: roundedField(attribution, "timeToFirstByte"),
+    vitalPath,
+
+    rating: stringOrUndefined(readField(metric, "rating"))
+  };
+}
+
+/**
+ * @param {BrowserWebVitalInput} metric
+ * @param {Window} [browserWindow]
+ * @param {BrowserWebVitalsOptions} [options]
+ * @returns {LogBrewBrowserEvent<SpanAttributes>}
+ */
+function createBrowserWebVitalEvent(metric, browserWindow = defaultWindow(), {
+  idFactory = defaultWebVitalEventId,
+  includeDocumentTitle = false,
+  includeHash = false,
+  includeQueryString = false,
+  includeUserAgent = false,
+  metadata,
+  now = currentTimestamp,
+  randomValues,
+  sampled,
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext,
+  traceFlags,
+  webVitalPathTemplate
+} = {}) {
+  const { durationMs, ...details } = webVitalDetails(metric, webVitalPathTemplate);
+  const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const parentTraceContext = optionalBrowserTraceContext(traceContext);
+  const spanTraceContext = createBrowserTraceContext({
+    randomValues,
+    sampled: parentTraceContext?.sampled ?? sampled,
+    traceFlags: parentTraceContext?.traceFlags ?? traceFlags,
+    traceId: parentTraceContext?.traceId
   });
-}
+  const baseMetadata = browserMetadata(browserWindow, { includeDocumentTitle, includeUserAgent, path, source: "browser.web_vital" });
+  const eventMetadata = mergeMetadata(mergeMetadata(baseMetadata, metadata), compactMetadata(details));
+  const safeMetadata = sanitizeMetadata(eventMetadata, "web_vital");
+  return {
+    id: idFactory({ browserWindow, message: `${details.metricName} ${details.vitalPath}`, metric, path, source: "web_vital" }),
+    timestamp: now(),
 
-function mergeMetadata(baseMetadata, extraMetadata) {
-  return compactMetadata({
-    ...baseMetadata,
-    ...safeMetadata(extraMetadata)
-  });
-}
-
-function safeObject(value) {
-  return value && !Array.isArray(value) && typeof value === "object" ? value : {};
-}
-
-function safeMetadata(metadata) {
-  if (metadata === undefined) {
-    return {};
-  }
-  if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") {
-    return {};
-  }
-  return compactMetadata(metadata);
-}
-
-function compactMetadata(metadata) {
-  const compacted = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (value === undefined) {
-      continue;
+    attributes: {
+      ...(durationMs === undefined ? {} : { durationMs }),
+      metadata: safeMetadata,
+      name: `browser.web_vital ${details.metricName} ${details.vitalPath}`,
+      ...(parentTraceContext === undefined ? {} : { parentSpanId: parentTraceContext.spanId }),
+      spanId: spanTraceContext.spanId,
+      status: "ok",
+      traceId: spanTraceContext.traceId
     }
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) {
-      compacted[key] = value;
+  };
+}
+
+/**
+ * @param {BrowserWebVitalInput} metric
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserWebVitalsOptions} [options]
+ * @returns {Promise<TransportResponse | undefined>}
+ */
+async function captureBrowserWebVital(metric, context, options = {}) {
+  assertBrowserContext(context, "captureBrowserWebVital");
+  const eventOptions = optionsWithTraceContext(options, resolveTraceContext(context, options));
+  const event = createBrowserWebVitalEvent(metric, context.browserWindow, eventOptions);
+
+  context.client.span(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
+}
+
+/**
+ * @param {BrowserWebVitalsOptions} options
+ * @returns {(metricName: string) => unknown}
+ */
+function webVitalRegistrations(options) {
+  const source = options.webVitals ?? options;
+  /** @type {Map<string, unknown>} */
+  const registrations = new Map();
+  for (const [metricName, callbackName] of METRIC_CALLBACKS) {
+    registrations.set(metricName, readField(source, callbackName));
+  }
+  return (metricName) => registrations.get(metricName);
+}
+
+/**
+ * @param {readonly string[] | undefined} metricNames
+ * @returns {readonly string[]}
+ */
+function configuredMetricNames(metricNames) {
+  if (metricNames === undefined) {
+    return DEFAULT_WEB_VITAL_METRICS;
+  }
+  if (!isList(metricNames)) {
+    throw new SdkError("configuration_error", "metricNames must be an array");
+  }
+  return metricNames.map((metricName) => normalizeMetricName(metricName));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is WebVitalRegister}
+ */
+function isRegister(value) {
+  return typeof value === "function";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is () => unknown}
+ */
+function isUnregister(value) {
+  return typeof value === "function";
+}
+
+/**
+ * @param {(metricName: string) => unknown} registration
+ * @param {readonly string[]} metricNames
+ * @param {BrowserWebVitalCallback} captureMetric
+ * @returns {(() => unknown)[]}
+ */
+function registerMetrics(registration, metricNames, captureMetric) {
+  /** @type {(() => unknown)[]} */
+  const unregisters = [];
+  for (const metricName of metricNames) {
+    const register = registration(metricName);
+    const unregister = isRegister(register) ? register(captureMetric) : undefined;
+    if (isUnregister(unregister)) {
+      unregisters.push(unregister);
     }
   }
-  return compacted;
+  return unregisters;
 }
 
-function defaultSanitizeMetadata(metadata) {
-  return safeMetadata(metadata);
+/**
+ * @param {WebVitalsState} state
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserWebVitalsOptions} options
+ * @returns {BrowserWebVitalCallback}
+ */
+function metricCapture(state, context, options) {
+  return (metric) => {
+    if (state.installed) {
+      void captureBrowserWebVital(metric, context, options);
+    }
+  };
 }
 
-function browserPath(browserWindow, { includeHash = false, includeQueryString = false } = {}) {
-  const location = browserWindow?.location;
-  if (!location) {
-    return "/";
+/**
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserWebVitalsOptions} [options]
+ * @returns {BrowserWebVitalsInstrumentation}
+ */
+function installLogBrewBrowserWebVitalsInstrumentation(context, options = {}) {
+  assertBrowserContext(context, "installLogBrewBrowserWebVitalsInstrumentation");
+  const registration = webVitalRegistrations(options);
+  const state = { installed: true };
+  const metricNames = configuredMetricNames(options.metricNames);
+  const unregisters = registerMetrics(registration, metricNames, metricCapture(state, context, options));
+  if (unregisters.length === NO_CALLBACKS && !metricNames.some((metricName) => isRegister(registration(metricName)))) {
+    throw new SdkError(
+      "configuration_error",
+      "installLogBrewBrowserWebVitalsInstrumentation requires web-vitals callbacks such as onLCP or options.webVitals"
+    );
   }
-  const href = typeof location.href === "string" ? location.href : String(location);
-  try {
-    const url = new URL(href, "https://logbrew.example");
-    return `${url.pathname || "/"}${includeQueryString ? url.search : ""}${includeHash ? url.hash : ""}`;
-  } catch {
-    return "/";
-  }
+  return {
+    uninstall() {
+      if (!state.installed) {
+        return;
+      }
+      state.installed = false;
+      for (const unregister of unregisters) {
+        unregister();
+      }
+    }
+  };
 }
 
-function metricUnitForName(metricName) {
-  return MILLISECOND_METRICS.has(metricName) ? "millisecond" : "score";
-}
-
-function normalizeMetricName(metricName) {
-  const normalized = stringOrUndefined(metricName)?.toUpperCase();
-  if (!normalized || !/^[A-Z][A-Z0-9_]{0,31}$/u.test(normalized)) {
-    throw new SdkError("configuration_error", "Web Vital metric name must be a short string such as LCP, CLS, INP, FCP, or TTFB");
-  }
-  return normalized;
-}
-
-function finiteNonNegativeNumber(label, value) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new SdkError("configuration_error", `${label} must be a non-negative finite number`);
-  }
-  return value;
-}
-
-function numberOrUndefined(value) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-}
-
-function roundedMetricValue(metricName, value) {
-  return metricName === "CLS" ? Number(value.toFixed(4)) : roundedNumber(value);
-}
-
-function roundedNumber(value) {
-  return value === undefined ? undefined : Number(value.toFixed(3));
-}
-
-function sanitizeSourcePath(source) {
-  if (typeof source !== "string" || source.trim() === "") {
-    return undefined;
-  }
-  try {
-    return new URL(source, "https://logbrew.example").pathname || "/";
-  } catch {
-    return undefined;
-  }
-}
-
-function routeTemplatePath(routeTemplate) {
-  if (typeof routeTemplate !== "string" || routeTemplate.trim() === "") {
-    return "/";
-  }
-  try {
-    const url = new URL(routeTemplate, "https://logbrew.example");
-    return url.pathname || "/";
-  } catch {
-    return "/";
-  }
-}
-
-function stringOrUndefined(value) {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function defaultWebVitalEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_web_vital", `${path}_${message}`);
-}
-
-function defaultWindow() {
-  return typeof globalThis.window === "object" ? globalThis.window : undefined;
-}
+export {
+  captureBrowserWebVital,
+  createBrowserWebVitalEvent,
+  installLogBrewBrowserWebVitalsInstrumentation
+};

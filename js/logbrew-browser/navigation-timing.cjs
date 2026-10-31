@@ -1,308 +1,117 @@
 "use strict";
 
-const { SdkError } = require("@logbrew/sdk");
+const {
+  assertBrowserContext,
+  browserMetadata,
+  browserPath,
+  compactMetadata,
+  defaultSanitizeMetadata,
+  defaultWindow,
+  durationBetween,
+  flushAfterCapture,
+  mergeMetadata,
+  nonNegativeNumberOrUndefined,
+  numberOrUndefined,
+  optionsWithTraceContext,
+  roundDurationMs,
+  routeTemplatePath,
+  sanitizeSourcePath
+} = require("./browser-events.cjs");
+const { callMethod, isRecord, readField, stringOrUndefined } = require("./values.cjs");
 const {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext
+  optionalBrowserTraceContext,
+  resolveTraceContext
 } = require("./trace-context.cjs");
+const { SdkError } = require("@logbrew/sdk");
 
-async function captureBrowserNavigationTiming(entry, context, options = {}) {
-  assertBrowserContext(context, "captureBrowserNavigationTiming");
-  const event = createBrowserNavigationTimingEvent(entry, context.browserWindow, optionsWithTraceContext(
-    options,
-    resolveTraceContext(context, options)
-  ));
+/**
+ * @import { SpanAttributes, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   BrowserNavigationPathTemplate,
+ *   BrowserNavigationTimingInput,
+ *   BrowserNavigationTimingInstrumentation,
+ *   BrowserNavigationTimingOptions,
+ *   LogBrewBrowserContext,
+ *   LogBrewBrowserEvent
+ * } from "./index.cjs"
+ * @typedef {{
+ *   readonly activationStartMs: number | undefined,
+ *   readonly connectMs: number | undefined,
+ *   readonly decodedBodySize: number | undefined,
+ *   readonly documentPath: string,
+ *   readonly domCompleteMs: number | undefined,
+ *   readonly domContentLoadedEventMs: number | undefined,
+ *   readonly domContentLoadedMs: number | undefined,
+ *   readonly domInteractiveMs: number | undefined,
+ *   readonly durationMs: number | undefined,
+ *   readonly encodedBodySize: number | undefined,
+ *   readonly fetchMs: number | undefined,
+ *   readonly firstByteMs: number | undefined,
+ *   readonly loadEventDurationMs: number | undefined,
+ *   readonly loadEventMs: number | undefined,
+ *   readonly lookupMs: number | undefined,
+ *   readonly navigationType: string,
+ *   readonly redirectCount: number | undefined,
+ *   readonly redirectMs: number | undefined,
+ *   readonly requestMs: number | undefined,
+ *   readonly responseMs: number | undefined,
+ *   readonly responseStatus: number | undefined,
+ *   readonly status: "error" | "ok",
+ *   readonly tlsMs: number | undefined,
+ *   readonly transferSize: number | undefined,
+ *   readonly workerMs: number | undefined
+ * }} NavigationTimingDetails
+ * @typedef {{
+ *   readonly browserWindow: Window,
+ *   readonly context: LogBrewBrowserContext,
+ *   readonly options: BrowserNavigationTimingOptions
+ * }} NavigationCaptureSetup
+ * @typedef {{ captured: boolean }} NavigationCaptureState
+ * @typedef {(callback: () => void, delay: number) => unknown} TimerFunction
+ */
 
-  context.client.span(event.id, event.timestamp, event.attributes);
-  return flushAfterCapture(context, options);
+const ERROR_STATUS = 400;
+const NO_STATUS = 0;
+const NO_DELAY = 0;
+const START_OF_NAVIGATION = 0;
+const FIRST = 0;
+
+/**
+ * @returns {string}
+ */
+function currentTimestamp() {
+  return new Date().toISOString();
 }
 
-function installLogBrewBrowserNavigationTimingInstrumentation(context, options = {}) {
-  assertBrowserContext(context, "installLogBrewBrowserNavigationTimingInstrumentation");
-  const browserWindow = options.browserWindow ?? context.browserWindow ?? defaultWindow();
-  if (!browserWindow) {
-    throw new SdkError(
-      "configuration_error",
-      "installLogBrewBrowserNavigationTimingInstrumentation requires a browser window"
-    );
-  }
-
-  let captured = false;
-  const captureOnce = () => {
-    if (captured) {
-      return;
-    }
-    captured = true;
-    scheduleAfterLoad(browserWindow, options, () => {
-      const entry = options.entry ?? navigationTimingEntry(browserWindow);
-      if (entry) {
-        void captureBrowserNavigationTiming(entry, context, options);
-      }
-    });
-  };
-  const onLoad = () => captureOnce();
-
-  if (options.captureInitial === false) {
-    return { uninstall() {} };
-  }
-  if (browserWindow.document?.readyState === "complete") {
-    captureOnce();
-  } else if (typeof browserWindow.addEventListener === "function") {
-    browserWindow.addEventListener("load", onLoad);
-  } else {
-    captureOnce();
-  }
-
-  return {
-    uninstall() {
-      browserWindow.removeEventListener?.("load", onLoad);
-    }
-  };
+/**
+ * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @returns {string}
+ */
+function defaultNavigationTimingEventId({ message, path }) {
+  return createAutomaticBrowserEventId("evt_browser_document", `${path}_${message}`);
 }
 
-function createBrowserNavigationTimingEvent(entry, browserWindow = defaultWindow(), {
-  idFactory = defaultNavigationTimingEventId,
-  includeDocumentTitle = false,
-  includeHash = false,
-  includeQueryString = false,
-  includeUserAgent = false,
-  metadata,
-  navigationPathTemplate,
-  now = () => new Date().toISOString(),
-  randomValues,
-  sampled,
-  sanitizeMetadata = defaultSanitizeMetadata,
-  traceContext,
-  traceFlags
-} = {}) {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-    throw new SdkError("configuration_error", "createBrowserNavigationTimingEvent requires a navigation timing entry");
-  }
-  const path = browserPath(browserWindow, { includeHash, includeQueryString });
-  const details = navigationTimingDetails(entry, navigationPathTemplate);
-  const parentTraceContext = optionalBrowserTraceContext(traceContext);
-  const spanTraceContext = createBrowserTraceContext({
-    randomValues,
-    sampled: parentTraceContext?.sampled ?? sampled,
-    traceFlags: parentTraceContext?.traceFlags ?? traceFlags,
-    traceId: parentTraceContext?.traceId
-  });
-  const baseMetadata = browserMetadata(browserWindow, {
-    includeDocumentTitle,
-    includeUserAgent,
-    path,
-    source: "browser.document"
-  });
-  const navigationMetadata = compactMetadata({
-    activationStartMs: details.activationStartMs,
-    connectMs: details.connectMs,
-    decodedBodySize: details.decodedBodySize,
-    documentPath: details.documentPath,
-    domCompleteMs: details.domCompleteMs,
-    domContentLoadedEventMs: details.domContentLoadedEventMs,
-    domContentLoadedMs: details.domContentLoadedMs,
-    domInteractiveMs: details.domInteractiveMs,
-    encodedBodySize: details.encodedBodySize,
-    fetchMs: details.fetchMs,
-    firstByteMs: details.firstByteMs,
-    loadEventDurationMs: details.loadEventDurationMs,
-    loadEventMs: details.loadEventMs,
-    lookupMs: details.lookupMs,
-    navigationType: details.navigationType,
-    redirectCount: details.redirectCount,
-    redirectMs: details.redirectMs,
-    requestMs: details.requestMs,
-    responseMs: details.responseMs,
-    responseStatus: details.responseStatus,
-    tlsMs: details.tlsMs,
-    transferSize: details.transferSize,
-    workerMs: details.workerMs
-  });
-  const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(baseMetadata, metadata), navigationMetadata),
-    "document"
-  );
-  return {
-    id: idFactory({ browserWindow, message: details.documentPath, path, source: "document" }),
-    timestamp: now(),
-    attributes: {
-      durationMs: details.durationMs,
-      metadata: safeMetadata,
-      name: `browser.document ${details.documentPath}`,
-      parentSpanId: parentTraceContext?.spanId,
-      spanId: spanTraceContext.spanId,
-      status: details.status,
-      traceId: spanTraceContext.traceId
-    }
-  };
+/**
+ * @param {unknown} entry
+ * @returns {string}
+ */
+function navigationTypeOf(entry) {
+  return stringOrUndefined(readField(entry, "type") ?? readField(entry, "navigationType")) ?? "navigate";
 }
 
-async function flushAfterCapture(context, options) {
-  if (options.flushOnCapture === false) {
-    return undefined;
-  }
-  try {
-    const response = await context.client.flush(context.transport);
-    if (typeof options.onFlush === "function") {
-      await options.onFlush(response, context, { reason: "capture" });
-    }
-    return response;
-  } catch (error) {
-    if (typeof options.onCaptureError === "function") {
-      await options.onCaptureError(error, context, { reason: "capture" });
-    }
-    if (options.raiseCaptureErrors === true) {
-      throw error;
-    }
-    return undefined;
-  }
-}
-
-function assertBrowserContext(context, functionName) {
-  if (!context || typeof context !== "object" || !context.client) {
-    throw new SdkError("configuration_error", `${functionName} requires a browser context`);
-  }
-}
-
-function resolveTraceContext(context, options) {
-  if (options.traceContext !== undefined) {
-    return typeof options.traceContext === "function"
-      ? optionalBrowserTraceContext(options.traceContext())
-      : optionalBrowserTraceContext(options.traceContext);
-  }
-  return context.traceContext;
-}
-
-function optionsWithTraceContext(options, traceContext) {
-  return {
-    ...options,
-    traceContext
-  };
-}
-
-function scheduleAfterLoad(browserWindow, options, callback) {
-  if (options.deferAfterLoad === false) {
-    callback();
-    return;
-  }
-  const setTimeoutImpl = options.setTimeout
-    ?? browserWindow.setTimeout?.bind(browserWindow)
-    ?? (typeof globalThis.setTimeout === "function" ? globalThis.setTimeout.bind(globalThis) : undefined);
-  if (typeof setTimeoutImpl === "function") {
-    setTimeoutImpl(callback, 0);
-  } else {
-    callback();
-  }
-}
-
-function navigationTimingEntry(browserWindow) {
-  const entries = browserWindow?.performance?.getEntriesByType?.("navigation");
-  return Array.isArray(entries) ? entries[0] : entries?.[0];
-}
-
-function browserMetadata(browserWindow, {
-  includeDocumentTitle,
-  includeUserAgent,
-  path,
-  source
-}) {
-  return compactMetadata({
-    documentTitle: includeDocumentTitle ? browserWindow?.document?.title : undefined,
-    path,
-    source,
-    userAgent: includeUserAgent ? browserWindow?.navigator?.userAgent : undefined,
-    visibilityState: browserWindow?.document?.visibilityState
-  });
-}
-
-function mergeMetadata(baseMetadata, extraMetadata) {
-  return compactMetadata({
-    ...baseMetadata,
-    ...safeMetadata(extraMetadata)
-  });
-}
-
-function safeMetadata(metadata) {
-  if (metadata === undefined) {
-    return {};
-  }
-  if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") {
-    return {};
-  }
-  return compactMetadata(metadata);
-}
-
-function compactMetadata(metadata) {
-  const compacted = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (value === undefined) {
-      continue;
-    }
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) {
-      compacted[key] = value;
-    }
-  }
-  return compacted;
-}
-
-function defaultSanitizeMetadata(metadata) {
-  return safeMetadata(metadata);
-}
-
-function browserPath(browserWindow, { includeHash = false, includeQueryString = false } = {}) {
-  const location = browserWindow?.location;
-  if (!location) {
-    return "/";
-  }
-  const href = typeof location.href === "string" ? location.href : String(location);
-  try {
-    const url = new URL(href, "https://logbrew.example");
-    return `${url.pathname || "/"}${includeQueryString ? url.search : ""}${includeHash ? url.hash : ""}`;
-  } catch {
-    return "/";
-  }
-}
-
-function navigationTimingDetails(entry, navigationPathTemplate) {
-  const documentPath = navigationTimingPath(entry, navigationPathTemplate);
-  const responseStatus = responseStatusCode(entry);
-  const startTime = nonNegativeNumberOrUndefined(entry.startTime) ?? 0;
-  return {
-    activationStartMs: nonNegativeRoundedNumber(entry.activationStart),
-    connectMs: durationBetween(entry.connectStart, entry.connectEnd),
-    decodedBodySize: nonNegativeNumberOrUndefined(entry.decodedBodySize),
-    documentPath,
-    domCompleteMs: durationSinceStart(entry.domComplete, startTime),
-    domContentLoadedEventMs: durationBetween(entry.domContentLoadedEventStart, entry.domContentLoadedEventEnd),
-    domContentLoadedMs: durationSinceStart(entry.domContentLoadedEventEnd, startTime),
-    domInteractiveMs: durationSinceStart(entry.domInteractive, startTime),
-    durationMs: navigationDurationMs(entry, startTime),
-    encodedBodySize: nonNegativeNumberOrUndefined(entry.encodedBodySize),
-    fetchMs: durationBetween(entry.fetchStart, entry.domainLookupStart),
-    firstByteMs: durationSinceStart(entry.responseStart, startTime),
-    loadEventDurationMs: durationBetween(entry.loadEventStart, entry.loadEventEnd),
-    loadEventMs: durationSinceStart(entry.loadEventEnd, startTime),
-    lookupMs: durationBetween(entry.domainLookupStart, entry.domainLookupEnd),
-    navigationType: stringOrUndefined(entry.type ?? entry.navigationType) ?? "navigate",
-    redirectCount: nonNegativeNumberOrUndefined(entry.redirectCount),
-    redirectMs: durationBetween(entry.redirectStart, entry.redirectEnd),
-    requestMs: durationBetween(entry.requestStart, entry.responseStart),
-    responseMs: durationBetween(entry.responseStart, entry.responseEnd),
-    responseStatus,
-    status: responseStatus !== undefined && responseStatus >= 400 ? "error" : "ok",
-    tlsMs: durationBetween(entry.secureConnectionStart, entry.connectEnd, { requirePositiveStart: true }),
-    transferSize: nonNegativeNumberOrUndefined(entry.transferSize),
-    workerMs: durationBetween(entry.workerStart, entry.fetchStart, { requirePositiveStart: true })
-  };
-}
-
+/**
+ * @param {BrowserNavigationTimingInput} entry
+ * @param {BrowserNavigationPathTemplate | undefined} navigationPathTemplate
+ * @returns {string}
+ */
 function navigationTimingPath(entry, navigationPathTemplate) {
-  const path = sanitizeSourcePath(entry?.name) ?? "/";
+  const path = sanitizeSourcePath(readField(entry, "name")) ?? "/";
   if (typeof navigationPathTemplate === "function") {
     return routeTemplatePath(navigationPathTemplate({
       entry,
-      navigationType: stringOrUndefined(entry?.type ?? entry?.navigationType) ?? "navigate",
+      navigationType: navigationTypeOf(entry),
       path
     }) ?? path);
   }
@@ -312,17 +121,20 @@ function navigationTimingPath(entry, navigationPathTemplate) {
   return routeTemplatePath(path);
 }
 
+/**
+ * @param {unknown} entry
+ * @returns {number | undefined}
+ */
 function responseStatusCode(entry) {
-  const statusCode = numberOrUndefined(entry?.responseStatus ?? entry?.statusCode);
-  return statusCode === 0 ? undefined : statusCode;
+  const statusCode = numberOrUndefined(readField(entry, "responseStatus") ?? readField(entry, "statusCode"));
+  return statusCode === NO_STATUS ? undefined : statusCode;
 }
 
-function navigationDurationMs(entry, startTime) {
-  return nonNegativeRoundedNumber(entry?.duration)
-    ?? durationSinceStart(entry?.loadEventEnd, startTime)
-    ?? durationSinceStart(entry?.responseEnd, startTime);
-}
-
+/**
+ * @param {unknown} value
+ * @param {number} startTime
+ * @returns {number | undefined}
+ */
 function durationSinceStart(value, startTime) {
   const endMs = nonNegativeNumberOrUndefined(value);
   if (endMs === undefined || endMs < startTime) {
@@ -331,68 +143,306 @@ function durationSinceStart(value, startTime) {
   return roundDurationMs(endMs - startTime);
 }
 
-function durationBetween(start, end, { requirePositiveStart = false } = {}) {
-  const startMs = nonNegativeNumberOrUndefined(start);
-  const endMs = nonNegativeNumberOrUndefined(end);
-  if (startMs === undefined || endMs === undefined || endMs < startMs) {
-    return undefined;
-  }
-  if (requirePositiveStart && startMs <= 0) {
-    return undefined;
-  }
-  return roundDurationMs(endMs - startMs);
-}
-
+/**
+ * @param {unknown} value
+ * @returns {number | undefined}
+ */
 function nonNegativeRoundedNumber(value) {
   const number = nonNegativeNumberOrUndefined(value);
   return number === undefined ? undefined : roundDurationMs(number);
 }
 
-function roundDurationMs(value) {
-  return Number(value.toFixed(3));
+/**
+ * @param {unknown} entry
+ * @param {number} startTime
+ * @returns {number | undefined}
+ */
+function navigationDurationMs(entry, startTime) {
+  return nonNegativeRoundedNumber(readField(entry, "duration"))
+    ?? durationSinceStart(readField(entry, "loadEventEnd"), startTime)
+    ?? durationSinceStart(readField(entry, "responseEnd"), startTime);
 }
 
-function sanitizeSourcePath(source) {
-  if (typeof source !== "string" || source.trim() === "") {
-    return undefined;
+/**
+ * @param {unknown} entry
+ * @param {string} start
+ * @param {string} end
+ * @returns {number | undefined}
+ */
+function entryDuration(entry, start, end) {
+  return durationBetween(readField(entry, start), readField(entry, end));
+}
+
+/**
+ * @param {unknown} entry
+ * @param {string} start
+ * @param {string} end
+ * @returns {number | undefined}
+ */
+function positiveStartDuration(entry, start, end) {
+  return durationBetween(readField(entry, start), readField(entry, end), { requirePositiveStart: true });
+}
+
+/**
+ * @param {BrowserNavigationTimingInput} entry
+ * @param {BrowserNavigationPathTemplate | undefined} navigationPathTemplate
+ * @returns {NavigationTimingDetails}
+ */
+function navigationTimingDetails(entry, navigationPathTemplate) {
+  const documentPath = navigationTimingPath(entry, navigationPathTemplate);
+  const responseStatus = responseStatusCode(entry);
+  const startTime = nonNegativeNumberOrUndefined(readField(entry, "startTime")) ?? START_OF_NAVIGATION;
+  return {
+    activationStartMs: nonNegativeRoundedNumber(readField(entry, "activationStart")),
+    connectMs: entryDuration(entry, "connectStart", "connectEnd"),
+    decodedBodySize: nonNegativeNumberOrUndefined(readField(entry, "decodedBodySize")),
+    documentPath,
+    domCompleteMs: durationSinceStart(readField(entry, "domComplete"), startTime),
+    domContentLoadedEventMs: entryDuration(entry, "domContentLoadedEventStart", "domContentLoadedEventEnd"),
+    domContentLoadedMs: durationSinceStart(readField(entry, "domContentLoadedEventEnd"), startTime),
+    domInteractiveMs: durationSinceStart(readField(entry, "domInteractive"), startTime),
+    durationMs: navigationDurationMs(entry, startTime),
+    encodedBodySize: nonNegativeNumberOrUndefined(readField(entry, "encodedBodySize")),
+    fetchMs: entryDuration(entry, "fetchStart", "domainLookupStart"),
+    firstByteMs: durationSinceStart(readField(entry, "responseStart"), startTime),
+    loadEventDurationMs: entryDuration(entry, "loadEventStart", "loadEventEnd"),
+    loadEventMs: durationSinceStart(readField(entry, "loadEventEnd"), startTime),
+    lookupMs: entryDuration(entry, "domainLookupStart", "domainLookupEnd"),
+    navigationType: navigationTypeOf(entry),
+    redirectCount: nonNegativeNumberOrUndefined(readField(entry, "redirectCount")),
+    redirectMs: entryDuration(entry, "redirectStart", "redirectEnd"),
+    requestMs: entryDuration(entry, "requestStart", "responseStart"),
+    responseMs: entryDuration(entry, "responseStart", "responseEnd"),
+    responseStatus,
+    status: responseStatus !== undefined && responseStatus >= ERROR_STATUS ? "error" : "ok",
+    tlsMs: positiveStartDuration(entry, "secureConnectionStart", "connectEnd"),
+    transferSize: nonNegativeNumberOrUndefined(readField(entry, "transferSize")),
+    workerMs: positiveStartDuration(entry, "workerStart", "fetchStart")
+  };
+}
+
+/**
+ * @param {BrowserNavigationTimingInput} entry
+ * @param {Window} [browserWindow]
+ * @param {BrowserNavigationTimingOptions} [options]
+ * @returns {LogBrewBrowserEvent<SpanAttributes>}
+ */
+function createBrowserNavigationTimingEvent(entry, browserWindow = defaultWindow(), {
+  idFactory = defaultNavigationTimingEventId,
+  includeDocumentTitle = false,
+  includeHash = false,
+  includeQueryString = false,
+  includeUserAgent = false,
+  metadata,
+  navigationPathTemplate,
+  now = currentTimestamp,
+  randomValues,
+  sampled,
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext,
+  traceFlags
+} = {}) {
+  if (!isRecord(entry)) {
+    throw new SdkError("configuration_error", "createBrowserNavigationTimingEvent requires a navigation timing entry");
   }
-  try {
-    return new URL(source, "https://logbrew.example").pathname || "/";
-  } catch {
-    return undefined;
+  const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const { durationMs, status, ...details } = navigationTimingDetails(entry, navigationPathTemplate);
+  const parentTraceContext = optionalBrowserTraceContext(traceContext);
+  const spanTraceContext = createBrowserTraceContext({
+    randomValues,
+    sampled: parentTraceContext?.sampled ?? sampled,
+    traceFlags: parentTraceContext?.traceFlags ?? traceFlags,
+    traceId: parentTraceContext?.traceId
+  });
+  const baseMetadata = browserMetadata(browserWindow, { includeDocumentTitle, includeUserAgent, path, source: "browser.document" });
+  const eventMetadata = mergeMetadata(mergeMetadata(baseMetadata, metadata), compactMetadata(details));
+  const safeMetadata = sanitizeMetadata(eventMetadata, "document");
+  return {
+    id: idFactory({ browserWindow, message: details.documentPath, path, source: "document" }),
+    timestamp: now(),
+
+    attributes: {
+      ...(durationMs === undefined ? {} : { durationMs }),
+      metadata: safeMetadata,
+      name: `browser.document ${details.documentPath}`,
+      ...(parentTraceContext === undefined ? {} : { parentSpanId: parentTraceContext.spanId }),
+      spanId: spanTraceContext.spanId,
+      status,
+      traceId: spanTraceContext.traceId
+    }
+  };
+}
+
+/**
+ * @param {BrowserNavigationTimingInput} entry
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserNavigationTimingOptions} [options]
+ * @returns {Promise<TransportResponse | undefined>}
+ */
+async function captureBrowserNavigationTiming(entry, context, options = {}) {
+  assertBrowserContext(context, "captureBrowserNavigationTiming");
+  const eventOptions = optionsWithTraceContext(options, resolveTraceContext(context, options));
+  const event = createBrowserNavigationTimingEvent(entry, context.browserWindow, eventOptions);
+
+  context.client.span(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is TimerFunction}
+ */
+function isTimer(value) {
+  return typeof value === "function";
+}
+
+/**
+ * @param {unknown} target
+ * @returns {unknown}
+ */
+function boundSetTimeout(target) {
+  const timer = readField(target, "setTimeout");
+  return timer === undefined || timer === null ? undefined : callMethod(timer, "bind", [target]);
+}
+
+/**
+ * @param {Window} browserWindow
+ * @param {BrowserNavigationTimingOptions} options
+ * @param {() => void} capture
+ * @returns {void}
+ */
+function scheduleAfterLoad(browserWindow, options, capture) {
+  if (options.deferAfterLoad === false) {
+    capture();
+    return;
+  }
+  const setTimeoutImpl = options.setTimeout ?? boundSetTimeout(browserWindow) ?? boundSetTimeout(globalThis);
+  if (isTimer(setTimeoutImpl)) {
+    setTimeoutImpl(capture, NO_DELAY);
+  } else {
+    capture();
   }
 }
 
-function routeTemplatePath(routeTemplate) {
-  if (typeof routeTemplate !== "string" || routeTemplate.trim() === "") {
-    return "/";
+/**
+ * @param {unknown} value
+ * @returns {value is BrowserNavigationTimingInput}
+ */
+function isNavigationEntry(value) {
+  const present = Boolean(value);
+  return present;
+}
+
+/**
+ * @param {Window} browserWindow
+ * @returns {unknown}
+ */
+function navigationTimingEntry(browserWindow) {
+  const entries = callMethod(readField(browserWindow, "performance"), "getEntriesByType", ["navigation"]);
+  return readField(entries, FIRST);
+}
+
+/**
+ * @param {NavigationCaptureSetup} setup
+ * @returns {void}
+ */
+function captureInitialEntry({ browserWindow, context, options }) {
+  const entry = options.entry ?? navigationTimingEntry(browserWindow);
+  if (isNavigationEntry(entry)) {
+    void captureBrowserNavigationTiming(entry, context, options);
   }
-  try {
-    const url = new URL(routeTemplate, "https://logbrew.example");
-    return url.pathname || "/";
-  } catch {
-    return "/";
+}
+
+/**
+ * @param {NavigationCaptureState} state
+ * @param {NavigationCaptureSetup} setup
+ * @returns {void}
+ */
+function captureOnce(state, setup) {
+  if (state.captured) {
+    return;
+  }
+  state.captured = true;
+  scheduleAfterLoad(setup.browserWindow, setup.options, () => {
+    captureInitialEntry(setup);
+  });
+}
+
+/**
+ * @param {NavigationCaptureState} state
+ * @param {NavigationCaptureSetup} setup
+ * @returns {() => void}
+ */
+function loadListener(state, setup) {
+  return () => {
+    captureOnce(state, setup);
+  };
+}
+
+/**
+ * @param {NavigationCaptureState} state
+ * @param {NavigationCaptureSetup} setup
+ * @param {() => void} onLoad
+ * @returns {void}
+ */
+function startCapture(state, setup, onLoad) {
+  if (readField(readField(setup.browserWindow, "document"), "readyState") === "complete") {
+    captureOnce(state, setup);
+  } else if (typeof readField(setup.browserWindow, "addEventListener") === "function") {
+    setup.browserWindow.addEventListener("load", onLoad);
+  } else {
+    captureOnce(state, setup);
   }
 }
 
-function numberOrUndefined(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+/**
+ * @param {Window | undefined} value
+ * @returns {value is Window}
+ */
+function isBrowserWindow(value) {
+  const present = Boolean(value);
+  return present;
 }
 
-function nonNegativeNumberOrUndefined(value) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+/**
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserNavigationTimingOptions} options
+ * @returns {Window}
+ */
+function navigationWindow(context, options) {
+  const browserWindow = options.browserWindow ?? context.browserWindow ?? defaultWindow();
+  if (!isBrowserWindow(browserWindow)) {
+    throw new SdkError(
+      "configuration_error",
+      "installLogBrewBrowserNavigationTimingInstrumentation requires a browser window"
+    );
+  }
+  return browserWindow;
 }
 
-function stringOrUndefined(value) {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function defaultNavigationTimingEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_document", `${path}_${message}`);
-}
-
-function defaultWindow() {
-  return typeof globalThis.window === "object" ? globalThis.window : undefined;
+/**
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserNavigationTimingOptions} [options]
+ * @returns {BrowserNavigationTimingInstrumentation}
+ */
+function installLogBrewBrowserNavigationTimingInstrumentation(context, options = {}) {
+  assertBrowserContext(context, "installLogBrewBrowserNavigationTimingInstrumentation");
+  const setup = { browserWindow: navigationWindow(context, options), context, options };
+  const state = { captured: false };
+  const onLoad = loadListener(state, setup);
+  if (options.captureInitial === false) {
+    return {
+      uninstall() {
+        return undefined;
+      }
+    };
+  }
+  startCapture(state, setup, onLoad);
+  return {
+    uninstall() {
+      callMethod(setup.browserWindow, "removeEventListener", ["load", onLoad]);
+    }
+  };
 }
 
 module.exports = {

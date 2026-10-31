@@ -188,6 +188,7 @@
           {
             "from": "file",
             "name": [
+              "Metadata",
               "SpanLinkSummary",
               "TelemetryContext",
               "TelemetryNamedVersion",
@@ -316,7 +317,8 @@
               "RegExp",
               "Request",
               "RequestInit",
-              "URL"
+              "URL",
+              "Window"
             ]
           },
           {
@@ -352,10 +354,21 @@
             "from": "file",
             "name": [
               "AngularTraceparentConfig",
+              "BrowserNavigationPathTemplate",
+              "BrowserNavigationTimingInput",
+              "BrowserNavigationTimingOptions",
+              "BrowserResourcePathTemplate",
+              "BrowserResourceTimingInput",
+              "BrowserResourceTimingOptions",
               "BrowserTraceContext",
               "BrowserTraceContextConfig",
               "BrowserTraceContextSource",
               "BrowserTraceparentConfig",
+              "BrowserWebVitalCallback",
+              "BrowserWebVitalInput",
+              "BrowserWebVitalPathTemplate",
+              "BrowserWebVitalsOptions",
+              "CaptureFlushOptions",
               "CreateLogBrewAngularClientConfig",
               "LifecycleCore",
               "LifecycleDelivery",
@@ -367,10 +380,14 @@
               "LogBrewAngularOptions",
               "LogBrewAngularRuntimeContext",
               "LogBrewAngularViewEventOptions",
+              "LogBrewBrowserContext",
+              "NavigationCaptureSetup",
+              "NavigationCaptureState",
               "PendingDelivery",
               "TraceparentFetchConfig",
               "TraceparentRequest",
-              "TraceparentRequestContext"
+              "TraceparentRequestContext",
+              "WebVitalsState"
             ]
           },
           {

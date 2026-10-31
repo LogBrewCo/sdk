@@ -1,5 +1,5 @@
 import type { ActionAttributes, IssueAttributes, LogBrewClient, Metadata, SpanAttributes, Transport, TransportResponse } from "@logbrew/sdk";
-import type { BrowserActionInput, BrowserIssueSuppressionRule, BrowserIssueSuppressionSummary, BrowserMetadataKind, BrowserNetworkInput, LogBrewBrowserEvent } from "./types-signals.js";
+import type { BrowserActionInput, BrowserInteractionTimingInput, BrowserIssueSuppressionRule, BrowserIssueSuppressionSummary, BrowserMetadataKind, BrowserNetworkInput, BrowserWebVitalInput, LogBrewBrowserEvent } from "./types-signals.js";
 import type { BrowserPersistedReplay, BrowserTraceContext, BrowserTraceContextInput, BrowserTraceContextSource, CreateLogBrewBrowserClientConfig, FetchTransportConfig, PersistentBrowserTransportConfig } from "./types-transport.js";
 
 type LogBrewBrowserContext = {
@@ -107,8 +107,10 @@ type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportCo
   idFactory?: undefined | ((context: {
     action?: BrowserActionInput | undefined;
     browserWindow?: Window | undefined;
+    entry?: BrowserInteractionTimingInput | undefined;
     error?: unknown;
     message?: string | undefined;
+    metric?: BrowserWebVitalInput | undefined;
     request?: BrowserNetworkInput | undefined;
     path: string;
     source?: string | undefined;
