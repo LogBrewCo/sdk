@@ -209,7 +209,7 @@ scripts/real_user_fastify_smoke.sh	*	line	requestUrl: "/auto?token=hidden",
 python/logbrew_py/src/logbrew_sdk/_opentelemetry_processor.py	*	has	SENSITIVE_OTEL_ATTRIBUTE_PATTERN
 python/logbrew_py/src/logbrew_sdk/_opentelemetry_processor.py	*	has	r"(^|[._-])(
 python/logbrew_py/src/logbrew_sdk/_opentelemetry_processor.py	*	has	r"private[-_]?key|
-js/logbrew-react-native/apple-native-diagnostics.js	password	has	parsed.password
+js/logbrew-react-native/apple-native-diagnostics-config.js	password	has	parsed.password
 js/logbrew-react-native/ios/AppleDiagnostics/LBRNAppleNativeDiagnostics.swift	password	has	components.password == nil
 go/logbrew/gin/README.md	*	line	values and drops keys that suggest credentials, payloads, URLs, headers,
 go/logbrew/gin/middleware.go	*	line	"host", "hostname", "ipaddress", "key", "message", "params", "parameters", "password", "path",

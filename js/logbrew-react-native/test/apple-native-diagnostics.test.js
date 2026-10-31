@@ -512,39 +512,15 @@ async function withRuntime({ entry = "apple-native-diagnostics.js", nativeModule
     const installedPackage = path.join(nodeModules, "@logbrew", "react-native");
     fs.mkdirSync(installedPackage, { recursive: true });
     const packageFiles = entry === "index.native.js"
-      ? [
+      ? fs.readdirSync(packageRoot).filter((file) => /\.c?js$/u.test(file))
+      : [
           "apple-native-diagnostics.js",
-          "android-native-diagnostics.js",
-          "fatal-admission.cjs",
-          "fatal-record.cjs",
-          "fatal-replay.cjs",
-          "global-errors-capture.cjs",
-          "global-errors-event.cjs",
-          "global-errors-support.cjs",
-          "global-errors.cjs",
-          "global-errors.js",
-          "global-errors.native.js",
-          "index-breadcrumbs.cjs",
-          "index-errors.cjs",
-          "index-events.cjs",
-          "index-navigation.cjs",
-          "index-random.cjs",
-          "index-react.cjs",
-          "index-spans.cjs",
-          "index-trace-fetch.cjs",
-          "index-trace.cjs",
-          "index-transport.cjs",
-          "index-values.cjs",
-          "index.cjs",
-          "index.js",
-          "index.native.js",
-          "metadata.cjs",
-          "null-value.cjs",
-          "persistent-delivery.native.js",
-          "promise-rejection-handlers.cjs",
-          "promise-rejections.cjs"
-        ]
-      : ["apple-native-diagnostics.js"];
+          "apple-native-diagnostics-config.js",
+          "apple-native-diagnostics-context.js",
+          "apple-native-diagnostics-module.js",
+          "native-diagnostics-values.js",
+          "native-module-lookup.js"
+        ];
     for (const file of packageFiles) {
       fs.copyFileSync(path.join(packageRoot, file), path.join(installedPackage, file));
     }
