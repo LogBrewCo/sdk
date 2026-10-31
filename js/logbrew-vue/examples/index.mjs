@@ -1,51 +1,64 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
-import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
-const commands = {
-  "readme-example": "readme-example.mjs",
-  "real-user-smoke": "real-user-smoke.mjs"
-};
+const COMMAND_ARGUMENT = 2;
+const FAILURE = 1;
+const commands = new Map([
+  ["readme-example", "readme-example.mjs"],
+  ["real-user-smoke", "real-user-smoke.mjs"]
+]);
+const help = [
+  "Usage: node node_modules/@logbrew/vue/examples/index.mjs [command]",
+  "",
+  "Commands:",
+  "  readme-example    Run the README-sized Vue example",
+  "  real-user-smoke   Run the full Vue real-user smoke example",
+  "",
+  "npm --prefix node_modules/@logbrew/vue/examples run readme-example",
+  "npm --prefix node_modules/@logbrew/vue/examples run real-user-smoke",
+  "node node_modules/@logbrew/vue/examples/index.mjs readme-example",
+  "node node_modules/@logbrew/vue/examples/index.mjs real-user-smoke"
+];
 
-const examplesDir = dirname(fileURLToPath(import.meta.url));
-const command = process.argv[2] ?? "real-user-smoke";
+/**
+ * @param {readonly string[]} lines
+ * @returns {void}
+ */
+function printLines(lines) {
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+/**
+ * @param {string} file
+ * @returns {void}
+ */
+function runExample(file) {
+  const child = spawn(process.execPath, [fileURLToPath(new URL(file, import.meta.url))], { stdio: "inherit" });
+  child.on("exit", (code, signal) => {
+    if (signal === null) {
+      process.exitCode = code ?? FAILURE;
+      return;
+    }
+    process.kill(process.pid, signal);
+  });
+}
+
+const command = process.argv[COMMAND_ARGUMENT] ?? "real-user-smoke";
+const file = commands.get(command);
 
 if (command === "--help" || command === "-h") {
-  console.log("Usage: node node_modules/@logbrew/vue/examples/index.mjs [command]");
-  console.log("");
-  console.log("Commands:");
-  console.log("  readme-example    Run the README-sized Vue example");
-  console.log("  real-user-smoke   Run the full Vue real-user smoke example");
-  console.log("");
-  console.log("npm --prefix node_modules/@logbrew/vue/examples run readme-example");
-  console.log("npm --prefix node_modules/@logbrew/vue/examples run real-user-smoke");
-  console.log("node node_modules/@logbrew/vue/examples/index.mjs readme-example");
-  console.log("node node_modules/@logbrew/vue/examples/index.mjs real-user-smoke");
-  process.exit(0);
-}
-
-if (command === "--list") {
-  for (const [name, file] of Object.entries(commands)) {
-    console.log(`${name} -> node node_modules/@logbrew/vue/examples/index.mjs ${name} (${file})`);
+  printLines(help);
+} else if (command === "--list") {
+  /** @type {string[]} */
+  const lines = [];
+  for (const [name, example] of commands) {
+    lines.push(`${name} -> node node_modules/@logbrew/vue/examples/index.mjs ${name} (${example})`);
   }
-  process.exit(0);
+  printLines(lines);
+} else if (file === undefined) {
+  process.stderr.write(`Unknown command: ${command}\n`);
+  process.exitCode = FAILURE;
+} else {
+  runExample(file);
 }
-
-const file = commands[command];
-if (!file) {
-  console.error(`Unknown command: ${command}`);
-  process.exit(1);
-}
-
-const child = spawn(process.execPath, [join(examplesDir, file)], {
-  stdio: "inherit"
-});
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code ?? 1);
-});

@@ -7,7 +7,8 @@
     "import",
     "jsdoc",
     "promise",
-    "node"
+    "node",
+    "vue"
   ],
   "categories": {
     "correctness": "error",
@@ -289,6 +290,60 @@
             "from": "package",
             "name": "TestContext",
             "package": "@types/node"
+          },
+          {
+            "from": "lib",
+            "name": [
+              "RegExp",
+              "Request",
+              "RequestInit",
+              "URL"
+            ]
+          },
+          {
+            "from": "package",
+            "name": [
+              "ErrorHandler",
+              "Injector"
+            ],
+            "package": "@angular/core"
+          },
+          {
+            "from": "package",
+            "name": [
+              "App",
+              "ComponentPublicInstance"
+            ],
+            "package": "@vue/runtime-core"
+          },
+          {
+            "from": "file",
+            "name": [
+              "CreateLogBrewVueClientConfig",
+              "LogBrewVueContext",
+              "LogBrewVueErrorContext",
+              "LogBrewVueErrorEventOptions",
+              "LogBrewVueOptions",
+              "LogBrewVueRuntimeContext",
+              "LogBrewVueViewEventOptions",
+              "VueTraceparentConfig"
+            ]
+          },
+          {
+            "from": "file",
+            "name": [
+              "AngularTraceparentConfig",
+              "CreateLogBrewAngularClientConfig",
+              "LogBrewAngularCaptureContext",
+              "LogBrewAngularContext",
+              "LogBrewAngularErrorEventOptions",
+              "LogBrewAngularErrorMetadata",
+              "LogBrewAngularOptions",
+              "LogBrewAngularRuntimeContext",
+              "LogBrewAngularViewEventOptions",
+              "TraceparentFetchConfig",
+              "TraceparentRequestContext"
+            ]
           }
         ]
       }
@@ -325,7 +380,8 @@
     {
       "files": [
         "logbrew-*/*.cjs",
-        "logbrew-express/test/*.cjs"
+        "logbrew-express/test/*.cjs",
+        "logbrew-vue/test/*.cjs"
       ],
       "rules": {
         "import/no-commonjs": "off",
@@ -381,7 +437,10 @@
         "logbrew-express/**",
         "logbrew-js/release-artifacts*",
         "logbrew-js/test/release-artifacts*",
-        "logbrew-js/vite-release-artifacts*.cjs"
+        "logbrew-js/vite-release-artifacts*.cjs",
+        "logbrew-angular/examples/**",
+        "logbrew-vue/examples/**",
+        "logbrew-vue/test/**"
       ],
       "rules": {
         "import/no-nodejs-modules": "off"
@@ -474,10 +533,35 @@
       "files": [
         "logbrew-fastify/index.d.ts",
         "logbrew-nestjs/index.d.ts",
-        "logbrew-express/index.d.ts"
+        "logbrew-express/index.d.ts",
+        "logbrew-vue/index.d.cts",
+        "logbrew-vue/index.d.ts"
       ],
       "rules": {
         "typescript/consistent-type-definitions": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-vue/examples/real-user-smoke.mjs",
+        "logbrew-vue/test/error-handler-ownership.test.mjs"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-vue/index.cjs",
+        "logbrew-vue/index.js"
+      ],
+      "rules": {
+        "typescript/no-confusing-void-expression": [
+          "error",
+          {
+            "ignoreVoidReturningFunctions": true
+          }
+        ]
       }
     },
     {
@@ -512,7 +596,11 @@
       "files": [
         "logbrew-bullmq/index.cjs",
         "logbrew-bullmq/index.d.cts",
-        "logbrew-bullmq/index.d.ts"
+        "logbrew-bullmq/index.d.ts",
+        "logbrew-vue/index.cjs",
+        "logbrew-vue/index.d.cts",
+        "logbrew-vue/index.d.ts",
+        "logbrew-vue/index.js"
       ],
       "rules": {
         "eslint/max-params": [
