@@ -242,6 +242,35 @@
             "from": "package",
             "name": "AbortSignal",
             "package": "@types/node"
+          },
+          {
+            "from": "package",
+            "name": [
+              "CallHandler",
+              "ExecutionContext"
+            ],
+            "package": "@nestjs/common"
+          },
+          {
+            "from": "package",
+            "name": [
+              "Request",
+              "Response"
+            ],
+            "package": "express"
+          },
+          {
+            "from": "file",
+            "name": [
+              "CreateLogBrewNestClientConfig",
+              "LogBrewNestLoggerOptions",
+              "LogBrewNestOptions"
+            ]
+          },
+          {
+            "from": "package",
+            "name": "Subscriber",
+            "package": "rxjs"
           }
         ]
       }
@@ -329,6 +358,7 @@
         "logbrew-amqplib/**",
         "logbrew-kafkajs/**",
         "logbrew-fastify/**",
+        "logbrew-nestjs/**",
         "logbrew-js/release-artifacts*",
         "logbrew-js/vite-release-artifacts*.cjs"
       ],
@@ -410,7 +440,8 @@
     },
     {
       "files": [
-        "logbrew-fastify/internal.cjs"
+        "logbrew-fastify/internal.cjs",
+        "logbrew-nestjs/internal.cjs"
       ],
       "rules": {
         "node/no-process-env": "off"
@@ -418,7 +449,8 @@
     },
     {
       "files": [
-        "logbrew-fastify/index.d.ts"
+        "logbrew-fastify/index.d.ts",
+        "logbrew-nestjs/index.d.ts"
       ],
       "rules": {
         "typescript/consistent-type-definitions": "off"
@@ -435,7 +467,9 @@
     {
       "files": [
         "logbrew-aws-sqs/index.cjs",
-        "logbrew-aws-sqs/index.d.ts"
+        "logbrew-aws-sqs/index.d.ts",
+        "logbrew-nestjs/index.d.ts",
+        "logbrew-nestjs/logger.cjs"
       ],
       "rules": {
         "eslint/max-params": [
@@ -468,6 +502,60 @@
       ],
       "rules": {
         "typescript/no-unnecessary-type-parameters": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-nestjs/logger.cjs"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-nestjs/examples/*.mjs"
+      ],
+      "rules": {
+        "eslint/class-methods-use-this": [
+          "error",
+          {
+            "exceptMethods": [
+              "auto",
+              "fail",
+              "logbrew"
+            ]
+          }
+        ],
+        "eslint/max-classes-per-file": [
+          "error",
+          4
+        ],
+        "eslint/new-cap": [
+          "error",
+          {
+            "capIsNewExceptions": [
+              "Controller",
+              "Get",
+              "Module",
+              "Req"
+            ]
+          }
+        ],
+        "import/no-unassigned-import": [
+          "error",
+          {
+            "allow": [
+              "reflect-metadata"
+            ]
+          }
+        ],
+        "typescript/no-extraneous-class": [
+          "error",
+          {
+            "allowEmpty": true
+          }
+        ]
       }
     }
   ]

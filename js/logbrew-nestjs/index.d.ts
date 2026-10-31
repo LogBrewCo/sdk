@@ -1,6 +1,4 @@
 import type { CallHandler, ExecutionContext, NestInterceptor } from "@nestjs/common";
-import type { Request, Response } from "express";
-import type { Observable } from "rxjs";
 import type {
   IssueAttributes,
   LogAttributes,
@@ -11,11 +9,11 @@ import type {
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
-import type { LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
+import type { LogBrewNodeContext, LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
+import type { Request, Response } from "express";
+import type { Observable } from "rxjs";
 
-export type { LogBrewTraceContext } from "@logbrew/node";
-
-export type CreateLogBrewNestClientConfig = {
+type CreateLogBrewNestClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
   captureRuntimeContext?: boolean;
@@ -25,60 +23,58 @@ export type CreateLogBrewNestClientConfig = {
   maxRetries?: number;
 };
 
-export type LogBrewNestContext = {
-  client: LogBrewClient;
-  logbrew: LogBrewClient;
-  trace?: LogBrewTraceContext;
-  /** Tag every event of this request with an opaque app-owned user ID. Returns false without a request trace. */
-  setUser(id: string, options?: { kind?: "user" | "anonymous" }): boolean;
-  transport: Transport;
-  previewJson(): string;
-  flush(): Promise<TransportResponse>;
-  shutdown(): Promise<TransportResponse>;
+/** Request context; the same type as the Node package's request context, so both declarations of `logbrew` agree. */
+type LogBrewNestContext = LogBrewNodeContext;
+
+type LogBrewNestRuntimeContext = {
+  readonly executionContext: ExecutionContext;
+  readonly request: Request;
+  readonly response: Response;
+  readonly client: LogBrewClient;
+  readonly trace?: Readonly<LogBrewTraceContext> | undefined;
 };
 
-export type LogBrewNestRuntimeContext = {
-  executionContext: ExecutionContext;
-  request: Request;
-  response: Response;
-  client: LogBrewClient;
-  trace?: LogBrewTraceContext;
+/** The request fields the event helpers read; an Express request has all of them. */
+type LogBrewNestRequestLike = {
+  readonly method?: string;
+  readonly originalUrl?: string;
+  readonly url?: string;
 };
 
-export type LogBrewClientFactory = (context: Omit<LogBrewNestRuntimeContext, "client">) => LogBrewClient;
-export type LogBrewTransportFactory = (context: LogBrewNestRuntimeContext) => Transport;
+type LogBrewClientFactory = (context: Omit<LogBrewNestRuntimeContext, "client">) => LogBrewClient;
+type LogBrewTransportFactory = (context: LogBrewNestRuntimeContext) => Transport;
 
-export type LogBrewRequestLogEvent = {
+type LogBrewRequestLogEvent = {
   id: string;
   timestamp: string;
   type?: "log";
   attributes: LogAttributes;
 };
 
-export type LogBrewRequestSpanEvent = {
+type LogBrewRequestSpanEvent = {
   id: string;
   timestamp: string;
   type: "span";
   attributes: SpanAttributes;
 };
 
-export type LogBrewRequestEvent = LogBrewRequestLogEvent | LogBrewRequestSpanEvent;
+type LogBrewRequestEvent = LogBrewRequestLogEvent | LogBrewRequestSpanEvent;
 
-export type LogBrewErrorEvent = {
+type LogBrewErrorEvent = {
   id: string;
   timestamp: string;
   attributes: IssueAttributes;
 };
 
-export type LogBrewRequestMetricEvent = {
+type LogBrewRequestMetricEvent = {
   id: string;
   timestamp: string;
   attributes: MetricAttributes;
 };
 
-export type LogBrewNestLoggerLevel = "info" | "warning" | "error" | "critical";
+type LogBrewNestLoggerLevel = "info" | "warning" | "error" | "critical";
 
-export type LogBrewNestBaseLogger = {
+type LogBrewNestBaseLogger = {
   log?: (message: unknown, context?: string) => void;
   error?: (message: unknown, stack?: string, context?: string) => void;
   warn?: (message: unknown, context?: string) => void;
@@ -88,22 +84,22 @@ export type LogBrewNestBaseLogger = {
   setLogLevels?: (levels: readonly string[]) => void;
 };
 
-export type LogBrewNestLogger = {
+type LogBrewNestLogger = {
   client: LogBrewClient;
   /** Delivery transport used by flush and shutdown. Defaults to the Node fetch transport. */
   transport: Transport;
-  log(message: unknown, context?: string): void;
-  error(message: unknown, stack?: string, context?: string): void;
-  warn(message: unknown, context?: string): void;
-  debug(message: unknown, context?: string): void;
-  verbose(message: unknown, context?: string): void;
-  fatal(message: unknown, stack?: string, context?: string): void;
-  setLogLevels(levels: readonly string[]): void;
-  flush(): Promise<TransportResponse | null>;
-  shutdown(): Promise<TransportResponse | null>;
+  log: (message: unknown, context?: string) => void;
+  error: (message: unknown, stack?: string, context?: string) => void;
+  warn: (message: unknown, context?: string) => void;
+  debug: (message: unknown, context?: string) => void;
+  verbose: (message: unknown, context?: string) => void;
+  fatal: (message: unknown, stack?: string, context?: string) => void;
+  setLogLevels: (levels: readonly string[]) => void;
+  flush: () => Promise<TransportResponse | null>;
+  shutdown: () => Promise<TransportResponse | null>;
 };
 
-export type LogBrewNestLoggerOptions = CreateLogBrewNestClientConfig & NodeFetchTransportConfig & {
+type LogBrewNestLoggerOptions = CreateLogBrewNestClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient;
   baseLogger?: LogBrewNestBaseLogger;
   logger?: string;
@@ -116,7 +112,14 @@ export type LogBrewNestLoggerOptions = CreateLogBrewNestClientConfig & NodeFetch
   onCaptureError?: (error: unknown) => void | Promise<void>;
 };
 
-export type LogBrewNestOptions = CreateLogBrewNestClientConfig & NodeFetchTransportConfig & {
+type LogBrewNestRequestHookContext = {
+  readonly client: LogBrewClient;
+  readonly durationMs: number;
+  readonly executionContext: ExecutionContext;
+  readonly trace?: Readonly<LogBrewTraceContext> | undefined;
+};
+
+type LogBrewNestOptions = CreateLogBrewNestClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory;
@@ -129,57 +132,59 @@ export type LogBrewNestOptions = CreateLogBrewNestClientConfig & NodeFetchTransp
   traceIdFactory?: (request: Request, response: Response) => string;
   metricName?: string;
   metricIdFactory?: (request: Request, response: Response) => string;
-  requestEvent?: (
-    request: Request,
-    response: Response,
-    context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext; trace?: LogBrewTraceContext }
-  ) => LogBrewRequestEvent;
+  requestEvent?: (request: Request, response: Response, context: LogBrewNestRequestHookContext) => LogBrewRequestEvent;
   requestMetricEvent?: (
     request: Request,
     response: Response,
-    context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext; trace?: LogBrewTraceContext }
+    context: LogBrewNestRequestHookContext
   ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewNestRuntimeContext) => LogBrewErrorEvent;
-  onFlush?: (response: TransportResponse, context: LogBrewNestRuntimeContext) => void | Promise<void>;
+  onFlush?: (response: Readonly<TransportResponse>, context: LogBrewNestRuntimeContext) => void | Promise<void>;
   onCaptureError?: (error: unknown, context: LogBrewNestRuntimeContext) => void | Promise<void>;
 };
 
-export declare function createLogBrewNestClient(config?: CreateLogBrewNestClientConfig): LogBrewClient;
-export declare function createLogBrewNestLogger(options?: LogBrewNestLoggerOptions): LogBrewNestLogger;
-export declare class LogBrewInterceptor implements NestInterceptor {
-  constructor(options?: LogBrewNestOptions);
-  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown>;
+declare function createLogBrewNestClient(config?: CreateLogBrewNestClientConfig): LogBrewClient;
+declare function createLogBrewNestLogger(options?: LogBrewNestLoggerOptions): LogBrewNestLogger;
+declare class LogBrewInterceptor implements NestInterceptor {
+  public constructor(options?: LogBrewNestOptions);
+  public intercept(context: ExecutionContext, next: CallHandler): Observable<unknown>;
 }
-export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
-export declare function createRequestEvent(
-  request: Request,
-  response: Response,
+declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
+declare function createRequestEvent<
+  RequestType extends LogBrewNestRequestLike = Request,
+  ResponseType = Response
+>(
+  request: RequestType,
+  response: ResponseType,
   options?: {
-    now?: () => string;
-    durationMs?: number;
-    idFactory?: (request: Request, response: Response) => string;
-    spanIdFactory?: (request: Request, response: Response) => string;
-    traceIdFactory?: (request: Request, response: Response) => string;
-    trace?: LogBrewTraceContext;
+    readonly now?: (() => string) | undefined;
+    readonly durationMs?: number | undefined;
+    readonly idFactory?: ((request: RequestType, response: ResponseType) => string) | undefined;
+    readonly spanIdFactory?: ((request: RequestType, response: ResponseType) => string) | undefined;
+    readonly traceIdFactory?: ((request: RequestType, response: ResponseType) => string) | undefined;
+    readonly trace?: Readonly<LogBrewTraceContext> | undefined;
   }
 ): LogBrewRequestSpanEvent;
-export declare function createErrorEvent(
+declare function createErrorEvent<RequestType extends LogBrewNestRequestLike = Request>(
   error: unknown,
-  request: Request,
+  request: RequestType,
   options?: {
-    now?: () => string;
-    idFactory?: (error: unknown, request: Request) => string;
-    trace?: LogBrewTraceContext;
+    readonly now?: (() => string) | undefined;
+    readonly idFactory?: ((error: unknown, request: RequestType) => string) | undefined;
+    readonly trace?: Readonly<LogBrewTraceContext> | undefined;
   }
 ): LogBrewErrorEvent;
-export declare function createRequestMetricEvent(
-  request: Request,
-  response: Response,
+declare function createRequestMetricEvent<
+  RequestType extends LogBrewNestRequestLike = Request,
+  ResponseType = Response
+>(
+  request: RequestType,
+  response: ResponseType,
   options?: {
-    now?: () => string;
-    durationMs?: number;
-    idFactory?: (request: Request, response: Response) => string;
-    metricName?: string;
+    readonly now?: (() => string) | undefined;
+    readonly durationMs?: number | undefined;
+    readonly idFactory?: ((request: RequestType, response: ResponseType) => string) | undefined;
+    readonly metricName?: string | undefined;
   }
 ): LogBrewRequestMetricEvent;
 
@@ -201,4 +206,33 @@ declare const defaultExport: {
   LogBrewInterceptor: typeof LogBrewInterceptor;
 };
 
+export type {
+  CreateLogBrewNestClientConfig,
+  LogBrewClientFactory,
+  LogBrewErrorEvent,
+  LogBrewNestBaseLogger,
+  LogBrewNestContext,
+  LogBrewNestLogger,
+  LogBrewNestLoggerLevel,
+  LogBrewNestLoggerOptions,
+  LogBrewNestOptions,
+  LogBrewNestRequestHookContext,
+  LogBrewNestRequestLike,
+  LogBrewNestRuntimeContext,
+  LogBrewRequestEvent,
+  LogBrewRequestLogEvent,
+  LogBrewRequestMetricEvent,
+  LogBrewRequestSpanEvent,
+  LogBrewTransportFactory
+};
+export {
+  createErrorEvent,
+  createLogBrewNestClient,
+  createLogBrewNestLogger,
+  createRequestEvent,
+  createRequestMetricEvent,
+  getActiveLogBrewTrace,
+  LogBrewInterceptor
+};
+export type { LogBrewTraceContext } from "@logbrew/node";
 export default defaultExport;

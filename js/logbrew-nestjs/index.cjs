@@ -1,32 +1,74 @@
 "use strict";
 
-const { catchError, Observable, tap, throwError } = require("rxjs");
 const {
-  SdkError
-} = require("@logbrew/sdk");
+  createErrorEvent,
+  createRequestEvent,
+  createRequestMetricEvent,
+  createRequestTraceContext
+} = require("./events.cjs");
+const { readEnvApiKey, readEnvServerApiKey } = require("./internal.cjs");
+const { createNestLogger } = require("./logger.cjs");
 const {
   createLogBrewNodeClient,
-  createLogBrewTraceContext,
   createNodeFetchTransport,
   getActiveLogBrewTrace,
   runWithLogBrewTrace,
   setLogBrewUser
 } = require("@logbrew/node");
+const { SdkError } = require("@logbrew/sdk");
+const rxjs = require("rxjs");
+
+/**
+ * @import { CallHandler, ExecutionContext, NestInterceptor } from "@nestjs/common"
+ * @import { Request, Response } from "express"
+ * @import { Observable } from "rxjs"
+ * @import { LogBrewTraceContext } from "@logbrew/node"
+ * @import { LogBrewClient, Transport, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   CreateLogBrewNestClientConfig,
+ *   LogBrewNestContext,
+ *   LogBrewNestLogger,
+ *   LogBrewNestLoggerOptions,
+ *   LogBrewNestOptions,
+ *   LogBrewNestRuntimeContext,
+ *   LogBrewRequestEvent,
+ *   LogBrewRequestMetricEvent
+ * } from "./index.cjs"
+ */
+
+/**
+ * @typedef {{
+ *   readonly client: LogBrewClient,
+ *   readonly executionContext: ExecutionContext,
+ *   readonly request: Request,
+ *   readonly response: Response,
+ *   readonly shutdownClient: boolean,
+ *   readonly trace: Readonly<LogBrewTraceContext>,
+ *   readonly transport: Transport
+ * }} InterceptedRequest
+ * @typedef {InterceptedRequest & { readonly startedAt: number }} TimedRequest
+ */
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
 const DEFAULT_SDK_VERSION = "0.1.9";
+const DEFAULT_MAX_RETRIES = 2;
+const MIN_DURATION_MS = 0;
 
+/**
+ * @param {CreateLogBrewNestClientConfig} [config]
+ * @returns {LogBrewClient}
+ */
 function createLogBrewNestClient({
-  serverApiKey,
   apiKey,
   captureRuntimeContext = true,
   context,
+  maxRetries = DEFAULT_MAX_RETRIES,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
-  maxRetries = 2
+  serverApiKey
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();
-  if (!authKey) {
+  if (authKey === undefined || authKey === "") {
     throw new SdkError(
       "configuration_error",
       "createLogBrewNestClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
@@ -34,550 +76,29 @@ function createLogBrewNestClient({
   }
   return createLogBrewNodeClient({
     serverApiKey: authKey,
+
     automaticDelivery: false,
     captureRuntimeContext,
-    context,
+    ...(context === undefined ? {} : { context }),
     sdkName,
     sdkVersion,
+
     maxRetries
   });
 }
 
-class LogBrewInterceptor {
-  constructor(options = {}) {
-    this.options = options;
-    this.defaultTransport = options.transport === undefined
-      ? createNodeFetchTransport(options)
-      : undefined;
-  }
-
-  intercept(executionContext, next) {
-    const http = executionContext.switchToHttp();
-    const request = http.getRequest();
-    const response = http.getResponse();
-    const client = resolveClient(this.options, executionContext, request, response);
-    const transport = resolveTransport(
-      this.options,
-      executionContext,
-      request,
-      response,
-      client,
-      this.defaultTransport
-    );
-    const trace = createRequestTraceContext(request, response, this.options);
-    const shutdownClient = shouldShutdownClient(this.options);
-    const startedAt = nowMs(this.options);
-
-    request.logbrew = createRequestContext(client, transport, trace, shutdownClient);
-
-    return new Observable((subscriber) => runWithLogBrewTrace(trace, () =>
-      next.handle().pipe(
-        tap({
-          complete: () => {
-            if (this.options.captureRequests !== false || this.options.captureRequestMetrics === true) {
-              void captureRequestFinish(this.options, {
-                client,
-                executionContext,
-                request,
-                response,
-                shutdownClient,
-                startedAt,
-                trace,
-                transport
-              });
-            }
-          }
-        }),
-        catchError((error) => {
-          void captureRequestError(this.options, {
-            client,
-            error,
-            executionContext,
-            request,
-            response,
-            shutdownClient,
-            trace,
-            transport
-          });
-          return throwError(() => error);
-        })
-      ).subscribe(subscriber)
-    ));
-  }
-}
-
+/**
+ * @param {LogBrewNestLoggerOptions} [options]
+ * @returns {LogBrewNestLogger}
+ */
 function createLogBrewNestLogger(options = {}) {
-  const client = options.client ?? createLogBrewNestClient(options);
-  const transport = options.transport ?? createNodeFetchTransport(options);
-  const logger = options.logger ?? "nestjs";
-  const now = typeof options.now === "function" ? options.now : () => new Date().toISOString();
-  const idFactory = typeof options.idFactory === "function" ? options.idFactory : defaultLoggerEventId;
-  const onCaptureError = typeof options.onCaptureError === "function" ? options.onCaptureError : () => {};
-  const state = {
-    captured: 0,
-    pendingFlush: Promise.resolve(null)
-  };
-  const baseLogger = options.baseLogger;
-
-  function notifyCaptureError(error) {
-    try {
-      void Promise.resolve(onCaptureError(error)).catch(() => {});
-    } catch {
-      // Logger error handlers must not make application logging throw.
-    }
-  }
-
-  function capture(level, message, context) {
-    try {
-      state.captured += 1;
-      const normalizedLevel = normalizeLoggerLevel(level);
-      const timestamp = now();
-      const metadata = loggerMetadata({
-        context,
-        logger,
-        message,
-        trace: getActiveLogBrewTrace()
-      });
-      const id = idFactory(normalizedLevel, message, context, state.captured);
-
-      if ((normalizedLevel === "error" || normalizedLevel === "critical") && options.captureErrorsAsIssues !== false) {
-        client.issue(id, timestamp, {
-          title: `${context || logger} ${normalizedLevel === "critical" ? "critical" : "error"}`,
-          level: normalizedLevel,
-          message: messageText(message),
-          metadata
-        });
-      } else {
-        client.log(id, timestamp, {
-          message: messageText(message),
-          level: normalizedLevel,
-          logger,
-          metadata
-        });
-      }
-
-      if (options.flushOnCapture === true) {
-        state.pendingFlush = Promise.resolve(client.flush(transport)).catch((error) => {
-          notifyCaptureError(error);
-          return null;
-        });
-      }
-    } catch (error) {
-      notifyCaptureError(error);
-    }
-  }
-
-  return {
-    client,
-    transport,
-    log(message, context) {
-      forwardLoggerCall(baseLogger, "log", [message, context]);
-      capture("info", message, context);
-    },
-    error(message, stack, context) {
-      forwardLoggerCall(baseLogger, "error", [message, stack, context]);
-      capture("error", message, context);
-    },
-    warn(message, context) {
-      forwardLoggerCall(baseLogger, "warn", [message, context]);
-      capture("warning", message, context);
-    },
-    debug(message, context) {
-      forwardLoggerCall(baseLogger, "debug", [message, context]);
-      capture("info", message, context);
-    },
-    verbose(message, context) {
-      forwardLoggerCall(baseLogger, "verbose", [message, context]);
-      capture("info", message, context);
-    },
-    fatal(message, stack, context) {
-      forwardLoggerCall(baseLogger, "fatal", [message, stack, context]);
-      capture("critical", message, context);
-    },
-    setLogLevels(levels) {
-      forwardLoggerCall(baseLogger, "setLogLevels", [levels]);
-    },
-    flush() {
-      if (client.pendingEvents() > 0) {
-        state.pendingFlush = Promise.resolve(client.flush(transport)).catch((error) => {
-          notifyCaptureError(error);
-          return null;
-        });
-      }
-      return state.pendingFlush;
-    },
-    shutdown() {
-      state.pendingFlush = Promise.resolve(client.shutdown(transport)).catch((error) => {
-        notifyCaptureError(error);
-        return null;
-      });
-      return state.pendingFlush;
-    }
-  };
+  return createNestLogger(options, options.client ?? createLogBrewNestClient(options));
 }
 
-function createRequestEvent(request, response, {
-  now = () => new Date().toISOString(),
-  durationMs = 0,
-  idFactory = defaultRequestEventId,
-  spanIdFactory,
-  traceIdFactory,
-  trace
-} = {}) {
-  const method = request.method ?? "GET";
-  const path = getRouteTemplate(request);
-  const statusCode = Number(response.statusCode ?? 0);
-  const id = idFactory(request, response);
-  return createTraceparentRequestSpan(
-    trace ?? getRequestTraceContext(request) ?? createRequestTraceContext(request, response, {
-      spanIdFactory,
-      traceIdFactory
-    }),
-    { durationMs, id, method, now, path, statusCode }
-  );
-}
-
-function createErrorEvent(error, request, {
-  now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId,
-  trace
-} = {}) {
-  const method = request.method ?? "GET";
-  const path = getRequestPath(request);
-  const message = error instanceof Error ? error.message : String(error);
-  const requestTrace = trace ?? getRequestTraceContext(request);
-  return {
-    id: idFactory(error, request),
-    timestamp: now(),
-    attributes: {
-      title: `${method} ${path} failed`,
-      level: "error",
-      message,
-      metadata: {
-        method,
-        path,
-        ...traceMetadata(requestTrace)
-      }
-    }
-  };
-}
-
-function createRequestMetricEvent(request, response, {
-  now = () => new Date().toISOString(),
-  durationMs = 0,
-  idFactory = defaultRequestMetricEventId,
-  metricName = "http.server.duration"
-} = {}) {
-  const method = request.method ?? "GET";
-  const routeTemplate = getRouteTemplate(request);
-  const statusCode = Number(response.statusCode ?? 0);
-  return {
-    id: idFactory(request, response),
-    timestamp: now(),
-    attributes: {
-      name: metricName,
-      description: "Duration of one completed server request.",
-      kind: "histogram",
-      value: Math.max(0, Number(durationMs)),
-      unit: "ms",
-      temporality: "delta",
-      metadata: {
-        framework: "nestjs",
-        method,
-        routeTemplate,
-        statusCode,
-        statusCodeClass: statusCodeClass(statusCode)
-      }
-    }
-  };
-}
-
-function createRequestContext(client, transport, trace, shutdownClient) {
-  return {
-    client,
-    logbrew: client,
-    // Tags every event of this request with an opaque app-owned user ID.
-    setUser: (id, options = {}) => setLogBrewUser(id, { ...options, trace }),
-    trace,
-    transport,
-    previewJson: () => client.previewJson(),
-    flush: () => client.flush(transport),
-    shutdown: () => flushCapturedClient(client, transport, shutdownClient)
-  };
-}
-
-async function captureRequestFinish(options, {
-  client,
-  executionContext,
-  request,
-  response,
-  shutdownClient,
-  startedAt,
-  trace,
-  transport
-}) {
-  try {
-    const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
-    if (options.captureRequests !== false) {
-      const event = typeof options.requestEvent === "function"
-        ? options.requestEvent(request, response, { client, durationMs, executionContext, trace })
-        : createRequestEvent(request, response, { ...options, durationMs, trace });
-      captureRequestEvent(client, event);
-    }
-    if (options.captureRequestMetrics === true) {
-      const metricEvent = typeof options.requestMetricEvent === "function"
-        ? options.requestMetricEvent(request, response, { client, durationMs, executionContext, trace })
-        : createRequestMetricEvent(request, response, {
-          ...options,
-          durationMs,
-          idFactory: options.metricIdFactory
-        });
-      captureRequestMetricEvent(client, metricEvent);
-    }
-    const transportResponse = await flushCapturedClient(client, transport, shutdownClient);
-    await notifyFlush(options, transportResponse, { client, executionContext, request, response, trace });
-  } catch (error) {
-    await notifyFailure(options, error, { client, executionContext, request, response, trace });
-  }
-}
-
-async function captureRequestError(options, {
-  client,
-  error,
-  executionContext,
-  request,
-  response,
-  shutdownClient,
-  trace,
-  transport
-}) {
-  const requestTrace = trace ?? getRequestTraceContext(request) ?? getActiveLogBrewTrace();
-  const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { client, executionContext, request, response, trace: requestTrace })
-    : createErrorEvent(error, request, { ...options, trace: requestTrace });
-
-  try {
-    client.issue(event.id, event.timestamp, event.attributes);
-    const transportResponse = await flushCapturedClient(client, transport, shutdownClient);
-    await notifyFlush(options, transportResponse, { client, executionContext, request, response, trace: requestTrace });
-  } catch (captureError) {
-    await notifyFailure(options, captureError, { client, executionContext, request, response, trace: requestTrace });
-  }
-}
-
-function resolveClient(options, executionContext, request, response) {
-  if (typeof options.client === "function") {
-    return options.client({ executionContext, request, response });
-  }
-  if (options.client) {
-    return options.client;
-  }
-  return createLogBrewNestClient(options);
-}
-
-function resolveTransport(options, executionContext, request, response, client, defaultTransport) {
-  if (typeof options.transport === "function") {
-    return options.transport({ client, executionContext, request, response });
-  }
-  return options.transport ?? defaultTransport;
-}
-
-function shouldShutdownClient(options) {
-  return !options.client;
-}
-
-function flushCapturedClient(client, transport, shutdownClient) {
-  return shutdownClient ? client.shutdown(transport) : client.flush(transport);
-}
-
-async function notifyFlush(options, response, context) {
-  if (typeof options.onFlush === "function") {
-    await options.onFlush(response, context);
-  }
-}
-
-async function notifyFailure(options, error, context) {
-  if (typeof options.onCaptureError === "function") {
-    await options.onCaptureError(error, context);
-  }
-}
-
-function defaultRequestEventId(request, response) {
-  return `evt_nestjs_request_${slugify(`${request.method ?? "GET"}_${getRequestPath(request)}_${response.statusCode ?? 0}`)}`;
-}
-
-function defaultLoggerEventId(level, _message, context, sequence) {
-  return `evt_nestjs_logger_${level}_${slugify(context || "app")}_${sequence}`;
-}
-
-function defaultErrorEventId(error, request) {
-  const message = error instanceof Error ? error.message : String(error);
-  return `evt_nestjs_error_${slugify(`${request.method ?? "GET"}_${getRequestPath(request)}_${message}`)}`;
-}
-
-function defaultRequestMetricEventId(request, response) {
-  return `evt_nestjs_metric_${slugify(`${request.method ?? "GET"}_${getRouteTemplate(request)}_${response.statusCode ?? 0}`)}`;
-}
-
-function getRequestPath(request) {
-  return pathOnly(request.originalUrl ?? request.url ?? "/");
-}
-
-function getRouteTemplate(request) {
-  const routePath = request.route?.path;
-  if (typeof routePath === "string") {
-    const baseUrl = request.baseUrl ?? "";
-    if (baseUrl && routePath.startsWith(baseUrl)) {
-      return pathOnly(routePath);
-    }
-    return pathOnly(`${baseUrl}${routePath}`);
-  }
-  return getRequestPath(request);
-}
-
-function pathOnly(value) {
-  const rawValue = typeof value === "string" ? value : String(value);
-  try {
-    return new URL(rawValue, "http://localhost").pathname || "/";
-  } catch {
-    return rawValue.split("?")[0] || "/";
-  }
-}
-
-function getTraceparentHeader(request) {
-  const value = request.headers?.traceparent;
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return typeof value === "string" ? value : undefined;
-}
-
-function createRequestTraceContext(request, response, {
-  spanIdFactory,
-  traceIdFactory
-} = {}) {
-  return createLogBrewTraceContext(getTraceparentHeader(request), {
-    spanIdFactory: () => spanIdFactory?.(request, response),
-    traceIdFactory: () => traceIdFactory?.(request, response)
-  });
-}
-
-function getRequestTraceContext(request) {
-  return request.logbrew?.trace;
-}
-
-function traceMetadata(trace) {
-  if (!trace) {
-    return {};
-  }
-  return {
-    parentSpanId: trace.parentSpanId,
-    sampled: trace.sampled,
-    spanId: trace.spanId,
-    traceId: trace.traceId
-  };
-}
-
-function loggerMetadata({ context, logger, message, trace }) {
-  return {
-    framework: "nestjs",
-    logger,
-    ...(context ? { context } : {}),
-    ...errorMetadata(message),
-    ...traceMetadata(trace)
-  };
-}
-
-function errorMetadata(message) {
-  if (message instanceof Error) {
-    return { errorType: message.name || "Error" };
-  }
-  return {};
-}
-
-function normalizeLoggerLevel(level) {
-  if (level === "warning" || level === "error" || level === "critical") {
-    return level;
-  }
-  return "info";
-}
-
-function messageText(message) {
-  if (message instanceof Error) {
-    return message.message;
-  }
-  if (typeof message === "string") {
-    return message;
-  }
-  if (typeof message === "number" || typeof message === "boolean" || typeof message === "bigint") {
-    return String(message);
-  }
-  if (message === undefined || message === null) {
-    return String(message);
-  }
-  return Object.prototype.toString.call(message);
-}
-
-function forwardLoggerCall(baseLogger, method, args) {
-  const target = baseLogger?.[method];
-  if (typeof target === "function") {
-    target.apply(baseLogger, args);
-  }
-}
-
-function createTraceparentRequestSpan(traceContext, {
-  durationMs,
-  id,
-  method,
-  now,
-  path,
-  statusCode
-}) {
-  if (!traceContext) {
-    return undefined;
-  }
-
-  return {
-    id,
-    timestamp: now(),
-    type: "span",
-    attributes: {
-      name: `${method} ${path}`,
-      traceId: traceContext.traceId,
-      spanId: traceContext.spanId,
-      parentSpanId: traceContext.parentSpanId,
-      status: statusCode >= 500 ? "error" : "ok",
-      durationMs,
-      metadata: {
-        framework: "nestjs",
-        method,
-        path,
-        sampled: traceContext.sampled,
-        statusCode
-      }
-    }
-  };
-}
-
-function captureRequestEvent(client, event) {
-  if (event.type === "span") {
-    client.span(event.id, event.timestamp, event.attributes);
-    return;
-  }
-  client.log(event.id, event.timestamp, event.attributes);
-}
-
-function captureRequestMetricEvent(client, event) {
-  client.metric(event.id, event.timestamp, event.attributes);
-}
-
-function statusCodeClass(statusCode) {
-  if (!Number.isFinite(statusCode) || statusCode <= 0) {
-    return "unknown";
-  }
-  return `${Math.floor(statusCode / 100)}xx`;
-}
-
+/**
+ * @param {LogBrewNestOptions} options
+ * @returns {number}
+ */
 function nowMs(options) {
   if (typeof options.nowMs === "function") {
     return options.nowMs();
@@ -585,36 +106,259 @@ function nowMs(options) {
   return performance.now();
 }
 
-function readEnvApiKey() {
-  return globalThis.process?.env?.LOGBREW_API_KEY;
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {Omit<LogBrewNestRuntimeContext, "client">} runtime
+ * @returns {LogBrewClient}
+ */
+function resolveClient(options, runtime) {
+  if (typeof options.client === "function") {
+    return options.client(runtime);
+  }
+  if (options.client) {
+    return options.client;
+  }
+  return createLogBrewNestClient(options);
 }
 
-function readEnvServerApiKey() {
-  return globalThis.process?.env?.LOGBREW_SERVER_API_KEY;
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {LogBrewNestRuntimeContext} runtime
+ * @param {Transport | undefined} defaultTransport
+ * @returns {Transport}
+ */
+function resolveTransport(options, runtime, defaultTransport) {
+  if (typeof options.transport === "function") {
+    return options.transport(runtime);
+  }
+  return options.transport ?? defaultTransport ?? createNodeFetchTransport(options);
 }
 
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
+/**
+ * @param {LogBrewClient} client
+ * @param {Transport} transport
+ * @param {boolean} shutdownClient
+ * @returns {Promise<TransportResponse>}
+ */
+async function flushCapturedClient(client, transport, shutdownClient) {
+  return shutdownClient ? client.shutdown(transport) : client.flush(transport);
+}
+
+/**
+ * @param {Readonly<LogBrewTraceContext>} trace
+ * @returns {(id: string, options?: Readonly<{ kind?: "user" | "anonymous" }>) => boolean}
+ */
+function createSetUser(trace) {
+  return (id, options = {}) => setLogBrewUser(id, { ...options, trace });
+}
+
+/**
+ * @param {InterceptedRequest} intercepted
+ * @returns {LogBrewNestContext}
+ */
+function createRequestContext(intercepted) {
+  const { client, shutdownClient, trace, transport } = intercepted;
+  return {
+    client,
+    logbrew: client,
+    setUser: createSetUser(trace),
+    trace,
+    transport,
+
+    previewJson: () => client.previewJson(),
+
+    flush: async () => client.flush(transport),
+    shutdown: async () => flushCapturedClient(client, transport, shutdownClient)
+  };
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {Readonly<TransportResponse>} response
+ * @param {LogBrewNestRuntimeContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFlush(options, response, context) {
+  if (typeof options.onFlush === "function") {
+    await options.onFlush(response, context);
+  }
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {unknown} error
+ * @param {LogBrewNestRuntimeContext} context
+ * @returns {Promise<void>}
+ */
+async function notifyFailure(options, error, context) {
+  if (typeof options.onCaptureError === "function") {
+    await options.onCaptureError(error, context);
+  }
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {InterceptedRequest} intercepted
+ * @param {number} durationMs
+ * @returns {void}
+ */
+function recordFinishedRequest(options, intercepted, durationMs) {
+  const { client, executionContext, request, response, trace } = intercepted;
+  if (options.captureRequests !== false) {
+    /** @type {LogBrewRequestEvent} */
+    const event =
+      typeof options.requestEvent === "function"
+        ? options.requestEvent(request, response, { client, durationMs, executionContext, trace })
+        : createRequestEvent(request, response, { ...options, durationMs, trace });
+    if (event.type === "span") {
+      client.span(event.id, event.timestamp, event.attributes);
+    } else {
+      client.log(event.id, event.timestamp, event.attributes);
+    }
+  }
+  if (options.captureRequestMetrics === true) {
+    /** @type {LogBrewRequestMetricEvent} */
+    const metricEvent =
+      typeof options.requestMetricEvent === "function"
+        ? options.requestMetricEvent(request, response, { client, durationMs, executionContext, trace })
+        : createRequestMetricEvent(request, response, { ...options, durationMs, idFactory: options.metricIdFactory });
+    client.metric(metricEvent.id, metricEvent.timestamp, metricEvent.attributes);
+  }
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {TimedRequest} intercepted
+ * @returns {Promise<void>}
+ */
+async function captureRequestFinish(options, intercepted) {
+  const { client, executionContext, request, response, shutdownClient, startedAt, trace, transport } = intercepted;
+  const runtime = { client, executionContext, request, response, trace };
+  try {
+    const durationMs = Math.max(MIN_DURATION_MS, Math.round(nowMs(options) - startedAt));
+    recordFinishedRequest(options, intercepted, durationMs);
+    await notifyFlush(options, await flushCapturedClient(client, transport, shutdownClient), runtime);
+  } catch (error) {
+    await notifyFailure(options, error, runtime);
+  }
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {InterceptedRequest} intercepted
+ * @param {unknown} error
+ * @returns {Promise<void>}
+ */
+async function captureRequestError(options, intercepted, error) {
+  const { client, executionContext, request, response, shutdownClient, transport } = intercepted;
+  const runtime = { client, executionContext, request, response, trace: intercepted.trace };
+  const event =
+    typeof options.errorEvent === "function"
+      ? options.errorEvent(error, runtime)
+      : createErrorEvent(error, request, { now: options.now, trace: runtime.trace });
+  try {
+    client.issue(event.id, event.timestamp, event.attributes);
+    await notifyFlush(options, await flushCapturedClient(client, transport, shutdownClient), runtime);
+  } catch (captureError) {
+    await notifyFailure(options, captureError, runtime);
+  }
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {InterceptedRequest} intercepted
+ * @returns {(error: unknown) => Observable<never>}
+ */
+function captureAndRethrow(options, intercepted) {
+  return (error) => {
+    void captureRequestError(options, intercepted, error);
+    return rxjs.throwError(() => error);
+  };
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {Transport | undefined} defaultTransport
+ * @param {ExecutionContext} executionContext
+ * @returns {InterceptedRequest}
+ */
+function interceptRequest(options, defaultTransport, executionContext) {
+  const http = executionContext.switchToHttp();
+  /** @type {Request} */
+  const request = http.getRequest();
+  /** @type {Response} */
+  const response = http.getResponse();
+  const client = resolveClient(options, { executionContext, request, response });
+  const transport = resolveTransport(options, { client, executionContext, request, response }, defaultTransport);
+  const trace = createRequestTraceContext(request, response, options);
+  return { client, executionContext, request, response, shutdownClient: !options.client, trace, transport };
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {TimedRequest} intercepted
+ * @param {CallHandler<unknown>} next
+ * @returns {Observable<unknown>}
+ */
+function handleWithCapture(options, intercepted, next) {
+  return next.handle().pipe(
+    rxjs.tap({
+      complete: () => {
+        if (options.captureRequests !== false || options.captureRequestMetrics === true) {
+          void captureRequestFinish(options, intercepted);
+        }
+      }
+    }),
+    rxjs.catchError(captureAndRethrow(options, intercepted))
+  );
+}
+
+/** @implements {NestInterceptor} */
+class LogBrewInterceptor {
+  /**
+   * @param {LogBrewNestOptions} [options]
+   */
+  constructor(options = {}) {
+    /** @readonly */
+    this.options = options;
+    /** @readonly */
+    this.defaultTransport = options.transport === undefined ? createNodeFetchTransport(options) : undefined;
+  }
+
+  /**
+   * @param {ExecutionContext} executionContext
+   * @param {CallHandler<unknown>} next
+   * @returns {Observable<unknown>}
+   */
+  intercept(executionContext, next) {
+    const { defaultTransport, options } = this;
+    const intercepted = interceptRequest(options, defaultTransport, executionContext);
+    const timed = { ...intercepted, startedAt: nowMs(options) };
+    intercepted.request.logbrew = createRequestContext(intercepted);
+    return new rxjs.Observable((subscriber) =>
+      runWithLogBrewTrace(intercepted.trace, () => handleWithCapture(options, timed, next).subscribe(subscriber))
+    );
+  }
 }
 
 module.exports = {
   createErrorEvent,
-  getActiveLogBrewTrace,
-  createLogBrewNestLogger,
   createLogBrewNestClient,
-  createRequestMetricEvent,
+  createLogBrewNestLogger,
   createRequestEvent,
+  createRequestMetricEvent,
+  getActiveLogBrewTrace,
+
   default: {
     createErrorEvent,
-    getActiveLogBrewTrace,
-    createLogBrewNestLogger,
     createLogBrewNestClient,
-    createRequestMetricEvent,
+    createLogBrewNestLogger,
     createRequestEvent,
+    createRequestMetricEvent,
+    getActiveLogBrewTrace,
+
     LogBrewInterceptor
   },
+
   LogBrewInterceptor
 };

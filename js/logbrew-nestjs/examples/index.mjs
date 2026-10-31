@@ -1,51 +1,57 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
-import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
-const commands = {
-  "readme-example": "readme-example.mjs",
-  "real-user-smoke": "real-user-smoke.mjs"
-};
-
-const examplesDir = dirname(fileURLToPath(import.meta.url));
-const command = process.argv[2] ?? "real-user-smoke";
+const COMMAND_ARGUMENT = 2;
+const SUCCESS = 0;
+const FAILURE = 1;
+const launcher = "node_modules/@logbrew/nestjs/examples/index.mjs";
+const commands = new Map([
+  ["readme-example", "readme-example.mjs"],
+  ["real-user-smoke", "real-user-smoke.mjs"]
+]);
+const command = process.argv[COMMAND_ARGUMENT] ?? "real-user-smoke";
 
 if (command === "--help" || command === "-h") {
-  console.log("Usage: node node_modules/@logbrew/nestjs/examples/index.mjs [command]");
-  console.log("");
-  console.log("Commands:");
-  console.log("  readme-example    Run the README-sized NestJS example");
-  console.log("  real-user-smoke   Run the full NestJS real-user smoke example");
-  console.log("");
-  console.log("npm --prefix node_modules/@logbrew/nestjs/examples run readme-example");
-  console.log("npm --prefix node_modules/@logbrew/nestjs/examples run real-user-smoke");
-  console.log("node node_modules/@logbrew/nestjs/examples/index.mjs readme-example");
-  console.log("node node_modules/@logbrew/nestjs/examples/index.mjs real-user-smoke");
-  process.exit(0);
+  process.stdout.write(
+    [
+      `Usage: node ${launcher} [command]`,
+      "",
+      "Commands:",
+      "  readme-example    Run the README-sized NestJS example",
+      "  real-user-smoke   Run the full NestJS real-user smoke example",
+      "",
+      "npm --prefix node_modules/@logbrew/nestjs/examples run readme-example",
+      "npm --prefix node_modules/@logbrew/nestjs/examples run real-user-smoke",
+      `node ${launcher} readme-example`,
+      `node ${launcher} real-user-smoke`,
+      ""
+    ].join("\n")
+  );
+  process.exit(SUCCESS);
 }
 
 if (command === "--list") {
-  for (const [name, file] of Object.entries(commands)) {
-    console.log(`${name} -> node node_modules/@logbrew/nestjs/examples/index.mjs ${name} (${file})`);
+  for (const [name, file] of commands) {
+    process.stdout.write(`${name} -> node ${launcher} ${name} (${file})\n`);
   }
-  process.exit(0);
+  process.exit(SUCCESS);
 }
 
-const file = commands[command];
-if (!file) {
-  console.error(`Unknown command: ${command}`);
-  process.exit(1);
+const file = commands.get(command);
+if (file === undefined) {
+  process.stderr.write(`Unknown command: ${command}\n`);
+  process.exit(FAILURE);
 }
 
-const child = spawn(process.execPath, [join(examplesDir, file)], {
+const child = spawn(process.execPath, [fileURLToPath(new URL(file, import.meta.url))], {
   stdio: "inherit"
 });
 
 child.on("exit", (code, signal) => {
-  if (signal) {
+  if (signal !== null) {
     process.kill(process.pid, signal);
     return;
   }
-  process.exit(code ?? 1);
+  process.exit(code ?? FAILURE);
 });

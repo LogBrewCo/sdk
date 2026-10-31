@@ -19,10 +19,13 @@
     }
   },
   "files": [
+    "events.cjs",
     "index.cjs",
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "internal.cjs",
+    "logger.cjs",
     "README.md",
     "examples"
   ],
@@ -53,6 +56,6 @@
     "rxjs": ">=7"
   },
   "scripts": {
-    "test": "bun ../../scripts/check_js_package_sources.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check events.cjs && node --check internal.cjs && node --check logger.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }
