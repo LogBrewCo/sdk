@@ -1,118 +1,112 @@
-const { SdkError } = require("@logbrew/sdk");
+"use strict";
+
+const {
+  assertBrowserContext,
+  browserMetadata,
+  browserPath,
+  compactMetadata,
+  defaultSanitizeMetadata,
+  defaultWindow,
+  finiteNonNegativeNumber,
+  flushAfterCapture,
+  mergeMetadata,
+  optionsWithTraceContext
+} = require("./browser-events.cjs");
+const { callMethod, isList, isRecord, readField } = require("./values.cjs");
 const {
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
-  optionalBrowserTraceContext
+  optionalBrowserTraceContext,
+  resolveTraceContext
 } = require("./trace-context.cjs");
+const { interactionTimingDetails, interactionToNextPaintDetails, timingEntryType } = require("./interaction-details.cjs");
+const { SdkError } = require("@logbrew/sdk");
+
+/**
+ * @import { SpanAttributes, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   BrowserInteractionTimingInput,
+ *   BrowserInteractionTimingInstrumentation,
+ *   BrowserInteractionTimingObserver,
+ *   BrowserInteractionTimingObserverConstructor,
+ *   BrowserInteractionTimingObserverEntryType,
+ *   BrowserInteractionTimingOptions,
+ *   BrowserInteractionToNextPaintOptions,
+ *   BrowserTraceContext,
+ *   LogBrewBrowserContext,
+ *   LogBrewBrowserEvent
+ * } from "./index.cjs"
+ * @typedef {{
+ *   readonly durationMs: number,
+ *   readonly message: string,
+ *   readonly metadata: Readonly<Record<string, unknown>>,
+ *   readonly name: string
+ * }} InteractionSpan
+ * @typedef {{
+ *   readonly browserWindow: Window | undefined,
+ *   readonly idContext: { readonly entry: BrowserInteractionTimingInput, readonly message: string, readonly path: string },
+ *   readonly options: BrowserInteractionToNextPaintOptions,
+ *   readonly path: string,
+ *   readonly source: string
+ * }} InteractionEventInput
+ * @typedef {{
+ *   readonly context: LogBrewBrowserContext,
+ *   readonly options: BrowserInteractionTimingOptions,
+ *   readonly state: { installed: boolean }
+ * }} InteractionObserverSetup
+ */
 
 const DEFAULT_EVENT_DURATION_THRESHOLD_MS = 40;
 const DEFAULT_MAX_DURATION_MS = 60_000;
 const DEFAULT_MAX_RANKED_INTERACTIONS = 10;
+/** @type {readonly BrowserInteractionTimingObserverEntryType[]} */
 const DEFAULT_OBSERVED_ENTRY_TYPES = ["event", "longtask"];
+/** @type {readonly BrowserInteractionTimingObserverEntryType[]} */
 const DEFAULT_OBSERVED_ENTRY_TYPES_WITH_LONG_ANIMATION_FRAME = ["event", "long-animation-frame"];
+/** @type {ReadonlySet<unknown>} */
+const OBSERVED_ENTRY_TYPES = new Set(["event", "first-input", "long-animation-frame", "longtask"]);
 
-async function captureBrowserInteractionTiming(entry, context, options = {}) {
-  assertBrowserContext(context, "captureBrowserInteractionTiming");
-  const event = createBrowserInteractionTimingEvent(entry, context.browserWindow, optionsWithTraceContext(
-    options,
-    resolveTraceContext(context, options)
-  ));
-
-  context.client.span(event.id, event.timestamp, event.attributes);
-  return flushAfterCapture(context, options);
+/**
+ * @returns {string}
+ */
+function currentTimestamp() {
+  return new Date().toISOString();
 }
 
-async function captureBrowserInteractionToNextPaint(entries, context, options = {}) {
-  assertBrowserContext(context, "captureBrowserInteractionToNextPaint");
-  const event = createBrowserInteractionToNextPaintEvent(entries, context.browserWindow, optionsWithTraceContext(
-    options,
-    resolveTraceContext(context, options)
-  ));
-
-  context.client.span(event.id, event.timestamp, event.attributes);
-  return flushAfterCapture(context, options);
+/**
+ * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @returns {string}
+ */
+function defaultInteractionTimingEventId({ message, path }) {
+  return createAutomaticBrowserEventId("evt_browser_interaction", `${path}_${message}`);
 }
 
-function installLogBrewBrowserInteractionTimingInstrumentation(context, options = {}) {
-  assertBrowserContext(context, "installLogBrewBrowserInteractionTimingInstrumentation");
-  const browserWindow = options.browserWindow ?? context.browserWindow ?? defaultWindow();
-  const PerformanceObserverConstructor = options.performanceObserver
-    ?? browserWindow?.PerformanceObserver
-    ?? globalThis.PerformanceObserver;
-  if (typeof PerformanceObserverConstructor !== "function") {
-    throw new SdkError(
-      "configuration_error",
-      "installLogBrewBrowserInteractionTimingInstrumentation requires PerformanceObserver"
-    );
-  }
-
-  let installed = true;
-  const isInstalled = () => installed;
-  const observers = [];
-  for (const entryType of observedEntryTypes(options, PerformanceObserverConstructor)) {
-    const observer = createInteractionTimingObserver(
-      PerformanceObserverConstructor,
-      entryType,
-      context,
-      options,
-      isInstalled
-    );
-    observeEntryType(observer, entryType, options);
-    observers.push(observer);
-  }
-
-  return {
-    uninstall() {
-      if (!installed) {
-        return;
-      }
-      installed = false;
-      for (const observer of observers) {
-        observer.disconnect?.();
-      }
-    }
-  };
+/**
+ * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @returns {string}
+ */
+function defaultInteractionToNextPaintEventId({ message, path }) {
+  return createAutomaticBrowserEventId("evt_browser_inp", `${path}_${message}`);
 }
 
-function createInteractionTimingObserver(PerformanceObserverConstructor, entryType, context, options, isInstalled) {
-  return new PerformanceObserverConstructor((entryList) => {
-    if (!isInstalled()) {
-      return;
-    }
-    for (const entry of interactionTimingEntries(entryList)) {
-      if (entry.entryType === entryType) {
-        void captureBrowserInteractionTiming(entry, context, options);
-      }
-    }
-  });
-}
-
-function createBrowserInteractionToNextPaintEvent(entries, browserWindow = defaultWindow(), {
-  idFactory = defaultInteractionToNextPaintEventId,
-  includeDocumentTitle = false,
-  includeHash = false,
-  includeQueryString = false,
-  includeUserAgent = false,
-  interactionCount,
-  interactionPathTemplate,
-  maxDurationMs = DEFAULT_MAX_DURATION_MS,
-  maxRankedInteractions = DEFAULT_MAX_RANKED_INTERACTIONS,
-  metadata,
-  now = () => new Date().toISOString(),
-  randomValues,
-  sampled,
-  sanitizeMetadata = defaultSanitizeMetadata,
-  traceContext,
-  traceFlags
-} = {}) {
-  const path = browserPath(browserWindow, { includeHash, includeQueryString });
-  const details = interactionToNextPaintDetails(entries, {
-    interactionCount,
-    interactionPathTemplate,
-    maxDurationMs,
-    maxRankedInteractions,
-    path
-  });
+/**
+ * @param {InteractionEventInput} input
+ * @param {InteractionSpan} span
+ * @returns {LogBrewBrowserEvent<SpanAttributes>}
+ */
+function interactionEvent({ browserWindow, idContext, options, path, source }, span) {
+  const {
+    idFactory = source === "interaction" ? defaultInteractionTimingEventId : defaultInteractionToNextPaintEventId,
+    includeDocumentTitle = false,
+    includeUserAgent = false,
+    metadata,
+    now = currentTimestamp,
+    randomValues,
+    sampled,
+    sanitizeMetadata = defaultSanitizeMetadata,
+    traceContext,
+    traceFlags
+  } = options;
   const parentTraceContext = optionalBrowserTraceContext(traceContext);
   const spanTraceContext = createBrowserTraceContext({
     randomValues,
@@ -120,37 +114,17 @@ function createBrowserInteractionToNextPaintEvent(entries, browserWindow = defau
     traceFlags: parentTraceContext?.traceFlags ?? traceFlags,
     traceId: parentTraceContext?.traceId
   });
-  const baseMetadata = browserMetadata(browserWindow, {
-    includeDocumentTitle,
-    includeUserAgent,
-    path,
-    source: "browser.interaction_to_next_paint"
-  });
-  const timingMetadata = compactMetadata({
-    candidateRank: details.candidateRank,
-    inputDelayMs: details.inputDelayMs,
-    interactionId: details.interactionId,
-    interactionPath: details.interactionPath,
-    interactionType: details.interactionType,
-    maxInteractionDurationMs: details.maxInteractionDurationMs,
-    presentationDelayMs: details.presentationDelayMs,
-    processingDurationMs: details.processingDurationMs,
-    rankedInteractionCount: details.rankedInteractionCount,
-    startTimeMs: details.startTimeMs,
-    viewInteractionCount: details.viewInteractionCount
-  });
-  const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(baseMetadata, metadata), timingMetadata),
-    "interaction"
-  );
+  const baseMetadata = browserMetadata(browserWindow, { includeDocumentTitle, includeUserAgent, path, source: `browser.${source}` });
+  const safeMetadata = sanitizeMetadata(mergeMetadata(mergeMetadata(baseMetadata, metadata), compactMetadata(span.metadata)), "interaction");
   return {
-    id: idFactory({ browserWindow, entry: details.entry, message: details.message, path, source: "interaction_to_next_paint" }),
+    id: idFactory({ browserWindow, ...idContext, source }),
     timestamp: now(),
+
     attributes: {
-      durationMs: details.durationMs,
+      durationMs: span.durationMs,
       metadata: safeMetadata,
-      name: details.name,
-      parentSpanId: parentTraceContext?.spanId,
+      name: span.name,
+      ...(parentTraceContext === undefined ? {} : { parentSpanId: parentTraceContext.spanId }),
       spanId: spanTraceContext.spanId,
       status: "ok",
       traceId: spanTraceContext.traceId
@@ -158,291 +132,136 @@ function createBrowserInteractionToNextPaintEvent(entries, browserWindow = defau
   };
 }
 
-function createBrowserInteractionTimingEvent(entry, browserWindow = defaultWindow(), {
-  idFactory = defaultInteractionTimingEventId,
-  includeDocumentTitle = false,
-  includeHash = false,
-  includeQueryString = false,
-  includeUserAgent = false,
-  interactionPathTemplate,
-  maxDurationMs = DEFAULT_MAX_DURATION_MS,
-  metadata,
-  now = () => new Date().toISOString(),
-  randomValues,
-  sampled,
-  sanitizeMetadata = defaultSanitizeMetadata,
-  traceContext,
-  traceFlags
-} = {}) {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+/**
+ * @param {readonly BrowserInteractionTimingInput[]} entries
+ * @param {Window} [browserWindow]
+ * @param {BrowserInteractionToNextPaintOptions} [options]
+ * @returns {LogBrewBrowserEvent<SpanAttributes>}
+ */
+function createBrowserInteractionToNextPaintEvent(entries, browserWindow = defaultWindow(), options = {}) {
+  const {
+    includeHash = false,
+    includeQueryString = false,
+    interactionCount,
+    interactionPathTemplate,
+    maxDurationMs = DEFAULT_MAX_DURATION_MS,
+    maxRankedInteractions = DEFAULT_MAX_RANKED_INTERACTIONS
+  } = options;
+  const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const settings = { interactionCount, interactionPathTemplate, maxDurationMs, maxRankedInteractions, path };
+  const { durationMs, entry, message, name, ...metadata } = interactionToNextPaintDetails(entries, settings);
+  return interactionEvent(
+    { browserWindow, idContext: { entry, message, path }, options, path, source: "interaction_to_next_paint" },
+    { durationMs, message, metadata, name }
+  );
+}
+
+/**
+ * @param {BrowserInteractionTimingInput} entry
+ * @param {Window} [browserWindow]
+ * @param {BrowserInteractionTimingOptions} [options]
+ * @returns {LogBrewBrowserEvent<SpanAttributes>}
+ */
+function createBrowserInteractionTimingEvent(entry, browserWindow = defaultWindow(), options = {}) {
+  const { includeHash = false, includeQueryString = false, interactionPathTemplate, maxDurationMs = DEFAULT_MAX_DURATION_MS } = options;
+  if (!isRecord(entry)) {
     throw new SdkError("configuration_error", "createBrowserInteractionTimingEvent requires a performance timing entry");
   }
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
-  const details = interactionTimingDetails(entry, interactionPathTemplate, maxDurationMs, path);
-  const parentTraceContext = optionalBrowserTraceContext(traceContext);
-  const spanTraceContext = createBrowserTraceContext({
-    randomValues,
-    sampled: parentTraceContext?.sampled ?? sampled,
-    traceFlags: parentTraceContext?.traceFlags ?? traceFlags,
-    traceId: parentTraceContext?.traceId
-  });
-  const baseMetadata = browserMetadata(browserWindow, {
-    includeDocumentTitle,
-    includeUserAgent,
-    path,
-    source: "browser.interaction"
-  });
-  const timingMetadata = compactMetadata({
-    blockingDurationMs: details.blockingDurationMs,
-    entryType: details.entryType,
-    firstUIEventTimestampMs: details.firstUIEventTimestampMs,
-    inputDelayMs: details.inputDelayMs,
-    interactionId: details.interactionId,
-    interactionPath: details.interactionPath,
-    interactionType: details.interactionType,
-    presentationDelayMs: details.presentationDelayMs,
-    processingDurationMs: details.processingDurationMs,
-    renderStartMs: details.renderStartMs,
-    scriptCount: details.scriptCount,
-    scriptMaxDurationMs: details.scriptMaxDurationMs,
-    scriptTotalDurationMs: details.scriptTotalDurationMs,
-    scriptTotalForcedStyleAndLayoutDurationMs: details.scriptTotalForcedStyleAndLayoutDurationMs,
-    scriptTotalPauseDurationMs: details.scriptTotalPauseDurationMs,
-    startTimeMs: details.startTimeMs,
-    styleAndLayoutStartMs: details.styleAndLayoutStartMs,
-    taskName: details.taskName
-  });
-  const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(baseMetadata, metadata), timingMetadata),
-    "interaction"
+  const { durationMs, message, name, ...metadata } = interactionTimingDetails(entry, { interactionPathTemplate, maxDurationMs, path });
+  return interactionEvent(
+    { browserWindow, idContext: { entry, message, path }, options, path, source: "interaction" },
+    { durationMs, message, metadata, name }
   );
-  return {
-    id: idFactory({ browserWindow, entry, message: details.message, path, source: "interaction" }),
-    timestamp: now(),
-    attributes: {
-      durationMs: details.durationMs,
-      metadata: safeMetadata,
-      name: details.name,
-      parentSpanId: parentTraceContext?.spanId,
-      spanId: spanTraceContext.spanId,
-      status: "ok",
-      traceId: spanTraceContext.traceId
-    }
-  };
 }
 
-function interactionToNextPaintDetails(entries, {
-  interactionCount,
-  interactionPathTemplate,
-  maxDurationMs,
-  maxRankedInteractions,
-  path
-}) {
-  const rankedInteractions = rankedInteractionEntries(entries, {
-    maxDurationMs: validMaxDurationMs(maxDurationMs),
-    maxRankedInteractions: validMaxRankedInteractions(maxRankedInteractions)
-  });
-  if (rankedInteractions.length === 0) {
-    throw new SdkError(
-      "configuration_error",
-      "createBrowserInteractionToNextPaintEvent requires at least one event or first-input entry with interactionId"
-    );
-  }
-  const viewInteractionCount = Math.max(
-    rankedInteractions.length,
-    interactionCount === undefined
-      ? rankedInteractions.length
-      : Math.floor(finiteNonNegativeNumber("interactionCount", interactionCount))
-  );
-  const candidateIndex = Math.min(rankedInteractions.length - 1, Math.floor(viewInteractionCount / 50));
-  const candidate = rankedInteractions[candidateIndex];
-  const interactionPath = templatePath(candidate.entry, interactionPathTemplate, path);
-  const interactionType = normalizeInpInteractionType(candidate.entry.name);
-  return {
-    candidateRank: candidateIndex + 1,
-    durationMs: candidate.durationMs,
-    entry: candidate.entry,
-    inputDelayMs: durationBetween(candidate.entry.startTime, candidate.entry.processingStart),
-    interactionId: candidate.interactionId,
-    interactionPath,
-    interactionType,
-    maxInteractionDurationMs: rankedInteractions[0].durationMs,
-    message: interactionPath,
-    name: `browser.interaction_to_next_paint ${interactionPath}`,
-    presentationDelayMs: durationBetween(
-      candidate.entry.processingEnd,
-      Number(candidate.entry.startTime) + Number(candidate.entry.duration)
-    ),
-    processingDurationMs: durationBetween(candidate.entry.processingStart, candidate.entry.processingEnd),
-    rankedInteractionCount: rankedInteractions.length,
-    startTimeMs: roundedNumber(nonNegativeNumberOrUndefined(candidate.entry.startTime)),
-    viewInteractionCount
-  };
+/**
+ * @template {BrowserInteractionTimingOptions} Options
+ * @param {LogBrewBrowserContext} context
+ * @param {Options} options
+ * @returns {Options & { readonly traceContext: BrowserTraceContext | undefined }}
+ */
+function captureOptions(context, options) {
+  return optionsWithTraceContext(options, resolveTraceContext(context, options));
 }
 
-function rankedInteractionEntries(entries, { maxDurationMs, maxRankedInteractions }) {
-  if (!Array.isArray(entries)) {
-    throw new SdkError("configuration_error", "createBrowserInteractionToNextPaintEvent requires an array of entries");
-  }
-  const byInteractionId = new Map();
-  for (const entry of entries) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      continue;
-    }
-    const entryType = stringOrUndefined(entry.entryType);
-    if (entryType !== "event" && entryType !== "first-input") {
-      continue;
-    }
-    const interactionId = nonNegativeNumberOrUndefined(entry.interactionId);
-    const durationMs = nonNegativeNumberOrUndefined(entry.duration);
-    if (!interactionId || durationMs === undefined || durationMs > maxDurationMs) {
-      continue;
-    }
-    const current = byInteractionId.get(interactionId);
-    if (!current || durationMs > current.durationMs) {
-      byInteractionId.set(interactionId, {
-        durationMs: roundedNumber(durationMs),
-        entry,
-        interactionId
-      });
-    }
-  }
-  return [...byInteractionId.values()]
-    .sort((left, right) => right.durationMs - left.durationMs)
-    .slice(0, maxRankedInteractions);
+/**
+ * @param {BrowserInteractionTimingInput} entry
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserInteractionTimingOptions} [options]
+ * @returns {Promise<TransportResponse | undefined>}
+ */
+async function captureBrowserInteractionTiming(entry, context, options = {}) {
+  assertBrowserContext(context, "captureBrowserInteractionTiming");
+  const event = createBrowserInteractionTimingEvent(entry, context.browserWindow, captureOptions(context, options));
+
+  context.client.span(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
 }
 
-function observeEntryType(observer, entryType, options) {
-  const observedOptions = entryType === "event"
-    ? {
-        buffered: options.buffered !== false,
-        durationThreshold: interactionDurationThreshold(options),
-        type: entryType
-      }
-    : {
-        buffered: options.buffered !== false,
-        type: entryType
-      };
-  try {
-    observer.observe(observedOptions);
-  } catch {
-    observer.observe({ entryTypes: [entryType] });
-  }
+/**
+ * @param {readonly BrowserInteractionTimingInput[]} entries
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserInteractionToNextPaintOptions} [options]
+ * @returns {Promise<TransportResponse | undefined>}
+ */
+async function captureBrowserInteractionToNextPaint(entries, context, options = {}) {
+  assertBrowserContext(context, "captureBrowserInteractionToNextPaint");
+  const event = createBrowserInteractionToNextPaintEvent(entries, context.browserWindow, captureOptions(context, options));
+
+  context.client.span(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
 }
 
-function interactionTimingDetails(entry, interactionPathTemplate, maxDurationMs, path) {
-  const entryType = timingEntryType(entry.entryType);
-  const durationMs = roundedNumber(finiteNonNegativeNumber("performance timing duration", entry.duration));
-  if (durationMs > validMaxDurationMs(maxDurationMs)) {
-    throw new SdkError("configuration_error", "performance timing duration exceeds maxDurationMs");
-  }
-  const interactionPath = templatePath(entry, interactionPathTemplate, path);
-  if (entryType === "event" || entryType === "first-input") {
-    const interactionType = normalizeInteractionType(entry.name);
-    return {
-      durationMs,
-      entryType,
-      inputDelayMs: durationBetween(entry.startTime, entry.processingStart),
-      interactionId: nonNegativeNumberOrUndefined(entry.interactionId),
-      interactionPath,
-      interactionType,
-      message: `${interactionType} ${interactionPath}`,
-      name: `browser.interaction ${interactionType} ${interactionPath}`,
-      presentationDelayMs: durationBetween(entry.processingEnd, Number(entry.startTime) + Number(entry.duration)),
-      processingDurationMs: durationBetween(entry.processingStart, entry.processingEnd),
-      startTimeMs: roundedNumber(nonNegativeNumberOrUndefined(entry.startTime))
-    };
-  }
-  if (entryType === "long-animation-frame") {
-    const scriptSummary = longAnimationFrameScriptSummary(entry.scripts);
-    return {
-      ...scriptSummary,
-      blockingDurationMs: roundedNumber(nonNegativeNumberOrUndefined(entry.blockingDuration)),
-      durationMs,
-      entryType,
-      firstUIEventTimestampMs: roundedNumber(nonNegativeNumberOrUndefined(entry.firstUIEventTimestamp)),
-      interactionPath,
-      message: interactionPath,
-      name: `browser.long_animation_frame ${interactionPath}`,
-      renderStartMs: roundedNumber(nonNegativeNumberOrUndefined(entry.renderStart)),
-      startTimeMs: roundedNumber(nonNegativeNumberOrUndefined(entry.startTime)),
-      styleAndLayoutStartMs: roundedNumber(nonNegativeNumberOrUndefined(entry.styleAndLayoutStart))
-    };
-  }
-  return {
-    durationMs,
-    entryType,
-    interactionPath,
-    message: interactionPath,
-    name: `browser.long_task ${interactionPath}`,
-    startTimeMs: roundedNumber(nonNegativeNumberOrUndefined(entry.startTime)),
-    taskName: stringOrUndefined(entry.name)
-  };
+/**
+ * @param {unknown} value
+ * @returns {value is BrowserInteractionTimingInput[]}
+ */
+function isEntryList(value) {
+  return Array.isArray(value);
 }
 
-async function flushAfterCapture(context, options) {
-  if (options.flushOnCapture === false) {
-    return undefined;
-  }
-  try {
-    const response = await context.client.flush(context.transport);
-    if (typeof options.onFlush === "function") {
-      await options.onFlush(response, context, { reason: "capture" });
-    }
-    return response;
-  } catch (error) {
-    if (typeof options.onCaptureError === "function") {
-      await options.onCaptureError(error, context, { reason: "capture" });
-    }
-    if (options.raiseCaptureErrors === true) {
-      throw error;
-    }
-    return undefined;
-  }
-}
-
-function assertBrowserContext(context, functionName) {
-  if (!context || typeof context !== "object" || !context.client) {
-    throw new SdkError("configuration_error", `${functionName} requires a browser context`);
-  }
-}
-
-function resolveTraceContext(context, options) {
-  if (options.traceContext !== undefined) {
-    return typeof options.traceContext === "function"
-      ? optionalBrowserTraceContext(options.traceContext())
-      : optionalBrowserTraceContext(options.traceContext);
-  }
-  return context.traceContext;
-}
-
-function optionsWithTraceContext(options, traceContext) {
-  return {
-    ...options,
-    traceContext
-  };
-}
-
+/**
+ * @param {unknown} entryList
+ * @returns {BrowserInteractionTimingInput[]}
+ */
 function interactionTimingEntries(entryList) {
-  if (!entryList || typeof entryList.getEntries !== "function") {
+  const hasEntryList = Boolean(entryList);
+  if (!hasEntryList || typeof readField(entryList, "getEntries") !== "function") {
     return [];
   }
-  return entryList.getEntries().filter((entry) => {
-    const entryType = entry?.entryType;
-    return entryType === "event"
-      || entryType === "first-input"
-      || entryType === "long-animation-frame"
-      || entryType === "longtask";
-  });
+  const entries = callMethod(entryList, "getEntries", []);
+  if (!isEntryList(entries)) {
+    throw new TypeError("entryList.getEntries(...).filter is not a function");
+  }
+  return entries.filter((entry) => OBSERVED_ENTRY_TYPES.has(readField(entry, "entryType")));
 }
 
+/**
+ * @param {unknown} PerformanceObserverConstructor
+ * @returns {readonly BrowserInteractionTimingObserverEntryType[]}
+ */
+function defaultObservedEntryTypes(PerformanceObserverConstructor) {
+  const supportedEntryTypes = readField(PerformanceObserverConstructor, "supportedEntryTypes");
+  if (isList(supportedEntryTypes) && callMethod(supportedEntryTypes, "includes", ["long-animation-frame"]) === true) {
+    return DEFAULT_OBSERVED_ENTRY_TYPES_WITH_LONG_ANIMATION_FRAME;
+  }
+  return DEFAULT_OBSERVED_ENTRY_TYPES;
+}
+
+/**
+ * @param {BrowserInteractionTimingOptions} options
+ * @param {unknown} PerformanceObserverConstructor
+ * @returns {readonly BrowserInteractionTimingObserverEntryType[]}
+ */
 function observedEntryTypes(options, PerformanceObserverConstructor) {
   if (options.entryTypes === undefined) {
     return defaultObservedEntryTypes(PerformanceObserverConstructor);
   }
-  if (!Array.isArray(options.entryTypes)) {
+  if (!isList(options.entryTypes)) {
     throw new SdkError("configuration_error", "entryTypes must be an array");
   }
+  /** @type {BrowserInteractionTimingObserverEntryType[]} */
   const unique = [];
   for (const entryType of options.entryTypes) {
     const normalized = timingEntryType(entryType);
@@ -453,249 +272,104 @@ function observedEntryTypes(options, PerformanceObserverConstructor) {
   return unique;
 }
 
-function defaultObservedEntryTypes(PerformanceObserverConstructor) {
-  const supportedEntryTypes = PerformanceObserverConstructor?.supportedEntryTypes;
-  if (Array.isArray(supportedEntryTypes) && supportedEntryTypes.includes("long-animation-frame")) {
-    return DEFAULT_OBSERVED_ENTRY_TYPES_WITH_LONG_ANIMATION_FRAME;
-  }
-  return DEFAULT_OBSERVED_ENTRY_TYPES;
-}
-
+/**
+ * @param {BrowserInteractionTimingOptions} options
+ * @returns {number}
+ */
 function interactionDurationThreshold(options) {
   const threshold = options.interactionDurationThresholdMs ?? DEFAULT_EVENT_DURATION_THRESHOLD_MS;
   return finiteNonNegativeNumber("interactionDurationThresholdMs", threshold);
 }
 
-function timingEntryType(entryType) {
-  const normalized = stringOrUndefined(entryType);
-  if (
-    normalized === "event"
-    || normalized === "first-input"
-    || normalized === "long-animation-frame"
-    || normalized === "longtask"
-  ) {
-    return normalized;
+/**
+ * @param {BrowserInteractionTimingObserver} observer
+ * @param {BrowserInteractionTimingObserverEntryType} entryType
+ * @param {BrowserInteractionTimingOptions} options
+ * @returns {void}
+ */
+function observeEntryType(observer, entryType, options) {
+  const buffered = options.buffered !== false;
+  /** @type {Parameters<BrowserInteractionTimingObserver["observe"]>[0]} */
+  const observedOptions = entryType === "event"
+    ? { buffered, durationThreshold: interactionDurationThreshold(options), type: entryType }
+    : { buffered, type: entryType };
+  try {
+    observer.observe(observedOptions);
+  } catch {
+    observer.observe({ entryTypes: [entryType] });
   }
-  throw new SdkError(
-    "configuration_error",
-    "performance timing entryType must be event, first-input, long-animation-frame, or longtask"
-  );
 }
 
-function longAnimationFrameScriptSummary(scripts) {
-  if (!Array.isArray(scripts)) {
-    return {
-      scriptCount: 0
-    };
-  }
-  const safeScripts = scripts.filter((script) => script && typeof script === "object" && !Array.isArray(script));
-  return {
-    scriptCount: safeScripts.length,
-    scriptMaxDurationMs: maxScriptNumber(safeScripts, "duration"),
-    scriptTotalDurationMs: sumScriptNumbers(safeScripts, "duration"),
-    scriptTotalForcedStyleAndLayoutDurationMs: sumScriptNumbers(safeScripts, "forcedStyleAndLayoutDuration"),
-    scriptTotalPauseDurationMs: sumScriptNumbers(safeScripts, "pauseDuration")
+/**
+ * @param {InteractionObserverSetup} setup
+ * @param {string} entryType
+ * @returns {(entryList: unknown) => void}
+ */
+function interactionEntryHandler({ context, options, state }, entryType) {
+  return (entryList) => {
+    if (!state.installed) {
+      return;
+    }
+    for (const entry of interactionTimingEntries(entryList)) {
+      if (readField(entry, "entryType") === entryType) {
+        void captureBrowserInteractionTiming(entry, context, options);
+      }
+    }
   };
 }
 
-function sumScriptNumbers(scripts, propertyName) {
-  let total = 0;
-  let found = false;
-  for (const script of scripts) {
-    const value = nonNegativeNumberOrUndefined(script[propertyName]);
-    if (value !== undefined) {
-      total += value;
-      found = true;
-    }
-  }
-  return found ? roundedNumber(total) : undefined;
+/**
+ * @param {unknown} value
+ * @returns {value is BrowserInteractionTimingObserverConstructor}
+ */
+function isObserverConstructor(value) {
+  return typeof value === "function";
 }
 
-function maxScriptNumber(scripts, propertyName) {
-  let max;
-  for (const script of scripts) {
-    const value = nonNegativeNumberOrUndefined(script[propertyName]);
-    if (value !== undefined && (max === undefined || value > max)) {
-      max = value;
-    }
+/**
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserInteractionTimingOptions} options
+ * @returns {BrowserInteractionTimingObserverConstructor}
+ */
+function interactionObserverConstructor(context, options) {
+  const browserWindow = options.browserWindow ?? context.browserWindow ?? defaultWindow();
+  const constructor = options.performanceObserver
+    ?? readField(browserWindow, "PerformanceObserver")
+    ?? readField(globalThis, "PerformanceObserver");
+  if (!isObserverConstructor(constructor)) {
+    throw new SdkError(
+      "configuration_error",
+      "installLogBrewBrowserInteractionTimingInstrumentation requires PerformanceObserver"
+    );
   }
-  return roundedNumber(max);
+  return constructor;
 }
 
-function templatePath(entry, interactionPathTemplate, path) {
-  const currentPath = routeTemplatePath(path);
-  if (typeof interactionPathTemplate === "function") {
-    return routeTemplatePath(interactionPathTemplate({
-      entry,
-      entryType: entry.entryType,
-      name: stringOrUndefined(entry.name),
-      path: currentPath
-    }));
-  }
-  if (typeof interactionPathTemplate === "string") {
-    return routeTemplatePath(interactionPathTemplate);
-  }
-  return currentPath;
-}
-
-function browserMetadata(browserWindow, {
-  includeDocumentTitle,
-  includeUserAgent,
-  path,
-  source
-}) {
-  return compactMetadata({
-    documentTitle: includeDocumentTitle ? browserWindow?.document?.title : undefined,
-    path,
-    source,
-    userAgent: includeUserAgent ? browserWindow?.navigator?.userAgent : undefined,
-    visibilityState: browserWindow?.document?.visibilityState
+/**
+ * @param {LogBrewBrowserContext} context
+ * @param {BrowserInteractionTimingOptions} [options]
+ * @returns {BrowserInteractionTimingInstrumentation}
+ */
+function installLogBrewBrowserInteractionTimingInstrumentation(context, options = {}) {
+  assertBrowserContext(context, "installLogBrewBrowserInteractionTimingInstrumentation");
+  const PerformanceObserverConstructor = interactionObserverConstructor(context, options);
+  const setup = { context, options, state: { installed: true } };
+  const observers = observedEntryTypes(options, PerformanceObserverConstructor).map((entryType) => {
+    const observer = new PerformanceObserverConstructor(interactionEntryHandler(setup, entryType));
+    observeEntryType(observer, entryType, options);
+    return observer;
   });
-}
-
-function mergeMetadata(baseMetadata, extraMetadata) {
-  return compactMetadata({
-    ...baseMetadata,
-    ...safeMetadata(extraMetadata)
-  });
-}
-
-function safeMetadata(metadata) {
-  if (metadata === undefined) {
-    return {};
-  }
-  if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") {
-    return {};
-  }
-  return compactMetadata(metadata);
-}
-
-function compactMetadata(metadata) {
-  const compacted = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (value === undefined) {
-      continue;
+  return {
+    uninstall() {
+      if (!setup.state.installed) {
+        return;
+      }
+      setup.state.installed = false;
+      for (const observer of observers) {
+        callMethod(observer, "disconnect", []);
+      }
     }
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) {
-      compacted[key] = value;
-    }
-  }
-  return compacted;
-}
-
-function defaultSanitizeMetadata(metadata) {
-  return safeMetadata(metadata);
-}
-
-function browserPath(browserWindow, { includeHash = false, includeQueryString = false } = {}) {
-  const location = browserWindow?.location;
-  if (!location) {
-    return "/";
-  }
-  const href = typeof location.href === "string" ? location.href : String(location);
-  try {
-    const url = new URL(href, "https://logbrew.example");
-    return `${url.pathname || "/"}${includeQueryString ? url.search : ""}${includeHash ? url.hash : ""}`;
-  } catch {
-    return "/";
-  }
-}
-
-function routeTemplatePath(routeTemplate) {
-  if (typeof routeTemplate !== "string" || routeTemplate.trim() === "") {
-    return "/";
-  }
-  try {
-    const url = new URL(routeTemplate, "https://logbrew.example");
-    return url.pathname || "/";
-  } catch {
-    return "/";
-  }
-}
-
-function normalizeInteractionType(name) {
-  const normalized = stringOrUndefined(name)?.toLowerCase();
-  if (!normalized || !/^[a-z][a-z0-9_.:-]{0,31}$/u.test(normalized)) {
-    return "event";
-  }
-  return normalized;
-}
-
-function normalizeInpInteractionType(name) {
-  const normalized = normalizeInteractionType(name);
-  if (normalized === "click") {
-    return "click";
-  }
-  if (
-    normalized === "keydown"
-    || normalized === "keypress"
-    || normalized === "keyup"
-    || normalized === "input"
-  ) {
-    return "press";
-  }
-  if (
-    normalized === "mousedown"
-    || normalized === "mouseup"
-    || normalized === "pointerdown"
-    || normalized === "pointerup"
-    || normalized === "touchend"
-    || normalized === "touchstart"
-  ) {
-    return "tap";
-  }
-  return normalized;
-}
-
-function validMaxDurationMs(maxDurationMs) {
-  return finiteNonNegativeNumber("maxDurationMs", maxDurationMs);
-}
-
-function validMaxRankedInteractions(maxRankedInteractions) {
-  const value = finiteNonNegativeNumber("maxRankedInteractions", maxRankedInteractions);
-  if (value < 1) {
-    throw new SdkError("configuration_error", "maxRankedInteractions must be at least 1");
-  }
-  return Math.floor(value);
-}
-
-function finiteNonNegativeNumber(label, value) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new SdkError("configuration_error", `${label} must be a non-negative finite number`);
-  }
-  return value;
-}
-
-function nonNegativeNumberOrUndefined(value) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-}
-
-function durationBetween(start, end) {
-  if (typeof start !== "number" || typeof end !== "number" || !Number.isFinite(start) || !Number.isFinite(end)) {
-    return undefined;
-  }
-  const duration = end - start;
-  return duration >= 0 ? roundedNumber(duration) : undefined;
-}
-
-function roundedNumber(value) {
-  return value === undefined ? undefined : Number(value.toFixed(3));
-}
-
-function stringOrUndefined(value) {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function defaultInteractionTimingEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_interaction", `${path}_${message}`);
-}
-
-function defaultInteractionToNextPaintEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_inp", `${path}_${message}`);
-}
-
-function defaultWindow() {
-  return typeof globalThis.window === "object" ? globalThis.window : undefined;
+  };
 }
 
 module.exports = {
