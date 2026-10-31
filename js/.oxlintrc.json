@@ -590,7 +590,10 @@
         "logbrew-js/react-native.js",
         "logbrew-react-native/expo.d.ts",
         "logbrew-react-native/expo.js",
-        "logbrew-react-native/react-native.config.js"
+        "logbrew-react-native/react-native.config.js",
+        "logbrew-react-native/apollo.js",
+        "logbrew-react-native/metro.js",
+        "logbrew-react-native/release-artifacts.js"
       ],
       "rules": {
         "import/no-default-export": "off"
@@ -1122,6 +1125,56 @@
         "import/no-nodejs-modules": "off",
         "node/no-sync": "off",
         "unicorn/prefer-import-meta-properties": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/metro*.cjs",
+        "logbrew-react-native/release-artifacts*.cjs"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/release-artifacts.cjs",
+        "logbrew-react-native/release-artifacts-files.cjs"
+      ],
+      "rules": {
+        "node/no-sync": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/metro-serializer.cjs"
+      ],
+      "rules": {
+        "import/no-dynamic-require": "off",
+        "node/global-require": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/metro-serializer.cjs",
+        "logbrew-react-native/release-artifacts.cjs"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/metro.cjs",
+        "logbrew-react-native/metro-serializer.cjs"
+      ],
+      "rules": {
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 4
+          }
+        ]
       }
     }
   ]

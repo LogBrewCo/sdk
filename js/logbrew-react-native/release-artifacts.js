@@ -1,8 +1,6 @@
 import releaseArtifacts from "./release-artifacts.cjs";
 
-export const prepareLogBrewReactNativeReleaseArtifacts =
-  releaseArtifacts.prepareLogBrewReactNativeReleaseArtifacts;
-export const uploadLogBrewReactNativeReleaseArtifacts =
-  releaseArtifacts.uploadLogBrewReactNativeReleaseArtifacts;
+const { prepareLogBrewReactNativeReleaseArtifacts, uploadLogBrewReactNativeReleaseArtifacts } = releaseArtifacts;
 
+export { prepareLogBrewReactNativeReleaseArtifacts, uploadLogBrewReactNativeReleaseArtifacts };
 export default prepareLogBrewReactNativeReleaseArtifacts;
