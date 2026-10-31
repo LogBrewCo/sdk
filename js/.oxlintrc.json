@@ -395,6 +395,7 @@
               "FetchWithLogBrewSpanOptions",
               "LeaseProgress",
               "LeaseState",
+              "LockProgress",
               "LogBrewAxiosInstrumentableInstance",
               "LogBrewAxiosInstrumentationOptions",
               "LogBrewAxiosSpanOptions",
@@ -424,7 +425,11 @@
               "NodeFetchTransportConfig",
               "QueueBatchOperationWithLogBrewSpanOptions",
               "QueueOperationWithLogBrewSpanOptions",
-              "QueueState"
+              "QueueState",
+              "RecoveryProgress",
+              "RemovalProgress",
+              "StoreState",
+              "WriteProgress"
             ]
           },
           {
