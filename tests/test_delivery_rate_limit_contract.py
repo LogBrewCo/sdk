@@ -41,7 +41,7 @@ FAMILIES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "javascript": (
         ("js/logbrew-js/", "js/logbrew-browser/", "js/logbrew-node/", "js/logbrew-react-native/"),
         (
-            "js/logbrew-js/test/sdk.test.js",
+            "js/logbrew-js/test/automatic-delivery-pause.test.js",
             "js/logbrew-browser/test/beacon-transport.test.mjs",
             "js/logbrew-browser/test/lifecycle-delivery.test.mjs",
             "js/logbrew-node/test/fetch-transport.test.js",
