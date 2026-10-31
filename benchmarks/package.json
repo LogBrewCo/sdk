@@ -15,5 +15,8 @@
     "@sentry/node": "11.10.0",
     "esbuild": "0.28.2",
     "web-vitals": "6.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6"
   }
 }

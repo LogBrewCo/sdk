@@ -1,36 +1,56 @@
-// Bundles the errors and tracing setup of each SDK in size/ with esbuild (bundled, minified, ESM, browser platform) and
-// prints the gzip (level 9) and brotli (quality 11) sizes in bytes.
-// Sizes do not vary between runs, so one build per setup is reported.
-import { readFileSync } from "node:fs";
-import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { brotliCompress, constants, gzip } from "node:zlib";
 import { build } from "esbuild";
+import { promisify } from "node:util";
+import { readField } from "./overhead/fields.js";
+import { readFile } from "node:fs/promises";
 
-const setups = [
-  ["LogBrew", "@logbrew/browser", "size/logbrew-tracing.js"],
-  ["Comparison", "@sentry/browser", "size/comparison-tracing.js"]
+const SETUPS = [
+  { entry: "size/logbrew-tracing.js", packageName: "@logbrew/browser", sdk: "LogBrew" },
+  { entry: "size/comparison-tracing.js", packageName: "@sentry/browser", sdk: "Comparison" }
 ];
-const version = (name) =>
-  JSON.parse(readFileSync(new URL(`node_modules/${name}/package.json`, import.meta.url))).version;
+const GZIP_LEVEL = 9;
+const BROTLI_QUALITY = 11;
+const INDENT = 2;
+const gzipAsync = promisify(gzip);
+const brotliAsync = promisify(brotliCompress);
+
+/**
+ * @param {string} name
+ * @returns {Promise<string>}
+ */
+async function version(name) {
+  /** @type {unknown} */
+  const manifest = JSON.parse(await readFile(new URL(`node_modules/${name}/package.json`, import.meta.url), "utf8"));
+  return String(readField(manifest, "version"));
+}
+
+/**
+ * @param {{ readonly entry: string, readonly packageName: string, readonly sdk: string }} setup
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function measureSetup({ entry, packageName, sdk }) {
+  const result = await build({
+    bundle: true,
+    entryPoints: [new URL(entry, import.meta.url).pathname],
+    format: "esm",
+    logLevel: "silent",
+    minify: true,
+    platform: "browser",
+    write: false
+  });
+  const [output] = result.outputFiles;
+  const code = output?.contents ?? new Uint8Array();
+  const gzipped = await gzipAsync(code, { level: GZIP_LEVEL });
+  const brotli = await brotliAsync(code, {
+    params: { [constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY, [constants.BROTLI_PARAM_SIZE_HINT]: code.length }
+  });
+  return { brotli: brotli.length, gzip: gzipped.length, package: `${packageName}@${await version(packageName)}`, sdk };
+}
 
 const rows = [];
-for (const [sdk, pkg, entry] of setups) {
-  const result = await build({
-    entryPoints: [new URL(entry, import.meta.url).pathname],
-    bundle: true,
-    minify: true,
-    format: "esm",
-    platform: "browser",
-    write: false,
-    logLevel: "silent"
-  });
-  const code = result.outputFiles[0].contents;
-  rows.push({
-    sdk,
-    package: `${pkg}@${version(pkg)}`,
-    gzip: gzipSync(code, { level: 9 }).length,
-    brotli: brotliCompressSync(code, {
-      params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: code.length }
-    }).length
-  });
+for (const setup of SETUPS) {
+  rows.push(await measureSetup(setup));
 }
-console.log(JSON.stringify({ benchmark: "browser-bundle-size", esbuild: version("esbuild"), unit: "bytes", rows }, null, 2));
+process.stdout.write(
+  `${JSON.stringify({ benchmark: "browser-bundle-size", esbuild: await version("esbuild"), rows, unit: "bytes" }, undefined, INDENT)}\n`
+);

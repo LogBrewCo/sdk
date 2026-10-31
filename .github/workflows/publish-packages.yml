@@ -149,7 +149,7 @@ jobs:
 
       - name: Install npm publisher
         run: |
-          bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts
+          bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts --production
           (cd tools/npm-publish && bun audit)
 
       - name: Build native SDK verifier

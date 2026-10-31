@@ -1,46 +1,51 @@
-// The comparison browser SDK with its transport replaced by an in-memory stub.
-// Serialization still runs: createTransport serializes each envelope before the stub.
-import * as Sentry from "@sentry/browser";
+import { captureException, createTransport, flush, init, startSpan } from "@sentry/browser";
+import { countComparisonDelivered } from "./delivered.js";
 
+/**
+ * @import { InternalBaseTransportOptions, Transport, TransportMakeRequestResponse } from "@sentry/core"
+ * @import { Bench } from "./loop.js"
+ */
+
+/** @type {unknown[]} */
 const bodies = [];
-const transport = (options) =>
-  Sentry.createTransport(options, (request) => {
-    bodies.push(request.body);
-    return Promise.resolve({ statusCode: 200 });
-  });
+const DELIVERED = { statusCode: 200 };
+const FLUSH_TIMEOUT_MS = 5000;
+const SAMPLE_EVERY_SPAN = 1;
 
-globalThis.bench = {
+/**
+ * @param {{ readonly body: unknown }} request
+ * @returns {Promise<TransportMakeRequestResponse>}
+ */
+async function makeRequest(request) {
+  bodies.push(request.body);
+  return DELIVERED;
+}
+
+/**
+ * @param {Readonly<InternalBaseTransportOptions>} options
+ * @returns {Transport}
+ */
+function transport(options) {
+  return createTransport(options, makeRequest);
+}
+
+/** @type {Bench} */
+const bench = {
+  delivered: (signal) => countComparisonDelivered(bodies, signal),
+  error(error) {
+    captureException(error);
+  },
+  flush: async () => flush(FLUSH_TIMEOUT_MS),
   init(signal) {
-    Sentry.init({
+    init({
       dsn: "https://examplePublicKey@o0.ingest.sentry.io/0",
       transport,
-      ...(signal === "span" ? { tracesSampleRate: 1.0 } : {})
+      ...(signal === "span" ? { tracesSampleRate: SAMPLE_EVERY_SPAN } : {})
     });
   },
-  error(error) {
-    Sentry.captureException(error);
-  },
   span(name) {
-    Sentry.startSpan({ name }, () => undefined);
-  },
-  flush: () => Sentry.flush(5000),
-  delivered: (signal) => bodies.reduce((count, body) => count + deliveredItems(String(body), signal), 0)
+    startSpan({ name }, () => undefined);
+  }
 };
 
-// Counts the benchmark's error events or spans in one serialized envelope.
-function deliveredItems(envelope, signal) {
-  const lines = envelope.split("\n");
-  let count = 0;
-  for (let i = 1; i < lines.length - 1; i += 2) {
-    const { type } = JSON.parse(lines[i]);
-    const payload = JSON.parse(lines[i + 1]);
-    if (signal === "error" && type === "event") {
-      count += 1;
-    } else if (signal === "span" && type === "span") {
-      count += payload.items.filter((span) => span.name === "checkout.step").length;
-    } else if (signal === "span" && type === "transaction" && payload.transaction === "checkout.step") {
-      count += 1;
-    }
-  }
-  return count;
-}
+export { bench };

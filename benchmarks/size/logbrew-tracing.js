@@ -1,6 +1,3 @@
-// LogBrew browser setup with every documented tracing helper turned on: route changes,
-// fetch and XHR spans with trace propagation, document load, resources, interactions,
-// long tasks, and Web Vitals through the web-vitals package.
 import {
   installLogBrewBrowser,
   installLogBrewBrowserFetchInstrumentation,

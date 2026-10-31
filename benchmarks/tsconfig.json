@@ -1,0 +1,5 @@
+{
+  "extends": "../js/tsconfig.base.json",
+  "compilerOptions": { "lib": ["es2024", "dom"], "paths": {} },
+  "include": ["**/*.js", "**/*.cjs", "**/*.mjs"]
+}

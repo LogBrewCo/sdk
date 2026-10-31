@@ -1,48 +1,113 @@
-// Runs one Node.js measurement in a fresh process and prints one JSON line.
-// Usage: node node-child.mjs <logbrew|comparison> <error|span> <count> <warmup>
 import { Session } from "node:inspector/promises";
 import { runLoop } from "./loop.js";
+import { setImmediate } from "node:timers/promises";
 
-const [adapter, signal, countText, warmupText] = process.argv.slice(2);
+/**
+ * @import { Bench, LoopRun, Signal } from "./loop.js"
+ * @typedef {{ readonly children: readonly SampledNode[], readonly selfSize: number }} SampledNode
+ */
+
+const FIRST_ARGUMENT = 2;
+const HEAP_SAMPLING_INTERVAL_BYTES = 128;
+const NO_BYTES = 0;
+const [adapterName = "", signalText = "", countText = "", warmupText = ""] = process.argv.slice(FIRST_ARGUMENT);
 const count = Number(countText);
 const warmup = Number(warmupText);
-const bench = (await import(`./${adapter}-node.mjs`)).default;
-const nextTask = () =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
-const cpuMicros = () => {
+const session = new Session();
+const progress = { delivered: 0, offset: 0 };
+
+/**
+ * @returns {Promise<Bench>}
+ */
+async function loadBench() {
+  if (adapterName === "logbrew") {
+    const { bench } = await import("./logbrew-node.mjs");
+    return bench;
+  }
+  if (adapterName === "comparison") {
+    const { bench } = await import("./comparison-node.mjs");
+    return bench;
+  }
+  throw new TypeError(`unknown adapter ${adapterName}`);
+}
+
+/**
+ * @param {SampledNode} node
+ * @returns {number}
+ */
+function sampled(node) {
+  return node.selfSize + node.children.reduce((sum, child) => sum + sampled(child), NO_BYTES);
+}
+
+/**
+ * @returns {number}
+ */
+function cpuMicros() {
   const usage = process.cpuUsage();
   return usage.user + usage.system;
-};
-const session = new Session();
-session.connect();
-await session.post("HeapProfiler.enable");
-const sampled = (node) => node.selfSize + node.children.reduce((sum, child) => sum + sampled(child), 0);
-async function allocated(withSdk, offset) {
+}
+
+/**
+ * @returns {Promise<void>}
+ */
+async function nextTask() {
+  await setImmediate();
+}
+
+/**
+ * @param {Signal} signal
+ * @param {number} events
+ * @param {boolean} withSdk
+ * @returns {LoopRun}
+ */
+function nextRun(signal, events, withSdk) {
+  const run = { count: events, offset: progress.offset, signal, withSdk };
+  progress.offset += events;
+  if (withSdk) {
+    progress.delivered += events;
+  }
+  return run;
+}
+
+/**
+ * @param {Bench} bench
+ * @param {Signal} signal
+ * @param {boolean} withSdk
+ * @returns {Promise<number>}
+ */
+async function allocated(bench, signal, withSdk) {
   await session.post("HeapProfiler.startSampling", {
-    samplingInterval: 128,
     includeObjectsCollectedByMajorGC: true,
-    includeObjectsCollectedByMinorGC: true
+    includeObjectsCollectedByMinorGC: true,
+    samplingInterval: HEAP_SAMPLING_INTERVAL_BYTES
   });
-  await runLoop(bench, signal, count, offset, nextTask, withSdk);
+  await runLoop(bench, nextTask, nextRun(signal, count, withSdk));
   const { profile } = await session.post("HeapProfiler.stopSampling");
   return sampled(profile.head);
 }
 
+if (signalText !== "error" && signalText !== "span") {
+  throw new TypeError("Usage: node node-child.mjs <logbrew|comparison> <error|span> <count> <warmup>");
+}
+const signal = signalText;
+const bench = await loadBench();
+session.connect();
+await session.post("HeapProfiler.enable");
 bench.init(signal);
-await runLoop(bench, signal, warmup, 0, nextTask, true);
-const cpu0 = cpuMicros();
-await runLoop(bench, signal, count, warmup, nextTask, false);
-const cpu1 = cpuMicros();
-await runLoop(bench, signal, count, warmup + count, nextTask, true);
-const cpu2 = cpuMicros();
-const baselineBytes = await allocated(false, warmup + 2 * count);
-const sdkBytes = await allocated(true, warmup + 3 * count);
-console.log(JSON.stringify({
-  cpuMicrosPerEvent: (cpu2 - cpu1 - (cpu1 - cpu0)) / count,
-  bytesPerEvent: (sdkBytes - baselineBytes) / count,
-  delivered: bench.delivered(signal),
-  expected: warmup + 2 * count
-}));
-process.exit(0);
+await runLoop(bench, nextTask, nextRun(signal, warmup, true));
+const cpuBefore = cpuMicros();
+await runLoop(bench, nextTask, nextRun(signal, count, false));
+const cpuBaseline = cpuMicros();
+await runLoop(bench, nextTask, nextRun(signal, count, true));
+const cpuWithSdk = cpuMicros();
+const baselineBytes = await allocated(bench, signal, false);
+const sdkBytes = await allocated(bench, signal, true);
+session.disconnect();
+process.stdout.write(
+  `${JSON.stringify({
+    bytesPerEvent: (sdkBytes - baselineBytes) / count,
+    cpuMicrosPerEvent: (cpuWithSdk - cpuBaseline - (cpuBaseline - cpuBefore)) / count,
+    delivered: bench.delivered(signal),
+    expected: progress.delivered
+  })}\n`
+);

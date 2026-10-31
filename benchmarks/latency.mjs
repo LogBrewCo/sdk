@@ -1,105 +1,174 @@
-// Measures, against the LogBrew API, how long a log takes from capture until the read API
-// returns it, and how long a log search takes. It needs your own project keys:
-//   LOGBREW_INGEST_KEY_FILE  a file that holds a server ingest key for a test project
-//   LOGBREW_READ_KEY_FILE    a file that holds a read key for the same project
-// Keys are read from the files and never printed. Usage: node latency.mjs [--quick]
-import { readFileSync } from "node:fs";
-import { setTimeout as sleep } from "node:timers/promises";
 import { createLogBrewNodeClient } from "@logbrew/node";
+import { readField } from "./overhead/fields.js";
+import { readFile } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 
-const quick = process.argv.includes("--quick");
-// Fixed before any result was seen.
-const COUNT = quick ? 3 : 100;
+/**
+ * @typedef {{ readonly acknowledged: number, readonly visible: number }} CaptureSample
+ * @typedef {{ readonly elapsed: number, readonly rows: readonly unknown[] }} SearchResult
+ */
+
+const QUICK_COUNT = 3;
+const FULL_COUNT = 100;
+const COUNT = process.argv.includes("--quick") ? QUICK_COUNT : FULL_COUNT;
 const POLL_MS = 200;
 const TIMEOUT_MS = 60_000;
-const api = process.env.LOGBREW_API_URL ?? "https://api.logbrew.co";
-const keyFile = (name) => {
-  const path = process.env[name];
-  if (!path) {
+const MARKER_ROWS = 5;
+const SEARCH_ROWS = 100;
+const HTTP_OK = 200;
+const HTTP_ACCEPTED = 202;
+const HTTP_TOO_MANY_REQUESTS = 429;
+const MS_PER_SECOND = 1000;
+const DEFAULT_RETRY_SECONDS = 1;
+const PERCENT = 100;
+const MEDIAN_PERCENTILE = 50;
+const TAIL_PERCENTILE = 99;
+const RANK_OFFSET = 1;
+const STEP = 1;
+const BASE36 = 36;
+const INDENT = 2;
+const api = process.env["LOGBREW_API_URL"] ?? "https://api.logbrew.co";
+const run = `lbbench${Date.now().toString(BASE36)}`;
+const stats = { rateLimited: 0 };
+
+/**
+ * @param {string} name
+ * @returns {Promise<string>}
+ */
+async function keyFile(name) {
+  const keyPath = process.env[name] ?? "";
+  if (keyPath === "") {
     throw new Error(`Set ${name} to a key file path.`);
   }
-  return readFileSync(path, "utf8").trim();
-};
-const readKey = keyFile("LOGBREW_READ_KEY_FILE");
-const client = createLogBrewNodeClient({ apiKey: keyFile("LOGBREW_INGEST_KEY_FILE") });
-const run = `lbbench${Date.now().toString(36)}`;
-let rateLimited = 0;
+  const key = await readFile(keyPath, "utf8");
+  return key.trim();
+}
 
-// One read request. Returns the rows and the request's round-trip time in milliseconds.
+const readKey = await keyFile("LOGBREW_READ_KEY_FILE");
+const client = createLogBrewNodeClient({ apiKey: await keyFile("LOGBREW_INGEST_KEY_FILE") });
+
+/**
+ * @param {Response} response
+ * @param {number} elapsed
+ * @returns {Promise<SearchResult>}
+ */
+async function readRows(response, elapsed) {
+  if (!response.ok) {
+    throw new Error(`read API returned ${String(response.status)}`);
+  }
+  /** @type {unknown} */
+  const rows = await response.json();
+  return { elapsed, rows: Array.isArray(rows) ? rows : [] };
+}
+
+/**
+ * @param {string} text
+ * @param {number} limit
+ * @returns {Promise<SearchResult>}
+ */
 async function search(text, limit) {
+  const query = new URLSearchParams({ limit: String(limit), search: text, since: "1h" });
   for (;;) {
     const start = performance.now();
-    const response = await fetch(`${api}/api/logs?${new URLSearchParams({ search: text, since: "1h", limit: String(limit) })}`, {
-      headers: { authorization: `Bearer ${readKey}` }
-    });
+    const response = await fetch(`${api}/api/logs?${query.toString()}`, { headers: { authorization: `Bearer ${readKey}` } });
     const elapsed = performance.now() - start;
-    if (response.status === 429) {
-      rateLimited += 1;
-      await sleep(Number(response.headers.get("retry-after") ?? 1) * 1000);
-      continue;
+    if (response.status !== HTTP_TOO_MANY_REQUESTS) {
+      return readRows(response, elapsed);
     }
-    if (!response.ok) {
-      throw new Error(`read API returned ${response.status}`);
-    }
-    return { rows: await response.json(), elapsed };
+    stats.rateLimited += STEP;
+    await sleep(Number(response.headers.get("retry-after") ?? DEFAULT_RETRY_SECONDS) * MS_PER_SECOND);
   }
 }
 
-const capture = [];
-for (let i = 0; i < COUNT; i += 1) {
-  const marker = `${run}n${i}e`;
-  const start = performance.now();
-  client.log(crypto.randomUUID(), new Date().toISOString(), { message: `benchmark ${marker}`, level: "info", logger: "benchmark" });
-  const sent = await client.flush();
-  const acknowledged = performance.now() - start;
-  if (sent.statusCode !== 200 && sent.statusCode !== 202) {
-    throw new Error(`ingest returned ${sent.statusCode}`);
-  }
+/**
+ * @param {string} marker
+ * @param {number} start
+ * @returns {Promise<number>}
+ */
+async function waitUntilReadable(marker, start) {
   for (;;) {
-    const { rows } = await search(marker, 5);
+    const { rows } = await search(marker, MARKER_ROWS);
     const visible = performance.now() - start;
-    if (rows.some((row) => row.message.includes(marker))) {
-      capture.push({ acknowledged, visible });
-      break;
+    if (rows.some((row) => String(readField(row, "message")).includes(marker))) {
+      return visible;
     }
     if (visible > TIMEOUT_MS) {
-      throw new Error(`log ${i} was not readable after ${TIMEOUT_MS} ms`);
+      throw new Error(`log ${marker} was not readable after ${String(TIMEOUT_MS)} ms`);
     }
     await sleep(POLL_MS);
   }
-  await sleep(POLL_MS);
 }
 
+/**
+ * @param {number} index
+ * @returns {Promise<CaptureSample>}
+ */
+async function captureOne(index) {
+  const marker = `${run}n${String(index)}e`;
+  const start = performance.now();
+  client.log(crypto.randomUUID(), new Date().toISOString(), { level: "info", logger: "benchmark", message: `benchmark ${marker}` });
+  const sent = await client.flush();
+  const acknowledged = performance.now() - start;
+  if (sent.statusCode !== HTTP_OK && sent.statusCode !== HTTP_ACCEPTED) {
+    throw new Error(`ingest returned ${String(sent.statusCode)}`);
+  }
+  const visible = await waitUntilReadable(marker, start);
+  await sleep(POLL_MS);
+  return { acknowledged, visible };
+}
+
+/**
+ * @param {readonly number[]} values
+ * @param {number} rank
+ * @returns {number}
+ */
+function percentile(values, rank) {
+  return values.toSorted((left, right) => left - right)[Math.ceil((rank / PERCENT) * values.length) - RANK_OFFSET] ?? Number.NaN;
+}
+
+/**
+ * @param {readonly number[]} values
+ * @returns {Record<string, number>}
+ */
+function summary(values) {
+  return {
+    max: Math.round(Math.max(...values)),
+    p50: Math.round(percentile(values, MEDIAN_PERCENTILE)),
+    p99: Math.round(percentile(values, TAIL_PERCENTILE)),
+    samples: values.length
+  };
+}
+
+/** @type {CaptureSample[]} */
+const capture = [];
+for (let index = 0; index < COUNT; index += STEP) {
+  capture.push(await captureOne(index));
+}
+/** @type {number[]} */
 const queries = [];
-let found = 0;
-for (let i = 0; i < COUNT; i += 1) {
-  const { rows, elapsed } = await search(run, 100);
+const found = { rows: 0 };
+for (let index = 0; index < COUNT; index += STEP) {
+  const { elapsed, rows } = await search(run, SEARCH_ROWS);
   queries.push(elapsed);
-  found = rows.length;
+  found.rows = rows.length;
   await sleep(POLL_MS);
 }
-if (found !== COUNT) {
-  throw new Error(`search returned ${found} of ${COUNT} logs`);
+if (found.rows !== COUNT) {
+  throw new Error(`search returned ${String(found.rows)} of ${String(COUNT)} logs`);
 }
 await client.shutdown();
-
-// Nearest-rank percentile over every observation.
-const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.ceil((p / 100) * values.length) - 1];
-const summary = (values) => ({
-  p50: Math.round(percentile(values, 50)),
-  p99: Math.round(percentile(values, 99)),
-  max: Math.round(Math.max(...values)),
-  samples: values.length
-});
-console.log(JSON.stringify({
-  benchmark: "ingest-and-query-latency",
+/** @type {unknown} */
+const installed = JSON.parse(await readFile(new URL("node_modules/@logbrew/node/package.json", import.meta.url), "utf8"));
+const report = {
   api,
-  package: `@logbrew/node@${JSON.parse(readFileSync(new URL("node_modules/@logbrew/node/package.json", import.meta.url))).version}`,
-  node: process.version,
-  pollIntervalMs: POLL_MS,
-  rateLimitedRequests: rateLimited,
-  unit: "ms",
+  benchmark: "ingest-and-query-latency",
   captureToAcknowledged: summary(capture.map((sample) => sample.acknowledged)),
   captureToReadable: summary(capture.map((sample) => sample.visible)),
-  searchQuery: summary(queries)
-}, null, 2));
+  node: process.version,
+  package: `@logbrew/node@${String(readField(installed, "version"))}`,
+  pollIntervalMs: POLL_MS,
+  rateLimitedRequests: stats.rateLimited,
+  searchQuery: summary(queries),
+  unit: "ms"
+};
+process.stdout.write(`${JSON.stringify(report, undefined, INDENT)}\n`);

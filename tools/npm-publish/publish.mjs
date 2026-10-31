@@ -1,72 +1,149 @@
+import { argv, version as bunVersion, file, spawn } from "bun";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import path from "node:path";
 import { publish } from "libnpmpublish";
+import { tmpdir } from "node:os";
 
-async function jsonResponse(response, label) {
-  if (!response.ok) throw new Error(`${label} failed with HTTP ${response.status}`);
-  return response.json();
+/**
+ * @import { PackageJson } from "@npm/types"
+ * @typedef {{ readonly headers: Readonly<Record<string, string>>, readonly method?: "POST" }} JsonRequest
+ * @typedef {{ readonly grant: string, readonly manifest: PackageJson, readonly packageDir: string }} PublishTarget
+ */
+
+const FIRST_PACKAGE_ARGUMENT = 2;
+const NO_PACKAGES = 0;
+const SUCCESS_EXIT_CODE = 0;
+const TRANSPARENCY_LOG_TIMEOUT_MS = 60_000;
+
+/**
+ * @param {unknown} value
+ * @returns {value is Readonly<Record<string, unknown>>}
+ */
+function isObjectLike(value) {
+  return typeof value === "object" && value !== null;
 }
 
-async function exchangeGrant(packageName) {
-  const { ACTIONS_ID_TOKEN_REQUEST_TOKEN: requestGrant, ACTIONS_ID_TOKEN_REQUEST_URL: requestUrl } = process.env;
-  if (!requestUrl || !requestGrant) {
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {string}
+ */
+function readString(value, key) {
+  const field = isObjectLike(value) ? value[key] : undefined;
+  return typeof field === "string" ? field : "";
+}
+
+/**
+ * @param {string} url
+ * @param {JsonRequest} request
+ * @param {string} label
+ * @returns {Promise<unknown>}
+ */
+async function fetchJson(url, request, label) {
+  const response = await fetch(url, request);
+  if (!response.ok) {
+    throw new Error(`${label} failed with HTTP ${String(response.status)}`);
+  }
+  /** @type {unknown} */
+  const body = await response.json();
+  return body;
+}
+
+/**
+ * @returns {Promise<string>}
+ */
+async function requestIdentity() {
+  const requestUrl = process.env["ACTIONS_ID_TOKEN_REQUEST_URL"] ?? "";
+  const requestGrant = process.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] ?? "";
+  if (requestUrl === "" || requestGrant === "") {
     throw new Error("GitHub OIDC environment is incomplete");
   }
   const identityUrl = new URL(requestUrl);
   identityUrl.searchParams.set("audience", "npm:registry.npmjs.org");
-  const identity = await jsonResponse(
-    await fetch(identityUrl, {
-      headers: { Accept: "application/json", Authorization: `Bearer ${requestGrant}` },
-    }),
-    "GitHub OIDC request",
+  const identity = readString(
+    await fetchJson(
+      identityUrl.href,
+      { headers: { Accept: "application/json", Authorization: `Bearer ${requestGrant}` } },
+      "GitHub OIDC request"
+    ),
+    "value"
   );
-  if (typeof identity.value !== "string" || !identity.value) {
+  if (identity === "") {
     throw new Error("GitHub OIDC response omitted its identity");
   }
-  const exchange = await jsonResponse(
-    await fetch(
-      `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${packageName.replace("/", "%2f")}`,
-      { method: "POST", headers: { Authorization: `Bearer ${identity.value}` } },
-    ),
-    `npm OIDC exchange for ${packageName}`,
-  );
-  if (typeof exchange.token !== "string" || !exchange.token) {
-    throw new Error(`npm OIDC exchange omitted its grant for ${packageName}`);
-  }
-  return exchange.token;
+  return identity;
 }
 
-const packageDirs = Bun.argv.slice(2).map((path) => resolve(path));
-if (packageDirs.length === 0) throw new Error("At least one package directory is required");
-const manifests = await Promise.all(packageDirs.map(async (path) => {
-  const manifest = await Bun.file(join(path, "package.json")).json();
-  if (typeof manifest.name !== "string" || typeof manifest.version !== "string") {
-    throw new Error("Every package manifest requires name and version");
+/**
+ * @param {string} packageName
+ * @returns {Promise<string>}
+ */
+async function exchangeGrant(packageName) {
+  const identity = await requestIdentity();
+  const exchangeUrl = `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${packageName.replace("/", "%2f")}`;
+  const exchange = await fetchJson(
+    exchangeUrl,
+    { headers: { Authorization: `Bearer ${identity}` }, method: "POST" },
+    `npm OIDC exchange for ${packageName}`
+  );
+  const grant = readString(exchange, "token");
+  if (grant === "") {
+    throw new Error(`npm OIDC exchange omitted its grant for ${packageName}`);
   }
-  return manifest;
-}));
-const grants = await Promise.all(manifests.map(({ name }) => exchangeGrant(name)));
-const scratch = await mkdtemp(join(tmpdir(), "logbrew-npm-publish-"));
+  return grant;
+}
+
+/**
+ * @param {string} packageDir
+ * @returns {Promise<PackageJson>}
+ */
+async function readManifest(packageDir) {
+  /** @type {unknown} */
+  const manifest = await file(path.join(packageDir, "package.json")).json();
+  const name = readString(manifest, "name");
+  const packageVersion = readString(manifest, "version");
+  if (!isObjectLike(manifest) || name === "" || packageVersion === "") {
+    throw new TypeError("Every package manifest requires name and version");
+  }
+  return { ...manifest, name, version: packageVersion };
+}
+
+/**
+ * @param {PublishTarget} target
+ * @param {string} scratch
+ * @returns {Promise<string>}
+ */
+async function publishPackage({ grant, manifest, packageDir }, scratch) {
+  const tarballPath = path.join(scratch, `${manifest.name.replace("/", "-")}.tgz`);
+  const pack = spawn([process.execPath, "pm", "pack", "--ignore-scripts", "--quiet", "--filename", tarballPath], {
+    cwd: packageDir
+  });
+  if ((await pack.exited) !== SUCCESS_EXIT_CODE) {
+    throw new Error(`Bun pack failed for ${manifest.name}`);
+  }
+  await publish(manifest, await readFile(tarballPath), {
+    access: "public",
+    forceAuth: { token: grant },
+    npmVersion: `bun/${bunVersion}`,
+    provenance: true,
+    registry: "https://registry.npmjs.org/",
+    timeout: TRANSPARENCY_LOG_TIMEOUT_MS
+  });
+  return `Published ${manifest.name}@${manifest.version} with npm provenance\n`;
+}
+
+const packageDirs = argv.slice(FIRST_PACKAGE_ARGUMENT).map((packageDir) => path.resolve(packageDir));
+if (packageDirs.length === NO_PACKAGES) {
+  throw new Error("At least one package directory is required");
+}
+const manifests = await Promise.all(packageDirs.map(async (packageDir) => readManifest(packageDir)));
+const grants = await Promise.all(manifests.map(async (manifest) => exchangeGrant(manifest.name)));
+/** @type {readonly PublishTarget[]} */
+const targets = manifests.map((manifest, index) => ({ grant: grants[index] ?? "", manifest, packageDir: packageDirs[index] ?? "" }));
+const scratch = await mkdtemp(path.join(tmpdir(), "logbrew-npm-publish-"));
 try {
-  for (const [index, manifest] of manifests.entries()) {
-    const tarballPath = join(scratch, `${index}.tgz`);
-    const pack = Bun.spawnSync([
-      process.execPath, "pm", "pack", "--ignore-scripts", "--quiet",
-      "--filename", tarballPath,
-    ], { cwd: packageDirs[index] });
-    if (pack.exitCode !== 0) throw new Error(`Bun pack failed for ${manifest.name}`);
-    await publish(manifest, await readFile(tarballPath), {
-      access: "public",
-      npmVersion: `bun/${Bun.version}`,
-      provenance: true,
-      // The provenance signer gives the transparency log 5 seconds by default. When the log is
-      // slower, the entry is still written and the retry fails with 409, so allow a minute.
-      timeout: 60_000,
-      registry: "https://registry.npmjs.org/",
-      forceAuth: { token: grants[index] },
-    });
-    console.log(`Published ${manifest.name}@${manifest.version} with npm provenance`);
+  for (const target of targets) {
+    process.stdout.write(await publishPackage(target, scratch));
   }
 } finally {
   await rm(scratch, { force: true, recursive: true });
