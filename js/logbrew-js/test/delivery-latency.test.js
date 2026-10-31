@@ -1,53 +1,94 @@
-import test from "node:test";
+import { CLIENT_IDENTITY, field, items, parseJson } from "./capture-helpers.js";
+import { LogBrewClient } from "@logbrew/sdk";
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
+import { once } from "node:events";
+import test from "node:test";
 
-import { LogBrewClient } from "../index.js";
+/**
+ * @import { Transport, TransportResponse } from "@logbrew/sdk"
+ */
+
+/**
+ * @typedef {{ readonly at: number, readonly events: number }} TimedSend
+ * @typedef {Transport & { readonly firstSend: Promise<unknown>, readonly sends: TimedSend[] }} TimedTransport
+ */
 
 const timestamp = "2026-06-02T10:00:00Z";
+const ACCEPTED = 202;
+const DELIVERY_DEADLINE_MS = 1500;
+const MIN_BATCH_WINDOW_MS = 900;
+const BURST_SIZE = 20;
+const ONE_REQUEST = 1;
 
+/**
+ * @returns {TimedTransport}
+ */
 function timedTransport() {
+  /** @type {TimedSend[]} */
   const sends = [];
-  let notify;
-  const firstSend = new Promise((resolve) => { notify = resolve; });
+  const notifier = new EventTarget();
   return {
-    sends,
-    firstSend,
+    firstSend: once(notifier, "send"),
+    /**
+     * @param {string} _apiKey
+     * @param {string} body
+     * @returns {TransportResponse}
+     */
     send(_apiKey, body) {
-      sends.push({ at: performance.now(), events: JSON.parse(body).events.length });
-      notify();
-      return { statusCode: 202 };
-    }
+      const payload = parseJson(body);
+      sends.push({ at: performance.now(), events: items(field(payload, "events")).length });
+      notifier.dispatchEvent(new Event("send"));
+      return { attempts: 1, statusCode: ACCEPTED };
+    },
+    sends
   };
 }
 
+/**
+ * @param {Transport} transport
+ * @returns {LogBrewClient}
+ */
 function createClient(transport) {
-  return LogBrewClient.create({ apiKey: "LOGBREW_API_KEY", sdkName: "logbrew-js", sdkVersion: "0.1.0", transport });
+  return LogBrewClient.create({ ...CLIENT_IDENTITY, transport });
 }
 
-const deadline = (ms) => new Promise((resolve) => { setTimeout(resolve, ms).unref?.(); });
+/**
+ * @param {Readonly<Promise<unknown>>} firstSend
+ * @returns {Promise<void>}
+ */
+async function firstSendOrDeadline(firstSend) {
+  const deadline = new AbortController();
+  try {
+    await Promise.race([firstSend, delay(DELIVERY_DEADLINE_MS, undefined, { signal: deadline.signal })]);
+  } finally {
+    deadline.abort();
+  }
+}
 
-test("a single event is delivered within about one second by default", async () => {
+await test("a single event is delivered within about one second by default", async () => {
   const transport = timedTransport();
   const client = createClient(transport);
   const capturedAt = performance.now();
-  client.log("evt_log_001", timestamp, { message: "checkout ready", level: "info" });
+  client.log("evt_log_001", timestamp, { level: "info", message: "checkout ready" });
 
-  await Promise.race([transport.firstSend, deadline(1500)]);
+  await firstSendOrDeadline(transport.firstSend);
 
-  assert.equal(transport.sends.length, 1, "the default interval must deliver one event within 1.5 s");
-  assert.ok(transport.sends[0].at - capturedAt >= 900, "the first event still waits for its batch window");
+  assert.equal(transport.sends.length, ONE_REQUEST, "the default interval must deliver one event within 1.5 s");
+  const [first] = transport.sends;
+  assert.ok(first !== undefined && first.at - capturedAt >= MIN_BATCH_WINDOW_MS, "the first event still waits for its batch window");
   await client.shutdown();
 });
 
-test("a burst inside the delivery window still goes out as one request", async () => {
+await test("a burst inside the delivery window still goes out as one request", async () => {
   const transport = timedTransport();
   const client = createClient(transport);
-  for (let index = 0; index < 20; index += 1) {
-    client.log(`evt_log_${index}`, timestamp, { message: "burst", level: "info" });
+  for (const index of Array.from({ length: BURST_SIZE }).keys()) {
+    client.log(`evt_log_${index}`, timestamp, { level: "info", message: "burst" });
   }
 
-  await Promise.race([transport.firstSend, deadline(1500)]);
+  await firstSendOrDeadline(transport.firstSend);
 
-  assert.deepEqual(transport.sends.map(({ events }) => events), [20]);
+  assert.deepEqual(transport.sends.map(({ events }) => events), [BURST_SIZE]);
   await client.shutdown();
 });
