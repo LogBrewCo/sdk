@@ -1,6 +1,6 @@
-export type LogBrewReactNativeReleaseArtifactPlatform = "android" | "ios";
+type LogBrewReactNativeReleaseArtifactPlatform = "android" | "ios";
 
-export type LogBrewReactNativeReleaseArtifactsOptions = {
+type LogBrewReactNativeReleaseArtifactsOptions = {
   bundle: string;
   platform: LogBrewReactNativeReleaseArtifactPlatform;
   release: string;
@@ -18,7 +18,7 @@ export type LogBrewReactNativeReleaseArtifactsOptions = {
   stripSourcePrefix?: string[];
 };
 
-export type LogBrewReactNativeReleaseArtifactsResult = {
+type LogBrewReactNativeReleaseArtifactsResult = {
   buildDir: string;
   bundlePath: string;
   sourcemapPath: string;
@@ -28,7 +28,7 @@ export type LogBrewReactNativeReleaseArtifactsResult = {
   manifestReport: Record<string, unknown>;
 };
 
-export type LogBrewReactNativeReleaseArtifactUploadOptions = LogBrewReactNativeReleaseArtifactsOptions & {
+type LogBrewReactNativeReleaseArtifactUploadOptions = LogBrewReactNativeReleaseArtifactsOptions & {
   endpoint: string;
   allowHostedUpload?: boolean;
   tokenEnv?: string;
@@ -38,16 +38,27 @@ export type LogBrewReactNativeReleaseArtifactUploadOptions = LogBrewReactNativeR
   timeout?: string | number;
 };
 
-export type LogBrewReactNativeReleaseArtifactUploadResult = LogBrewReactNativeReleaseArtifactsResult & {
+type LogBrewReactNativeReleaseArtifactUploadResult = LogBrewReactNativeReleaseArtifactsResult & {
   uploadReport: Record<string, unknown>;
 };
 
-export declare function prepareLogBrewReactNativeReleaseArtifacts(
+declare function prepareLogBrewReactNativeReleaseArtifacts(
   options: LogBrewReactNativeReleaseArtifactsOptions
 ): LogBrewReactNativeReleaseArtifactsResult;
 
-export declare function uploadLogBrewReactNativeReleaseArtifacts(
+declare function uploadLogBrewReactNativeReleaseArtifacts(
   options: LogBrewReactNativeReleaseArtifactUploadOptions
 ): LogBrewReactNativeReleaseArtifactUploadResult;
 
+export type {
+  LogBrewReactNativeReleaseArtifactPlatform,
+  LogBrewReactNativeReleaseArtifactUploadOptions,
+  LogBrewReactNativeReleaseArtifactUploadResult,
+  LogBrewReactNativeReleaseArtifactsOptions,
+  LogBrewReactNativeReleaseArtifactsResult
+};
+export {
+  prepareLogBrewReactNativeReleaseArtifacts,
+  uploadLogBrewReactNativeReleaseArtifacts
+};
 export default prepareLogBrewReactNativeReleaseArtifacts;

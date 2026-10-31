@@ -1,17 +1,21 @@
 import type { EventStore, LogBrewClient } from "@logbrew/sdk";
+import type {
+  getLogBrewAndroidNativeDiagnosticsStatus,
+  installLogBrewAndroidNativeDiagnostics,
+  uninstallLogBrewAndroidNativeDiagnostics
+} from "./android-native-diagnostics.js";
+import type {
+  getLogBrewAppleNativeDiagnosticsStatus,
+  installLogBrewAppleNativeDiagnostics,
+  replayLogBrewAppleNativeDiagnostics,
+  setLogBrewAppleNativeCrashContext
+} from "./apple-native-diagnostics.js";
 import type { CreateLogBrewReactNativeClientConfig } from "./index.js";
+import type indexDefault from "./index.js";
 
-export * from "./index.js";
-export * from "./apple-native-diagnostics.js";
-export * from "./android-native-diagnostics.js";
-export {
-  installLogBrewReactNativeGlobalErrorHandler,
-  installLogBrewReactNativePromiseRejectionTracker
-} from "./global-errors";
+type ReactNativePersistentQueueMode = "auto" | "required" | "disabled";
 
-export type ReactNativePersistentQueueMode = "auto" | "required" | "disabled";
-
-export type CreateNativeLogBrewReactNativeClientConfig =
+type CreateNativeLogBrewReactNativeClientConfig =
   Omit<CreateLogBrewReactNativeClientConfig, "eventStore"> & ({
     /**
      * `auto` uses the linked app-private native queue when available and otherwise uses memory.
@@ -25,32 +29,124 @@ export type CreateNativeLogBrewReactNativeClientConfig =
     persistentQueue?: never;
   });
 
-export declare function createLogBrewReactNativeClient(
+declare function createLogBrewReactNativeClient(
   config: CreateNativeLogBrewReactNativeClientConfig
 ): LogBrewClient;
 
-export declare function createDefaultLogBrewReactNativeClient(
+declare function createDefaultLogBrewReactNativeClient(
   config: CreateNativeLogBrewReactNativeClientConfig
 ): LogBrewClient;
 
-export declare function purgeLogBrewReactNativePersistentQueue(
+declare function purgeLogBrewReactNativePersistentQueue(
   config: { apiKey?: string; clientKey?: string }
 ): void;
 
 declare const defaultExport: Omit<
-  typeof import("./index.js").default,
+  typeof indexDefault,
   "createLogBrewReactNativeClient" | "createDefaultLogBrewReactNativeClient"
 > & {
   createLogBrewReactNativeClient: typeof createLogBrewReactNativeClient;
   createDefaultLogBrewReactNativeClient: typeof createDefaultLogBrewReactNativeClient;
-  getLogBrewAppleNativeDiagnosticsStatus: typeof import("./apple-native-diagnostics.js").getLogBrewAppleNativeDiagnosticsStatus;
-  getLogBrewAndroidNativeDiagnosticsStatus: typeof import("./android-native-diagnostics.js").getLogBrewAndroidNativeDiagnosticsStatus;
-  installLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").installLogBrewAppleNativeDiagnostics;
-  installLogBrewAndroidNativeDiagnostics: typeof import("./android-native-diagnostics.js").installLogBrewAndroidNativeDiagnostics;
+  getLogBrewAppleNativeDiagnosticsStatus: typeof getLogBrewAppleNativeDiagnosticsStatus;
+  getLogBrewAndroidNativeDiagnosticsStatus: typeof getLogBrewAndroidNativeDiagnosticsStatus;
+  installLogBrewAppleNativeDiagnostics: typeof installLogBrewAppleNativeDiagnostics;
+  installLogBrewAndroidNativeDiagnostics: typeof installLogBrewAndroidNativeDiagnostics;
   purgeLogBrewReactNativePersistentQueue: typeof purgeLogBrewReactNativePersistentQueue;
-  replayLogBrewAppleNativeDiagnostics: typeof import("./apple-native-diagnostics.js").replayLogBrewAppleNativeDiagnostics;
-  setLogBrewAppleNativeCrashContext: typeof import("./apple-native-diagnostics.js").setLogBrewAppleNativeCrashContext;
-  uninstallLogBrewAndroidNativeDiagnostics: typeof import("./android-native-diagnostics.js").uninstallLogBrewAndroidNativeDiagnostics;
+  replayLogBrewAppleNativeDiagnostics: typeof replayLogBrewAppleNativeDiagnostics;
+  setLogBrewAppleNativeCrashContext: typeof setLogBrewAppleNativeCrashContext;
+  uninstallLogBrewAndroidNativeDiagnostics: typeof uninstallLogBrewAndroidNativeDiagnostics;
 };
 
+export type {
+  CaptureAppStateChangeOptions,
+  CaptureReactNativeErrorOptions,
+  CaptureScreenViewOptions,
+  CreateAppStateListenerOptions,
+  CreateLogBrewReactNativeClientConfig,
+  LogBrewNativeActions,
+  LogBrewNativeContextValue,
+  LogBrewNativeProviderProps,
+  ReactNativeActionEvent,
+  ReactNativeActionIdFactoryContext,
+  ReactNativeActionInput,
+  ReactNativeAppStateLike,
+  ReactNativeContextOptions,
+  ReactNativeErrorEvent,
+  ReactNativeErrorIdFactoryContext,
+  ReactNativeFetchLike,
+  ReactNativeFetchResponseLike,
+  ReactNativeFetchTransportConfig,
+  ReactNativeNavigationSpanIdFactoryContext,
+  ReactNativeNavigationSpanInput,
+  ReactNativeNetworkIdFactoryContext,
+  ReactNativeNetworkInput,
+  ReactNativePlatformLike,
+  ReactNativeResourceSpanIdFactoryContext,
+  ReactNativeResourceSpanInput,
+  ReactNativeSpanAttributesInput,
+  ReactNativeSpanEvent,
+  ReactNativeTraceContext,
+  ReactNativeTraceContextConfig,
+  ReactNativeTraceInput,
+  ReactNativeTraceparentConfig,
+  ReactNavigationContainerLike,
+  ReactNavigationRouteLike,
+  ReactNavigationSpanListenerOptions,
+  TracePropagationTarget,
+  TraceparentFetchConfig,
+  TraceparentFetchLike
+} from "./index.js";
+export {
+  LogBrewNativeProvider,
+  bindLogBrewTrace,
+  captureAppStateChange,
+  captureDefaultAppStateChange,
+  captureDefaultReactNativeAction,
+  captureDefaultReactNativeError,
+  captureDefaultReactNativeNetwork,
+  captureDefaultScreenView,
+  captureReactNativeAction,
+  captureReactNativeError,
+  captureReactNativeNavigationSpan,
+  captureReactNativeNetwork,
+  captureReactNativeResourceSpan,
+  captureScreenView,
+  createAppStateListener,
+  createDefaultAppStateListener,
+  createReactNativeActionEvent,
+  createReactNativeErrorEvent,
+  createReactNativeFetchTransport,
+  createReactNativeNavigationSpanEvent,
+  createReactNativeNetworkEvent,
+  createReactNativeResourceSpanEvent,
+  createReactNativeSpanAttributes,
+  createReactNativeTraceContext,
+  createReactNativeTraceHeaders,
+  createReactNativeTraceparent,
+  createReactNavigationSpanListener,
+  createTraceparentFetch,
+  getActiveLogBrewTrace,
+  getDefaultReactNativeContext,
+  getReactNativeContext,
+  getReactNativeTraceMetadata,
+  shouldPropagateTraceparent,
+  useLogBrewNative,
+  useLogBrewNativeActions,
+  withLogBrewTrace
+} from "./index.js";
+export * from "./apple-native-diagnostics.js";
+export * from "./android-native-diagnostics.js";
+export {
+  installLogBrewReactNativeGlobalErrorHandler,
+  installLogBrewReactNativePromiseRejectionTracker
+} from "./global-errors.js";
+export type {
+  CreateNativeLogBrewReactNativeClientConfig,
+  ReactNativePersistentQueueMode
+};
+export {
+  createLogBrewReactNativeClient,
+  createDefaultLogBrewReactNativeClient,
+  purgeLogBrewReactNativePersistentQueue
+};
 export default defaultExport;

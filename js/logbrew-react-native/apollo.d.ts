@@ -1,25 +1,25 @@
 import type { Metadata } from "@logbrew/sdk";
 import type { ReactNativeTraceContext } from "./index.js";
 
-export type ApolloOperationLike = {
+type ApolloOperationLike = {
   operationName?: string;
   query?: {
-    definitions?: ReadonlyArray<{
+    definitions?: readonly {
       kind?: string;
       operation?: string;
       name?: { value?: string };
-    }>;
+    }[];
   };
   setContext?: (context: ((previous: { headers?: Record<string, string> }) => { headers?: Record<string, string> }) | { headers?: Record<string, string> }) => void;
 };
 
-export type ApolloObserverLike<TValue = unknown> = {
+type ApolloObserverLike<TValue = unknown> = {
   next?: (value: TValue) => void;
   error?: (error: unknown) => void;
   complete?: () => void;
 };
 
-export type ApolloObservableLike<TValue = unknown> = {
+type ApolloObservableLike<TValue = unknown> = {
   subscribe: (
     observerOrNext?: ApolloObserverLike<TValue> | ((value: TValue) => void),
     onError?: (error: unknown) => void,
@@ -27,13 +27,13 @@ export type ApolloObservableLike<TValue = unknown> = {
   ) => unknown;
 };
 
-export type ApolloForwardLike<TValue = unknown> = (operation: ApolloOperationLike) => ApolloObservableLike<TValue>;
+type ApolloForwardLike<TValue = unknown> = (operation: ApolloOperationLike) => ApolloObservableLike<TValue>;
 
-export type ApolloLinkConstructor<TLink = unknown, TValue = unknown> = new (
+type ApolloLinkConstructor<TLink = unknown, TValue = unknown> = new (
   request?: (...args: any[]) => any
 ) => TLink;
 
-export type ReactNativeApolloMetadataFactoryContext = {
+type ReactNativeApolloMetadataFactoryContext = {
   durationMs?: number;
   error?: unknown;
   operationName?: string;
@@ -42,7 +42,7 @@ export type ReactNativeApolloMetadataFactoryContext = {
   status: "ok" | "error";
 };
 
-export type ReactNativeApolloLinkOptions<TLink = unknown, TValue = unknown> = {
+type ReactNativeApolloLinkOptions<TLink = unknown, TValue = unknown> = {
   ApolloLink: ApolloLinkConstructor<TLink, TValue>;
   appState?: { currentState?: string };
   metadata?: Metadata;
@@ -58,13 +58,25 @@ export type ReactNativeApolloLinkOptions<TLink = unknown, TValue = unknown> = {
   traceFlags?: string;
 };
 
-export function createReactNativeApolloLink<TLink = unknown, TValue = unknown>(
+declare function createReactNativeApolloLink<TLink = unknown, TValue = unknown>(
   client: { span: (id: string, timestamp: string, attributes: any) => unknown },
   options: ReactNativeApolloLinkOptions<TLink, TValue>
 ): TLink;
 
-declare const _default: {
+declare const defaultExport: {
   createReactNativeApolloLink: typeof createReactNativeApolloLink;
 };
 
-export default _default;
+export type {
+  ApolloForwardLike,
+  ApolloLinkConstructor,
+  ApolloObservableLike,
+  ApolloObserverLike,
+  ApolloOperationLike,
+  ReactNativeApolloLinkOptions,
+  ReactNativeApolloMetadataFactoryContext
+};
+export {
+  createReactNativeApolloLink
+};
+export default defaultExport;

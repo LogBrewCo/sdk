@@ -991,6 +991,61 @@
         "eslint/no-bitwise": "off",
         "node/no-sync": "off"
       }
+    },
+    {
+      "files": [
+        "logbrew-react-native/*.d.ts",
+        "logbrew-react-native/*.d.cts",
+        "logbrew-react-native/types/*.d.ts"
+      ],
+      "rules": {
+        "typescript/method-signature-style": "off",
+        "typescript/no-invalid-void-type": "off",
+        "typescript/prefer-readonly-parameter-types": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/apollo.d.ts",
+        "logbrew-react-native/apollo.d.cts",
+        "logbrew-react-native/global-errors.d.ts",
+        "logbrew-react-native/global-errors.d.cts",
+        "logbrew-react-native/instrumentation.d.ts",
+        "logbrew-react-native/instrumentation.d.cts",
+        "logbrew-react-native/metro.d.ts",
+        "logbrew-react-native/metro.d.cts",
+        "logbrew-react-native/native-bridge.d.ts",
+        "logbrew-react-native/native-bridge.d.cts",
+        "logbrew-react-native/release-artifacts.d.ts",
+        "logbrew-react-native/release-artifacts.d.cts",
+        "logbrew-react-native/apple-native-diagnostics.d.ts",
+        "logbrew-react-native/index.native.d.ts"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/apollo.d.ts",
+        "logbrew-react-native/types/trace.d.ts"
+      ],
+      "rules": {
+        "typescript/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/metro.d.ts"
+      ],
+      "rules": {
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 4
+          }
+        ]
+      }
     }
   ]
 }

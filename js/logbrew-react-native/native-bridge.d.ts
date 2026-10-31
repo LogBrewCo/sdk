@@ -1,7 +1,7 @@
 import type { Metadata } from "@logbrew/sdk";
 import type { ReactNativeTraceInput } from "./index.js";
 
-export type LogBrewNativeBridgeScope = {
+type LogBrewNativeBridgeScope = {
   trace?: {
     traceId: string;
     spanId: string;
@@ -12,7 +12,7 @@ export type LogBrewNativeBridgeScope = {
   metadata: Metadata;
 };
 
-export type LogBrewNativeBridgeLike =
+type LogBrewNativeBridgeLike =
   | ((scope: LogBrewNativeBridgeScope | undefined) => void)
   | {
       setLogBrewScope?: (scope: LogBrewNativeBridgeScope) => void;
@@ -21,7 +21,7 @@ export type LogBrewNativeBridgeLike =
       clearLogBrewTraceContext?: () => void;
     };
 
-export type LogBrewNativeBridgeScopeInput = {
+type LogBrewNativeBridgeScopeInput = {
   logger?: string;
   metadata?: Metadata;
   screen?: string;
@@ -30,7 +30,7 @@ export type LogBrewNativeBridgeScopeInput = {
   trace?: ReactNativeTraceInput;
 };
 
-export type LogBrewAsyncNativeBridgeLike =
+type LogBrewAsyncNativeBridgeLike =
   | ((scope: LogBrewNativeBridgeScope | undefined) => void | PromiseLike<void>)
   | ({
       setLogBrewScope?: (scope: LogBrewNativeBridgeScope) => void | PromiseLike<void>;
@@ -40,24 +40,24 @@ export type LogBrewAsyncNativeBridgeLike =
       | { clearLogBrewTraceContext: () => void | PromiseLike<void> }
     ));
 
-export declare function createLogBrewNativeBridgeScope(
+declare function createLogBrewNativeBridgeScope(
   input?: LogBrewNativeBridgeScopeInput
 ): LogBrewNativeBridgeScope;
-export declare function syncLogBrewNativeBridgeScope(
+declare function syncLogBrewNativeBridgeScope(
   nativeBridge: LogBrewNativeBridgeLike,
   input?: LogBrewNativeBridgeScopeInput
 ): LogBrewNativeBridgeScope;
-export declare function clearLogBrewNativeBridgeScope(
+declare function clearLogBrewNativeBridgeScope(
   nativeBridge: LogBrewNativeBridgeLike
 ): void;
-export declare function withLogBrewNativeBridgeScope<TResult>(
+declare function withLogBrewNativeBridgeScope<TResult>(
   nativeBridge: LogBrewNativeBridgeLike,
-  callback: (scope: LogBrewNativeBridgeScope) => TResult
+  operation: (scope: LogBrewNativeBridgeScope) => TResult
 ): TResult;
-export declare function withLogBrewNativeBridgeScope<TResult>(
+declare function withLogBrewNativeBridgeScope<TResult>(
   nativeBridge: LogBrewNativeBridgeLike,
   input: LogBrewNativeBridgeScopeInput,
-  callback: (scope: LogBrewNativeBridgeScope) => TResult
+  operation: (scope: LogBrewNativeBridgeScope) => TResult
 ): TResult;
 
 /**
@@ -73,14 +73,14 @@ export declare function withLogBrewNativeBridgeScope<TResult>(
  * An unsettled callback keeps its scope and queue slot. There is no timeout or
  * cancellation contract; queued callbacks wait until it settles and native scope is cleared.
  */
-export declare function withLogBrewNativeBridgeScopeAsync<TResult>(
+declare function withLogBrewNativeBridgeScopeAsync<TResult>(
   nativeBridge: LogBrewAsyncNativeBridgeLike,
-  callback: (scope: LogBrewNativeBridgeScope) => TResult
+  operation: (scope: LogBrewNativeBridgeScope) => TResult
 ): Promise<Awaited<TResult>>;
-export declare function withLogBrewNativeBridgeScopeAsync<TResult>(
+declare function withLogBrewNativeBridgeScopeAsync<TResult>(
   nativeBridge: LogBrewAsyncNativeBridgeLike,
   input: LogBrewNativeBridgeScopeInput,
-  callback: (scope: LogBrewNativeBridgeScope) => TResult
+  operation: (scope: LogBrewNativeBridgeScope) => TResult
 ): Promise<Awaited<TResult>>;
 
 declare const defaultExport: {
@@ -91,4 +91,17 @@ declare const defaultExport: {
   withLogBrewNativeBridgeScopeAsync: typeof withLogBrewNativeBridgeScopeAsync;
 };
 
+export type {
+  LogBrewAsyncNativeBridgeLike,
+  LogBrewNativeBridgeLike,
+  LogBrewNativeBridgeScope,
+  LogBrewNativeBridgeScopeInput
+};
+export {
+  createLogBrewNativeBridgeScope,
+  syncLogBrewNativeBridgeScope,
+  clearLogBrewNativeBridgeScope,
+  withLogBrewNativeBridgeScope,
+  withLogBrewNativeBridgeScopeAsync
+};
 export default defaultExport;
