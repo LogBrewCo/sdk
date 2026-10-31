@@ -1,10 +1,19 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { compile } from "svelte/compiler";
-import { render } from "svelte/server";
 import { RecordingTransport } from "@logbrew/sdk";
+import { compileComponent } from "./support.mjs";
 import { createLogBrewSvelteClient } from "@logbrew/svelte";
+import { render } from "svelte/server";
+
+/**
+ * @param {string} text
+ * @returns {number}
+ */
+function countEvents(text) {
+  /** @type {unknown} */
+  const parsed = JSON.parse(text);
+  /** @type {unknown} */
+  const events = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "events") : undefined;
+  return Array.isArray(events) ? events.length : Number.NaN;
+}
 
 const transport = RecordingTransport.alwaysAccept();
 const client = createLogBrewSvelteClient({
@@ -65,33 +74,21 @@ const App = await compileComponent("ReadmeExample.svelte", `
 </script>
 
 <pre>LogBrew Svelte example</pre>
-`);
+`, ".logbrew-svelte-example-");
 
 const rendered = render(App, { props: { client, transport } });
-if (!rendered.html.includes("LogBrew Svelte example")) {
-  throw new Error(`unexpected Svelte render output: ${rendered.html}`);
+if (!rendered.body.includes("LogBrew Svelte example")) {
+  throw new Error(`unexpected Svelte render output: ${rendered.body}`);
 }
 const payload = client.previewJson();
 await client.shutdown(transport);
 
-console.log(payload);
-console.error(JSON.stringify({
+process.stdout.write(`${payload}\n`);
+process.stderr.write(`${JSON.stringify({
   ok: true,
+
   attempts: transport.sentBodies.length,
-  events: JSON.parse(payload).events.length,
+  events: countEvents(payload),
   rendered: true,
   viewHelper: "evt_svelte_view_001"
-}));
-
-async function compileComponent(filename, source) {
-  const dir = await mkdtemp(join(process.cwd(), ".logbrew-svelte-example-"));
-  try {
-    const compiled = compile(source, { generate: "server", filename });
-    const modulePath = join(dir, `${filename}.mjs`);
-    await writeFile(modulePath, compiled.js.code, "utf8");
-    const module = await import(pathToFileURL(modulePath).href);
-    return module.default;
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
-}
+})}\n`);

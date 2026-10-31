@@ -32,7 +32,7 @@ test -f "$browser_tgz"
 test -f "$svelte_tgz"
 
 tar -tzf "$svelte_tgz" > "$tmp_dir/svelte-tarball.txt"
-for packaged_file in README.md index.js index.cjs index.d.ts index.d.cts examples/index.mjs examples/package.json examples/readme-example.mjs examples/real-user-smoke.mjs; do
+for packaged_file in README.md index.js index.cjs index.d.ts index.d.cts capture.js capture.cjs sveltekit.js sveltekit.cjs examples/index.mjs examples/package.json examples/readme-example.mjs examples/real-user-smoke.mjs examples/support.mjs; do
   grep -q "^package/$packaged_file$" "$tmp_dir/svelte-tarball.txt"
 done
 tar -xOf "$svelte_tgz" package/README.md > "$tmp_dir/svelte-readme.md"

@@ -1,9 +1,3 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { compile } from "svelte/compiler";
-import { render } from "svelte/server";
-import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureSvelteError,
   createLogBrewSvelteClient,
@@ -14,14 +8,80 @@ import {
   createTraceparentFetch,
   shouldPropagateTraceparent
 } from "@logbrew/svelte";
+import { compileComponent, readPath } from "./support.mjs";
+import { RecordingTransport } from "@logbrew/sdk";
+import { render } from "svelte/server";
 
-const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
+/**
+ * @typedef {{ readonly endpoint: unknown, readonly init: unknown }} DeliveredRequest
+ * @typedef {{ readonly init: unknown, readonly input: unknown }} PropagatedRequest
+ */
+
+const UNAVAILABLE = 503;
+const ACCEPTED = 202;
+const NO_CONTENT = 204;
+const SERVER_ERROR = 500;
+const REQUEST_STARTED_MS = 100;
+const REQUEST_ENDED_MS = 112;
+const FIRST = 0;
+const SECOND = 1;
+const THIRD = 2;
+const ONE = 1;
+const BYTE_OFFSET = 1;
+
+/**
+ * @param {string | null} text
+ * @returns {unknown}
+ */
+function parseBody(text) {
+  return text === null ? undefined : JSON.parse(text);
+}
+
+/**
+ * @param {string} body
+ * @returns {unknown[]}
+ */
+function eventsInBody(body) {
+  const events = readPath(parseBody(body), ["events"]);
+  return Array.isArray(events) ? events : [];
+}
+
+/**
+ * @param {number} length
+ * @returns {Uint8Array}
+ */
+function deterministicBytes(length) {
+  return Uint8Array.from({ length }, (_value, index) => index + BYTE_OFFSET);
+}
+
+/**
+ * @param {unknown} span
+ * @param {unknown} issue
+ * @returns {boolean}
+ */
+function correlatedEvidence(span, issue) {
+  const frames = readPath(issue, ["attributes", "stackFrames", "length"]);
+  return readPath(span, ["attributes", "metadata", "operation"]) === "http.server"
+    && readPath(issue, ["attributes", "exception", "mechanism", "type"]) === "sveltekit.handle_error"
+    && readPath(issue, ["attributes", "exception", "mechanism", "handled"]) === false
+    && readPath(issue, ["attributes", "exceptionChain", "entries", "length"]) === ONE
+    && !(typeof frames === "number" && frames < ONE)
+    && readPath(issue, ["attributes", "breadcrumbs", "length"]) === ONE
+    && readPath(issue, ["attributes", "breadcrumbs", FIRST, "category"]) === "sveltekit.request"
+    && readPath(issue, ["attributes", "metadata", "routeTemplate"]) === "/orders/[id]"
+    && readPath(issue, ["attributes", "metadata", "errorStack"]) === undefined
+    && readPath(issue, ["attributes", "metadata", "traceId"]) === readPath(span, ["attributes", "traceId"])
+    && readPath(issue, ["attributes", "metadata", "spanId"]) === readPath(span, ["attributes", "spanId"])
+    && readPath(issue, ["attributes", "evidence", "likelyFixArea", "file"]) === "src/lib/orders.js";
+}
+
+const requestTransport = new RecordingTransport([{ statusCode: UNAVAILABLE }, { statusCode: ACCEPTED }]);
 const errorTransport = RecordingTransport.alwaysAccept();
 const client = createLogBrewSvelteClient({
   clientKey: "LOGBREW_CLIENT_KEY",
+  maxRetries: 1,
   sdkName: "svelte-smoke-app",
-  sdkVersion: "0.1.0",
-  maxRetries: 1
+  sdkVersion: "0.1.0"
 });
 
 const App = await compileComponent("Smoke.svelte", `
@@ -76,40 +136,41 @@ const App = await compileComponent("Smoke.svelte", `
 </script>
 
 <pre>LogBrew Svelte smoke</pre>
-`);
+`, ".logbrew-svelte-smoke-");
 
 const rendered = render(App, { props: { client, transport: requestTransport } });
-if (!rendered.html.includes("LogBrew Svelte smoke")) {
-  throw new Error(`unexpected Svelte render output: ${rendered.html}`);
+if (!rendered.body.includes("LogBrew Svelte smoke")) {
+  throw new Error(`unexpected Svelte render output: ${rendered.body}`);
 }
 const payload = client.previewJson();
 await client.shutdown(requestTransport);
 
-let missingContextFailed = false;
+const missingContext = { failed: false };
 const MissingContext = await compileComponent("MissingContext.svelte", `
 <script>
   import { useLogBrew } from "@logbrew/svelte";
   useLogBrew();
 </script>
-`);
+`, ".logbrew-svelte-smoke-");
 try {
-  void render(MissingContext).html;
+  void render(MissingContext).body;
 } catch (error) {
-  if (error?.code !== "configuration_error") {
+  if (readPath(error, ["code"]) !== "configuration_error") {
     throw error;
   }
-  missingContextFailed = true;
+  missingContext.failed = true;
 }
-if (!missingContextFailed) {
+if (!missingContext.failed) {
   throw new Error("expected missing Svelte context to fail");
 }
 
+/** @type {DeliveredRequest[]} */
 const deliveredRequests = [];
 const deliveryContext = createLogBrewSvelteContext({
   clientKey: "LOGBREW_CLIENT_KEY",
   fetchImpl: async (endpoint, init) => {
     deliveredRequests.push({ endpoint, init });
-    return { headers: { get: () => null }, status: 202 };
+    return new Response(undefined, { status: ACCEPTED });
   },
   sdkName: "svelte-delivery-smoke",
   sdkVersion: "0.1.1"
@@ -119,8 +180,8 @@ deliveryContext.client.log("evt_svelte_delivery_001", "2026-06-02T10:00:07Z", {
   message: "Svelte delivery probe"
 });
 await deliveryContext.flush();
-if (deliveredRequests[0]?.endpoint !== "https://api.logbrew.co/v1/events"
-  || deliveredRequests[0]?.init?.headers?.authorization !== "Bearer LOGBREW_CLIENT_KEY") {
+if (readPath(deliveredRequests, [FIRST, "endpoint"]) !== "https://api.logbrew.co/v1/events"
+  || readPath(deliveredRequests, [FIRST, "init", "headers", "authorization"]) !== "Bearer LOGBREW_CLIENT_KEY") {
   throw new Error("expected default authenticated .co delivery");
 }
 
@@ -138,100 +199,82 @@ errorClient.addBreadcrumb({
   message: "/orders/[id]",
   type: "navigation"
 }, "2026-06-02T10:00:08Z");
+const nowValues = [REQUEST_STARTED_MS, REQUEST_ENDED_MS];
 const hooks = createLogBrewSvelteKitHooks(errorContext, {
   evidence: {
-    likelyRootCause: "The order state decoder rejected a valid value.",
-    likelyFixArea: { file: "src/lib/orders.js", function: "decodeOrder", line: 42 }
+    likelyFixArea: { file: "src/lib/orders.js", function: "decodeOrder", line: 42 },
+    likelyRootCause: "The order state decoder rejected a valid value."
   },
   now: () => "2026-06-02T10:00:09Z",
-  nowMs: (() => {
-    const values = [100, 112];
-    return () => values.shift();
-  })(),
+  nowMs: () => nowValues.shift() ?? REQUEST_ENDED_MS,
   randomValues: deterministicBytes
 });
 const requestEvent = {
   request: {
-    headers: {
-      get: (name) => name === "traceparent"
-        ? "00-11111111111111111111111111111111-2222222222222222-01"
-        : null
-    },
+    headers: new Headers({ traceparent: "00-11111111111111111111111111111111-2222222222222222-01" }),
     method: "GET"
   },
   route: { id: "/orders/[id]" }
 };
 const response = await hooks.handle({
   event: requestEvent,
-  resolve: async () => ({ status: 500 })
+  resolve: async () => ({ status: SERVER_ERROR })
 });
-if (response.status !== 500) {
+if (response.status !== SERVER_ERROR) {
   throw new Error("SvelteKit handle changed the app response");
 }
 const malformedResponse = await createLogBrewSvelteKitHooks(errorContext, {
   captureRequests: false,
   randomValues: deterministicBytes
 }).handle({
-  event: { request: { headers: { get: () => "malformed" }, method: "GET" } },
-  resolve: async () => ({ status: 204 })
+  event: { request: { headers: new Headers({ traceparent: "malformed" }), method: "GET" } },
+  resolve: async () => ({ status: NO_CONTENT })
 });
-if (malformedResponse.status !== 204) {
+if (malformedResponse.status !== NO_CONTENT) {
   throw new Error("malformed traceparent changed the app response");
 }
 await hooks.handleError({
   error: new Error("component exploded"),
   event: requestEvent,
   message: "Internal Error",
-  status: 500
+  status: SERVER_ERROR
 });
 
-const errorEvents = errorTransport.sentBodies.flatMap((body) => JSON.parse(body).events);
-const requestSpan = errorEvents.find((event) => event.type === "span");
-const capturedIssue = errorEvents.find((event) => event.type === "issue");
-if (!requestSpan || !capturedIssue
-  || requestSpan.attributes.metadata?.operation !== "http.server"
-  || capturedIssue.attributes.exception?.mechanism?.type !== "sveltekit.handle_error"
-  || capturedIssue.attributes.exception?.mechanism?.handled !== false
-  || capturedIssue.attributes.exceptionChain?.entries?.length !== 1
-  || capturedIssue.attributes.stackFrames?.length < 1
-  || capturedIssue.attributes.breadcrumbs?.length !== 1
-  || capturedIssue.attributes.breadcrumbs[0].category !== "sveltekit.request"
-  || capturedIssue.attributes.metadata?.routeTemplate !== "/orders/[id]"
-  || capturedIssue.attributes.metadata?.errorStack !== undefined
-  || capturedIssue.attributes.metadata?.traceId !== requestSpan.attributes.traceId
-  || capturedIssue.attributes.metadata?.spanId !== requestSpan.attributes.spanId
-  || capturedIssue.attributes.evidence?.likelyFixArea?.file !== "src/lib/orders.js") {
+const errorEvents = errorTransport.sentBodies.flatMap((body) => eventsInBody(body));
+const requestSpan = errorEvents.find((event) => readPath(event, ["type"]) === "span");
+const capturedIssue = errorEvents.find((event) => readPath(event, ["type"]) === "issue");
+if (requestSpan === undefined || capturedIssue === undefined || !correlatedEvidence(requestSpan, capturedIssue)) {
   throw new Error(`unexpected correlated SvelteKit evidence: ${JSON.stringify(errorEvents)}`);
 }
 
 await captureSvelteError(new Error("second component failure"), errorContext, {
   component: "ExplodingSvelteComponent",
-  errorEvent(error) {
-    return createSvelteErrorEvent(error, {
-      component: "ExplodingSvelteComponent",
-      idFactory: () => "evt_svelte_error_002",
-      info: "boundary",
-      now: () => "2026-06-02T10:00:10Z"
-    });
-  }
+  errorEvent: (error) => createSvelteErrorEvent(error, {
+    component: "ExplodingSvelteComponent",
+    idFactory: () => "evt_svelte_error_002",
+    info: "boundary",
+    now: () => "2026-06-02T10:00:10Z"
+  })
 });
-if (JSON.parse(errorTransport.lastBody()).events[0].id !== "evt_svelte_error_002") {
+const lastEvent = readPath(parseBody(errorTransport.lastBody()), ["events", FIRST]);
+if (readPath(lastEvent, ["id"]) !== "evt_svelte_error_002") {
   throw new Error("captureSvelteError must keep the shared context reusable");
 }
-if (JSON.parse(errorTransport.lastBody()).events[0].attributes.breadcrumbs?.length !== 1) {
+if (readPath(lastEvent, ["attributes", "breadcrumbs", "length"]) !== ONE) {
   throw new Error("component capture must retain its client breadcrumbs");
 }
 
+/** @type {PropagatedRequest[]} */
 const propagatedRequests = [];
 const tracedFetch = createTraceparentFetch({
   fetchImpl: async (input, init = {}) => {
-    propagatedRequests.push({ input, init });
-    return { status: 204 };
+    propagatedRequests.push({ init, input });
+    return new Response(undefined, { status: NO_CONTENT });
   },
+  tracePropagationTargets: ["https://api.example.test/", /^\/api\//u],
   traceparentFactory: () => createSvelteTraceparent({
     randomValues: deterministicBytes
-  }),
-  tracePropagationTargets: ["https://api.example.test/", /^\/api\//u]
+  })
 });
 if (!shouldPropagateTraceparent("https://api.example.test/checkout", ["https://api.example.test/"])) {
   throw new Error("expected API request to match trace propagation target");
@@ -246,45 +289,31 @@ await tracedFetch("https://cdn.example.test/app.js", {
   headers: { accept: "text/javascript" }
 });
 await tracedFetch("/api/cart");
-const propagatedTraceparent = propagatedRequests[0].init.headers.traceparent;
+const propagatedTraceparent = readPath(propagatedRequests, [FIRST, "init", "headers", "traceparent"]);
 if (propagatedTraceparent !== "00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01") {
-  throw new Error(`unexpected propagated traceparent: ${propagatedTraceparent}`);
+  throw new Error(`unexpected propagated traceparent: ${String(propagatedTraceparent)}`);
 }
-if (propagatedRequests[0].init.headers.accept !== "application/json") {
+if (readPath(propagatedRequests, [FIRST, "init", "headers", "accept"]) !== "application/json") {
   throw new Error("expected traced fetch to preserve existing headers");
 }
-if (propagatedRequests[1].init.headers?.traceparent !== undefined) {
+if (readPath(propagatedRequests, [SECOND, "init", "headers", "traceparent"]) !== undefined) {
   throw new Error("unmatched requests should not receive traceparent");
 }
-if (propagatedRequests[2].init.headers.traceparent !== propagatedTraceparent) {
+if (readPath(propagatedRequests, [THIRD, "init", "headers", "traceparent"]) !== propagatedTraceparent) {
   throw new Error("relative matched requests should receive traceparent");
 }
 
-console.log(payload);
-console.error(JSON.stringify({
+const eventCount = readPath(parseBody(payload), ["events", "length"]);
+const issueEvidence = readPath(capturedIssue, ["attributes", "stackFrames", "length"]);
+process.stdout.write(`${payload}\n`);
+process.stderr.write(`${JSON.stringify({
   ok: true,
+
   attempts: requestTransport.sentBodies.length,
   defaultDelivery: deliveredRequests.length,
-  events: JSON.parse(payload).events.length,
-  issueEvidence: capturedIssue.attributes.stackFrames.length,
-  missingContextFailed,
+  events: eventCount,
+  issueEvidence,
+  missingContextFailed: missingContext.failed,
   propagatedTraceparent,
   rendered: true
-}));
-
-async function compileComponent(filename, source) {
-  const dir = await mkdtemp(join(process.cwd(), ".logbrew-svelte-smoke-"));
-  try {
-    const compiled = compile(source, { generate: "server", filename });
-    const modulePath = join(dir, `${filename}.mjs`);
-    await writeFile(modulePath, compiled.js.code, "utf8");
-    const module = await import(pathToFileURL(modulePath).href);
-    return module.default;
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
-}
-
-function deterministicBytes(length) {
-  return Uint8Array.from({ length }, (_value, index) => index + 1);
-}
+})}\n`);

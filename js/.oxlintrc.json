@@ -344,6 +344,18 @@
               "TraceparentFetchConfig",
               "TraceparentRequestContext"
             ]
+          },
+          {
+            "from": "file",
+            "name": [
+              "BrowserTraceparentConfig",
+              "CreateLogBrewSvelteClientConfig",
+              "LogBrewSvelteCaptureOptions",
+              "LogBrewSvelteContext",
+              "LogBrewSvelteErrorOptions",
+              "LogBrewSvelteKitHooksOptions",
+              "LogBrewSvelteOptions"
+            ]
           }
         ]
       }
@@ -439,6 +451,7 @@
         "logbrew-js/test/release-artifacts*",
         "logbrew-js/vite-release-artifacts*.cjs",
         "logbrew-angular/examples/**",
+        "logbrew-svelte/examples/**",
         "logbrew-vue/examples/**",
         "logbrew-vue/test/**"
       ],

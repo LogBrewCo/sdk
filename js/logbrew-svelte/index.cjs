@@ -1,63 +1,118 @@
 "use strict";
 
+const { LogBrewClient, SdkError } = require("@logbrew/sdk");
+const { captureSvelteError, createSvelteErrorEvent, currentTime, isLogBrewSvelteContext, readField, slugify } = require("./capture.cjs");
+const { createBrowserTraceparent, createFetchTransport, createTraceparentFetch, shouldPropagateTraceparent } = require("@logbrew/browser");
 const { getContext, hasContext, setContext } = require("svelte");
-const {
-  createIssueAttributesFromError,
-  LogBrewClient,
-  parseTraceparent,
-  SdkError
-} = require("@logbrew/sdk");
-const {
-  createBrowserTraceparent: createSvelteTraceparent,
-  createFetchTransport,
-  createTraceparentFetch,
-  shouldPropagateTraceparent
-} = require("@logbrew/browser");
+const { createLogBrewSvelteKitHooks } = require("./sveltekit.cjs");
+
+/**
+ * @import { Transport } from "@logbrew/sdk"
+ * @import {
+ *   CreateLogBrewSvelteClientConfig,
+ *   LogBrewSvelteContext,
+ *   LogBrewSvelteOptions,
+ *   LogBrewSvelteViewEvent,
+ *   LogBrewSvelteViewEventOptions
+ * } from "./index.cjs"
+ */
+
+const DEFAULT_SDK_NAME = "logbrew-svelte";
+const DEFAULT_SDK_VERSION = "0.1.6";
+const DEFAULT_MAX_RETRIES = 2;
 
 const LOG_BREW_SVELTE_KEY = Symbol.for("logbrew.svelte");
+const createSvelteTraceparent = createBrowserTraceparent;
 
-function createLogBrewSvelteClient({
-  apiKey = readEnv("LOGBREW_API_KEY"),
-  clientKey = readEnv("LOGBREW_CLIENT_KEY"),
-  serverApiKey = readEnv("LOGBREW_SERVER_API_KEY"),
-  context,
-  sdkName = "logbrew-svelte",
-  sdkVersion = "0.1.6",
-  maxRetries = 2
-} = {}) {
+/**
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function readEnv(name) {
+  const value = readField(readField(readField(globalThis, "process"), "env"), name);
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * @param {CreateLogBrewSvelteClientConfig} [config]
+ * @returns {LogBrewClient}
+ */
+function createLogBrewSvelteClient(config = {}) {
+  const {
+    apiKey = readEnv("LOGBREW_API_KEY"),
+    clientKey = readEnv("LOGBREW_CLIENT_KEY"),
+    context,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    sdkName = DEFAULT_SDK_NAME,
+    sdkVersion = DEFAULT_SDK_VERSION,
+    serverApiKey = readEnv("LOGBREW_SERVER_API_KEY")
+  } = config;
   const authKey = clientKey ?? serverApiKey ?? apiKey;
-  if (!authKey) {
+  const hasAuthKey = Boolean(authKey);
+  if (authKey === undefined || !hasAuthKey) {
     throw new SdkError(
       "configuration_error",
       "createLogBrewSvelteClient requires a browser client key or server API key"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, context, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({ apiKey: authKey, maxRetries, sdkName, sdkVersion, ...(context === undefined ? {} : { context }) });
 }
 
+/**
+ * @param {LogBrewSvelteOptions} options
+ * @returns {LogBrewClient}
+ */
+function resolveClient(options) {
+  if (typeof options.client === "function") {
+    return options.client();
+  }
+  return options.client ?? createLogBrewSvelteClient(options);
+}
+
+/**
+ * @param {LogBrewSvelteOptions} options
+ * @param {LogBrewClient} client
+ * @returns {Transport}
+ */
+function resolveTransport(options, client) {
+  if (typeof options.transport === "function") {
+    return options.transport({ client });
+  }
+  return options.transport ?? createFetchTransport(options);
+}
+
+/**
+ * @param {LogBrewSvelteOptions} [options]
+ * @returns {LogBrewSvelteContext}
+ */
 function createLogBrewSvelteContext(options = {}) {
-  const client = typeof options.client === "function"
-    ? options.client() : options.client ?? createLogBrewSvelteClient(options);
-  const transport = typeof options.transport === "function"
-    ? options.transport({ client }) : options.transport ?? createFetchTransport(options);
+  const client = resolveClient(options);
+  const transport = resolveTransport(options, client);
   return {
     client,
     logbrew: client,
     transport,
+
     previewJson: () => client.previewJson(),
-    flush: () => client.flush(transport),
-    shutdown: () => client.shutdown(transport)
+
+    flush: async () => client.flush(transport),
+    shutdown: async () => client.shutdown(transport)
   };
 }
 
+/**
+ * @param {LogBrewSvelteOptions | LogBrewSvelteContext} [options]
+ * @returns {LogBrewSvelteContext}
+ */
 function setLogBrewContext(options = {}) {
-  const context = isLogBrewSvelteContext(options)
-    ? options
-    : createLogBrewSvelteContext(options);
+  const context = isLogBrewSvelteContext(options) ? options : createLogBrewSvelteContext(options);
   setContext(LOG_BREW_SVELTE_KEY, context);
   return context;
 }
 
+/**
+ * @returns {LogBrewSvelteContext}
+ */
 function useLogBrew() {
   if (!hasContext(LOG_BREW_SVELTE_KEY)) {
     throw new SdkError(
@@ -70,17 +125,29 @@ function useLogBrew() {
 
 const getLogBrewContext = useLogBrew;
 
-function createSvelteViewEvent(name, {
-  now = () => new Date().toISOString(),
-  path = "",
-  idFactory = defaultViewEventId,
-  metadata = {}
-} = {}) {
+/**
+ * @param {string} name
+ * @param {string} path
+ * @returns {string}
+ */
+function defaultViewEventId(name, path) {
+  return `evt_svelte_view_${slugify(`${name}_${path}`)}`;
+}
+
+/**
+ * @param {string} name
+ * @param {LogBrewSvelteViewEventOptions} [options]
+ * @returns {LogBrewSvelteViewEvent}
+ */
+function createSvelteViewEvent(name, options = {}) {
+  const { idFactory = defaultViewEventId, metadata = {}, now: timestamp = currentTime, path = "" } = options;
   return {
     id: idFactory(name, path),
-    timestamp: now(),
+    timestamp: timestamp(),
+
     attributes: {
       message: path ? `Svelte view ${name} at ${path}` : `Svelte view ${name}`,
+
       level: "info",
       logger: "svelte",
       metadata: { ...metadata, name, path }
@@ -88,218 +155,7 @@ function createSvelteViewEvent(name, {
   };
 }
 
-function createSvelteErrorEvent(error, {
-  component = "",
-  handled = true,
-  info = "",
-  now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId,
-  mechanism = "svelte.error_boundary",
-  metadata,
-  source = "svelte.error",
-  title,
-  ...options
-} = {}) {
-  return {
-    id: idFactory(error, { component, info }),
-    timestamp: now(),
-    attributes: createIssueAttributesFromError(error, {
-      ...options,
-      handled,
-      mechanism,
-      metadata: { ...metadata, component, info },
-      source,
-      title: title ?? (component ? `${component} failed` : "Svelte component failed")
-    })
-  };
-}
-
-async function captureSvelteError(error, context, options = {}) {
-  const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { context })
-    : createSvelteErrorEvent(error, options);
-
-  try {
-    const attributes = options.breadcrumbs === undefined
-      ? event.attributes
-      : { ...event.attributes, breadcrumbs: options.breadcrumbs };
-    context.client.issue(event.id, event.timestamp, attributes);
-    const response = await context.client.flush(context.transport);
-    await notify(options, "onFlush", response, { context });
-    return response;
-  } catch (captureError) {
-    await notify(options, "onCaptureError", captureError, { context });
-    throw captureError;
-  }
-}
-
-function createLogBrewSvelteKitHooks(context, options = {}) {
-  if (!isLogBrewSvelteContext(context)) {
-    throw new SdkError("configuration_error", "createLogBrewSvelteKitHooks requires a LogBrew context");
-  }
-  const traces = new WeakMap();
-
-  return {
-    async handle({ event, resolve }) {
-      if (!event || typeof resolve !== "function") {
-        throw new SdkError("configuration_error", "SvelteKit handle requires event and resolve");
-      }
-      const trace = createSvelteKitTrace(event.request, options);
-      traces.set(event, trace);
-      const startedAt = nowMs(options);
-      let response;
-      try {
-        response = await resolve(event);
-      } catch (error) {
-        await captureSvelteKitRequest(context, event, 500, trace, startedAt, options);
-        throw error;
-      }
-      await captureSvelteKitRequest(context, event, response?.status, trace, startedAt, options);
-      return response;
-    },
-    async handleError(input) {
-      const event = input?.event;
-      const trace = traces.get(event) ?? createSvelteKitTrace(event?.request, options);
-      try {
-        await captureSvelteError(input?.error, context, {
-          ...options,
-          breadcrumbs: [{
-            category: "sveltekit.request",
-            message: `${svelteKitMethod(event)} ${svelteKitRoute(event)}`,
-            timestamp: now(options),
-            type: "http"
-          }],
-          component: svelteKitRoute(event),
-          errorEvent: undefined,
-          handled: false,
-          info: "sveltekit.handle_error",
-          mechanism: "sveltekit.handle_error",
-          metadata: svelteKitMetadata(event, input?.status, options.metadata),
-          source: "sveltekit.handle_error",
-          trace
-        });
-      } catch (error) {
-        if (options.raiseCaptureErrors === true) {
-          throw error;
-        }
-      }
-      return typeof options.mapError === "function" ? options.mapError(input) : undefined;
-    }
-  };
-}
-
-function isLogBrewSvelteContext(value) {
-  return Boolean(value?.client && value?.transport && typeof value.previewJson === "function");
-}
-
-async function notify(options, name, value, context) {
-  return typeof options[name] === "function" ? options[name](value, context) : undefined;
-}
-
-function defaultViewEventId(name, path) {
-  return `evt_svelte_view_${slugify(`${name}_${path}`)}`;
-}
-
-function defaultErrorEventId(error, { component, info }) {
-  const message = error instanceof Error ? error.message : String(error);
-  return `evt_svelte_error_${slugify(`${component}_${info}_${message}`)}`;
-}
-
-async function captureSvelteKitRequest(context, event, status, trace, startedAt, options) {
-  if (options.captureRequests === false) {
-    return;
-  }
-  const statusCode = Number.isInteger(status) && status >= 100 && status <= 599 ? status : 500;
-  try {
-    context.client.span(`evt_sveltekit_request_${trace.spanId}`, now(options), {
-      durationMs: Math.max(0, nowMs(options) - startedAt),
-      name: `${svelteKitMethod(event)} ${svelteKitRoute(event)}`,
-      ...(trace.parentSpanId ? { parentSpanId: trace.parentSpanId } : {}),
-      spanId: trace.spanId,
-      status: statusCode >= 500 ? "error" : "ok",
-      traceId: trace.traceId,
-      metadata: svelteKitMetadata(event, statusCode, options.metadata)
-    });
-    if (options.flushOnCapture !== false) {
-      await context.client.flush(context.transport);
-    }
-  } catch (error) {
-    await notify(options, "onCaptureError", error, { context });
-    if (options.raiseCaptureErrors === true) {
-      throw error;
-    }
-  }
-}
-
-function createSvelteKitTrace(request, options) {
-  const parent = requestTraceparent(request);
-  const generated = parseTraceparent(createSvelteTraceparent({
-    randomValues: options.randomValues,
-    traceFlags: parent?.traceFlags ?? options.traceFlags,
-    traceId: parent?.traceId
-  }));
-  return {
-    traceId: generated.traceId,
-    spanId: generated.parentSpanId,
-    ...(parent ? { parentSpanId: parent.parentSpanId } : {})
-  };
-}
-
-function requestTraceparent(request) {
-  try {
-    const value = request?.headers?.get?.("traceparent");
-    return value ? parseTraceparent(value) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function svelteKitMetadata(event, statusCode, metadata) {
-  return {
-    ...metadata,
-    framework: "sveltekit",
-    method: svelteKitMethod(event),
-    operation: "http.server",
-    routeTemplate: svelteKitRoute(event),
-    statusCode,
-    statusCodeClass: `${Math.floor(statusCode / 100)}xx`
-  };
-}
-
-function svelteKitMethod(event) {
-  const method = event?.request?.method;
-  return typeof method === "string" && /^[A-Za-z]{1,16}$/u.test(method)
-    ? method.toUpperCase()
-    : "GET";
-}
-
-function svelteKitRoute(event) {
-  const route = event?.route?.id;
-  return typeof route === "string" && route.trim() !== "" && route.length <= 256
-    ? route
-    : "<unmatched>";
-}
-
-function now(options) {
-  return typeof options.now === "function" ? options.now() : new Date().toISOString();
-}
-
-function nowMs(options) {
-  return typeof options.nowMs === "function" ? options.nowMs() : Date.now();
-}
-
-function readEnv(name) {
-  return globalThis.process?.env?.[name];
-}
-
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "event";
-}
-
-const api = {
+const defaultExport = {
   captureSvelteError,
   createLogBrewSvelteClient,
   createLogBrewSvelteContext,
@@ -309,10 +165,11 @@ const api = {
   createSvelteViewEvent,
   createTraceparentFetch,
   getLogBrewContext,
+
   LOG_BREW_SVELTE_KEY,
   setLogBrewContext,
   shouldPropagateTraceparent,
   useLogBrew
 };
 
-module.exports = { ...api, default: api };
+module.exports = { ...defaultExport, default: defaultExport };

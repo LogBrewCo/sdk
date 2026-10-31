@@ -23,6 +23,10 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "capture.cjs",
+    "capture.js",
+    "sveltekit.cjs",
+    "sveltekit.js",
     "README.md",
     "examples"
   ],
@@ -50,6 +54,6 @@
     "svelte": ">=5"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check capture.js && node --check capture.cjs && node --check sveltekit.js && node --check sveltekit.cjs && node --check examples/index.mjs && node --check examples/support.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }
