@@ -198,7 +198,7 @@ js/logbrew-js/pino-record.cjs	*	line	"credentials",
 js/logbrew-js/pino-record.cjs	*	line	"password",
 js/logbrew-js/pino-record.cjs	*	line	"secret",
 js/logbrew-js/pino-record.cjs	*	line	"token",
-js/logbrew-js/test/sdk.test.js	*	line	requestUrl: "/checkout/42?token=hidden",
+js/logbrew-js/test/pino.test.js	*	line	requestUrl: "/checkout/42?token=hidden",
 js/logbrew-node/README.md	*	line	Primitive structured fields become `context.*` metadata. Runtime defaults and nested objects are omitted. Credentials, authorization and cookie fields, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack fields are also excluded automatically; serialized error name/message remain available, while stack text requires `includeErrorStack: true`. The log message itself is telemetry, so keep secrets and user-entered text out of messages and retain your normal Pino redaction policy.
 js/logbrew-node/README.md	*	line	redact: ["authorization", "cookie", "password", "token"]
 js/logbrew-node/test/pino-instrumentation.test.js	*	line	hostname: "host.local",
@@ -336,8 +336,8 @@ python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	_TOKEN_PATTERN = re.
 python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	if _SENSITIVE_ASSIGNMENT_PATTERN.search(value) or _TOKEN_PATTERN.search(value):
 python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	r"(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]",
 python/logbrew_py/src/logbrew_sdk/_support_ticket.py	*	line	return normalized in _SENSITIVE_KEYS or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
-js/logbrew-js/test/sdk.test.js	*	line	{ token: "[redacted]" }
-js/logbrew-js/test/sdk.test.js	*	line	{ token: "hidden" }
+js/logbrew-js/test/support-ticket.test.js	*	line	{ token: "[redacted]" }
+js/logbrew-js/test/support-ticket.test.js	*	line	{ token: "hidden" }
 go/logbrew/support_ticket_test.go	*	line	if len(events) != 2 || events[1].(map[string]any)["token"] != "[redacted]" {
 go/logbrew/support_ticket_test.go	*	line	map[string]any{"token": "hidden"},
 java/logbrew-java/src/test/java/co/logbrew/sdk/SupportTicketDraftTest.java	*	line	assertEquals("[redacted]", safeSecondEvent.get("token"), "event token");
