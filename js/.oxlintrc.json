@@ -177,13 +177,23 @@
           },
           {
             "from": "file",
-            "name": [
-              "LogBrewClient",
-              "RecordingTransport",
-              "SpanLinkSummary",
-              "Transport"
-            ],
-            "path": "../logbrew-js/index.d.ts"
+            "name": "LogBrewClient",
+            "path": "../logbrew-js/types/client.d.ts"
+          },
+          {
+            "from": "file",
+            "name": "RecordingTransport",
+            "path": "../logbrew-js/types/recording-transport.d.ts"
+          },
+          {
+            "from": "file",
+            "name": "SpanLinkSummary",
+            "path": "../logbrew-js/types/telemetry.d.ts"
+          },
+          {
+            "from": "file",
+            "name": "Transport",
+            "path": "../logbrew-js/types/delivery.d.ts"
           },
           {
             "from": "file",
@@ -584,6 +594,24 @@
             "ignoreVoidReturningFunctions": true
           }
         ]
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/index.d.ts"
+      ],
+      "rules": {
+        "import/group-exports": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/types/*.d.ts"
+      ],
+      "rules": {
+        "typescript/method-signature-style": "off",
+        "typescript/no-invalid-void-type": "off",
+        "typescript/prefer-readonly-parameter-types": "off"
       }
     },
     {

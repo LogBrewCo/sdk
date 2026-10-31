@@ -81,6 +81,7 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "types",
     "issue-breadcrumbs.cjs",
     "issue-diagnostics.cjs",
     "issue-evidence.cjs",
