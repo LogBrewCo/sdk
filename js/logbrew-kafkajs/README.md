@@ -14,21 +14,20 @@ pnpm add @logbrew/sdk @logbrew/node @logbrew/kafkajs kafkajs
 Use a project-scoped server ingest key from your LogBrew project settings:
 
 ```js
+import { instrumentLogBrewKafkaJsConsumer, instrumentLogBrewKafkaJsProducer } from "@logbrew/kafkajs";
 import { Kafka } from "kafkajs";
 import { LogBrewClient } from "@logbrew/sdk";
-import { instrumentLogBrewKafkaJsConsumer, instrumentLogBrewKafkaJsProducer } from "@logbrew/kafkajs";
 
 const client = LogBrewClient.create({
-  apiKey: process.env.LOGBREW_SERVER_API_KEY ?? "LOGBREW_SERVER_API_KEY",
-  release: "checkout-api@1.0.0",
-  environment: "production",
+  apiKey: process.env["LOGBREW_SERVER_API_KEY"] ?? "LOGBREW_SERVER_API_KEY",
+  context: { resource: { deployment: { environment: "production", release: "checkout-worker@1.0.0" } }, schemaVersion: 1 },
   sdkName: "checkout-worker",
   sdkVersion: "1.0.0"
 });
 
 const kafka = new Kafka({
-  clientId: "checkout-worker",
-  brokers: [process.env.KAFKA_BROKER ?? "localhost:9092"]
+  brokers: [process.env["KAFKA_BROKER"] ?? "localhost:9092"],
+  clientId: "checkout-worker"
 });
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: "checkout-worker" });
@@ -37,16 +36,15 @@ const producerInstrumentation = instrumentLogBrewKafkaJsProducer(producer, { cli
 const consumerInstrumentation = instrumentLogBrewKafkaJsConsumer(consumer, { client });
 
 await producer.send({
-  topic: "checkout.events",
-  messages: [{ value: JSON.stringify({ event: "checkout.started" }) }]
+  messages: [{ value: JSON.stringify({ event: "checkout.started" }) }],
+  topic: "checkout.events"
 });
 
-await consumer.run({
-  eachMessage: async ({ message }) => {
-    // Process your app-owned message. LogBrew does not capture key/value bytes.
-    await handleCheckoutMessage(message);
-  }
-});
+async function forwardCheckout({ message }) {
+  await producer.send({ messages: [{ key: message.key, value: message.value }], topic: "checkout.processed" });
+}
+
+await consumer.run({ eachMessage: forwardCheckout });
 
 producerInstrumentation.uninstall();
 consumerInstrumentation.uninstall();

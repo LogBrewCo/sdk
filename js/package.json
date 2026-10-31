@@ -3,6 +3,7 @@
   "description": "Type declarations the JavaScript type gate checks the packages against.",
   "devDependencies": {
     "@types/node": "26.6.6",
-    "amqplib": "2.2.0"
+    "amqplib": "2.2.0",
+    "kafkajs": "2.2.4"
   }
 }
