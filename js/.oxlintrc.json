@@ -995,6 +995,15 @@
     },
     {
       "files": [
+        "logbrew-react-native/instrumentation.js",
+        "logbrew-react-native/native-bridge.js"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": [
         "logbrew-react-native/src/*.ts"
       ],
       "rules": {
