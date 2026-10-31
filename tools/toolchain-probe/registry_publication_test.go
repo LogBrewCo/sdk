@@ -158,6 +158,9 @@ func TestRegistryMavenPlan(t *testing.T) {
 
 func TestRegistryPublicationChecks(t *testing.T) {
 	catalog, _ := loadReleaseCatalog(releaseCatalogText)
+	if catalogNPM := slices.Sorted(slices.Values(catalog.npmNames())); !slices.Equal(registryNPM, catalogNPM) {
+		t.Fatalf("registry npm packages = %q, release catalog = %q", registryNPM, catalogNPM)
+	}
 	responses := map[string][]registryReply{
 		"https://pypi.org/pypi/logbrew-sdk/json":            ok(`{"info": {"version": "0.1.0"}}`),
 		"https://pypi.org/pypi/logbrew-flask/json":          ok(`{"releases": {"v0.1.0": []}}`),
