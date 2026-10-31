@@ -73,6 +73,16 @@ declare function setLogBrewAppleNativeCrashContext(
   context: LogBrewAppleNativeCrashContext | null
 ): LogBrewAppleNativeCrashContextResult;
 
+type LogBrewAppleNativeCrashBreadcrumbsSnapshot = Readonly<{
+  breadcrumbs: readonly Readonly<Record<string, unknown>>[];
+  schemaVersion: typeof CRASH_CONTEXT_SCHEMA_VERSION;
+  truncated: boolean;
+}>;
+
+declare function syncLogBrewAppleNativeCrashBreadcrumbs(
+  snapshot: LogBrewAppleNativeCrashBreadcrumbsSnapshot | null
+): LogBrewAppleNativeCrashContextResult;
+
 declare const defaultExport: {
   getLogBrewAppleNativeDiagnosticsStatus: typeof getLogBrewAppleNativeDiagnosticsStatus;
   installLogBrewAppleNativeDiagnostics: typeof installLogBrewAppleNativeDiagnostics;
@@ -81,6 +91,7 @@ declare const defaultExport: {
 };
 
 export type {
+  LogBrewAppleNativeCrashBreadcrumbsSnapshot,
   LogBrewAppleNativeCrashContext,
   LogBrewAppleNativeCrashContextResult,
   LogBrewAppleNativeDiagnosticsConfiguration,
@@ -91,6 +102,7 @@ export {
   installLogBrewAppleNativeDiagnostics,
   replayLogBrewAppleNativeDiagnostics,
   getLogBrewAppleNativeDiagnosticsStatus,
-  setLogBrewAppleNativeCrashContext
+  setLogBrewAppleNativeCrashContext,
+  syncLogBrewAppleNativeCrashBreadcrumbs
 };
 export default defaultExport;

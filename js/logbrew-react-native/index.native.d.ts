@@ -1,3 +1,13 @@
+import type {
+  CreateLogBrewReactNativeClientConfig,
+  captureDefaultAppStateChange,
+  captureDefaultReactNativeAction,
+  captureDefaultReactNativeError,
+  captureDefaultReactNativeNetwork,
+  captureDefaultScreenView,
+  createDefaultAppStateListener,
+  getDefaultReactNativeContext
+} from "./index.js";
 import type { EventStore, LogBrewClient } from "@logbrew/sdk";
 import type {
   getLogBrewAndroidNativeDiagnosticsStatus,
@@ -10,7 +20,6 @@ import type {
   replayLogBrewAppleNativeDiagnostics,
   setLogBrewAppleNativeCrashContext
 } from "./apple-native-diagnostics.js";
-import type { CreateLogBrewReactNativeClientConfig } from "./index.js";
 import type indexDefault from "./index.js";
 
 type ReactNativePersistentQueueMode = "auto" | "required" | "disabled";
@@ -55,6 +64,13 @@ declare const defaultExport: Omit<
   replayLogBrewAppleNativeDiagnostics: typeof replayLogBrewAppleNativeDiagnostics;
   setLogBrewAppleNativeCrashContext: typeof setLogBrewAppleNativeCrashContext;
   uninstallLogBrewAndroidNativeDiagnostics: typeof uninstallLogBrewAndroidNativeDiagnostics;
+  captureDefaultAppStateChange: typeof captureDefaultAppStateChange;
+  captureDefaultReactNativeAction: typeof captureDefaultReactNativeAction;
+  captureDefaultReactNativeError: typeof captureDefaultReactNativeError;
+  captureDefaultReactNativeNetwork: typeof captureDefaultReactNativeNetwork;
+  captureDefaultScreenView: typeof captureDefaultScreenView;
+  createDefaultAppStateListener: typeof createDefaultAppStateListener;
+  getDefaultReactNativeContext: typeof getDefaultReactNativeContext;
 };
 
 export type {
@@ -134,7 +150,19 @@ export {
   useLogBrewNativeActions,
   withLogBrewTrace
 } from "./index.js";
-export * from "./apple-native-diagnostics.js";
+export type {
+  LogBrewAppleNativeCrashContext,
+  LogBrewAppleNativeCrashContextResult,
+  LogBrewAppleNativeDiagnosticsConfiguration,
+  LogBrewAppleNativeDiagnosticsReplayResult,
+  LogBrewAppleNativeDiagnosticsStatus
+} from "./apple-native-diagnostics.js";
+export {
+  getLogBrewAppleNativeDiagnosticsStatus,
+  installLogBrewAppleNativeDiagnostics,
+  replayLogBrewAppleNativeDiagnostics,
+  setLogBrewAppleNativeCrashContext
+} from "./apple-native-diagnostics.js";
 export * from "./android-native-diagnostics.js";
 export {
   installLogBrewReactNativeGlobalErrorHandler,
