@@ -107,6 +107,25 @@ function requireNonEmpty(label, value) {
   return value;
 }
 
+/** @type {(value: unknown) => boolean} */
+const isTruthy = Boolean;
+
+/**
+ * @param {unknown} value
+ * @returns {value is Readonly<Record<string, unknown>>}
+ */
+function isObjectValue(value) {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function stringOrUndefined(value) {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
 /**
  * @template {string} Allowed
  * @param {string} value
@@ -263,7 +282,9 @@ module.exports = {
   hasUnicodeControlCharacter,
   isAllowedValue,
   isList,
+  isObjectValue,
   isRecord,
+  isTruthy,
   optionalEntry,
   rejectUnknownKeys,
   requireAllowedValue,
@@ -275,5 +296,6 @@ module.exports = {
   requireSpanId,
   requireTimestamp,
   requireTraceFlags,
-  requireTraceId
+  requireTraceId,
+  stringOrUndefined
 };

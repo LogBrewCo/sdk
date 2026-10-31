@@ -73,12 +73,9 @@ function validateIssueExceptionMechanism(mechanism) {
 
 /**
  * @param {unknown} exception
- * @returns {IssueException | undefined}
+ * @returns {IssueException}
  */
-function validateIssueException(exception) {
-  if (exception === undefined) {
-    return undefined;
-  }
+function requireIssueException(exception) {
   const source = requireObject("issue exception", exception);
   rejectUnknownKeys("issue exception", source, EXCEPTION_KEYS);
   const type = boundedIdentity("issue exception type", source["type"], MAX_EXCEPTION_TYPE_LENGTH);
@@ -87,13 +84,21 @@ function validateIssueException(exception) {
 }
 
 /**
- * @param {string} type
- * @param {string} mechanism
- * @param {boolean} handled
+ * @param {unknown} exception
  * @returns {IssueException | undefined}
  */
+function validateIssueException(exception) {
+  return exception === undefined ? undefined : requireIssueException(exception);
+}
+
+/**
+ * @param {string} type
+ * @param {string} mechanism
+ * @param {unknown} handled
+ * @returns {IssueException}
+ */
 function createIssueException(type, mechanism, handled) {
-  return validateIssueException({ mechanism: { handled, type: mechanism }, type });
+  return requireIssueException({ mechanism: { handled, type: mechanism }, type });
 }
 
 /**
