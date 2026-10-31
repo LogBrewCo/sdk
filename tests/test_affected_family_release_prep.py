@@ -180,7 +180,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         workflow = source_text(".github/workflows/publish-packages.yml")
         publisher = source_text("tools/npm-publish/publish.mjs")
         publisher_manifest = json.loads(source_text("tools/npm-publish/package.json"))
-        self.assertIn("timeout: 60_000,", publisher)
+        self.assertIn("const TRANSPARENCY_LOG_TIMEOUT_MS = 60_000;", publisher)
+        self.assertIn("timeout: TRANSPARENCY_LOG_TIMEOUT_MS", publisher)
         npm_job = workflow.split("\n  npm:\n", 1)[1].split("\n  pypi:\n", 1)[0]
         package_dirs = workflow.split("package_dirs=(", 1)[1].split("\n          )", 1)[0]
         selector = workflow.split("select_npm_package_dirs() {", 1)[1].split(
@@ -211,8 +212,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         ):
             self.assertIn(needle, npm_job)
         self.assertIn("provenance: true", publisher)
-        self.assertRegex(publisher, r"\w+: \{ \w+: grants\[index\] \},")
-        self.assertIn("Promise.all(manifests.map(({ name }) => exchangeGrant(name)))", publisher)
+        self.assertRegex(publisher, r"\w+: \{ \w+: grant \},")
+        self.assertIn("Promise.all(manifests.map(async ({ name }) => exchangeGrant(name)))", publisher)
         self.assertIn("/-/npm/v1/oidc/" "token/exchange/package/", publisher)
         self.assertEqual(publisher_manifest["dependencies"], {"libnpmpublish": "12.0.1"})
         self.assertNotIn("bun publish", npm_job)
