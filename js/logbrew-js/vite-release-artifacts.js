@@ -1,6 +1,6 @@
 import viteReleaseArtifacts from "./vite-release-artifacts.cjs";
 
-export const createLogBrewViteReleaseArtifactsPlugin =
-  viteReleaseArtifacts.createLogBrewViteReleaseArtifactsPlugin;
+const { createLogBrewViteReleaseArtifactsPlugin } = viteReleaseArtifacts;
 
+export { createLogBrewViteReleaseArtifactsPlugin };
 export default createLogBrewViteReleaseArtifactsPlugin;
