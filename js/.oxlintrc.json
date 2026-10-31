@@ -197,7 +197,10 @@
           },
           {
             "from": "file",
-            "name": "Transport",
+            "name": [
+              "Event",
+              "Transport"
+            ],
             "path": "../logbrew-js/types/delivery.d.ts"
           },
           {
@@ -470,7 +473,8 @@
       "files": [
         "logbrew-*/*.cjs",
         "logbrew-express/test/*.cjs",
-        "logbrew-vue/test/*.cjs"
+        "logbrew-vue/test/*.cjs",
+        "logbrew-js/examples/*.cjs"
       ],
       "rules": {
         "import/no-commonjs": "off",
@@ -487,7 +491,9 @@
         "logbrew-*/index.js",
         "logbrew-js/vite-release-artifacts.d.cts",
         "logbrew-js/vite-release-artifacts.d.ts",
-        "logbrew-js/vite-release-artifacts.js"
+        "logbrew-js/vite-release-artifacts.js",
+        "logbrew-js/react-native.d.ts",
+        "logbrew-js/react-native.js"
       ],
       "rules": {
         "import/no-default-export": "off"
@@ -526,12 +532,13 @@
         "logbrew-express/**",
         "logbrew-node/**",
         "logbrew-js/release-artifacts*",
-        "logbrew-js/test/release-artifacts*",
         "logbrew-js/vite-release-artifacts*.cjs",
         "logbrew-angular/examples/**",
         "logbrew-svelte/examples/**",
         "logbrew-vue/examples/**",
-        "logbrew-vue/test/**"
+        "logbrew-vue/test/**",
+        "logbrew-js/examples/**",
+        "logbrew-js/test/**"
       ],
       "rules": {
         "import/no-nodejs-modules": "off"
@@ -550,7 +557,11 @@
       "files": [
         "logbrew-js/release-artifacts-manifest-artifact.js",
         "logbrew-js/test/release-artifacts-vite.test.js",
-        "logbrew-js/vite-release-artifacts-config.cjs"
+        "logbrew-js/vite-release-artifacts-config.cjs",
+        "logbrew-js/test/client-report-store.test.js",
+        "logbrew-js/test/metric-helpers.test.js",
+        "logbrew-js/test/opentelemetry-context.test.js",
+        "logbrew-js/test/transport-responses.test.js"
       ],
       "rules": {
         "unicorn/no-null": "off"
@@ -571,6 +582,32 @@
       ],
       "rules": {
         "eslint/no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/examples/*.cjs"
+      ],
+      "rules": {
+        "unicorn/prefer-top-level-await": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/examples/*",
+        "logbrew-js/test/issue-admission-overrides.test.js"
+      ],
+      "rules": {
+        "import/no-relative-parent-imports": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/test/opentelemetry-processor.test.js"
+      ],
+      "rules": {
+        "eslint/no-throw-literal": "off",
+        "typescript/only-throw-error": "off"
       }
     },
     {

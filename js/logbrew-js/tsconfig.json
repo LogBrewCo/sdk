@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {}
+  },
+  "files": [
+    "index.cjs",
+    "index.d.cts",
+    "index.d.ts",
+    "index.js",
+    "react-native.d.ts",
+    "react-native.js",
+    "vite-release-artifacts.cjs",
+    "vite-release-artifacts.d.cts",
+    "vite-release-artifacts.d.ts",
+    "vite-release-artifacts.js"
+  ],
+  "include": ["**/*.js", "**/*.cjs", "**/*.mjs", "types/*.d.ts"]
+}
