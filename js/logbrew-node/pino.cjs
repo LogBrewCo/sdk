@@ -7,232 +7,252 @@ const {
   logAttributesFromPinoRecord
 } = require("@logbrew/sdk");
 const { createAutomaticEventId } = require("./automatic-event-id.cjs");
+const { attempt, isWeakKey, readMember, readOptionalMember } = require("./internal.cjs");
+const { normalizedPinoRecord, pinoLevelNumber, settle } = require("./pino-record.cjs");
+
+/**
+ * @import { PinoLogRecord, TransportResponse } from "@logbrew/sdk"
+ * @import {
+ *   LogBrewPinoInstrumentationConfig,
+ *   LogBrewPinoInstrumentationHandle,
+ *   LogBrewTraceContext
+ * } from "./index.cjs"
+ */
+
+/**
+ * @typedef {{ capturing: boolean, installed: boolean }} PinoState
+ */
 
 const PINO_AS_JSON_END_CHANNEL = diagnosticsChannel.channel("tracing:pino_asJson:end");
 const DEFAULT_EVENT_ID_PREFIX = "evt_node_pino";
 const LOGBREW_PINO_INSTRUMENTATION = Symbol.for("@logbrew/node.pinoInstrumentation");
+const MAX_TEXT_OPTION_LENGTH = 128;
+const NO_PENDING_EVENTS = 0;
+const NON_WORD_RUN = /[^a-z0-9]+/gu;
+const EDGE_UNDERSCORES = /^_+|_+$/gu;
+/** @type {(value: unknown) => string} */
+const text = String;
 
-function installLogBrewPinoInstrumentation(config) {
-  if (!config || Array.isArray(config) || typeof config !== "object") {
-    throw new SdkError("configuration_error", "installLogBrewPinoInstrumentation requires a config object");
+/**
+ * @param {string} message
+ * @returns {never}
+ */
+function configurationError(message) {
+  throw new SdkError("configuration_error", message);
+}
+
+/**
+ * @param {object} config
+ * @param {string} name
+ * @returns {void}
+ */
+function checkOptionalFunction(config, name) {
+  /** @type {unknown} */
+  const value = Reflect.get(config, name);
+  if (value !== undefined && typeof value !== "function") {
+    configurationError(`Pino instrumentation ${name} must be a function`);
+  }
+}
+
+/**
+ * @param {object} config
+ * @param {string} name
+ * @returns {void}
+ */
+function checkOptionalText(config, name) {
+  /** @type {unknown} */
+  const value = Reflect.get(config, name);
+  if (value !== undefined && (typeof value !== "string" || value.trim() === "" || value.length > MAX_TEXT_OPTION_LENGTH)) {
+    configurationError(`Pino instrumentation ${name} must be 1 to 128 characters`);
+  }
+}
+
+/**
+ * @param {object} config
+ * @returns {void}
+ */
+function checkOptions(config) {
+  for (const name of ["shouldCapture", "traceProvider", "timestamp", "onError"]) {
+    checkOptionalFunction(config, name);
+  }
+  /** @type {unknown} */
+  const includeErrorStack = Reflect.get(config, "includeErrorStack");
+  if (includeErrorStack !== undefined && typeof includeErrorStack !== "boolean") {
+    configurationError("Pino instrumentation includeErrorStack must be a boolean");
+  }
+  checkOptionalText(config, "eventIdPrefix");
+  checkOptionalText(config, "logger");
+  /** @type {unknown} */
+  const metadata = Reflect.get(config, "metadata");
+  if (metadata !== undefined && (metadata === null || Array.isArray(metadata) || typeof metadata !== "object")) {
+    configurationError("Pino instrumentation metadata must be an object");
+  }
+}
+
+/**
+ * @param {unknown} config
+ * @returns {asserts config is LogBrewPinoInstrumentationConfig}
+ */
+function validateConfig(config) {
+  if (config === null || Array.isArray(config) || typeof config !== "object") {
+    configurationError("installLogBrewPinoInstrumentation requires a config object");
   }
   if (typeof diagnosticsChannel.tracingChannel !== "function") {
-    throw new SdkError(
-      "configuration_error",
-      "automatic Pino instrumentation requires Node.js 18.19 or newer"
-    );
+    configurationError("automatic Pino instrumentation requires Node.js 18.19 or newer");
   }
-  if (!(config.client instanceof LogBrewClient)) {
-    throw new SdkError("configuration_error", "Pino instrumentation client must be a LogBrewClient");
+  if (!(Reflect.get(config, "client") instanceof LogBrewClient)) {
+    configurationError("Pino instrumentation client must be a LogBrewClient");
   }
-  if (config.shouldCapture !== undefined && typeof config.shouldCapture !== "function") {
-    throw new SdkError("configuration_error", "Pino instrumentation shouldCapture must be a function");
+  checkOptions(config);
+  const installed = Boolean(readOptionalMember(Reflect.get(globalThis, LOGBREW_PINO_INSTRUMENTATION), "installed"));
+  if (installed) {
+    configurationError("Pino instrumentation is already installed in this process");
   }
-  if (config.traceProvider !== undefined && typeof config.traceProvider !== "function") {
-    throw new SdkError("configuration_error", "Pino instrumentation traceProvider must be a function");
-  }
-  if (config.timestamp !== undefined && typeof config.timestamp !== "function") {
-    throw new SdkError("configuration_error", "Pino instrumentation timestamp must be a function");
-  }
-  if (config.onError !== undefined && typeof config.onError !== "function") {
-    throw new SdkError("configuration_error", "Pino instrumentation onError must be a function");
-  }
-  if (config.includeErrorStack !== undefined && typeof config.includeErrorStack !== "boolean") {
-    throw new SdkError("configuration_error", "Pino instrumentation includeErrorStack must be a boolean");
-  }
-  if (
-    config.eventIdPrefix !== undefined
-    && (typeof config.eventIdPrefix !== "string" || config.eventIdPrefix.trim() === "" || config.eventIdPrefix.length > 128)
-  ) {
-    throw new SdkError("configuration_error", "Pino instrumentation eventIdPrefix must be 1 to 128 characters");
-  }
-  if (
-    config.logger !== undefined
-    && (typeof config.logger !== "string" || config.logger.trim() === "" || config.logger.length > 128)
-  ) {
-    throw new SdkError("configuration_error", "Pino instrumentation logger must be 1 to 128 characters");
-  }
-  if (config.metadata !== undefined && (!config.metadata || Array.isArray(config.metadata) || typeof config.metadata !== "object")) {
-    throw new SdkError("configuration_error", "Pino instrumentation metadata must be an object");
-  }
-  if (globalThis[LOGBREW_PINO_INSTRUMENTATION]?.installed) {
-    throw new SdkError("configuration_error", "Pino instrumentation is already installed in this process");
-  }
+}
 
-  const state = {
-    capturing: false,
-    installed: true
-  };
-  const onPinoEnd = (data) => {
-    if (!state.installed || state.capturing) {
-      return;
+/**
+ * @param {unknown} error
+ * @param {unknown} onError
+ * @returns {void}
+ */
+function reportError(onError, error) {
+  if (typeof onError !== "function") {
+    return;
+  }
+  attempt(() => {
+    /** @type {unknown} */
+    const result = Reflect.apply(onError, undefined, [error]);
+    if (isWeakKey(result) && typeof readMember(result, "then") === "function") {
+      void settle(result);
     }
-    state.capturing = true;
-    try {
-      const levelNumber = pinoLevelNumber(data);
-      const record = normalizedPinoRecord(data, levelNumber);
-      if (config.shouldCapture?.(record, { instance: data?.instance, level: levelNumber }) === false) {
-        return;
-      }
-      const trace = traceFromProvider(config.traceProvider, config.onError);
-      const attributes = logAttributesFromPinoRecord(record, {
-        includeErrorStack: config.includeErrorStack === true,
-        logger: config.logger ?? "pino",
-        metadata: config.metadata,
-        trace
-      });
-      config.client.log(
-        createAutomaticEventId(
-          config.eventIdPrefix ?? DEFAULT_EVENT_ID_PREFIX,
-          eventIdLevel(attributes.metadata?.pinoLevel)
-        ),
-        timestampFromPinoRecord(record, config.timestamp),
-        attributes
-      );
-    } catch (error) {
-      reportError(config.onError, error);
-    } finally {
-      state.capturing = false;
-    }
-  };
-
-  PINO_AS_JSON_END_CHANNEL.subscribe(onPinoEnd);
-  Object.defineProperty(globalThis, LOGBREW_PINO_INSTRUMENTATION, {
-    configurable: true,
-    value: state
   });
-
-  return {
-    async flush() {
-      try {
-        if (config.client.pendingEvents() === 0) {
-          return null;
-        }
-        return await config.client.flush(config.transport);
-      } catch (error) {
-        reportError(config.onError, error);
-        return null;
-      }
-    },
-    uninstall() {
-      if (!state.installed) {
-        return;
-      }
-      state.installed = false;
-      PINO_AS_JSON_END_CHANNEL.unsubscribe(onPinoEnd);
-      if (globalThis[LOGBREW_PINO_INSTRUMENTATION] === state) {
-        delete globalThis[LOGBREW_PINO_INSTRUMENTATION];
-      }
-    }
-  };
 }
 
-function normalizedPinoRecord(data, levelNumber) {
-  if (typeof data?.result !== "string") {
-    throw new SdkError("validation_error", "Pino diagnostics result must be a JSON string");
-  }
-  const parsed = JSON.parse(data.result);
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-    throw new SdkError("validation_error", "Pino diagnostics result must contain a JSON object");
-  }
-
-  const record = { ...parsed };
-  const messageKey = getPinoKey(data.instance, "pino.messageKey", "msg");
-  const errorKey = getPinoKey(data.instance, "pino.errorKey", "err");
-  if (messageKey !== "msg") {
-    if (record.msg === undefined) {
-      record.msg = record[messageKey];
-    }
-    delete record[messageKey];
-  }
-  if (errorKey !== "err") {
-    if (record.err === undefined) {
-      record.err = record[errorKey];
-    }
-    delete record[errorKey];
-  }
-  if (record.level === undefined && levelNumber !== undefined) {
-    record.level = levelNumber;
-  }
-  return record;
-}
-
-function getPinoKey(logger, symbolName, fallback) {
-  if (!logger || typeof logger !== "object" && typeof logger !== "function") {
-    return fallback;
-  }
-  try {
-    const expected = `Symbol(${symbolName})`;
-    const visited = new Set();
-    let owner = logger;
-    for (let depth = 0; owner && depth < 8 && !visited.has(owner); depth += 1) {
-      visited.add(owner);
-      for (const symbol of Object.getOwnPropertySymbols(owner)) {
-        if (symbol.toString() === expected && typeof logger[symbol] === "string") {
-          return logger[symbol];
-        }
-      }
-      owner = Object.getPrototypeOf(owner);
-    }
-  } catch {
-    return fallback;
-  }
-  return fallback;
-}
-
-function pinoLevelNumber(data) {
-  const value = data?.arguments?.[2];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function traceFromProvider(provider, onError) {
+/**
+ * @param {LogBrewPinoInstrumentationConfig} config
+ * @returns {LogBrewTraceContext | null | undefined}
+ */
+function traceFromProvider(config) {
+  const provider = config.traceProvider;
   if (!provider) {
     return undefined;
   }
   try {
     return provider();
   } catch (error) {
-    reportError(onError, error);
+    reportError(config.onError, error);
     return undefined;
   }
 }
 
-function timestampFromPinoRecord(record, fallback) {
+/**
+ * @param {Readonly<PinoLogRecord>} record
+ * @param {LogBrewPinoInstrumentationConfig} config
+ * @returns {string}
+ */
+function timestampFromPinoRecord(record, config) {
   const value = record.time ?? record.timestamp;
-  if (typeof value === "number" && Number.isFinite(value)) {
+  if ((typeof value === "number" && Number.isFinite(value)) || (typeof value === "string" && value.trim() !== "")) {
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.valueOf())) {
       return parsed.toISOString();
     }
   }
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.valueOf())) {
-      return parsed.toISOString();
-    }
-  }
+  const fallback = config.timestamp;
   return typeof fallback === "function" ? fallback() : new Date().toISOString();
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function eventIdLevel(value) {
-  return String(value ?? "info")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "_")
-    .replace(/^_+|_+$/gu, "") || "info";
+  return text(value ?? "info").toLowerCase().replaceAll(NON_WORD_RUN, "_").replaceAll(EDGE_UNDERSCORES, "") || "info";
 }
 
-function reportError(onError, error) {
-  if (typeof onError !== "function") {
+/**
+ * @param {LogBrewPinoInstrumentationConfig} config
+ * @param {unknown} data
+ * @returns {void}
+ */
+function captureRecord(config, data) {
+  const levelNumber = pinoLevelNumber(data);
+  const record = normalizedPinoRecord(data, levelNumber);
+  if (config.shouldCapture?.(record, { instance: readOptionalMember(data, "instance"), level: levelNumber }) === false) {
     return;
   }
+  const trace = traceFromProvider(config);
+  const attributes = logAttributesFromPinoRecord(record, {
+    includeErrorStack: config.includeErrorStack === true,
+    logger: config.logger ?? "pino",
+    ...(config.metadata === undefined ? {} : { metadata: config.metadata }),
+    ...(trace === undefined ? {} : { trace })
+  });
+  config.client.log(
+    createAutomaticEventId(config.eventIdPrefix ?? DEFAULT_EVENT_ID_PREFIX, eventIdLevel(attributes.metadata?.["pinoLevel"])),
+    timestampFromPinoRecord(record, config),
+    attributes
+  );
+}
+
+/**
+ * @param {LogBrewPinoInstrumentationConfig} config
+ * @returns {Promise<TransportResponse | null>}
+ */
+async function flushPino(config) {
   try {
-    const result = onError(error);
-    if (result && typeof result.then === "function") {
-      Promise.resolve(result).catch(() => {});
+    if (config.client.pendingEvents() === NO_PENDING_EVENTS) {
+      return null;
     }
-  } catch {
-    // Capture diagnostics must never interrupt application logging.
+    return await config.client.flush(config.transport);
+  } catch (error) {
+    reportError(config.onError, error);
+    return null;
   }
+}
+
+/**
+ * @param {unknown} config
+ * @returns {LogBrewPinoInstrumentationHandle}
+ */
+function installLogBrewPinoInstrumentation(config) {
+  validateConfig(config);
+  /** @type {LogBrewPinoInstrumentationConfig} */
+  const options = config;
+  /** @type {PinoState} */
+  const state = { capturing: false, installed: true };
+  /**
+   * @param {unknown} data
+   * @returns {void}
+   */
+  function onPinoEnd(data) {
+    if (!state.installed || state.capturing) {
+      return;
+    }
+    state.capturing = true;
+    try {
+      captureRecord(options, data);
+    } catch (error) {
+      reportError(options.onError, error);
+    } finally {
+      state.capturing = false;
+    }
+  }
+  PINO_AS_JSON_END_CHANNEL.subscribe(onPinoEnd);
+  Object.defineProperty(globalThis, LOGBREW_PINO_INSTRUMENTATION, { configurable: true, value: state });
+  return {
+    flush: async () => flushPino(options),
+    uninstall: () => {
+      if (!state.installed) {
+        return;
+      }
+      state.installed = false;
+      PINO_AS_JSON_END_CHANNEL.unsubscribe(onPinoEnd);
+      if (Reflect.get(globalThis, LOGBREW_PINO_INSTRUMENTATION) === state) {
+        Reflect.deleteProperty(globalThis, LOGBREW_PINO_INSTRUMENTATION);
+      }
+    }
+  };
 }
 
 module.exports = { installLogBrewPinoInstrumentation };

@@ -25,7 +25,7 @@ function isWeakKey(value) {
 
 /**
  * @param {unknown} value
- * @param {string} name
+ * @param {PropertyKey} name
  * @returns {unknown}
  */
 function readMember(value, name) {
@@ -33,7 +33,7 @@ function readMember(value, name) {
     return Reflect.get(value, name);
   }
   if (value === undefined || value === null) {
-    throw new TypeError(`Cannot read properties of ${String(value)} (reading '${name}')`);
+    throw new TypeError(`Cannot read properties of ${String(value)} (reading '${String(name)}')`);
   }
   return Reflect.get(new Object(value), name);
 }
@@ -62,6 +62,31 @@ function callOptional(target, name, args) {
   if (method === undefined || method === null) {
     return undefined;
   }
+  if (typeof method !== "function") {
+    throw new TypeError(`${name} is not a function`);
+  }
+  /** @type {unknown} */
+  const result = Reflect.apply(method, target, args);
+  return result;
+}
+
+/**
+ * @param {unknown} value
+ * @param {PropertyKey} name
+ * @returns {unknown}
+ */
+function readOptionalMember(value, name) {
+  return value === undefined || value === null ? undefined : readMember(value, name);
+}
+
+/**
+ * @param {unknown} target
+ * @param {string} name
+ * @param {readonly unknown[]} args
+ * @returns {unknown}
+ */
+function callMethod(target, name, args) {
+  const method = readMember(target, name);
   if (typeof method !== "function") {
     throw new TypeError(`${name} is not a function`);
   }
@@ -110,10 +135,12 @@ function sanitizeUrl(value) {
 module.exports = {
   attempt,
   boundedText,
+  callMethod,
   callOptional,
   isObjectLike,
   isWeakKey,
   readMember,
+  readOptionalMember,
   sanitizeUrl,
   templateText
 };
