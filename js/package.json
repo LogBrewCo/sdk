@@ -2,8 +2,10 @@
   "private": true,
   "description": "Type declarations the JavaScript type gate checks the packages against.",
   "devDependencies": {
+    "@prisma/client": "7.10.1",
     "@types/node": "26.6.6",
     "amqplib": "2.2.0",
-    "kafkajs": "2.2.4"
+    "kafkajs": "2.2.4",
+    "prisma": "7.10.1"
   }
 }
