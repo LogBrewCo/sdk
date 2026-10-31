@@ -1,225 +1,148 @@
 "use strict";
 
-const crypto = require("node:crypto");
-const { Buffer } = require("node:buffer");
 const { createRequire } = require("node:module");
 const path = require("node:path");
+const {
+  configurationError,
+  field,
+  isCallable,
+  isDevelopmentGraph,
+  isRecord,
+  prependDebugIdModule,
+  productionResult
+} = require("./metro-debug-id.cjs");
+const { createDefaultMetroSerializer } = require("./metro-serializer.cjs");
 
-const DEBUG_ID_PLACEHOLDER = "__LOGBREW_REACT_NATIVE_DEBUG_ID__";
-const DEBUG_ID_MODULE_PATH = "__logbrew_debug_id__";
-const DEBUG_ID_REGISTRY_NAME = "@logbrew/react-native/debug-ids";
-const RUNTIME_DEBUG_ID_MARKER = "/*logbrew-runtime-debug-id*/";
-const DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"];
-const DEBUG_ID_COMMENT_RE = /(?:\/\/[#@]|\/\*[#@])\s*debugId=[^\r\n]*/iu;
+/**
+ * @typedef {(this: unknown, ...args: readonly unknown[]) => unknown} Callable
+ * @typedef {(entryPoint: unknown, preModules: unknown, graph: unknown, options: unknown) => Promise<unknown>} MetroSerializer
+ * @typedef {Readonly<Record<string, unknown>> & { readonly enabled?: boolean }} LogBrewMetroOptions
+ * @typedef {LogBrewMetroOptions & {
+ *   readonly getDefaultConfig?: Callable,
+ *   readonly unstable_beforeAssetSerializationPlugins?: readonly Callable[]
+ * }} LogBrewExpoOptions
+ */
+
 const DEBUG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/[#@]|\/\*[#@])\s*sourceMappingURL=[^\r\n]*/giu;
 const WRAPPED_SERIALIZER = Symbol.for("@logbrew/react-native/metro-serializer");
 
-function configurationError(message, options) {
-  const error = new Error(message, options);
-  error.code = "configuration_error";
-  return error;
-}
-
+/**
+ * @param {unknown} options
+ * @returns {asserts options is LogBrewMetroOptions}
+ */
 function requireOptions(options) {
-  if (!options || Array.isArray(options) || typeof options !== "object") {
+  if (!isRecord(options) || Array.isArray(options)) {
     throw configurationError("LogBrew Metro options must be an object");
   }
-  if (options.enabled !== undefined && typeof options.enabled !== "boolean") {
+  if (options["enabled"] !== undefined && typeof options["enabled"] !== "boolean") {
     throw configurationError("LogBrew Metro option enabled must be a boolean");
   }
-  return options;
 }
 
-function runtimeDebugIdSnippet(debugId) {
-  const embedded = `${RUNTIME_DEBUG_ID_MARKER}//# debugId=${debugId}`;
-  return `;(()=>{try{const d=${JSON.stringify(embedded)}.slice(-36),k=Symbol.for(${JSON.stringify(DEBUG_ID_REGISTRY_NAME)}),g=globalThis,r=g[k]||(g[k]=Object.create(null)),s=(new Error).stack;if(s){r[s]=d;const e=Object.keys(r);if(e.length>64)delete r[e[0]]}}catch{}})();`;
+/**
+ * @param {unknown} value
+ * @returns {value is readonly unknown[]}
+ */
+function isArray(value) {
+  return Array.isArray(value);
 }
 
-function countLines(source) {
-  return source === "" ? 0 : source.split("\n").length;
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isFunctionArray(value) {
+  return Array.isArray(value) && value.every((plugin) => typeof plugin === "function");
 }
 
-function createDebugIdModule(debugId = DEBUG_ID_PLACEHOLDER) {
-  const code = runtimeDebugIdSnippet(debugId);
-  return {
-    dependencies: new Map(),
-    getSource: () => Buffer.from(code),
-    inverseDependencies: new Set(),
-    path: DEBUG_ID_MODULE_PATH,
-    output: [
-      {
-        type: "js/script/virtual",
-        data: {
-          code,
-          lineCount: countLines(code),
-          map: [],
-        },
-      },
-    ],
-  };
-}
-
-function prependDebugIdModule(preModules, debugId = DEBUG_ID_PLACEHOLDER) {
-  if (!Array.isArray(preModules)) {
-    throw configurationError("LogBrew Metro serializer expected preModules to be an array");
-  }
-  if (preModules.some((module) => module?.path === DEBUG_ID_MODULE_PATH)) {
-    return preModules;
-  }
-  const debugIdModule = createDebugIdModule(debugId);
-  if (preModules[0]?.path === "__prelude__") {
-    return [preModules[0], debugIdModule, ...preModules.slice(1)];
-  }
-  return [debugIdModule, ...preModules];
-}
-
-function isDevelopmentGraph(graph) {
-  const transformOptions = graph?.transformOptions;
-  return transformOptions?.hot === true || transformOptions?.dev === true;
-}
-
-function parseSourceMap(value) {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw configurationError("LogBrew Metro production serializer must return a non-empty source map string");
-  }
-  let sourceMap;
-  try {
-    sourceMap = JSON.parse(value);
-  } catch (error) {
-    throw configurationError(`LogBrew Metro production serializer returned invalid source map JSON: ${error.message}`);
-  }
-  if (!sourceMap || Array.isArray(sourceMap) || typeof sourceMap !== "object") {
-    throw configurationError("LogBrew Metro production serializer source map must be an object");
-  }
-  return sourceMap;
-}
-
-function canonicalSourceMap(sourceMap) {
-  const copy = { ...sourceMap };
-  for (const key of DEBUG_ID_KEYS) {
-    delete copy[key];
-  }
-  return JSON.stringify(copy);
-}
-
-function formatDebugId(bytes) {
-  const value = Buffer.from(bytes.subarray(0, 16));
-  value[6] = (value[6] & 0x0f) | 0x50;
-  value[8] = (value[8] & 0x3f) | 0x80;
-  const hex = value.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-function createDebugId(code, sourceMap) {
-  const digest = crypto
-    .createHash("sha256")
-    .update(code.split(DEBUG_ID_PLACEHOLDER).join(""))
-    .update("\0")
-    .update(canonicalSourceMap(sourceMap))
-    .digest();
-  return formatDebugId(digest);
-}
-
-function sourceWithDebugId(source, debugId) {
-  const replaced = source.split(DEBUG_ID_PLACEHOLDER).join(debugId);
-  const debugLine = `//# debugId=${debugId}\n`;
-  const matches = [...replaced.matchAll(SOURCE_MAPPING_COMMENT_RE)];
-  if (matches.length === 0) {
-    return `${replaced}${replaced.endsWith("\n") ? "" : "\n"}${debugLine}`;
-  }
-  const last = matches.at(-1);
-  const prefix = replaced.slice(0, last.index);
-  const separator = prefix.endsWith("\n") || prefix.endsWith("\r") ? "" : "\n";
-  return `${prefix}${separator}${debugLine}${replaced.slice(last.index)}`;
-}
-
-function productionResult(result) {
-  if (Array.isArray(result)) {
-    throw configurationError(
-      "LogBrew Metro received Expo static assets; use getLogBrewExpoConfig instead of withLogBrewMetroConfig for Expo projects",
-    );
-  }
-  if (!result || typeof result !== "object") {
-    throw configurationError("LogBrew Metro production serializer must return { code, map }");
-  }
-  if (typeof result.code !== "string") {
-    throw configurationError("LogBrew Metro production serializer code must be a string");
-  }
-  if (result.code.split(DEBUG_ID_PLACEHOLDER).length !== 2) {
-    throw configurationError("LogBrew Metro production serializer must include the injected Debug ID module exactly once");
-  }
-  if (DEBUG_ID_COMMENT_RE.test(result.code.replace(`${RUNTIME_DEBUG_ID_MARKER}//# debugId=${DEBUG_ID_PLACEHOLDER}`, ""))) {
-    throw configurationError("LogBrew Metro production serializer already contains Debug ID metadata");
-  }
-  const sourceMap = parseSourceMap(result.map);
-  if (DEBUG_ID_KEYS.some((key) => Object.prototype.hasOwnProperty.call(sourceMap, key))) {
-    throw configurationError("LogBrew Metro production serializer already contains Debug ID metadata");
-  }
-  const debugId = createDebugId(result.code, sourceMap);
-  sourceMap.debug_id = debugId;
-  sourceMap.debugId = debugId;
-  return {
-    ...result,
-    code: sourceWithDebugId(result.code, debugId),
-    map: JSON.stringify(sourceMap),
-  };
-}
-
+/**
+ * @param {unknown} options
+ * @returns {asserts options is LogBrewExpoOptions}
+ */
 function requireExpoPluginOptions(options) {
   requireOptions(options);
   if (
-    options.unstable_beforeAssetSerializationPlugins !== undefined &&
-    (!Array.isArray(options.unstable_beforeAssetSerializationPlugins) ||
-      options.unstable_beforeAssetSerializationPlugins.some((plugin) => typeof plugin !== "function"))
+    options["unstable_beforeAssetSerializationPlugins"] !== undefined &&
+    !isFunctionArray(options["unstable_beforeAssetSerializationPlugins"])
   ) {
     throw configurationError(
-      "LogBrew Expo option unstable_beforeAssetSerializationPlugins must be an array of functions",
+      "LogBrew Expo option unstable_beforeAssetSerializationPlugins must be an array of functions"
     );
   }
-  if (options.getDefaultConfig !== undefined && typeof options.getDefaultConfig !== "function") {
+  if (options["getDefaultConfig"] !== undefined && typeof options["getDefaultConfig"] !== "function") {
     throw configurationError("LogBrew Expo option getDefaultConfig must be a function");
   }
-  return options;
 }
 
+/**
+ * @param {unknown} input
+ * @returns {readonly unknown[]}
+ */
+function expoPreModules(input) {
+  if (!isRecord(input) || Array.isArray(input)) {
+    throw configurationError("LogBrew Expo Debug ID plugin requires a serialization input object");
+  }
+  const preModules = input["premodules"];
+  if (!isArray(preModules)) {
+    throw configurationError("LogBrew Expo Debug ID plugin expected premodules to be an array");
+  }
+  return preModules;
+}
+
+/**
+ * @param {unknown} [options]
+ * @returns {(input: unknown) => unknown}
+ */
 function createLogBrewExpoDebugIdPlugin(options = {}) {
   requireOptions(options);
   return (input) => {
-    if (!input || Array.isArray(input) || typeof input !== "object") {
-      throw configurationError("LogBrew Expo Debug ID plugin requires a serialization input object");
-    }
-    const preModules = input.premodules;
-    if (!Array.isArray(preModules)) {
-      throw configurationError("LogBrew Expo Debug ID plugin expected premodules to be an array");
-    }
-    if (options.enabled === false || input.debugId === undefined || input.debugId === null) {
+    const preModules = expoPreModules(input);
+    const debugId = field(input, "debugId");
+    if (options.enabled === false || debugId === undefined || debugId === null) {
       return preModules;
     }
-    if (typeof input.debugId !== "string" || !DEBUG_ID_RE.test(input.debugId)) {
+    if (typeof debugId !== "string" || !DEBUG_ID_RE.test(debugId)) {
       throw configurationError("LogBrew Expo Debug ID plugin requires a valid Expo Debug ID");
     }
-    return prependDebugIdModule(preModules, input.debugId.toLowerCase());
+    return prependDebugIdModule(preModules, debugId.toLowerCase());
   };
 }
 
-function loadExpoGetDefaultConfig(projectRoot) {
-  let expoMetroConfig;
+/**
+ * @param {string} projectRoot
+ * @returns {unknown}
+ */
+function requireExpoMetroConfig(projectRoot) {
   try {
     const projectRequire = createRequire(path.join(projectRoot, "package.json"));
-    expoMetroConfig = projectRequire("expo/metro-config");
+    /** @type {unknown} */
+    const expoMetroConfig = projectRequire("expo/metro-config");
+    return expoMetroConfig;
   } catch (error) {
     throw configurationError(
       "LogBrew could not load expo/metro-config from the app; install a supported Expo SDK or pass getDefaultConfig",
-      { cause: error },
+      { cause: error }
     );
   }
-  if (typeof expoMetroConfig?.getDefaultConfig !== "function") {
-    throw configurationError("LogBrew could not resolve getDefaultConfig from expo/metro-config");
-  }
-  return expoMetroConfig.getDefaultConfig;
 }
 
+/**
+ * @param {string} projectRoot
+ * @returns {Callable}
+ */
+function loadExpoGetDefaultConfig(projectRoot) {
+  const getDefaultConfig = field(requireExpoMetroConfig(projectRoot), "getDefaultConfig");
+  if (!isCallable(getDefaultConfig)) {
+    throw configurationError("LogBrew could not resolve getDefaultConfig from expo/metro-config");
+  }
+  return getDefaultConfig;
+}
+
+/**
+ * @param {unknown} projectRoot
+ * @param {unknown} [options]
+ * @returns {unknown}
+ */
 function getLogBrewExpoConfig(projectRoot, options = {}) {
   if (typeof projectRoot !== "string" || projectRoot.trim() === "") {
     throw configurationError("getLogBrewExpoConfig requires a non-empty Expo project root");
@@ -237,128 +160,52 @@ function getLogBrewExpoConfig(projectRoot, options = {}) {
     : [...unstable_beforeAssetSerializationPlugins];
   return getDefaultConfig(root, {
     ...expoOptions,
-    unstable_beforeAssetSerializationPlugins: plugins,
+    unstable_beforeAssetSerializationPlugins: plugins
   });
 }
 
-function requireMetroModule(privatePath, sourcePath) {
-  try {
-    return require(privatePath);
-  } catch (privateError) {
-    try {
-      return require(sourcePath);
-    } catch {
-      throw configurationError(
-        `LogBrew Metro could not load ${privatePath}; install a supported React Native Metro package`,
-        { cause: privateError },
-      );
-    }
+/**
+ * @param {unknown} result
+ * @param {MetroSerializer} fallbackSerializer
+ * @param {readonly [unknown, unknown, unknown, unknown]} args
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function stringSerializerResult(result, fallbackSerializer, args) {
+  const fallbackResult = await fallbackSerializer(...args);
+  if (typeof fallbackResult === "string" || field(fallbackResult, "code") !== result) {
+    throw configurationError(
+      "LogBrew Metro string-returning custom serializer changed bundle code; return { code, map } to preserve source-map accuracy"
+    );
   }
+  return productionResult(fallbackResult);
 }
 
-function moduleFunction(moduleValue, names, label) {
-  if (typeof moduleValue === "function") {
-    return moduleValue;
-  }
-  for (const name of names) {
-    if (typeof moduleValue?.[name] === "function") {
-      return moduleValue[name];
-    }
-  }
-  throw configurationError(`LogBrew Metro could not resolve ${label} from the installed Metro package`);
-}
-
-function sortedModules(graph, options) {
-  const modules = [...(graph?.dependencies?.values?.() ?? [])];
-  if (typeof options?.createModuleId !== "function") {
-    return modules;
-  }
-  return modules.sort((left, right) => options.createModuleId(left.path) - options.createModuleId(right.path));
-}
-
-function createMetroSourceMapSerializer() {
-  const getSourceMapInfo = moduleFunction(
-    requireMetroModule(
-      "metro/private/DeltaBundler/Serializers/helpers/getSourceMapInfo",
-      "metro/src/DeltaBundler/Serializers/helpers/getSourceMapInfo",
-    ),
-    ["default"],
-    "getSourceMapInfo",
-  );
-  const isJsModule = moduleFunction(
-    requireMetroModule(
-      "metro/private/DeltaBundler/Serializers/helpers/js",
-      "metro/src/DeltaBundler/Serializers/helpers/js",
-    ),
-    ["isJsModule"],
-    "isJsModule",
-  );
-  const metroRequire = createRequire(require.resolve("metro/package.json"));
-  const fromRawMappings = moduleFunction(
-    metroRequire("metro-source-map"),
-    ["fromRawMappings"],
-    "fromRawMappings",
-  );
-
-  return (preModules, graph, options) => {
-    const sourceMapOptions = {
-      excludeSource: options?.excludeSource === true,
-      getSourceUrl: typeof options?.getSourceUrl === "function" ? options.getSourceUrl : null,
-      processModuleFilter: typeof options?.processModuleFilter === "function" ? options.processModuleFilter : () => true,
-      shouldAddToIgnoreList:
-        typeof options?.shouldAddToIgnoreList === "function" ? options.shouldAddToIgnoreList : () => false,
-    };
-    const modules = [...preModules, ...sortedModules(graph, options)]
-      .filter(isJsModule)
-      .filter(sourceMapOptions.processModuleFilter)
-      .map((module) => getSourceMapInfo(module, sourceMapOptions));
-    return fromRawMappings(modules).toString(undefined, sourceMapOptions);
-  };
-}
-
-function createDefaultMetroSerializer() {
-  const baseJSBundle = moduleFunction(
-    requireMetroModule(
-      "metro/private/DeltaBundler/Serializers/baseJSBundle",
-      "metro/src/DeltaBundler/Serializers/baseJSBundle",
-    ),
-    ["baseJSBundle", "default"],
-    "baseJSBundle",
-  );
-  const bundleToString = moduleFunction(
-    requireMetroModule("metro/private/lib/bundleToString", "metro/src/lib/bundleToString"),
-    ["bundleToString", "default"],
-    "bundleToString",
-  );
-  const serializeSourceMap = createMetroSourceMapSerializer();
-
-  return async (entryPoint, preModules, graph, options) => {
-    const code = bundleToString(baseJSBundle(entryPoint, preModules, graph, options)).code;
-    if (isDevelopmentGraph(graph)) {
-      return code;
-    }
-    const map = await serializeSourceMap(preModules, graph, options);
-    return { code, map };
-  };
-}
-
+/**
+ * @param {unknown} customSerializer
+ * @returns {Callable}
+ */
 function createLogBrewMetroSerializer(customSerializer) {
-  if (customSerializer !== undefined && customSerializer !== null && typeof customSerializer !== "function") {
+  if (customSerializer !== undefined && customSerializer !== null && !isCallable(customSerializer)) {
     throw configurationError("LogBrew Metro custom serializer must be a function");
   }
-  if (customSerializer?.[WRAPPED_SERIALIZER] === true) {
+  if (isCallable(customSerializer) && field(customSerializer, WRAPPED_SERIALIZER) === true) {
     return customSerializer;
   }
-
+  /** @type {Callable | undefined} */
   let serializerSource = customSerializer ?? undefined;
-  let fallbackSerializer;
-  const resolveSerializer = () => {
-    serializerSource ??= createDefaultMetroSerializer();
-    return serializerSource;
-  };
+  /** @type {MetroSerializer | undefined} */
+  let fallbackSerializer = undefined;
 
-  const serializer = async (entryPoint, preModules, graph, options) => {
-    const source = resolveSerializer();
+  /**
+   * @param {unknown} entryPoint
+   * @param {unknown} preModules
+   * @param {unknown} graph
+   * @param {unknown} options
+   * @returns {Promise<unknown>}
+   */
+  async function serializer(entryPoint, preModules, graph, options) {
+    serializerSource ??= createDefaultMetroSerializer();
+    const source = serializerSource;
     if (isDevelopmentGraph(graph)) {
       return source(entryPoint, preModules, graph, options);
     }
@@ -366,41 +213,49 @@ function createLogBrewMetroSerializer(customSerializer) {
     const result = await source(entryPoint, releaseModules, graph, options);
     if (typeof result === "string") {
       fallbackSerializer ??= createDefaultMetroSerializer();
-      const fallbackResult = await fallbackSerializer(entryPoint, releaseModules, graph, options);
-      if (typeof fallbackResult === "string" || fallbackResult.code !== result) {
-        throw configurationError(
-          "LogBrew Metro string-returning custom serializer changed bundle code; return { code, map } to preserve source-map accuracy",
-        );
-      }
-      return productionResult(fallbackResult);
+      return stringSerializerResult(result, fallbackSerializer, [entryPoint, releaseModules, graph, options]);
     }
     return productionResult(result);
-  };
+  }
   Object.defineProperty(serializer, WRAPPED_SERIALIZER, { value: true });
   return serializer;
 }
 
+/**
+ * @param {Readonly<Record<string, unknown>>} config
+ * @returns {Readonly<Record<string, unknown>>}
+ */
+function requireSerializerConfig(config) {
+  const serializerConfig = config["serializer"] ?? {};
+  if (!isRecord(serializerConfig) || Array.isArray(serializerConfig)) {
+    throw configurationError("withLogBrewMetroConfig requires config.serializer to be an object");
+  }
+  return serializerConfig;
+}
+
+/**
+ * @param {unknown} config
+ * @param {unknown} [options]
+ * @returns {unknown}
+ */
 function withLogBrewMetroConfig(config, options = {}) {
   requireOptions(options);
-  if (!config || Array.isArray(config) || typeof config !== "object") {
+  if (!isRecord(config) || Array.isArray(config)) {
     throw configurationError("withLogBrewMetroConfig requires a Metro config object");
   }
   if (options.enabled === false) {
     return config;
   }
-  const serializerConfig = config.serializer ?? {};
-  if (!serializerConfig || Array.isArray(serializerConfig) || typeof serializerConfig !== "object") {
-    throw configurationError("withLogBrewMetroConfig requires config.serializer to be an object");
-  }
-  if (serializerConfig.customSerializer?.[WRAPPED_SERIALIZER] === true) {
+  const serializerConfig = requireSerializerConfig(config);
+  if (field(serializerConfig["customSerializer"], WRAPPED_SERIALIZER) === true) {
     return config;
   }
   return {
     ...config,
     serializer: {
       ...serializerConfig,
-      customSerializer: createLogBrewMetroSerializer(serializerConfig.customSerializer),
-    },
+      customSerializer: createLogBrewMetroSerializer(serializerConfig["customSerializer"])
+    }
   };
 }
 
@@ -408,5 +263,6 @@ module.exports = {
   createLogBrewMetroSerializer,
   getLogBrewExpoConfig,
   withLogBrewMetroConfig,
-  default: withLogBrewMetroConfig,
+
+  default: withLogBrewMetroConfig
 };
