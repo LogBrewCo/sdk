@@ -242,6 +242,12 @@ for unit in ${joined[@]+"${joined[@]}"}; do
   if [[ -f "$unit/bun.lock" ]]; then
     (cd "$unit" && bun install --frozen-lockfile --ignore-scripts --silent)
   fi
+  if [[ -f "$unit/prisma/schema.prisma" ]]; then
+    if ! generated="$(CHECKPOINT_DISABLE=1 bun --bun js/node_modules/.bin/prisma generate --schema "$unit/prisma/schema.prisma" 2>&1)"; then
+      printf '%s\n' "$generated" >&2
+      exit 1
+    fi
+  fi
 done
 
 source_files() {

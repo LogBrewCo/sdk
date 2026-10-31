@@ -15,4 +15,4 @@ await extension.query.$allOperations({
   query: async () => [{ id: 1 }]
 });
 
-console.log(client.previewJson());
+process.stdout.write(`${client.previewJson()}\n`);

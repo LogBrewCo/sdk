@@ -1,16 +1,16 @@
+import type { DatabaseOperationWithLogBrewSpanOptions, LogBrewTraceContext } from "@logbrew/node";
 import type { LogBrewClient, SpanEventSummary, SpanLinkSummary } from "@logbrew/sdk";
-import type { LogBrewTraceContext } from "@logbrew/node";
 
-export type LogBrewPrismaPrimitiveMetadata = Record<string, string | number | boolean | null>;
+type LogBrewPrismaPrimitiveMetadata = Record<string, string | number | boolean | null>;
 
-export type LogBrewPrismaOperationContext<Result = unknown> = {
-  args?: unknown;
-  model?: string;
-  operation?: string;
-  query: (args?: unknown) => Result | Promise<Result>;
+type LogBrewPrismaOperationContext<Result = unknown> = {
+  readonly args?: unknown;
+  readonly model?: string;
+  readonly operation?: string;
+  readonly query: (args?: unknown) => Result | Promise<Result>;
 };
 
-export type LogBrewPrismaSpanOptions = {
+type LogBrewPrismaSpanOptions = {
   client: LogBrewClient;
   databaseName?: string;
   trace?: LogBrewTraceContext;
@@ -22,43 +22,30 @@ export type LogBrewPrismaSpanOptions = {
   nowMs?: () => number;
   spanIdFactory?: () => string;
   traceIdFactory?: () => string;
-  onCaptureError?: (
-    error: unknown,
-    context: {
-      client: LogBrewClient;
-      error?: unknown;
-      trace: LogBrewTraceContext;
-    }
-  ) => void | Promise<void>;
+  onCaptureError?: NonNullable<DatabaseOperationWithLogBrewSpanOptions["onCaptureError"]>;
 };
 
-export type LogBrewPrismaExtension = {
-  name: "logbrew";
-  query: {
-    $allOperations<Result = unknown>(
-      context: LogBrewPrismaOperationContext<Result>
-    ): Promise<Awaited<Result>>;
+type LogBrewPrismaExtension = {
+  readonly name: "logbrew";
+  readonly query: {
+    readonly $allOperations: <Result = unknown>(context: LogBrewPrismaOperationContext<Result>) => Promise<Awaited<Result>>;
   };
 };
 
-export type LogBrewPrismaInstrumentation<Client> = {
+type LogBrewPrismaInstrumentation<Client> = {
   client: Client;
-  isInstalled(): boolean;
-  uninstall(): void;
+  isInstalled: () => boolean;
+  uninstall: () => void;
 };
 
-export declare function createLogBrewPrismaExtension(
-  options: LogBrewPrismaSpanOptions
-): LogBrewPrismaExtension;
+declare function createLogBrewPrismaExtension(options: LogBrewPrismaSpanOptions): LogBrewPrismaExtension;
 
-export declare function instrumentLogBrewPrismaClient<
-  Client extends { $extends(extension: LogBrewPrismaExtension): unknown }
->(
+declare function instrumentLogBrewPrismaClient<Client extends { $extends: (extension: LogBrewPrismaExtension) => unknown }>(
   prismaClient: Client,
   options: LogBrewPrismaSpanOptions
 ): LogBrewPrismaInstrumentation<Client>;
 
-export declare function prismaOperationWithLogBrewSpan<Result = unknown>(
+declare function prismaOperationWithLogBrewSpan<Result = unknown>(
   context: LogBrewPrismaOperationContext<Result>,
   options: LogBrewPrismaSpanOptions
 ): Promise<Awaited<Result>>;
@@ -69,4 +56,12 @@ declare const defaultExport: {
   prismaOperationWithLogBrewSpan: typeof prismaOperationWithLogBrewSpan;
 };
 
+export type {
+  LogBrewPrismaExtension,
+  LogBrewPrismaInstrumentation,
+  LogBrewPrismaOperationContext,
+  LogBrewPrismaPrimitiveMetadata,
+  LogBrewPrismaSpanOptions
+};
+export { createLogBrewPrismaExtension, instrumentLogBrewPrismaClient, prismaOperationWithLogBrewSpan };
 export default defaultExport;

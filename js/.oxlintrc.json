@@ -153,6 +153,14 @@
               "MessageEvent",
               "Response"
             ]
+          },
+          {
+            "from": "file",
+            "name": "LogBrewPrismaExtensionOptions"
+          },
+          {
+            "from": "file",
+            "name": "LogBrewPrismaSpanOptions"
           }
         ]
       }

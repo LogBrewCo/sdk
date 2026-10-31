@@ -15,12 +15,12 @@ pnpm add @logbrew/sdk @logbrew/node @logbrew/prisma @prisma/client
 Use a project-scoped server ingest key, for example `LOGBREW_SERVER_API_KEY`.
 
 ```js
-import { PrismaClient } from "@prisma/client";
 import { LogBrewClient } from "@logbrew/sdk";
+import { PrismaClient } from "@prisma/client";
 import { instrumentLogBrewPrismaClient } from "@logbrew/prisma";
 
 const logbrew = LogBrewClient.create({
-  apiKey: process.env.LOGBREW_SERVER_API_KEY,
+  apiKey: process.env["LOGBREW_SERVER_API_KEY"] ?? "LOGBREW_SERVER_API_KEY",
   sdkName: "checkout-api",
   sdkVersion: "1.0.0"
 });

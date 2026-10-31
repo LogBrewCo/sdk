@@ -1,20 +1,11 @@
-import { createRequire } from "node:module";
+import prisma from "./index.cjs";
 
-const require = createRequire(import.meta.url);
-const {
-  createLogBrewPrismaExtension,
-  instrumentLogBrewPrismaClient,
-  prismaOperationWithLogBrewSpan
-} = require("./index.cjs");
-
-export {
+const { createLogBrewPrismaExtension, instrumentLogBrewPrismaClient, prismaOperationWithLogBrewSpan } = prisma;
+const defaultExport = {
   createLogBrewPrismaExtension,
   instrumentLogBrewPrismaClient,
   prismaOperationWithLogBrewSpan
 };
 
-export default {
-  createLogBrewPrismaExtension,
-  instrumentLogBrewPrismaClient,
-  prismaOperationWithLogBrewSpan
-};
+export { createLogBrewPrismaExtension, instrumentLogBrewPrismaClient, prismaOperationWithLogBrewSpan };
+export default defaultExport;
