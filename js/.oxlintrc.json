@@ -260,6 +260,14 @@
   "overrides": [
     {
       "files": [
+        "logbrew-js/null-value.cjs"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
+      }
+    },
+    {
+      "files": [
         "logbrew-*/*.cjs"
       ],
       "rules": {
