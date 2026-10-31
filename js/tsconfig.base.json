@@ -32,6 +32,7 @@
       "@logbrew/nestjs": ["./logbrew-nestjs/index.d.ts"],
       "@logbrew/node": ["./logbrew-node/index.d.ts"],
       "@logbrew/sdk": ["./logbrew-js/index.d.ts"],
+      "@logbrew/svelte": ["./logbrew-svelte/index.d.ts"],
       "@logbrew/vue": ["./logbrew-vue/index.d.ts"]
     },
     "skipLibCheck": false,
