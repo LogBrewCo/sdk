@@ -53,10 +53,10 @@ const ROOT_DEPTH = 0;
 const DEPTH_STEP = 1;
 const TEXT_START = 0;
 const KEY_SEPARATOR_PATTERN = /[^a-z0-9]/giu;
-const SECRET_ASSIGNMENT_PATTERN = /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]/iu;
+const SENSITIVE_ASSIGNMENT_PATTERN = /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]/iu;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/iu;
 const LOGBREW_KEY_PATTERN = /\blbw_(?:ingest|client|api)_[A-Za-z0-9._-]+/iu;
-const VENDOR_TOKEN_PATTERN = /\b(?:github_pat|ghp|gho|npm|pypi|sk_live|sk_test|xox[baprs]|AKIA)[A-Za-z0-9._-]+/u;
+const VENDOR_KEY_PATTERN = /\b(?:github_pat|ghp|gho|npm|pypi|sk_live|sk_test|xox[baprs]|AKIA)[A-Za-z0-9._-]+/u;
 const LOCAL_PATH_PATTERN = /^(?:\/Users\/|\/home\/|\/var\/folders\/|[A-Za-z]:\\)/u;
 const QUERY_OR_FRAGMENT_PATTERN = /[?#]/u;
 
@@ -77,10 +77,10 @@ function isSensitiveSupportKey(key) {
  * @returns {boolean}
  */
 function isSensitiveSupportString(value) {
-  return SECRET_ASSIGNMENT_PATTERN.test(value)
+  return SENSITIVE_ASSIGNMENT_PATTERN.test(value)
     || BEARER_PATTERN.test(value)
     || LOGBREW_KEY_PATTERN.test(value)
-    || VENDOR_TOKEN_PATTERN.test(value);
+    || VENDOR_KEY_PATTERN.test(value);
 }
 
 /**

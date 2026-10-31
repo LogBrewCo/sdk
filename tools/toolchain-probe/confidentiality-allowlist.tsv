@@ -269,7 +269,7 @@ js/logbrew-js/support-ticket.cjs	*	line	"password",
 js/logbrew-js/support-ticket.cjs	*	line	"refreshtoken",
 js/logbrew-js/support-ticket.cjs	*	line	"secret",
 js/logbrew-js/support-ticket.cjs	*	line	"token"
-js/logbrew-js/support-ticket.cjs	*	line	return /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]/iu.test(value)
+js/logbrew-js/support-ticket.cjs	*	line	const SENSITIVE_ASSIGNMENT_PATTERN = /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]/iu;
 go/logbrew/support_ticket.go	*	line	"authtoken":        {},
 go/logbrew/support_ticket.go	*	line	"clientsecret":     {},
 go/logbrew/support_ticket.go	*	line	"credential",
