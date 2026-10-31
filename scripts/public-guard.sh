@@ -16,6 +16,7 @@
 #
 # The project term list comes from PUBLIC_GUARD_TERMS (content),
 # PUBLIC_GUARD_TERMS_FILE, or `git config logbrew.publicGuardTermsFile`.
+# A file setting that names a missing file stops the guard.
 # Each line is: CATEGORY<TAB>PATTERN[<TAB>only:REPO,...|except:REPO,...].
 # PATTERN is a word that also matches across case changes and up to two
 # separator characters between letters, `=TEXT` for exact text, or `re:RE2`.
@@ -83,14 +84,19 @@ repository_name() {
 }
 
 load_terms() {
-  local file
+  local file setting="PUBLIC_GUARD_TERMS_FILE" fix="set it to the current term list"
   if [[ -n "${PUBLIC_GUARD_TERMS:-}" ]]; then
     printf '%s\n' "$PUBLIC_GUARD_TERMS"
     return
   fi
-  file="${PUBLIC_GUARD_TERMS_FILE:-$(git config --get logbrew.publicGuardTermsFile || true)}"
+  file="${PUBLIC_GUARD_TERMS_FILE:-}"
+  if [[ -z "$file" ]]; then
+    file="$(git config --get logbrew.publicGuardTermsFile || true)"
+    setting="git config logbrew.publicGuardTermsFile"
+    fix="run 'bash scripts/public-guard.sh install TERMS_FILE' with the current term list"
+  fi
   if [[ -n "$file" ]]; then
-    [[ -f "$file" ]] || fail "project term list file is missing"
+    [[ -f "$file" ]] || fail "$setting names a term list file that does not exist; $fix"
     cat "$file"
   fi
 }
@@ -121,7 +127,7 @@ build_config() {
   local config="$work/config.toml" repo terms count=0 category pattern scope regex items item skip paths
   cp "$guard_dir/public-guard.toml" "$config"
   repo="$(repository_name)"
-  terms="$(load_terms)"
+  terms="$(load_terms)" || exit
   if [[ -z "$terms" ]]; then
     [[ "${PUBLIC_GUARD_REQUIRE_TERMS:-0}" != "1" ]] || fail "project term list is required but unavailable"
     printf 'public-guard: project term list unavailable; generic rules only\n' >&2

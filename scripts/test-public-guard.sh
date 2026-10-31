@@ -219,6 +219,12 @@ text_case "only the edited field is scanned" pull_request_target \
 
 terms="" expect "missing term list falls back to generic rules" 0 "generic rules only" "" text pr-body="$work/body"
 PUBLIC_GUARD_REQUIRE_TERMS=1 terms="" expect "required term list missing fails closed" 2 "required but unavailable" "" text pr-body="$work/body"
+PUBLIC_GUARD_TERMS_FILE="$work/missing.tsv" terms="" expect "missing term list file fails closed" 2 \
+  "PUBLIC_GUARD_TERMS_FILE names a term list file that does not exist" "" text pr-body="$work/body"
+git -C "$repo" config logbrew.publicGuardTermsFile "$work/missing.tsv"
+terms="" expect "missing configured term list file fails closed" 2 \
+  "logbrew.publicGuardTermsFile names a term list file that does not exist; run 'bash scripts/public-guard.sh install" "" text pr-body="$work/body"
+git -C "$repo" config --unset logbrew.publicGuardTermsFile
 terms="$(printf 'Bad Category\t%s\n' "$term")" expect "malformed term list fails closed" 2 "malformed line" "" text pr-body="$work/body"
 terms="$(printf 'product\t%s\texcept:sample@bench\n' "$term")" expect "directory scope without a slash fails closed" 2 "malformed scope" "" text pr-body="$work/body"
 terms="$(printf 'product\t%s\texcept:sample@../x/\n' "$term")" expect "directory scope outside the repository fails closed" 2 "malformed scope" "" text pr-body="$work/body"
