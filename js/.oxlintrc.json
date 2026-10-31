@@ -330,10 +330,19 @@
     },
     {
       "files": [
+        "logbrew-js/release-artifacts-manifest-artifact.js",
         "logbrew-js/vite-release-artifacts-config.cjs"
       ],
       "rules": {
         "unicorn/no-null": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-js/release-artifacts-upload.js"
+      ],
+      "rules": {
+        "node/no-process-env": "off"
       }
     },
     {

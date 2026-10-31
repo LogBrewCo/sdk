@@ -1,40 +1,40 @@
 #!/usr/bin/env node
-import { Buffer } from "node:buffer";
-import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-
 import {
-  byteSize,
-  fileReference,
+  errorMessage,
   normalizeProjectId,
   parseOptions,
+  pathExists,
   printJson,
   readJsonObject,
-  relativeTo,
-  requireOption,
   requireBuildDir,
-  safeResolve,
-  sha256File,
-  sourceMapDebugId,
-  SOURCE_MAP_DEBUG_ID_KEYS,
-  sortJson,
-  stableJson
+  requireOption
 } from "./release-artifacts-common.js";
-import { runUploadJs } from "./release-artifacts-upload.js";
 import { verifyJavaScriptIssueSymbolication, verifyJavaScriptSymbolication } from "./release-artifacts-symbolication.js";
+import { createDebugIdPlan } from "./release-artifacts-prepare.js";
+import { createManifest } from "./release-artifacts-manifest.js";
+import path from "node:path";
+import { runUploadJs } from "./release-artifacts-upload.js";
 
-const DEBUG_ID_NAMESPACE = "16f4a837-7e0b-4d7c-97d9-8a7af1fd2768";
-const DEBUG_ID_RE = /(?:\/\/#|\/\*#)\s*debugId=([A-Za-z0-9._:-]+)/giu;
-const DEBUG_ID_REGISTRY_NAME = "logbrew.release-artifact.debug-ids";
-const DEBUG_ID_REGISTRY_EXPRESSION = `Symbol.for(${JSON.stringify(DEBUG_ID_REGISTRY_NAME)})`;
-const HERMES_RUNTIME_DEBUG_ID_RE = /\/\*logbrew-runtime-debug-id\*\/\/\/# debugId=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/iu;
-const RUNTIME_DEBUG_ID_MARKER = "/*logbrew-runtime-debug-id*/";
-const MINIFIED_SOURCE_SUFFIXES = [".js", ".mjs", ".bundle", ".jsbundle"];
+/**
+ * @import { CliOptions } from "./release-artifacts-common.js"
+ * @import { SourceContextOptions } from "./release-artifacts-source-context.js"
+ */
+
 const SCRIPT_VERSION = "0.1.0";
-const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
-const SOURCE_MAPPING_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=([^\s*]+)/iu;
+const DEFAULT_CONTEXT_LINES = 2;
+const MAX_CONTEXT_LINES = 10;
+const MIN_CONTEXT_LINES = 0;
+const DECIMAL = 10;
+const EXIT_OK = 0;
+const EXIT_BLOCKED = 1;
+const EXIT_USAGE = 2;
+const ARGUMENT_OFFSET = 2;
+const NON_NEGATIVE_INTEGER_RE = /^\d+$/u;
+const VERIFIER = { name: "logbrew-js-release-artifact-symbolication-verifier", version: SCRIPT_VERSION };
 
+/**
+ * @returns {string}
+ */
 function usage() {
   return [
     "Usage:",
@@ -48,691 +48,218 @@ function usage() {
   ].join("\n");
 }
 
+/**
+ * @param {CliOptions} options
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function optionalOption(options, name) {
+  const value = options[name];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * @param {CliOptions} options
+ * @param {string} name
+ * @returns {boolean}
+ */
+function hasOption(options, name) {
+  const value = options[name];
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * @param {string} value
+ * @returns {number}
+ */
+function parseContextLines(value) {
+  const trimmed = value.trim();
+  if (!NON_NEGATIVE_INTEGER_RE.test(trimmed)) {
+    throw new Error("--context-lines must be an integer from 0 to 10");
+  }
+  const contextLines = Number.parseInt(trimmed, DECIMAL);
+  if (contextLines < MIN_CONTEXT_LINES || contextLines > MAX_CONTEXT_LINES) {
+    throw new Error("--context-lines must be an integer from 0 to 10");
+  }
+  return contextLines;
+}
+
+/**
+ * @param {CliOptions} options
+ * @returns {SourceContextOptions | undefined}
+ */
 function optionalSourceContextOptions(options) {
-  const hasSourceRoot = typeof options["source-root"] === "string" && options["source-root"].trim() !== "";
-  const hasContextLines = typeof options["context-lines"] === "string" && options["context-lines"].trim() !== "";
+  const hasSourceRoot = hasOption(options, "source-root");
+  const contextLinesOption = optionalOption(options, "context-lines");
+  const hasContextLines = hasOption(options, "context-lines");
   if (!hasSourceRoot && !hasContextLines) {
     return undefined;
   }
   if (!hasSourceRoot) {
     throw new Error("--source-root is required when --context-lines is provided");
   }
-  let contextLines = 2;
-  if (hasContextLines) {
-    const value = options["context-lines"].trim();
-    if (!/^\d+$/u.test(value)) {
-      throw new Error("--context-lines must be an integer from 0 to 10");
-    }
-    contextLines = Number.parseInt(value, 10);
-    if (contextLines < 0 || contextLines > 10) {
-      throw new Error("--context-lines must be an integer from 0 to 10");
-    }
-  }
   return {
-    sourceRoot: path.resolve(requireOption(options, "source-root")),
-    contextLines
+    contextLines: hasContextLines ? parseContextLines(contextLinesOption ?? "") : DEFAULT_CONTEXT_LINES,
+    sourceRoot: path.resolve(requireOption(options, "source-root"))
   };
 }
 
-function readText(filePath) {
-  return fs.readFileSync(filePath, "utf8");
-}
-
-function writeText(filePath, value) {
-  fs.writeFileSync(filePath, value, "utf8");
-}
-
-function readSourceMap(filePath) {
-  let payload;
-  try {
-    payload = JSON.parse(readText(filePath));
-  } catch (error) {
-    return [null, [`source map is not valid JSON: ${error.message}`]];
-  }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return [null, ["source map must be a JSON object"]];
-  }
-  return [payload, []];
-}
-
-function findLastMatch(source, regex) {
-  let result = null;
-  regex.lastIndex = 0;
-  for (const match of source.matchAll(regex)) {
-    result = match[1]?.trim() ?? null;
-  }
-  return result;
-}
-
-function findDebugId(source) {
-  const runtimeDebugId = source.match(HERMES_RUNTIME_DEBUG_ID_RE)?.[1];
-  return runtimeDebugId ?? findLastMatch(source, DEBUG_ID_RE);
-}
-
-function findSourceMappingUrl(source) {
-  const match = source.match(SOURCE_MAPPING_RE);
-  return match?.[1]?.trim() ?? null;
-}
-
-function resolveSourceMapPath(jsPath, buildDir, sourceMappingUrl) {
-  const warnings = [];
-  const errors = [];
-  if (!sourceMappingUrl) {
-    const fallback = `${jsPath}.map`;
-    warnings.push("sourceMappingURL comment missing; checked sibling .map fallback");
-    return [fs.existsSync(fallback) ? fallback : null, warnings, errors];
-  }
-
-  const reference = fileReference(sourceMappingUrl);
-  if (reference.startsWith("data:")) {
-    errors.push("inline source maps are not accepted for release artifact manifests");
-    return [null, warnings, errors];
-  }
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(reference)) {
-    errors.push("external sourceMappingURL cannot be validated from the local build directory");
-    return [null, warnings, errors];
-  }
-
-  const candidate = reference.startsWith("/")
-    ? path.join(buildDir, reference.slice(1))
-    : path.join(path.dirname(jsPath), reference);
-  const resolved = safeResolve(candidate, buildDir);
-  if (!resolved) {
-    errors.push("sourceMappingURL resolves outside the build directory");
-  }
-  return [resolved, warnings, errors];
-}
-
-function isMinifiedSource(filePath) {
-  return !filePath.endsWith(".map") && MINIFIED_SOURCE_SUFFIXES.some((suffix) => filePath.endsWith(suffix));
-}
-
-function walkFiles(root) {
-  const results = [];
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const entryPath = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...walkFiles(entryPath));
-    } else if (entry.isFile()) {
-      results.push(entryPath);
-    }
-  }
-  return results.sort();
-}
-
-function iterMinifiedSourceFiles(buildDir) {
-  return walkFiles(buildDir).filter(isMinifiedSource);
-}
-
-function canonicalSourceWithoutDebugId(source) {
-  return source.replace(DEBUG_ID_RE, "");
-}
-
-function canonicalSourceMapWithoutDebugId(payload) {
-  const copy = { ...payload };
-  for (const key of SOURCE_MAP_DEBUG_ID_KEYS) {
-    delete copy[key];
-  }
-  return stableJson(copy);
-}
-
-function uuidBytes(value) {
-  return Buffer.from(value.replaceAll("-", ""), "hex");
-}
-
-function formatUuid(bytes) {
-  const hex = Buffer.from(bytes).toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-function uuidV5(namespace, name) {
-  const bytes = crypto
-    .createHash("sha1")
-    .update(uuidBytes(namespace))
-    .update(Buffer.from(name, "utf8"))
-    .digest()
-    .subarray(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  return formatUuid(bytes);
-}
-
-function generateDebugId(relativeJsPath, jsSource, sourceMapPayload) {
-  const digest = crypto.createHash("sha256");
-  digest.update(relativeJsPath);
-  digest.update("\0");
-  digest.update(canonicalSourceWithoutDebugId(jsSource));
-  digest.update("\0");
-  digest.update(canonicalSourceMapWithoutDebugId(sourceMapPayload));
-  return uuidV5(DEBUG_ID_NAMESPACE, digest.digest("hex"));
-}
-
-function executableShebang(source) {
-  return source.startsWith("#!") ? source.match(/^#![^\r\n]*(?:\r?\n|$)/u)?.[0] ?? "" : "";
-}
-
-function sourceStartsWithDirective(source, shebang) {
-  const body = source.slice(shebang.length).replace(/^(?:\s|\/\/[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)+/u, "");
-  return body.startsWith("\"") || body.startsWith("'");
-}
-
-function sourceWithDebugId(source, debugId, relativePath) {
-  const registryLine = `;try{${RUNTIME_DEBUG_ID_MARKER}(function(){var g=globalThis,s=${DEBUG_ID_REGISTRY_EXPRESSION},r=g[s];if(!r||typeof r!=="object")r=g[s]=Object.create(null);r[${JSON.stringify(relativePath)}]=${JSON.stringify(debugId)}})()}catch(_){}\n`;
-  const shebang = executableShebang(source);
-  const prepared = source.includes(RUNTIME_DEBUG_ID_MARKER)
-    ? source
-    : `${shebang}${shebang === source && shebang ? "\n" : ""}${registryLine}${source.slice(shebang.length)}`;
-  if (findDebugId(prepared)) {
-    return prepared;
-  }
-  const debugLine = `//# debugId=${debugId}\n`;
-  const matches = [...prepared.matchAll(SOURCE_MAPPING_COMMENT_RE)];
-  if (matches.length === 0) {
-    return `${prepared}${prepared.endsWith("\n") ? "" : "\n"}${debugLine}`;
-  }
-  const last = matches.at(-1);
-  const prefix = prepared.slice(0, last.index);
-  const separator = prefix.endsWith("\n") || prefix.endsWith("\r") ? "" : "\n";
-  return `${prefix}${separator}${debugLine}${prepared.slice(last.index)}`;
-}
-
-function normalizeSourcePrefixes(values) {
-  const prefixes = [];
-  for (const value of values ?? []) {
-    for (const candidate of [path.resolve(value), fs.existsSync(value) ? fs.realpathSync(value) : path.resolve(value)]) {
-      const normalized = candidate.split(path.sep).join("/").replace(/\/+$/u, "");
-      if (normalized && !prefixes.includes(normalized)) {
-        prefixes.push(normalized);
-      }
-    }
-  }
-  return prefixes;
-}
-
-function sourceWithoutPrefix(source, prefixes) {
-  const normalized = source.replaceAll("\\", "/");
-  for (const prefix of prefixes) {
-    const marker = `${prefix}/`;
-    if (normalized === prefix) {
-      return path.posix.basename(prefix);
-    }
-    if (normalized.startsWith(marker)) {
-      return normalized.slice(marker.length);
-    }
-  }
-  return source;
-}
-
-function sourceMapSourcesWithoutPrefixes(payload, prefixes) {
-  if (prefixes.length === 0 || !Array.isArray(payload.sources)) {
-    return null;
-  }
-  const updated = payload.sources.map((source) => (typeof source === "string" ? sourceWithoutPrefix(source, prefixes) : source));
-  return JSON.stringify(updated) === JSON.stringify(payload.sources) ? null : updated;
-}
-
-function sourceMapPayloadForDebugId(payload, { stripSourcesContent, sourcePrefixes }) {
-  const updatedSources = sourceMapSourcesWithoutPrefixes(payload, sourcePrefixes);
-  if (!stripSourcesContent && !updatedSources) {
-    return payload;
-  }
-  const updated = updatedSources ? { ...payload, sources: updatedSources } : { ...payload };
-  if (stripSourcesContent) {
-    delete updated.sourcesContent;
-  }
-  return updated;
-}
-
-function sourceMapWithPrivacyUpdates(payload, debugId, options) {
-  const privacyUpdated = sourceMapPayloadForDebugId(payload, options);
-  const { shiftGeneratedLines } = options;
-  if (sourceMapDebugId(payload)
-    && privacyUpdated === payload
-    && !shiftGeneratedLines) {
-    return payload;
-  }
-  const updated = { ...privacyUpdated };
-  if (!sourceMapDebugId(updated)) {
-    updated.debug_id = debugId;
-  }
-  if (shiftGeneratedLines && typeof updated.mappings === "string") {
-    updated.mappings = `;${updated.mappings}`;
-  }
-  return updated;
-}
-
-function inspectArtifactFiles(jsPath, buildDir) {
-  const errors = [];
-  const warnings = [];
-  const relJs = relativeTo(buildDir, jsPath);
-  const jsSize = byteSize(jsPath);
-
-  if (jsSize === 0) {
-    errors.push("minified source file is empty");
-  }
-
-  const jsSource = readText(jsPath);
-  const jsDebugId = findDebugId(jsSource);
-  const sourceMappingUrl = findSourceMappingUrl(jsSource);
-  const [sourceMapPath, mapWarnings, mapErrors] = resolveSourceMapPath(jsPath, buildDir, sourceMappingUrl);
-  warnings.push(...mapWarnings);
-  errors.push(...mapErrors);
-
-  let sourceMapPayload = null;
-  let mapDebugId = null;
-  let sourceMapRel = null;
-  let sourceMapSize = null;
-  if (!sourceMapPath) {
-    errors.push("source map file is missing");
-  } else if (!fs.existsSync(sourceMapPath)) {
-    errors.push(`source map file is missing: ${relativeTo(buildDir, sourceMapPath)}`);
-  } else if (byteSize(sourceMapPath) === 0) {
-    errors.push(`source map file is empty: ${relativeTo(buildDir, sourceMapPath)}`);
-  } else {
-    sourceMapRel = relativeTo(buildDir, sourceMapPath);
-    sourceMapSize = byteSize(sourceMapPath);
-    const [payload, sourceMapErrors] = readSourceMap(sourceMapPath);
-    errors.push(...sourceMapErrors);
-    if (payload) {
-      sourceMapPayload = payload;
-      mapDebugId = sourceMapDebugId(payload);
-    }
-  }
-
-  if (jsDebugId && mapDebugId && jsDebugId !== mapDebugId) {
-    errors.push("minified source debugId does not match source map debugId");
-  }
-
-  return {
-    errors,
-    warnings,
-    relJs,
-    jsSize,
-    jsSource,
-    jsDebugId,
-    sourceMappingUrl,
-    sourceMapPath,
-    sourceMapPayload,
-    sourceMapRel,
-    sourceMapSize,
-    mapDebugId
-  };
-}
-
-function buildArtifactPlan(jsPath, buildDir, options) {
-  const {
-    errors,
-    warnings,
-    relJs,
-    jsSource,
-    jsDebugId,
-    sourceMapPayload,
-    sourceMapRel,
-    mapDebugId
-  } = inspectArtifactFiles(jsPath, buildDir);
-  const changes = [];
-  let debugId = jsDebugId || mapDebugId;
-  const needsRuntimeDebugId = !jsSource.includes(RUNTIME_DEBUG_ID_MARKER);
-  if (needsRuntimeDebugId && sourceStartsWithDirective(jsSource, executableShebang(jsSource))) {
-    errors.push("runtime Debug ID injection cannot precede a script directive");
-  }
-  if (needsRuntimeDebugId
-    && sourceMapPayload
-    && (typeof sourceMapPayload.mappings !== "string" || sourceMapPayload.mappings === "")) {
-    errors.push("source map mappings must be a non-empty string before runtime Debug ID injection");
-  }
-  if (errors.length === 0 && sourceMapPayload) {
-    if (needsRuntimeDebugId) {
-      changes.push("minifiedSource.runtimeDebugId");
-    }
-    if (!debugId) {
-      debugId = generateDebugId(
-        relJs,
-        jsSource,
-        sourceMapPayloadForDebugId(sourceMapPayload, options)
-      );
-      changes.push("minifiedSource.debugId", "sourceMap.debug_id");
-    } else {
-      if (!jsDebugId) {
-        changes.push("minifiedSource.debugId");
-      }
-      if (!mapDebugId) {
-        changes.push("sourceMap.debug_id");
-      }
-    }
-    if (options.stripSourcesContent && "sourcesContent" in sourceMapPayload) {
-      changes.push("sourceMap.sourcesContent");
-    }
-    if (sourceMapSourcesWithoutPrefixes(sourceMapPayload, options.sourcePrefixes)) {
-      changes.push("sourceMap.sources");
-    }
-  }
-
-  return {
-    path: relJs,
-    ...(sourceMapRel ? { sourceMapPath: sourceMapRel } : {}),
-    ...(debugId ? { debugId } : {}),
-    changes,
-    validation: {
-      status: errors.length > 0 ? "blocked" : "ready",
-      errors,
-      warnings
-    }
-  };
-}
-
-function applyArtifactPlan(artifact, buildDir, options) {
-  const debugId = artifact.debugId;
-  const jsPath = path.join(buildDir, artifact.path);
-  const sourceMapPath = path.join(buildDir, artifact.sourceMapPath);
-  const jsSource = readText(jsPath);
-  const shiftGeneratedLines = !jsSource.includes(RUNTIME_DEBUG_ID_MARKER);
-  const updatedSource = sourceWithDebugId(jsSource, debugId, artifact.path);
-  if (updatedSource !== jsSource) {
-    writeText(jsPath, updatedSource);
-  }
-  const [payload, errors] = readSourceMap(sourceMapPath);
-  if (!payload || errors.length > 0) {
-    throw new Error(`${artifact.path}: source map became unreadable before write`);
-  }
-  const updatedPayload = sourceMapWithPrivacyUpdates(payload, debugId, {
-    ...options,
-    shiftGeneratedLines
-  });
-  if (stableJson(updatedPayload) !== stableJson(payload)) {
-    writeText(sourceMapPath, `${JSON.stringify(sortJson(updatedPayload), null, 2)}\n`);
-  }
-}
-
-function createDebugIdPlan({ buildDir, write, stripSourcesContent, stripSourcePrefixes }) {
-  const sourcePrefixes = normalizeSourcePrefixes(stripSourcePrefixes);
-  const artifactOptions = { stripSourcesContent, sourcePrefixes };
-  const artifacts = iterMinifiedSourceFiles(buildDir).map((filePath) => buildArtifactPlan(filePath, buildDir, artifactOptions));
-  const errors = artifacts.length === 0 ? ["no JavaScript release artifact files found in build directory"] : [];
-  const warnings = [];
-  for (const artifact of artifacts) {
-    errors.push(...artifact.validation.errors.map((message) => `${artifact.path}: ${message}`));
-    warnings.push(...artifact.validation.warnings.map((message) => `${artifact.path}: ${message}`));
-  }
-  const status = errors.length > 0 ? "blocked" : "ready";
-  if (write && status === "ready") {
-    for (const artifact of artifacts) {
-      applyArtifactPlan(artifact, buildDir, artifactOptions);
-    }
-  }
-  return {
-    manifestVersion: 1,
-    tool: { name: "logbrew-js-release-artifact-debug-id-prep", version: SCRIPT_VERSION },
-    stripSourcesContent,
-    stripSourcePrefixCount: stripSourcePrefixes?.length ?? 0,
-    writeApplied: Boolean(write && status === "ready"),
-    artifacts,
-    validation: { status, errors, warnings }
-  };
-}
-
-function validateSourceMapPayload(payload, allowSourcesContent) {
-  const errors = [];
-  const warnings = [];
-  if (payload.version === undefined) {
-    errors.push("source map version is required");
-  }
-  if (!Array.isArray(payload.sources) || payload.sources.length === 0) {
-    errors.push("source map sources must be a non-empty array");
-  }
-  if (typeof payload.mappings !== "string" || payload.mappings === "") {
-    errors.push("source map mappings must be a non-empty string");
-  }
-  if ("sourcesContent" in payload) {
-    if (allowSourcesContent) {
-      warnings.push("source map contains sourcesContent; ensure app policy permits source upload");
-    } else {
-      errors.push("source map contains sourcesContent; rerun with --allow-sources-content only if policy permits it");
-    }
-  }
-  return [errors, warnings];
-}
-
-function normalizeUrlOrPath(value) {
-  const trimmed = value.trim();
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(trimmed)) {
-    const parsed = new URL(trimmed);
-    const normalizedPath = path.posix.normalize(parsed.pathname || "/").replace(/\/+$/u, "") || "/";
-    return parsed.host
-      ? `${parsed.protocol}//${parsed.host}${normalizedPath}`
-      : `${parsed.protocol}//${normalizedPath}`;
-  }
-  return trimmed.split("?", 1)[0].split("#", 1)[0].trim().replace(/\/+$/u, "");
-}
-
-function joinUrlOrPath(prefix, relativePath) {
-  const normalizedPrefix = normalizeUrlOrPath(prefix);
-  const normalizedRelative = relativePath.replaceAll("\\", "/").replace(/^\/+/u, "");
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(normalizedPrefix)) {
-    const parsed = new URL(normalizedPrefix);
-    const joinedPath = path.posix.join(parsed.pathname.replace(/\/+$/u, ""), normalizedRelative);
-    const finalPath = joinedPath.startsWith("/") ? joinedPath : `/${joinedPath}`;
-    return parsed.host
-      ? `${parsed.protocol}//${parsed.host}${finalPath}`
-      : `${parsed.protocol}//${finalPath}`;
-  }
-  return normalizedPrefix ? `${normalizedPrefix.replace(/\/+$/u, "")}/${normalizedRelative}` : normalizedRelative;
-}
-
-function buildManifestArtifact(jsPath, buildDir, minifiedPathPrefix, allowSourcesContent) {
-  const {
-    errors,
-    warnings,
-    relJs,
-    jsSize,
-    jsDebugId,
-    sourceMappingUrl,
-    sourceMapPath,
-    sourceMapPayload,
-    sourceMapRel,
-    sourceMapSize,
-    mapDebugId
-  } = inspectArtifactFiles(jsPath, buildDir);
-  let sourceMapEntry = null;
-  if (sourceMapPayload && sourceMapPath && sourceMapRel) {
-    const [payloadErrors, payloadWarnings] = validateSourceMapPayload(sourceMapPayload, allowSourcesContent);
-    errors.push(...payloadErrors);
-    warnings.push(...payloadWarnings);
-    sourceMapEntry = {
-      path: sourceMapRel,
-      artifactSha256: sha256File(sourceMapPath),
-      byteSize: sourceMapSize,
-      sourceCount: Array.isArray(sourceMapPayload.sources) ? sourceMapPayload.sources.length : 0,
-      hasSourcesContent: "sourcesContent" in sourceMapPayload,
-      ...(mapDebugId ? { debugId: mapDebugId } : {})
-    };
-  }
-  if (!jsDebugId && !mapDebugId) {
-    warnings.push("no debugId found; backend matching must rely on release/environment/service and minified path");
-  }
-
-  const debugId = jsDebugId || mapDebugId;
-  return {
-    artifactType: "javascript_source_map",
-    ...(debugId ? { debugId } : {}),
-    minifiedSource: {
-      path: relJs,
-      minifiedUrl: joinUrlOrPath(minifiedPathPrefix, relJs),
-      artifactSha256: sha256File(jsPath),
-      byteSize: jsSize,
-      ...(jsDebugId ? { debugId: jsDebugId } : {}),
-      ...(sourceMappingUrl ? { sourceMappingUrl } : {})
-    },
-    sourceMap: sourceMapEntry,
-    validation: {
-      status: errors.length > 0 ? "blocked" : "ready",
-      errors,
-      warnings
-    }
-  };
-}
-
-function createManifest({ buildDir, projectId, release, environment, service, minifiedPathPrefix, allowSourcesContent, repositoryUrl, commitSha }) {
-  const normalizedPrefix = normalizeUrlOrPath(minifiedPathPrefix.trim());
-  const artifacts = iterMinifiedSourceFiles(buildDir).map((filePath) =>
-    buildManifestArtifact(filePath, buildDir, normalizedPrefix, allowSourcesContent)
-  );
-  const errors = artifacts.length === 0 ? ["no JavaScript release artifact files found in build directory"] : [];
-  const warnings = [];
-  for (const artifact of artifacts) {
-    const relPath = artifact.minifiedSource.path;
-    errors.push(...artifact.validation.errors.map((message) => `${relPath}: ${message}`));
-    warnings.push(...artifact.validation.warnings.map((message) => `${relPath}: ${message}`));
-  }
-  const git = {};
-  if (repositoryUrl) {
-    git.repositoryUrl = repositoryUrl.trim();
-  }
-  if (commitSha) {
-    git.commitSha = commitSha.trim();
-  }
-  return {
-    manifestVersion: 1,
-    ...(projectId ? { projectId } : {}),
-    release,
-    environment,
-    service,
-    artifactType: "javascript_source_map_manifest",
-    minifiedPathPrefix: normalizedPrefix,
-    uploader: { name: "logbrew-js-release-artifact-manifest", version: SCRIPT_VERSION },
-    ...(Object.keys(git).length > 0 ? { git } : {}),
-    artifacts,
-    validation: {
-      status: errors.length > 0 ? "blocked" : "ready",
-      errors,
-      warnings
-    }
-  };
-}
-
-function runPrepareJs(args) {
+/**
+ * @param {readonly string[]} args
+ * @returns {Promise<number>}
+ */
+async function runPrepareJs(args) {
   const options = parseOptions(args, {
     "build-dir": "string",
-    write: "boolean",
+    "strip-source-prefix": "repeat",
     "strip-sources-content": "boolean",
-    "strip-source-prefix": "repeat"
+    write: "boolean"
   });
-  const buildDir = requireBuildDir(requireOption(options, "build-dir"));
-  const plan = createDebugIdPlan({
+  const buildDir = await requireBuildDir(requireOption(options, "build-dir"));
+  const stripSourcePrefixes = options["strip-source-prefix"];
+  const plan = await createDebugIdPlan({
     buildDir,
-    write: Boolean(options.write),
-    stripSourcesContent: Boolean(options["strip-sources-content"]),
-    stripSourcePrefixes: options["strip-source-prefix"] ?? []
+    stripSourcePrefixes: Array.isArray(stripSourcePrefixes) ? stripSourcePrefixes : [],
+    stripSourcesContent: options["strip-sources-content"] === true,
+    write: options["write"] === true
   });
   printJson(plan);
-  return plan.validation.status === "blocked" ? 1 : 0;
+  return plan.validation.status === "blocked" ? EXIT_BLOCKED : EXIT_OK;
 }
 
-function runManifestJs(args) {
+/**
+ * @param {readonly string[]} args
+ * @returns {Promise<number>}
+ */
+async function runManifestJs(args) {
   const options = parseOptions(args, {
+    "allow-sources-content": "boolean",
     "build-dir": "string",
+    "commit-sha": "string",
+    environment: "string",
+    "minified-path-prefix": "string",
     "project-id": "string",
     release: "string",
-    environment: "string",
-    service: "string",
-    "minified-path-prefix": "string",
     "repository-url": "string",
-    "commit-sha": "string",
-    "allow-sources-content": "boolean"
+    service: "string"
   });
-  const manifest = createManifest({
-    buildDir: requireBuildDir(requireOption(options, "build-dir")),
-    projectId: normalizeProjectId(options["project-id"], "--project-id must be a UUID"),
-    release: requireOption(options, "release"),
-    environment: requireOption(options, "environment"),
-    service: requireOption(options, "service"),
-    minifiedPathPrefix: requireOption(options, "minified-path-prefix"),
-    allowSourcesContent: Boolean(options["allow-sources-content"]),
-    repositoryUrl: options["repository-url"],
-    commitSha: options["commit-sha"]
+  const buildDir = await requireBuildDir(requireOption(options, "build-dir"));
+  const projectId = normalizeProjectId(options["project-id"], "--project-id must be a UUID");
+  const release = requireOption(options, "release");
+  const environment = requireOption(options, "environment");
+  const service = requireOption(options, "service");
+  const minifiedPathPrefix = requireOption(options, "minified-path-prefix");
+  const manifest = await createManifest({
+    allowSourcesContent: options["allow-sources-content"] === true,
+    buildDir,
+    commitSha: optionalOption(options, "commit-sha"),
+    environment,
+    minifiedPathPrefix,
+    projectId,
+    release,
+    repositoryUrl: optionalOption(options, "repository-url"),
+    service
   });
   printJson(manifest);
-  return manifest.validation.status === "blocked" ? 1 : 0;
+  return manifest.validation.status === "blocked" ? EXIT_BLOCKED : EXIT_OK;
 }
 
-function runSymbolicateJs(args) {
+/**
+ * @param {CliOptions} options
+ * @param {string} name
+ * @param {string} label
+ * @returns {Promise<string>}
+ */
+async function requireExistingFile(options, name, label) {
+  const filePath = path.resolve(requireOption(options, name));
+  if (!(await pathExists(filePath))) {
+    throw new Error(`${label} file does not exist: ${String(options[name])}`);
+  }
+  return filePath;
+}
+
+/**
+ * @param {CliOptions} options
+ * @returns {Promise<number>}
+ */
+async function symbolicateFromOptions(options) {
+  const buildDir = await requireBuildDir(requireOption(options, "build-dir"));
+  const manifestPath = await requireExistingFile(options, "manifest", "manifest");
+  const issueEvent = hasOption(options, "issue-event");
+  if (hasOption(options, "stack-frame") === issueEvent) {
+    throw new Error("provide exactly one of --stack-frame or --issue-event");
+  }
+  const manifest = await readJsonObject(manifestPath, "manifest");
+  const sourceContext = optionalSourceContextOptions(options);
+  const report = issueEvent
+    ? await verifyJavaScriptIssueSymbolication({
+      buildDir,
+      issueEvent: await readJsonObject(await requireExistingFile(options, "issue-event", "issue event"), "issue event"),
+      manifest,
+      sourceContext
+    })
+    : await verifyJavaScriptSymbolication({ buildDir, manifest, sourceContext, stackFrame: requireOption(options, "stack-frame") });
+  printJson(report);
+  return EXIT_OK;
+}
+
+/**
+ * @param {readonly string[]} args
+ * @returns {Promise<number>}
+ */
+async function runSymbolicateJs(args) {
   const options = parseOptions(args, {
     "build-dir": "string",
-    manifest: "string",
-    "stack-frame": "string",
+    "context-lines": "string",
     "issue-event": "string",
+    manifest: "string",
     "source-root": "string",
-    "context-lines": "string"
+    "stack-frame": "string"
   });
   try {
-    const buildDir = requireBuildDir(requireOption(options, "build-dir"));
-    const manifestPath = path.resolve(requireOption(options, "manifest"));
-    if (!fs.existsSync(manifestPath)) {
-      throw new Error(`manifest file does not exist: ${options.manifest}`);
-    }
-    const stackFrame = typeof options["stack-frame"] === "string" && options["stack-frame"].trim() !== "";
-    const issueEvent = typeof options["issue-event"] === "string" && options["issue-event"].trim() !== "";
-    if (stackFrame === issueEvent) {
-      throw new Error("provide exactly one of --stack-frame or --issue-event");
-    }
-    const manifest = readJsonObject(manifestPath, "manifest");
-    const sourceContext = optionalSourceContextOptions(options);
-    if (issueEvent) {
-      const issueEventPath = path.resolve(requireOption(options, "issue-event"));
-      if (!fs.existsSync(issueEventPath)) {
-        throw new Error(`issue event file does not exist: ${options["issue-event"]}`);
-      }
-      const report = verifyJavaScriptIssueSymbolication({
-        buildDir,
-        manifest,
-        issueEvent: readJsonObject(issueEventPath, "issue event"),
-        sourceContext
-      });
-      printJson(report);
-      return 0;
-    }
-    const report = verifyJavaScriptSymbolication({
-      buildDir,
-      manifest,
-      stackFrame: requireOption(options, "stack-frame"),
-      sourceContext
-    });
-    printJson(report);
-    return 0;
+    return await symbolicateFromOptions(options);
   } catch (error) {
-    printJson({
-      status: "validation_failed",
-      verifier: { name: "logbrew-js-release-artifact-symbolication-verifier", version: SCRIPT_VERSION },
-      validation: { errors: [error.message] }
-    });
-    return 1;
+    printJson({ status: "validation_failed", validation: { errors: [errorMessage(error)] }, verifier: VERIFIER });
+    return EXIT_BLOCKED;
   }
 }
 
+const COMMANDS = new Map([
+  ["manifest-js", runManifestJs],
+  ["prepare-js", runPrepareJs],
+  ["symbolicate-js", runSymbolicateJs],
+  ["upload-js", runUploadJs]
+]);
+
+/**
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @returns {Promise<number>}
+ */
+async function runCommand(command, args) {
+  const run = COMMANDS.get(command);
+  if (run === undefined) {
+    throw new Error(`unknown command: ${command}`);
+  }
+  return run(args);
+}
+
+/**
+ * @param {readonly string[]} argv
+ * @returns {Promise<number>}
+ */
 async function main(argv) {
-  const [command, ...args] = argv;
-  if (!command || command === "--help" || command === "-h") {
+  const [command = "", ...args] = argv;
+  if (command === "" || command === "--help" || command === "-h") {
     process.stdout.write(`${usage()}\n`);
-    return command ? 0 : 1;
+    return command === "" ? EXIT_BLOCKED : EXIT_OK;
   }
   try {
-    if (command === "prepare-js") {
-      return runPrepareJs(args);
-    }
-    if (command === "manifest-js") {
-      return runManifestJs(args);
-    }
-    if (command === "symbolicate-js") {
-      return runSymbolicateJs(args);
-    }
-    if (command === "upload-js") {
-      return await runUploadJs(args);
-    }
-    throw new Error(`unknown command: ${command}`);
+    return await runCommand(command, args);
   } catch (error) {
-    process.stderr.write(`${error.message}\n\n${usage()}\n`);
-    return 2;
+    process.stderr.write(`${errorMessage(error)}\n\n${usage()}\n`);
+    return EXIT_USAGE;
   }
 }
 
-process.exitCode = await main(process.argv.slice(2));
+process.exitCode = await main(process.argv.slice(ARGUMENT_OFFSET));

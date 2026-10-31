@@ -1,337 +1,192 @@
-/* global AbortController, clearTimeout */
-
-import { Buffer } from "node:buffer";
-import crypto from "node:crypto";
-import fs from "node:fs";
-import net from "node:net";
-import path from "node:path";
-
 import {
-  byteSize,
-  normalizeProjectId,
+  encodeMultipart,
+  endpointWithoutQuery,
+  requireUploadEndpoint,
+  uploadWithRetries
+} from "./release-artifacts-upload-request.js";
+import {
+  errorMessage,
   parseOptions,
+  pathExists,
   printJson,
   readJsonObject,
-  requireOption,
   requireBuildDir,
-  safeResolve,
-  sha256File,
-  stableJson
+  requireOption
 } from "./release-artifacts-common.js";
+import { collectUploadFiles } from "./release-artifacts-upload-files.js";
+import path from "node:path";
+
+/**
+ * @import { CliOptions, JsonObject } from "./release-artifacts-common.js"
+ * @import { UploadFile } from "./release-artifacts-upload-request.js"
+ * @typedef {{ readonly endpoint: string, readonly files: readonly UploadFile[], readonly manifest: JsonObject, readonly report: JsonObject }} PreparedUpload
+ */
 
 const DEFAULT_UPLOAD_TOKEN_ENV = "LOGBREW_RELEASE_ARTIFACT_TOKEN";
-const HOSTED_UPLOAD_ENDPOINT = "https://api.logbrew.co/api/release-artifacts";
-const NON_RETRYABLE_UPLOAD_STATUSES = new Set([400, 401, 403, 413]);
-const RETRYABLE_UPLOAD_STATUSES = new Set([408, 429]);
 const SCRIPT_VERSION = "0.1.0";
+const NO_RETRIES = 0;
+const DECIMAL = 10;
+const NON_NEGATIVE_INTEGER_RE = /^\d+$/u;
+const UPLOADER = { name: "logbrew-js-release-artifact-upload-verifier", version: SCRIPT_VERSION };
+const EXIT_OK = 0;
+const EXIT_AUTH_MISSING = 2;
+const EXIT_AUTH_FAILED = 3;
+const EXIT_VALIDATION_FAILED = 4;
+const EXIT_CODES = new Map([
+  ["auth_failed", EXIT_AUTH_FAILED],
+  ["auth_missing", EXIT_AUTH_MISSING],
+  ["dry_run", EXIT_OK],
+  ["uploaded", EXIT_OK],
+  ["validation_failed", EXIT_VALIDATION_FAILED]
+]);
+const UNKNOWN_FAILURE_EXIT_CODE = 5;
 
+/**
+ * @param {string} value
+ * @param {string} label
+ * @returns {number}
+ */
 function parseNonNegativeInteger(value, label) {
   const trimmed = value.trim();
-  if (!/^\d+$/u.test(trimmed)) {
+  if (!NON_NEGATIVE_INTEGER_RE.test(trimmed)) {
     throw new Error(`${label} must be a non-negative integer`);
   }
-  return Number.parseInt(trimmed, 10);
+  return Number.parseInt(trimmed, DECIMAL);
 }
 
+/**
+ * @param {string} value
+ * @param {string} label
+ * @returns {number}
+ */
 function parseNonNegativeNumber(value, label) {
-  const trimmed = value.trim();
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  const parsed = Number(value.trim());
+  if (!Number.isFinite(parsed) || parsed < NO_RETRIES) {
     throw new Error(`${label} must be a non-negative number`);
   }
   return parsed;
 }
 
-function endpointWithoutQuery(endpoint) {
-  const parsed = new URL(endpoint);
-  return `${parsed.protocol}//${parsed.host}${parsed.pathname || "/"}`;
-}
-
-function parseEndpoint(endpoint) {
-  let parsed;
-  try {
-    parsed = new URL(endpoint);
-  } catch (error) {
-    throw new Error(`upload endpoint is not a valid URL: ${error.message}`, { cause: error });
-  }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("release artifact upload proof endpoint must use http or https");
-  }
-  return parsed;
-}
-
-function isLoopbackEndpoint(parsed) {
-  const hostname = parsed.hostname.toLowerCase();
-  return (
-    hostname === "localhost" ||
-    hostname === "[::1]" ||
-    hostname === "::1" ||
-    (net.isIP(hostname) !== 0 && (hostname.startsWith("127.") || hostname === "::1"))
-  );
-}
-
-function requireUploadEndpoint(endpoint, allowHosted) {
-  const parsed = parseEndpoint(endpoint);
-  if (isLoopbackEndpoint(parsed)) {
-    return parsed;
-  }
-  if (!allowHosted) {
-    throw new Error("release artifact hosted upload requires explicit --allow-hosted; use loopback endpoints for local proof");
-  }
-  if (endpoint !== HOSTED_UPLOAD_ENDPOINT) {
-    throw new Error(`hosted release artifact uploads must use ${HOSTED_UPLOAD_ENDPOINT}`);
-  }
-  return parsed;
-}
-
-function quoteMultipartValue(value) {
-  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-}
-
-function encodeMultipart(manifest, files) {
-  const boundary = `logbrew-${crypto.randomUUID().replaceAll("-", "")}`;
-  const chunks = [];
-  const appendPart = (name, filename, contentType, bytes) => {
-    chunks.push(Buffer.from(`--${boundary}\r\n`, "ascii"));
-    chunks.push(
-      Buffer.from(
-        `Content-Disposition: form-data; name="${quoteMultipartValue(name)}"; filename="${quoteMultipartValue(filename)}"\r\n`,
-        "utf8"
-      )
-    );
-    chunks.push(Buffer.from(`Content-Type: ${contentType}\r\n\r\n`, "ascii"));
-    chunks.push(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
-    chunks.push(Buffer.from("\r\n", "ascii"));
-  };
-
-  appendPart("manifest", "manifest.json", "application/json", Buffer.from(stableJson(manifest), "utf8"));
-  for (const [name, filePath] of files) {
-    appendPart(name, path.basename(filePath), "application/octet-stream", fs.readFileSync(filePath));
-  }
-  chunks.push(Buffer.from(`--${boundary}--\r\n`, "ascii"));
-  return { body: Buffer.concat(chunks), boundary };
-}
-
-function classifyUploadStatus(status) {
-  if (status >= 200 && status < 300) {
-    return "uploaded";
-  }
-  if (status === 401 || status === 403) {
-    return "auth_failed";
-  }
-  if (NON_RETRYABLE_UPLOAD_STATUSES.has(status)) {
-    return "validation_failed";
-  }
-  if (RETRYABLE_UPLOAD_STATUSES.has(status) || status >= 500) {
-    return "retryable_error";
-  }
-  return "upload_failed";
-}
-
-function sleep(seconds) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, seconds * 1000);
-  });
-}
-
-async function postMultipart(endpoint, token, body, boundary, timeoutSeconds) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        "User-Agent": `logbrew-release-artifact-verifier/${SCRIPT_VERSION}`
-      },
-      body,
-      signal: controller.signal
-    });
-    await response.arrayBuffer();
-    return response.status;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function uploadWithRetries({ endpoint, token, body, boundary, maxRetries, retryDelaySeconds, timeoutSeconds }) {
-  const attempts = [];
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
-    let result;
-    try {
-      const httpStatus = await postMultipart(endpoint, token, body, boundary, timeoutSeconds);
-      result = classifyUploadStatus(httpStatus);
-      attempts.push({ attempt, httpStatus, result });
-    } catch {
-      result = "retryable_error";
-      attempts.push({ attempt, result });
-    }
-
-    if (result === "uploaded") {
-      break;
-    }
-    if (result !== "retryable_error" || attempt > maxRetries) {
-      break;
-    }
-    if (retryDelaySeconds > 0) {
-      await sleep(retryDelaySeconds);
-    }
-  }
-  const finalResult = attempts.at(-1)?.result ?? "upload_failed";
-  return {
-    status: finalResult,
-    attempts,
-    retryCount: Math.max(0, attempts.length - 1)
-  };
-}
-
-function requireReadyJavaScriptManifest(manifest, requireProjectId) {
-  if (manifest.artifactType !== "javascript_source_map_manifest") {
-    throw new Error("only javascript_source_map_manifest uploads are supported by this verifier");
-  }
-  if (manifest.validation?.status !== "ready") {
-    throw new Error("manifest validation status must be ready before upload");
-  }
-  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
-    throw new Error("manifest must contain at least one JavaScript release artifact");
-  }
-  normalizeProjectId(
-    manifest.projectId,
-    requireProjectId
-      ? "hosted release artifact uploads require manifest projectId as a UUID"
-      : "manifest projectId must be a UUID when provided",
-    requireProjectId,
-  );
-}
-
-function requireArtifactFile(artifact, buildDir, section, requiredFields) {
-  const payload = artifact[section];
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error(`artifact is missing ${section}`);
-  }
-  for (const field of requiredFields) {
-    if (payload[field] === undefined || payload[field] === "") {
-      throw new Error(`${section} is missing ${field}`);
-    }
-  }
-  const filePath = safeResolve(path.join(buildDir, String(payload.path)), buildDir);
-  if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    throw new Error(`${section} file is missing: ${payload.path}`);
-  }
-  if (byteSize(filePath) !== Number(payload.byteSize)) {
-    throw new Error(`${section} byte size changed after manifest creation: ${payload.path}`);
-  }
-  if (sha256File(filePath) !== String(payload.artifactSha256)) {
-    throw new Error(`${section} sha256 changed after manifest creation: ${payload.path}`);
-  }
-  return filePath;
-}
-
-function collectUploadFiles(manifest, buildDir, requireProjectId) {
-  requireReadyJavaScriptManifest(manifest, requireProjectId);
-  const files = [];
-  for (const [index, artifact] of manifest.artifacts.entries()) {
-    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
-      throw new Error("artifact entries must be JSON objects");
-    }
-    files.push([
-      `minified_source_${index}`,
-      requireArtifactFile(artifact, buildDir, "minifiedSource", ["path", "artifactSha256", "byteSize"])
-    ]);
-    files.push([
-      `source_map_${index}`,
-      requireArtifactFile(artifact, buildDir, "sourceMap", ["path", "artifactSha256", "byteSize"])
-    ]);
-  }
-  return files;
-}
-
-function buildUploadReport({ endpoint, manifest, files, dryRun }) {
-  return {
-    uploader: { name: "logbrew-js-release-artifact-upload-verifier", version: SCRIPT_VERSION },
-    endpoint: endpointWithoutQuery(endpoint),
-    dryRun,
-    release: manifest.release,
-    environment: manifest.environment,
-    service: manifest.service,
-    artifactType: manifest.artifactType,
-    artifactCount: manifest.artifacts.length,
-    filePartCount: files.length
-  };
-}
-
+/**
+ * @param {string} status
+ * @returns {number}
+ */
 function exitCodeForUploadStatus(status) {
-  return {
-    uploaded: 0,
-    dry_run: 0,
-    auth_missing: 2,
-    auth_failed: 3,
-    validation_failed: 4
-  }[status] ?? 5;
+  return EXIT_CODES.get(status) ?? UNKNOWN_FAILURE_EXIT_CODE;
 }
 
-export async function runUploadJs(args) {
+/**
+ * @param {CliOptions} options
+ * @param {string} name
+ * @param {string} fallback
+ * @returns {string}
+ */
+function optionOrDefault(options, name, fallback) {
+  const value = options[name];
+  return typeof value === "string" ? value : fallback;
+}
+
+/**
+ * @param {CliOptions} options
+ * @returns {Promise<PreparedUpload>}
+ */
+async function prepareUpload(options) {
+  const endpoint = requireOption(options, "endpoint");
+  const loopback = requireUploadEndpoint(endpoint, options["allow-hosted"] === true);
+  const buildDir = await requireBuildDir(requireOption(options, "build-dir"));
+  const manifestPath = path.resolve(requireOption(options, "manifest"));
+  if (!(await pathExists(manifestPath))) {
+    throw new Error(`manifest file does not exist: ${String(options["manifest"])}`);
+  }
+  const manifest = await readJsonObject(manifestPath, "manifest");
+  const { artifactCount, files } = await collectUploadFiles(manifest, buildDir, !loopback);
+  return {
+    endpoint,
+    files,
+    manifest,
+    report: {
+      artifactCount,
+      artifactType: manifest["artifactType"],
+      dryRun: options["dry-run"] === true,
+      endpoint: endpointWithoutQuery(endpoint),
+      environment: manifest["environment"],
+      filePartCount: files.length,
+      release: manifest["release"],
+      service: manifest["service"],
+      uploader: UPLOADER
+    }
+  };
+}
+
+/**
+ * @param {CliOptions} options
+ * @param {PreparedUpload} prepared
+ * @param {string} token
+ * @returns {Promise<number>}
+ */
+async function sendUpload(options, { endpoint, files, manifest, report }, token) {
+  const maxRetries = parseNonNegativeInteger(optionOrDefault(options, "max-retries", "2"), "--max-retries");
+  const retryDelaySeconds = parseNonNegativeNumber(optionOrDefault(options, "retry-delay", "0.25"), "--retry-delay");
+  const timeoutSeconds = parseNonNegativeNumber(optionOrDefault(options, "timeout", "5"), "--timeout");
+  const { body, boundary } = await encodeMultipart(manifest, files);
+  const uploadReport = await uploadWithRetries({ body, boundary, endpoint, maxRetries, retryDelaySeconds, timeoutSeconds, token });
+  printJson({ ...report, ...uploadReport });
+  return exitCodeForUploadStatus(uploadReport.status);
+}
+
+/**
+ * @param {CliOptions} options
+ * @returns {string}
+ */
+function requireTokenEnv(options) {
+  const tokenEnv = optionOrDefault(options, "token-env", DEFAULT_UPLOAD_TOKEN_ENV).trim();
+  if (tokenEnv === "") {
+    throw new Error("--token-env must not be empty");
+  }
+  return tokenEnv;
+}
+
+/**
+ * @param {CliOptions} options
+ * @returns {Promise<number>}
+ */
+async function uploadFromOptions(options) {
+  const prepared = await prepareUpload(options);
+  if (options["dry-run"] === true) {
+    printJson({ ...prepared.report, attempts: [], retryCount: NO_RETRIES, status: "dry_run" });
+    return exitCodeForUploadStatus("dry_run");
+  }
+  const tokenEnv = requireTokenEnv(options);
+  const token = (process.env[tokenEnv] ?? "").trim();
+  if (token === "") {
+    printJson({ ...prepared.report, attempts: [], auth: { tokenEnv }, retryCount: NO_RETRIES, status: "auth_missing" });
+    return exitCodeForUploadStatus("auth_missing");
+  }
+  return sendUpload(options, prepared, token);
+}
+
+/**
+ * @param {readonly string[]} args
+ * @returns {Promise<number>}
+ */
+async function runUploadJs(args) {
   const options = parseOptions(args, {
-    "build-dir": "string",
-    manifest: "string",
-    endpoint: "string",
-    "token-env": "string",
-    "dry-run": "boolean",
     "allow-hosted": "boolean",
+    "build-dir": "string",
+    "dry-run": "boolean",
+    endpoint: "string",
+    manifest: "string",
     "max-retries": "string",
     "retry-delay": "string",
-    timeout: "string"
+    timeout: "string",
+    "token-env": "string"
   });
   try {
-    const endpoint = requireOption(options, "endpoint");
-    const parsedEndpoint = requireUploadEndpoint(endpoint, Boolean(options["allow-hosted"]));
-    const buildDir = requireBuildDir(requireOption(options, "build-dir"));
-    const manifestPath = path.resolve(requireOption(options, "manifest"));
-    if (!fs.existsSync(manifestPath)) {
-      throw new Error(`manifest file does not exist: ${options.manifest}`);
-    }
-    const manifest = readJsonObject(manifestPath, "manifest");
-    const files = collectUploadFiles(manifest, buildDir, !isLoopbackEndpoint(parsedEndpoint));
-    const dryRun = Boolean(options["dry-run"]);
-    const report = buildUploadReport({ endpoint, manifest, files, dryRun });
-
-    if (dryRun) {
-      printJson({ ...report, status: "dry_run", attempts: [], retryCount: 0 });
-      return 0;
-    }
-
-    const tokenEnv = (options["token-env"] ?? DEFAULT_UPLOAD_TOKEN_ENV).trim();
-    if (tokenEnv === "") {
-      throw new Error("--token-env must not be empty");
-    }
-    const token = (process.env[tokenEnv] ?? "").trim();
-    if (!token) {
-      printJson({ ...report, status: "auth_missing", attempts: [], retryCount: 0, auth: { tokenEnv } });
-      return exitCodeForUploadStatus("auth_missing");
-    }
-
-    const maxRetries = parseNonNegativeInteger(options["max-retries"] ?? "2", "--max-retries");
-    const retryDelaySeconds = parseNonNegativeNumber(options["retry-delay"] ?? "0.25", "--retry-delay");
-    const timeoutSeconds = parseNonNegativeNumber(options.timeout ?? "5", "--timeout");
-    const { body, boundary } = encodeMultipart(manifest, files);
-    const uploadReport = await uploadWithRetries({
-      endpoint,
-      token,
-      body,
-      boundary,
-      maxRetries,
-      retryDelaySeconds,
-      timeoutSeconds
-    });
-    printJson({ ...report, ...uploadReport });
-    return exitCodeForUploadStatus(uploadReport.status);
+    return await uploadFromOptions(options);
   } catch (error) {
-    printJson({
-      status: "validation_failed",
-      uploader: { name: "logbrew-js-release-artifact-upload-verifier", version: SCRIPT_VERSION },
-      validation: { errors: [error.message] }
-    });
+    printJson({ status: "validation_failed", uploader: UPLOADER, validation: { errors: [errorMessage(error)] } });
     return exitCodeForUploadStatus("validation_failed");
   }
 }
+
+export { runUploadJs };
