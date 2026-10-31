@@ -16,9 +16,7 @@ import type {
 } from "@logbrew/sdk";
 import type { LogBrewTraceContext, NodeFetchTransportConfig } from "@logbrew/node";
 
-export type { LogBrewTraceContext } from "@logbrew/node";
-
-export type CreateLogBrewFastifyClientConfig = {
+type CreateLogBrewFastifyClientConfig = {
   serverApiKey?: string;
   apiKey?: string;
   captureRuntimeContext?: boolean;
@@ -28,59 +26,70 @@ export type CreateLogBrewFastifyClientConfig = {
   maxRetries?: number;
 };
 
-export type LogBrewFastifyContext = {
+type LogBrewFastifyContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
   trace?: LogBrewTraceContext;
   transport: Transport;
-  previewJson(): string;
-  flush(): Promise<TransportResponse>;
-  shutdown(): Promise<TransportResponse>;
+  previewJson: () => string;
+  flush: () => Promise<TransportResponse>;
+  shutdown: () => Promise<TransportResponse>;
 };
 
-export type LogBrewFastifyRuntimeContext = {
-  request: FastifyRequest;
-  reply: FastifyReply;
-  client: LogBrewClient;
-  trace?: LogBrewTraceContext;
+type LogBrewFastifyRuntimeContext = {
+  readonly request: FastifyRequest;
+  readonly reply: FastifyReply;
+  readonly client: LogBrewClient;
+  readonly trace?: Readonly<LogBrewTraceContext> | undefined;
 };
 
-export type LogBrewFastifyApplicationLogContext = {
-  client: LogBrewClient;
+/** The request fields the event helpers read; a FastifyRequest has both. */
+type LogBrewFastifyRequestLike = {
+  readonly method?: string;
+  readonly url?: string;
 };
 
-export type LogBrewClientFactory = (context: Omit<LogBrewFastifyRuntimeContext, "client">) => LogBrewClient;
-export type LogBrewTransportFactory = (context: LogBrewFastifyRuntimeContext) => Transport;
+type LogBrewFastifyApplicationLogContext = {
+  readonly client: LogBrewClient;
+};
 
-export type LogBrewLogRequestEvent = {
+type LogBrewFastifyClientFactoryContext = {
+  readonly request: FastifyRequest;
+  readonly reply: FastifyReply;
+};
+
+type LogBrewClientFactory = (context: LogBrewFastifyClientFactoryContext) => LogBrewClient;
+type LogBrewTransportFactory = (context: LogBrewFastifyRuntimeContext) => Transport;
+
+type LogBrewLogRequestEvent = {
   id: string;
   timestamp: string;
   type?: "log";
   attributes: LogAttributes;
 };
 
-export type LogBrewSpanRequestEvent = {
+type LogBrewSpanRequestEvent = {
   id: string;
   timestamp: string;
   type: "span";
   attributes: SpanAttributes;
 };
 
-export type LogBrewRequestEvent = LogBrewLogRequestEvent | LogBrewSpanRequestEvent;
+type LogBrewRequestEvent = LogBrewLogRequestEvent | LogBrewSpanRequestEvent;
 
-export type LogBrewErrorEvent = {
+type LogBrewErrorEvent = {
   id: string;
   timestamp: string;
   attributes: IssueAttributes;
 };
 
-export type LogBrewRequestMetricEvent = {
+type LogBrewRequestMetricEvent = {
   id: string;
   timestamp: string;
   attributes: MetricAttributes;
 };
 
-export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & NodeFetchTransportConfig & {
+type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & NodeFetchTransportConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   /** Override the default Node fetch transport, optionally per request. */
   transport?: Transport | LogBrewTransportFactory;
@@ -107,51 +116,65 @@ export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & NodeFetch
   requestEvent?: (
     request: FastifyRequest,
     reply: FastifyReply,
-    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
+    context: {
+      readonly client: LogBrewClient;
+      readonly durationMs: number;
+      readonly trace?: Readonly<LogBrewTraceContext> | undefined;
+    }
   ) => LogBrewRequestEvent;
   requestMetricEvent?: (
     request: FastifyRequest,
     reply: FastifyReply,
-    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
+    context: {
+      readonly client: LogBrewClient;
+      readonly durationMs: number;
+      readonly trace?: Readonly<LogBrewTraceContext> | undefined;
+    }
   ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewFastifyRuntimeContext) => LogBrewErrorEvent;
-  onFlush?: (response: TransportResponse, context: LogBrewFastifyRuntimeContext) => void | Promise<void>;
+  onFlush?: (response: Readonly<TransportResponse>, context: LogBrewFastifyRuntimeContext) => void | Promise<void>;
   onCaptureError?: (error: unknown, context: LogBrewFastifyRuntimeContext) => void | Promise<void>;
 };
 
-export declare function createLogBrewFastifyClient(config?: CreateLogBrewFastifyClientConfig): LogBrewClient;
-export declare const logbrewFastifyPlugin: FastifyPluginAsync<LogBrewFastifyOptions>;
-export declare const logbrewPlugin: typeof logbrewFastifyPlugin;
-export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
-export declare function createRequestEvent(
-  request: FastifyRequest,
-  reply: FastifyReply,
+declare function createLogBrewFastifyClient(config?: CreateLogBrewFastifyClientConfig): LogBrewClient;
+declare const logbrewFastifyPlugin: FastifyPluginAsync<LogBrewFastifyOptions>;
+declare const logbrewPlugin: typeof logbrewFastifyPlugin;
+declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
+declare function createRequestEvent<
+  Request extends LogBrewFastifyRequestLike = FastifyRequest,
+  Reply = FastifyReply
+>(
+  request: Request,
+  reply: Reply,
   options?: {
-    now?: () => string;
-    durationMs?: number;
-    idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
-    spanIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
-    traceIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
-    trace?: LogBrewTraceContext;
+    readonly now?: (() => string) | undefined;
+    readonly durationMs?: number | undefined;
+    readonly idFactory?: ((request: Request, reply: Reply) => string) | undefined;
+    readonly spanIdFactory?: ((request: Request, reply: Reply) => string) | undefined;
+    readonly traceIdFactory?: ((request: Request, reply: Reply) => string) | undefined;
+    readonly trace?: Readonly<LogBrewTraceContext> | undefined;
   }
 ): LogBrewSpanRequestEvent;
-export declare function createRequestMetricEvent(
-  request: FastifyRequest,
-  reply: FastifyReply,
+declare function createRequestMetricEvent<
+  Request extends LogBrewFastifyRequestLike = FastifyRequest,
+  Reply = FastifyReply
+>(
+  request: Request,
+  reply: Reply,
   options?: {
-    now?: () => string;
-    durationMs?: number;
-    idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
-    metricName?: string;
+    readonly now?: (() => string) | undefined;
+    readonly durationMs?: number | undefined;
+    readonly idFactory?: ((request: Request, reply: Reply) => string) | undefined;
+    readonly metricName?: string | undefined;
   }
 ): LogBrewRequestMetricEvent;
-export declare function createErrorEvent(
+declare function createErrorEvent<Request extends LogBrewFastifyRequestLike = FastifyRequest>(
   error: unknown,
-  request: FastifyRequest,
+  request: Request,
   options?: {
-    now?: () => string;
-    idFactory?: (error: unknown, request: FastifyRequest) => string;
-    trace?: LogBrewTraceContext;
+    readonly now?: (() => string) | undefined;
+    readonly idFactory?: ((error: unknown, request: Request) => string) | undefined;
+    readonly trace?: Readonly<LogBrewTraceContext> | undefined;
   }
 ): LogBrewErrorEvent;
 
@@ -171,4 +194,30 @@ declare const defaultExport: {
   logbrewPlugin: typeof logbrewPlugin;
 };
 
+export type {
+  CreateLogBrewFastifyClientConfig,
+  LogBrewClientFactory,
+  LogBrewErrorEvent,
+  LogBrewFastifyApplicationLogContext,
+  LogBrewFastifyClientFactoryContext,
+  LogBrewFastifyContext,
+  LogBrewFastifyOptions,
+  LogBrewFastifyRequestLike,
+  LogBrewFastifyRuntimeContext,
+  LogBrewLogRequestEvent,
+  LogBrewRequestEvent,
+  LogBrewRequestMetricEvent,
+  LogBrewSpanRequestEvent,
+  LogBrewTransportFactory
+};
+export {
+  createErrorEvent,
+  createLogBrewFastifyClient,
+  createRequestEvent,
+  createRequestMetricEvent,
+  getActiveLogBrewTrace,
+  logbrewFastifyPlugin,
+  logbrewPlugin
+};
+export type { LogBrewTraceContext } from "@logbrew/node";
 export default defaultExport;

@@ -118,6 +118,7 @@ cat > "$tmp_dir/oxlintrc.json" <<'EOF'
     "no-unneeded-ternary": "error",
     "no-unreachable-loop": "error",
     "no-unused-expressions": "error",
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "ignoreRestSiblings": true, "varsIgnorePattern": "^_" }],
     "no-useless-call": "error",
     "no-useless-computed-key": "error",
     "no-useless-concat": "error",

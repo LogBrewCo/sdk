@@ -161,12 +161,50 @@
           {
             "from": "file",
             "name": "LogBrewPrismaSpanOptions"
+          },
+          {
+            "from": "package",
+            "name": [
+              "FastifyInstance",
+              "FastifyReply",
+              "FastifyRequest"
+            ],
+            "package": "fastify"
+          },
+          {
+            "from": "file",
+            "name": [
+              "LogBrewClient",
+              "RecordingTransport",
+              "Transport"
+            ],
+            "path": "../logbrew-js/index.d.ts"
+          },
+          {
+            "from": "file",
+            "name": [
+              "CreateLogBrewFastifyClientConfig",
+              "LogBrewFastifyOptions"
+            ]
+          },
+          {
+            "from": "package",
+            "name": "FastifyError",
+            "package": "@fastify/error"
           }
         ]
       }
     ],
     "typescript/require-await": "off",
-    "unicorn/no-useless-undefined": "off"
+    "unicorn/no-useless-undefined": "off",
+    "eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "ignoreRestSiblings": true,
+        "varsIgnorePattern": "^_"
+      }
+    ]
   },
   "overrides": [
     {
@@ -218,7 +256,8 @@
     {
       "files": [
         "logbrew-amqplib/**",
-        "logbrew-kafkajs/**"
+        "logbrew-kafkajs/**",
+        "logbrew-fastify/**"
       ],
       "rules": {
         "import/no-nodejs-modules": "off"
@@ -268,6 +307,30 @@
         "eslint/require-unicode-regexp": "off",
         "eslint/sort-imports": "off",
         "import/no-namespace": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-fastify/internal.cjs"
+      ],
+      "rules": {
+        "node/no-process-env": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-fastify/index.d.ts"
+      ],
+      "rules": {
+        "typescript/consistent-type-definitions": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-fastify/examples/*.mjs"
+      ],
+      "rules": {
+        "oxc/no-async-endpoint-handlers": "off"
       }
     }
   ]

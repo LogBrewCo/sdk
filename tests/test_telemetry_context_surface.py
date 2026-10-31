@@ -43,7 +43,7 @@ class TelemetryContextSurfaceTests(unittest.TestCase):
                         source,
                         re.compile(
                             r"(?:LogBrewClient\.create|createLogBrewNodeClient)\(\{[\s\S]{0,700}?"
-                            r"\bcontext(?:\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*)?,",
+                            r"\bcontext(?:\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*)?\s*[,}]",
                         ),
                     )
 

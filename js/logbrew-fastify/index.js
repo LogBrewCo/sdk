@@ -1,13 +1,23 @@
 import fastify from "./index.cjs";
 
-export const {
+const {
   createErrorEvent,
   createLogBrewFastifyClient,
-  createRequestMetricEvent,
   createRequestEvent,
+  createRequestMetricEvent,
   getActiveLogBrewTrace,
   logbrewFastifyPlugin,
   logbrewPlugin
 } = fastify;
+const defaultExport = fastify.default;
 
-export default fastify.default;
+export {
+  createErrorEvent,
+  createLogBrewFastifyClient,
+  createRequestEvent,
+  createRequestMetricEvent,
+  getActiveLogBrewTrace,
+  logbrewFastifyPlugin,
+  logbrewPlugin
+};
+export default defaultExport;
