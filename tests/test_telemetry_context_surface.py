@@ -20,7 +20,10 @@ CLIENT_ENTRYPOINTS = (
     ("svelte", "index"),
     ("vue", "index"),
 )
-COMMONJS_DECLARATION_REEXPORT = 'export * from "./index";\nexport { default } from "./index";\n'
+COMMONJS_DECLARATION_REEXPORTS = (
+    'export * from "./index";\nexport { default } from "./index";\n',
+    'export * from "./index.js";\nexport { default } from "./index.js";\n',
+)
 
 
 def client_source(path: Path) -> str:
@@ -33,7 +36,7 @@ def client_source(path: Path) -> str:
 
 def client_declaration(path: Path) -> str:
     source = path.read_text(encoding="utf-8")
-    for module in re.findall(r'from\s+"(\./types-[^\"]+)\.js";', source):
+    for module in re.findall(r'from\s+"(\./types[-/][^\"]+)\.js";', source):
         source += (path.parent / f"{module}.d.ts").read_text(encoding="utf-8")
     return source
 
@@ -65,7 +68,7 @@ class TelemetryContextSurfaceTests(unittest.TestCase):
             with self.subTest(path=f"js/logbrew-{package}/{entrypoint}.d.ts"):
                 self.assertIn("TelemetryContext", surface)
                 self.assertRegex(surface, r"\bcontext\?: TelemetryContext(?: \| undefined)?;")
-                self.assertIn(commonjs, (declaration, COMMONJS_DECLARATION_REEXPORT))
+                self.assertIn(commonjs, (declaration, *COMMONJS_DECLARATION_REEXPORTS))
 
 
 if __name__ == "__main__":

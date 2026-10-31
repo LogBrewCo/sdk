@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -366,7 +367,12 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
             PACKAGE_ROOT / "global-errors.d.cts"
         ).read_text(encoding="utf-8")
 
-        self.assertEqual(declaration, commonjs_declaration)
+        exported = re.findall(r"^export (?:type )?\{([^}]*)\}", declaration, re.MULTILINE)
+        names = [name.strip() for block in exported for name in block.split(",") if name.strip()]
+        self.assertTrue(names)
+        self.assertIn('from "./global-errors.js";', commonjs_declaration)
+        for name in [*names, "default"]:
+            self.assertRegex(commonjs_declaration, rf"\b{name}\b")
         self.assertIn("installLogBrewReactNativeGlobalErrorHandler", esm)
         self.assertIn("installLogBrewReactNativeGlobalErrorHandler", cjs)
         self.assertIn("installLogBrewReactNativeGlobalErrorHandler", native)
