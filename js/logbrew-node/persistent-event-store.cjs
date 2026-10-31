@@ -1,754 +1,419 @@
 "use strict";
 
+const { Buffer } = require("node:buffer");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const path = require("node:path");
-const { TextDecoder } = require("node:util");
+const nodePath = require("node:path");
+const { attempt } = require("./internal.cjs");
+const { CLIENT_REPORT_FILE, cloneRecord, encryptRecord, normalizeRecord, recoverRecords } = require("./persistent-store-records.cjs");
+const { acquireLock, releaseLock } = require("./persistent-store-lock.cjs");
+const {
+  assertPinnedDirectory,
+  assertPrivateFile,
+  atomicWrite,
+  errorCode
+} = require("./persistent-store-files.cjs");
+const {
+  configurationHash,
+  ensureManifest,
+  eventFilename,
+  readOrCreateAcceptedMarker,
+  removeEventFiles,
+  writeAcceptedMarker
+} = require("./persistent-store-state.cjs");
+const { prepareQueueDirectory, validateDependencies } = require("./persistent-store-setup.cjs");
 
-const STORE_SCHEMA = 1;
-const RECORD_SCHEMA = 1;
-const MANIFEST_FILE = "manifest.json";
-const ACCEPTED_FILE = ".accepted";
-// Drop counts only: reason codes, counts, and a random report ID, never event data.
-const CLIENT_REPORT_FILE = "client-report.json";
+/**
+ * @import { FailFactory, StoreScope } from "./persistent-store-files.cjs"
+ * @import { StoredRecord } from "./persistent-store-records.cjs"
+ * @import { ErrorConstructor, StoreDependencies } from "./persistent-store-setup.cjs"
+ * @import { StoreLimits } from "./persistent-store-state.cjs"
+ */
+
+/**
+ * @typedef {{
+ *   closed: boolean,
+ *   nextSequence: number,
+ *   pendingBytes: number,
+ *   records: StoredRecord[],
+ *   sequences: number[],
+ *   uncertain: boolean
+ * }} StoreState
+ * @typedef {Readonly<{ key: Buffer, limits: StoreLimits, ownerLease: string, scope: StoreScope, state: StoreState }>} StoreContext
+ * @typedef {{ owned: boolean }} LockProgress
+ * @typedef {Readonly<{ key: Buffer, limits: StoreLimits, lock: LockProgress, ownerLease: string, sdkName: string }>} StoreSession
+ * @typedef {Readonly<{
+ *   acknowledge: (count: unknown) => void,
+ *   remove: (indexes: unknown) => void,
+ *   append: (record: unknown) => void,
+ *   loadClientReport: () => unknown,
+ *   saveClientReport: (state: unknown) => void,
+ *   close: () => void,
+ *   load: () => StoredRecord[],
+ *   purge: () => void
+ * }>} NodePersistentEventStore
+ */
+
 const MAX_CLIENT_REPORT_BYTES = 4096;
-const LOCK_DIRECTORY = ".lock";
-const LOCK_OWNER_FILE = "owner.json";
-const EVENT_FILE_PATTERN = /^event-([0-9]{16})\.lbq$/u;
-const TEMP_FILE_PATTERN = /^\.(?:accepted|event|manifest)\.tmp-[0-9a-f]{32}$/u;
-const LOCK_LEASE_PATTERN = /^[0-9a-f]{32}$/u;
-const PRIVATE_DIRECTORY_MODE = 0o700;
-const PRIVATE_FILE_MODE = 0o600;
-const AES_GCM_IV_BYTES = 12;
-const AES_GCM_TAG_BYTES = 16;
-const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+const LEASE_BYTES = 16;
+const EMPTY = 0;
+const NEXT = 1;
+const NO_INDEX = -1;
+const LAST = -1;
 
-function buildNodePersistentEventStore({
-  SdkError,
-  directory,
-  encryptionKey,
-  limits,
-  onWarning,
-  sdkName
-}) {
-  validateDependencies({ SdkError, directory, encryptionKey, limits, onWarning, sdkName });
-  const fail = (message) => new SdkError("persistence_error", message);
-  const failCommit = (message) => new SdkError("persistence_commit_error", message);
-  const key = Buffer.from(encryptionKey);
-  const ownerLease = crypto.randomBytes(16).toString("hex");
-  const queueDirectory = prepareQueueDirectory(directory, fail);
-  let lockOwned = false;
-  let closed = false;
-  let uncertain = false;
+/**
+ * @param {StoreContext} context
+ * @returns {void}
+ */
+function assertOpen(context) {
+  if (context.state.closed) {
+    throw context.scope.fail("persistent queue is closed");
+  }
+  if (context.state.uncertain) {
+    throw context.scope.failCommit("persistent queue durability is uncertain and requires restart");
+  }
+}
 
+/**
+ * @param {StoreContext} context
+ * @returns {void}
+ */
+function assertUsable(context) {
+  assertOpen(context);
+  assertPinnedDirectory(context.scope);
+}
+
+/**
+ * @param {StoreContext} context
+ * @param {() => void} operation
+ * @returns {void}
+ */
+function commit(context, operation) {
   try {
-    acquireLock(queueDirectory, ownerLease, fail, failCommit, onWarning);
-    lockOwned = true;
-    ensureManifest(queueDirectory, configurationHash(sdkName, limits), fail, failCommit);
-    const acceptedThrough = readOrCreateAcceptedMarker(queueDirectory, fail, failCommit);
-    const recovered = recoverRecords({
-      acceptedThrough,
-      directory: queueDirectory.path,
-      fail,
-      key,
-      limits,
-      onWarning,
-      owner: queueDirectory.owner
-    });
-    let records = recovered.records;
-    let sequences = recovered.sequences;
-    let pendingBytes = records.reduce((total, record) => total + record.eventBytes, 0);
-    let nextSequence = Math.max(acceptedThrough, recovered.highestSequence) + 1;
-
-    return {
-      acknowledge(count) {
-        assertOpen();
-        assertPinnedDirectory(queueDirectory, fail);
-        if (!Number.isSafeInteger(count) || count <= 0 || count > records.length) {
-          throw fail("persistent acknowledgement count is invalid");
-        }
-        const acknowledgedThrough = sequences[count - 1];
-        try {
-          writeAcceptedMarker(queueDirectory, acknowledgedThrough, fail, failCommit);
-          removeEventFiles(queueDirectory, sequences.slice(0, count), fail, failCommit);
-        } catch (error) {
-          markCommitUncertain(error);
-          throw error;
-        }
-        pendingBytes -= records.slice(0, count).reduce((total, record) => total + record.eventBytes, 0);
-        records = records.slice(count);
-        sequences = sequences.slice(count);
-      },
-
-      // Removes evicted records; the core passes strictly ascending indexes.
-      remove(indexes) {
-        assertOpen();
-        assertPinnedDirectory(queueDirectory, fail);
-        if (!Array.isArray(indexes) || indexes.some((index, position) => (
-          !Number.isSafeInteger(index) || index >= records.length || index <= (position === 0 ? -1 : indexes[position - 1])
-        ))) {
-          throw fail("persistent removal indexes are invalid");
-        }
-        try {
-          removeEventFiles(queueDirectory, indexes.map((index) => sequences[index]), fail, failCommit);
-        } catch (error) {
-          markCommitUncertain(error);
-          throw error;
-        }
-        const removed = new Set(indexes);
-        pendingBytes -= indexes.reduce((total, index) => total + records[index].eventBytes, 0);
-        records = records.filter((_, index) => !removed.has(index));
-        sequences = sequences.filter((_, index) => !removed.has(index));
-      },
-
-      append(record) {
-        assertOpen();
-        assertPinnedDirectory(queueDirectory, fail);
-        const normalized = normalizeRecord(record, fail);
-        if (records.length >= limits.maxQueueSize || pendingBytes + normalized.eventBytes > limits.maxQueueBytes) {
-          throw fail("persistent queue limits were exceeded");
-        }
-        if (!Number.isSafeInteger(nextSequence) || nextSequence <= 0) {
-          throw fail("persistent queue sequence was exhausted");
-        }
-        const sequence = nextSequence;
-        const filename = eventFilename(sequence);
-        const encrypted = encryptRecord(normalized, sequence, key, fail);
-        try {
-          atomicWrite(queueDirectory, filename, encrypted, fail, failCommit, "event");
-        } catch (error) {
-          markCommitUncertain(error);
-          throw error;
-        }
-        records.push(normalized);
-        sequences.push(sequence);
-        pendingBytes += normalized.eventBytes;
-        nextSequence += 1;
-      },
-
-      loadClientReport() {
-        assertOpen();
-        const reportPath = path.join(queueDirectory.path, CLIENT_REPORT_FILE);
-        if (!fs.existsSync(reportPath)) {
-          return undefined;
-        }
-        assertPrivateFile(reportPath, queueDirectory.owner, fail, "persistent queue client report");
-        if (fs.lstatSync(reportPath).size > MAX_CLIENT_REPORT_BYTES) {
-          throw fail("persistent queue client report is too large");
-        }
-        return JSON.parse(fs.readFileSync(reportPath, "utf8"));
-      },
-
-      saveClientReport(state) {
-        assertOpen();
-        const data = Buffer.from(JSON.stringify(state));
-        if (data.length > MAX_CLIENT_REPORT_BYTES) {
-          throw fail("persistent queue client report is too large");
-        }
-        atomicWrite(queueDirectory, CLIENT_REPORT_FILE, data, fail, failCommit, "client report");
-      },
-
-      close() {
-        if (closed) {
-          return;
-        }
-        assertPinnedDirectory(queueDirectory, fail);
-        try {
-          releaseLock(queueDirectory, ownerLease, fail, failCommit);
-        } catch (error) {
-          if (error?.code === "persistence_commit_error") {
-            lockOwned = false;
-            closed = true;
-            key.fill(0);
-          }
-          throw error;
-        }
-        lockOwned = false;
-        closed = true;
-        key.fill(0);
-      },
-
-      load() {
-        assertOpen();
-        assertPinnedDirectory(queueDirectory, fail);
-        return records.map(cloneRecord);
-      },
-
-      purge() {
-        assertOpen();
-        assertPinnedDirectory(queueDirectory, fail);
-        if (sequences.length === 0) {
-          return;
-        }
-        const acknowledgedThrough = sequences.at(-1);
-        try {
-          writeAcceptedMarker(queueDirectory, acknowledgedThrough, fail, failCommit);
-          removeEventFiles(queueDirectory, sequences, fail, failCommit);
-        } catch (error) {
-          markCommitUncertain(error);
-          throw error;
-        }
-        records = [];
-        sequences = [];
-        pendingBytes = 0;
-      }
-    };
-
-    function assertOpen() {
-      if (closed) {
-        throw fail("persistent queue is closed");
-      }
-      if (uncertain) {
-        throw failCommit("persistent queue durability is uncertain and requires restart");
-      }
-    }
-
-    function markCommitUncertain(error) {
-      if (error?.code === "persistence_commit_error") {
-        uncertain = true;
-      }
-    }
+    operation();
   } catch (error) {
-    if (lockOwned) {
-      try {
-        releaseLock(queueDirectory, ownerLease, fail, failCommit);
-      } catch {
-        // Preserve the original initialization failure.
-      }
+    if (errorCode(error) === "persistence_commit_error") {
+      context.state.uncertain = true;
     }
-    key.fill(0);
     throw error;
   }
 }
 
-function validateDependencies({ SdkError, directory, encryptionKey, limits, onWarning, sdkName }) {
-  if (typeof SdkError !== "function") {
-    throw new TypeError("SdkError must be a constructor");
+/**
+ * @param {readonly StoredRecord[]} records
+ * @returns {number}
+ */
+function totalBytes(records) {
+  return records.reduce((total, record) => total + record.eventBytes, EMPTY);
+}
+
+/**
+ * @param {StoreContext} context
+ * @param {unknown} count
+ * @returns {void}
+ */
+function acknowledge(context, count) {
+  assertUsable(context);
+  const { scope, state } = context;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= EMPTY || count > state.records.length) {
+    throw scope.fail("persistent acknowledgement count is invalid");
   }
-  if (process.platform === "win32" || typeof process.getuid !== "function") {
-    throw new SdkError("configuration_error", "persistentQueue is supported only on POSIX runtimes");
+  const acknowledgedThrough = state.sequences[count - NEXT] ?? EMPTY;
+  commit(context, () => {
+    writeAcceptedMarker(scope, acknowledgedThrough);
+    removeEventFiles(scope, state.sequences.slice(EMPTY, count));
+  });
+  state.pendingBytes -= totalBytes(state.records.slice(EMPTY, count));
+  state.records = state.records.slice(count);
+  state.sequences = state.sequences.slice(count);
+}
+
+/**
+ * @param {unknown} indexes
+ * @param {number} length
+ * @returns {indexes is readonly unknown[]}
+ */
+function isRemovalList(indexes, length) {
+  if (!Array.isArray(indexes)) {
+    return false;
   }
-  if (typeof directory !== "string" || directory === "" || !path.isAbsolute(directory) || path.resolve(directory) !== directory || path.parse(directory).root === directory) {
-    throw new SdkError("configuration_error", "persistentQueue.directory must be an absolute normalized path below the filesystem root");
-  }
-  if (!(Buffer.isBuffer(encryptionKey) || encryptionKey instanceof Uint8Array) || encryptionKey.byteLength !== 32) {
-    throw new SdkError("configuration_error", "persistentQueue.encryptionKey must contain exactly 32 bytes");
-  }
-  if (onWarning !== undefined && typeof onWarning !== "function") {
-    throw new SdkError("configuration_error", "persistentQueue.onWarning must be a function");
-  }
-  if (typeof sdkName !== "string" || sdkName === "") {
-    throw new SdkError("configuration_error", "persistent queue SDK identity is invalid");
-  }
-  for (const name of ["maxBatchBytes", "maxBatchEvents", "maxQueueBytes", "maxQueueSize"]) {
-    if (!Number.isSafeInteger(limits?.[name]) || limits[name] <= 0) {
-      throw new SdkError("configuration_error", `persistent queue ${name} is invalid`);
+  /** @type {readonly unknown[]} */
+  const values = indexes;
+  return !values.some((index, position) => {
+    const previous = position === EMPTY ? NO_INDEX : values[position - NEXT];
+    return typeof index !== "number" || !Number.isSafeInteger(index) || index >= length || (typeof previous === "number" && index <= previous);
+  });
+}
+
+/**
+ * @param {readonly StoredRecord[]} records
+ * @param {readonly unknown[]} indexes
+ * @returns {number}
+ */
+function removedBytes(records, indexes) {
+  let total = EMPTY;
+  for (const index of indexes) {
+    if (typeof index === "number") {
+      total += records[index]?.eventBytes ?? EMPTY;
     }
+  }
+  return total;
+}
+
+/**
+ * @param {StoreContext} context
+ * @param {unknown} indexes
+ * @returns {void}
+ */
+function remove(context, indexes) {
+  assertUsable(context);
+  const { scope, state } = context;
+  if (!isRemovalList(indexes, state.records.length)) {
+    throw scope.fail("persistent removal indexes are invalid");
+  }
+  commit(context, () => {
+    removeEventFiles(scope, indexes.map((index) => (typeof index === "number" ? state.sequences[index] : undefined)));
+  });
+  const removed = new Set(indexes);
+  state.pendingBytes -= removedBytes(state.records, indexes);
+  state.records = state.records.filter((_record, index) => !removed.has(index));
+  state.sequences = state.sequences.filter((_sequence, index) => !removed.has(index));
+}
+
+/**
+ * @param {StoreContext} context
+ * @param {StoredRecord} normalized
+ * @returns {void}
+ */
+function checkAppend(context, normalized) {
+  const { limits, scope, state } = context;
+  if (state.records.length >= limits.maxQueueSize || state.pendingBytes + normalized.eventBytes > limits.maxQueueBytes) {
+    throw scope.fail("persistent queue limits were exceeded");
+  }
+  if (!Number.isSafeInteger(state.nextSequence) || state.nextSequence <= EMPTY) {
+    throw scope.fail("persistent queue sequence was exhausted");
   }
 }
 
-function prepareQueueDirectory(directory, fail) {
-  const owner = process.getuid();
-  const root = path.parse(directory).root;
-  const segments = directory.slice(root.length).split(path.sep).filter(Boolean);
-  let current = root;
-  for (const segment of segments) {
-    current = path.join(current, segment);
-    let stat;
-    try {
-      stat = fs.lstatSync(current);
-    } catch (error) {
-      if (error?.code !== "ENOENT") {
-        throw fail("persistent queue path could not be inspected");
-      }
-      try {
-        fs.mkdirSync(current, { mode: PRIVATE_DIRECTORY_MODE });
-        stat = fs.lstatSync(current);
-      } catch (mkdirError) {
-        if (mkdirError?.code !== "EEXIST") {
-          throw fail("persistent queue directory could not be created");
-        }
-        stat = fs.lstatSync(current);
-      }
-    }
-    if (stat.isSymbolicLink()) {
-      throw fail("persistent queue path must not contain symbolic links");
-    }
-    if (!stat.isDirectory()) {
-      throw fail("persistent queue path must contain only directories");
-    }
-  }
-
-  const stat = fs.lstatSync(directory);
-  if (stat.uid !== owner || (stat.mode & 0o777) !== PRIVATE_DIRECTORY_MODE) {
-    throw fail("persistent queue directory must be private and owned by the current user");
-  }
-  return { dev: stat.dev, ino: stat.ino, owner, path: directory };
+/**
+ * @param {StoreContext} context
+ * @param {StoredRecord} normalized
+ * @param {number} sequence
+ * @returns {void}
+ */
+function writeEvent(context, normalized, sequence) {
+  const { key, scope } = context;
+  const encrypted = encryptRecord({ fail: scope.fail, key }, normalized, sequence);
+  commit(context, () => {
+    atomicWrite(scope, { data: encrypted, label: "event", name: eventFilename(sequence) });
+  });
 }
 
-function assertPinnedDirectory(queueDirectory, fail) {
-  let stat;
+/**
+ * @param {StoreContext} context
+ * @param {unknown} record
+ * @returns {void}
+ */
+function append(context, record) {
+  assertUsable(context);
+  const { scope, state } = context;
+  const normalized = normalizeRecord(record, scope.fail);
+  checkAppend(context, normalized);
+  const sequence = state.nextSequence;
+  writeEvent(context, normalized, sequence);
+  state.records.push(normalized);
+  state.sequences.push(sequence);
+  state.pendingBytes += normalized.eventBytes;
+  state.nextSequence += NEXT;
+}
+
+/**
+ * @param {StoreContext} context
+ * @returns {unknown}
+ */
+function loadClientReport(context) {
+  assertOpen(context);
+  const { scope } = context;
+  const reportPath = nodePath.join(scope.directory.path, CLIENT_REPORT_FILE);
+  if (!fs.existsSync(reportPath)) {
+    return undefined;
+  }
+  assertPrivateFile(scope, reportPath, "persistent queue client report");
+  if (fs.lstatSync(reportPath).size > MAX_CLIENT_REPORT_BYTES) {
+    throw scope.fail("persistent queue client report is too large");
+  }
+  /** @type {unknown} */
+  const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+  return report;
+}
+
+/**
+ * @param {StoreContext} context
+ * @param {unknown} report
+ * @returns {void}
+ */
+function saveClientReport(context, report) {
+  assertOpen(context);
+  const data = Buffer.from(JSON.stringify(report));
+  if (data.length > MAX_CLIENT_REPORT_BYTES) {
+    throw context.scope.fail("persistent queue client report is too large");
+  }
+  atomicWrite(context.scope, { data, label: "client report", name: CLIENT_REPORT_FILE });
+}
+
+/**
+ * @param {StoreContext} context
+ * @returns {void}
+ */
+function seal(context) {
+  context.state.closed = true;
+  context.key.fill(EMPTY);
+}
+
+/**
+ * @param {StoreContext} context
+ * @returns {void}
+ */
+function close(context) {
+  if (context.state.closed) {
+    return;
+  }
+  assertPinnedDirectory(context.scope);
   try {
-    stat = fs.lstatSync(queueDirectory.path);
-  } catch {
-    throw fail("persistent queue directory identity changed");
-  }
-  if (
-    stat.isSymbolicLink()
-    || !stat.isDirectory()
-    || stat.uid !== queueDirectory.owner
-    || (stat.mode & 0o777) !== PRIVATE_DIRECTORY_MODE
-    || stat.dev !== queueDirectory.dev
-    || stat.ino !== queueDirectory.ino
-  ) {
-    throw fail("persistent queue directory identity changed");
-  }
-}
-
-function acquireLock(queueDirectory, ownerLease, fail, failCommit, onWarning) {
-  const lockPath = path.join(queueDirectory.path, LOCK_DIRECTORY);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    assertPinnedDirectory(queueDirectory, fail);
-    let created = false;
-    try {
-      fs.mkdirSync(lockPath, { mode: PRIVATE_DIRECTORY_MODE });
-      created = true;
-      atomicWriteInDirectory(lockPath, LOCK_OWNER_FILE, Buffer.from(JSON.stringify({
-        lease: ownerLease,
-        pid: process.pid
-      })), queueDirectory.owner, fail, failCommit, "lock owner");
-      fsyncDirectory(lockPath, fail);
-      fsyncDirectory(queueDirectory.path, fail);
-      return;
-    } catch (error) {
-      if (created) {
-        removeIncompleteLease(lockPath);
-      }
-      if (error?.code !== "EEXIST") {
-        if (error?.code && !["persistence_error", "persistence_commit_error"].includes(error.code)) {
-          throw fail("persistent queue lock could not be acquired");
-        }
-        throw error;
-      }
-    }
-
-    const owner = readLockOwner(lockPath, queueDirectory.owner, fail);
-    if (processIsAlive(owner.pid)) {
-      throw fail("persistent queue is already in use");
-    }
-    removeStaleLock(lockPath, queueDirectory.owner, fail);
-    notify(onWarning, { code: "stale_lock_recovered" });
-  }
-  throw fail("persistent queue lock could not be acquired");
-}
-
-function removeIncompleteLease(lockPath) {
-  try {
-    for (const entry of fs.readdirSync(lockPath)) {
-      if (entry === LOCK_OWNER_FILE || TEMP_FILE_PATTERN.test(entry)) {
-        fs.unlinkSync(path.join(lockPath, entry));
-      }
-    }
-    fs.rmdirSync(lockPath);
-  } catch {
-    // Initialization remains failed closed if lease removal cannot be completed.
-  }
-}
-
-function readLockOwner(lockPath, owner, fail) {
-  assertPrivateDirectory(lockPath, owner, fail, "persistent queue lock");
-  const entries = fs.readdirSync(lockPath);
-  if (entries.length !== 1 || entries[0] !== LOCK_OWNER_FILE) {
-    throw fail("persistent queue lock state is invalid");
-  }
-  const ownerPath = path.join(lockPath, LOCK_OWNER_FILE);
-  assertPrivateFile(ownerPath, owner, fail, "persistent queue lock owner");
-  try {
-    const value = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
-    if (
-      !value
-      || Object.keys(value).sort().join(",") !== "lease,pid"
-      || !Number.isSafeInteger(value.pid)
-      || value.pid <= 0
-      || !LOCK_LEASE_PATTERN.test(value.lease)
-    ) {
-      throw new Error("invalid owner");
-    }
-    return value;
-  } catch {
-    throw fail("persistent queue lock state is invalid");
-  }
-}
-
-function processIsAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
+    releaseLock(context.scope, context.ownerLease);
   } catch (error) {
-    return error?.code !== "ESRCH";
-  }
-}
-
-function removeStaleLock(lockPath, owner, fail) {
-  const ownerPath = path.join(lockPath, LOCK_OWNER_FILE);
-  assertPrivateFile(ownerPath, owner, fail, "persistent queue lock owner");
-  try {
-    fs.unlinkSync(ownerPath);
-    fs.rmdirSync(lockPath);
-  } catch {
-    throw fail("stale persistent queue lock could not be removed");
-  }
-}
-
-function releaseLock(queueDirectory, ownerLease, fail, failCommit) {
-  const lockPath = path.join(queueDirectory.path, LOCK_DIRECTORY);
-  const owner = readLockOwner(lockPath, queueDirectory.owner, fail);
-  if (owner.pid !== process.pid || owner.lease !== ownerLease) {
-    throw fail("persistent queue lock ownership changed");
-  }
-  try {
-    fs.unlinkSync(path.join(lockPath, LOCK_OWNER_FILE));
-    fs.rmdirSync(lockPath);
-  } catch {
-    throw fail("persistent queue lock could not be released");
-  }
-  try {
-    fsyncDirectory(queueDirectory.path, fail);
-  } catch {
-    throw failCommit("persistent queue lock release could not be confirmed");
-  }
-}
-
-function configurationHash(sdkName, limits) {
-  return crypto.createHash("sha256").update(JSON.stringify({
-    limits: {
-      maxBatchBytes: limits.maxBatchBytes,
-      maxBatchEvents: limits.maxBatchEvents,
-      maxQueueBytes: limits.maxQueueBytes,
-      maxQueueSize: limits.maxQueueSize
-    },
-    sdkName
-  })).digest("hex");
-}
-
-function ensureManifest(queueDirectory, expectedHash, fail, failCommit) {
-  const manifestPath = path.join(queueDirectory.path, MANIFEST_FILE);
-  if (!fs.existsSync(manifestPath)) {
-    atomicWrite(queueDirectory, MANIFEST_FILE, Buffer.from(JSON.stringify({
-      configurationHash: expectedHash,
-      schema: STORE_SCHEMA
-    })), fail, failCommit, "manifest");
-  }
-  assertPrivateFile(manifestPath, queueDirectory.owner, fail, "persistent queue manifest");
-  try {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    if (
-      !manifest
-      || Object.keys(manifest).sort().join(",") !== "configurationHash,schema"
-      || manifest.schema !== STORE_SCHEMA
-      || manifest.configurationHash !== expectedHash
-    ) {
-      throw new Error("invalid manifest");
+    if (errorCode(error) === "persistence_commit_error") {
+      seal(context);
     }
-  } catch {
-    throw fail("persistent queue configuration does not match its manifest");
+    throw error;
   }
+  seal(context);
 }
 
-function readOrCreateAcceptedMarker(queueDirectory, fail, failCommit) {
-  const markerPath = path.join(queueDirectory.path, ACCEPTED_FILE);
-  if (!fs.existsSync(markerPath)) {
-    atomicWrite(queueDirectory, ACCEPTED_FILE, Buffer.from("0\n"), fail, failCommit, "accepted");
+/**
+ * @param {StoreContext} context
+ * @returns {void}
+ */
+function purge(context) {
+  assertUsable(context);
+  const { scope, state } = context;
+  if (state.sequences.length === EMPTY) {
+    return;
   }
-  assertPrivateFile(markerPath, queueDirectory.owner, fail, "persistent queue accepted marker");
-  const raw = fs.readFileSync(markerPath, "utf8");
-  if (!/^(?:0|[1-9][0-9]{0,15})\n$/u.test(raw)) {
-    throw fail("persistent queue accepted marker is invalid");
-  }
-  const value = Number(raw.trim());
-  if (!Number.isSafeInteger(value)) {
-    throw fail("persistent queue accepted marker is invalid");
-  }
-  return value;
+  const acknowledgedThrough = state.sequences.at(LAST) ?? EMPTY;
+  commit(context, () => {
+    writeAcceptedMarker(scope, acknowledgedThrough);
+    removeEventFiles(scope, state.sequences);
+  });
+  state.records = [];
+  state.sequences = [];
+  state.pendingBytes = EMPTY;
 }
 
-function writeAcceptedMarker(queueDirectory, sequence, fail, failCommit) {
-  atomicWrite(queueDirectory, ACCEPTED_FILE, Buffer.from(`${sequence}\n`), fail, failCommit, "accepted");
-}
-
-function recoverRecords({ acceptedThrough, directory, fail, key, limits, onWarning, owner }) {
-  const records = [];
-  const sequences = [];
-  let highestSequence = acceptedThrough;
-  let pendingBytes = 0;
-  const acceptedFiles = [];
-  const entries = fs.readdirSync(directory).sort();
-  for (const entry of entries) {
-    if ([ACCEPTED_FILE, CLIENT_REPORT_FILE, LOCK_DIRECTORY, MANIFEST_FILE].includes(entry)) {
-      continue;
-    }
-    const fullPath = path.join(directory, entry);
-    if (TEMP_FILE_PATTERN.test(entry)) {
-      assertPrivateFile(fullPath, owner, fail, "persistent queue temporary file");
-      fs.unlinkSync(fullPath);
-      notify(onWarning, { code: "orphaned_temp_removed" });
-      continue;
-    }
-    const match = EVENT_FILE_PATTERN.exec(entry);
-    if (!match) {
-      throw fail("persistent queue contains an unexpected entry");
-    }
-    const sequence = Number(match[1]);
-    if (!Number.isSafeInteger(sequence) || sequence <= 0) {
-      throw fail("persisted event sequence is invalid");
-    }
-    highestSequence = Math.max(highestSequence, sequence);
-    assertPrivateFile(fullPath, owner, fail, "persisted event file");
-    if (sequence <= acceptedThrough) {
-      acceptedFiles.push(sequence);
-      continue;
-    }
-    const stat = fs.lstatSync(fullPath);
-    const maximumEncryptedBytes = Math.ceil(limits.maxBatchBytes * 4 / 3) + 4096;
-    if (stat.size <= 0 || stat.size > maximumEncryptedBytes) {
-      throw fail("persisted event file size is invalid");
-    }
-    const record = decryptRecord(fs.readFileSync(fullPath), sequence, key, fail);
-    pendingBytes += record.eventBytes;
-    if (records.length + 1 > limits.maxQueueSize || pendingBytes > limits.maxQueueBytes) {
-      throw fail("recovered persistent queue exceeds configured limits");
-    }
-    records.push(record);
-    sequences.push(sequence);
-  }
-  if (acceptedFiles.length > 0) {
-    removeEventFiles({ owner, path: directory }, acceptedFiles, fail, (message) => fail(message));
-    notify(onWarning, { code: "accepted_prefix_recovered" });
-  }
-  return { highestSequence, records, sequences };
-}
-
-function normalizeRecord(record, fail) {
-  if (
-    !record
-    || Array.isArray(record)
-    || typeof record !== "object"
-    || !record.event
-    || Array.isArray(record.event)
-    || typeof record.event !== "object"
-    || typeof record.serializedEvent !== "string"
-    || !Number.isSafeInteger(record.eventBytes)
-    || record.eventBytes <= 0
-    || Buffer.byteLength(record.serializedEvent, "utf8") !== record.eventBytes
-    || JSON.stringify(record.event) !== record.serializedEvent
-  ) {
-    throw fail("persistent event record is invalid");
-  }
-  return cloneRecord(record);
-}
-
-function cloneRecord(record) {
+/**
+ * @param {StoreContext} context
+ * @returns {NodePersistentEventStore}
+ */
+function storeMethods(context) {
   return {
-    event: JSON.parse(record.serializedEvent),
-    eventBytes: record.eventBytes,
-    serializedEvent: record.serializedEvent
+    acknowledge: (count) => {
+      acknowledge(context, count);
+    },
+
+    remove: (indexes) => {
+      remove(context, indexes);
+    },
+
+    append: (record) => {
+      append(context, record);
+    },
+
+    loadClientReport: () => loadClientReport(context),
+
+    saveClientReport: (report) => {
+      saveClientReport(context, report);
+    },
+
+    close: () => {
+      close(context);
+    },
+
+    load: () => {
+      assertUsable(context);
+      return context.state.records.map((record) => cloneRecord(record));
+    },
+
+    purge: () => {
+      purge(context);
+    }
   };
 }
 
-function encryptRecord(record, sequence, key, fail) {
-  const plaintext = Buffer.from(record.serializedEvent);
+/**
+ * @param {StoreScope} scope
+ * @param {StoreSession} session
+ * @returns {NodePersistentEventStore}
+ */
+function openStore(scope, session) {
+  const { key, limits, ownerLease } = session;
+  acquireLock(scope, ownerLease);
+  session.lock.owned = true;
+  ensureManifest(scope, configurationHash(session.sdkName, limits));
+  const acceptedThrough = readOrCreateAcceptedMarker(scope);
+  const recovered = recoverRecords(scope, { acceptedThrough, cipher: { fail: scope.fail, key }, limits });
+  /** @type {StoreState} */
+  const state = {
+    closed: false,
+    nextSequence: Math.max(acceptedThrough, recovered.highestSequence) + NEXT,
+    pendingBytes: totalBytes(recovered.records),
+    records: recovered.records,
+    sequences: recovered.sequences,
+    uncertain: false
+  };
+  return storeMethods({ key, limits, ownerLease, scope, state });
+}
+
+/**
+ * @param {StoreScope} scope
+ * @param {StoreSession} session
+ * @returns {NodePersistentEventStore}
+ */
+function openOrRelease(scope, session) {
   try {
-    const iv = crypto.randomBytes(AES_GCM_IV_BYTES);
-    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-    cipher.setAAD(Buffer.from(`logbrew-node-event-v${RECORD_SCHEMA}:${sequence}`));
-    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-    return Buffer.from(JSON.stringify({
-      ciphertext: ciphertext.toString("base64"),
-      iv: iv.toString("base64"),
-      schema: RECORD_SCHEMA,
-      sequence,
-      tag: cipher.getAuthTag().toString("base64")
-    }));
-  } catch {
-    throw fail("persisted event could not be encrypted");
-  } finally {
-    plaintext.fill(0);
-  }
-}
-
-function decryptRecord(payload, expectedSequence, key, fail) {
-  let plaintext;
-  try {
-    const envelope = JSON.parse(utf8Decoder.decode(payload));
-    if (
-      !envelope
-      || Object.keys(envelope).sort().join(",") !== "ciphertext,iv,schema,sequence,tag"
-      || envelope.schema !== RECORD_SCHEMA
-      || envelope.sequence !== expectedSequence
-    ) {
-      throw new Error("invalid envelope");
-    }
-    const iv = decodeBase64(envelope.iv);
-    const tag = decodeBase64(envelope.tag);
-    const ciphertext = decodeBase64(envelope.ciphertext);
-    if (iv.length !== AES_GCM_IV_BYTES || tag.length !== AES_GCM_TAG_BYTES || ciphertext.length === 0) {
-      throw new Error("invalid encryption fields");
-    }
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAAD(Buffer.from(`logbrew-node-event-v${RECORD_SCHEMA}:${expectedSequence}`));
-    decipher.setAuthTag(tag);
-    plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const serializedEvent = utf8Decoder.decode(plaintext);
-    return normalizeRecord({
-      event: JSON.parse(serializedEvent),
-      eventBytes: plaintext.length,
-      serializedEvent
-    }, fail);
-  } catch {
-    throw fail("could not decrypt persisted events");
-  } finally {
-    plaintext?.fill(0);
-  }
-}
-
-function decodeBase64(value) {
-  if (typeof value !== "string" || value === "" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)) {
-    throw new Error("invalid base64");
-  }
-  const decoded = Buffer.from(value, "base64");
-  if (decoded.toString("base64") !== value) {
-    throw new Error("non-canonical base64");
-  }
-  return decoded;
-}
-
-function eventFilename(sequence) {
-  return `event-${String(sequence).padStart(16, "0")}.lbq`;
-}
-
-function removeEventFiles(queueDirectory, sequences, fail, failCommit) {
-  let removed = false;
-  for (const sequence of sequences) {
-    const fullPath = path.join(queueDirectory.path, eventFilename(sequence));
-    assertPrivateFile(fullPath, queueDirectory.owner, fail, "persisted event file");
-    try {
-      fs.unlinkSync(fullPath);
-      removed = true;
-    } catch {
-      throw removed
-        ? failCommit("persisted event removal could not be confirmed")
-        : fail("acknowledged persisted event could not be removed");
-    }
-  }
-  try {
-    fsyncDirectory(queueDirectory.path, fail);
-  } catch {
-    throw failCommit("persisted event removal could not be confirmed");
-  }
-}
-
-function atomicWrite(queueDirectory, filename, data, fail, failCommit, label) {
-  assertPinnedDirectory(queueDirectory, fail);
-  atomicWriteInDirectory(queueDirectory.path, filename, data, queueDirectory.owner, fail, failCommit, label);
-  try {
-    fsyncDirectory(queueDirectory.path, fail);
-  } catch {
-    throw failCommit(`${label} commit could not be confirmed`);
-  }
-}
-
-function atomicWriteInDirectory(directory, filename, data, owner, fail, failCommit, label) {
-  const tempPrefix = filename === ACCEPTED_FILE ? "accepted" : filename === MANIFEST_FILE ? "manifest" : "event";
-  const tempPath = path.join(directory, `.${tempPrefix}.tmp-${crypto.randomBytes(16).toString("hex")}`);
-  const finalPath = path.join(directory, filename);
-  let descriptor;
-  let renamed = false;
-  try {
-    descriptor = fs.openSync(tempPath, "wx", PRIVATE_FILE_MODE);
-    fs.writeFileSync(descriptor, data);
-    fs.fsyncSync(descriptor);
-    fs.closeSync(descriptor);
-    descriptor = undefined;
-    assertPrivateFile(tempPath, owner, fail, `${label} temporary file`);
-    fs.renameSync(tempPath, finalPath);
-    renamed = true;
-    assertPrivateFile(finalPath, owner, fail, label);
+    return openStore(scope, session);
   } catch (error) {
-    if (descriptor !== undefined) {
-      try {
-        fs.closeSync(descriptor);
-      } catch {
-        // Preserve the write failure.
-      }
+    if (session.lock.owned) {
+      attempt(() => {
+        releaseLock(scope, session.ownerLease);
+      });
     }
-    try {
-      fs.unlinkSync(tempPath);
-    } catch {
-      // The temporary file may already have been renamed or absent.
-    }
-    if (renamed) {
-      throw failCommit(`${label} commit could not be confirmed`);
-    }
-    if (error?.code && !["persistence_error", "persistence_commit_error"].includes(error.code)) {
-      throw fail(`${label} could not be written`);
-    }
+    session.key.fill(EMPTY);
     throw error;
   }
 }
 
-function assertPrivateDirectory(directory, owner, fail, label) {
-  let stat;
-  try {
-    stat = fs.lstatSync(directory);
-  } catch {
-    throw fail(`${label} could not be inspected`);
-  }
-  if (stat.isSymbolicLink() || !stat.isDirectory() || stat.uid !== owner || (stat.mode & 0o777) !== PRIVATE_DIRECTORY_MODE) {
-    throw fail(`${label} must be private and owned by the current user`);
-  }
+/**
+ * @param {ErrorConstructor} SdkError
+ * @returns {Readonly<{ fail: FailFactory, failCommit: FailFactory }>}
+ */
+function storeErrors(SdkError) {
+  return {
+    fail: (message) => new SdkError("persistence_error", message),
+    failCommit: (message) => new SdkError("persistence_commit_error", message)
+  };
 }
 
-function assertPrivateFile(filename, owner, fail, label) {
-  let stat;
-  try {
-    stat = fs.lstatSync(filename);
-  } catch {
-    throw fail(`${label} could not be inspected`);
-  }
-  if (
-    stat.isSymbolicLink()
-    || !stat.isFile()
-    || stat.uid !== owner
-    || stat.nlink !== 1
-    || (stat.mode & 0o777) !== PRIVATE_FILE_MODE
-  ) {
-    throw fail(`${label} must be private, regular, single-linked, and owned by the current user`);
-  }
-}
-
-function fsyncDirectory(directory, fail) {
-  let descriptor;
-  try {
-    descriptor = fs.openSync(directory, "r");
-    fs.fsyncSync(descriptor);
-  } catch {
-    throw fail("persistent queue directory could not be synchronized");
-  } finally {
-    if (descriptor !== undefined) {
-      fs.closeSync(descriptor);
-    }
-  }
-}
-
-function notify(onWarning, warning) {
-  if (!onWarning) {
-    return;
-  }
-  try {
-    onWarning(warning);
-  } catch {
-    // Warning callbacks are advisory and cannot change persistence behavior.
-  }
+/**
+ * @param {StoreDependencies} dependencies
+ * @returns {NodePersistentEventStore}
+ */
+function buildNodePersistentEventStore({ SdkError, directory, encryptionKey, limits, onWarning, sdkName }) {
+  const valid = validateDependencies({ SdkError, directory, encryptionKey, limits, onWarning, sdkName });
+  const errors = storeErrors(valid.SdkError);
+  const key = Buffer.from(valid.encryptionKey);
+  const ownerLease = crypto.randomBytes(LEASE_BYTES).toString("hex");
+  const scope = { directory: prepareQueueDirectory(valid.directory, errors.fail), ...errors, onWarning };
+  return openOrRelease(scope, { key, limits: valid.limits, lock: { owned: false }, ownerLease, sdkName: valid.sdkName });
 }
 
 module.exports = { buildNodePersistentEventStore };
