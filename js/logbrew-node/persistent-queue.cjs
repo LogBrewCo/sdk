@@ -1,804 +1,304 @@
 "use strict";
 
-const { Buffer } = require("node:buffer");
-const { randomBytes } = require("node:crypto");
+const { rmdirSync } = require("node:fs");
+const nodePath = require("node:path");
+const { acquireLease, releaseAfterFailure } = require("./persistent-lease.cjs");
+const { fixedError, fsyncDirectory } = require("./persistent-files.cjs");
+const { admitRecord, isAscendingIndexList, readClientReport, writeClientReport } = require("./persistent-records.cjs");
 const {
-  closeSync,
-  constants,
-  fstatSync,
-  fsyncSync,
-  linkSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readSync,
-  readdirSync,
-  realpathSync,
-  renameSync,
-  rmdirSync,
-  unlinkSync,
-  utimesSync,
-  writeFileSync
-} = require("node:fs");
-const { resolve, join } = require("node:path");
-const { clearInterval, setInterval } = require("node:timers");
-const { SdkError } = require("@logbrew/sdk");
+  CHILD_NAME,
+  asQueueError,
+  assertProcess,
+  assertUsable,
+  loadRecords,
+  prepareStorage,
+  recordAt,
+  removeQueueEntries,
+  unlinkRecord
+} = require("./persistent-storage.cjs");
 
-const CHILD_NAME = "logbrew-node-queue-v1";
-const OWNER_NAME = ".owner";
-// Drop counts only: reason codes, counts, and a random report ID, never event data.
-const CLIENT_REPORT_NAME = "client-report.json";
-const CLIENT_REPORT_TEMP_NAME = ".client-report.tmp";
-const MAX_CLIENT_REPORT_BYTES = 4096;
-const RECLAIM_NAME = ".owner-reclaim";
-const RECORD_PATTERN = /^event-([0-9]{16})\.json$/u;
-const TEMP_PATTERN = /^\.event-([0-9]{16})\.tmp$/u;
-const LEASE_PATTERN = /^lease-([0-9a-f]{32})$/u;
-const NON_RECORD_NAMES = new Set([OWNER_NAME, CLIENT_REPORT_NAME]);
-const STALE_LEASE_MS = 30_000;
-const HEARTBEAT_MS = 1_000;
+/**
+ * @import { LeaseOwner } from "./persistent-lease.cjs"
+ * @import { AdmissionPaths } from "./persistent-records.cjs"
+ * @import {
+ *   AppendedRecord,
+ *   PersistentQueueConfig,
+ *   QueueContext,
+ *   QueueRecord,
+ *   QueueStorage
+ * } from "./persistent-storage.cjs"
+ */
+
+/**
+ * @typedef {Readonly<{
+ *   acknowledge: (count: unknown) => void,
+ *   append: (record: AppendedRecord) => void,
+ *   byteCount: () => number,
+ *   close: () => void,
+ *   eventBytesAt: (index: number) => number,
+ *   events: () => unknown[],
+ *   length: () => number,
+ *   loadClientReport: () => unknown,
+ *   remove: (indexes: unknown) => void,
+ *   saveClientReport: (state: unknown) => void,
+ *   serializedAt: (index: number) => string
+ * }>} PersistentEventQueue
+ * @typedef {{ owner: LeaseOwner | undefined, released: boolean }} LeaseProgress
+ */
+
 const MAX_SEQUENCE = 9_999_999_999_999_999n;
+const SEQUENCE_STEP = 1n;
+const SEQUENCE_DIGITS = 16;
+const NO_COUNT = 0;
+const LAST_OFFSET = 1;
 
-class PersistentEventQueue {
-  constructor(config, storage, owner) {
-    this.config = config;
-    this.storage = storage;
-    this.owner = owner;
-    this.ownerPid = process.pid;
-    this.records = [];
-    this.totalBytes = 0;
-    this.nextSequence = 1n;
-    this.closed = false;
-    this.load();
-    this.owner.startHeartbeat();
+/**
+ * @param {QueueContext} context
+ * @returns {Readonly<{ name: string, paths: AdmissionPaths, temporaryName: string }>}
+ */
+function nextRecordPaths(context) {
+  const { state, storage } = context;
+  if (state.nextSequence > MAX_SEQUENCE) {
+    throw fixedError("persistent_queue_unavailable", "persistent queue sequence is exhausted");
   }
+  const sequence = state.nextSequence.toString().padStart(SEQUENCE_DIGITS, "0");
+  const name = `event-${sequence}.json`;
+  const temporaryName = `.event-${sequence}.tmp`;
+  return {
+    name,
+    paths: {
+      childPath: storage.childPath,
+      finalPath: nodePath.join(storage.childPath, name),
+      temporaryPath: nodePath.join(storage.childPath, temporaryName)
+    },
+    temporaryName
+  };
+}
 
-  length() {
-    this.assertUsable();
-    return this.records.length;
+/**
+ * @param {QueueContext} context
+ * @param {AppendedRecord} record
+ * @returns {void}
+ */
+function appendRecord(context, record) {
+  assertUsable(context);
+  const { state } = context;
+  const { name, paths, temporaryName } = nextRecordPaths(context);
+  const identity = admitRecord(paths, record.serialized, () => {
+    state.closed = true;
+  });
+  state.records.push({ ...record, identity, name, temporaryName });
+  state.totalBytes += record.byteCount;
+  state.nextSequence += SEQUENCE_STEP;
+}
+
+/**
+ * @param {QueueContext} context
+ * @param {QueueRecord} record
+ * @returns {void}
+ */
+function acknowledgeFirst(context, record) {
+  const { state, storage } = context;
+  try {
+    unlinkRecord(context, record);
+    fsyncDirectory(storage.childPath);
+  } catch {
+    throw fixedError("persistent_queue_unavailable", "persistent queue acknowledgement failed");
   }
+  state.records.shift();
+  state.totalBytes -= record.byteCount;
+}
 
-  byteCount() {
-    this.assertUsable();
-    return this.totalBytes;
+/**
+ * @param {QueueContext} context
+ * @param {unknown} count
+ * @returns {void}
+ */
+function acknowledgeRecords(context, count) {
+  assertUsable(context);
+  const { state } = context;
+  if (typeof count !== "number" || !Number.isInteger(count) || count < NO_COUNT || count > state.records.length) {
+    throw fixedError("persistent_queue_invalid", "persistent queue acknowledgement is invalid");
   }
-
-  events() {
-    this.assertUsable();
-    return this.records.map((record) => record.event);
-  }
-
-  serializedAt(index) {
-    this.assertUsable();
-    return this.recordAt(index).serialized;
-  }
-
-  eventBytesAt(index) {
-    this.assertUsable();
-    return this.recordAt(index).byteCount;
-  }
-
-  append(record) {
-    this.assertUsable();
-    if (this.nextSequence > MAX_SEQUENCE) {
-      throw fixedError("persistent_queue_unavailable", "persistent queue sequence is exhausted");
-    }
-    const sequence = this.nextSequence.toString().padStart(16, "0");
-    const name = `event-${sequence}.json`;
-    const temporaryName = `.event-${sequence}.tmp`;
-    const finalPath = join(this.storage.childPath, name);
-    const temporaryPath = join(this.storage.childPath, temporaryName);
-    let descriptor;
-    let identity;
-    let linked = false;
-    try {
-      descriptor = openSync(
-        temporaryPath,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollowFlag(),
-        0o600
-      );
-      writeFileSync(descriptor, record.serialized, { encoding: "utf8" });
-      fsyncSync(descriptor);
-      closeSync(descriptor);
-      descriptor = undefined;
-      linkSync(temporaryPath, finalPath);
-      linked = true;
-      const finalStat = lstatSync(finalPath);
-      validateOwnedFile(finalStat, 0o600, [2]);
-      identity = identityOf(finalStat);
-      fsyncDirectory(this.storage.childPath);
-    } catch {
-      closeQuietly(descriptor);
-      try {
-        rollbackAdmission(this.storage.childPath, temporaryPath, finalPath, linked);
-      } catch (rollbackError) {
-        this.closed = true;
-        throw rollbackError;
-      }
-      throw fixedError("persistent_queue_unavailable", "persistent queue admission failed");
-    }
-    finishPublishedAdmission(this.storage.childPath, temporaryPath);
-    this.records.push({ ...record, identity, name, temporaryName });
-    this.totalBytes += record.byteCount;
-    this.nextSequence += 1n;
-  }
-
-  acknowledge(count) {
-    this.assertUsable();
-    if (!Number.isInteger(count) || count < 0 || count > this.records.length) {
-      throw fixedError("persistent_queue_invalid", "persistent queue acknowledgement is invalid");
-    }
-    for (let index = 0; index < count; index += 1) {
-      const record = this.records[0];
-      try {
-        this.unlinkRecord(record);
-        fsyncDirectory(this.storage.childPath);
-      } catch {
-        throw fixedError("persistent_queue_unavailable", "persistent queue acknowledgement failed");
-      }
-      this.records.shift();
-      this.totalBytes -= record.byteCount;
-    }
-  }
-
-  // Removes evicted records; the core passes strictly ascending indexes.
-  remove(indexes) {
-    this.assertUsable();
-    if (!isAscendingIndexList(indexes, this.records.length)) {
-      throw fixedError("persistent_queue_invalid", "persistent queue removal is invalid");
-    }
-    for (let position = indexes.length - 1; position >= 0; position -= 1) {
-      const index = indexes[position];
-      const record = this.records[index];
-      try {
-        this.unlinkRecord(record);
-      } catch {
-        throw fixedError("persistent_queue_unavailable", "persistent queue removal failed");
-      }
-      this.records.splice(index, 1);
-      this.totalBytes -= record.byteCount;
-    }
-    try {
-      fsyncDirectory(this.storage.childPath);
-    } catch {
-      throw fixedError("persistent_queue_unavailable", "persistent queue removal failed");
-    }
-  }
-
-  loadClientReport() {
-    this.assertUsable();
-    const path = join(this.storage.childPath, CLIENT_REPORT_NAME);
-    const stat = lstatOptional(path);
-    if (stat === undefined) {
-      return undefined;
-    }
-    validateOwnedFile(stat, 0o600, [1]);
-    if (stat.size > MAX_CLIENT_REPORT_BYTES) {
-      throw fixedError("persistent_queue_invalid", "persistent queue client report is invalid");
-    }
-    const descriptor = openSync(path, constants.O_RDONLY | noFollowFlag());
-    try {
-      const buffer = Buffer.alloc(MAX_CLIENT_REPORT_BYTES + 1);
-      return JSON.parse(buffer.subarray(0, readSync(descriptor, buffer, 0, buffer.length, 0)).toString("utf8"));
-    } finally {
-      closeSync(descriptor);
-    }
-  }
-
-  saveClientReport(state) {
-    this.assertUsable();
-    const serialized = JSON.stringify(state);
-    if (Buffer.byteLength(serialized, "utf8") > MAX_CLIENT_REPORT_BYTES) {
-      throw fixedError("persistent_queue_invalid", "persistent queue client report is invalid");
-    }
-    const temporaryPath = join(this.storage.childPath, CLIENT_REPORT_TEMP_NAME);
-    let descriptor;
-    try {
-      descriptor = openSync(
-        temporaryPath,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollowFlag(),
-        0o600
-      );
-      validateOwnedFile(fstatSync(descriptor), 0o600, [1]);
-      writeFileSync(descriptor, serialized, { encoding: "utf8" });
-      fsyncSync(descriptor);
-      closeSync(descriptor);
-      descriptor = undefined;
-      renameSync(temporaryPath, join(this.storage.childPath, CLIENT_REPORT_NAME));
-      fsyncDirectory(this.storage.childPath);
-    } catch {
-      closeQuietly(descriptor);
-      throw fixedError("persistent_queue_unavailable", "persistent queue client report could not be saved");
-    }
-  }
-
-  unlinkRecord(record) {
-    const path = join(this.storage.childPath, record.name);
-    const temporaryPath = record.temporaryName === undefined
-      ? undefined
-      : join(this.storage.childPath, record.temporaryName);
-    validateRecordIdentity(path, record.identity, temporaryPath);
-    unlinkSync(path);
-  }
-
-  close() {
-    if (this.closed) {
-      return;
-    }
-    this.assertProcess();
-    this.owner.release();
-    this.closed = true;
-  }
-
-  load() {
-    reconcileTemporaryRecords(this.storage.childPath);
-    const entries = readdirSync(this.storage.childPath).filter((name) => !NON_RECORD_NAMES.has(name));
-    const recordNames = entries.filter((name) => RECORD_PATTERN.test(name)).sort();
-    if (recordNames.length !== entries.length || recordNames.length > this.config.maxQueueSize) {
-      throw fixedError("persistent_queue_invalid", "persistent queue contents are invalid");
-    }
-    let highestSequence = 0n;
-    for (const name of recordNames) {
-      const sequence = BigInt(RECORD_PATTERN.exec(name)[1]);
-      // Removal of evicted records leaves gaps; order stays strictly ascending.
-      if (sequence <= highestSequence) {
-        throw fixedError("persistent_queue_invalid", "persistent queue order is invalid");
-      }
-      highestSequence = sequence;
-      const loaded = readRecord(join(this.storage.childPath, name), this.config);
-      if (this.totalBytes + loaded.byteCount > this.config.maxQueueBytes) {
-        throw fixedError("persistent_queue_invalid", "persistent queue bounds are invalid");
-      }
-      this.records.push({ ...loaded, name });
-      this.totalBytes += loaded.byteCount;
-    }
-    this.nextSequence = highestSequence === 0n ? 1n : highestSequence + 1n;
-  }
-
-  recordAt(index) {
-    const record = this.records[index];
-    if (!record) {
-      throw fixedError("persistent_queue_invalid", "persistent queue order is invalid");
-    }
-    return record;
-  }
-
-  assertUsable() {
-    this.assertProcess();
-    if (this.closed || !this.owner.isCurrent()) {
-      throw fixedError("persistent_queue_unavailable", "persistent queue ownership was lost");
-    }
-  }
-
-  assertProcess() {
-    if (process.pid !== this.ownerPid) {
-      throw fixedError("persistent_queue_unavailable", "persistent queue process ownership changed");
-    }
+  for (const record of state.records.slice(NO_COUNT, count)) {
+    acknowledgeFirst(context, record);
   }
 }
 
-class LeaseOwner {
-  constructor(childPath, leasePath, markerPath, identity, markerIdentity) {
-    this.childPath = childPath;
-    this.leasePath = leasePath;
-    this.markerPath = markerPath;
-    this.identity = identity;
-    this.markerIdentity = markerIdentity;
-    this.ownerPid = process.pid;
-    this.timer = undefined;
-    this.released = false;
-    this.heartbeatFailed = false;
-  }
-
-  startHeartbeat() {
-    this.timer = setInterval(() => {
-      if (!this.hasIdentity()) {
-        this.heartbeatFailed = true;
-        clearInterval(this.timer);
-        this.timer = undefined;
-        return;
-      }
-      try {
-        const now = new Date();
-        utimesSync(this.markerPath, now, now);
-      } catch {
-        this.heartbeatFailed = true;
-        clearInterval(this.timer);
-        this.timer = undefined;
-      }
-    }, HEARTBEAT_MS);
-    this.timer.unref();
-  }
-
-  isCurrent() {
-    return !this.heartbeatFailed && this.hasIdentity();
-  }
-
-  hasIdentity() {
-    if (this.released || process.pid !== this.ownerPid) {
-      return false;
+/**
+ * @param {QueueContext} context
+ * @param {number | undefined} index
+ * @returns {void}
+ */
+function removeRecordAt(context, index) {
+  const { state } = context;
+  const record = index === undefined ? undefined : state.records[index];
+  try {
+    if (record === undefined) {
+      throw new TypeError("record is missing");
     }
-    try {
-      const current = lstatSync(this.leasePath);
-      const marker = lstatSync(this.markerPath);
-      return (
-        sameIdentity(current, this.identity)
-        && current.isDirectory()
-        && sameIdentity(marker, this.markerIdentity)
-        && marker.isFile()
-        && !marker.isSymbolicLink()
-      );
-    } catch {
-      return false;
-    }
+    unlinkRecord(context, record);
+  } catch {
+    throw fixedError("persistent_queue_unavailable", "persistent queue removal failed");
   }
+  state.records.splice(index ?? NO_COUNT, LAST_OFFSET);
+  state.totalBytes -= record.byteCount;
+}
 
-  release() {
-    if (!this.hasIdentity()) {
-      this.stopHeartbeat(true);
-      throw fixedError("persistent_queue_unavailable", "persistent queue ownership was lost");
-    }
-    try {
-      unlinkSync(this.markerPath);
-      rmdirSync(this.leasePath);
-      fsyncDirectory(this.childPath);
-      this.released = true;
-    } catch {
-      if (!this.hasIdentity()) {
-        this.stopHeartbeat(true);
-      }
-      throw fixedError("persistent_queue_unavailable", "persistent queue release failed");
-    }
-    this.stopHeartbeat(false);
+/**
+ * @param {QueueContext} context
+ * @param {unknown} indexes
+ * @returns {void}
+ */
+function removeRecords(context, indexes) {
+  assertUsable(context);
+  if (!isAscendingIndexList(indexes, context.state.records.length)) {
+    throw fixedError("persistent_queue_invalid", "persistent queue removal is invalid");
   }
-
-  stopHeartbeat(failed) {
-    this.heartbeatFailed ||= failed;
-    if (this.timer !== undefined) {
-      clearInterval(this.timer);
-      this.timer = undefined;
-    }
+  for (let position = indexes.length - LAST_OFFSET; position >= NO_COUNT; position -= LAST_OFFSET) {
+    removeRecordAt(context, indexes[position]);
+  }
+  try {
+    fsyncDirectory(context.storage.childPath);
+  } catch {
+    throw fixedError("persistent_queue_unavailable", "persistent queue removal failed");
   }
 }
 
+/**
+ * @param {QueueContext} context
+ * @returns {void}
+ */
+function closeQueue(context) {
+  if (context.state.closed) {
+    return;
+  }
+  assertProcess(context);
+  context.owner.release();
+  context.state.closed = true;
+}
+
+/**
+ * @param {QueueContext} context
+ * @returns {PersistentEventQueue}
+ */
+function queueMethods(context) {
+  const { state, storage } = context;
+  return {
+    acknowledge: (count) => {
+      acknowledgeRecords(context, count);
+    },
+    append: (record) => {
+      appendRecord(context, record);
+    },
+    byteCount: () => {
+      assertUsable(context);
+      return state.totalBytes;
+    },
+    close: () => {
+      closeQueue(context);
+    },
+    eventBytesAt: (index) => recordAt(context, index).byteCount,
+    events: () => {
+      assertUsable(context);
+      return state.records.map((record) => record.event);
+    },
+    length: () => {
+      assertUsable(context);
+      return state.records.length;
+    },
+    loadClientReport: () => {
+      assertUsable(context);
+      return readClientReport(storage.childPath);
+    },
+    remove: (indexes) => {
+      removeRecords(context, indexes);
+    },
+    saveClientReport: (report) => {
+      assertUsable(context);
+      writeClientReport(storage.childPath, report);
+    },
+    serializedAt: (index) => recordAt(context, index).serialized
+  };
+}
+
+/**
+ * @param {PersistentQueueConfig} config
+ * @param {QueueStorage} storage
+ * @param {LeaseOwner} owner
+ * @returns {PersistentEventQueue}
+ */
+function openQueue(config, storage, owner) {
+  /** @type {QueueContext} */
+  const context = {
+    config,
+    owner,
+    ownerPid: process.pid,
+    state: { closed: false, nextSequence: SEQUENCE_STEP, records: [], totalBytes: NO_COUNT },
+    storage
+  };
+  loadRecords(context);
+  owner.startHeartbeat();
+  return queueMethods(context);
+}
+
+/**
+ * @param {PersistentQueueConfig} config
+ * @returns {PersistentEventQueue}
+ */
 function createPersistentEventQueue(config) {
-  let owner;
+  /** @type {LeaseProgress} */
+  const progress = { owner: undefined, released: false };
   try {
     const storage = prepareStorage(config.persistentQueuePath, true);
-    owner = acquireLease(storage.childPath);
-    return new PersistentEventQueue(config, storage, owner);
+    if (storage === undefined) {
+      throw new TypeError("persistent queue storage is missing");
+    }
+    progress.owner = acquireLease(storage.childPath);
+    return openQueue(config, storage, progress.owner);
   } catch (error) {
-    if (owner !== undefined) {
-      releaseAfterFailure(owner);
+    if (progress.owner !== undefined) {
+      releaseAfterFailure(progress.owner);
     }
-    if (error instanceof SdkError) {
-      throw error;
-    }
-    throw fixedError("persistent_queue_unavailable", "persistent queue could not be opened");
+    throw asQueueError(error, "persistent queue could not be opened");
   }
 }
 
+/**
+ * @param {QueueStorage} storage
+ * @param {LeaseProgress} progress
+ * @returns {void}
+ */
+function purgeStorage(storage, progress) {
+  const owner = acquireLease(storage.childPath);
+  progress.owner = owner;
+  removeQueueEntries(storage);
+  owner.release();
+  progress.released = true;
+  rmdirSync(storage.childPath);
+  fsyncDirectory(storage.parentPath);
+}
+
+/**
+ * @param {Readonly<{ persistentQueuePath?: unknown }>} [options]
+ * @returns {boolean}
+ */
 function purgePersistentEventQueue({ persistentQueuePath } = {}) {
-  let owner;
-  let released = false;
+  /** @type {LeaseProgress} */
+  const progress = { owner: undefined, released: false };
   try {
     const storage = prepareStorage(persistentQueuePath, false);
     if (storage === undefined) {
       return false;
     }
-    owner = acquireLease(storage.childPath);
-    reconcileTemporaryRecords(storage.childPath);
-    const entries = readdirSync(storage.childPath).filter((name) => name !== OWNER_NAME);
-    if (entries.some((name) => !RECORD_PATTERN.test(name) && name !== CLIENT_REPORT_NAME)) {
-      throw fixedError("persistent_queue_invalid", "persistent queue contents are invalid");
-    }
-    for (const name of entries) {
-      const path = join(storage.childPath, name);
-      validatePurgeRecord(path);
-      unlinkSync(path);
-    }
-    fsyncDirectory(storage.childPath);
-    owner.release();
-    released = true;
-    rmdirSync(storage.childPath);
-    fsyncDirectory(storage.parentPath);
+    purgeStorage(storage, progress);
     return true;
   } catch (error) {
-    if (!released && owner !== undefined) {
-      releaseAfterFailure(owner);
+    if (!progress.released && progress.owner !== undefined) {
+      releaseAfterFailure(progress.owner);
     }
-    if (error instanceof SdkError) {
-      throw error;
-    }
-    throw fixedError("persistent_queue_unavailable", "persistent queue purge failed");
+    throw asQueueError(error, "persistent queue purge failed");
   }
 }
 
-function prepareStorage(persistentQueuePath, createChild) {
-  requireSupportedPlatform();
-  if (typeof persistentQueuePath !== "string" || persistentQueuePath.trim() === "") {
-    throw fixedError("configuration_error", "persistent queue path is required");
-  }
-  const requested = resolve(persistentQueuePath);
-  let parentPath;
-  let parentStat;
-  try {
-    parentPath = realpathSync(requested);
-    parentStat = lstatSync(requested);
-  } catch {
-    throw fixedError("persistent_queue_unavailable", "persistent queue parent is unavailable");
-  }
-  if (parentPath !== requested || !parentStat.isDirectory() || parentStat.isSymbolicLink()) {
-    throw fixedError("persistent_queue_invalid", "persistent queue parent is invalid");
-  }
-  validateOwnedMode(parentStat, 0o700);
-  const childPath = join(parentPath, CHILD_NAME);
-  const existing = lstatOptional(childPath);
-  if (existing === undefined && !createChild) {
-    return undefined;
-  }
-  if (existing === undefined) {
-    try {
-      mkdirSync(childPath, { mode: 0o700 });
-      fsyncDirectory(parentPath);
-    } catch {
-      throw fixedError("persistent_queue_unavailable", "persistent queue storage is unavailable");
-    }
-  }
-  validateDirectory(childPath);
-  return { childPath, parentPath };
-}
-
-function acquireLease(childPath) {
-  reconcileReclaim(childPath);
-  const leasePath = join(childPath, OWNER_NAME);
-  let leaseStat = lstatOptional(leasePath);
-  if (leaseStat !== undefined) {
-    validateLeaseDirectory(leasePath, leaseStat);
-    if (!leaseIsStale(leasePath, leaseStat)) {
-      throw fixedError("persistent_queue_in_use", "persistent queue is already owned");
-    }
-    reclaimLease(childPath, leasePath, leaseStat);
-  }
-  try {
-    mkdirSync(leasePath, { mode: 0o700 });
-  } catch (error) {
-    if (error?.code === "EEXIST") {
-      throw fixedError("persistent_queue_in_use", "persistent queue is already owned");
-    }
-    throw fixedError("persistent_queue_unavailable", "persistent queue ownership is unavailable");
-  }
-  let descriptor;
-  try {
-    const markerName = `lease-${randomBytes(16).toString("hex")}`;
-    const markerPath = join(leasePath, markerName);
-    descriptor = openSync(markerPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-    fsyncDirectory(leasePath);
-    fsyncDirectory(childPath);
-    leaseStat = lstatSync(leasePath);
-    const markerStat = lstatSync(markerPath);
-    validateOwnedFile(markerStat, 0o600, [1]);
-    return new LeaseOwner(
-      childPath,
-      leasePath,
-      markerPath,
-      identityOf(leaseStat),
-      identityOf(markerStat)
-    );
-  } catch {
-    closeQuietly(descriptor);
-    rollbackNewLease(leasePath);
-    throw fixedError("persistent_queue_unavailable", "persistent queue ownership is unavailable");
-  }
-}
-
-function rollbackNewLease(leasePath) {
-  try {
-    removeLeaseDirectory(leasePath);
-  } catch {
-    // The incomplete lease remains fail-closed until its stale deadline.
-  }
-}
-
-function reclaimLease(childPath, leasePath, expectedStat) {
-  const reclaimPath = join(childPath, RECLAIM_NAME);
-  try {
-    const current = lstatSync(leasePath);
-    if (!sameIdentity(current, identityOf(expectedStat)) || !leaseIsStale(leasePath, current)) {
-      throw new Error("lease changed");
-    }
-    renameSync(leasePath, reclaimPath);
-    removeLeaseDirectory(reclaimPath);
-    fsyncDirectory(childPath);
-  } catch {
-    throw fixedError("persistent_queue_in_use", "persistent queue is already owned");
-  }
-}
-
-function reconcileReclaim(childPath) {
-  const reclaimPath = join(childPath, RECLAIM_NAME);
-  const reclaimStat = lstatOptional(reclaimPath);
-  if (reclaimStat === undefined) {
-    return;
-  }
-  validateLeaseDirectory(reclaimPath, reclaimStat);
-  if (!leaseIsStale(reclaimPath, reclaimStat)) {
-    throw fixedError("persistent_queue_in_use", "persistent queue ownership is changing");
-  }
-  try {
-    removeLeaseDirectory(reclaimPath);
-    fsyncDirectory(childPath);
-  } catch {
-    throw fixedError("persistent_queue_unavailable", "persistent queue ownership is unavailable");
-  }
-}
-
-function removeLeaseDirectory(path) {
-  const entries = readdirSync(path);
-  if (entries.length > 1 || entries.some((name) => !LEASE_PATTERN.test(name))) {
-    throw fixedError("persistent_queue_invalid", "persistent queue ownership is invalid");
-  }
-  if (entries.length === 1) {
-    const markerPath = join(path, entries[0]);
-    validateOwnedFile(lstatSync(markerPath), 0o600, [1]);
-    unlinkSync(markerPath);
-  }
-  rmdirSync(path);
-}
-
-function validateLeaseDirectory(path, stat) {
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw fixedError("persistent_queue_invalid", "persistent queue ownership is invalid");
-  }
-  validateOwnedMode(stat, 0o700);
-  const entries = readdirSync(path);
-  if (entries.length > 1 || entries.some((name) => !LEASE_PATTERN.test(name))) {
-    throw fixedError("persistent_queue_invalid", "persistent queue ownership is invalid");
-  }
-  if (entries.length === 1) {
-    validateOwnedFile(lstatSync(join(path, entries[0])), 0o600, [1]);
-  }
-}
-
-function leaseIsStale(path, stat) {
-  const entries = readdirSync(path);
-  const timestamp = entries.length === 1 ? lstatSync(join(path, entries[0])).mtimeMs : stat.mtimeMs;
-  return Date.now() - timestamp >= STALE_LEASE_MS;
-}
-
-function reconcileTemporaryRecords(childPath) {
-  const reportTemporaryPath = join(childPath, CLIENT_REPORT_TEMP_NAME);
-  const reportTemporaryStat = lstatOptional(reportTemporaryPath);
-  if (reportTemporaryStat !== undefined) {
-    validateOwnedFile(reportTemporaryStat, 0o600, [1]);
-    unlinkSync(reportTemporaryPath);
-  }
-  const names = readdirSync(childPath).filter((name) => TEMP_PATTERN.test(name));
-  for (const temporaryName of names) {
-    const sequence = TEMP_PATTERN.exec(temporaryName)[1];
-    const finalName = `event-${sequence}.json`;
-    const temporaryPath = join(childPath, temporaryName);
-    const finalPath = join(childPath, finalName);
-    const temporaryStat = lstatSync(temporaryPath);
-    validateOwnedFile(temporaryStat, 0o600, [1, 2]);
-    const finalStat = lstatOptional(finalPath);
-    if (finalStat !== undefined && !sameIdentity(finalStat, identityOf(temporaryStat))) {
-      throw fixedError("persistent_queue_invalid", "persistent queue publication is invalid");
-    }
-    if (finalStat !== undefined) {
-      validateOwnedFile(finalStat, 0o600, [2]);
-    }
-    try {
-      unlinkSync(temporaryPath);
-      fsyncDirectory(childPath);
-    } catch {
-      throw fixedError("persistent_queue_unavailable", "persistent queue recovery failed");
-    }
-  }
-}
-
-function readRecord(path, config) {
-  const before = lstatSync(path);
-  validateOwnedFile(before, 0o600, [1]);
-  const maxRecordBytes = Math.min(
-    config.maxQueueBytes,
-    config.maxBatchBytes - config.batchPrefixBytes - config.batchSuffixBytes
-  );
-  if (before.size <= 0 || before.size > maxRecordBytes) {
-    throw fixedError("persistent_queue_invalid", "persistent queue record is invalid");
-  }
-  let descriptor;
-  let serialized;
-  let opened;
-  try {
-    descriptor = openSync(path, constants.O_RDONLY | noFollowFlag());
-    opened = fstatSync(descriptor);
-    validateOwnedFile(opened, 0o600, [1]);
-    if (!sameIdentity(opened, identityOf(before)) || opened.size !== before.size) {
-      throw new Error("record changed");
-    }
-    const buffer = Buffer.alloc(opened.size + 1);
-    let totalBytes = 0;
-    while (totalBytes < buffer.length) {
-      const bytesRead = readSync(descriptor, buffer, totalBytes, buffer.length - totalBytes, null);
-      if (bytesRead === 0) {
-        break;
-      }
-      totalBytes += bytesRead;
-    }
-    const after = fstatSync(descriptor);
-    validateOwnedFile(after, 0o600, [1]);
-    if (
-      totalBytes > maxRecordBytes
-      || totalBytes !== opened.size
-      || after.size !== opened.size
-      || !sameIdentity(after, identityOf(opened))
-    ) {
-      throw new Error("record changed");
-    }
-    serialized = buffer.subarray(0, totalBytes).toString("utf8");
-    closeSync(descriptor);
-    descriptor = undefined;
-  } catch {
-    closeQuietly(descriptor);
-    throw fixedError("persistent_queue_invalid", "persistent queue record is invalid");
-  }
-  const byteCount = Buffer.byteLength(serialized, "utf8");
-  if (
-    byteCount !== opened.size
-    || byteCount > maxRecordBytes
-  ) {
-    throw fixedError("persistent_queue_invalid", "persistent queue record is invalid");
-  }
-  let event;
-  try {
-    event = config.restoreEvent(serialized);
-  } catch {
-    throw fixedError("persistent_queue_invalid", "persistent queue record is invalid");
-  }
-  return { byteCount, event, identity: identityOf(before), serialized };
-}
-
-function isAscendingIndexList(indexes, length) {
-  return Array.isArray(indexes) && indexes.every((index, position) => (
-    Number.isInteger(index) && index < length && index > (position === 0 ? -1 : indexes[position - 1])
-  ));
-}
-
-function validatePurgeRecord(path) {
-  validateOwnedFile(lstatSync(path), 0o600, [1]);
-}
-
-function validateRecordIdentity(path, identity, temporaryPath) {
-  const temporaryStat = temporaryPath === undefined ? undefined : lstatOptional(temporaryPath);
-  if (temporaryStat !== undefined) {
-    validateOwnedFile(temporaryStat, 0o600, [2]);
-    if (!sameIdentity(temporaryStat, identity)) {
-      throw new Error("record changed");
-    }
-  }
-  const stat = lstatSync(path);
-  validateOwnedFile(stat, 0o600, temporaryStat === undefined ? [1] : [2]);
-  if (!sameIdentity(stat, identity)) {
-    throw new Error("record changed");
-  }
-}
-
-function validateDirectory(path) {
-  const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw fixedError("persistent_queue_invalid", "persistent queue storage is invalid");
-  }
-  validateOwnedMode(stat, 0o700);
-}
-
-function validateOwnedFile(stat, mode, links) {
-  if (!stat.isFile() || stat.isSymbolicLink() || !links.includes(stat.nlink)) {
-    throw fixedError("persistent_queue_invalid", "persistent queue file is invalid");
-  }
-  validateOwnedMode(stat, mode);
-}
-
-function validateOwnedMode(stat, mode) {
-  if ((stat.mode & 0o777) !== mode || stat.uid !== process.getuid()) {
-    throw fixedError("persistent_queue_invalid", "persistent queue permissions are invalid");
-  }
-}
-
-function requireSupportedPlatform() {
-  if (process.platform === "win32" || typeof process.getuid !== "function" || noFollowFlag() === 0) {
-    throw fixedError("configuration_error", "persistent queue requires owner only storage");
-  }
-}
-
-function noFollowFlag() {
-  return typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-}
-
-function fsyncDirectory(path) {
-  const descriptor = openSync(path, constants.O_RDONLY | noFollowFlag());
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function rollbackAdmission(childPath, temporaryPath, finalPath, linked) {
-  let failed = false;
-  for (const path of linked ? [finalPath, temporaryPath] : [temporaryPath]) {
-    try {
-      unlinkSync(path);
-    } catch (error) {
-      failed ||= error?.code !== "ENOENT";
-    }
-  }
-  try {
-    fsyncDirectory(childPath);
-  } catch {
-    failed = true;
-  }
-  if (failed) {
-    throw fixedError("persistent_queue_unavailable", "persistent queue admission rollback failed");
-  }
-}
-
-function finishPublishedAdmission(childPath, temporaryPath) {
-  try {
-    unlinkSync(temporaryPath);
-    fsyncDirectory(childPath);
-  } catch {
-    // The synced final link is admitted; recovery removes any remaining temporary link.
-  }
-}
-
-function releaseAfterFailure(owner) {
-  try {
-    owner.release();
-  } catch {
-    // The lease remains fail-closed until its bounded stale deadline.
-  }
-}
-
-function closeQuietly(descriptor) {
-  if (descriptor === undefined) {
-    return;
-  }
-  try {
-    closeSync(descriptor);
-  } catch {
-    // The original fixed storage failure remains authoritative.
-  }
-}
-
-function lstatOptional(path) {
-  try {
-    return lstatSync(path);
-  } catch (error) {
-    if (error?.code === "ENOENT") {
-      return undefined;
-    }
-    throw fixedError("persistent_queue_unavailable", "persistent queue storage is unavailable");
-  }
-}
-
-function identityOf(stat) {
-  return { device: stat.dev, inode: stat.ino };
-}
-
-function sameIdentity(stat, identity) {
-  return stat.dev === identity.device && stat.ino === identity.inode;
-}
-
-function fixedError(code, message) {
-  return new SdkError(code, message);
-}
-
-module.exports = {
-  CHILD_NAME,
-  createPersistentEventQueue,
-  purgePersistentEventQueue
-};
+module.exports = { CHILD_NAME, createPersistentEventQueue, purgePersistentEventQueue };

@@ -388,10 +388,13 @@
           {
             "from": "file",
             "name": [
+              "AdmissionProgress",
               "CacheOperationWithLogBrewSpanOptions",
               "CreateLogBrewNodeClientConfig",
               "DatabaseOperationWithLogBrewSpanOptions",
               "FetchWithLogBrewSpanOptions",
+              "LeaseProgress",
+              "LeaseState",
               "LogBrewAxiosInstrumentableInstance",
               "LogBrewAxiosInstrumentationOptions",
               "LogBrewAxiosSpanOptions",
@@ -420,7 +423,8 @@
               "LogBrewUndiciInstrumentationOptions",
               "NodeFetchTransportConfig",
               "QueueBatchOperationWithLogBrewSpanOptions",
-              "QueueOperationWithLogBrewSpanOptions"
+              "QueueOperationWithLogBrewSpanOptions",
+              "QueueState"
             ]
           },
           {
@@ -434,7 +438,10 @@
           },
           {
             "from": "package",
-            "name": "Process",
+            "name": [
+              "Process",
+              "Stats"
+            ],
             "package": "@types/node"
           }
         ]
@@ -885,6 +892,15 @@
       "rules": {
         "node/no-process-env": "off",
         "unicorn/no-process-exit": "off",
+        "node/no-sync": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-node/persistent-*.cjs"
+      ],
+      "rules": {
+        "eslint/no-bitwise": "off",
         "node/no-sync": "off"
       }
     }

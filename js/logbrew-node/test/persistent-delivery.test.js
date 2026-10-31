@@ -32,6 +32,19 @@ const require = createRequire(import.meta.url);
 const fsModule = require("node:fs");
 const timersModule = require("node:timers");
 const persistentQueueModulePath = require.resolve("../persistent-queue.cjs");
+const persistentQueueModulePaths = [
+  "../persistent-files.cjs",
+  "../persistent-lease.cjs",
+  "../persistent-queue.cjs",
+  "../persistent-records.cjs",
+  "../persistent-storage.cjs"
+].map((path) => require.resolve(path));
+
+function forgetPersistentQueueModules() {
+  for (const path of persistentQueueModulePaths) {
+    delete require.cache[path];
+  }
+}
 
 function temporaryParent(t) {
   const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), "logbrew-node-persistent-")));
@@ -106,7 +119,7 @@ function loadPersistentQueueWith({ filesystem = {}, timers = {} }) {
     ...Object.entries(timers).map(([name, replacement]) => [timersModule, name, replacement])
   ];
   const originals = replacements.map(([target, name]) => [target, name, target[name]]);
-  delete require.cache[persistentQueueModulePath];
+  forgetPersistentQueueModules();
   try {
     for (const [target, name, replacement] of replacements) {
       target[name] = replacement;
@@ -116,7 +129,7 @@ function loadPersistentQueueWith({ filesystem = {}, timers = {} }) {
     for (const [target, name, original] of originals) {
       target[name] = original;
     }
-    delete require.cache[persistentQueueModulePath];
+    forgetPersistentQueueModules();
   }
 }
 
@@ -565,7 +578,7 @@ for (const scenario of durablePublicationFailures) {
       assert.match(recovered.events()[0].id, /^retained-after-/);
       recovered.acknowledge(1);
       recovered.close();
-      delete require.cache[persistentQueueModulePath];
+      forgetPersistentQueueModules();
   });
 }
 
