@@ -107,6 +107,9 @@ expect_commit "agent attribution in message" 1 "agent-attribution: commit messag
 expect_commit "access key" 1 "access-key" "$access_key" src/app.txt "key = \"$access_key\""
 expect_commit "bidirectional control character" 1 "hidden-text:" "" src/app.txt "$bidi"
 expect_commit "inline allow comment is ignored" 1 "infrastructure:" "" src/app.txt "host $term # gitleaks:allow"
+patch_file="thread-stream@""4.2.0.patch"
+expect_commit "package patch file name stays allowed" 0 "clean" "" package.json \
+  "{\"patchedDependencies\": {\"thread-stream@4.2.0\": \"patches/$patch_file\"}}"
 expect_commit "public placeholders stay allowed" 0 "clean" "" src/app.txt "$(printf '%s\n' \
   "/Us""ers/example/app" "user@example.com" "trace_id=0123456789abcdef0123456789abcdef" \
   "localStorage retention storage ActivityKind.Internal" "Co-authored-by: Jane Roe <jane@roe.dev>")"
