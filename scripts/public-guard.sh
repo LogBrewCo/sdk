@@ -319,16 +319,16 @@ github_text() {
       -f query="mutation(\$id: ID!) { minimizeComment(input: {subjectId: \$id, classifier: OFF_TOPIC}) { minimizedComment { isMinimized } } }" \
       --jq .data.minimizeComment.minimizedComment.isMinimized | grep -qx true || action="could not hide the comment"
   else
-    action="$(restore_text "$event" "$subject")" || action="could not change the text"
+    action="$(revert_text "$event" "$subject")" || action="could not change the text"
   fi
   printf '::error title=Public text check::Found %s in %s; %s.\n' "$categories" \
     "$(jq -r --arg s "$subject" '.[$s].html_url' "$event")" "$action"
   return 1
 }
 
-# Print what restoring did. Fields with a finding take their text from before
+# Print what reverting did. Fields with a finding take their text from before
 # the edit when it exists and is clean, otherwise a removal notice.
-restore_text() {
+revert_text() {
   local event="$1" subject="$2" field fields=() patch='{}' notice=0 path=issues
   mv "$work/findings" "$work/findings.current"
   : >"$work/findings"
@@ -354,7 +354,7 @@ restore_text() {
   [[ "$subject" == issue ]] || path=pulls
   gh api --silent -X PATCH "repos/${GITHUB_REPOSITORY:?}/$path/$(jq -r --arg s "$subject" '.[$s].number' "$event")" \
     --input - <<<"$patch" || return 1
-  if ((notice == 1)); then printf 'replaced the text with a removal notice\n'; else printf 'restored the earlier text\n'; fi
+  if ((notice == 1)); then printf 'replaced the text with a removal notice\n'; else printf 'put back the earlier text\n'; fi
 }
 
 pre_push() {

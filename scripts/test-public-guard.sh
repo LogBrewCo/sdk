@@ -203,16 +203,16 @@ text_case "clean comment is left alone" pull_request_review_comment \
   0 "clean" ""
 text_case "edited issue body gets its earlier text back" issues \
   "{\"action\": \"edited\", \"changes\": {\"body\": {\"from\": \"earlier words\"}}, \"issue\": {\"number\": 9, \"html_url\": \"$url\", \"title\": \"Crash\", \"body\": \"host $term\"}}" \
-  1 "Found infrastructure in $url; restored the earlier text." '{"body":"earlier words"}'
+  1 "Found infrastructure in $url; put back the earlier text." '{"body":"earlier words"}'
 text_case "earlier text with a finding becomes a notice" issues \
   "{\"action\": \"edited\", \"changes\": {\"body\": {\"from\": \"old $term\"}}, \"issue\": {\"number\": 9, \"html_url\": \"$url\", \"title\": \"Crash\", \"body\": \"host $term\"}}" \
   1 "replaced the text with a removal notice." "repos/org/sample/issues/9"
 text_case "new issue title with a finding becomes a notice" issues \
   "{\"action\": \"opened\", \"issue\": {\"number\": 9, \"html_url\": \"$url\", \"title\": \"Crash in $term\", \"body\": \"steps\"}}" \
   1 "replaced the text with a removal notice." '{"title":"Title removed by the public content check"}'
-text_case "edited pull request body is restored through the pulls API" pull_request_target \
+text_case "edited pull request body goes back through the pulls API" pull_request_target \
   "{\"action\": \"edited\", \"changes\": {\"body\": {\"from\": \"\"}}, \"pull_request\": {\"number\": 7, \"html_url\": \"$url\", \"title\": \"feat: x\", \"body\": \"$term\"}}" \
-  1 "restored the earlier text." "repos/org/sample/pulls/7"
+  1 "put back the earlier text." "repos/org/sample/pulls/7"
 text_case "only the edited field is scanned" pull_request_target \
   "{\"action\": \"edited\", \"changes\": {\"title\": {\"from\": \"feat: y\"}}, \"pull_request\": {\"number\": 7, \"html_url\": \"$url\", \"title\": \"feat: x\", \"body\": \"$term\"}}" \
   0 "clean" ""
