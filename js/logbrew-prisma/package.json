@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/prisma",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prisma Client tracing helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
