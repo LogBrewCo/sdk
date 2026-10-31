@@ -488,6 +488,15 @@
     },
     {
       "files": [
+        "logbrew-js/batch-sender.cjs",
+        "logbrew-js/event-pipeline.cjs"
+      ],
+      "rules": {
+        "eslint/no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": [
         "**/tools/npm-publish/**"
       ],
       "rules": {

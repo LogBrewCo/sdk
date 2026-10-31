@@ -15,7 +15,7 @@ const { isList, isRecord, isTruthy, requireNonEmpty } = require("./validation.cj
  * @import { ErrorHandler } from "./capture-support.cjs"
  * @import { ResolvedSpanOptions } from "./opentelemetry-keys.cjs"
  * @typedef {Readonly<{
- *   span: (id: string, timestamp: unknown, attributes: unknown) => unknown,
+ *   span: (id: string, timestamp: unknown, attributes: Readonly<Record<string, unknown>>) => unknown,
  *   flush: (transport: unknown) => unknown,
  *   pendingEvents: () => number
  * }>} SpanClient

@@ -134,13 +134,20 @@ test("a client report never pushes a batch over maxBatchBytes", async () => {
 });
 
 test("client reports cap reasons at 16 and clamp counts", async () => {
-  const client = createClient({ maxQueueSize: 1 });
-  log(client, "evt_log_001");
-  client.unreportedDropsByReason.queue_overflow = 1_000_000_000;
-  for (let index = 0; index < 20; index += 1) {
-    client.unreportedDropsByReason[`reason_${String(index).padStart(2, "0")}`] = 1;
+  const unreported = { queue_overflow: 1_000_000_000 };
+  for (let index = 0; index < 15; index += 1) {
+    unreported[`reason_${String(index).padStart(2, "0")}`] = 1;
   }
+  const client = createClient({
+    maxQueueSize: 1,
+    [Symbol.for("@logbrew/sdk.clientReportStore")]: {
+      loadClientReport: () => ({ pending: null, unreported }),
+      saveClientReport() {}
+    }
+  });
+  log(client, "evt_log_001");
   log(client, "evt_log_002");
+  client.log("evt_log_big", timestamp, { message: "x".repeat(300 * 1024), level: "info" });
   const transport = RecordingTransport.alwaysAccept();
 
   await client.flush(transport);
@@ -148,6 +155,7 @@ test("client reports cap reasons at 16 and clamp counts", async () => {
   const dropped = reports(transport)[0].dropped_events;
   assert.equal(Object.keys(dropped).length, 16);
   assert.equal(dropped.queue_overflow, 1_000_000_000);
+  assert.equal(dropped.event_too_large, undefined);
 });
 
 function reportStore(saved) {

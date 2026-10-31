@@ -7,6 +7,10 @@ const { SdkError } = require("./sdk-error.cjs");
  *   : Value extends object ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> } : Value} DeepReadonly
  */
 
+/**
+ * @typedef {(...args: readonly never[]) => unknown} Callable
+ */
+
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
 const TRACE_ID_PATTERN = /^[0-9a-fA-F]{32}$/u;
@@ -109,6 +113,14 @@ function requireNonEmpty(label, value) {
 
 /** @type {(value: unknown) => boolean} */
 const isTruthy = Boolean;
+
+/**
+ * @param {unknown} value
+ * @returns {value is Callable}
+ */
+function isCallable(value) {
+  return typeof value === "function";
+}
 
 /**
  * @param {unknown} value
@@ -293,6 +305,7 @@ module.exports = {
   ZERO_TRACE_ID,
   hasUnicodeControlCharacter,
   isAllowedValue,
+  isCallable,
   isList,
   isObjectValue,
   isRecord,
