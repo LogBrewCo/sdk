@@ -413,6 +413,11 @@
               "URL"
             ],
             "package": "@types/node"
+          },
+          {
+            "from": "package",
+            "name": "Process",
+            "package": "@types/node"
           }
         ]
       }
@@ -722,7 +727,8 @@
     },
     {
       "files": [
-        "logbrew-nestjs/logger.cjs"
+        "logbrew-nestjs/logger.cjs",
+        "logbrew-node/pino.cjs"
       ],
       "rules": {
         "unicorn/no-null": "off"
@@ -818,6 +824,16 @@
             "max": 5
           }
         ]
+      }
+    },
+    {
+      "files": [
+        "logbrew-node/process-capture.cjs"
+      ],
+      "rules": {
+        "node/no-process-env": "off",
+        "unicorn/no-process-exit": "off",
+        "node/no-sync": "off"
       }
     }
   ]

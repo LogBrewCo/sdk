@@ -41,7 +41,7 @@ type QueueBatchOperationWithLogBrewSpanOptions<Result = unknown> = QueueOperatio
 
 type LogBrewPinoCaptureContext = {
   readonly instance: unknown;
-  readonly level?: number;
+  readonly level?: number | undefined;
 };
 
 type LogBrewPinoInstrumentationConfig = {
