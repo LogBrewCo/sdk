@@ -31,6 +31,13 @@ def client_source(path: Path) -> str:
     ).read_text(encoding="utf-8")
 
 
+def client_declaration(path: Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    for module in re.findall(r'from\s+"(\./types-[^\"]+)\.js";', source):
+        source += (path.parent / f"{module}.d.ts").read_text(encoding="utf-8")
+    return source
+
+
 class TelemetryContextSurfaceTests(unittest.TestCase):
     def test_every_javascript_client_forwards_shared_context_to_its_runtime(self) -> None:
         for package, entrypoint in CLIENT_ENTRYPOINTS:
@@ -51,11 +58,13 @@ class TelemetryContextSurfaceTests(unittest.TestCase):
         self,
     ) -> None:
         for package, entrypoint in CLIENT_ENTRYPOINTS:
-            declaration = (ROOT / f"js/logbrew-{package}/{entrypoint}.d.ts").read_text(encoding="utf-8")
+            declaration_path = ROOT / f"js/logbrew-{package}/{entrypoint}.d.ts"
+            declaration = declaration_path.read_text(encoding="utf-8")
+            surface = client_declaration(declaration_path)
             commonjs = (ROOT / f"js/logbrew-{package}/{entrypoint}.d.cts").read_text(encoding="utf-8")
             with self.subTest(path=f"js/logbrew-{package}/{entrypoint}.d.ts"):
-                self.assertIn("TelemetryContext", declaration)
-                self.assertRegex(declaration, r"\bcontext\?: TelemetryContext(?: \| undefined)?;")
+                self.assertIn("TelemetryContext", surface)
+                self.assertRegex(surface, r"\bcontext\?: TelemetryContext(?: \| undefined)?;")
                 self.assertIn(commonjs, (declaration, COMMONJS_DECLARATION_REEXPORT))
 
 
