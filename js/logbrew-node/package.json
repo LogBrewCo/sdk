@@ -24,6 +24,7 @@
     "breadcrumbs.cjs",
     "index.cjs",
     "index.js",
+    "internal.cjs",
     "mongo.cjs",
     "mongo.js",
     "mongoose.cjs",

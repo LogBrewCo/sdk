@@ -1,6 +1,7 @@
 "use strict";
 
 const { createTraceparentHeaders, parseTraceparent } = require("@logbrew/sdk");
+const { isObjectLike, readMember } = require("./internal.cjs");
 
 /**
  * @import { SpanLinkSummary, TraceparentContext } from "@logbrew/sdk"
@@ -36,29 +37,6 @@ const UNSAFE_QUEUE_LINK_METADATA_KEYS = new Set([
   "traceparent",
   "url"
 ]);
-
-/**
- * @param {unknown} value
- * @returns {value is object}
- */
-function isObjectLike(value) {
-  return typeof value === "object" && value !== null;
-}
-
-/**
- * @param {unknown} value
- * @param {string} name
- * @returns {unknown}
- */
-function readMember(value, name) {
-  if (isObjectLike(value) || typeof value === "function") {
-    return Reflect.get(value, name);
-  }
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  return Reflect.get(new Object(value), name);
-}
 
 /**
  * @param {unknown} value
@@ -140,7 +118,7 @@ function nodeBufferToString(value) {
     return undefined;
   }
   const constructor = readMember(value, "constructor");
-  const isBuffer = readMember(constructor, "isBuffer");
+  const isBuffer = constructor === undefined || constructor === null ? undefined : readMember(constructor, "isBuffer");
   return typeof isBuffer === "function" && Boolean(Reflect.apply(isBuffer, constructor, [value])) ? toString : undefined;
 }
 

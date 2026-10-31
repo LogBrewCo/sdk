@@ -1,224 +1,140 @@
 "use strict";
 
 const diagnosticsChannel = require("node:diagnostics_channel");
+const {
+  attempt,
+  boundedText,
+  callOptional,
+  isObjectLike,
+  isWeakKey,
+  readMember,
+  sanitizeUrl,
+  templateText
+} = require("./internal.cjs");
+
+/**
+ * @typedef {() => unknown} ActiveTraceProvider
+ * @typedef {Readonly<Record<string, unknown>>} BreadcrumbEntry
+ * @typedef {{ breadcrumbs: BreadcrumbEntry[], truncated: boolean }} BreadcrumbRing
+ * @typedef {Readonly<{ breadcrumbs: BreadcrumbEntry[], truncated: boolean }>} BreadcrumbSnapshot
+ * @typedef {(breadcrumb: unknown) => void} AddBreadcrumb
+ * @typedef {Readonly<{ method: unknown, url: string | undefined }>} PendingRequest
+ * @typedef {"debug" | "error" | "info" | "warning"} BreadcrumbLevel
+ */
 
 const MAX_BREADCRUMBS = 64;
 const MAX_MESSAGE_LENGTH = 512;
-const MAX_URL_LENGTH = 256;
+const NUMERIC_ZERO = 0;
+const LEVEL_NAME = 1;
+const PINO_ERROR = 50;
+const PINO_WARNING = 40;
+const PINO_INFO = 30;
+const FIRST_ARGUMENT = 0;
+const CLIENT_ERROR_STATUS = 400;
+const SERVER_ERROR_STATUS = 500;
 const INSTALLED = Symbol.for("@logbrew/node.automaticBreadcrumbs");
-// Lets the @logbrew/sdk Winston transport keep its breadcrumbs with the active request.
 const BREADCRUMB_RECORDER = Symbol.for("@logbrew/sdk.breadcrumbRecorder");
-const CONSOLE_LEVELS = Object.freeze({
-  debug: "debug",
-  error: "error",
-  info: "info",
-  log: "info",
-  warn: "warning"
-});
-const PINO_LEVELS = [[50, "error"], [40, "warning"], [30, "info"], [0, "debug"]];
+/** @type {readonly (readonly [string, BreadcrumbLevel])[]} */
+const CONSOLE_LEVELS = [
+  ["debug", "debug"],
+  ["error", "error"],
+  ["info", "info"],
+  ["log", "info"],
+  ["warn", "warning"]
+];
+/** @type {readonly (readonly [number, BreadcrumbLevel])[]} */
+const PINO_LEVELS = [
+  [PINO_ERROR, "error"],
+  [PINO_WARNING, "warning"],
+  [PINO_INFO, "info"],
+  [NUMERIC_ZERO, "debug"]
+];
 
-// Breadcrumbs recorded inside a request belong to that request's trace; others go to the process ring.
+/** @type {WeakMap<object, BreadcrumbRing>} */
 const traceRings = new WeakMap();
+/** @type {BreadcrumbRing} */
 const processRing = { breadcrumbs: [], truncated: false };
-// LogBrew's own delivery requests are not application breadcrumbs.
+/** @type {Set<string>} */
 const ignoredUrls = new Set();
-let recording = false;
+const recordingState = { active: false };
+/** @type {WeakMap<object, PendingRequest>} */
+const pendingRequests = new WeakMap();
 
+/**
+ * @param {ActiveTraceProvider} activeTraceProvider
+ * @returns {BreadcrumbRing}
+ */
+function currentRing(activeTraceProvider) {
+  const trace = activeTraceProvider();
+  if (!isObjectLike(trace)) {
+    return processRing;
+  }
+  const existing = traceRings.get(trace);
+  if (existing) {
+    return existing;
+  }
+  /** @type {BreadcrumbRing} */
+  const ring = { breadcrumbs: [], truncated: false };
+  traceRings.set(trace, ring);
+  return ring;
+}
+
+/**
+ * @param {ActiveTraceProvider} activeTraceProvider
+ * @returns {() => BreadcrumbSnapshot}
+ */
 function createBreadcrumbProvider(activeTraceProvider) {
   return () => {
     const ring = currentRing(activeTraceProvider);
-    return { breadcrumbs: ring.breadcrumbs.slice(), truncated: ring.truncated };
+    return { breadcrumbs: [...ring.breadcrumbs], truncated: ring.truncated };
   };
 }
 
+/**
+ * @param {unknown} value
+ * @returns {void}
+ */
 function ignoreBreadcrumbUrl(value) {
   const url = sanitizeUrl(value);
-  if (url) {
+  if (url !== undefined && url !== "") {
     ignoredUrls.add(url);
   }
 }
 
+/**
+ * @param {object} breadcrumb
+ * @param {ActiveTraceProvider} activeTraceProvider
+ * @returns {void}
+ */
+function recordBreadcrumb(breadcrumb, activeTraceProvider) {
+  const ring = currentRing(activeTraceProvider);
+  if (ring.breadcrumbs.length >= MAX_BREADCRUMBS) {
+    ring.breadcrumbs.shift();
+    ring.truncated = true;
+  }
+  ring.breadcrumbs.push({ timestamp: new Date().toISOString(), ...breadcrumb });
+}
+
+/**
+ * @param {unknown} breadcrumb
+ * @param {ActiveTraceProvider} activeTraceProvider
+ * @returns {void}
+ */
 function addLogBrewBreadcrumb(breadcrumb, activeTraceProvider) {
-  if (!breadcrumb || typeof breadcrumb !== "object" || recording) {
+  if (!isObjectLike(breadcrumb) || recordingState.active) {
     return;
   }
-  // A breadcrumb source must never throw into the application call it observes.
-  recording = true;
-  try {
-    const ring = currentRing(activeTraceProvider);
-    if (ring.breadcrumbs.length >= MAX_BREADCRUMBS) {
-      ring.breadcrumbs.shift();
-      ring.truncated = true;
-    }
-    ring.breadcrumbs.push({ timestamp: new Date().toISOString(), ...breadcrumb });
-  } catch {
-    // Ignore: breadcrumbs are advisory.
-  } finally {
-    recording = false;
-  }
-}
-
-function currentRing(activeTraceProvider) {
-  const trace = activeTraceProvider();
-  if (!trace || typeof trace !== "object") {
-    return processRing;
-  }
-  let ring = traceRings.get(trace);
-  if (!ring) {
-    ring = { breadcrumbs: [], truncated: false };
-    traceRings.set(trace, ring);
-  }
-  return ring;
-}
-
-// Installs console, outbound HTTP, and Pino breadcrumb sources once per process.
-function installAutomaticBreadcrumbs(activeTraceProvider) {
-  if (globalThis[INSTALLED]) {
-    return;
-  }
-  globalThis[INSTALLED] = true;
-  const add = (breadcrumb) => addLogBrewBreadcrumb(breadcrumb, activeTraceProvider);
-  globalThis[BREADCRUMB_RECORDER] = add;
-  installConsoleBreadcrumbs(add);
-  installHttpBreadcrumbs(add);
-  installPinoBreadcrumbs(add);
-}
-
-function installConsoleBreadcrumbs(add) {
-  for (const [method, level] of Object.entries(CONSOLE_LEVELS)) {
-    const original = console[method];
-    if (typeof original !== "function") {
-      continue;
-    }
-    console[method] = function logBrewConsoleBreadcrumb(...args) {
-      const message = boundedText(consoleTemplate(args), MAX_MESSAGE_LENGTH);
-      if (message) {
-        add({ type: "debug", category: "console", level, message });
-      }
-      return original.apply(this, args);
-    };
-  }
-}
-
-function installHttpBreadcrumbs(add) {
-  const pending = new WeakMap();
-  // Node's http client (http.request, http.get, and libraries built on them).
-  subscribe("http.client.request.start", ({ request }) => {
-    pending.set(request, { method: request.method, url: requestUrl(request) });
+  recordingState.active = true;
+  attempt(() => {
+    recordBreadcrumb(breadcrumb, activeTraceProvider);
   });
-  subscribe("http.client.response.finish", ({ request, response }) => {
-    const started = pending.get(request);
-    if (started && !isIgnoredUrl(started.url)) {
-      add(httpBreadcrumb(started.method, started.url, response?.statusCode));
-    }
-  });
-  // undici, which also backs the global fetch.
-  subscribe("undici:request:create", ({ request }) => {
-    pending.set(request, { method: request.method, url: undiciUrl(request) });
-  });
-  subscribe("undici:request:headers", ({ request, response }) => {
-    const started = pending.get(request);
-    if (started) {
-      pending.delete(request);
-      if (!isIgnoredUrl(started.url)) {
-        add(httpBreadcrumb(started.method, started.url, response?.statusCode));
-      }
-    }
-  });
-  subscribe("undici:request:error", ({ request }) => {
-    const started = pending.get(request);
-    if (started) {
-      pending.delete(request);
-      if (!isIgnoredUrl(started.url)) {
-        add({ ...httpBreadcrumb(started.method, started.url), level: "error" });
-      }
-    }
-  });
+  recordingState.active = false;
 }
 
-function installPinoBreadcrumbs(add) {
-  if (typeof diagnosticsChannel.tracingChannel !== "function") {
-    return;
-  }
-  subscribe("tracing:pino_asJson:end", ({ arguments: args, result }) => {
-    const record = parsePinoRecord(result, args);
-    if (!record) {
-      return;
-    }
-    const message = boundedText(typeof record.msg === "string" ? record.msg : "", MAX_MESSAGE_LENGTH);
-    if (message) {
-      add({ type: "debug", category: "log.pino", level: pinoLevel(record.level), message });
-    }
-  });
-}
-
-function subscribe(name, handler) {
-  diagnosticsChannel.subscribe(name, (message) => {
-    try {
-      handler(message ?? {});
-    } catch {
-      // Ignore: breadcrumbs are advisory.
-    }
-  });
-}
-
-function isIgnoredUrl(url) {
-  return url !== undefined && ignoredUrls.has(url);
-}
-
-function httpBreadcrumb(method, url, statusCode) {
-  const status = Number.isInteger(statusCode) ? statusCode : undefined;
-  return {
-    type: "http",
-    category: "http.client",
-    level: status === undefined || status < 400 ? "info" : status >= 500 ? "error" : "warning",
-    data: {
-      method: typeof method === "string" && method ? method.toUpperCase() : "GET",
-      ...(url ? { url } : {}),
-      ...(status === undefined ? {} : { status_code: status })
-    }
-  };
-}
-
-// Keeps scheme, host, and path; drops user info, query, and fragment.
-function requestUrl(request) {
-  const header = request.getHeader?.("host");
-  const host = typeof header === "string" ? header : request.host;
-  const protocol = typeof request.protocol === "string" ? request.protocol : "http:";
-  return sanitizeUrl(`${protocol}//${host ?? "unknown"}${typeof request.path === "string" ? request.path : "/"}`);
-}
-
-function undiciUrl(request) {
-  return sanitizeUrl(`${request.origin ?? ""}${typeof request.path === "string" ? request.path : "/"}`);
-}
-
-function sanitizeUrl(value) {
-  try {
-    const url = new URL(value);
-    return boundedText(`${url.protocol}//${url.host}${url.pathname}`, MAX_URL_LENGTH);
-  } catch {
-    return undefined;
-  }
-}
-
-function parsePinoRecord(result, args) {
-  const candidate = typeof result === "string" ? result : undefined;
-  if (candidate) {
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      return undefined;
-    }
-  }
-  return Array.isArray(args) && args[0] && typeof args[0] === "object" ? args[0] : undefined;
-}
-
-function pinoLevel(level) {
-  const numeric = Number(level);
-  return PINO_LEVELS.find(([floor]) => numeric >= floor)?.[1] ?? "info";
-}
-
-// Records the message template, never the interpolated arguments, so values passed to console stay out.
+/**
+ * @param {readonly unknown[]} args
+ * @returns {string}
+ */
 function consoleTemplate(args) {
   const [first] = args;
   if (typeof first === "string") {
@@ -227,13 +143,270 @@ function consoleTemplate(args) {
   return first instanceof Error ? first.name || "Error" : "";
 }
 
-function boundedText(value, limit) {
-  // Breadcrumb text allows no control characters; newlines and tabs become spaces.
-  const characters = Array.from(String(value), (character) => {
-    const code = character.codePointAt(0);
-    return code <= 31 || (code >= 127 && code <= 159) ? " " : character;
+/**
+ * @param {AddBreadcrumb} add
+ * @returns {void}
+ */
+function installConsoleBreadcrumbs(add) {
+  for (const [method, level] of CONSOLE_LEVELS) {
+    /** @type {unknown} */
+    const original = Reflect.get(console, method);
+    if (typeof original === "function") {
+      Reflect.set(
+        console,
+        method,
+        /**
+         * @this {unknown}
+         * @param {readonly unknown[]} args
+         * @returns {unknown}
+         */
+        function logBrewConsoleBreadcrumb(...args) {
+          const message = boundedText(consoleTemplate(args), MAX_MESSAGE_LENGTH);
+          if (message) {
+            add({
+              type: "debug",
+
+              category: "console",
+              level,
+              message
+            });
+          }
+          /** @type {unknown} */
+          const result = Reflect.apply(original, this, args);
+          return result;
+        }
+      );
+    }
+  }
+}
+
+/**
+ * @param {string} name
+ * @param {(message: unknown) => void} handler
+ * @returns {void}
+ */
+function subscribe(name, handler) {
+  diagnosticsChannel.subscribe(name, (message) => {
+    attempt(() => {
+      handler(message ?? {});
+    });
   });
-  return Array.from(characters.join("").replace(/\s+/gu, " ").trim()).slice(0, limit).join("");
+}
+
+/**
+ * @param {string | undefined} url
+ * @returns {boolean}
+ */
+function isIgnoredUrl(url) {
+  return url !== undefined && ignoredUrls.has(url);
+}
+
+/**
+ * @param {number | undefined} status
+ * @returns {BreadcrumbLevel}
+ */
+function httpLevel(status) {
+  if (status === undefined || status < CLIENT_ERROR_STATUS) {
+    return "info";
+  }
+  return status >= SERVER_ERROR_STATUS ? "error" : "warning";
+}
+
+/**
+ * @param {unknown} method
+ * @param {string | undefined} url
+ * @param {unknown} [statusCode]
+ * @returns {Readonly<Record<string, unknown>>}
+ */
+function httpBreadcrumb(method, url, statusCode) {
+  const status = typeof statusCode === "number" && Number.isInteger(statusCode) ? statusCode : undefined;
+  return {
+    type: "http",
+
+    category: "http.client",
+
+    level: httpLevel(status),
+
+    data: {
+      method: typeof method === "string" && method ? method.toUpperCase() : "GET",
+      ...(url !== undefined && url !== "" ? { url } : {}),
+      ...(status === undefined ? {} : { status_code: status })
+    }
+  };
+}
+
+/**
+ * @param {unknown} request
+ * @returns {string | undefined}
+ */
+function requestUrl(request) {
+  const header = callOptional(request, "getHeader", ["host"]);
+  const host = typeof header === "string" ? header : readMember(request, "host");
+  const protocol = readMember(request, "protocol");
+  const path = readMember(request, "path");
+  return sanitizeUrl(
+    `${typeof protocol === "string" ? protocol : "http:"}//${templateText(host ?? "unknown")}${typeof path === "string" ? path : "/"}`
+  );
+}
+
+/**
+ * @param {unknown} request
+ * @returns {string | undefined}
+ */
+function undiciUrl(request) {
+  const path = readMember(request, "path");
+  return sanitizeUrl(`${templateText(readMember(request, "origin") ?? "")}${typeof path === "string" ? path : "/"}`);
+}
+
+/**
+ * @param {unknown} message
+ * @returns {PendingRequest | undefined}
+ */
+function takePending(message) {
+  const request = readMember(message, "request");
+  const started = isWeakKey(request) ? pendingRequests.get(request) : undefined;
+  if (started && isWeakKey(request)) {
+    pendingRequests.delete(request);
+  }
+  return started;
+}
+
+/**
+ * @param {unknown} message
+ * @param {(request: unknown) => string | undefined} urlOf
+ * @returns {void}
+ */
+function startPending(message, urlOf) {
+  const request = readMember(message, "request");
+  const started = { method: readMember(request, "method"), url: urlOf(request) };
+  if (!isWeakKey(request)) {
+    throw new TypeError("Invalid value used as weak map key");
+  }
+  pendingRequests.set(request, started);
+}
+
+/**
+ * @param {unknown} message
+ * @returns {unknown}
+ */
+function responseStatus(message) {
+  const response = readMember(message, "response");
+  return response === undefined || response === null ? undefined : readMember(response, "statusCode");
+}
+
+/**
+ * @param {AddBreadcrumb} add
+ * @returns {void}
+ */
+function installHttpBreadcrumbs(add) {
+  subscribe("http.client.request.start", (message) => {
+    startPending(message, requestUrl);
+  });
+  subscribe("http.client.response.finish", (message) => {
+    const request = readMember(message, "request");
+    const started = isWeakKey(request) ? pendingRequests.get(request) : undefined;
+    if (started && !isIgnoredUrl(started.url)) {
+      add(httpBreadcrumb(started.method, started.url, responseStatus(message)));
+    }
+  });
+  subscribe("undici:request:create", (message) => {
+    startPending(message, undiciUrl);
+  });
+  subscribe("undici:request:headers", (message) => {
+    const started = takePending(message);
+    if (started && !isIgnoredUrl(started.url)) {
+      add(httpBreadcrumb(started.method, started.url, responseStatus(message)));
+    }
+  });
+  subscribe("undici:request:error", (message) => {
+    const started = takePending(message);
+    if (started && !isIgnoredUrl(started.url)) {
+      add({ ...httpBreadcrumb(started.method, started.url), level: "error" });
+    }
+  });
+}
+
+/**
+ * @param {unknown} result
+ * @param {unknown} args
+ * @returns {unknown}
+ */
+function parsePinoRecord(result, args) {
+  if (typeof result === "string" && result) {
+    try {
+      /** @type {unknown} */
+      const parsed = JSON.parse(result);
+      return parsed;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!Array.isArray(args)) {
+    return undefined;
+  }
+  /** @type {readonly unknown[]} */
+  const values = args;
+  const first = values[FIRST_ARGUMENT];
+  return isObjectLike(first) ? first : undefined;
+}
+
+/**
+ * @param {unknown} level
+ * @returns {BreadcrumbLevel}
+ */
+function pinoLevel(level) {
+  const numeric = Number(level);
+  return PINO_LEVELS.find(([floor]) => numeric >= floor)?.[LEVEL_NAME] ?? "info";
+}
+
+/**
+ * @param {AddBreadcrumb} add
+ * @returns {void}
+ */
+function installPinoBreadcrumbs(add) {
+  if (typeof diagnosticsChannel.tracingChannel !== "function") {
+    return;
+  }
+  subscribe("tracing:pino_asJson:end", (message) => {
+    const record = parsePinoRecord(readMember(message, "result"), readMember(message, "arguments"));
+    if (record === undefined || record === null || record === false || record === NUMERIC_ZERO || record === "") {
+      return;
+    }
+    const messageText = readMember(record, "msg");
+    const text = boundedText(typeof messageText === "string" ? messageText : "", MAX_MESSAGE_LENGTH);
+    if (text) {
+      add({
+        type: "debug",
+
+        category: "log.pino",
+        level: pinoLevel(readMember(record, "level")),
+        message: text
+      });
+    }
+  });
+}
+
+/**
+ * @param {ActiveTraceProvider} activeTraceProvider
+ * @returns {void}
+ */
+function installAutomaticBreadcrumbs(activeTraceProvider) {
+  const installed = Boolean(Reflect.get(globalThis, INSTALLED));
+  if (installed) {
+    return;
+  }
+  Reflect.set(globalThis, INSTALLED, true);
+  /**
+   * @param {unknown} breadcrumb
+   * @returns {void}
+   */
+  function add(breadcrumb) {
+    addLogBrewBreadcrumb(breadcrumb, activeTraceProvider);
+  }
+  Reflect.set(globalThis, BREADCRUMB_RECORDER, add);
+  installConsoleBreadcrumbs(add);
+  installHttpBreadcrumbs(add);
+  installPinoBreadcrumbs(add);
 }
 
 module.exports = { addLogBrewBreadcrumb, createBreadcrumbProvider, ignoreBreadcrumbUrl, installAutomaticBreadcrumbs };
