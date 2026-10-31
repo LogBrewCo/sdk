@@ -3,9 +3,15 @@ const { LogBrewClient } = require("./client.cjs");
 const { installLogBrewConsoleCapture } = require("./console-capture.cjs");
 const { logAttributesFromConsoleArgs, logbrewLevelFromConsoleMethod } = require("./console-arguments.cjs");
 const { createIssueAttributesFromError } = require("./error-issue.cjs");
-const { compactMetadata, isMetadataValue } = require("./log-context.cjs");
 const { createNetworkMilestoneAttributes } = require("./network-milestone.cjs");
-const { buildOpenTelemetryHelpers } = require("./opentelemetry.cjs");
+const {
+  createLogBrewOpenTelemetrySpanExporter,
+  createLogBrewOpenTelemetrySpanProcessor,
+  logbrewTraceContextFromCurrentOpenTelemetrySpan,
+  logbrewTraceContextFromOpenTelemetrySpan,
+  logbrewTraceContextFromOpenTelemetrySpanContext,
+  spanAttributesFromOpenTelemetryReadableSpan
+} = require("./opentelemetry.cjs");
 const { createLogBrewPinoDestination } = require("./pino-destination.cjs");
 const { logAttributesFromPinoRecord } = require("./pino-record.cjs");
 const {
@@ -28,35 +34,6 @@ const {
   parseTracestate
 } = require("./trace-context.cjs");
 const { TransportError } = require("./transport-error.cjs");
-const {
-  requireNonEmpty,
-  requireSpanId,
-  requireTraceId,
-  stringOrUndefined
-} = require("./validation.cjs");
-
-const MAX_SPAN_EVENTS = 8;
-const MAX_SPAN_LINKS = 8;
-
-const {
-  createLogBrewOpenTelemetrySpanExporter,
-  createLogBrewOpenTelemetrySpanProcessor,
-  logbrewTraceContextFromCurrentOpenTelemetrySpan,
-  logbrewTraceContextFromOpenTelemetrySpan,
-  logbrewTraceContextFromOpenTelemetrySpanContext,
-  spanAttributesFromOpenTelemetryReadableSpan
-} = buildOpenTelemetryHelpers({
-  LogBrewClient,
-  SdkError,
-  compactMetadata,
-  isMetadataValue,
-  maxSpanEvents: MAX_SPAN_EVENTS,
-  maxSpanLinks: MAX_SPAN_LINKS,
-  requireNonEmpty,
-  requireSpanId,
-  requireTraceId,
-  stringOrUndefined
-});
 
 module.exports = {
   PRODUCT_ANALYTICS_KINDS,

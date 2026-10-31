@@ -97,4 +97,4 @@ function captureSettings(config, flushKey, defaultName) {
   };
 }
 
-module.exports = { callableOrUndefined, captureSettings, settledFlush };
+module.exports = { callableOrUndefined, captureSettings, errorHandler, settledFlush };

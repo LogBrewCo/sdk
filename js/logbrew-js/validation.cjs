@@ -120,6 +120,18 @@ function isObjectValue(value) {
 
 /**
  * @param {unknown} value
+ * @param {string} key
+ * @returns {unknown}
+ */
+function optionalProperty(value, key) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return Reflect.get(new Object(value), key);
+}
+
+/**
+ * @param {unknown} value
  * @returns {string | undefined}
  */
 function stringOrUndefined(value) {
@@ -286,6 +298,7 @@ module.exports = {
   isRecord,
   isTruthy,
   optionalEntry,
+  optionalProperty,
   rejectUnknownKeys,
   requireAllowedValue,
   requireFiniteNumber,
