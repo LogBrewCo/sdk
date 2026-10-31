@@ -190,7 +190,7 @@ java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	us
 java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java	*	item	value
 java/logbrew-java/src/main/java/co/logbrew/sdk/PersistenceCrypto.java	*	line	import javax.crypto.spec.SecretKeySpec;
 java/logbrew-java/src/main/java/co/logbrew/sdk/PersistenceCrypto.java	*	line	new SecretKeySpec(key, "AES"),
-js/logbrew-js/opentelemetry.cjs	*	has	SENSITIVE_OTEL_ATTRIBUTE_PATTERN
+js/logbrew-js/opentelemetry-keys.cjs	*	has	SENSITIVE_OTEL_ATTRIBUTE_PATTERN
 README.md	*	line	- Automatic Pino metadata excludes credentials, cookies, bodies, payloads, query text, raw URLs, propagation headers, local file paths, and stack text by default.
 js/logbrew-fastify/README.md	*	line	Primitive structured fields become bounded LogBrew metadata. Credentials, cookies, bodies, payloads, query fields, raw URLs, propagation headers, local file paths, and stack text are excluded automatically. Keep normal Pino redaction enabled because the log message itself is telemetry.
 js/logbrew-fastify/README.md	*	line	redact: ["authorization", "cookie", "password", "token"]

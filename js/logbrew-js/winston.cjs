@@ -1,323 +1,223 @@
 const { Writable } = require("node:stream");
 
-const { LogBrewClient, SdkError } = require("./core.cjs");
-const {
-  compactMetadata,
-  isMetadataValue,
-  traceFromProvider,
-  traceMetadataFromLogContext
-} = require("./log-context.cjs");
+const { callableOrUndefined, captureSettings, settledFlush } = require("./capture-support.cjs");
+const { LogBrewClient } = require("./client.cjs");
+const { traceFromProvider } = require("./log-context.cjs");
+const { NULL_VALUE } = require("./null-value.cjs");
+const { SdkError } = require("./sdk-error.cjs");
+const { isObjectValue, isRecord, isTruthy, optionalProperty } = require("./validation.cjs");
+const { logAttributesFromWinstonInfo, timestampFromWinstonInfo, winstonMessage } = require("./winston-info.cjs");
 
-// Runtime packages with request scopes (such as @logbrew/node) register a recorder that keeps
-// breadcrumbs with the active request instead of the whole client.
+/**
+ * @import { IssueBreadcrumbLevel } from "./index.cjs"
+ * @import { CaptureClient } from "./capture-support.cjs"
+ * @typedef {CaptureClient & Readonly<{
+ *   breadcrumbProvider: unknown,
+ *   addBreadcrumb: (breadcrumb: unknown) => unknown
+ * }>} WinstonClient
+ * @typedef {{ type: "debug", category: string, level: IssueBreadcrumbLevel, message: string }} WinstonBreadcrumb
+ */
+
 const BREADCRUMB_RECORDER = Symbol.for("@logbrew/sdk.breadcrumbRecorder");
 const MAX_BREADCRUMB_MESSAGE_LENGTH = 512;
-const WINSTON_RESERVED_FIELDS = new Set([
-  "level",
-  "message",
-  "timestamp",
-  "time",
-  "err",
-  "error",
-  "stack"
+const FIRST_CHARACTER = 0;
+const NO_PENDING_EVENTS = 0;
+/** @type {ReadonlyMap<string, IssueBreadcrumbLevel>} */
+const BREADCRUMB_LEVELS = new Map([
+  ["error", "error"],
+  ["crit", "error"],
+  ["critical", "error"],
+  ["fatal", "error"],
+  ["alert", "error"],
+  ["emerg", "error"],
+  ["warn", "warning"],
+  ["warning", "warning"],
+  ["verbose", "debug"],
+  ["debug", "debug"],
+  ["silly", "debug"]
 ]);
 
-function createLogBrewWinstonTransport(config) {
-  if (!config || typeof config !== "object") {
-    throw new SdkError("validation_error", "Winston transport config must be an object");
+/**
+ * @param {unknown} level
+ * @returns {IssueBreadcrumbLevel}
+ */
+function winstonBreadcrumbLevel(level) {
+  return BREADCRUMB_LEVELS.get(String(level).toLowerCase()) ?? "info";
+}
+
+class WinstonCapture {
+  /**
+   * @param {Readonly<Record<string, unknown>>} config
+   * @param {WinstonClient} client
+   */
+  constructor(config, client) {
+    this.client = client;
+    this.breadcrumbs = config["breadcrumbs"] !== false;
+    this.settings = captureSettings(config, "flushOnWrite", "winston");
+    this.traceProvider = callableOrUndefined(config["traceProvider"]);
+    this.captured = 0;
+    /** @type {Promise<unknown>} */
+    this.pendingFlush = Promise.resolve(NULL_VALUE);
   }
 
-  const client = config.client;
+  /**
+   * @param {unknown} info
+   * @returns {void}
+   */
+  write(info) {
+    try {
+      if (this.breadcrumbs) {
+        this.recordBreadcrumb(info);
+      }
+      this.capture(info);
+    } catch (error) {
+      this.settings.onError(error);
+    }
+  }
+
+  /**
+   * @param {unknown} info
+   * @returns {boolean}
+   */
+  recordBreadcrumb(info) {
+    if (!isRecord(info) || info["silent"] === true) {
+      return false;
+    }
+    /** @type {WinstonBreadcrumb} */
+    const breadcrumb = {
+      type: "debug",
+
+      category: "log.winston",
+      level: winstonBreadcrumbLevel(info["level"]),
+      message: [...winstonMessage(info)].slice(FIRST_CHARACTER, MAX_BREADCRUMB_MESSAGE_LENGTH).join("")
+    };
+    /** @type {unknown} */
+    const recorder = isTruthy(this.client.breadcrumbProvider) ? Reflect.get(globalThis, BREADCRUMB_RECORDER) : undefined;
+    try {
+      if (typeof recorder === "function") {
+        Reflect.apply(recorder, undefined, [breadcrumb]);
+      } else {
+        this.client.addBreadcrumb(breadcrumb);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * @param {unknown} info
+   * @returns {void}
+   */
+  capture(info) {
+    if (optionalProperty(info, "silent") === true) {
+      return;
+    }
+    const { settings } = this;
+    this.captured += 1;
+    this.client.log(
+      [settings.eventIdPrefix, this.captured].join("_"),
+      timestampFromWinstonInfo(info, settings.timestamp),
+      logAttributesFromWinstonInfo(info, {
+        includeErrorStack: settings.includeErrorStack,
+        logger: settings.logger,
+        metadata: settings.metadata,
+        trace: traceFromProvider(this.traceProvider, settings.onError)
+      })
+    );
+    if (settings.flushOnEvent && isTruthy(settings.transport)) {
+      this.pendingFlush = settledFlush(this.client.flush(settings.transport), settings.onError);
+    }
+  }
+
+  /**
+   * @returns {void}
+   */
+  flushPending() {
+    const { settings } = this;
+    if (isTruthy(settings.transport) && this.client.pendingEvents() > NO_PENDING_EVENTS) {
+      this.pendingFlush = settledFlush(this.client.flush(settings.transport), settings.onError);
+    }
+  }
+
+  /**
+   * @returns {() => Promise<unknown>}
+   */
+  flushHandler() {
+    return async () => {
+      this.flushPending();
+      return this.pendingFlush;
+    };
+  }
+}
+
+/**
+ * @this {Readonly<{ write: (chunk: unknown) => boolean }>}
+ * @param {unknown} info
+ * @param {unknown} callback
+ * @returns {void}
+ */
+function log(info, callback) {
+  this.write(info);
+  if (typeof callback === "function") {
+    Reflect.apply(callback, undefined, []);
+  }
+}
+
+/**
+ * @param {Readonly<Record<string, unknown>>} config
+ * @returns {Readonly<Record<string, unknown>>}
+ */
+function winstonTransportOptions(config) {
+  const { level, name } = config;
+  const nameText = String(name);
+  return {
+    ...(typeof level === "string" && level.trim() !== "" ? { level } : {}),
+    ...(name === undefined ? {} : { name: nameText }),
+    ...(config["silent"] === true ? { silent: true } : {}),
+    ...(config["handleExceptions"] === true ? { handleExceptions: true } : {}),
+    ...(config["handleRejections"] === true ? { handleRejections: true } : {})
+  };
+}
+
+/**
+ * @param {unknown} config
+ * @returns {Writable}
+ */
+function createLogBrewWinstonTransport(config) {
+  if (!isObjectValue(config)) {
+    throw new SdkError("validation_error", "Winston transport config must be an object");
+  }
+  const { client } = config;
   if (!(client instanceof LogBrewClient)) {
     throw new SdkError("validation_error", "Winston transport client must be a LogBrewClient");
   }
-
-  const transport = config.transport;
-  const breadcrumbs = config.breadcrumbs !== false;
-  const flushOnWrite = config.flushOnWrite === true;
-  const includeErrorStack = config.includeErrorStack === true;
-  const logger = config.logger ?? "winston";
-  const metadata = compactMetadata(config.metadata);
-  const timestamp = typeof config.timestamp === "function"
-    ? config.timestamp
-    : () => new Date().toISOString();
-  const eventIdPrefix = config.eventIdPrefix ?? "winston";
-  const onError = typeof config.onError === "function" ? config.onError : () => {};
-  const traceProvider = typeof config.traceProvider === "function" ? config.traceProvider : null;
-  const state = {
-    captured: 0,
-    pendingFlush: Promise.resolve(null)
-  };
-
+  const capture = new WinstonCapture(config, client);
   const winstonTransport = new Writable({
     objectMode: true,
+    /**
+     * @param {unknown} info
+     * @param {unknown} _encoding
+     * @param {() => void} callback
+     * @returns {void}
+     */
     write(info, _encoding, callback) {
       try {
-        if (breadcrumbs) {
-          recordWinstonBreadcrumb(client, info);
-        }
-        captureWinstonInfo({
-          client,
-          eventIdPrefix,
-          flushOnWrite,
-          includeErrorStack,
-          info,
-          logger,
-          metadata,
-          onError,
-          state,
-          timestamp,
-          traceProvider,
-          transport
-        });
-      } catch (error) {
-        onError(error);
+        capture.write(info);
       } finally {
-        callback();
+        Reflect.apply(callback, undefined, []);
       }
     }
   });
+  return Object.assign(
+    winstonTransport,
+    {
+      log,
 
-  winstonTransport.log = function log(info, callback) {
-    this.write(info);
-    if (typeof callback === "function") {
-      callback();
-    }
-  };
-  winstonTransport.flush = async () => {
-    if (transport && client.pendingEvents() > 0) {
-      state.pendingFlush = Promise.resolve(client.flush(transport)).catch((error) => {
-        onError(error);
-        return null;
-      });
-    }
-    return state.pendingFlush;
-  };
-  if (typeof config.level === "string" && config.level.trim() !== "") {
-    winstonTransport.level = config.level;
-  }
-  if (config.name !== undefined) {
-    winstonTransport.name = String(config.name);
-  }
-  if (config.silent === true) {
-    winstonTransport.silent = true;
-  }
-  if (config.handleExceptions === true) {
-    winstonTransport.handleExceptions = true;
-  }
-  if (config.handleRejections === true) {
-    winstonTransport.handleRejections = true;
-  }
-
-  return winstonTransport;
-}
-
-function captureWinstonInfo(config) {
-  if (config.info?.silent === true) {
-    return;
-  }
-  config.state.captured += 1;
-  config.client.log(
-    `${config.eventIdPrefix}_${config.state.captured}`,
-    timestampFromWinstonInfo(config.info, config.timestamp),
-    logAttributesFromWinstonInfo(config.info, {
-      includeErrorStack: config.includeErrorStack,
-      logger: config.logger,
-      metadata: config.metadata,
-      trace: traceFromProvider(config.traceProvider, config.onError)
-    })
+      flush: capture.flushHandler()
+    },
+    winstonTransportOptions(config)
   );
-  if (config.flushOnWrite && config.transport) {
-    config.state.pendingFlush = Promise.resolve(config.client.flush(config.transport)).catch((error) => {
-      config.onError(error);
-      return null;
-    });
-  }
 }
 
-function recordWinstonBreadcrumb(client, info) {
-  if (!info || Array.isArray(info) || typeof info !== "object" || info.silent === true) {
-    return;
-  }
-  const breadcrumb = {
-    type: "debug",
-    category: "log.winston",
-    level: winstonBreadcrumbLevel(info.level),
-    message: Array.from(winstonMessage(info)).slice(0, MAX_BREADCRUMB_MESSAGE_LENGTH).join("")
-  };
-  const recorder = client.breadcrumbProvider ? globalThis[BREADCRUMB_RECORDER] : undefined;
-  try {
-    if (typeof recorder === "function") {
-      recorder(breadcrumb);
-    } else {
-      client.addBreadcrumb(breadcrumb);
-    }
-  } catch {
-    // Breadcrumbs are advisory; the log event below still goes out.
-  }
-}
-
-function winstonBreadcrumbLevel(level) {
-  switch (String(level).toLowerCase()) {
-    case "error":
-    case "crit":
-    case "critical":
-    case "fatal":
-    case "alert":
-    case "emerg":
-      return "error";
-    case "warn":
-    case "warning":
-      return "warning";
-    case "verbose":
-    case "debug":
-    case "silly":
-      return "debug";
-    default:
-      return "info";
-  }
-}
-
-function logAttributesFromWinstonInfo(info, options = {}) {
-  if (!info || Array.isArray(info) || typeof info !== "object") {
-    throw new SdkError("validation_error", "Winston info must be an object");
-  }
-
-  const level = logbrewLevelFromWinstonLevel(info.level);
-  const metadata = {
-    ...compactMetadata(options.metadata),
-    winstonLevel: winstonLevelLabel(info.level),
-    ...winstonContextMetadata(info),
-    ...traceMetadataFromLogContext(options.trace)
-  };
-  addWinstonErrorMetadata(metadata, info, options.includeErrorStack === true);
-
-  return {
-    message: winstonMessage(info),
-    level,
-    ...(options.logger ? { logger: options.logger } : {}),
-    metadata
-  };
-}
-
-function timestampFromWinstonInfo(info, fallbackTimestamp) {
-  const value = info?.timestamp ?? info?.time;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value).toISOString();
-  }
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.valueOf())) {
-      return parsed.toISOString();
-    }
-    return value;
-  }
-  if (value instanceof Date && !Number.isNaN(value.valueOf())) {
-    return value.toISOString();
-  }
-  return fallbackTimestamp();
-}
-
-function logbrewLevelFromWinstonLevel(level) {
-  switch (String(level).toLowerCase()) {
-    case "debug":
-    case "silly":
-      return "info";
-    case "warn":
-    case "warning":
-      return "warning";
-    case "error":
-      return "error";
-    case "crit":
-    case "critical":
-    case "fatal":
-      return "critical";
-    case "http":
-    case "verbose":
-    case "info":
-    default:
-      return "info";
-  }
-}
-
-function winstonLevelLabel(level) {
-  return typeof level === "string" && level.trim() !== "" ? level : "info";
-}
-
-function winstonMessage(info) {
-  if (typeof info.message === "string" && info.message.trim() !== "") {
-    return info.message;
-  }
-  const error = info.err ?? info.error;
-  if (error && typeof error === "object" && typeof error.message === "string" && error.message.trim() !== "") {
-    return error.message;
-  }
-  return "winston event";
-}
-
-function winstonContextMetadata(info) {
-  const metadata = {};
-  for (const [key, value] of Object.entries(info)) {
-    if (!WINSTON_RESERVED_FIELDS.has(key) && isMetadataValue(value)) {
-      metadata[`context.${key}`] = value;
-    }
-  }
-  return metadata;
-}
-
-function addWinstonErrorMetadata(metadata, info, includeErrorStack) {
-  const error = info.err ?? info.error;
-  addWinstonNestedErrorMetadata(metadata, error, includeErrorStack);
-  if (typeof info.stack === "string" && info.stack.trim() !== "") {
-    const firstLine = info.stack.split(/\r?\n/u)[0] ?? "";
-    const match = /^([A-Za-z][A-Za-z0-9_.]*(?:Error|Exception)?):\s*(.*)$/u.exec(firstLine);
-    if (match && metadata.errorName === undefined) {
-      metadata.errorName = match[1];
-    }
-    if (match && match[2] && metadata.errorMessage === undefined) {
-      metadata.errorMessage = match[2];
-    }
-    if (includeErrorStack) {
-      metadata.errorStack = info.stack;
-    }
-  }
-}
-
-function addWinstonNestedErrorMetadata(metadata, error, includeErrorStack) {
-  if (!error) {
-    return;
-  }
-  if (error instanceof Error) {
-    metadata.errorName = error.name || "Error";
-    if (error.message) {
-      metadata.errorMessage = error.message;
-    }
-    if (includeErrorStack && error.stack) {
-      metadata.errorStack = error.stack;
-    }
-    return;
-  }
-  if (typeof error === "object") {
-    const name = error.type ?? error.name;
-    const message = error.message;
-    const stack = error.stack;
-    if (typeof name === "string" && name.trim() !== "") {
-      metadata.errorName = name;
-    }
-    if (typeof message === "string" && message.trim() !== "") {
-      metadata.errorMessage = message;
-    }
-    if (includeErrorStack && typeof stack === "string" && stack.trim() !== "") {
-      metadata.errorStack = stack;
-    }
-    return;
-  }
-  if (typeof error === "string" && error.trim() !== "") {
-    metadata.errorMessage = error;
-  }
-}
-
-module.exports = {
-  createLogBrewWinstonTransport,
-  logAttributesFromWinstonInfo
-};
+module.exports = { createLogBrewWinstonTransport, logAttributesFromWinstonInfo };
