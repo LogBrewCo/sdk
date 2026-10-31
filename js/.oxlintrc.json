@@ -496,6 +496,16 @@
               "Stats"
             ],
             "package": "@types/node"
+          },
+          {
+            "from": "package",
+            "name": "ExpoConfig",
+            "package": "@expo/config-types"
+          },
+          {
+            "from": "package",
+            "name": "ExportedConfigWithProps",
+            "package": "@expo/config-plugins"
           }
         ]
       }
@@ -553,7 +563,10 @@
         "logbrew-js/vite-release-artifacts.d.ts",
         "logbrew-js/vite-release-artifacts.js",
         "logbrew-js/react-native.d.ts",
-        "logbrew-js/react-native.js"
+        "logbrew-js/react-native.js",
+        "logbrew-react-native/expo.d.ts",
+        "logbrew-react-native/expo.js",
+        "logbrew-react-native/react-native.config.js"
       ],
       "rules": {
         "import/no-default-export": "off"
@@ -946,6 +959,28 @@
         "node/no-process-env": "off",
         "unicorn/no-process-exit": "off",
         "node/no-sync": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/expo.cjs"
+      ],
+      "rules": {
+        "node/global-require": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-react-native/src/*.ts"
+      ],
+      "rules": {
+        "eslint/no-duplicate-imports": "off",
+        "import/no-default-export": "off",
+        "typescript/array-type": "off",
+        "typescript/consistent-type-definitions": "off",
+        "typescript/method-signature-style": "off",
+        "typescript/prefer-readonly-parameter-types": "off",
+        "unicorn/filename-case": "off"
       }
     },
     {
