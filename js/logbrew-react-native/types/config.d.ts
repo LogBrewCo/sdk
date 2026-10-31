@@ -14,7 +14,7 @@ type ReactNativePlatformLike = {
 };
 
 type ReactNativeAppStateLike = {
-  currentState?: string | null;
+  currentState?: string | null | undefined;
   addEventListener?: (
     type: "change",
     listener: (state: string) => void
