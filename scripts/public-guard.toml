@@ -57,6 +57,7 @@ regexes = [
   '''(?i)^n[o]-?reply@''',
   '''(?i)@(?:[a-z0-9-]+\.)*(?:example\.(?:com|org|net)|[a-z0-9-]+\.(?:example|test|invalid|localhost)|logbrew\.(?:co|com|dev)|users\.n[o]reply\.github\.com|n[o]reply\.github\.com|github\.com)$''',
   '''(?i)^(?:you|your-?(?:name|email)|user|username|name|first\.last|someone|me|jane|john|alice|bob|dev|developer|support|hello|security|team|admin)@(?:company|your-?(?:company|domain)|domain|acme|corp|org)\.(?:com|org|io|dev)$''',
+  '''(?i)@[0-9]+(?:\.[0-9]+)+\.patch$''',
 ]
 
 [[rules.allowlists]]
