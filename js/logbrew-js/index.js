@@ -36,4 +36,4 @@ export const {
   TransportError
 } = sdk;
 
-export default sdk;
+export { default } from "./index.cjs";
