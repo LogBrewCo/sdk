@@ -55,7 +55,7 @@ class TelemetryContextSurfaceTests(unittest.TestCase):
             commonjs = (ROOT / f"js/logbrew-{package}/{entrypoint}.d.cts").read_text(encoding="utf-8")
             with self.subTest(path=f"js/logbrew-{package}/{entrypoint}.d.ts"):
                 self.assertIn("TelemetryContext", declaration)
-                self.assertIn("context?: TelemetryContext;", declaration)
+                self.assertRegex(declaration, r"\bcontext\?: TelemetryContext(?: \| undefined)?;")
                 self.assertIn(commonjs, (declaration, COMMONJS_DECLARATION_REEXPORT))
 
 
