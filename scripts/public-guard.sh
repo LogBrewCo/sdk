@@ -8,6 +8,7 @@
 #   public-guard.sh commit-msg MESSAGE_FILE           Git commit-msg hook
 #   public-guard.sh pre-push REMOTE [URL] < refs      Git pre-push hook
 #   public-guard.sh github                            GitHub Actions entry point
+#   public-guard.sh github-text                       issue, pull request, and comment events
 #   public-guard.sh install [TERMS_FILE]              enable the local Git hooks
 #
 # Every scan also blocks tracked Markdown other than READMEs, licenses,
@@ -285,6 +286,77 @@ github_main() {
   fi
 }
 
+# Issue, pull request, and comment text from GitHub events. Only text the
+# event added or changed is scanned. A comment with a finding is hidden as
+# off-topic. An issue or pull request title or body with a finding gets its
+# text from before the edit back, or a removal notice when that text is
+# missing or also has a finding. The run then fails with one error line that
+# names the link and the finding categories, never the matched text.
+github_text() {
+  local event="${GITHUB_EVENT_PATH:?}" subject field scanned=0 categories action
+  case "${GITHUB_EVENT_NAME:?}" in
+    issues) subject=issue ;;
+    pull_request_target) subject=pull_request ;;
+    issue_comment | pull_request_review_comment) subject=comment ;;
+    *) fail "unsupported event" ;;
+  esac
+  for field in title body; do
+    [[ "$subject" == comment && "$field" == title ]] && continue
+    if [[ "$(jq -r .action "$event")" == edited ]] &&
+      ! jq -e --arg f "$field" '.changes // {} | has($f)' "$event" >/dev/null; then
+      continue
+    fi
+    jq -j --arg s "$subject" --arg f "$field" '.[$s][$f] // ""' "$event" >"$work/text/$field.txt"
+    scanned=1
+  done
+  ((scanned == 0)) || run_gitleaks dir "$work/text"
+  report && return 0
+  categories="$(awk -F'|' '{c = $1; if (c ~ /\./) sub(/\..*/, "", c); else c = "access-key"; print c}' \
+    "$work/findings" | sort -u | paste -sd, - | sed 's/,/, /g')"
+  if [[ "$subject" == comment ]]; then
+    action="hid the comment"
+    gh api graphql -f id="$(jq -r .comment.node_id "$event")" \
+      -f query="mutation(\$id: ID!) { minimizeComment(input: {subjectId: \$id, classifier: OFF_TOPIC}) { minimizedComment { isMinimized } } }" \
+      --jq .data.minimizeComment.minimizedComment.isMinimized | grep -qx true || action="could not hide the comment"
+  else
+    action="$(restore_text "$event" "$subject")" || action="could not change the text"
+  fi
+  printf '::error title=Public text check::Found %s in %s; %s.\n' "$categories" \
+    "$(jq -r --arg s "$subject" '.[$s].html_url' "$event")" "$action"
+  return 1
+}
+
+# Print what restoring did. Fields with a finding take their text from before
+# the edit when it exists and is clean, otherwise a removal notice.
+restore_text() {
+  local event="$1" subject="$2" field fields=() patch='{}' notice=0 path=issues
+  mv "$work/findings" "$work/findings.current"
+  : >"$work/findings"
+  rm -f "$work/text/"*
+  for field in title body; do
+    grep -qF "|$work/text/$field.txt:" "$work/findings.current" || continue
+    fields+=("$field")
+    if jq -e --arg f "$field" '.changes // {} | .[$f] // {} | has("from")' "$event" >/dev/null; then
+      jq -j --arg f "$field" '.changes[$f].from // ""' "$event" >"$work/text/$field.txt"
+    fi
+  done
+  [[ -z "$(ls -A "$work/text")" ]] || run_gitleaks dir "$work/text"
+  for field in "${fields[@]}"; do
+    if [[ -f "$work/text/$field.txt" ]] && ! grep -qF "|$work/text/$field.txt:" "$work/findings"; then
+      patch="$(jq -c --arg f "$field" --rawfile v "$work/text/$field.txt" '.[$f] = $v' <<<"$patch")"
+    else
+      notice=1
+      patch="$(jq -c --arg f "$field" '.[$f] = (if $f == "title" then "Title removed by the public content check"
+        else "This text was removed by the public content check." end)' <<<"$patch")"
+    fi
+  done
+  mv "$work/findings.current" "$work/findings"
+  [[ "$subject" == issue ]] || path=pulls
+  gh api --silent -X PATCH "repos/${GITHUB_REPOSITORY:?}/$path/$(jq -r --arg s "$subject" '.[$s].number' "$event")" \
+    --input - <<<"$patch" || return 1
+  if ((notice == 1)); then printf 'replaced the text with a removal notice\n'; else printf 'restored the earlier text\n'; fi
+}
+
 pre_push() {
   local remote="${1:-origin}" _local_ref local_sha remote_ref remote_sha base
   local zero="0000000000000000000000000000000000000000"
@@ -327,7 +399,7 @@ case "$command" in
     install_hooks "$@"
     exit 0
     ;;
-  range | text | commit-msg | pre-push | github) ;;
+  range | text | commit-msg | pre-push | github | github-text) ;;
   *) fail "unknown command; see the usage comment in this script" ;;
 esac
 
@@ -358,5 +430,6 @@ case "$command" in
     ;;
   pre-push) pre_push "$@" ;;
   github) github_main ;;
+  github-text) github_text ;;
   *) fail "unknown command" ;;
 esac
