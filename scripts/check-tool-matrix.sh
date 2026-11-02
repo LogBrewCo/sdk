@@ -189,11 +189,14 @@ listed() {
 while IFS=$'\t' read -r file command; do
     listed "$command" || fail "$file: \`$command\` has no tool-matrix entry; add it to quality/tool-matrix.toml"
 done <"$work/found"
+# A file, not a pipe: grep -q exits at the first match, and under pipefail the
+# writer it leaves behind fails the whole check when its next write breaks.
+cut -f 2 "$work/found" >"$work/found-commands"
 while IFS=$'\t' read -r id command; do
     if [[ "$command" == *"*" ]]; then
-        cut -f 2 "$work/found" | grep -qF -- "${command%"*"}" && continue
+        grep -qF -- "${command%"*"}" "$work/found-commands" && continue
     else
-        cut -f 2 "$work/found" | grep -qxF -- "$command" && continue
+        grep -qxF -- "$command" "$work/found-commands" && continue
     fi
     fail "$id: command \`$command\` matches no gate command; remove it"
 done <"$work/commands"
