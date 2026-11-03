@@ -1,5 +1,6 @@
 "use strict";
 
+const { STATUS_CODES } = require("node:http");
 const { RecordingTransport, SdkError } = require("@logbrew/sdk");
 const { applyFunction, callMethod, readMember } = require("./internal.cjs");
 const { runWithLogBrewTrace, setLogBrewUser } = require("./active-trace.cjs");
@@ -39,6 +40,7 @@ const { durationSince, notifyFailure, nowMs } = require("./span-support.cjs");
  */
 
 const NO_EVENTS = 0;
+const CLIENT_ERROR_STATUS = 400;
 const SERVER_ERROR_STATUS = 500;
 
 /**
@@ -139,14 +141,27 @@ async function captureHttpError(error, req, res, context, options = {}) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {number | undefined}
+ */
+function clientErrorStatus(error) {
+  const status = readMember(error, "status") ?? readMember(error, "statusCode");
+  return typeof status === "number" && Number.isInteger(status) && status >= CLIENT_ERROR_STATUS && status < SERVER_ERROR_STATUS
+    ? status
+    : undefined;
+}
+
+/**
  * @param {ServerResponse} res
+ * @param {unknown} error
  * @returns {void}
  */
-function endFailedResponse(res) {
+function endFailedResponse(res, error) {
   if (!res.headersSent) {
-    res.statusCode = SERVER_ERROR_STATUS;
+    const status = clientErrorStatus(error) ?? SERVER_ERROR_STATUS;
+    res.statusCode = status;
     res.setHeader("content-type", "text/plain; charset=utf-8");
-    res.end("Internal Server Error");
+    res.end(STATUS_CODES[status] ?? "Error");
     return;
   }
   if (!res.writableEnded) {
@@ -157,15 +172,18 @@ function endFailedResponse(res) {
 /**
  * @param {LogBrewNodeOptions} options
  * @param {Readonly<{ context: LogBrewNodeContext, error: unknown, req: IncomingMessage, res: ServerResponse }>} failure
+ * @param {boolean} reported
  * @returns {Promise<void>}
  */
-async function handleHttpHandlerError(options, { error, req, res, context }) {
-  await quietly(async () => captureHttpError(error, req, res, context, options));
+async function handleHttpHandlerError(options, { error, req, res, context }, reported) {
+  if (reported) {
+    await quietly(async () => captureHttpError(error, req, res, context, options));
+  }
   if (typeof options.onError === "function") {
     await options.onError(error, hookContext({ client: context.client, req, res, trace: context.trace }));
     return;
   }
-  endFailedResponse(res);
+  endFailedResponse(res, error);
 }
 
 /**
@@ -324,18 +342,23 @@ function prepareHandledRequest(options, { req, res }, createClient) {
  */
 function invokeHandler(handler, { context, request, state }) {
   const { options, req, res, trace } = request;
+  /** @returns {Promise<void>} */
+  async function settle() {
+    return settleHandler(request, state);
+  }
   /**
    * @param {unknown} error
    * @returns {Promise<void>}
    */
   async function reject(error) {
     state.handlerSettled = true;
-    state.errorCaptured = true;
-    return handleHttpHandlerError(options, { context, error, req, res });
-  }
-  /** @returns {Promise<void>} */
-  async function settle() {
-    return settleHandler(request, state);
+    // A 4xx describes the request, so it stays on the request span unless the app opts in.
+    const reported = options.captureClientErrors === true || clientErrorStatus(error) === undefined;
+    state.errorCaptured = reported;
+    await handleHttpHandlerError(options, { context, error, req, res }, reported);
+    if (!reported) {
+      await settle();
+    }
   }
   runWithLogBrewTrace(trace, () => {
     try {
