@@ -2,12 +2,18 @@
 name = "logbrew"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT"
 description = "Public LogBrew Rust SDK for event batches, typed issue diagnostics, and delivery."
+homepage = "https://logbrew.co"
+documentation = "https://docs.rs/logbrew"
 repository = "https://github.com/LogBrewCo/sdk"
 readme = "README.md"
 keywords = ["logbrew", "observability", "logs", "traces", "events"]
 categories = ["api-bindings", "development-tools"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = []

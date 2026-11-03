@@ -363,6 +363,7 @@ rust/logbrew/README.md	customer	has	"customer.tier"
 rust/logbrew/README.md	hostnames	prefix	The client adds conservative `rust` runtime
 rust/logbrew/README.md	restore	prefix	`activate_telemetry_context` returns a same-thread RAII guard
 rust/logbrew/README.md	customer	prefix	Session and subject IDs must be application-owned opaque identifiers.
+rust/logbrew/src/lib.rs	customer	has	"customer.tier"
 rust/logbrew/src/telemetry_context.rs	restore	line	/// Restore this guard's context contribution. Repeated calls are harmless.
 rust/logbrew/src/telemetry_context.rs	restore	line	/// Run one synchronous closure with context and restore the exact previous scope on unwind.
 rust/logbrew/tests/telemetry_context.rs	customer	has	"customer.tier"

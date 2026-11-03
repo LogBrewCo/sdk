@@ -283,7 +283,7 @@ jobs:
 
       - name: Run Rust SDK tests
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}
-        run: cd rust/logbrew && cargo test
+        run: cd rust/logbrew && cargo test && cargo test --all-features
 
       - name: Run Rust real-user smoke test
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}

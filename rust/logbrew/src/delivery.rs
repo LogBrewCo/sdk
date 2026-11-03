@@ -47,6 +47,20 @@ pub const DEFAULT_AUTOMATIC_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Configuration for an explicit client-owned automatic delivery worker.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::AutomaticDeliveryConfig;
+/// use std::time::Duration;
+///
+/// let config = AutomaticDeliveryConfig {
+///     interval: Duration::from_secs(3),
+///     threshold: 50,
+///     ..AutomaticDeliveryConfig::default()
+/// };
+/// assert!(config.enabled);
+/// ```
 pub struct AutomaticDeliveryConfig {
     /// Whether the background worker delivers queued events.
     pub enabled: bool,
@@ -173,6 +187,23 @@ pub struct DeliveryHealthSnapshot {
 
 #[derive(Clone)]
 /// Builder for constructing a bounded LogBrew client from SDK identity and delivery settings.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::LogBrewClient;
+///
+/// let client = LogBrewClient::builder("checkout-service", "1.2.3")
+///     .api_key("LOGBREW_API_KEY")
+///     .max_queue_events(500)
+///     .max_queue_bytes(2 * 1024 * 1024)
+///     .max_batch_events(50)
+///     .max_request_body_bytes(128 * 1024)
+///     .max_retries(3)
+///     .build()?;
+/// assert_eq!(client.pending_events(), 0);
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct ClientBuilder {
     sdk_name: String,
     sdk_version: String,
@@ -220,6 +251,21 @@ impl ClientBuilder {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when a configured setting is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::LogBrewClient;
+    ///
+    /// let missing_key = LogBrewClient::builder("checkout-service", "1.2.3").build();
+    /// assert_eq!(missing_key.unwrap_err().code, "config_error");
+    ///
+    /// let client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// assert!(!client.delivery_health().closed);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn build(self) -> Result<LogBrewClient, SdkError> {
         self.build_client(None)
@@ -294,6 +340,27 @@ impl ClientBuilder {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when a configured setting or the automatic delivery configuration is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{AutomaticDeliveryConfig, LogBrewClient, LogEvent, RecordingTransport};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build_with_owned_transport(
+    ///         RecordingTransport::always_accept(),
+    ///         AutomaticDeliveryConfig::default(),
+    ///     )?;
+    /// client.log(
+    ///     "evt_log_001",
+    ///     "2026-06-02T10:00:00Z",
+    ///     LogEvent::new("worker started", "info"),
+    /// )?;
+    /// client.shutdown_owned()?;
+    /// assert!(client.delivery_health().closed);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn build_with_owned_transport<T>(
         self,
@@ -368,6 +435,35 @@ impl ClientBuilder {
 }
 
 /// Synchronous client with one shared bounded delivery queue across clones.
+///
+/// Capture methods validate each event and queue it. Nothing leaves the
+/// process until [`flush`](Self::flush) or [`shutdown`](Self::shutdown) sends
+/// the queued batch through a [`Transport`].
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{IssueEvent, LogBrewClient, LogEvent, RecordingTransport};
+///
+/// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+///     .api_key("LOGBREW_API_KEY")
+///     .build()?;
+/// client.log(
+///     "evt_log_001",
+///     "2026-06-02T10:00:00Z",
+///     LogEvent::new("worker started", "info"),
+/// )?;
+/// client.issue(
+///     "evt_issue_001",
+///     "2026-06-02T10:00:01Z",
+///     IssueEvent::new("Checkout timeout", "error"),
+/// )?;
+///
+/// let mut transport = RecordingTransport::always_accept();
+/// let response = client.shutdown(&mut transport)?;
+/// assert_eq!(response.accepted_events, 2);
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct LogBrewClient {
     inner: Arc<ClientInner>,
 }
@@ -409,6 +505,23 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is full, or an event field fails validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{ActionEvent, LogBrewClient};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.action(
+    ///     "evt_action_001",
+    ///     "2026-06-02T10:00:05Z",
+    ///     ActionEvent::new("deploy", "success"),
+    /// )?;
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn action<IdInput, TimestampInput>(
         &mut self,
@@ -424,6 +537,17 @@ impl LogBrewClient {
     }
 
     /// Create a builder from public SDK identity values like name and version.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::LogBrewClient;
+    ///
+    /// let builder = LogBrewClient::builder("checkout-service", "1.2.3");
+    /// let client = builder.api_key("LOGBREW_API_KEY").build()?;
+    /// assert_eq!(client.pending_events(), 0);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn builder<SdkName, SdkVersion>(sdk_name: SdkName, sdk_version: SdkVersion) -> ClientBuilder
     where
@@ -445,6 +569,25 @@ impl LogBrewClient {
     }
 
     /// Return an immutable content-free snapshot of bounded delivery state and counters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, LogEvent};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.log(
+    ///     "evt_log_001",
+    ///     "2026-06-02T10:00:00Z",
+    ///     LogEvent::new("worker started", "info"),
+    /// )?;
+    /// let health = client.delivery_health();
+    /// assert_eq!(health.pending_events, 1);
+    /// assert_eq!(health.dropped_events, 0);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn delivery_health(&self) -> DeliveryHealthSnapshot {
         let automatic = self
@@ -460,6 +603,23 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is full, or an event field fails validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{EnvironmentEvent, LogBrewClient};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.environment(
+    ///     "evt_environment_001",
+    ///     "2026-06-02T10:00:01Z",
+    ///     EnvironmentEvent::new("production").with_region("global"),
+    /// )?;
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn environment<IdInput, TimestampInput>(
         &mut self,
@@ -484,6 +644,28 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is busy, or delivery fails; undelivered events stay queued.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, LogEvent, RecordingTransport};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.log(
+    ///     "evt_log_001",
+    ///     "2026-06-02T10:00:00Z",
+    ///     LogEvent::new("worker started", "info"),
+    /// )?;
+    ///
+    /// let mut transport = RecordingTransport::always_accept();
+    /// let response = client.flush(&mut transport)?;
+    /// assert_eq!(response.status_code, 202);
+    /// assert_eq!(response.accepted_events, 1);
+    /// assert_eq!(client.pending_events(), 0);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn flush<T>(&mut self, transport: &mut T) -> Result<TransportResponse, SdkError>
     where
@@ -501,6 +683,28 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when no owned transport is configured or delivery fails; undelivered events stay queued.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{AutomaticDeliveryConfig, LogBrewClient, LogEvent, RecordingTransport};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build_with_owned_transport(
+    ///         RecordingTransport::always_accept(),
+    ///         AutomaticDeliveryConfig::default(),
+    ///     )?;
+    /// client.log(
+    ///     "evt_log_001",
+    ///     "2026-06-02T10:00:00Z",
+    ///     LogEvent::new("worker started", "info"),
+    /// )?;
+    /// let response = client.flush_owned()?;
+    /// assert_eq!(response.accepted_events, 1);
+    /// client.shutdown_owned()?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn flush_owned(&mut self) -> Result<TransportResponse, SdkError> {
         let automatic =
@@ -515,6 +719,24 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is full, or an event field fails validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueEvent, LogBrewClient};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.issue(
+    ///     "evt_issue_001",
+    ///     "2026-06-02T10:00:02Z",
+    ///     IssueEvent::new("Checkout timeout", "error")
+    ///         .with_message("Request timed out after retry budget"),
+    /// )?;
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn issue<IdInput, TimestampInput>(
         &mut self,
@@ -541,6 +763,23 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is full, or an event field fails validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, LogEvent};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.log(
+    ///     "evt_log_001",
+    ///     "2026-06-02T10:00:03Z",
+    ///     LogEvent::new("worker started", "info").with_logger("job-runner"),
+    /// )?;
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn log<IdInput, TimestampInput>(
         &mut self,
@@ -560,6 +799,24 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is full, or an event field fails validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, MetricEvent};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.metric(
+    ///     "evt_metric_001",
+    ///     "2026-06-02T10:00:06Z",
+    ///     MetricEvent::new("checkout.request.duration", "histogram", 42.5, "ms", "delta")
+    ///         .with_description("Duration of one completed checkout request."),
+    /// )?;
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn metric<Id, Timestamp>(
         &mut self,
@@ -586,6 +843,24 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the queue state is unavailable or the events cannot be serialized.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, LogEvent};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.log(
+    ///     "evt_log_001",
+    ///     "2026-06-02T10:00:03Z",
+    ///     LogEvent::new("worker started", "info"),
+    /// )?;
+    /// let preview = client.preview_json()?;
+    /// assert!(preview.contains("\"type\": \"log\""));
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn preview_json(&self) -> Result<String, SdkError> {
         let state = self.lock_state()?;
@@ -687,6 +962,23 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is full, or an event field fails validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, ReleaseEvent};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.release(
+    ///     "evt_release_001",
+    ///     "2026-06-02T10:00:00Z",
+    ///     ReleaseEvent::new("1.2.3").with_commit("abc123def456"),
+    /// )?;
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn release<IdInput, TimestampInput>(
         &mut self,
@@ -715,6 +1007,33 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is busy, or delivery fails; undelivered events stay queued.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, LogEvent, RecordingTransport};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.log(
+    ///     "evt_log_001",
+    ///     "2026-06-02T10:00:03Z",
+    ///     LogEvent::new("worker stopping", "info"),
+    /// )?;
+    ///
+    /// let mut transport = RecordingTransport::always_accept();
+    /// client.shutdown(&mut transport)?;
+    /// assert!(client.delivery_health().closed);
+    ///
+    /// let late = client.log(
+    ///     "evt_log_002",
+    ///     "2026-06-02T10:00:04Z",
+    ///     LogEvent::new("too late", "info"),
+    /// );
+    /// assert!(late.is_err());
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn shutdown<T>(&mut self, transport: &mut T) -> Result<TransportResponse, SdkError>
     where
@@ -745,6 +1064,24 @@ impl LogBrewClient {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the client is closed, the queue is full, or an event field fails validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, SpanEvent};
+    ///
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.span(
+    ///     "evt_span_001",
+    ///     "2026-06-02T10:00:04Z",
+    ///     SpanEvent::new("GET /health", "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", "ok")
+    ///         .with_duration_ms(12.5),
+    /// )?;
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn span<IdInput, TimestampInput>(
         &mut self,

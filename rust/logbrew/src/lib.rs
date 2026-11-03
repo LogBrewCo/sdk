@@ -1,4 +1,49 @@
 //! Public Rust client for building, validating, previewing, and flushing LogBrew event batches.
+//!
+//! Build one [`LogBrewClient`], capture events into its bounded queue, then
+//! send them with [`LogBrewClient::flush`] or [`LogBrewClient::shutdown`]
+//! through any [`Transport`].
+//!
+//! # Examples
+//!
+//! ```
+//! use logbrew::{IssueEvent, LogBrewClient, LogEvent, RecordingTransport};
+//!
+//! let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+//!     .api_key("LOGBREW_API_KEY")
+//!     .build()?;
+//!
+//! client.log(
+//!     "evt_log_001",
+//!     "2026-06-02T10:00:00Z",
+//!     LogEvent::new("checkout started", "info"),
+//! )?;
+//! client.issue(
+//!     "evt_issue_001",
+//!     "2026-06-02T10:00:01Z",
+//!     IssueEvent::new("Checkout timeout", "error")
+//!         .with_message("Payment provider did not answer in time"),
+//! )?;
+//!
+//! // Use `HttpTransport` (feature `http`) to send to LogBrew.
+//! let mut transport = RecordingTransport::always_accept();
+//! let response = client.shutdown(&mut transport)?;
+//! assert_eq!(response.accepted_events, 2);
+//! # Ok::<(), logbrew::SdkError>(())
+//! ```
+//!
+//! # Features
+//!
+//! No feature is enabled by default.
+//!
+//! - `http`: the blocking `HttpTransport` and outbound spans for `ureq` calls.
+//! - `reqwest`: outbound spans for `reqwest` calls.
+//! - `hyper`: outbound spans for Hyper or any client built on `http::Request`.
+//! - `tower`: Tower layers for server request telemetry and client spans.
+//! - `tracing`: a `tracing` layer that queues app log events as LogBrew logs.
+//! - `tracing-opentelemetry`: reads OpenTelemetry span context from `tracing` spans.
+//! - `opentelemetry-exporter`: an OpenTelemetry span exporter that queues
+//!   finished spans in your `LogBrewClient`.
 
 extern crate alloc;
 
@@ -110,6 +155,20 @@ use ureq::http::Response;
 /// The generated frame keeps only the source basename, positive line and
 /// column coordinates, and the compile-time Rust module path. Add a function
 /// name and `inApp` classification explicitly when those are useful.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::IssueEvent;
+///
+/// let issue = IssueEvent::new("Checkout timeout", "error")
+///     .with_stack_frame(logbrew::issue_stack_frame!().with_function("submit_payment"));
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 #[macro_export]
 macro_rules! issue_stack_frame {
     () => {
@@ -136,6 +195,20 @@ pub type Metadata = Map<String, Value>;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 /// Public SDK identity emitted with every LogBrew event batch.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::LogBrewClient;
+///
+/// let client = LogBrewClient::builder("checkout-service", "1.2.3")
+///     .api_key("LOGBREW_API_KEY")
+///     .build()?;
+/// let preview = client.preview_json()?;
+/// assert!(preview.contains("\"name\": \"checkout-service\""));
+/// assert!(preview.contains("\"version\": \"1.2.3\""));
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct SdkInfo {
     /// SDK or application name attached to emitted batches.
     pub name: String,
@@ -147,6 +220,22 @@ pub struct SdkInfo {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 /// Public event batch preview shape returned by `preview_json`.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{LogBrewClient, LogEvent};
+///
+/// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+///     .api_key("LOGBREW_API_KEY")
+///     .build()?;
+/// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+///
+/// let preview = client.preview_json()?;
+/// assert!(preview.contains("\"language\": \"rust\""));
+/// assert!(preview.contains("\"events\": ["));
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct EventBatch {
     /// SDK identity metadata attached to the batch.
     pub sdk: SdkInfo,
@@ -156,6 +245,19 @@ pub struct EventBatch {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 /// Public event shape buffered, previewed, and flushed by the client.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::Event;
+///
+/// let event: Event = serde_json::from_str(
+///     r#"{"type":"log","timestamp":"2026-06-02T10:00:00Z","id":"evt_log_001","attributes":{"message":"worker started","level":"info"}}"#,
+/// )?;
+/// assert_eq!(event.event_type, "log");
+/// assert_eq!(event.attributes["level"], "info");
+/// # Ok::<(), serde_json::Error>(())
+/// ```
 pub struct Event {
     #[serde(rename = "type")]
     /// Stable LogBrew event type such as `release` or `span`.
@@ -170,6 +272,23 @@ pub struct Event {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Response returned after a transport accepts or skips a queued flush.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{LogBrewClient, LogEvent, RecordingTransport};
+///
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+/// let response = client.flush(&mut RecordingTransport::always_accept())?;
+/// assert_eq!(response.status_code, 202);
+/// assert_eq!(response.attempts, 1);
+/// assert_eq!(response.batches, 1);
+/// assert_eq!(response.accepted_events, 1);
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct TransportResponse {
     /// Final HTTP-like status returned by the transport.
     pub status_code: u16,
@@ -187,6 +306,17 @@ pub struct TransportResponse {
 
 impl TransportResponse {
     /// Create a transport response before client-owned delivery totals are applied.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::TransportResponse;
+    ///
+    /// let response = TransportResponse::new(202);
+    /// assert_eq!(response.status_code, 202);
+    /// assert_eq!(response.attempts, 1);
+    /// assert!(response.retry_after.is_none());
+    /// ```
     #[must_use]
     #[inline]
     pub const fn new(status_code: u16) -> Self {
@@ -203,6 +333,16 @@ impl TransportResponse {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Transport-layer failure with a stable public code and retry hint.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::TransportError;
+///
+/// let error = TransportError::network("connection reset");
+/// assert_eq!(error.code, "network_failure");
+/// assert!(error.retryable);
+/// ```
 pub struct TransportError {
     /// Stable error code.
     pub code: &'static str,
@@ -214,6 +354,26 @@ pub struct TransportError {
 
 impl TransportError {
     /// Create a retryable network failure that preserves queued events.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogBrewClient, LogEvent, RecordingTransport, TransportError};
+    ///
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+    ///
+    /// let mut offline = RecordingTransport::scripted(vec![
+    ///     Err(TransportError::network("connection reset")),
+    ///     Err(TransportError::network("connection reset")),
+    ///     Err(TransportError::network("connection reset")),
+    /// ]);
+    /// assert!(client.flush(&mut offline).is_err());
+    /// assert_eq!(client.pending_events(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn network<MessageInput>(message: MessageInput) -> Self
     where
@@ -227,6 +387,16 @@ impl TransportError {
     }
 
     /// Create a transport failure with an explicit code and retryability flag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::TransportError;
+    ///
+    /// let error = TransportError::other("unauthenticated", "API key was rejected", false);
+    /// assert_eq!(error.code, "unauthenticated");
+    /// assert!(!error.retryable);
+    /// ```
     #[inline]
     pub fn other<MessageInput>(code: &'static str, message: MessageInput, retryable: bool) -> Self
     where
@@ -241,17 +411,71 @@ impl TransportError {
 }
 
 /// Public transport interface used by `flush` and `shutdown`.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{LogBrewClient, LogEvent, Transport, TransportError, TransportResponse};
+///
+/// struct CountingTransport {
+///     batches: usize,
+/// }
+///
+/// impl Transport for CountingTransport {
+///     fn send(&mut self, _api_key: &str, _body: &[u8]) -> Result<TransportResponse, TransportError> {
+///         self.batches += 1;
+///         Ok(TransportResponse::new(202))
+///     }
+/// }
+///
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+/// let mut transport = CountingTransport { batches: 0 };
+/// client.flush(&mut transport)?;
+/// assert_eq!(transport.batches, 1);
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub trait Transport {
+    /// Send one serialized event batch with the client API key.
     ///
     /// # Errors
     ///
     /// Returns a [`TransportError`] when the request fails or LogBrew rejects the batch.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{RecordingTransport, Transport};
+    ///
+    /// let mut transport = RecordingTransport::always_accept();
+    /// let response = transport.send("LOGBREW_API_KEY", br#"{"events":[]}"#)?;
+    /// assert_eq!(response.status_code, 202);
+    /// assert_eq!(transport.last_body(), Some(&br#"{"events":[]}"#[..]));
+    /// # Ok::<(), logbrew::TransportError>(())
+    /// ```
     fn send(&mut self, api_key: &str, body: &[u8]) -> Result<TransportResponse, TransportError>;
 }
 
 #[cfg(feature = "http")]
 #[derive(Clone, Debug)]
 /// Configuration for the feature-gated blocking HTTP transport.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{HttpTransport, HttpTransportConfig};
+/// use std::time::Duration;
+///
+/// let transport = HttpTransport::new(HttpTransportConfig {
+///     headers: vec![("x-request-source".to_owned(), "checkout-service".to_owned())],
+///     timeout: Some(Duration::from_secs(5)),
+///     ..HttpTransportConfig::default()
+/// })?;
+/// assert_eq!(transport.endpoint(), logbrew::DEFAULT_HTTP_ENDPOINT);
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct HttpTransportConfig {
     /// Absolute HTTP or HTTPS endpoint that accepts LogBrew event batches.
     pub endpoint: String,
@@ -279,6 +503,20 @@ impl Default for HttpTransportConfig {
 #[cfg(feature = "http")]
 #[derive(Clone, Debug)]
 /// Blocking HTTP transport that sends queued batches to a LogBrew intake endpoint.
+///
+/// # Examples
+///
+/// ```no_run
+/// use logbrew::{AutomaticDeliveryConfig, HttpTransport, HttpTransportConfig, LogBrewClient, LogEvent};
+///
+/// let transport = HttpTransport::new(HttpTransportConfig::default())?;
+/// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+///     .api_key("LOGBREW_API_KEY")
+///     .build_with_owned_transport(transport, AutomaticDeliveryConfig::default())?;
+/// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+/// client.shutdown_owned()?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct HttpTransport {
     endpoint: String,
     headers: Vec<(String, String)>,
@@ -288,6 +526,19 @@ pub struct HttpTransport {
 #[cfg(feature = "http")]
 impl HttpTransport {
     /// Return the configured endpoint used for future send attempts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{HttpTransport, HttpTransportConfig};
+    ///
+    /// let transport = HttpTransport::new(HttpTransportConfig {
+    ///     endpoint: "https://intake.example.com/v1/events".to_owned(),
+    ///     ..HttpTransportConfig::default()
+    /// })?;
+    /// assert_eq!(transport.endpoint(), "https://intake.example.com/v1/events");
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn endpoint(&self) -> &str {
@@ -295,6 +546,19 @@ impl HttpTransport {
     }
 
     /// Return the additional request headers configured for this transport.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{HttpTransport, HttpTransportConfig};
+    ///
+    /// let transport = HttpTransport::new(HttpTransportConfig {
+    ///     headers: vec![("x-request-source".to_owned(), "checkout-service".to_owned())],
+    ///     ..HttpTransportConfig::default()
+    /// })?;
+    /// assert_eq!(transport.headers().len(), 1);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn headers(&self) -> &[(String, String)] {
@@ -306,6 +570,20 @@ impl HttpTransport {
     /// # Errors
     ///
     /// Returns an [`SdkError`] when the endpoint, timeout, or headers are invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use logbrew::{HttpTransport, HttpTransportConfig, LogBrewClient, LogEvent};
+    ///
+    /// let mut transport = HttpTransport::new(HttpTransportConfig::default())?;
+    /// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    ///     .api_key("LOGBREW_API_KEY")
+    ///     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+    /// client.shutdown(&mut transport)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn new(config: HttpTransportConfig) -> Result<Self, SdkError> {
         validate_http_config(&config)?;
@@ -361,6 +639,21 @@ impl Transport for HttpTransport {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Stable public SDK error with parseable code and message fields.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{LogBrewClient, LogEvent};
+///
+/// let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+///     .api_key("LOGBREW_API_KEY")
+///     .build()?;
+/// let error = client
+///     .log("evt_log_001", "not a timestamp", LogEvent::new("worker started", "info"))
+///     .unwrap_err();
+/// assert_eq!(error.code, "validation_error");
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct SdkError {
     /// Stable error code, such as `validation_error`.
     pub code: &'static str,
@@ -388,6 +681,21 @@ impl Error for SdkError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Public release-event builder for stable LogBrew release payload fields.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::ReleaseEvent;
+///
+/// let release = ReleaseEvent::new("1.2.3")
+///     .with_commit("abc123def456")
+///     .with_notes("Faster checkout retries");
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.release("evt_release_001", "2026-06-02T10:00:00Z", release)?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct ReleaseEvent {
     version: String,
     commit: Option<String>,
@@ -412,6 +720,19 @@ impl ReleaseEvent {
     }
 
     /// Create a release event with its required version field.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::ReleaseEvent;
+    ///
+    /// let release = ReleaseEvent::new("1.2.3");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.release("evt_release_001", "2026-06-02T10:00:00Z", release)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn new<Version>(version: Version) -> Self
     where
@@ -427,6 +748,19 @@ impl ReleaseEvent {
     }
 
     /// Add an optional commit identifier to the release payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::ReleaseEvent;
+    ///
+    /// let release = ReleaseEvent::new("1.2.3").with_commit("abc123def456");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.release("evt_release_001", "2026-06-02T10:00:00Z", release)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_commit<Commit>(mut self, commit: Commit) -> Self
@@ -438,6 +772,20 @@ impl ReleaseEvent {
     }
 
     /// Attach an explicit shared telemetry context override.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{ReleaseEvent, TelemetryContext};
+    ///
+    /// let context = TelemetryContext::new().with_tag("customer.tier", "pro");
+    /// let event = ReleaseEvent::new("1.2.3").with_context(context);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.release("evt_release_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_context(mut self, context: TelemetryContext) -> Self {
@@ -446,6 +794,21 @@ impl ReleaseEvent {
     }
 
     /// Attach optional metadata to the release payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{Metadata, ReleaseEvent};
+    ///
+    /// let mut metadata = Metadata::new();
+    /// metadata.insert("region".to_owned(), "eu-central".into());
+    /// let event = ReleaseEvent::new("1.2.3").with_metadata(metadata);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.release("evt_release_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
@@ -454,6 +817,19 @@ impl ReleaseEvent {
     }
 
     /// Add optional release notes to the release payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::ReleaseEvent;
+    ///
+    /// let release = ReleaseEvent::new("1.2.3").with_notes("Faster checkout retries");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.release("evt_release_001", "2026-06-02T10:00:00Z", release)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_notes<Notes>(mut self, notes: Notes) -> Self
@@ -467,6 +843,19 @@ impl ReleaseEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Public environment-event builder for stable LogBrew environment payload fields.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::EnvironmentEvent;
+///
+/// let environment = EnvironmentEvent::new("production").with_region("eu-central");
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.environment("evt_environment_001", "2026-06-02T10:00:00Z", environment)?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct EnvironmentEvent {
     name: String,
     region: Option<String>,
@@ -486,6 +875,19 @@ impl EnvironmentEvent {
     }
 
     /// Create an environment event with its required name field.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::EnvironmentEvent;
+    ///
+    /// let environment = EnvironmentEvent::new("production");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.environment("evt_environment_001", "2026-06-02T10:00:00Z", environment)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn new<NameInput>(name: NameInput) -> Self
     where
@@ -500,6 +902,20 @@ impl EnvironmentEvent {
     }
 
     /// Attach an explicit shared telemetry context override.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{EnvironmentEvent, TelemetryContext};
+    ///
+    /// let context = TelemetryContext::new().with_tag("customer.tier", "pro");
+    /// let event = EnvironmentEvent::new("production").with_context(context);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.environment("evt_environment_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_context(mut self, context: TelemetryContext) -> Self {
@@ -508,6 +924,21 @@ impl EnvironmentEvent {
     }
 
     /// Attach optional metadata to the environment payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{EnvironmentEvent, Metadata};
+    ///
+    /// let mut metadata = Metadata::new();
+    /// metadata.insert("region".to_owned(), "eu-central".into());
+    /// let event = EnvironmentEvent::new("production").with_metadata(metadata);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.environment("evt_environment_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
@@ -516,6 +947,19 @@ impl EnvironmentEvent {
     }
 
     /// Add an optional region to the environment payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::EnvironmentEvent;
+    ///
+    /// let environment = EnvironmentEvent::new("production").with_region("eu-central");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.environment("evt_environment_001", "2026-06-02T10:00:00Z", environment)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_region<Region>(mut self, region: Region) -> Self
@@ -529,6 +973,29 @@ impl EnvironmentEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Public issue-event builder for stable LogBrew issue payload fields.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{IssueBreadcrumb, IssueEvent, IssueStackFrame};
+///
+/// let issue = IssueEvent::new("Checkout timeout", "error")
+///     .with_message("Payment provider did not answer in time")
+///     .with_stack_frame(
+///         IssueStackFrame::new("checkout.rs", 42, 9)
+///             .with_function("submit_payment")
+///             .with_in_app(true),
+///     )
+///     .with_breadcrumb(
+///         IssueBreadcrumb::new("2026-06-02T09:59:58Z", "http")
+///             .with_message("POST /payments started"),
+///     );
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct IssueEvent {
     title: String,
     level: String,
@@ -619,6 +1086,20 @@ impl IssueEvent {
     /// handled state. It does not format the error, so `Display` and `Debug`
     /// text are not captured. Pass a concrete error reference rather than a
     /// trait object when exact type identity is important.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::IssueEvent;
+    ///
+    /// let error = "not-a-number".parse::<u32>().unwrap_err();
+    /// let issue = IssueEvent::from_error(&error);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn from_error<E>(error: &E) -> Self
     where
@@ -628,6 +1109,20 @@ impl IssueEvent {
     }
 
     /// Create an error-level issue with an explicit capture mechanism and handled state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::IssueEvent;
+    ///
+    /// let error = std::io::Error::other("disk full");
+    /// let issue = IssueEvent::from_error_with_mechanism(&error, "job.retry_exhausted", false);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn from_error_with_mechanism<E, MechanismTypeInput>(
         error: &E,
@@ -654,6 +1149,21 @@ impl IssueEvent {
     /// This helper uses the exact panic location when Rust provides one and
     /// never formats the panic payload. It does not install, replace, flush, or
     /// otherwise own the process-global panic hook.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use logbrew::IssueEvent;
+    /// use std::sync::{Arc, Mutex};
+    ///
+    /// let captured = Arc::new(Mutex::new(Vec::new()));
+    /// let sink = Arc::clone(&captured);
+    /// std::panic::set_hook(Box::new(move |info| {
+    ///     if let Ok(mut issues) = sink.lock() {
+    ///         issues.push(IssueEvent::from_panic_info(info));
+    ///     }
+    /// }));
+    /// ```
     #[must_use]
     #[inline]
     pub fn from_panic_info(info: &PanicHookInfo<'_>) -> Self {
@@ -665,12 +1175,44 @@ impl IssueEvent {
     }
 
     /// Create a critical issue from a panic payload without formatting its text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::IssueEvent;
+    /// use std::any::Any;
+    ///
+    /// // A payload as returned by `std::panic::catch_unwind`.
+    /// let payload: Box<dyn Any + Send> = Box::new("worker crashed");
+    /// let issue = IssueEvent::from_panic_payload(payload.as_ref());
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn from_panic_payload(payload: &(dyn Any + Send)) -> Self {
         Self::from_panic_payload_with_mechanism(payload, "rust.panic", false)
     }
 
     /// Create a panic issue with an explicit capture mechanism and handled state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::IssueEvent;
+    /// use std::any::Any;
+    ///
+    /// // A payload as returned by `std::panic::catch_unwind`.
+    /// let payload: Box<dyn Any + Send> = Box::new("job crashed");
+    /// let issue = IssueEvent::from_panic_payload_with_mechanism(payload.as_ref(), "job.catch_unwind", true);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn from_panic_payload_with_mechanism<MechanismType>(
         payload: &(dyn Any + Send),
@@ -713,6 +1255,19 @@ impl IssueEvent {
     }
 
     /// Create an issue event with its required title and level fields.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::IssueEvent;
+    ///
+    /// let issue = IssueEvent::new("Checkout timeout", "error");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn new<Title, LevelInput>(title: Title, level: LevelInput) -> Self
     where
@@ -735,6 +1290,21 @@ impl IssueEvent {
     }
 
     /// Append one optional privacy-bounded oldest-to-newest breadcrumb.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueBreadcrumb, IssueEvent};
+    ///
+    /// let issue = IssueEvent::new("Checkout timeout", "error").with_breadcrumb(
+    ///     IssueBreadcrumb::new("2026-06-02T09:59:58Z", "http").with_message("POST /payments started"),
+    /// );
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_breadcrumb(mut self, breadcrumb: IssueBreadcrumb) -> Self {
@@ -745,6 +1315,22 @@ impl IssueEvent {
     }
 
     /// Attach 1-64 optional privacy-bounded oldest-to-newest breadcrumbs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueBreadcrumb, IssueEvent};
+    ///
+    /// let issue = IssueEvent::new("Checkout timeout", "error").with_breadcrumbs([
+    ///     IssueBreadcrumb::new("2026-06-02T09:59:57Z", "navigation").with_message("Opened checkout"),
+    ///     IssueBreadcrumb::new("2026-06-02T09:59:58Z", "http").with_message("POST /payments started"),
+    /// ]);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_breadcrumbs<I>(mut self, breadcrumbs: I) -> Self
@@ -756,6 +1342,21 @@ impl IssueEvent {
     }
 
     /// Mark that older breadcrumbs were evicted before this snapshot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueBreadcrumb, IssueEvent};
+    ///
+    /// let event = IssueEvent::new("Checkout timeout", "error")
+    ///     .with_breadcrumb(IssueBreadcrumb::new("2026-06-02T09:59:58Z", "http"))
+    ///     .with_breadcrumbs_truncated(true);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub const fn with_breadcrumbs_truncated(mut self, truncated: bool) -> Self {
@@ -764,6 +1365,20 @@ impl IssueEvent {
     }
 
     /// Attach an explicit shared telemetry context override.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueEvent, TelemetryContext};
+    ///
+    /// let context = TelemetryContext::new().with_tag("customer.tier", "pro");
+    /// let event = IssueEvent::new("Checkout timeout", "error").with_context(context);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_context(mut self, context: TelemetryContext) -> Self {
@@ -772,6 +1387,22 @@ impl IssueEvent {
     }
 
     /// Attach optional structured exception identity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueEvent, IssueException, IssueExceptionMechanism};
+    ///
+    /// let issue = IssueEvent::new("Payment failed", "error").with_exception(
+    ///     IssueException::new("PaymentDeclined")
+    ///         .with_mechanism(IssueExceptionMechanism::new("checkout.handler", true)),
+    /// );
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_exception(mut self, exception: IssueException) -> Self {
@@ -780,6 +1411,28 @@ impl IssueEvent {
     }
 
     /// Attach an optional bounded parent-first exception chain.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{
+    ///     IssueEvent, IssueException, IssueExceptionChain, IssueExceptionChainEntry,
+    ///     IssueExceptionRelationship,
+    /// };
+    ///
+    /// let root = IssueExceptionChainEntry::new(0, IssueExceptionRelationship::Reported, "CheckoutFailure");
+    /// let cause = IssueExceptionChainEntry::new(1, IssueExceptionRelationship::Cause, "AuthorizationFailure")
+    ///     .with_parent_id(0)
+    ///     .with_message("provider rejected the authorization", false);
+    /// let issue = IssueEvent::new("CheckoutFailure", "error")
+    ///     .with_exception(IssueException::new("CheckoutFailure"))
+    ///     .with_exception_chain(IssueExceptionChain::new([root, cause], false));
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_exception_chain(mut self, exception_chain: IssueExceptionChain) -> Self {
@@ -788,6 +1441,20 @@ impl IssueEvent {
     }
 
     /// Add an optional message to the issue payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::IssueEvent;
+    ///
+    /// let issue = IssueEvent::new("Checkout timeout", "error")
+    ///     .with_message("Payment provider did not answer in time");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_message<MessageInput>(mut self, message: MessageInput) -> Self
@@ -799,6 +1466,21 @@ impl IssueEvent {
     }
 
     /// Attach optional metadata to the issue payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueEvent, Metadata};
+    ///
+    /// let mut metadata = Metadata::new();
+    /// metadata.insert("region".to_owned(), "eu-central".into());
+    /// let event = IssueEvent::new("Checkout timeout", "error").with_metadata(metadata);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
@@ -807,6 +1489,20 @@ impl IssueEvent {
     }
 
     /// Append one optional privacy-bounded newest-first stack frame.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueEvent, IssueStackFrame};
+    ///
+    /// let issue = IssueEvent::new("Checkout timeout", "error")
+    ///     .with_stack_frame(IssueStackFrame::new("checkout.rs", 42, 9).with_function("submit_payment"));
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_stack_frame(mut self, frame: IssueStackFrame) -> Self {
@@ -815,6 +1511,22 @@ impl IssueEvent {
     }
 
     /// Attach 1-32 optional privacy-bounded newest-first stack frames.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueEvent, IssueStackFrame};
+    ///
+    /// let issue = IssueEvent::new("Checkout timeout", "error").with_stack_frames([
+    ///     IssueStackFrame::new("payments.rs", 88, 13).with_function("charge_card"),
+    ///     IssueStackFrame::new("checkout.rs", 42, 9).with_function("submit_payment"),
+    /// ]);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", issue)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_stack_frames<I>(mut self, frames: I) -> Self
@@ -826,6 +1538,21 @@ impl IssueEvent {
     }
 
     /// Mark that more stack frames existed than the retained 32-frame payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{IssueEvent, IssueStackFrame};
+    ///
+    /// let event = IssueEvent::new("Checkout timeout", "error")
+    ///     .with_stack_frame(IssueStackFrame::new("checkout.rs", 42, 9))
+    ///     .with_stack_frames_truncated(true);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.issue("evt_issue_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub const fn with_stack_frames_truncated(mut self, truncated: bool) -> Self {
@@ -836,6 +1563,23 @@ impl IssueEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Public log-event builder for stable LogBrew log payload fields.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{LogEvent, Metadata};
+///
+/// let mut metadata = Metadata::new();
+/// metadata.insert("queue".to_owned(), "emails".into());
+/// let log = LogEvent::new("worker started", "info")
+///     .with_logger("job-runner")
+///     .with_metadata(metadata);
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.log("evt_log_001", "2026-06-02T10:00:00Z", log)?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct LogEvent {
     message: String,
     level: String,
@@ -858,6 +1602,19 @@ impl LogEvent {
     }
 
     /// Create a log event with its required message and level fields.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::LogEvent;
+    ///
+    /// let log = LogEvent::new("worker started", "info");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", log)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn new<Message, Level>(message: Message, level: Level) -> Self
     where
@@ -874,6 +1631,20 @@ impl LogEvent {
     }
 
     /// Attach an explicit shared telemetry context override.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogEvent, TelemetryContext};
+    ///
+    /// let context = TelemetryContext::new().with_tag("customer.tier", "pro");
+    /// let event = LogEvent::new("worker started", "info").with_context(context);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_context(mut self, context: TelemetryContext) -> Self {
@@ -882,6 +1653,19 @@ impl LogEvent {
     }
 
     /// Add an optional logger name to the log payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::LogEvent;
+    ///
+    /// let log = LogEvent::new("worker started", "info").with_logger("job-runner");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", log)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_logger<Logger>(mut self, logger: Logger) -> Self
@@ -893,6 +1677,21 @@ impl LogEvent {
     }
 
     /// Attach optional metadata to the log payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogEvent, Metadata};
+    ///
+    /// let mut metadata = Metadata::new();
+    /// metadata.insert("region".to_owned(), "eu-central".into());
+    /// let event = LogEvent::new("worker started", "info").with_metadata(metadata);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
@@ -903,6 +1702,26 @@ impl LogEvent {
 
 #[derive(Clone, Debug, PartialEq)]
 /// Public span-event builder for stable LogBrew span payload fields.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::SpanEvent;
+///
+/// let span = SpanEvent::new(
+///     "GET /checkout",
+///     "4bf92f3577b34da6a3ce929d0e0e4736",
+///     "00f067aa0ba902b7",
+///     "ok",
+/// )
+/// .with_parent_span_id("b7ad6b7169203331")
+/// .with_duration_ms(12.5);
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.span("evt_span_001", "2026-06-02T10:00:00Z", span)?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct SpanEvent {
     name: String,
     trace_id: String,
@@ -946,6 +1765,24 @@ impl SpanEvent {
     }
 
     /// Create a span event with its required name, trace, span, and status fields.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::SpanEvent;
+    ///
+    /// let span = SpanEvent::new(
+    ///     "GET /checkout",
+    ///     "4bf92f3577b34da6a3ce929d0e0e4736",
+    ///     "00f067aa0ba902b7",
+    ///     "ok",
+    /// );
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.span("evt_span_001", "2026-06-02T10:00:00Z", span)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn new<NameInput, TraceId, SpanId, StatusInput>(
         name: NameInput,
@@ -972,6 +1809,20 @@ impl SpanEvent {
     }
 
     /// Attach an explicit shared telemetry context override.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{SpanEvent, TelemetryContext};
+    ///
+    /// let context = TelemetryContext::new().with_tag("customer.tier", "pro");
+    /// let event = SpanEvent::new("GET /checkout", "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", "ok").with_context(context);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.span("evt_span_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_context(mut self, context: TelemetryContext) -> Self {
@@ -980,6 +1831,19 @@ impl SpanEvent {
     }
 
     /// Add an optional non-negative duration to the span payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::SpanEvent;
+    ///
+    /// let span = SpanEvent::new("GET /checkout", "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", "ok").with_duration_ms(12.5);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.span("evt_span_001", "2026-06-02T10:00:00Z", span)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub const fn with_duration_ms(mut self, duration_ms: f64) -> Self {
@@ -988,6 +1852,21 @@ impl SpanEvent {
     }
 
     /// Attach optional metadata to the span payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{Metadata, SpanEvent};
+    ///
+    /// let mut metadata = Metadata::new();
+    /// metadata.insert("region".to_owned(), "eu-central".into());
+    /// let event = SpanEvent::new("GET /checkout", "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", "ok").with_metadata(metadata);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.span("evt_span_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
@@ -996,6 +1875,19 @@ impl SpanEvent {
     }
 
     /// Add an optional parent span identifier to the span payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::SpanEvent;
+    ///
+    /// let span = SpanEvent::new("GET /checkout", "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", "ok").with_parent_span_id("b7ad6b7169203331");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.span("evt_span_001", "2026-06-02T10:00:00Z", span)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_parent_span_id<ParentSpanId>(mut self, parent_span_id: ParentSpanId) -> Self
@@ -1009,6 +1901,19 @@ impl SpanEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Public action-event builder for stable LogBrew action payload fields.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::ActionEvent;
+///
+/// let action = ActionEvent::new("checkout.submit", "success");
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.action("evt_action_001", "2026-06-02T10:00:00Z", action)?;
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct ActionEvent {
     name: String,
     status: String,
@@ -1029,6 +1934,19 @@ impl ActionEvent {
     }
 
     /// Create an action event with its required name and status fields.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::ActionEvent;
+    ///
+    /// let action = ActionEvent::new("checkout.submit", "success");
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.action("evt_action_001", "2026-06-02T10:00:00Z", action)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn new<Name, Status>(name: Name, status: Status) -> Self
     where
@@ -1044,6 +1962,20 @@ impl ActionEvent {
     }
 
     /// Attach an explicit shared telemetry context override.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{ActionEvent, TelemetryContext};
+    ///
+    /// let context = TelemetryContext::new().with_tag("customer.tier", "pro");
+    /// let event = ActionEvent::new("checkout.submit", "success").with_context(context);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.action("evt_action_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_context(mut self, context: TelemetryContext) -> Self {
@@ -1052,6 +1984,21 @@ impl ActionEvent {
     }
 
     /// Attach optional metadata to the action payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{ActionEvent, Metadata};
+    ///
+    /// let mut metadata = Metadata::new();
+    /// metadata.insert("region".to_owned(), "eu-central".into());
+    /// let event = ActionEvent::new("checkout.submit", "success").with_metadata(metadata);
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.action("evt_action_001", "2026-06-02T10:00:00Z", event)?;
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
@@ -1062,6 +2009,21 @@ impl ActionEvent {
 
 #[derive(Clone, Debug, Default)]
 /// Scripted in-memory transport for previewing, accepting, or failing flushes.
+///
+/// # Examples
+///
+/// ```
+/// use logbrew::{LogEvent, RecordingTransport};
+///
+/// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+/// #     .api_key("LOGBREW_API_KEY")
+/// #     .build()?;
+/// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+/// let mut transport = RecordingTransport::always_accept();
+/// client.flush(&mut transport)?;
+/// assert_eq!(transport.sent_bodies().len(), 1);
+/// # Ok::<(), logbrew::SdkError>(())
+/// ```
 pub struct RecordingTransport {
     scripted: VecDeque<Result<u16, TransportError>>,
     sent_bodies: Vec<Vec<u8>>,
@@ -1069,6 +2031,20 @@ pub struct RecordingTransport {
 
 impl RecordingTransport {
     /// Create a transport that accepts queued flushes with a `202` response.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogEvent, RecordingTransport};
+    ///
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+    /// let response = client.flush(&mut RecordingTransport::always_accept())?;
+    /// assert_eq!(response.status_code, 202);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn always_accept() -> Self {
@@ -1079,12 +2055,44 @@ impl RecordingTransport {
     }
 
     /// Return the most recent request body sent through this transport.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogEvent, RecordingTransport};
+    ///
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+    /// let mut transport = RecordingTransport::always_accept();
+    /// client.flush(&mut transport)?;
+    /// let body = transport.last_body().map(String::from_utf8_lossy).unwrap_or_default();
+    /// assert!(body.contains("worker started"));
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[inline]
     pub fn last_body(&self) -> Option<&[u8]> {
         self.sent_bodies.last().map(Vec::as_slice)
     }
 
     /// Create a transport from public status codes or transport failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogEvent, RecordingTransport};
+    ///
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("worker started", "info"))?;
+    /// let mut transport = RecordingTransport::scripted(vec![Ok(503), Ok(202)]);
+    /// let response = client.flush(&mut transport)?;
+    /// assert_eq!(response.attempts, 2);
+    /// assert_eq!(response.status_code, 202);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn scripted(scripted: Vec<Result<u16, TransportError>>) -> Self {
@@ -1095,6 +2103,23 @@ impl RecordingTransport {
     }
 
     /// Return every request body sent through this transport instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logbrew::{LogEvent, RecordingTransport};
+    ///
+    /// # let mut client = logbrew::LogBrewClient::builder("checkout-service", "1.2.3")
+    /// #     .api_key("LOGBREW_API_KEY")
+    /// #     .build()?;
+    /// let mut transport = RecordingTransport::always_accept();
+    /// client.log("evt_log_001", "2026-06-02T10:00:00Z", LogEvent::new("first", "info"))?;
+    /// client.flush(&mut transport)?;
+    /// client.log("evt_log_002", "2026-06-02T10:00:01Z", LogEvent::new("second", "info"))?;
+    /// client.flush(&mut transport)?;
+    /// assert_eq!(transport.sent_bodies().len(), 2);
+    /// # Ok::<(), logbrew::SdkError>(())
+    /// ```
     #[must_use]
     #[inline]
     pub fn sent_bodies(&self) -> &[Vec<u8>] {

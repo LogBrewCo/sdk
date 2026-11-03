@@ -310,7 +310,7 @@ run_shell_step "python3 scripts/run_python_contract_tests.py"
 mark_step_complete
 
 begin_next_step "Rust tests"
-run_shell_step "bash scripts/check_rust_static.sh && cd rust/logbrew && cargo test && cargo test --features http && bash tests/run.sh"
+run_shell_step "bash scripts/check_rust_static.sh && cd rust/logbrew && cargo test && cargo test --all-features && bash tests/run.sh"
 mark_step_complete
 
 begin_next_step "Rust package dry-run"
