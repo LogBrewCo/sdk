@@ -460,7 +460,7 @@ jobs:
           rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
 
       - name: Run Rust tests
-        run: cd rust/logbrew && cargo test
+        run: cd rust/logbrew && cargo test && cargo test --all-features
 
       - name: Run Rust real-user smoke test
         run: bash scripts/real_user_rust_smoke.sh

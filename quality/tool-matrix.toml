@@ -35,18 +35,18 @@ checked = 2026-10-19
 id = "rust"
 risk = "Rust SDK compile errors, compiler lints, and test failures"
 tool = "rustc, cargo, and libtest"
-version = "the channel in rust-toolchain.toml (1.99.1 on 2026-10-23); Dependabot proposes each new stable release"
-pins = ["rust-toolchain.toml::channel = \"", ".github/dependabot.yml::package-ecosystem: rust-toolchain"]
+version = "the channel in rust-toolchain.toml (1.99.1 on 2026-10-23, still the latest stable on 2026-11-03); Dependabot proposes each new stable release; the crate's rust-version (1.88) for the minimum supported Rust check"
+pins = ["rust-toolchain.toml::channel = \"", ".github/dependabot.yml::package-ecosystem: rust-toolchain", "rust/logbrew/Cargo.toml::rust-version = \"1.88\""]
 uses = ["rust-lang/crates-io-auth-action"]
 commands = ["cargo test", "cargo publish", "rustup"]
-runs_in = "CI Rust jobs; publish workflows"
-config = "rust/*/Cargo.toml"
+runs_in = "CI Rust jobs; publish workflows; CI Contract checks: Run Rust static analysis builds the library at rust-version"
+config = "rust/*/Cargo.toml; scripts/check_rust_static.sh checks the library with no features and all features on the rust-version toolchain, with the locked dependencies and lints capped as for a registry dependency, so a newer language feature, standard library API, or dependency floor fails before release; cargo test runs with no features and with all features, which also runs the feature-gated doctests"
 conflicts = "none known"
 exceptions = "none"
 runtime = "see clippy (the static step builds every target)"
-findings = "unknown: failures are fixed before merge and not recorded"
+findings = "unknown: failures are fixed before merge and not recorded; 2026-11-03: rust-version 1.87 fails on let chains in the library, 1.88 passes with the locked and the oldest compatible dependencies"
 replaces = "none"
-checked = 2026-10-23
+checked = 2026-11-03
 
 [[tool]]
 id = "clippy-rustfmt"
