@@ -26,7 +26,8 @@ without extra setup.
 When no service is set in `context` or `LOGBREW_SERVICE_NAME`, the service
 name is the `name` field of the nearest `package.json` at or above the working
 directory, so traces, logs, and issues show your app's own name. If that file
-has no usable `name`, no service is sent.
+has no usable `name`, no service is sent. `addLogBrewPackageService(context)`
+returns a context with the same service rule for clients you create yourself.
 
 Caller context remains authoritative. Explicit runtime and operating-system
 sections replace their defaults, while explicit device fields extend and

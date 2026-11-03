@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test, { after, before } from "node:test";
 
 import { RecordingTransport } from "@logbrew/sdk";
-import nodeSdk, { createLogBrewNodeClient } from "../index.js";
+import nodeSdk, { addLogBrewPackageService, createLogBrewNodeClient } from "../index.js";
 
 const FIXED_TIMESTAMP = "2026-08-02T10:00:00Z";
 const require = createRequire(import.meta.url);
@@ -306,4 +306,18 @@ test("a package.json without a usable name leaves the service unset", async () =
     const attributes = await inApp(packageJson, () => capturedAttributes(createLogBrewNodeClient));
     assert.deepEqual(attributes.context, expectedDefaultContext());
   }
+});
+
+test("addLogBrewPackageService adds the package.json name only where no service is set", async () => {
+  const deployment = { schemaVersion: 1, resource: { deployment: { environment: "production" } } };
+  const named = { schemaVersion: 1, resource: { service: { name: "checkout-api" } } };
+  const results = await inApp(JSON.stringify({ name: "todos-api" }), () => [undefined, deployment, named].map(addLogBrewPackageService));
+  const unnamed = await inApp(JSON.stringify({ private: true }), () => addLogBrewPackageService(undefined));
+
+  assert.deepEqual(results, [
+    { schemaVersion: 1, resource: { service: { name: "todos-api" } } },
+    { schemaVersion: 1, resource: { deployment: { environment: "production" }, service: { name: "todos-api" } } },
+    named
+  ]);
+  assert.equal(unnamed, undefined);
 });

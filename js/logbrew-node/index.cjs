@@ -2,7 +2,7 @@
 
 const { LogBrewClient, SdkError } = require("@logbrew/sdk");
 const { attempt, callMethod, isTruthy, readMember, readOptionalMember } = require("./internal.cjs");
-const { addEnvironmentResourceContext, addNodeRuntimeContext } = require("./runtime-context.cjs");
+const { addEnvironmentResourceContext, addNodeRuntimeContext, addPackageServiceContext } = require("./runtime-context.cjs");
 const { createBreadcrumbProvider, installAutomaticBreadcrumbs } = require("./breadcrumbs.cjs");
 const { buildNodePersistentEventStore } = require("./persistent-event-store.cjs");
 const { createPersistentEventQueue, purgePersistentEventQueue } = require("./persistent-queue.cjs");
@@ -372,6 +372,7 @@ function createLogBrewQueueTraceHeaders(trace = getActiveLogBrewTrace()) {
 
 const exported = {
   addLogBrewBreadcrumb,
+  addLogBrewPackageService: addPackageServiceContext,
   axiosRequestWithLogBrewSpan,
   cacheOperationWithLogBrewSpan,
   captureHttpError,

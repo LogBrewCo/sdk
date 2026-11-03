@@ -124,6 +124,9 @@ type LogBrewNodeContext = {
   shutdown: () => Promise<TransportResponse>;
 };
 
+/** Names the service after the `name` in the nearest package.json at or above the working directory when the context names none. */
+declare function addLogBrewPackageService(context?: TelemetryContext): TelemetryContext | undefined;
+
 declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
 
 declare function runWithLogBrewTrace<Result>(
@@ -146,6 +149,7 @@ declare module "node:http" {
 
 declare const defaultExport: {
   addLogBrewBreadcrumb: typeof addLogBrewBreadcrumb;
+  addLogBrewPackageService: typeof addLogBrewPackageService;
   axiosRequestWithLogBrewSpan: typeof axiosRequestWithLogBrewSpan;
   cacheOperationWithLogBrewSpan: typeof cacheOperationWithLogBrewSpan;
   captureHttpError: typeof captureHttpError;
@@ -189,6 +193,7 @@ export type {
   NodeFetchTransportConfig
 };
 export {
+  addLogBrewPackageService,
   createLogBrewTraceContext,
   enterWithLogBrewTrace,
   getActiveLogBrewTrace,
