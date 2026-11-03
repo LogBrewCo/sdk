@@ -1480,7 +1480,7 @@ def create_logbrew_trace_context(
     return LogBrewTraceContext(
         trace_id=default_trace_id(),
         span_id=child_span_id.lower(),
-        sampled=False,
+        sampled=True,
     )
 
 

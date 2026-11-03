@@ -76,7 +76,7 @@ def child_trace(
         return LogBrewTraceContext(
             trace_id=default_trace_id(),
             span_id=span_id,
-            sampled=False,
+            sampled=True,
         )
     return LogBrewTraceContext(
         trace_id=parent_trace.trace_id,
