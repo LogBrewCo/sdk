@@ -532,11 +532,10 @@ class FlaskIntegrationTests(_FlaskTestCase):
         self.assertEqual(span["status"], "error")
         self.assertEqual(span["metadata"]["status_code"], 500)
         self.assertEqual(span["metadata"]["routeTemplate"], "/orders/<int:order_id>/boom")
-        self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
-        self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
-        metric_trace = payload["events"][2]["attributes"]["context"]["trace"]
-        self.assertEqual(metric_trace["traceId"], span["traceId"])
-        self.assertEqual(metric_trace["spanId"], span["spanId"])
+        recorded_trace = {"traceId": span["traceId"], "spanId": span["spanId"], "sampled": True}
+        issue_trace = {key: issue["metadata"][key] for key in recorded_trace}
+        self.assertEqual(issue_trace, recorded_trace)
+        self.assertEqual(payload["events"][2]["attributes"]["context"]["trace"], recorded_trace)
         for private_value in ("/orders/42", "broken order 42", "debug"):
             self.assertNotIn(private_value, json.dumps(payload))
 

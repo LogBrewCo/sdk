@@ -928,6 +928,15 @@ class LogBrewSdkTests(unittest.TestCase):
         self.assertGreaterEqual(metadata.items(), trace.metadata().items())
         self.assertEqual(attributes["context"]["trace"], trace.metadata())
 
+    def test_local_root_trace_is_sampled_like_the_span_it_records(self) -> None:
+        """Mark a new local trace sampled, because the SDK records every span it starts."""
+        trace = create_logbrew_trace_context(span_id="b7ad6b7169203331")
+
+        self.assertEqual(
+            trace.metadata(),
+            {"traceId": trace.trace_id, "spanId": "b7ad6b7169203331", "sampled": True},
+        )
+
     def test_trace_metadata_returns_empty_without_active_trace(self) -> None:
         self.assertEqual(trace_metadata(), {})
 
