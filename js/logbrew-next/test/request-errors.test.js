@@ -807,8 +807,8 @@ test("Route Handler redirect and permanentRedirect are request spans with the re
     }
 
     for (const [digest, status] of [
-      ["NEXT_REDIRECT;replace;/account?invite=secret-invite-value;307;", 307],
-      ["NEXT_REDIRECT;replace;https://example.com/a;b?c=secret-invite-value;308;", 308],
+      ["NEXT_REDIRECT;replace;/account?invite=invite-query-value;307;", 307],
+      ["NEXT_REDIRECT;replace;https://example.com/a;b?c=invite-query-value;308;", 308],
       ["NEXT_REDIRECT;push;/account;303;", 303]
     ]) {
       for (const options of [{}, { captureClientErrors: true }]) {
@@ -817,7 +817,7 @@ test("Route Handler redirect and permanentRedirect are request spans with the re
         assert.deepEqual(events.map((event) => event.type), ["log"], digest);
         assert.equal(events[0].attributes.metadata.statusCode, status);
         assert.equal(events[0].attributes.message, "GET /api/login " + status);
-        assert.equal(body.includes("secret-invite-value"), false, "redirect destination stays out of stored data");
+        assert.equal(body.includes("invite-query-value"), false, "redirect destination stays out of stored data");
       }
     }
 
