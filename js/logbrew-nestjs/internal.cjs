@@ -24,6 +24,7 @@ const FIRST_ITEM = 0;
 const NO_STATUS_CODE = 0;
 const STATUS_CLASS_SIZE = 100;
 const SERVER_ERROR_STATUS = 500;
+const MIN_CLIENT_ERROR = 400;
 
 /**
  * @param {unknown} value
@@ -213,6 +214,15 @@ function readEnvServerApiKey() {
   return process.env["LOGBREW_SERVER_API_KEY"];
 }
 
+/**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isClientError(error) {
+  const status = readField(error, "status") ?? readField(error, "statusCode");
+  return typeof status === "number" && Number.isInteger(status) && status >= MIN_CLIENT_ERROR && status < SERVER_ERROR_STATUS;
+}
+
 module.exports = {
   createTraceparentRequestSpan,
   getRequestMethod,
@@ -221,6 +231,7 @@ module.exports = {
   getStatusCode,
   getStatusCodeText,
   getTraceparentHeader,
+  isClientError,
   readEnvApiKey,
   readEnvServerApiKey,
   readField,

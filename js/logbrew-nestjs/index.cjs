@@ -6,7 +6,7 @@ const {
   createRequestMetricEvent,
   createRequestTraceContext
 } = require("./events.cjs");
-const { readEnvApiKey, readEnvServerApiKey } = require("./internal.cjs");
+const { isClientError, readEnvApiKey, readEnvServerApiKey } = require("./internal.cjs");
 const { createNestLogger } = require("./logger.cjs");
 const {
   createLogBrewNodeClient,
@@ -266,12 +266,29 @@ async function captureRequestError(options, intercepted, error) {
 
 /**
  * @param {LogBrewNestOptions} options
- * @param {InterceptedRequest} intercepted
+ * @param {TimedRequest} intercepted
+ * @returns {void}
+ */
+function captureAfterResponse(options, intercepted) {
+  if (options.captureRequests !== false || options.captureRequestMetrics === true) {
+    intercepted.response.once("close", () => {
+      void captureRequestFinish(options, intercepted);
+    });
+  }
+}
+
+/**
+ * @param {LogBrewNestOptions} options
+ * @param {TimedRequest} intercepted
  * @returns {(error: unknown) => Observable<never>}
  */
 function captureAndRethrow(options, intercepted) {
   return (error) => {
-    void captureRequestError(options, intercepted, error);
+    if (options.captureClientErrors !== true && isClientError(error)) {
+      captureAfterResponse(options, intercepted);
+    } else {
+      void captureRequestError(options, intercepted, error);
+    }
     return rxjs.throwError(() => error);
   };
 }

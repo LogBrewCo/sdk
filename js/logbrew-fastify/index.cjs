@@ -1,7 +1,7 @@
 "use strict";
 
 const { addApplicationLogCloseHook, installFastifyApplicationLogCapture } = require("./application-logs.cjs");
-const { readEnvApiKey, readEnvServerApiKey, readField } = require("./internal.cjs");
+const { isClientError, readEnvApiKey, readEnvServerApiKey, readField } = require("./internal.cjs");
 const {
   createErrorEvent,
   createRequestEvent,
@@ -319,6 +319,9 @@ function addRequestHooks(fastify, state) {
     });
   }
   fastify.addHook("onError", async (request, reply, error) => {
+    if (options.captureClientErrors !== true && isClientError(error)) {
+      return;
+    }
     enterRequestTraceContext(request);
     await captureRequestError(state, { error, reply, request });
   });

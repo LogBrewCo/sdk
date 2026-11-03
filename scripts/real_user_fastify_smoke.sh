@@ -1094,4 +1094,8 @@ run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" 
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
+mkdir -p "$app_dir/fastify-tests"
+cp "$repo_root"/js/logbrew-fastify/test/*.test.js "$app_dir/fastify-tests/"
+node --test "$app_dir"/fastify-tests/*.test.js > "$tmp_dir/fastify-tests.txt" || { cat "$tmp_dir/fastify-tests.txt" >&2; exit 1; }
+
 echo "fastify real-user smoke passed with fastify@$fastify_version and pino@$pino_version"

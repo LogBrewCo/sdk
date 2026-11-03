@@ -28,6 +28,8 @@ const FALLBACK_PATH = "/";
 const URL_BASE = "http://localhost";
 const FIRST_ITEM = 0;
 const NO_STATUS_CODE = 0;
+const MIN_CLIENT_ERROR = 400;
+const MIN_SERVER_ERROR = 500;
 const MIN_STATUS_CODE = 100;
 const MAX_STATUS_CODE = 999;
 const STATUS_CLASS_SIZE = 100;
@@ -138,6 +140,15 @@ function slugify(value) {
       .replaceAll(/[^\da-z]+/gu, "_")
       .replaceAll(/^_+|_+$/gu, "") || "event"
   );
+}
+
+/**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isClientError(error) {
+  const status = readField(error, "status") ?? readField(error, "statusCode");
+  return typeof status === "number" && Number.isInteger(status) && status >= MIN_CLIENT_ERROR && status < MIN_SERVER_ERROR;
 }
 
 /**
@@ -265,6 +276,7 @@ module.exports = {
   getStatusCode,
   getStatusCodeText,
   getTraceparentHeader,
+  isClientError,
   readEnvApiKey,
   readEnvServerApiKey,
   readField,

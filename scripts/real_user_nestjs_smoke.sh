@@ -1074,4 +1074,8 @@ run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" 
 python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
+mkdir -p "$app_dir/nestjs-tests"
+cp "$repo_root"/js/logbrew-nestjs/test/*.test.js "$app_dir/nestjs-tests/"
+node --test "$app_dir"/nestjs-tests/*.test.js > "$tmp_dir/nestjs-tests.txt" || { cat "$tmp_dir/nestjs-tests.txt" >&2; exit 1; }
+
 echo "nestjs real-user smoke passed with @nestjs/common@$nest_common_version @nestjs/core@$nest_core_version @nestjs/platform-express@$nest_platform_express_version"

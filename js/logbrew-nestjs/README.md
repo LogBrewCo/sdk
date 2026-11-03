@@ -143,6 +143,8 @@ export class AppController {
 
 The interceptor uses Nest's HTTP `ExecutionContext`, adds `request.logbrew` before the route handler runs, captures successful request completion, and captures thrown route errors with RxJS `catchError` before rethrowing them to Nest's normal exception handling path.
 
+Errors with a 4xx `status` or `statusCode`, such as `NotFoundException` or a `BadRequestException` from a validation pipe, are not issues: they describe the request, not a failure in your app. Nest still sends its normal error response, and the request span records the 4xx status once the response is sent. Set `captureClientErrors: true` to report them as issues too.
+
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK.
 
 `RecordingTransport` remains available from `@logbrew/sdk` when you want to
