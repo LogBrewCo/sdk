@@ -68,6 +68,8 @@ type LogBrewNodeOptions = Omit<CreateLogBrewNodeClientConfig, "transport"> & {
   client?: LogBrewClient | LogBrewClientFactory;
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
+  /** Report errors with a 4xx `status` or `statusCode` as issues too. Defaults to false. */
+  captureClientErrors?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (req: IncomingMessage, res: ServerResponse) => string;
