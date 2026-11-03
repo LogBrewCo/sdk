@@ -749,3 +749,44 @@ test("Route Handler setUser tags the route span and error issue of its own reque
   `);
   assert.equal(result.status, 0, result.stderr);
 });
+
+test("Route Handler notFound, forbidden, and unauthorized are request spans, not issues", () => {
+  const result = runInstalledConsumer(`
+    import assert from "node:assert/strict";
+    import { RecordingTransport } from "@logbrew/sdk";
+    import { withLogBrewRouteHandler } from "@logbrew/next";
+
+    function nextError(digest) {
+      return Object.assign(new Error(digest), { digest });
+    }
+    async function capture(error, options = {}) {
+      const transport = RecordingTransport.alwaysAccept();
+      const route = withLogBrewRouteHandler(async () => { throw error; }, {
+        serverApiKey: "local-preview-key", routeTemplate: "/api/orders/[id]", transport, ...options
+      });
+      await assert.rejects(route(new Request("https://example.com/api/orders/1")), (thrown) => thrown === error);
+      return JSON.parse(transport.lastBody()).events;
+    }
+
+    for (const [digest, status] of [
+      ["NEXT_HTTP_ERROR_FALLBACK;404", 404],
+      ["NEXT_HTTP_ERROR_FALLBACK;403", 403],
+      ["NEXT_HTTP_ERROR_FALLBACK;401", 401],
+      ["NEXT_NOT_FOUND", 404]
+    ]) {
+      const events = await capture(nextError(digest));
+      assert.deepEqual(events.map((event) => event.type), ["log"], digest);
+      assert.equal(events[0].attributes.metadata.statusCode, status);
+      assert.equal(events[0].attributes.message, "GET /api/orders/[id] " + status);
+
+      const reported = await capture(nextError(digest), { captureClientErrors: true });
+      assert.deepEqual(reported.map((event) => event.type), ["issue"], digest);
+    }
+
+    // Next.js answers other thrown errors with a 500, whatever status they carry.
+    const statusError = await capture(Object.assign(new Error("item not found"), { statusCode: 404 }));
+    assert.deepEqual(statusError.map((event) => event.type), ["issue"]);
+  `);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
