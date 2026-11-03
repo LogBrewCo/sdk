@@ -51,6 +51,9 @@ unset project_result
 export LOGBREW_SERVER_API_KEY="$(< "$HOME/.logbrew/express-service.ingest")"
 ```
 
+Events name the service after the `name` in your app's `package.json`. Set
+`LOGBREW_SERVICE_NAME` to use a different name.
+
 Start the app after registering the middleware below, then request one safe
 route that your app already owns. For example:
 
