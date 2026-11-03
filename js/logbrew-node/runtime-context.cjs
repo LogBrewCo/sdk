@@ -1,6 +1,8 @@
 "use strict";
 
+const { readFileSync } = require("node:fs");
 const { arch, release, type } = require("node:os");
+const { dirname, join } = require("node:path");
 
 /**
  * @import { TelemetryContext, TelemetryNamedVersion, TelemetryResource } from "@logbrew/sdk"
@@ -60,6 +62,39 @@ function boundedProbe(probe) {
   } catch {
     return undefined;
   }
+}
+
+/** @type {Map<string, string | undefined>} */
+const packageNames = new Map();
+
+/**
+ * @param {string} directory
+ * @returns {string | undefined}
+ */
+function readPackageName(directory) {
+  try {
+    const text = readFileSync(join(directory, "package.json"), "utf8");
+    return boundedProbe(() => {
+      /** @type {unknown} */
+      const manifest = JSON.parse(text);
+      return isRecord(manifest) ? manifest["name"] : undefined;
+    });
+  } catch {
+    const parent = dirname(directory);
+    return parent === directory ? undefined : readPackageName(parent);
+  }
+}
+
+/**
+ * The app's own package name, from the nearest package.json at or above the directory.
+ * @param {string} directory
+ * @returns {string | undefined}
+ */
+function packageName(directory) {
+  if (!packageNames.has(directory)) {
+    packageNames.set(directory, readPackageName(directory));
+  }
+  return packageNames.get(directory);
 }
 
 /**
@@ -192,6 +227,21 @@ function createNodeRuntimeContext() {
 const DEFAULT_NODE_RUNTIME_CONTEXT = createNodeRuntimeContext();
 
 /**
+ * @returns {NodeRuntimeContext}
+ */
+function defaultRuntimeContext() {
+  const name = packageName(process.cwd());
+  if (name === undefined) {
+    return DEFAULT_NODE_RUNTIME_CONTEXT;
+  }
+  return {
+    schemaVersion: SCHEMA_VERSION,
+
+    resource: { service: { name }, ...DEFAULT_NODE_RUNTIME_CONTEXT.resource }
+  };
+}
+
+/**
  * @param {UnknownRecord} context
  * @returns {boolean}
  */
@@ -205,7 +255,7 @@ function hasContextSection(context) {
  */
 function mergeRuntimeResource(explicitResource) {
   /** @type {Record<string, unknown>} */
-  const resource = { ...DEFAULT_NODE_RUNTIME_CONTEXT.resource, ...explicitResource };
+  const resource = { ...defaultRuntimeContext().resource, ...explicitResource };
   const explicitDevice = explicitResource["device"];
   if (isRecord(explicitDevice)) {
     resource["device"] = {
@@ -223,7 +273,7 @@ function mergeRuntimeResource(explicitResource) {
 function withRuntimeResource(context) {
   const explicitResource = context["resource"];
   if (explicitResource === undefined) {
-    return { ...context, resource: DEFAULT_NODE_RUNTIME_CONTEXT.resource };
+    return { ...context, resource: defaultRuntimeContext().resource };
   }
   if (!isRecord(explicitResource) || Object.keys(explicitResource).length === EMPTY) {
     return context;
@@ -242,7 +292,7 @@ function withRuntimeResource(context) {
  */
 function addNodeRuntimeContext(context) {
   if (context === undefined) {
-    return DEFAULT_NODE_RUNTIME_CONTEXT;
+    return defaultRuntimeContext();
   }
   if (!isRecord(context) || context["schemaVersion"] !== SCHEMA_VERSION || !hasContextSection(context)) {
     return context;

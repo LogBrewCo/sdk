@@ -82,29 +82,33 @@ grep -q 'captureRuntimeContext' "$tmp_dir/node-readme.md"
 
 node --input-type=module - \
   "$repo_root/fixtures/valid-batch.json" \
-  "$tmp_dir/node-valid-batch.json" <<'EOF'
+  "$tmp_dir/node-valid-batch.json" \
+  "$tmp_dir/node-example-valid-batch.json" <<'EOF'
 import { readFileSync, writeFileSync } from "node:fs";
 import { arch, release, type } from "node:os";
 
-const [sourcePath, destinationPath] = process.argv.slice(2);
-const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
-const context = {
-  schemaVersion: 1,
-  resource: {
-    runtime: { name: "node", version: process.versions.node },
-    operatingSystem: { name: type(), version: release() },
-    device: { architecture: arch() }
-  },
-  trace: {
-    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-    spanId: "b7ad6b7169203330",
-    sampled: true
-  }
+const [sourcePath, appDestinationPath, exampleDestinationPath] = process.argv.slice(2);
+const resource = {
+  runtime: { name: "node", version: process.versions.node },
+  operatingSystem: { name: type(), version: release() },
+  device: { architecture: arch() }
 };
-for (const event of payload.events) {
-  event.attributes.context = context;
+const trace = {
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  spanId: "b7ad6b7169203330",
+  sampled: true
+};
+function writeExpected(destinationPath, expectedResource) {
+  const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
+  for (const event of payload.events) {
+    event.attributes.context = { schemaVersion: 1, resource: expectedResource, trace };
+  }
+  writeFileSync(destinationPath, JSON.stringify(payload));
 }
-writeFileSync(destinationPath, JSON.stringify(payload));
+// npm init names the app "smoke-app", and a client run from the app reports it as the service.
+writeExpected(appDestinationPath, { service: { name: "smoke-app" }, ...resource });
+// The examples package.json has no name, so a run from that folder reports no service.
+writeExpected(exampleDestinationPath, resource);
 EOF
 
 app_dir="$tmp_dir/node-smoke-app"
@@ -2072,7 +2076,7 @@ run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" 
 grep -q '"events":7' "$tmp_dir/npm-helper-first-useful.stderr.json"
 npm --prefix node_modules/@logbrew/node/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/node-valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/node-example-valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "node real-user smoke passed with $(node --version)"

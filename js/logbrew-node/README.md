@@ -23,6 +23,11 @@ type/release reported by Node, and the runtime architecture. These fields help
 people and coding agents distinguish runtime- or platform-specific failures
 without extra setup.
 
+When no service is set in `context` or `LOGBREW_SERVICE_NAME`, the service
+name is the `name` field of the nearest `package.json` at or above the working
+directory, so traces, logs, and issues show your app's own name. If that file
+has no usable `name`, no service is sent.
+
 Caller context remains authoritative. Explicit runtime and operating-system
 sections replace their defaults, while explicit device fields extend and
 override the default architecture:
@@ -46,8 +51,9 @@ Any explicit `context` still passes through unchanged and remains subject to
 the shared SDK validation contract.
 
 Automatic runtime context reads only the three Node-provided values listed
-above. It does not inspect other process or system state, and it does not infer
-service, application, deployment, or framework identity from `sdkName`. Add
+above and that `package.json` name. It does not inspect other process or system
+state, and it does not infer service, application, deployment, or framework
+identity from `sdkName`. Add
 those fields explicitly when they are stable and privacy-safe for your
 application.
 

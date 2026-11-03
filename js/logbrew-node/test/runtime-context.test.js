@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { arch, release, type } from "node:os";
-import test from "node:test";
+import { arch, release, tmpdir, type } from "node:os";
+import { join } from "node:path";
+import test, { after, before } from "node:test";
 
 import { RecordingTransport } from "@logbrew/sdk";
 import nodeSdk, { createLogBrewNodeClient } from "../index.js";
 
 const FIXED_TIMESTAMP = "2026-08-02T10:00:00Z";
 const require = createRequire(import.meta.url);
+const startDirectory = process.cwd();
+const scratchDirectory = mkdtempSync(join(tmpdir(), "logbrew-node-context-"));
+
+before(() => { process.chdir(scratchDirectory); });
+after(() => {
+  process.chdir(startDirectory);
+  rmSync(scratchDirectory, { recursive: true, force: true });
+});
 
 async function capturedAttributes(createClient, config = {}) {
   const client = createClient({
@@ -249,4 +259,51 @@ test("blank, oversized, or control-character variables are ignored", async () =>
   }, () => capturedAttributes(createLogBrewNodeClient));
 
   assert.deepEqual(attributes.context, expectedDefaultContext());
+});
+
+async function inApp(packageJson, callback) {
+  const appDirectory = mkdtempSync(join(scratchDirectory, "app-"));
+  writeFileSync(join(appDirectory, "package.json"), packageJson);
+  const workingDirectory = join(appDirectory, "src");
+  mkdirSync(workingDirectory);
+  process.chdir(workingDirectory);
+  try {
+    return await withLogBrewEnvironment({}, callback);
+  } finally {
+    process.chdir(scratchDirectory);
+  }
+}
+
+test("the nearest package.json name becomes the service when none is configured", async () => {
+  const attributes = await inApp(JSON.stringify({ name: "todos-api" }), () => capturedAttributes(createLogBrewNodeClient));
+
+  const disabled = await inApp(JSON.stringify({ name: "todos-api" }), () => capturedAttributes(createLogBrewNodeClient, {
+    captureRuntimeContext: false
+  }));
+
+  assert.deepEqual(attributes.context, {
+    schemaVersion: 1,
+    resource: { service: { name: "todos-api" }, ...expectedDefaultContext().resource }
+  });
+  assert.equal(disabled.context, undefined);
+});
+
+test("LOGBREW_SERVICE_NAME and explicit context win over the package.json name", async () => {
+  const fromEnvironment = await inApp(JSON.stringify({ name: "todos-api" }), () => withLogBrewEnvironment(
+    { LOGBREW_SERVICE_NAME: "checkout-api" },
+    () => capturedAttributes(createLogBrewNodeClient)
+  ));
+  const explicit = await inApp(JSON.stringify({ name: "todos-api" }), () => capturedAttributes(createLogBrewNodeClient, {
+    context: { schemaVersion: 1, resource: { service: { name: "checkout-api" } } }
+  }));
+
+  assert.deepEqual(fromEnvironment.context.resource.service, { name: "checkout-api" });
+  assert.deepEqual(explicit.context.resource.service, { name: "checkout-api" });
+});
+
+test("a package.json without a usable name leaves the service unset", async () => {
+  for (const packageJson of [JSON.stringify({ private: true }), JSON.stringify({ name: "x".repeat(257) }), "{"]) {
+    const attributes = await inApp(packageJson, () => capturedAttributes(createLogBrewNodeClient));
+    assert.deepEqual(attributes.context, expectedDefaultContext());
+  }
 });
