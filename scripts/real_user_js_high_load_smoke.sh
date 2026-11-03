@@ -93,7 +93,7 @@ import { createLogBrewNodeClient, createNodeFetchTransport } from "@logbrew/node
 
 const highVolumeLogs = 1500;
 const maxQueueSize = 1000;
-const maxQueueBytes = 512 * 1024;
+const maxQueueBytes = 1024 * 1024;
 const maxBatchEvents = 100;
 const maxBatchBytes = 16 * 1024;
 const serverApiKey = "LOGBREW_SERVER_API_KEY";
