@@ -55,7 +55,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((project["name"], project["version"]), expected)
 
         rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
-        self.assertEqual(rust["package"]["version"], "0.2.0")
+        self.assertEqual(rust["package"]["version"], "0.2.1")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{CATALOG["rubygems"]}"', ruby_version)
         self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.15")
@@ -239,7 +239,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
     def test_release_catalog_matches_the_affected_version_matrix(self) -> None:
-        self.assertEqual(CATALOG["rust"], "0.2.0")
+        self.assertEqual(CATALOG["rust"], "0.2.1")
         self.assertEqual(CATALOG["rubygems"], "0.1.18")
         self.assertEqual(CATALOG["packagist"], "0.1.23")
         self.assertEqual(
