@@ -125,6 +125,8 @@ type LogBrewNestOptions = CreateLogBrewNestClientConfig & NodeFetchTransportConf
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;
+  /** Report errors with a 4xx `status` or `statusCode` as issues too. Defaults to false. */
+  captureClientErrors?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (request: Request, response: Response) => string;

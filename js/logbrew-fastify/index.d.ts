@@ -106,6 +106,8 @@ type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & NodeFetchTranspo
   ) => void | Promise<void>;
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;
+  /** Report errors with a 4xx `status` or `statusCode` as issues too. Defaults to false. */
+  captureClientErrors?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;

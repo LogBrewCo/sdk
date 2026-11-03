@@ -939,6 +939,52 @@
     },
     {
       "files": [
+        "logbrew-nestjs/test/*.test.js"
+      ],
+      "rules": {
+        "eslint/class-methods-use-this": [
+          "error",
+          {
+            "exceptMethods": [
+              "broken",
+              "item",
+              "missing"
+            ]
+          }
+        ],
+        "eslint/max-classes-per-file": [
+          "error",
+          4
+        ],
+        "eslint/new-cap": [
+          "error",
+          {
+            "capIsNewExceptions": [
+              "Controller",
+              "Get",
+              "Module",
+              "Param"
+            ]
+          }
+        ],
+        "import/no-unassigned-import": [
+          "error",
+          {
+            "allow": [
+              "reflect-metadata"
+            ]
+          }
+        ],
+        "typescript/no-extraneous-class": [
+          "error",
+          {
+            "allowEmpty": true
+          }
+        ]
+      }
+    },
+    {
+      "files": [
         "logbrew-express/test/support.js"
       ],
       "rules": {

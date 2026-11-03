@@ -226,6 +226,8 @@ app.setErrorHandler((error, _request, reply) => {
 
 The plugin uses Fastify's `onRequest`, `preHandler`, `onResponse`, and `onError` hooks. `onResponse` runs after the response has been sent, which makes it a good place to flush request telemetry without changing the response body; `onError` queues thrown route errors before your normal error response handler finishes the request. When request capture or request metrics are enabled, the completed error response and its issue are delivered together once from `onResponse`. When both are disabled, `onError` delivers the issue directly. A failing request with a valid `traceparent` includes trace correlation metadata without echoing the raw propagation header.
 
+Errors with a 4xx `status` or `statusCode`, such as a thrown 404 or a failed schema validation, are not issues: they describe the request, not a failure in your app. Fastify still sends its normal error response, and the request span keeps its 4xx status. Unknown routes never reach `onError`, so they stay request spans too. Set `captureClientErrors: true` to report 4xx errors as issues.
+
 ## Example Source
 
 The package includes example source for the request plugin, `onResponse` flushing, `onError` capture, and app-owned error responses. The packaged examples use an explicit `RecordingTransport` so they can run offline and print serialized event batches without sending them. Use the default network-delivery snippets above as the starting point for wiring LogBrew into your Fastify application.
