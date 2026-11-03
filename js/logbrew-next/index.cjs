@@ -94,11 +94,11 @@ function withLogBrewRouteHandler(handler, options = {}) {
         await captureRouteResponse(options, { request, response, context, client, owned, transport, startedAt, trace });
         return response;
       } catch (error) {
-        const clientErrorStatus = options.captureClientErrors === true ? undefined : nextClientErrorStatus(error);
-        if (clientErrorStatus === undefined) {
+        const nextStatus = nextResponseStatus(error, options);
+        if (nextStatus === undefined) {
           await recordRouteError(options, error, { request, context, client, owned, transport, trace });
         } else {
-          const response = new Response(null, { status: clientErrorStatus });
+          const response = new Response(null, { status: nextStatus });
           await captureRouteResponse(options, { request, response, context, client, owned, transport, startedAt, trace });
         }
         throw error;
@@ -291,14 +291,22 @@ function createRouteHelpers(client, transport, trace, request) {
   };
 }
 
-// notFound(), forbidden(), and unauthorized() throw these digests, and Next.js answers with that 4xx.
-function nextClientErrorStatus(error) {
-  const digest = error?.digest;
+// Next.js answers these thrown digests itself: redirect() and permanentRedirect() with a 3xx, and
+// notFound(), forbidden(), and unauthorized() with a 4xx. The redirect destination is never read.
+function nextResponseStatus(error, { captureClientErrors }) {
+  const digest = typeof error?.digest === "string" ? error.digest : "";
+  const redirect = /^NEXT_REDIRECT;(?:push|replace);.*;(30[378]);$/su.exec(digest);
+  if (redirect) {
+    return Number(redirect[1]);
+  }
+  if (captureClientErrors === true) {
+    return undefined;
+  }
   if (digest === "NEXT_NOT_FOUND") {
     return 404;
   }
-  const match = typeof digest === "string" ? /^NEXT_HTTP_ERROR_FALLBACK;(4\d\d)$/u.exec(digest) : null;
-  return match ? Number(match[1]) : undefined;
+  const clientError = /^NEXT_HTTP_ERROR_FALLBACK;(4\d\d)$/u.exec(digest);
+  return clientError ? Number(clientError[1]) : undefined;
 }
 
 function ensureResponse(response) {
