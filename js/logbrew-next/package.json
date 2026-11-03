@@ -93,7 +93,7 @@
     "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "peerDependencies": {
-    "@logbrew/node": "^0.1.2",
+    "@logbrew/node": "^0.1.24",
     "@logbrew/sdk": "^0.1.32",
     "next": ">=15",
     "react": ">=18",

@@ -94,6 +94,40 @@ test("transport: null keeps the browser client manual, and LOGBREW variables win
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("server clients and request-error issues name the service after the app's package.json", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import { writeFileSync } from "node:fs";
+    import { RecordingTransport } from "@logbrew/sdk";
+    import { createLogBrewNextClient, createLogBrewNextRequestErrorHandler } from "@logbrew/next";
+
+    writeFileSync("package.json", JSON.stringify({ name: "storefront-web" }));
+    function service(client) {
+      client.log("evt_log", "2026-06-02T10:00:00Z", { message: "ready", level: "info" });
+      return JSON.parse(client.previewJson()).events[0].attributes.context?.resource?.service;
+    }
+
+    assert.deepEqual(service(createLogBrewNextClient({ serverApiKey: "LOGBREW_SERVER_API_KEY" })), { name: "storefront-web" });
+    assert.deepEqual(service(createLogBrewNextClient({
+      serverApiKey: "LOGBREW_SERVER_API_KEY",
+      context: { schemaVersion: 1, resource: { service: { name: "checkout-web" } } }
+    })), { name: "checkout-web" });
+    process.env.LOGBREW_SERVICE_NAME = "storefront";
+    assert.deepEqual(service(createLogBrewNextClient({ serverApiKey: "LOGBREW_SERVER_API_KEY" })), { name: "storefront" });
+    delete process.env.LOGBREW_SERVICE_NAME;
+
+    const transport = RecordingTransport.alwaysAccept();
+    await createLogBrewNextRequestErrorHandler({ serverApiKey: "LOGBREW_SERVER_API_KEY", transport })(
+      new Error("render failed"),
+      { path: "/orders/1", method: "GET", headers: {} },
+      { routerKind: "App Router", routePath: "/orders/[id]", routeType: "render" }
+    );
+    const issue = JSON.parse(transport.lastBody()).events[0];
+    assert.deepEqual(issue.attributes.context.resource.service, { name: "storefront-web" });
+  `);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test("server clients read release and environment from LOGBREW and Vercel variables", () => {
   const result = runClientConsumer(`
     import assert from "node:assert/strict";

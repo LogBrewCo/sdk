@@ -149,7 +149,10 @@ sends the same issue with `fetch` and loads no Node.js modules.
 Server and Edge issues carry the release and environment from
 `LOGBREW_RELEASE` and `LOGBREW_ENVIRONMENT`, or from Vercel's
 `VERCEL_GIT_COMMIT_SHA` and `VERCEL_ENV` when the LogBrew variables are not
-set. `LOGBREW_SERVICE_NAME` sets the service. Explicit `context` fields win.
+set. `LOGBREW_SERVICE_NAME` sets the service. Without it, server issues and
+Route Handler events use the `name` in your app's `package.json`. Edge and
+browser code cannot read that file, so set `LOGBREW_SERVICE_NAME` or pass
+`context` there. Explicit `context` fields win.
 
 By default, the issue includes the error message, exception type, structured
 stack frames, Next.js error digest, method, stable route file path, router kind,

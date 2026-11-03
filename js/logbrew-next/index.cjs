@@ -5,7 +5,7 @@ const {
   createIssueAttributesFromError,
   parseTraceparent
 } = require("@logbrew/sdk");
-const { createNodeFetchTransport } = require("@logbrew/node");
+const { addLogBrewPackageService, createNodeFetchTransport } = require("@logbrew/node");
 const {
   createNextRequestErrorEvent,
   getTraceparentHeader,
@@ -33,7 +33,7 @@ function createLogBrewNextClient({
       "createLogBrewNextClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  const deploymentContext = nextDeploymentContext(context);
+  const deploymentContext = addLogBrewPackageService(nextDeploymentContext(context));
   return LogBrewClient.create({ apiKey: authKey, context: deploymentContext, sdkName, sdkVersion, maxRetries });
 }
 

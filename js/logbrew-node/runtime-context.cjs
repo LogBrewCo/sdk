@@ -242,6 +242,17 @@ function defaultRuntimeContext() {
 }
 
 /**
+ * Names the service after the app's package.json when the context names none.
+ * @template Context
+ * @param {Context} context
+ * @returns {Context | TelemetryContext}
+ */
+function addPackageServiceContext(context) {
+  const name = packageName(process.cwd());
+  return name === undefined ? context : withEnvironmentResource(context, { service: { name } });
+}
+
+/**
  * @param {UnknownRecord} context
  * @returns {boolean}
  */
@@ -300,4 +311,4 @@ function addNodeRuntimeContext(context) {
   return withRuntimeResource(context);
 }
 
-module.exports = { addEnvironmentResourceContext, addNodeRuntimeContext };
+module.exports = { addEnvironmentResourceContext, addNodeRuntimeContext, addPackageServiceContext };

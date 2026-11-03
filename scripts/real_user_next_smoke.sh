@@ -351,9 +351,21 @@ grep -q '"ok":true' "$tmp_dir/instrumentation-check.json"
 grep -q 'POST /app/orders/\[orderId\]/page failed' "$tmp_dir/instrumentation-check.json"
 grep -q '"routeType":"render"' "$tmp_dir/instrumentation-check.json"
 
+# npm init names the app "next-smoke-app", and server clients run from the app report it as the service.
+python3 - "$repo_root/fixtures/valid-batch.json" "$tmp_dir/next-app-valid-batch.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+for event in payload["events"]:
+    event["attributes"]["context"] = {"schemaVersion": 1, "resource": {"service": {"name": "next-smoke-app"}}}
+Path(sys.argv[2]).write_text(json.dumps(payload))
+PY
+
 node invoke-route.mjs > "$tmp_dir/next-route.stdout.json" 2> "$tmp_dir/next-route.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/next-route.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/next-route.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/next-app-valid-batch.json" "$tmp_dir/next-route.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/next-route.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/next-route.stderr.json"
 grep -q '"events":6' "$tmp_dir/next-route.stderr.json"
@@ -1193,11 +1205,11 @@ grep -q 'request-errors -> node node_modules/@logbrew/next/examples/index.mjs re
 grep -q 'real-user-smoke -> node node_modules/@logbrew/next/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/next/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/next-app-valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"attempts":1' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/next/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-default.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$tmp_dir/next-app-valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 node node_modules/@logbrew/next/examples/index.mjs request-errors > "$tmp_dir/example-request-errors.stdout.json" 2> "$tmp_dir/example-request-errors.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-request-errors.stdout.json" >/dev/null

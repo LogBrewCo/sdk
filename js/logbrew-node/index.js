@@ -2,6 +2,7 @@ import nodeSdk from "./index.cjs";
 
 export const {
   addLogBrewBreadcrumb,
+  addLogBrewPackageService,
   axiosRequestWithLogBrewSpan,
   cacheOperationWithLogBrewSpan,
   captureHttpError,
