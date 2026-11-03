@@ -171,6 +171,8 @@ If the same Route Handler also uses `withLogBrewRouteHandler`, set
 single issue owner. The wrapper can continue to capture successful requests,
 metrics, and trace context.
 
+`notFound()`, `forbidden()`, and `unauthorized()` inside a wrapped Route Handler are not issues: they describe the request, not a failure in your app. Next.js still sends its 404, 403, or 401 response, and the wrapper records the request with that status. Other thrown errors stay issues even when they carry a 4xx `status`, because Next.js answers them with a 500. Set `captureClientErrors: true` to report those three as issues too.
+
 ## App Router Route Handler
 
 ```js

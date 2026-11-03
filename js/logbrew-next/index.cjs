@@ -91,10 +91,16 @@ function withLogBrewRouteHandler(handler, options = {}) {
       try {
         const response = await handler(request, context, helpers);
         ensureResponse(response);
-        await captureRouteSuccess(options, { request, response, context, client, owned, transport, startedAt, trace });
+        await captureRouteResponse(options, { request, response, context, client, owned, transport, startedAt, trace });
         return response;
       } catch (error) {
-        await recordRouteError(options, error, { request, context, client, owned, transport, trace });
+        const clientErrorStatus = options.captureClientErrors === true ? undefined : nextClientErrorStatus(error);
+        if (clientErrorStatus === undefined) {
+          await recordRouteError(options, error, { request, context, client, owned, transport, trace });
+        } else {
+          const response = new Response(null, { status: clientErrorStatus });
+          await captureRouteResponse(options, { request, response, context, client, owned, transport, startedAt, trace });
+        }
         throw error;
       }
     });
@@ -285,6 +291,16 @@ function createRouteHelpers(client, transport, trace, request) {
   };
 }
 
+// notFound(), forbidden(), and unauthorized() throw these digests, and Next.js answers with that 4xx.
+function nextClientErrorStatus(error) {
+  const digest = error?.digest;
+  if (digest === "NEXT_NOT_FOUND") {
+    return 404;
+  }
+  const match = typeof digest === "string" ? /^NEXT_HTTP_ERROR_FALLBACK;(4\d\d)$/u.exec(digest) : null;
+  return match ? Number(match[1]) : undefined;
+}
+
 function ensureResponse(response) {
   if (!(response instanceof Response)) {
     throw new SdkError("route_handler_error", "Next.js route handler must return a Response");
@@ -307,7 +323,7 @@ async function notifyFailure(options, error, context) {
   }
 }
 
-async function captureRouteSuccess(options, runtime) {
+async function captureRouteResponse(options, runtime) {
   const { request, response, context, client, startedAt, trace } = runtime;
   try {
     const durationMs = (options.captureRequests !== false || options.captureRequestMetrics === true)
