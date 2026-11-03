@@ -180,7 +180,7 @@ export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewN
   captureRequests?: boolean;
   captureRequestMetrics?: boolean;
   captureErrors?: boolean;
-  /** Report `notFound()`, `forbidden()`, and `unauthorized()` as issues too. Defaults to false. */
+  /** Report `notFound()`, `forbidden()`, and `unauthorized()` as issues too. Defaults to false. `redirect()` is never an issue. */
   captureClientErrors?: boolean;
   /** Include raw stack text in issue metadata. Structured frames are always captured. Defaults to false. */
   includeErrorStack?: boolean;

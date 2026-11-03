@@ -790,3 +790,43 @@ test("Route Handler notFound, forbidden, and unauthorized are request spans, not
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
+
+test("Route Handler redirect and permanentRedirect are request spans with the redirect status, not issues", () => {
+  const result = runInstalledConsumer(`
+    import assert from "node:assert/strict";
+    import { RecordingTransport } from "@logbrew/sdk";
+    import { withLogBrewRouteHandler } from "@logbrew/next";
+
+    async function capture(error, options = {}) {
+      const transport = RecordingTransport.alwaysAccept();
+      const route = withLogBrewRouteHandler(async () => { throw error; }, {
+        serverApiKey: "local-preview-key", routeTemplate: "/api/login", transport, ...options
+      });
+      await assert.rejects(route(new Request("https://example.com/api/login")), (thrown) => thrown === error);
+      return transport.lastBody();
+    }
+
+    for (const [digest, status] of [
+      ["NEXT_REDIRECT;replace;/account?invite=secret-invite-value;307;", 307],
+      ["NEXT_REDIRECT;replace;https://example.com/a;b?c=secret-invite-value;308;", 308],
+      ["NEXT_REDIRECT;push;/account;303;", 303]
+    ]) {
+      for (const options of [{}, { captureClientErrors: true }]) {
+        const body = await capture(Object.assign(new Error("NEXT_REDIRECT"), { digest }), options);
+        const events = JSON.parse(body).events;
+        assert.deepEqual(events.map((event) => event.type), ["log"], digest);
+        assert.equal(events[0].attributes.metadata.statusCode, status);
+        assert.equal(events[0].attributes.message, "GET /api/login " + status);
+        assert.equal(body.includes("secret-invite-value"), false, "redirect destination stays out of stored data");
+      }
+    }
+
+    // Next.js answers a digest it cannot parse as a redirect with a 500.
+    for (const digest of ["NEXT_REDIRECT;replace;/account;302;", "NEXT_REDIRECT;other;/account;307;", "NEXT_REDIRECT"]) {
+      const events = JSON.parse(await capture(Object.assign(new Error("NEXT_REDIRECT"), { digest }))).events;
+      assert.deepEqual(events.map((event) => event.type), ["issue"], digest);
+    }
+  `);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});

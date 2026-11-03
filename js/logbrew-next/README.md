@@ -173,6 +173,8 @@ metrics, and trace context.
 
 `notFound()`, `forbidden()`, and `unauthorized()` inside a wrapped Route Handler are not issues: they describe the request, not a failure in your app. Next.js still sends its 404, 403, or 401 response, and the wrapper records the request with that status. Other thrown errors stay issues even when they carry a 4xx `status`, because Next.js answers them with a 500. Set `captureClientErrors: true` to report those three as issues too.
 
+`redirect()` and `permanentRedirect()` inside a wrapped Route Handler are not issues either. Next.js still sends its 307 or 308 response, and the wrapper records the request with that status. The wrapper does not record the redirect destination. `captureClientErrors` does not change this.
+
 ## App Router Route Handler
 
 ```js

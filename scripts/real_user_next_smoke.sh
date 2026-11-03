@@ -609,6 +609,27 @@ grep -q 'http.server.duration' "$tmp_dir/capture-check.stderr.json"
 grep -q '/api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
 grep -q '"GET / 200"' "$tmp_dir/capture-check.stderr.json"
 
+cat > redirect-check.mjs <<'EOF'
+import assert from "node:assert/strict";
+import { permanentRedirect, redirect } from "next/navigation.js";
+import { RecordingTransport } from "@logbrew/sdk";
+import { withLogBrewRouteHandler } from "@logbrew/next";
+
+for (const [navigate, status] of [[redirect, 307], [permanentRedirect, 308]]) {
+  const transport = RecordingTransport.alwaysAccept();
+  const route = withLogBrewRouteHandler(() => navigate("/account?invite=redirect-query-value"), {
+    serverApiKey: "LOGBREW_SERVER_API_KEY",
+    routeTemplate: "/api/login",
+    transport
+  });
+  await assert.rejects(route(new Request("https://example.com/api/login")), (error) => error.digest.startsWith("NEXT_REDIRECT;"));
+  const body = transport.lastBody();
+  assert.deepEqual(JSON.parse(body).events.map((event) => [event.type, event.attributes.metadata.statusCode]), [["log", status]], body);
+  assert.equal(body.includes("redirect-query-value"), false, body);
+}
+EOF
+node redirect-check.mjs
+
 cat > default-delivery.mjs <<'EOF'
 import { createServer } from "node:http";
 import { withLogBrewRouteHandler } from "@logbrew/next";
