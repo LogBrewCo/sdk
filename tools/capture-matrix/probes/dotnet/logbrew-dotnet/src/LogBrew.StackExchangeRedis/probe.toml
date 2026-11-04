@@ -1,0 +1,7 @@
+family = "dotnet"
+method = "StackExchange.Redis against a local redis-server started by the probe, with TraceLogBrewCommand and TraceLogBrewCommandAsync, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; under an incoming traceparent, a SET and GET that succeed and an INCR on a text value that the server rejects"
+run = ["dotnet", "run", "--configuration", "Release"]
+inputs = ["dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis", "dotnet/logbrew-dotnet/src/LogBrew"]
+
+[not_applicable]
+session = "a server unit of work has no client session"

@@ -1,0 +1,3 @@
+family = "c"
+method = "C program linked against the SDK's static library and libcurl HTTP transport, with client resource context, a telemetry scope for session and user, a breadcrumb, and two requests that continue an incoming W3C traceparent; each logs and records a span and a metric, and the declined one captures an issue with a frame from logbrew_issue_frame_from_location; the core has no framework hooks or crash handler, so its documented API is the capture path"
+run = ["bash", "-c", "cc -std=c99 -Wall -Wextra -Wpedantic -Werror -I\"$LOGBREW_CAPTURE_WORK/include\" probe.c \"$LOGBREW_CAPTURE_WORK/lib/liblogbrew.a\" $(curl-config --libs) -o probe && ./probe"]

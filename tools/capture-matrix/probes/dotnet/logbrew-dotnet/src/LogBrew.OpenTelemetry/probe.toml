@@ -1,0 +1,7 @@
+family = "dotnet"
+method = "OpenTelemetry TracerProvider with an app ActivitySource and the built-in System.Net.Http source, AddLogBrew processor with service context, the user context active, a LogBrewClient with automatic HttpTransport delivery, deployment context, and the ILogger provider; one server Activity continued from an incoming traceparent that calls a local HttpListener, and one whose outbound call throws and is recorded with Activity.AddException"
+run = ["dotnet", "run", "--configuration", "Release"]
+inputs = ["dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry", "dotnet/logbrew-dotnet/src/LogBrew"]
+
+[not_applicable]
+session = "a server request has no client session"

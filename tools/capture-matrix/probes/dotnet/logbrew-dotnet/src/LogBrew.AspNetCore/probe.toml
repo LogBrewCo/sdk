@@ -1,0 +1,7 @@
+family = "dotnet"
+method = "ASP.NET Core minimal API with builder.AddLogBrew() configured through LOGBREW_* variables, information-level ILogger capture, dependency telemetry, a request context provider for the user, and app.UseLogBrew(); one request that succeeds and calls a dependency, and one whose handler throws"
+run = ["dotnet", "run", "--configuration", "Release"]
+inputs = ["dotnet/logbrew-dotnet/src/LogBrew.AspNetCore", "dotnet/logbrew-dotnet/src/LogBrew"]
+
+[not_applicable]
+session = "a server request has no client session"

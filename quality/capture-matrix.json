@@ -15,6 +15,292 @@
     "service": "every issue, log, span, and metric carries the service"
   },
   "packages": {
+    "c/logbrew-c": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "C program linked against the SDK's static library and libcurl HTTP transport, with client resource context, a telemetry scope for session and user, a breadcrumb, and two requests that continue an incoming W3C traceparent; each logs and records a span and a metric, and the declined one captures an issue with a frame from logbrew_issue_frame_from_location; the core has no framework hooks or crash handler, so its documented API is the capture path",
+      "probe": "tools/capture-matrix/probes/c/logbrew-c",
+      "inputs": "b980ee09c5ac26ef4b73b4eba24f94841fb245b1163acf2e65485c355708341b"
+    },
+    "cpp/logbrew-cpp": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "C++ program built with CMake find_package(LogBrew) against the installed SDK and LogBrew::HttpTransport, with client resource context, a TelemetryScope for session and user, a breadcrumb, and two requests under TraceScope from an incoming W3C traceparent; each logs and records a span and a metric, and a thrown and caught exception captures an issue with a frame from issue_frame_from_location; the core has no framework hooks or crash handler, so its documented API is the capture path",
+      "probe": "tools/capture-matrix/probes/cpp/logbrew-cpp",
+      "inputs": "372ecd356b097e983214ae22ac3cc2ce1f52f90e4f5585b7bdafc49ead89e23c"
+    },
+    "dotnet/logbrew-dotnet/src/LogBrew": {
+      "share": 91.7,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [
+        "breadcrumbs"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "LogBrewClient with automatic HttpTransport delivery, service and deployment context in LogBrewClientOptions, the ILogger provider, and LogBrewHttpRequestTelemetry for one request that succeeds and one whose thrown exception becomes an issue through IssueAttributes.FromException; the core has no framework hooks, so its documented API is the capture path",
+      "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew",
+      "inputs": "1b0bc55375ecc77ff4522d1cb2c8fab695e8de0c022e8f449d628f71c330b30b"
+    },
+    "dotnet/logbrew-dotnet/src/LogBrew.AspNetCore": {
+      "share": 90.9,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "breadcrumbs"
+      ],
+      "events": {
+        "environment": 1,
+        "issue": 1,
+        "log": 27,
+        "metric": 3,
+        "release": 1,
+        "span": 8
+      },
+      "method": "ASP.NET Core minimal API with builder.AddLogBrew() configured through LOGBREW_* variables, information-level ILogger capture, dependency telemetry, a request context provider for the user, and app.UseLogBrew(); one request that succeeds and calls a dependency, and one whose handler throws",
+      "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.AspNetCore",
+      "inputs": "4c7fca6d4a10ec8c98627b98bed7a60794389cce9a6db6d97dd62ead25ae0f79"
+    },
+    "dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore": {
+      "share": 63.6,
+      "signals": {
+        "errors": "missing",
+        "stack": "missing",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server unit of work has no client session"
+      },
+      "missing": [
+        "errors",
+        "stack",
+        "breadcrumbs",
+        "metrics"
+      ],
+      "events": {
+        "log": 2,
+        "span": 5
+      },
+      "method": "EF Core 10 DbContext on an in-memory SQLite connection with AddLogBrewCommandTelemetry, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; one unit of work under an incoming traceparent that creates, saves, and queries rows, and one raw query that fails in the provider",
+      "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore",
+      "inputs": "1eb2176be5e0d46b62b85d8568cd7d3b1eef1e2cea712ce6196c490b1f56ef87"
+    },
+    "dotnet/logbrew-dotnet/src/LogBrew.Hangfire": {
+      "share": 72.7,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "missing",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a background job has no client session"
+      },
+      "missing": [
+        "breadcrumbs",
+        "metrics",
+        "user"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "span": 2
+      },
+      "method": "Hangfire BackgroundJobServer on Hangfire.InMemory storage (as the package's tests use) with UseLogBrewHangfire, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; one job that succeeds and one that throws with retries off, each logging and activating the user context inside the job",
+      "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.Hangfire",
+      "inputs": "1705fc5d687151691d7d8dd25a7a61762e4852da11d646a082593ac10a513229"
+    },
+    "dotnet/logbrew-dotnet/src/LogBrew.HttpClient": {
+      "share": 63.6,
+      "signals": {
+        "errors": "missing",
+        "stack": "missing",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server unit of work has no client session"
+      },
+      "missing": [
+        "errors",
+        "stack",
+        "breadcrumbs",
+        "metrics"
+      ],
+      "events": {
+        "log": 10,
+        "span": 2
+      },
+      "method": "IHttpClientFactory named client with AddLogBrewCorrelation, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; under an incoming traceparent, one request to a local HttpListener that succeeds and one to a closed port that throws",
+      "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.HttpClient",
+      "inputs": "83dbf8cac6b4abe5c8869112092b9bf7d93ae215ec7e66a9658b717f8c5ada1f"
+    },
+    "dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry": {
+      "share": 54.5,
+      "signals": {
+        "errors": "missing",
+        "stack": "missing",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "missing",
+        "metrics": "missing",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "errors",
+        "stack",
+        "breadcrumbs",
+        "traces",
+        "metrics"
+      ],
+      "events": {
+        "log": 2,
+        "span": 4
+      },
+      "method": "OpenTelemetry TracerProvider with an app ActivitySource and the built-in System.Net.Http source, AddLogBrew processor with service context, the user context active, a LogBrewClient with automatic HttpTransport delivery, deployment context, and the ILogger provider; one server Activity continued from an incoming traceparent that calls a local HttpListener, and one whose outbound call throws and is recorded with Activity.AddException",
+      "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry",
+      "inputs": "7f199eef44311d5627216099a5028d580f83453066bc6077aa9cf54bb6e8f291"
+    },
+    "dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis": {
+      "share": 63.6,
+      "signals": {
+        "errors": "missing",
+        "stack": "missing",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server unit of work has no client session"
+      },
+      "missing": [
+        "errors",
+        "stack",
+        "breadcrumbs",
+        "metrics"
+      ],
+      "events": {
+        "log": 2,
+        "span": 3
+      },
+      "method": "StackExchange.Redis against a local redis-server started by the probe, with TraceLogBrewCommand and TraceLogBrewCommandAsync, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; under an incoming traceparent, a SET and GET that succeed and an INCR on a text value that the server rejects",
+      "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis",
+      "inputs": "c853650fa7cf6bf556787141844b5df1a3bcd3b290f6ddb9496e9e66b5961d23"
+    },
     "go/logbrew": {
       "share": 81.8,
       "signals": {
@@ -790,6 +1076,34 @@
       "probe": "tools/capture-matrix/probes/kotlin/logbrew-kotlin-okhttp",
       "inputs": "927e7a3c2faa3bda7bef1a74823ae6e743b1bd4ea17c192ad9da8748d578ffdb"
     },
+    "objc/logbrew-objc": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 1,
+        "span": 2
+      },
+      "method": "Objective-C program compiled with the SDK sources the way Install From Source shows, with client resource context, an LBWTelemetry scope for session and user, a continued W3C trace, a breadcrumb, a log, an explicit metric, and NSURLSession requests through startURLSessionSpanForRequest and captureURLSessionSpanWithID: one succeeds against a local backend and one fails to connect, and its NSError becomes an issue through LBWIssueDiagnostics; the source package has no crash engine (LogBrewCrash ships with the Swift package), so its documented API is the capture path",
+      "probe": "tools/capture-matrix/probes/objc/logbrew-objc",
+      "inputs": "bb6b88035dc9e6e3076fda3ccbbab3c5e38a3f985f5ff370bc10e2d55986a0ba"
+    },
     "php/logbrew-php": {
       "share": 90.9,
       "signals": {
@@ -1007,6 +1321,63 @@
       "method": "Axum 0.8 server with the crate's tower, tracing, and http features: TowerRequestTelemetryLayer as a route layer with error issues on, LogBrewTracingLayer with span events and error issues for logs, an app middleware that sets the user in a scoped TelemetryContext, release, environment, and service in the client context, and automatic HTTP delivery; one request that succeeds and one whose handler returns an error response that logs through tracing::error!, both with a W3C traceparent",
       "probe": "tools/capture-matrix/probes/rust/logbrew",
       "inputs": "0e015cdd516ca9ee374fbbc8162abbf729d05137e77d777c773867a79035e35f"
+    },
+    "swift/logbrew-swift": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [],
+      "events": {
+        "issue": 2,
+        "log": 2,
+        "metric": 1,
+        "span": 2
+      },
+      "method": "SwiftPM app with LogBrew and LogBrewCrash: one run crashes on an out-of-range index under KSCrash capture with a correlation snapshot and breadcrumbs, the next run replays it, then LogBrewLogger, task-local session and user, a continued W3C trace, LogBrewURLSessionTracer for one request that succeeds against a local backend and one that fails to connect (its onRequestError builds the issue with IssueAttributes.fromError), a breadcrumb, an explicit metric, and HTTPTransport to the collector",
+      "probe": "tools/capture-matrix/probes/swift/logbrew-swift",
+      "inputs": "bcd6e3c541623f1ad19be0435e22986b1297640ee2fe943ba762bb222b202e92"
+    },
+    "unity/logbrew-unity": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [],
+      "events": {
+        "action": 1,
+        "issue": 1,
+        "log": 3,
+        "metric": 1,
+        "span": 4
+      },
+      "method": "No Unity editor runs here, so the package's Runtime sources compile into a .NET console player the way scripts/check_unity_package.sh tests them, with a small UnityEngine shim for Debug.Log and Application.logMessageReceived; the game wires the log callback to CaptureLogMessage, adds a breadcrumb, captures a caught exception, sends one request through UnityRequestTracker to a local HttpListener, runs a tracked coroutine, a pause, a scene load, and a frame metric under session, user, and incoming-trace context, then flushes through HttpTransport",
+      "probe": "tools/capture-matrix/probes/unity/logbrew-unity",
+      "inputs": "4c377ddd81ba6139fb6eabab752a7d776b16df1458ff04d6040cdb81b87d37d7"
     }
   }
 }

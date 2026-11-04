@@ -1,0 +1,3 @@
+family = "dotnet"
+method = "LogBrewClient with automatic HttpTransport delivery, service and deployment context in LogBrewClientOptions, the ILogger provider, and LogBrewHttpRequestTelemetry for one request that succeeds and one whose thrown exception becomes an issue through IssueAttributes.FromException; the core has no framework hooks, so its documented API is the capture path"
+run = ["dotnet", "run", "--configuration", "Release"]
