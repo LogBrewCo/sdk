@@ -1,0 +1,7 @@
+family = "go"
+method = "Asynq producer and worker against a local redis-server: EnqueueContext from a context that continues a W3C traceparent, the documented worker middleware, the core slog handler, and release, environment, and service in Config.Context; one task that succeeds and one that returns an error on its last attempt"
+run = ["sh", "-c", "go mod edit -replace=github.com/LogBrewCo/sdk/go/logbrew=\"$1/go/logbrew\" -replace=github.com/LogBrewCo/sdk/go/logbrew/asynq=\"$1/go/logbrew/asynq\" && exec go run .", "sh", "{sdk}"]
+inputs = ["go/logbrew/asynq", "go/logbrew"]
+
+[not_applicable]
+session = "a background job has no client session"

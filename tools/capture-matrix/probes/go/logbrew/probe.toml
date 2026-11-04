@@ -1,0 +1,6 @@
+family = "go"
+method = "net/http server whose ServeMux is wrapped with NewHTTPHandlerWithOptions (request metric and server error issues on), with the slog handler and release, environment, and service in Config.Context; one request that succeeds and one that panics, both with a W3C traceparent"
+run = ["sh", "-c", "go mod edit -replace=github.com/LogBrewCo/sdk/go/logbrew=\"$1/go/logbrew\" && exec go run .", "sh", "{sdk}"]
+
+[not_applicable]
+session = "a server request has no client session"

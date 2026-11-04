@@ -1,0 +1,6 @@
+family = "java"
+method = "Spring Boot 4 web app (embedded Tomcat) with the auto-registered LogBrewServletFilter and LogBrewSpringExceptionResolver, the LogBrewLogbackAppender on an SLF4J logger, an automatic HttpTransport client with the documented service and deployment context, and a W3C traceparent; one request that succeeds and one whose controller throws"
+run = ["bash", "-c", "cp=\"$(cat {work}/classpath.txt)\" && javac --release 17 -parameters -cp \"$cp\" -d classes Probe.java && java -cp \"classes:$cp\" probe.Probe"]
+
+[not_applicable]
+session = "a server request has no client session"

@@ -1,0 +1,4 @@
+family = "python"
+method = "LogBrewClient with HttpTransport and a documented session context, LogBrewLoggingHandler on a stdlib logger, use_logbrew_trace from an incoming traceparent with set_logbrew_user, a span from span_attributes_from_trace_context, an explicit metric, and an issue from create_issue_attributes_from_exception for a raised error; the core has no framework hooks, so its documented API is the capture path"
+run = ["{work}/venv/bin/python", "-I", "probe.py"]
+inputs = ["python/logbrew_py"]

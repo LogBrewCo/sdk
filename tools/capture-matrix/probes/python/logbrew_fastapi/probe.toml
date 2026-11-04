@@ -1,0 +1,7 @@
+family = "python"
+method = "FastAPI app with init_logbrew, an HttpTransport, capture_request_metrics, the returned logging handler on the app logger, and set_logbrew_user in a dependency; one request that succeeds and one that raises, through Starlette's TestClient with the app lifespan"
+run = ["{work}/venv/bin/python", "-I", "probe.py"]
+inputs = ["python/logbrew_fastapi", "python/logbrew_py"]
+
+[not_applicable]
+session = "a server request has no client session"

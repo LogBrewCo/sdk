@@ -1,0 +1,7 @@
+family = "python"
+method = "Django 5.2 project with LogBrewDjangoMiddleware first, configure_logbrew with an HttpTransport and capture_request_metrics, LogBrewLoggingHandler on the app logger, and a later middleware that calls set_logbrew_user; one request that succeeds and one that raises, through Django's test client and WSGI handler"
+run = ["{work}/venv/bin/python", "-I", "probe.py"]
+inputs = ["python/logbrew_django", "python/logbrew_py"]
+
+[not_applicable]
+session = "a server request has no client session"
