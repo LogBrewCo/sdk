@@ -23,7 +23,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn(
-            "run-name: Publish ${{ inputs.target }} from ${{ inputs.ref }}",
+            "run-name: Publish ${{ inputs.npm_packages || inputs.target }} from ${{ inputs.ref }}",
             workflow,
         )
 
