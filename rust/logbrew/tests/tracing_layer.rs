@@ -146,13 +146,13 @@ fn tracing_layer_queues_allowed_log_fields() {
     });
 
     let events = queued_events(&client);
-    assert_event_types(&events, &["log", "log", "log", "log"]);
+    assert_event_types(&events, &["log", "log", "log"]);
     assert_eq!(
         events
             .iter()
             .map(|event| event["attributes"]["level"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["info", "info", "warning", "error"]
+        ["info", "warning", "error"]
     );
     assert_strings(
         &events[0],
@@ -184,6 +184,29 @@ fn tracing_layer_queues_allowed_log_fields() {
             "debug-value",
         ],
     );
+}
+
+#[test]
+fn tracing_layer_sends_debug_and_trace_events_only_up_to_the_chosen_level() {
+    let client = Arc::new(Mutex::new(sample_client()));
+    let layer = LogBrewTracingLayer::new(Arc::clone(&client), || "2026-06-02T10:00:00Z".to_owned())
+        .with_max_level(tracing::Level::DEBUG);
+    let subscriber = tracing_subscriber::registry().with(layer);
+
+    with_default(subscriber, || {
+        tracing::trace!(target: "hyper", "connection 127.0.0.1:57474 accepted");
+        emit_worker_logs();
+    });
+
+    let events = queued_events(&client);
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event["attributes"]["message"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["debug event", "warning event"]
+    );
+    assert_not_contains(&Value::Array(events), &["127.0.0.1"]);
 }
 
 #[test]
