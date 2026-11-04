@@ -1,0 +1,7 @@
+family = "dotnet"
+method = "IHttpClientFactory named client with AddLogBrewCorrelation, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; under an incoming traceparent, one request to a local HttpListener that succeeds and one to a closed port that throws"
+run = ["dotnet", "run", "--configuration", "Release"]
+inputs = ["dotnet/logbrew-dotnet/src/LogBrew.HttpClient", "dotnet/logbrew-dotnet/src/LogBrew"]
+
+[not_applicable]
+session = "a server unit of work has no client session"

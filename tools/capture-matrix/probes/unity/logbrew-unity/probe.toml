@@ -1,0 +1,4 @@
+family = "unity"
+method = "No Unity editor runs here, so the package's Runtime sources compile into a .NET console player the way scripts/check_unity_package.sh tests them, with a small UnityEngine shim for Debug.Log and Application.logMessageReceived; the game wires the log callback to CaptureLogMessage, adds a breadcrumb, captures a caught exception, sends one request through UnityRequestTracker to a local HttpListener, runs a tracked coroutine, a pause, a scene load, and a frame metric under session, user, and incoming-trace context, then flushes through HttpTransport"
+run = ["dotnet", "run", "--configuration", "Release"]
+parts = ["unity/logbrew-unity/Runtime"]

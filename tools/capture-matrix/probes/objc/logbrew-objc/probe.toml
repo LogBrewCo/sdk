@@ -1,0 +1,3 @@
+family = "objc"
+method = "Objective-C program compiled with the SDK sources the way Install From Source shows, with client resource context, an LBWTelemetry scope for session and user, a continued W3C trace, a breadcrumb, a log, an explicit metric, and NSURLSession requests through startURLSessionSpanForRequest and captureURLSessionSpanWithID: one succeeds against a local backend and one fails to connect, and its NSError becomes an issue through LBWIssueDiagnostics; the source package has no crash engine (LogBrewCrash ships with the Swift package), so its documented API is the capture path"
+run = ["bash", "run.sh"]
