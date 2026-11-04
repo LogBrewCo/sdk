@@ -100,16 +100,6 @@ impl<T> LogBrewTracingLayer<T> {
         self
     }
 
-    /// Convert events up to this verbosity. Defaults to `Level::INFO`, so `debug` and `trace`
-    /// events stay out of LogBrew: libraries such as hyper log connection details, including
-    /// client addresses, at those levels.
-    #[must_use]
-    #[inline]
-    pub const fn with_max_level(mut self, level: Level) -> Self {
-        self.max_level = level;
-        self
-    }
-
     /// Override the event ID prefix used before the layer's monotonic counter.
     #[must_use]
     #[inline]
@@ -129,6 +119,16 @@ impl<T> LogBrewTracingLayer<T> {
         Logger: Into<String>,
     {
         self.logger_name = Some(logger.into());
+        self
+    }
+
+    /// Convert events up to this verbosity. Defaults to `Level::INFO`, so `debug` and `trace`
+    /// events stay out of LogBrew: libraries such as hyper log connection details, including
+    /// client addresses, at those levels.
+    #[must_use]
+    #[inline]
+    pub const fn with_max_level(mut self, level: Level) -> Self {
+        self.max_level = level;
         self
     }
 
