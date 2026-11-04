@@ -364,6 +364,56 @@ test("failed shutdown restores lifecycle delivery after an in-flight exit reques
   }
 });
 
+test("a page exit sends its batch once when the exit request fails, and keeps the batch for the next flush", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const browserWindow = createBrowserWindow();
+  const bodies = [];
+  const exitRequest = deferred();
+  const failures = [];
+  const flushes = [];
+  try {
+    const context = imported.installLogBrewBrowser({
+      browserWindow,
+      captureGlobalErrors: false,
+      capturePageViews: false,
+      captureUnhandledRejections: false,
+      clientKey: CLIENT_KEY,
+      endpoint: ENDPOINT,
+      fetchImpl: async (_url, init) => {
+        bodies.push(init.body);
+        return bodies.length === 1 ? exitRequest.promise : response(202);
+      },
+      flushOnOnline: false,
+      onCaptureError(error, _context, details) {
+        failures.push({ code: error.code, reason: details.reason, retryable: error.retryable });
+      },
+      onFlush(_response, _context, details) {
+        flushes.push(details.reason);
+      }
+    });
+    queueLog(context.client, "evt_browser_exit_once_001");
+    browserWindow.dispatchEvent({ type: "pagehide" });
+    browserWindow.document.visibilityState = "hidden";
+    browserWindow.document.dispatchEvent({ type: "visibilitychange" });
+    await waitFor(() => bodies.length === 1);
+    exitRequest.reject(new TypeError("Failed to fetch"));
+    await waitFor(() => failures.length + flushes.length === 1);
+    await nextTask();
+
+    assert.equal(bodies.length, 1);
+    assert.deepEqual(failures, [{ code: "network_failure", reason: "pagehide", retryable: true }]);
+    assert.equal(context.client.pendingEvents(), 1);
+
+    await context.flush();
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[1], bodies[0]);
+    assert.equal(context.client.pendingEvents(), 0);
+    context.uninstall();
+  } finally {
+    await removeTempDir();
+  }
+});
+
 test("persistent lifecycle retries preserve exact failed bytes and clear accepted storage", async () => {
   const { imported, removeTempDir } = await importBrowserPackage();
   const browserWindow = createBrowserWindow();
@@ -480,11 +530,13 @@ function eventIds(body) {
 }
 
 function deferred() {
+  let reject;
   let resolve;
-  const promise = new Promise((resolvePromise) => {
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    reject = rejectPromise;
     resolve = resolvePromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 async function waitFor(predicate) {
