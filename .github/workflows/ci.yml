@@ -63,6 +63,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Check that changed npm packages advance their version
+        if: ${{ github.event_name == 'pull_request' }}
+        run: bash scripts/npm_release.sh check HEAD^1 && bash scripts/test-npm-release.sh
 
       - name: Check the tool matrix
         run: bash scripts/check-tool-matrix.sh && bash scripts/test-check-tool-matrix.sh

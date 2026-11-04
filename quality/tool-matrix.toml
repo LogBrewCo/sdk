@@ -363,6 +363,22 @@ replaces = "none"
 checked = 2026-10-19
 
 [[tool]]
+id = "npm-release"
+risk = "a merged change to a published npm file that never reaches npm"
+tool = "scripts/npm_release.sh and its seeded tests"
+version = "repository"
+unpinned = "repository script, versioned by commit"
+commands = ["scripts/npm_release.sh", "scripts/test-npm-release.sh"]
+runs_in = "CI Contract checks: Check that changed npm packages advance their version (pull requests); Release npm Packages workflow on main"
+config = "each package manifest: `files` minus README.md and examples, and every manifest field except version and scripts"
+conflicts = "none known"
+exceptions = "none"
+runtime = "new; record from CI runs at the next check"
+findings = "seeded: a code change and a peer range change without a new version each fail; README, example, tsconfig, and scripts changes pass; a dependent waits for its unpublished workspace peer"
+replaces = "none"
+checked = 2026-11-04
+
+[[tool]]
 id = "osv-scanner"
 risk = "a security advisory published against a locked dependency after the change that locked it merged"
 tool = "OSV-Scanner (native Go) and scripts/advisory-issue.sh"
