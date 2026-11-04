@@ -32,6 +32,7 @@ pub struct LogBrewTracingLayer<T> {
     logger_name: Option<String>,
     capture_spans: bool,
     capture_error_issues: bool,
+    max_level: Level,
     context: Option<TelemetryContext>,
 }
 
@@ -45,6 +46,7 @@ impl<T> fmt::Debug for LogBrewTracingLayer<T> {
             .field("logger_name", &self.logger_name)
             .field("capture_spans", &self.capture_spans)
             .field("capture_error_issues", &self.capture_error_issues)
+            .field("max_level", &self.max_level)
             .field("context", &self.context)
             .finish_non_exhaustive()
     }
@@ -65,6 +67,7 @@ impl<T> LogBrewTracingLayer<T> {
             logger_name: None,
             capture_spans: false,
             capture_error_issues: false,
+            max_level: Level::INFO,
             context: None,
         }
     }
@@ -94,6 +97,16 @@ impl<T> LogBrewTracingLayer<T> {
     #[inline]
     pub const fn with_error_issues(mut self) -> Self {
         self.capture_error_issues = true;
+        self
+    }
+
+    /// Convert events up to this verbosity. Defaults to `Level::INFO`, so `debug` and `trace`
+    /// events stay out of LogBrew: libraries such as hyper log connection details, including
+    /// client addresses, at those levels.
+    #[must_use]
+    #[inline]
+    pub const fn with_max_level(mut self, level: Level) -> Self {
+        self.max_level = level;
         self
     }
 
@@ -183,6 +196,9 @@ where
     #[inline]
     fn on_event(&self, event: &TracingEvent<'_>, ctx: Context<'_, S>) {
         let metadata = event.metadata();
+        if *metadata.level() > self.max_level {
+            return;
+        }
         let mut visitor = TracingLogVisitor::new(&self.allowed_fields);
         event.record(&mut visitor);
 
