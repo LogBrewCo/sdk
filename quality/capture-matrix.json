@@ -112,7 +112,7 @@
       },
       "method": "Real @aws-sdk/client-sqs SQSClient instrumented with the documented instrumentLogBrewSqsClient and withLogBrewSqsMessageProcessor, the sender inside an active Node trace with a request user, and Pino capture from @logbrew/node; no SQS service is installed, so the client talks to a local HTTP stand-in for the SQS JSON protocol; one message that succeeds and one whose processor throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-aws-sqs",
-      "inputs": "bcb103c448b6b5d51fd257edeb4bc27b9886315e9296e70fd9942f94e116fb01"
+      "inputs": "6072de854fb79ce21d41973b0f6567ce021ce61269583f188a43939afe88154d"
     },
     "js/logbrew-browser": {
       "share": 75.0,
