@@ -24,7 +24,9 @@ class CheckoutProbe < Rails::Application
 end
 CheckoutProbe.initialize!
 
-class CheckoutController < ActionController::API
+class CheckoutController < ActionController::Base
+  protect_from_forgery with: :exception
+
   around_action do |_controller, action|
     LogBrew::Telemetry.with_context(LogBrew::TelemetryContext.create.with_subject(id: "user_123", kind: "user").build) { action.call }
   end

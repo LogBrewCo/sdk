@@ -973,7 +973,7 @@
       },
       "method": "Rails 8.1 app with the gem's automatic Railtie (LOGBREW_SERVER_API_KEY, LOGBREW_ENDPOINT, LOGBREW_CAPTURE_RAILS_LOGS), an ActionController around_action that sets the user through LogBrew::Telemetry.with_context, and Rails.logger calls; one request that succeeds and one that raises, through the full Rails middleware stack with Rack::MockRequest",
       "probe": "tools/capture-matrix/probes/ruby/logbrew-ruby",
-      "inputs": "b9bb7f2f623c74274eac4fdf9e78dbebbb7f1ee9adb14f200c9a056210ad338e"
+      "inputs": "f9b1896facd39fda7e464206ddf35b315d757b802c4ba98cbd19b92ea173e2b5"
     },
     "rust/logbrew": {
       "share": 81.8,
