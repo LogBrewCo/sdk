@@ -1,5 +1,5 @@
 name: Publish Packages
-run-name: Publish ${{ inputs.target }} from ${{ inputs.ref }}
+run-name: Publish ${{ inputs.npm_packages || inputs.target }} from ${{ inputs.ref }}
 
 on:
   workflow_dispatch:
