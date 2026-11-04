@@ -1,0 +1,7 @@
+family = "js"
+method = "BullMQ 6 queue and worker on a local redis-server, with the documented queue instrumentation and wrapped processor, the producer inside an active Node trace with a request user, and BullMQ's job.log; one job that succeeds and one that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-bullmq", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a queue job has no client session"

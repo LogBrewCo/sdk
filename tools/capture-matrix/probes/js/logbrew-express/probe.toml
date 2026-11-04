@@ -1,0 +1,7 @@
+family = "js"
+method = "Express 5 app with the documented middleware, error handler, request user, and Pino capture; one request that succeeds and one that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-express", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a server request has no client session"

@@ -1,0 +1,4 @@
+family = "js"
+method = "React 19 app rendered with react-dom under happy-dom, with LogBrewProvider, the React 19 root error options, LogBrewErrorBoundary, the React Router route observer, console capture, and the @logbrew/browser fetch transport; one route that renders and one whose component throws during render"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-react", "js/logbrew-browser", "js/logbrew-js"]

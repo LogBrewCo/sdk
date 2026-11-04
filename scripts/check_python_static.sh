@@ -69,4 +69,14 @@ MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$r
   python/logbrew_django/tests \
   scripts/check_python_sources.py
 
+# The capture matrix tool reads TOML with the standard library, which needs Python 3.11.
+RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check \
+  --isolated \
+  --target-version py311 \
+  --line-length 120 \
+  --select E,F,I,UP,B,SIM,PERF,RUF,PL \
+  --ignore PLR2004,PLR0913 \
+  tools/capture-matrix/capture_matrix.py
+"$tool_python" -m mypy --strict --python-version 3.11 --cache-dir "$cache_dir/mypy" tools/capture-matrix/capture_matrix.py
+
 printf '%s\n' "python static analysis ok"

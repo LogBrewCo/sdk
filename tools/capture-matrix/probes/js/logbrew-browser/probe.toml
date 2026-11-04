@@ -1,0 +1,4 @@
+family = "js"
+method = "Browser page under happy-dom with installLogBrewBrowser and its fetch transport, the documented service, deployment, and subject context, fetch and SPA navigation instrumentation, and console capture; one API call that succeeds, one that fails, and a click handler that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-browser", "js/logbrew-js"]

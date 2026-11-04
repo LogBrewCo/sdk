@@ -1,0 +1,4 @@
+family = "js"
+method = "Vue 3 app mounted under happy-dom with createLogBrewVuePlugin, its error handler, useLogBrew, console capture, and the @logbrew/browser fetch transport; one traced API call through createTraceparentFetch and a click handler that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-vue", "js/logbrew-browser", "js/logbrew-js"]

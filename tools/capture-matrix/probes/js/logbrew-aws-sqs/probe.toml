@@ -1,0 +1,7 @@
+family = "js"
+method = "Real @aws-sdk/client-sqs SQSClient instrumented with the documented instrumentLogBrewSqsClient and withLogBrewSqsMessageProcessor, the sender inside an active Node trace with a request user, and Pino capture from @logbrew/node; no SQS service is installed, so the client talks to a local HTTP stand-in for the SQS JSON protocol; one message that succeeds and one whose processor throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-aws-sqs", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a queue message has no client session"

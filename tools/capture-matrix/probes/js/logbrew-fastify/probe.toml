@@ -1,0 +1,7 @@
+family = "js"
+method = "Fastify 5 app with the documented plugin, application-log capture through Fastify's Pino logger, request metrics, and the Node request user; one request that succeeds and one that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-fastify", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a server request has no client session"

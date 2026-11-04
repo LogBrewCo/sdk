@@ -1,0 +1,14 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Order {
+  id    Int    @id @default(autoincrement())
+  cart  String @unique
+  total Int
+}

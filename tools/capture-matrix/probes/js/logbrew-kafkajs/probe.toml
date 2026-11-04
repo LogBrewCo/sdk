@@ -1,0 +1,7 @@
+family = "js"
+method = "KafkaJS producer and consumer instrumented with the documented instrumentLogBrewKafkaJsProducer and instrumentLogBrewKafkaJsConsumer, the producer inside an active Node trace with a request user, and the KafkaJS logger; no broker is installed, so the producer and consumer are in-memory stand-ins with the KafkaJS send and run shapes, as in the package's own examples; one message that succeeds and one whose handler throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-kafkajs", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a queue message has no client session"
