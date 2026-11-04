@@ -72,19 +72,19 @@ function currentTimestamp() {
 }
 
 /**
- * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @param {{ readonly message?: string | undefined }} context
  * @returns {string}
  */
-function defaultInteractionTimingEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_interaction", `${path}_${message}`);
+function defaultInteractionTimingEventId({ message }) {
+  return createAutomaticBrowserEventId("evt_browser_interaction", message);
 }
 
 /**
- * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @param {{ readonly message?: string | undefined }} context
  * @returns {string}
  */
-function defaultInteractionToNextPaintEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_inp", `${path}_${message}`);
+function defaultInteractionToNextPaintEventId({ message }) {
+  return createAutomaticBrowserEventId("evt_browser_inp", message);
 }
 
 /**

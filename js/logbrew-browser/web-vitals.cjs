@@ -83,11 +83,11 @@ function currentTimestamp() {
 }
 
 /**
- * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @param {{ readonly message?: string | undefined }} context
  * @returns {string}
  */
-function defaultWebVitalEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_web_vital", `${path}_${message}`);
+function defaultWebVitalEventId({ message }) {
+  return createAutomaticBrowserEventId("evt_browser_web_vital", message);
 }
 
 /**

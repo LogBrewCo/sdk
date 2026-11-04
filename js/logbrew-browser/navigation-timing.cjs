@@ -86,11 +86,11 @@ function currentTimestamp() {
 }
 
 /**
- * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @param {{ readonly message?: string | undefined }} context
  * @returns {string}
  */
-function defaultNavigationTimingEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_document", `${path}_${message}`);
+function defaultNavigationTimingEventId({ message }) {
+  return createAutomaticBrowserEventId("evt_browser_document", message);
 }
 
 /**
