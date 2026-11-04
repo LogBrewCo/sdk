@@ -1,0 +1,6 @@
+family = "ruby"
+method = "Rails 8.1 app with the gem's automatic Railtie (LOGBREW_SERVER_API_KEY, LOGBREW_ENDPOINT, LOGBREW_CAPTURE_RAILS_LOGS), an ActionController around_action that sets the user through LogBrew::Telemetry.with_context, and Rails.logger calls; one request that succeeds and one that raises, through the full Rails middleware stack with Rack::MockRequest"
+run = ["{work}/bin/ruby", "probe.rb"]
+
+[not_applicable]
+session = "a server request has no client session"

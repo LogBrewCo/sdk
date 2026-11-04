@@ -1,0 +1,6 @@
+family = "rust"
+method = "Axum 0.8 server with the crate's tower, tracing, and http features: TowerRequestTelemetryLayer as a route layer with error issues on, LogBrewTracingLayer with span events and error issues for logs, an app middleware that sets the user in a scoped TelemetryContext, release, environment, and service in the client context, and automatic HTTP delivery; one request that succeeds and one whose handler returns an error response that logs through tracing::error!, both with a W3C traceparent"
+run = ["sh", "-c", "export CARGO_TARGET_DIR=\"$2/target\" && cp Cargo.probe.toml Cargo.toml && cargo add --quiet logbrew --path \"$1/rust/logbrew\" --features http,tower,tracing && exec cargo run --quiet", "sh", "{sdk}", "{work}"]
+
+[not_applicable]
+session = "a server request has no client session"

@@ -1,0 +1,3 @@
+family = "kotlin"
+method = "LogBrewAndroid client with the documented service, deployment, and subject context, a W3C trace and session restored by LogBrewCoroutines on Dispatchers.IO, HttpURLConnection request spans against a local API, Android log capture, a breadcrumb, a metric, and an issue from captureThrowable for the failed call; the core has no framework hooks, so its documented API is the capture path"
+run = ["bash", "-c", "cp=\"$(cat {work}/classpath.txt)\" && kotlinc Probe.kt -cp \"$cp\" -jvm-target 17 -include-runtime -d probe.jar 2>&1 && java -cp \"probe.jar:$cp\" ProbeKt"]

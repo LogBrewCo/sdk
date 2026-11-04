@@ -15,6 +15,172 @@
     "service": "every issue, log, span, and metric carries the service"
   },
   "packages": {
+    "go/logbrew": {
+      "share": 81.8,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "missing",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "breadcrumbs",
+        "user"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "net/http server whose ServeMux is wrapped with NewHTTPHandlerWithOptions (request metric and server error issues on), with the slog handler and release, environment, and service in Config.Context; one request that succeeds and one that panics, both with a W3C traceparent",
+      "probe": "tools/capture-matrix/probes/go/logbrew",
+      "inputs": "17e5845deb75bb3a981ca83db298bddfde8ae84d125ffa9128404efdaa647800"
+    },
+    "go/logbrew/asynq": {
+      "share": 72.7,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "missing",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a background job has no client session"
+      },
+      "missing": [
+        "breadcrumbs",
+        "metrics",
+        "user"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "span": 4
+      },
+      "method": "Asynq producer and worker against a local redis-server: EnqueueContext from a context that continues a W3C traceparent, the documented worker middleware, the core slog handler, and release, environment, and service in Config.Context; one task that succeeds and one that returns an error on its last attempt",
+      "probe": "tools/capture-matrix/probes/go/logbrew/asynq",
+      "inputs": "92d45ba0fc78a2e730d963d1b7c82e1070122a537a5e6f678aa7fe882fd2fc38"
+    },
+    "go/logbrew/gin": {
+      "share": 81.8,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "missing",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "breadcrumbs",
+        "user"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "Gin router with gin.Recovery and the documented middleware (request metrics and server error issues on), the core slog handler, and release, environment, and service in Config.Context; one request that succeeds and one that panics, both with a W3C traceparent",
+      "probe": "tools/capture-matrix/probes/go/logbrew/gin",
+      "inputs": "33853aaf768265a569d16c9b9e38f7331b713eca64860b769e84653897fe799d"
+    },
+    "go/logbrew/otel": {
+      "share": 54.5,
+      "signals": {
+        "errors": "missing",
+        "stack": "missing",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "missing",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "errors",
+        "stack",
+        "breadcrumbs",
+        "metrics",
+        "user"
+      ],
+      "events": {
+        "log": 2,
+        "span": 2
+      },
+      "method": "net/http server instrumented with the OpenTelemetry Go API (W3C propagator, server spans, RecordError on failure) and a TracerProvider whose SimpleSpanProcessor uses the documented LogBrew span exporter; logs go through the core slog handler after the documented OTel context copy; one request that succeeds and one that fails, both with a W3C traceparent",
+      "probe": "tools/capture-matrix/probes/go/logbrew/otel",
+      "inputs": "e79e5668579f1c2e1d2586abdf2c942b0d9dcea90ec13645279644f68751f725"
+    },
+    "java/logbrew-java": {
+      "share": 81.8,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "missing",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "breadcrumbs",
+        "user"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "Spring Boot 4 web app (embedded Tomcat) with the auto-registered LogBrewServletFilter and LogBrewSpringExceptionResolver, the LogBrewLogbackAppender on an SLF4J logger, an automatic HttpTransport client with the documented service and deployment context, and a W3C traceparent; one request that succeeds and one whose controller throws",
+      "probe": "tools/capture-matrix/probes/java/logbrew-java",
+      "inputs": "42702988d36e64507f4f0a84de095793d9e1fbf88002da7cfe0144034026dccc"
+    },
     "js/logbrew-amqplib": {
       "share": 63.6,
       "signals": {
@@ -563,6 +729,284 @@
       "method": "Vue 3 app mounted under happy-dom with createLogBrewVuePlugin, its error handler, useLogBrew, console capture, and the @logbrew/browser fetch transport; one traced API call through createTraceparentFetch and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-vue",
       "inputs": "83f058aa7e63f71a016fa52fee486d1a170094c2d3a2331763364ac9bcd98527"
+    },
+    "kotlin/logbrew-kotlin": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [],
+      "events": {
+        "action": 1,
+        "issue": 1,
+        "log": 2,
+        "metric": 1,
+        "span": 2
+      },
+      "method": "LogBrewAndroid client with the documented service, deployment, and subject context, a W3C trace and session restored by LogBrewCoroutines on Dispatchers.IO, HttpURLConnection request spans against a local API, Android log capture, a breadcrumb, a metric, and an issue from captureThrowable for the failed call; the core has no framework hooks, so its documented API is the capture path",
+      "probe": "tools/capture-matrix/probes/kotlin/logbrew-kotlin",
+      "inputs": "b223a5bed109a06e08dfe4b7e86aff9ae1ba8d777e6659f0e9ed3aa1484bf616"
+    },
+    "kotlin/logbrew-kotlin-okhttp": {
+      "share": 66.7,
+      "signals": {
+        "errors": "missing",
+        "stack": "missing",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [
+        "errors",
+        "stack",
+        "breadcrumbs",
+        "metrics"
+      ],
+      "events": {
+        "log": 2,
+        "span": 2
+      },
+      "method": "OkHttp 4 client with LogBrewOkHttpInterceptor, phase timings, and LogBrewOkHttpCallFactory under a W3C trace and session, on a LogBrewAndroid client with the documented service, deployment, and subject context; one call that succeeds against a local API, one that fails to connect, and Android log capture from the core for each",
+      "probe": "tools/capture-matrix/probes/kotlin/logbrew-kotlin-okhttp",
+      "inputs": "927e7a3c2faa3bda7bef1a74823ae6e743b1bd4ea17c192ad9da8748d578ffdb"
+    },
+    "php/logbrew-php": {
+      "share": 90.9,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "breadcrumbs"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 3,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "Plain PHP request handling under the PHP built-in server: per request, LogBrewHttpRequestTelemetry from the incoming traceparent, the documented client context for service, environment, and release, LogBrewTelemetry with the request user, LogBrewPsrLogger, an issue from IssueDiagnostics::fromThrowable for the thrown error, finishSpanAndMetric, and shutdown through HttpTransport; one request that succeeds and one that throws; the package's framework bridges are Symfony and Laravel, and plain PHP has no framework that catches errors, so the documented helpers are the capture path",
+      "probe": "tools/capture-matrix/probes/php/logbrew-php",
+      "inputs": "c6fa323a949e2524e88e63e4425a861f818a5e052c36ba4f8736ff028084f5f9"
+    },
+    "python/logbrew_django": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "Django 5.2 project with LogBrewDjangoMiddleware first, configure_logbrew with an HttpTransport and capture_request_metrics, LogBrewLoggingHandler on the app logger, and a later middleware that calls set_logbrew_user; one request that succeeds and one that raises, through Django's test client and WSGI handler",
+      "probe": "tools/capture-matrix/probes/python/logbrew_django",
+      "inputs": "5be4d788a23d97ce3eb961e671fee1e678b1c4c1b1c260878445acd1017bc9c9"
+    },
+    "python/logbrew_fastapi": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "FastAPI app with init_logbrew, an HttpTransport, capture_request_metrics, the returned logging handler on the app logger, and set_logbrew_user in a dependency; one request that succeeds and one that raises, through Starlette's TestClient with the app lifespan",
+      "probe": "tools/capture-matrix/probes/python/logbrew_fastapi",
+      "inputs": "9f3a4dd5ff52a5a055db431043e2a8293414ffaec96052592c6b5fcae0b601f9"
+    },
+    "python/logbrew_flask": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [],
+      "events": {
+        "issue": 1,
+        "log": 3,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "Flask 3 app with init_logbrew, an HttpTransport, capture_request_metrics, LogBrewLoggingHandler on app.logger, and set_logbrew_user in a before_request hook; one request that succeeds and one that raises, through Werkzeug's test client",
+      "probe": "tools/capture-matrix/probes/python/logbrew_flask",
+      "inputs": "c598e13e17373f61adbe805d67c43563560d4c6d166e11f3f7aacc8d456d0e0e"
+    },
+    "python/logbrew_py": {
+      "share": 100.0,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "sent",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "sent",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {},
+      "missing": [],
+      "events": {
+        "issue": 1,
+        "log": 2,
+        "metric": 1,
+        "span": 1
+      },
+      "method": "LogBrewClient with HttpTransport and a documented session context, LogBrewLoggingHandler on a stdlib logger, use_logbrew_trace from an incoming traceparent with set_logbrew_user, a span from span_attributes_from_trace_context, an explicit metric, and an issue from create_issue_attributes_from_exception for a raised error; the core has no framework hooks, so its documented API is the capture path",
+      "probe": "tools/capture-matrix/probes/python/logbrew_py",
+      "inputs": "0e02600ce17e6d5495ac2d72b2996d667d551d404bed0560c253920d6a840438"
+    },
+    "ruby/logbrew-ruby": {
+      "share": 72.7,
+      "signals": {
+        "errors": "sent",
+        "stack": "sent",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "missing",
+        "user": "missing",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "breadcrumbs",
+        "metrics",
+        "user"
+      ],
+      "events": {
+        "environment": 1,
+        "issue": 1,
+        "log": 2,
+        "release": 1,
+        "span": 2
+      },
+      "method": "Rails 8.1 app with the gem's automatic Railtie (LOGBREW_SERVER_API_KEY, LOGBREW_ENDPOINT, LOGBREW_CAPTURE_RAILS_LOGS), an ActionController around_action that sets the user through LogBrew::Telemetry.with_context, and Rails.logger calls; one request that succeeds and one that raises, through the full Rails middleware stack with Rack::MockRequest",
+      "probe": "tools/capture-matrix/probes/ruby/logbrew-ruby",
+      "inputs": "b9bb7f2f623c74274eac4fdf9e78dbebbb7f1ee9adb14f200c9a056210ad338e"
+    },
+    "rust/logbrew": {
+      "share": 81.8,
+      "signals": {
+        "errors": "sent",
+        "stack": "missing",
+        "breadcrumbs": "missing",
+        "logs": "sent",
+        "requests": "sent",
+        "traces": "sent",
+        "metrics": "sent",
+        "user": "sent",
+        "session": "n/a",
+        "release": "sent",
+        "environment": "sent",
+        "service": "sent"
+      },
+      "not_applicable": {
+        "session": "a server request has no client session"
+      },
+      "missing": [
+        "stack",
+        "breadcrumbs"
+      ],
+      "events": {
+        "issue": 1,
+        "log": 8,
+        "metric": 2,
+        "span": 2
+      },
+      "method": "Axum 0.8 server with the crate's tower, tracing, and http features: TowerRequestTelemetryLayer as a route layer with error issues on, LogBrewTracingLayer with span events and error issues for logs, an app middleware that sets the user in a scoped TelemetryContext, release, environment, and service in the client context, and automatic HTTP delivery; one request that succeeds and one whose handler returns an error response that logs through tracing::error!, both with a W3C traceparent",
+      "probe": "tools/capture-matrix/probes/rust/logbrew",
+      "inputs": "0e015cdd516ca9ee374fbbc8162abbf729d05137e77d777c773867a79035e35f"
     }
   }
 }

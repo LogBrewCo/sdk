@@ -1,0 +1,7 @@
+family = "go"
+method = "Gin router with gin.Recovery and the documented middleware (request metrics and server error issues on), the core slog handler, and release, environment, and service in Config.Context; one request that succeeds and one that panics, both with a W3C traceparent"
+run = ["sh", "-c", "go mod edit -replace=github.com/LogBrewCo/sdk/go/logbrew=\"$1/go/logbrew\" -replace=github.com/LogBrewCo/sdk/go/logbrew/gin=\"$1/go/logbrew/gin\" && exec go run .", "sh", "{sdk}"]
+inputs = ["go/logbrew/gin", "go/logbrew"]
+
+[not_applicable]
+session = "a server request has no client session"

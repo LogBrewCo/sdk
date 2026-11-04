@@ -1,0 +1,4 @@
+family = "kotlin"
+method = "OkHttp 4 client with LogBrewOkHttpInterceptor, phase timings, and LogBrewOkHttpCallFactory under a W3C trace and session, on a LogBrewAndroid client with the documented service, deployment, and subject context; one call that succeeds against a local API, one that fails to connect, and Android log capture from the core for each"
+run = ["bash", "-c", "cp=\"$(cat {work}/classpath.txt)\" && kotlinc Probe.kt -cp \"$cp\" -jvm-target 17 -include-runtime -d probe.jar 2>&1 && java -cp \"probe.jar:$cp\" ProbeKt"]
+inputs = ["kotlin/logbrew-kotlin-okhttp", "kotlin/logbrew-kotlin"]

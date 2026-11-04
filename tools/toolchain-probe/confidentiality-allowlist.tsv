@@ -223,6 +223,9 @@ go/logbrew/gin/middleware_test.go	*	line	request := httptest.NewRequest(http.Met
 scripts/real_user_go_gin_smoke.sh	*	line	"https://private.example.test/articles/private-article?token=private-query",
 scripts/real_user_go_gin_smoke.sh	*	line	httptest.NewRequest(http.MethodGet, "/panic/private-id?token=private-panic-query", nil),
 scripts/real_user_ruby_rails_smoke.sh	*	line	config.secret_key_base = "installed-rails-smoke-secret-key-base"
+tools/capture-matrix/probes/ruby/logbrew-ruby/probe.rb	*	line	config.secret_key_base = "capture-probe-secret-key-base"
+tools/capture-matrix/probes/python/logbrew_django/probe.py	*	line	SECRET_KEY="capture-probe-secret-key",
+{tools/capture-matrix/probes/kotlin/logbrew-kotlin/probe.toml,quality/capture-matrix.json}	restore	ihas	session restored by logbrewcoroutines
 
 # Support-ticket drafts redact credentials; docs and tests describe that.
 scripts/real_user_go_support_ticket_smoke.sh	*	line	"apiKey":      token,

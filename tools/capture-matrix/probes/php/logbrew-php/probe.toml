@@ -1,0 +1,6 @@
+family = "php"
+method = "Plain PHP request handling under the PHP built-in server: per request, LogBrewHttpRequestTelemetry from the incoming traceparent, the documented client context for service, environment, and release, LogBrewTelemetry with the request user, LogBrewPsrLogger, an issue from IssueDiagnostics::fromThrowable for the thrown error, finishSpanAndMetric, and shutdown through HttpTransport; one request that succeeds and one that throws; the package's framework bridges are Symfony and Laravel, and plain PHP has no framework that catches errors, so the documented helpers are the capture path"
+run = ["php", "probe.php"]
+
+[not_applicable]
+session = "a server request has no client session"

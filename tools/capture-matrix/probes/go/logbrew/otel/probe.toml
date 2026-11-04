@@ -1,0 +1,7 @@
+family = "go"
+method = "net/http server instrumented with the OpenTelemetry Go API (W3C propagator, server spans, RecordError on failure) and a TracerProvider whose SimpleSpanProcessor uses the documented LogBrew span exporter; logs go through the core slog handler after the documented OTel context copy; one request that succeeds and one that fails, both with a W3C traceparent"
+run = ["sh", "-c", "go mod edit -replace=github.com/LogBrewCo/sdk/go/logbrew=\"$1/go/logbrew\" -replace=github.com/LogBrewCo/sdk/go/logbrew/otel=\"$1/go/logbrew/otel\" && exec go run .", "sh", "{sdk}"]
+inputs = ["go/logbrew/otel", "go/logbrew"]
+
+[not_applicable]
+session = "a server request has no client session"

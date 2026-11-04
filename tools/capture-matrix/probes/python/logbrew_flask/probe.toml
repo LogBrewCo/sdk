@@ -1,0 +1,7 @@
+family = "python"
+method = "Flask 3 app with init_logbrew, an HttpTransport, capture_request_metrics, LogBrewLoggingHandler on app.logger, and set_logbrew_user in a before_request hook; one request that succeeds and one that raises, through Werkzeug's test client"
+run = ["{work}/venv/bin/python", "-I", "probe.py"]
+inputs = ["python/logbrew_flask", "python/logbrew_py"]
+
+[not_applicable]
+session = "a server request has no client session"
