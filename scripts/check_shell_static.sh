@@ -43,7 +43,7 @@ cd "$repo_root"
   --source-path=SCRIPTDIR \
   --severity=style \
   --exclude=SC1091,SC2016 \
-  scripts/*.sh
-bash -n scripts/*.sh
+  scripts/*.sh tools/capture-matrix/families/*.sh
+bash -n scripts/*.sh tools/capture-matrix/families/*.sh
 
 printf 'shell static analysis ok (ShellCheck %s)\n' "$installed_version"

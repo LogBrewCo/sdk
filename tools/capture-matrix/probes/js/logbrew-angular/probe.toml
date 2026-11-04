@@ -1,0 +1,4 @@
+family = "js"
+method = "Angular 22 standalone app bootstrapped with JIT and zoneless change detection under happy-dom, with provideLogBrew and its ErrorHandler, injectLogBrew, console capture, and the @logbrew/browser fetch transport; one traced API call through createTraceparentFetch and a click handler that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-angular", "js/logbrew-browser", "js/logbrew-js"]

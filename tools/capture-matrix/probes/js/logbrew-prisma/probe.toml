@@ -1,0 +1,7 @@
+family = "js"
+method = "Prisma 7 client on a local SQLite file through the better-sqlite3 driver adapter, instrumented with instrumentLogBrewPrismaClient inside an active Node trace with a request user and Prisma's own query logger; two queries that succeed and one unique-constraint failure"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-prisma", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a database query has no client session"

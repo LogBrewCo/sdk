@@ -1,0 +1,7 @@
+family = "js"
+method = "NestJS 12 Express app with the documented global interceptor, Nest logger, request metrics, and request user set in a guard; one request that succeeds and one that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-nestjs", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a server request has no client session"

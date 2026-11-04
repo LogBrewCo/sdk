@@ -1,0 +1,7 @@
+family = "js"
+method = "Next.js 16 App Router production build (next build, next start) with the documented instrumentation onRequestError hook, wrapped Route Handlers with request metrics and the request user, and Pino capture from @logbrew/node; one route that succeeds, one that throws, and one server component that throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-next", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a server request has no client session"

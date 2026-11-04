@@ -1,0 +1,4 @@
+family = "js"
+method = "Svelte 5 component compiled with svelte/compiler and mounted under happy-dom, with installLogBrewBrowser and its fetch transport, setLogBrewContext, console capture, and captureSvelteError in a svelte:boundary handler around a render that throws; plus the SvelteKit handle and handleError hooks called with web Request events the way SvelteKit calls them, since a real SvelteKit server needs a Vite build"
+run = ["node", "--conditions=browser", "probe.mjs"]
+inputs = ["js/logbrew-svelte", "js/logbrew-browser", "js/logbrew-js"]

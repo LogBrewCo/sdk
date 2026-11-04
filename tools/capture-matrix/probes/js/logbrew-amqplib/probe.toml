@@ -1,0 +1,7 @@
+family = "js"
+method = "amqplib publish and consume through the documented amqplibSendToQueueWithLogBrewSpan and withLogBrewAmqplibConsumer, the publisher inside an active Node trace with a request user, and Pino capture from @logbrew/node; no RabbitMQ broker is installed, so the channel is an in-memory stand-in with the amqplib sendToQueue and consume shapes, as in the package's own examples; one message that succeeds and one whose consumer throws"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-amqplib", "js/logbrew-node", "js/logbrew-js"]
+
+[not_applicable]
+session = "a queue message has no client session"

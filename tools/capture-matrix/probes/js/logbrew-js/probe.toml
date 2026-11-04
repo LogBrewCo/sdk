@@ -1,0 +1,4 @@
+family = "js"
+method = "LogBrewClient with an app-owned fetch transport, the documented telemetry context, console capture, a W3C trace, and an issue built from a thrown Error; the core has no framework hooks, so its documented API is the capture path"
+run = ["node", "probe.mjs"]
+inputs = ["js/logbrew-js"]
