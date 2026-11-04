@@ -46,7 +46,8 @@ const logger = pino({ level: "info" });
 const sqs = new SQSClient({
   region: "us-east-1",
   endpoint: `http://127.0.0.1:${sqsServer.address().port}`,
-  credentials: { accessKeyId: "local-test", secretAccessKey: "local-test" }
+  httpAuthSchemeProvider: () => [{ schemeId: "smithy.api#noAuth" }],
+  httpAuthSchemes: [{ schemeId: "smithy.api#noAuth", identityProvider: () => async () => ({}), signer: { sign: async (request) => request } }]
 });
 const sqsTracing = instrumentLogBrewSqsClient(sqs, { SendMessageCommand, SendMessageBatchCommand, ReceiveMessageCommand }, { client, queueName: "orders" });
 
