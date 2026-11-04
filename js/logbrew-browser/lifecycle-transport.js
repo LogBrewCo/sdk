@@ -1,3 +1,4 @@
+import { SdkError, TransportError } from "@logbrew/sdk";
 import { isFunction, readField } from "./values.js";
 
 /**
@@ -35,6 +36,18 @@ function markLifecycleTransport(transport, send = readField(transport, "send")) 
 }
 
 /**
+ * The browser may still deliver a keepalive request whose fetch rejected, so
+ * an exit send is the only attempt. The batch stays queued for the next flush.
+ * @param {unknown} error
+ * @returns {unknown}
+ */
+function finalExitAttempt(error) {
+  return error instanceof TransportError && error.retryable
+    ? new SdkError(error.code, error.message, { retryable: true })
+    : error;
+}
+
+/**
  * @param {Transport | undefined} transport
  * @returns {Transport | undefined}
  */
@@ -46,7 +59,11 @@ function lifecycleTransportFor(transport) {
   /** @type {Transport} */
   const lifecycleTransport = {
     async send(apiKey, body) {
-      return send.call(transport, apiKey, body);
+      try {
+        return await send.call(transport, apiKey, body);
+      } catch (error) {
+        throw finalExitAttempt(error);
+      }
     }
   };
   return Object.freeze(lifecycleTransport);
