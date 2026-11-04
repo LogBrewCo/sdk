@@ -87,7 +87,7 @@ export {
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
-const DEFAULT_SDK_VERSION = "0.1.17";
+const DEFAULT_SDK_VERSION = "0.1.18";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -1305,16 +1305,16 @@ function defaultPageViewEventId({ path }) {
   return createAutomaticBrowserEventId("evt_browser_page", path);
 }
 
-function defaultErrorEventId({ message, path, source }) {
-  return createAutomaticBrowserEventId(`evt_browser_${source}`, `${path}_${message}`);
+function defaultErrorEventId({ source }) {
+  return createAutomaticBrowserEventId("evt_browser", source);
 }
 
-function defaultActionEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_action", `${path}_${message}`);
+function defaultActionEventId({ message }) {
+  return createAutomaticBrowserEventId("evt_browser_action", message);
 }
 
-function defaultNetworkEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_network", `${path}_${message}`);
+function defaultNetworkEventId({ message }) {
+  return createAutomaticBrowserEventId("evt_browser_network", message);
 }
 
 function defaultFetch() {

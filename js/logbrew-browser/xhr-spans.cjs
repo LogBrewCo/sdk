@@ -64,11 +64,11 @@ const DECIMAL = 10;
 const NO_STATUS = 0;
 
 /**
- * @param {{ readonly message?: string | undefined, readonly path: string }} context
+ * @param {{ readonly message?: string | undefined }} context
  * @returns {string}
  */
-function defaultXhrSpanEventId({ message, path }) {
-  return createAutomaticBrowserEventId("evt_browser_xhr", `${path}_${message}`);
+function defaultXhrSpanEventId({ message }) {
+  return createAutomaticBrowserEventId("evt_browser_xhr", message);
 }
 
 /**
@@ -102,7 +102,7 @@ function createBrowserXhrSpanEvent(request, browserWindow = defaultWindow(), opt
     idFactory(context) {
       return typeof idFactory === "function"
         ? idFactory({ ...context, request, source: "xhr" })
-        : defaultXhrSpanEventId({ message: context.message, path: context.path });
+        : defaultXhrSpanEventId(context);
     },
     /**
      * @param {Readonly<Metadata>} metadata
