@@ -51,14 +51,9 @@ func writeFixtureFile(t *testing.T, root, name, content string) {
 	}
 }
 
-func TestConfidentialityRepositoryIsClean(t *testing.T) {
+// Every rule must still cover a file, so removed files take their rules along.
+func TestConfidentialityRulesMatchFiles(t *testing.T) {
 	t.Parallel()
-	var output, diagnostic bytes.Buffer
-	if code := checkConfidentiality([]string{"../.."}, &output, &diagnostic); code != exitOK ||
-		output.String() != "confidentiality scan ok\n" {
-		t.Fatalf("code %d: %s%s", code, output.String(), diagnostic.String())
-	}
-	// Every rule must still cover a file, so removed files take their rules along.
 	rules, _ := parseAllowRules(confidentialityRules)
 	files := scannedFiles("../..")
 	for _, rule := range rules {
@@ -110,6 +105,7 @@ func TestConfidentialityReportsAndAllowsLines(t *testing.T) {
 		{"brand images and skipped files", map[string]string{
 			"assets/brand/logo.svg": wordKey + "\n", "LICENSE": wordKey + "\n", "node_modules/a.js": wordKey + "\n",
 			"x.egg-info/a": wordKey + "\n", "empty.txt": "", "a.PNG": wordKey + "\n", "tools/toolchain-probe/confidentiality_scan.go": wordKey,
+			"tools/toolchain-probe/confidentiality-allowlist.tsv": wordKey,
 		}, nil},
 		{"agent guide home paths", map[string]string{
 			"AGENTS.md": "/" + "Users/name/project\n", "docs/AGENTS.override.md": "/" + "home/name/x\n",
@@ -126,8 +122,11 @@ func TestConfidentialityReportsAndAllowsLines(t *testing.T) {
 		{"line breaks and encoding", map[string]string{"a.txt": "one\r\ntwo\rthree\vfour " + wordKey + "\xff\n"},
 			[]string{"./a.txt:4:four " + wordKey}},
 	} {
-		if got := scanFixture(t, test.files, false); !slices.Equal(got, test.reports) {
-			t.Fatalf("%s: %q, want %q", test.name, got, test.reports)
+		// A Git checkout lists files with git; a plain tree walks them.
+		for _, gitRepository := range []bool{false, true} {
+			if got := scanFixture(t, test.files, gitRepository); !slices.Equal(got, test.reports) {
+				t.Fatalf("%s (Git %t): %q, want %q", test.name, gitRepository, got, test.reports)
+			}
 		}
 	}
 }
@@ -198,8 +197,14 @@ func TestAllowRuleKinds(t *testing.T) {
 func TestConfidentialityCommand(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeFixtureFile(t, root, "a.txt", wordKey+"\n")
+	writeFixtureFile(t, root, "a.txt", "ok\n")
 	var output, diagnostic bytes.Buffer
+	if code := checkConfidentiality([]string{root}, &output, &diagnostic); code != exitOK ||
+		output.String() != "confidentiality scan ok\n" || diagnostic.String() != "" {
+		t.Fatalf("clean code %d: %q %q", code, output.String(), diagnostic.String())
+	}
+	output.Reset()
+	writeFixtureFile(t, root, "a.txt", wordKey+"\n")
 	if code := checkConfidentiality([]string{root}, &output, &diagnostic); code != exitFailure ||
 		output.String() != "./a.txt:1:"+wordKey+"\n" ||
 		diagnostic.String() != "confidentiality scan found unexpected matches\n" {
