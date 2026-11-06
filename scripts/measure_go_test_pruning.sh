@@ -9,14 +9,18 @@
 #                       and statement coverage
 #   covered-blocks.txt  every covered statement block of non-test code
 #   mutants.txt         each mutant of SOURCE_FILE and its result: killed,
-#                       survived, uncovered (no test runs its line), or skipped
-#                       (it does not compile)
+#                       survived, uncovered (no test runs its line), skipped
+#                       (it does not compile), or unselected (see FOCUS_LINES)
 # A deletion is safe when covered-blocks.txt is the same and every mutant that
 # was killed before is still killed.
 #
 # Each mutant runs only the tests whose coverage includes a changed line: a test
 # that never runs a line cannot kill a mutant of that line.
-# Environment: JOBS (parallel mutants, default 4), RUNS (timed runs, default 3).
+# Environment: JOBS (parallel mutants, default 4), RUNS (timed runs, default 3),
+# FOCUS_LINES (optional file of "file line" pairs: only mutants that change one
+# of these lines run; the others are "unselected"). To check a deletion, list
+# every line that a changed or deleted test covers on either commit: a mutant
+# of any other line runs the same tests against the same code on both commits.
 set -Eeuo pipefail
 
 mutesting_version="v0.0.0-20261002081621-9ce5f731e321"
@@ -27,6 +31,10 @@ if (($# < 2)); then
 fi
 output_dir="$(mkdir -p "$1" && cd "$1" && pwd)"
 shift
+if [[ -n "${FOCUS_LINES:-}" ]]; then
+  FOCUS_LINES="$(cd "$(dirname "$FOCUS_LINES")" && pwd)/$(basename "$FOCUS_LINES")"
+  export FOCUS_LINES
+fi
 module_dir="$(cd "$(dirname "$1")" && pwd)"
 targets=()
 for source in "$@"; do
@@ -103,10 +111,16 @@ judge_mutant() {
   lines="$(diff "$file" "$mutant" | awk '/^[0-9]/ {
     match($0, /^[0-9]+(,[0-9]+)?/); split(substr($0, 1, RLENGTH), span, ",")
     for (line = span[1]; line <= (span[2] == "" ? span[1] : span[2]); line++) print line
-  }' || true)"
-  tests="$(awk -v file="$file" -v lines="$lines" 'BEGIN { n = split(lines, wanted, "\n") }
+  }' | paste -sd ' ' - || true)"
+  tests="$(awk -v file="$file" -v lines="$lines" 'BEGIN { n = split(lines, wanted, " ") }
     $1 == file { for (i = 1; i <= n; i++) if (wanted[i] >= $2 && wanted[i] <= $3) print $4 }' \
     "$WORK/blocks.tsv" | sort -u | paste -sd '|' -)"
+  if [[ -n "${FOCUS_LINES:-}" ]] && ! awk -v file="$file" -v lines="$lines" \
+    'BEGIN { n = split(lines, wanted, " "); for (i = 1; i <= n; i++) keep[wanted[i]] = 1 }
+    $1 == file && ($2 in keep) { found = 1 } END { exit !found }' "$FOCUS_LINES"; then
+    printf '%s %s unselected\n' "$file" "$digest"
+    return
+  fi
   if [[ -z "$tests" ]]; then
     printf '%s %s uncovered\n' "$file" "$digest"
     return
@@ -135,7 +149,7 @@ done | xargs -n 1 -P "$jobs" bash -c 'judge_mutant "$1"' _ | sort >"$output_dir/
   printf 'tests that failed in a timed run: %s\n' "${timed_failures:-none}"
   printf 'tests that fail only under coverage: %s\n' "${coverage_failures:-none}"
   printf 'statement coverage: %s\ncovered blocks: %s\n' "$statement_coverage" "$(wc -l <"$output_dir/covered-blocks.txt" | tr -d ' ')"
-  for result in killed survived uncovered skipped; do
+  for result in killed survived uncovered skipped unselected; do
     printf 'mutants %s: %s\n' "$result" "$(grep -c " $result\$" "$output_dir/mutants.txt" || true)"
   done
 } >"$output_dir/summary.txt"
