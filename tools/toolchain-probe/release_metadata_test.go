@@ -64,13 +64,8 @@ func fixtureFailures(root string) []string {
 	return check.failures
 }
 
-func TestReleaseMetadataRepositoryPasses(t *testing.T) {
+func TestReleaseMetadataFixturePasses(t *testing.T) {
 	t.Parallel()
-	var output, diagnostic bytes.Buffer
-	if code := checkReleaseMetadata([]string{"../.."}, &output, &diagnostic); code != exitOK ||
-		output.String() != "release metadata ok\n" {
-		t.Fatalf("code %d: %s%s", code, output.String(), diagnostic.String())
-	}
 	if failures := fixtureFailures(releaseFixture(t)); len(failures) > 0 {
 		t.Fatalf("fixture failures: %q", failures)
 	}

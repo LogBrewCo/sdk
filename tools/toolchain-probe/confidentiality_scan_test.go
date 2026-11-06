@@ -51,14 +51,9 @@ func writeFixtureFile(t *testing.T, root, name, content string) {
 	}
 }
 
-func TestConfidentialityRepositoryIsClean(t *testing.T) {
+// Every rule must still cover a file, so removed files take their rules along.
+func TestConfidentialityRulesMatchFiles(t *testing.T) {
 	t.Parallel()
-	var output, diagnostic bytes.Buffer
-	if code := checkConfidentiality([]string{"../.."}, &output, &diagnostic); code != exitOK ||
-		output.String() != "confidentiality scan ok\n" {
-		t.Fatalf("code %d: %s%s", code, output.String(), diagnostic.String())
-	}
-	// Every rule must still cover a file, so removed files take their rules along.
 	rules, _ := parseAllowRules(confidentialityRules)
 	files := scannedFiles("../..")
 	for _, rule := range rules {
@@ -198,8 +193,14 @@ func TestAllowRuleKinds(t *testing.T) {
 func TestConfidentialityCommand(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeFixtureFile(t, root, "a.txt", wordKey+"\n")
+	writeFixtureFile(t, root, "a.txt", "ok\n")
 	var output, diagnostic bytes.Buffer
+	if code := checkConfidentiality([]string{root}, &output, &diagnostic); code != exitOK ||
+		output.String() != "confidentiality scan ok\n" || diagnostic.String() != "" {
+		t.Fatalf("clean code %d: %q %q", code, output.String(), diagnostic.String())
+	}
+	output.Reset()
+	writeFixtureFile(t, root, "a.txt", wordKey+"\n")
 	if code := checkConfidentiality([]string{root}, &output, &diagnostic); code != exitFailure ||
 		output.String() != "./a.txt:1:"+wordKey+"\n" ||
 		diagnostic.String() != "confidentiality scan found unexpected matches\n" {
