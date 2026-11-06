@@ -105,6 +105,7 @@ func TestConfidentialityReportsAndAllowsLines(t *testing.T) {
 		{"brand images and skipped files", map[string]string{
 			"assets/brand/logo.svg": wordKey + "\n", "LICENSE": wordKey + "\n", "node_modules/a.js": wordKey + "\n",
 			"x.egg-info/a": wordKey + "\n", "empty.txt": "", "a.PNG": wordKey + "\n", "tools/toolchain-probe/confidentiality_scan.go": wordKey,
+			"tools/toolchain-probe/confidentiality-allowlist.tsv": wordKey,
 		}, nil},
 		{"agent guide home paths", map[string]string{
 			"AGENTS.md": "/" + "Users/name/project\n", "docs/AGENTS.override.md": "/" + "home/name/x\n",
@@ -121,8 +122,11 @@ func TestConfidentialityReportsAndAllowsLines(t *testing.T) {
 		{"line breaks and encoding", map[string]string{"a.txt": "one\r\ntwo\rthree\vfour " + wordKey + "\xff\n"},
 			[]string{"./a.txt:4:four " + wordKey}},
 	} {
-		if got := scanFixture(t, test.files, false); !slices.Equal(got, test.reports) {
-			t.Fatalf("%s: %q, want %q", test.name, got, test.reports)
+		// A Git checkout lists files with git; a plain tree walks them.
+		for _, gitRepository := range []bool{false, true} {
+			if got := scanFixture(t, test.files, gitRepository); !slices.Equal(got, test.reports) {
+				t.Fatalf("%s (Git %t): %q, want %q", test.name, gitRepository, got, test.reports)
+			}
 		}
 	}
 }
