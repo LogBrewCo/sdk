@@ -58,6 +58,8 @@ class WinstonCapture {
     this.captured = 0;
     /** @type {Promise<unknown>} */
     this.pendingFlush = Promise.resolve(NULL_VALUE);
+    /** @type {unknown} */
+    this.logger = NULL_VALUE;
   }
 
   /**
@@ -141,6 +143,21 @@ class WinstonCapture {
   }
 
   /**
+   * @param {unknown} source
+   * @returns {void}
+   */
+  attachLogger(source) {
+    this.logger = source;
+  }
+
+  /**
+   * @returns {void}
+   */
+  detachLogger() {
+    this.logger = NULL_VALUE;
+  }
+
+  /**
    * @returns {() => Promise<unknown>}
    */
   flushHandler() {
@@ -162,6 +179,27 @@ function log(info, callback) {
   if (typeof callback === "function") {
     Reflect.apply(callback, undefined, []);
   }
+}
+
+const WINSTON_LEVEL = Symbol.for("level");
+
+/**
+ * @param {unknown} info
+ * @param {unknown} transportLevel
+ * @param {unknown} logger
+ * @returns {boolean}
+ */
+function winstonLevelAllows(info, transportLevel, logger) {
+  if (!isRecord(info) || !isRecord(logger)) {
+    return true;
+  }
+  const { level, levels } = logger;
+  if (!isRecord(levels)) {
+    return true;
+  }
+  const threshold = levels[String(transportLevel ?? level)];
+  const severity = levels[String(Reflect.get(info, WINSTON_LEVEL) ?? info["level"])];
+  return typeof threshold !== "number" || typeof severity !== "number" || threshold >= severity;
 }
 
 /**
@@ -203,12 +241,15 @@ function createLogBrewWinstonTransport(config) {
      */
     write(info, _encoding, callback) {
       try {
-        capture.write(info);
+        if (winstonLevelAllows(info, Reflect.get(winstonTransport, "level"), capture.logger)) {
+          capture.write(info);
+        }
       } finally {
         Reflect.apply(callback, undefined, []);
       }
     }
   });
+  winstonTransport.on("pipe", capture.attachLogger.bind(capture)).on("unpipe", capture.detachLogger.bind(capture));
   return Object.assign(
     winstonTransport,
     {

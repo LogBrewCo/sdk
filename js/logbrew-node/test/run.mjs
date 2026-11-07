@@ -45,6 +45,7 @@ try {
       "exit-flush.test.js",
       "fetch-transport.test.js",
       "http-client-errors.test.js",
+      "http-shared-client.test.js",
       "process-errors.test.js",
       "request-tracing.test.js",
       "runtime-context.test.js",
