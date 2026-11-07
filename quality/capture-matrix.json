@@ -498,7 +498,7 @@
       },
       "method": "amqplib publish and consume through the documented amqplibSendToQueueWithLogBrewSpan and withLogBrewAmqplibConsumer, the publisher inside an active Node trace with a request user, and Pino capture from @logbrew/node; no RabbitMQ broker is installed, so the channel is an in-memory stand-in with the amqplib sendToQueue and consume shapes, as in the package's own examples; one message that succeeds and one whose consumer throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-amqplib",
-      "inputs": "afd313a2602150faf535371e5cd0e35e538733ed7838eee27b19fa09f1016d84"
+      "inputs": "54740d6df5c8cd4dbc97a1ba34153ddc7189cbcd15db8a2a5d5cc37403b3ec0e"
     },
     "js/logbrew-angular": {
       "share": 50.0,
@@ -564,7 +564,7 @@
       },
       "method": "Real @aws-sdk/client-sqs SQSClient instrumented with the documented instrumentLogBrewSqsClient and withLogBrewSqsMessageProcessor, the sender inside an active Node trace with a request user, and Pino capture from @logbrew/node; no SQS service is installed, so the client talks to a local HTTP stand-in for the SQS JSON protocol; one message that succeeds and one whose processor throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-aws-sqs",
-      "inputs": "821ad952f99fcedafca21fd6ae253db0eaa10ab57cd9abeaf5eaf8e766fa3f22"
+      "inputs": "0a1ff94c20b6774a366fc397c760216f4a7c1bff1ebc21be07a43c13526d5d09"
     },
     "js/logbrew-browser": {
       "share": 75.0,
@@ -629,7 +629,7 @@
       },
       "method": "BullMQ 6 queue and worker on a local redis-server, with the documented queue instrumentation and wrapped processor, the producer inside an active Node trace with a request user, and BullMQ's job.log; one job that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-bullmq",
-      "inputs": "0801fcf2dfb6f521e17ca3446b512cb62e679bdcc393f15ce532b8a4afe2e60f"
+      "inputs": "73930acf23f0983e722b5dc69d0e7a9af1c557e7c49c5a5ac0ea6b66e6e531d2"
     },
     "js/logbrew-express": {
       "share": 100.0,
@@ -659,7 +659,7 @@
       },
       "method": "Express 5 app with the documented middleware, error handler, request user, and Pino capture; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-express",
-      "inputs": "fe7dbe0a6f2a5b2350fee1b83eae2c9838feb5ff51d269bb72fe346cae5bc46e"
+      "inputs": "5677af58aa9d441d8cb6dcff05c5a4b44d42f31f7001b4d7c5e532ddf0d03490"
     },
     "js/logbrew-fastify": {
       "share": 90.9,
@@ -691,7 +691,7 @@
       },
       "method": "Fastify 5 app with the documented plugin, application-log capture through Fastify's Pino logger, request metrics, and the Node request user; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-fastify",
-      "inputs": "8ddccdac6d3574a9b5a9b24cad9be51a6d45e11af65f27688ff627eceaf7515e"
+      "inputs": "771fe58744afe3ea12a5c61dafbddc1ae76fe2c68f7b6d8f595ee4e7049d72f7"
     },
     "js/logbrew-js": {
       "share": 91.7,
@@ -755,7 +755,7 @@
       },
       "method": "KafkaJS producer and consumer instrumented with the documented instrumentLogBrewKafkaJsProducer and instrumentLogBrewKafkaJsConsumer, the producer inside an active Node trace with a request user, and the KafkaJS logger; no broker is installed, so the producer and consumer are in-memory stand-ins with the KafkaJS send and run shapes, as in the package's own examples; one message that succeeds and one whose handler throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-kafkajs",
-      "inputs": "61a8daf2f273b0169f205fa4d46948b00e00e73d34efd9c8bb5db34f52ea9800"
+      "inputs": "6a6d4f9a73447f805de6bfbc90d8330cdf010bdc6439d77e13683d45d87b594b"
     },
     "js/logbrew-nestjs": {
       "share": 81.8,
@@ -788,7 +788,7 @@
       },
       "method": "NestJS 12 Express app with the documented global interceptor, Nest logger, request metrics, and request user set in a guard; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-nestjs",
-      "inputs": "cd6275995640236501c9761fa487c99a91e9958403c5bb35c50b5730b5f72ae9"
+      "inputs": "53c9b9c239a871228a73eafda4a3122046f0a16b53213a7ef33f41234ce9e569"
     },
     "js/logbrew-next": {
       "share": 72.7,
@@ -822,7 +822,7 @@
       },
       "method": "Next.js 16 App Router production build (next build, next start) with the documented instrumentation onRequestError hook, wrapped Route Handlers with request metrics and the request user, and Pino capture from @logbrew/node; one route that succeeds, one that throws, and one server component that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-next",
-      "inputs": "60e8290d1482a1c7753975126e671c8a7b6864747034be3900d8b959f12fd515"
+      "inputs": "41c5e4cb2ab551f17ba53b2d5b8b38f688eb15e25ff83129488a9649c8f4b477"
     },
     "js/logbrew-node": {
       "share": 81.8,
@@ -854,7 +854,7 @@
       },
       "method": "node:http server wrapped with withLogBrewHttpHandler, with request user, Pino capture, and console breadcrumbs; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-node",
-      "inputs": "c1cf43c4c0313f048f91c264c0e1b1c6c265fdde00894978b5d5af7ea812dde3"
+      "inputs": "f6047b8024c21d50a44fb13f2198f3020213c9b4f2727a0ebd5d112ff38948d1"
     },
     "js/logbrew-prisma": {
       "share": 45.5,
@@ -888,7 +888,7 @@
       },
       "method": "Prisma 7 client on a local SQLite file through the better-sqlite3 driver adapter, instrumented with instrumentLogBrewPrismaClient inside an active Node trace with a request user and Prisma's own query logger; two queries that succeed and one unique-constraint failure",
       "probe": "tools/capture-matrix/probes/js/logbrew-prisma",
-      "inputs": "2be1f42beda3385f2f74e3bcdd1985d1d892976a8d0fb22952db6b632cc30894"
+      "inputs": "20b0f722eeeee38be7391d7ce930cb1d1fc91deff165c23dae818e52f4943402"
     },
     "js/logbrew-react": {
       "share": 75.0,
