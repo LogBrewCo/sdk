@@ -16,7 +16,7 @@ concurrency:
 jobs:
   changed-areas:
     name: Detect changed SDK areas
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       release_artifacts: ${{ steps.select.outputs.release_artifacts }}
       react_native_native: ${{ steps.select.outputs.react_native_native }}
@@ -57,7 +57,7 @@ jobs:
   contract-checks:
     name: Contract checks
     needs: changed-areas
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     steps:
@@ -634,7 +634,7 @@ jobs:
     name: PHP 8.2 / Symfony 6.4 compatibility
     needs: changed-areas
     if: ${{ needs.changed-areas.outputs.php == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -654,7 +654,7 @@ jobs:
     name: Go 1.26 compatibility
     needs: changed-areas
     if: ${{ needs.changed-areas.outputs.go == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       GOTOOLCHAIN: local
@@ -694,7 +694,7 @@ jobs:
         django_version:
           - "4.2.30"
           - "5.2.16"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -815,7 +815,7 @@ jobs:
     name: Swift Linux ${{ matrix.swift }} consumer
     needs: changed-areas
     if: ${{ needs.changed-areas.outputs.swift == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
