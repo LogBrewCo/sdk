@@ -23,7 +23,7 @@ import { createRandomTraceparent, createTracedFetch, shouldPropagateTraceparent 
  */
 
 const DEFAULT_SDK_NAME = "logbrew-angular";
-const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_SDK_VERSION = "0.1.2";
 const DEFAULT_MAX_RETRIES = 2;
 
 /** @type {InjectionToken<LogBrewAngularContext>} */

@@ -531,7 +531,7 @@
       },
       "method": "Angular 22 standalone app bootstrapped with JIT and zoneless change detection under happy-dom, with provideLogBrew and its ErrorHandler, injectLogBrew, console capture, and the @logbrew/browser fetch transport; one traced API call through createTraceparentFetch and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-angular",
-      "inputs": "b23611da2e9cd8baf02546f4199b8a4ba1fa43117497a6a2365e5cfa13eb153c"
+      "inputs": "6fa7386ddf669ee32f212d280a8e93d5a46b2ae84558bc8e5071dad2fab7e7c3"
     },
     "js/logbrew-aws-sqs": {
       "share": 63.6,
