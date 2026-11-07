@@ -116,12 +116,26 @@ def install_automatic_breadcrumbs() -> None:
         if _installed:
             return
         _installed.append(True)
-    logging.getLogger().addHandler(LogBrewBreadcrumbHandler())
+    _patch_logging()
     _patch_http_client()
     # Optional clients are patched only when the application has them installed.
     for patch, module in ((_patch_httpx, "httpx"), (_patch_httpx, "httpx2"), (_patch_aiohttp, "aiohttp")):
         with suppress(ImportError):
             patch(importlib.import_module(module))
+
+
+def _patch_logging() -> None:
+    # A root handler would make logging.basicConfig() a no-op, so records are read where loggers dispatch them.
+    original_call_handlers = logging.Logger.callHandlers
+    breadcrumb_handler = LogBrewBreadcrumbHandler()
+
+    def call_handlers(self: logging.Logger, record: logging.LogRecord) -> None:
+        try:
+            original_call_handlers(self, record)
+        finally:
+            breadcrumb_handler.handle(record)
+
+    logging.Logger.callHandlers = call_handlers  # type: ignore[method-assign]
 
 
 def _record_request(method: str, url: object, status: int | None, failed: bool = False) -> None:
