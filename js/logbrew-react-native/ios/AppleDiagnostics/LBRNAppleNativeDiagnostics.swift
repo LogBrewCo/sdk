@@ -3,7 +3,7 @@ import Foundation
 @objc(LBRNAppleNativeDiagnostics)
 public final class LBRNAppleNativeDiagnostics: NSObject, @unchecked Sendable {
     private static let shared = LBRNAppleNativeDiagnostics()
-    private static let sdkVersion = "0.1.40"
+    private static let sdkVersion = "0.1.41"
 
     private let lock = NSLock()
     private let replayQueue = DispatchQueue(label: "co.logbrew.react-native.apple-diagnostics-replay")
