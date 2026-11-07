@@ -53,6 +53,10 @@ individual run, is in [results/2026-10-29](results/2026-10-29).
 | Comparison SDK | `@sentry/browser` 11.10.0, `@sentry/node` 11.10.0 |
 | Web Vitals, for the LogBrew tracing setup | `web-vitals` 6.2.3 |
 
+These results used the comparison SDK at 11.10.0. On 2026-11-07,
+`package.json` moved it to 11.11.0, which clears the `glob` and `minimatch` advisories GHSA-3g3m-2fjr-6pw4
+and GHSA-g3hv-75wg-m249. The next run measures 11.11.0.
+
 We picked the comparison SDK because its browser package had the most weekly
 npm downloads of the open-source error-tracking browser SDKs we checked. The
 npm downloads API reported 41,639,917 downloads for it in the week from
