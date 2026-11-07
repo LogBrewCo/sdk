@@ -5,7 +5,9 @@ import {
   createLogBrewWinstonTransport,
   logAttributesFromWinstonInfo
 } from "@logbrew/sdk";
+import { PassThrough } from "node:stream";
 import assert from "node:assert/strict";
+import { finished } from "node:stream/promises";
 import test from "node:test";
 
 /**
@@ -214,4 +216,35 @@ await test("Winston records become issue breadcrumbs unless breadcrumbs is false
   const quiet = sampleClient();
   createLogBrewWinstonTransport({ breadcrumbs: false, client: quiet }).write({ level: "info", message: "cart ready" });
   assert.equal(pick(issueAttributesAfter(quiet, "evt_winston_quiet"), "breadcrumbs"), undefined);
+});
+
+/**
+ * @param {string | undefined} transportLevel
+ * @returns {Promise<readonly unknown[]>}
+ */
+async function messagesFromInfoLogger(transportLevel) {
+  const client = sampleClient();
+  const winstonTransport = createLogBrewWinstonTransport({
+    client,
+    eventIdPrefix: "test_winston_level",
+    logger: "winston",
+    ...(transportLevel === undefined ? {} : { level: transportLevel })
+  });
+  const logger = Object.assign(new PassThrough({ objectMode: true }), {
+    level: "info",
+    levels: { debug: 5, error: 0, info: 2, warn: 1 }
+  });
+  callUnchecked(logger.pipe.bind(logger), [winstonTransport]);
+  for (const level of ["debug", "info", "warn"]) {
+    logger.write({ level, message: `${level} record`, [Symbol.for("level")]: level });
+  }
+  logger.end();
+  await callUnchecked(finished, [winstonTransport]);
+  return eventValues(parseJson(client.previewJson()), "attributes.message");
+}
+
+void test("Winston transport sends only records the logger and transport levels allow", async () => {
+  assert.deepEqual(await messagesFromInfoLogger(undefined), ["info record", "warn record"]);
+  assert.deepEqual(await messagesFromInfoLogger("warn"), ["warn record"]);
+  assert.deepEqual(await messagesFromInfoLogger("debug"), ["debug record", "info record", "warn record"]);
 });

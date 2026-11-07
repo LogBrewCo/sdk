@@ -250,7 +250,7 @@ void test("standalone factory failure delivers its earlier safe log", async (tes
   assert.deepEqual(run.captures, [run.factory]);
   assert.deepEqual(eventsOfBodies(run.recorder.bodies).map((event) => readField(event, "id")), ["factory-log"]);
   assert.equal(run.client.pendingEvents(), NONE);
-  assert.equal(run.client.deliveryHealth().lifecycle, "closed");
+  assert.equal(run.client.deliveryHealth().lifecycle, "active");
 });
 
 void test("errors with a 4xx status stay request spans, not issues", async (testContext) => {

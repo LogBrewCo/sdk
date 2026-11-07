@@ -715,7 +715,7 @@ logger.error(new Error("payment failed"));
 await logbrewTransport.flush();
 ```
 
-The Winston adapter receives Winston `info` objects, maps `debug`/`silly` to LogBrew `info`, `warn` to `warning`, `error` to `error`, `fatal`/`critical` to `critical`, and other common Winston levels to `info`. It captures primitive info fields as `context.*`, captures nested `err`/`error` objects or formatted error stack name/message, omits stack text unless `includeErrorStack: true` is set, and exposes `onError` for capture failures. It does not mutate Winston globals or replace the app's logger.
+The Winston adapter receives Winston `info` objects, maps `debug`/`silly` to LogBrew `info`, `warn` to `warning`, `error` to `error`, `fatal`/`critical` to `critical`, and other common Winston levels to `info`. It captures primitive info fields as `context.*`, captures nested `err`/`error` objects or formatted error stack name/message, omits stack text unless `includeErrorStack: true` is set, and exposes `onError` for capture failures. Like Winston's built-in transports, it sends only records that the transport `level` allows, or the logger level when the transport has no `level`. It does not mutate Winston globals or replace the app's logger.
 
 Each Winston message is also kept as an issue breadcrumb (category `log.winston`, message capped at 512 characters, no info fields), so the next issue shows the log lines that led to it. With `@logbrew/node`, breadcrumbs written during a request stay with that request's issues. Pass `breadcrumbs: false` to turn this off.
 

@@ -53,7 +53,7 @@ const fp = require("fastify-plugin");
  */
 
 const DEFAULT_SDK_NAME = "logbrew-fastify";
-const DEFAULT_SDK_VERSION = "0.1.10";
+const DEFAULT_SDK_VERSION = "0.1.11";
 const DEFAULT_MAX_RETRIES = 2;
 const MIN_DURATION_MS = 0;
 
@@ -139,6 +139,27 @@ function resolveTransport(source, runtime) {
   return "factory" in source ? source.factory(runtime) : source.transport;
 }
 
+/** @type {WeakSet<LogBrewClient>} */
+const pluginClients = new WeakSet();
+
+/**
+ * @param {LogBrewClient} client
+ * @returns {LogBrewClient}
+ */
+function ownClient(client) {
+  pluginClients.add(client);
+  return client;
+}
+
+/**
+ * @param {LogBrewClient} client
+ * @param {Transport} transport
+ * @returns {Promise<TransportResponse>}
+ */
+async function releaseClient(client, transport) {
+  return pluginClients.has(client) ? client.shutdown(transport) : client.flush(transport);
+}
+
 /**
  * @param {LogBrewFastifyOptions} options
  * @param {FastifyRequest} request
@@ -147,12 +168,12 @@ function resolveTransport(source, runtime) {
  */
 function resolveClient(options, request, reply) {
   if (typeof options.client === "function") {
-    return options.client({ reply, request });
+    return ownClient(options.client({ reply, request }));
   }
   if (options.client) {
     return options.client;
   }
-  return createLogBrewFastifyClient(options);
+  return ownClient(createLogBrewFastifyClient(options));
 }
 
 /**
@@ -253,7 +274,7 @@ async function captureRequestFinish(state, request, reply) {
   try {
     const durationMs = Math.max(MIN_DURATION_MS, Math.round(nowMs(state.options) - startedAt));
     captureFinishedRequest(state.options, { client, durationMs, reply, request, trace });
-    await notifyFlush(state.options, await client.shutdown(existing.transport), { client, reply, request, trace });
+    await notifyFlush(state.options, await releaseClient(client, existing.transport), { client, reply, request, trace });
   } catch (error) {
     await notifyFailure(state.options, error, { client, reply, request, trace });
   }
@@ -287,7 +308,7 @@ async function captureRequestError(state, failure) {
   try {
     runtime.client.issue(event.id, event.timestamp, event.attributes);
     if (!state.capturesRequestFinish) {
-      await notifyFlush(options, await runtime.client.shutdown(transport), runtime);
+      await notifyFlush(options, await releaseClient(runtime.client, transport), runtime);
     }
   } catch (captureError) {
     await notifyFailure(options, captureError, runtime);

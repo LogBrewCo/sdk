@@ -70,7 +70,7 @@ export class DashboardComponent {
 }
 ```
 
-`provideLogBrew()` installs `LOG_BREW_ANGULAR_CONTEXT` and, by default, an Angular `ErrorHandler` that captures component/application errors. Pass `captureErrors: false` if the app owns error handling elsewhere, or pass `delegateErrorHandler` to keep an existing handler in the loop after telemetry capture.
+`provideLogBrew()` installs `LOG_BREW_ANGULAR_CONTEXT` and, by default, an Angular `ErrorHandler` that captures component/application errors. The handler flushes each error and keeps the client open, so the app keeps sending errors, logs, and spans after the first error. Pass `captureErrors: false` if the app owns error handling elsewhere, or pass `delegateErrorHandler` to keep an existing handler in the loop after telemetry capture.
 
 ## Trace Propagation
 

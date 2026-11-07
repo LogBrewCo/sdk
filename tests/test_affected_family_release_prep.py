@@ -29,17 +29,17 @@ CATALOG = tomllib.loads(source_text("tools/toolchain-probe/release-catalog.toml"
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.40",
+            "js/logbrew-js/package.json": "0.1.41",
             "js/logbrew-browser/package.json": "0.1.19",
-            "js/logbrew-express/package.json": "0.1.10",
-            "js/logbrew-fastify/package.json": "0.1.10",
-            "js/logbrew-node/package.json": "0.1.24",
+            "js/logbrew-express/package.json": "0.1.11",
+            "js/logbrew-fastify/package.json": "0.1.11",
+            "js/logbrew-node/package.json": "0.1.25",
             "js/logbrew-nestjs/package.json": "0.1.11",
             "js/logbrew-next/package.json": "0.1.14",
             "js/logbrew-react/package.json": "0.1.3",
             "js/logbrew-react-native/package.json": "0.1.40",
             "js/logbrew-svelte/package.json": "0.1.7",
-            "js/logbrew-angular/package.json": "0.1.1",
+            "js/logbrew-angular/package.json": "0.1.2",
         }
         for relative_path, expected in npm_versions.items():
             self.assertEqual(json_object(relative_path)["version"], expected)

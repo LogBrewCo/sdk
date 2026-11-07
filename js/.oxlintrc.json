@@ -572,6 +572,7 @@
       "files": [
         "logbrew-*/*.cjs",
         "logbrew-express/test/*.cjs",
+        "logbrew-angular/test/*.cjs",
         "logbrew-vue/test/*.cjs",
         "logbrew-js/examples/*.cjs"
       ],
@@ -639,6 +640,7 @@
         "logbrew-js/release-artifacts*",
         "logbrew-js/vite-release-artifacts*.cjs",
         "logbrew-angular/examples/**",
+        "logbrew-angular/test/**",
         "logbrew-svelte/examples/**",
         "logbrew-vue/examples/**",
         "logbrew-vue/test/**",
