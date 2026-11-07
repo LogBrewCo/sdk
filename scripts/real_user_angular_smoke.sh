@@ -434,4 +434,7 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 
+cp "$repo_root"/js/logbrew-angular/test/*.test.mjs "$repo_root"/js/logbrew-angular/test/*.cjs "$app_dir/"
+node --test "$app_dir"/*.test.mjs >/dev/null
+
 echo "angular real-user smoke passed with @angular/core@$angular_version @angular/compiler@$angular_version rxjs@$rxjs_version zone.js@$zone_version on $node_version (angular node engine: $angular_engine)"

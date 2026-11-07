@@ -25,7 +25,7 @@ const { createRandomTraceparent, createTracedFetch, shouldPropagateTraceparent: 
  */
 
 const DEFAULT_SDK_NAME = "logbrew-angular";
-const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_SDK_VERSION = "0.1.2";
 const DEFAULT_MAX_RETRIES = 2;
 
 /** @type {InjectionToken<LogBrewAngularContext>} */
@@ -252,7 +252,7 @@ async function captureAngularError(error, context, options = {}) {
     : createAngularErrorEvent(error, options, options);
   try {
     context.client.issue(event.id, event.timestamp, event.attributes);
-    const response = await context.client.shutdown(context.transport);
+    const response = await context.client.flush(context.transport);
     await notifyFlush(options, response, { context });
     return response;
   } catch (captureError) {
