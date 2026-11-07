@@ -184,7 +184,9 @@ async function launchChrome() {
       const exited = once(child, "exit");
       child.kill();
       await exited;
-      await rm(profile, { force: true, recursive: true });
+      // Chrome's helper processes can still write to the profile after the
+      // main process exits, so removal retries while the folder fills.
+      await rm(profile, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
     },
     send,
     waitFor
