@@ -1164,7 +1164,7 @@
       },
       "method": "Django 5.2 project with LogBrewDjangoMiddleware first, configure_logbrew with an HttpTransport and capture_request_metrics, LogBrewLoggingHandler on the app logger, and a later middleware that calls set_logbrew_user; one request that succeeds and one that raises, through Django's test client and WSGI handler",
       "probe": "tools/capture-matrix/probes/python/logbrew_django",
-      "inputs": "5be4d788a23d97ce3eb961e671fee1e678b1c4c1b1c260878445acd1017bc9c9"
+      "inputs": "7cb1cdf4f3dfeee74a27e9e3a07cf4651b2d8db3d0642305ec0bd9bc693c4f12"
     },
     "python/logbrew_fastapi": {
       "share": 100.0,
@@ -1194,7 +1194,7 @@
       },
       "method": "FastAPI app with init_logbrew, an HttpTransport, capture_request_metrics, the returned logging handler on the app logger, and set_logbrew_user in a dependency; one request that succeeds and one that raises, through Starlette's TestClient with the app lifespan",
       "probe": "tools/capture-matrix/probes/python/logbrew_fastapi",
-      "inputs": "9f3a4dd5ff52a5a055db431043e2a8293414ffaec96052592c6b5fcae0b601f9"
+      "inputs": "92f2f130360da7f4f0766cb750e481ce9c5981db88ddccb4cd136ceb447d76ae"
     },
     "python/logbrew_flask": {
       "share": 100.0,
@@ -1224,7 +1224,7 @@
       },
       "method": "Flask 3 app with init_logbrew, an HttpTransport, capture_request_metrics, LogBrewLoggingHandler on app.logger, and set_logbrew_user in a before_request hook; one request that succeeds and one that raises, through Werkzeug's test client",
       "probe": "tools/capture-matrix/probes/python/logbrew_flask",
-      "inputs": "c598e13e17373f61adbe805d67c43563560d4c6d166e11f3f7aacc8d456d0e0e"
+      "inputs": "2d639f22a3c1a54917c66fcb3745a42bf10e65272d66bf6ef371ee64e8fccf32"
     },
     "python/logbrew_py": {
       "share": 100.0,
@@ -1252,7 +1252,7 @@
       },
       "method": "LogBrewClient with HttpTransport and a documented session context, LogBrewLoggingHandler on a stdlib logger, use_logbrew_trace from an incoming traceparent with set_logbrew_user, a span from span_attributes_from_trace_context, an explicit metric, and an issue from create_issue_attributes_from_exception for a raised error; the core has no framework hooks, so its documented API is the capture path",
       "probe": "tools/capture-matrix/probes/python/logbrew_py",
-      "inputs": "0e02600ce17e6d5495ac2d72b2996d667d551d404bed0560c253920d6a840438"
+      "inputs": "bdefcd13f43c1aadb69983508d2fccf9438116742fed53d31d3d9b23e5f71b1b"
     },
     "ruby/logbrew-ruby": {
       "share": 72.7,
