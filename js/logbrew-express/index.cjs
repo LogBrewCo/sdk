@@ -14,6 +14,8 @@ const {
   claimRequestLifecycle,
   createRequestLifecycle,
   findDeliveringLifecycle,
+  ownClient,
+  releaseClient,
   settleWrappedHandler
 } = require("./lifecycle.cjs");
 const { notifyFlush, notifyLifecycleFailure } = require("./observers.cjs");
@@ -100,12 +102,12 @@ function createLogBrewExpressClient({
  */
 function resolveClient(options, runtime) {
   if (typeof options.client === "function") {
-    return options.client(runtime);
+    return ownClient(options.client(runtime));
   }
   if (options.client) {
     return options.client;
   }
-  return createLogBrewExpressClient(options);
+  return ownClient(createLogBrewExpressClient(options));
 }
 
 /**
@@ -287,9 +289,9 @@ function withLogBrewExpressHandler(handler) {
  * @param {LogBrewExpressRuntimeContext} context
  * @returns {Promise<void>}
  */
-async function shutdownErrorClient(options, transport, context) {
+async function releaseErrorClient(options, transport, context) {
   try {
-    const response = await context.client.shutdown(transport);
+    const response = await releaseClient(context.client, transport);
     await notifyFlush(options, { context, response });
   } catch (error) {
     await notifyLifecycleFailure([options], { context, error });
@@ -324,14 +326,14 @@ function captureRequestError(options, error, delivery) {
   try {
     recordRequestError(options, error, context);
     if (lifecycle === undefined) {
-      void shutdownErrorClient(options, transport, context);
+      void releaseErrorClient(options, transport, context);
     } else {
       adoptErrorObserver(lifecycle, options);
     }
   } catch (captureError) {
     void notifyLifecycleFailure([options], { context, error: captureError });
     if (lifecycle === undefined && context.client.pendingEvents() > NO_EVENTS) {
-      void shutdownErrorClient(options, transport, context);
+      void releaseErrorClient(options, transport, context);
     }
   }
 }
