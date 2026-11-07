@@ -94,6 +94,22 @@ test("transport: null keeps the browser client manual, and LOGBREW variables win
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("the browser client sends one queued event within 1.5 s by default", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import { createLogBrewNextBrowserClient } from "@logbrew/next/client";
+
+    const sent = [];
+    globalThis.fetch = async (url, init) => { sent.push({ url, init }); return { status: 202 }; };
+    const client = createLogBrewNextBrowserClient({ clientKey: "LOGBREW_CLIENT_KEY" });
+    client.log("evt_default_interval", "2026-06-02T10:00:00Z", { message: "ready", level: "info" });
+    await new Promise((resolve) => { setTimeout(resolve, 1500); });
+    assert.equal(sent.length, 1, "the default interval must deliver one event within 1.5 s");
+    await client.shutdown();
+  `);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test("server clients and request-error issues name the service after the app's package.json", () => {
   const result = runClientConsumer(`
     import assert from "node:assert/strict";

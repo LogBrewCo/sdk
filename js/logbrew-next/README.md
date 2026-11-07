@@ -301,8 +301,8 @@ Use `captureNextNavigation(client, input)` when you want to emit a route span fr
 
 ## Client Errors
 
-`createLogBrewNextBrowserClient()` sends events on its own with `fetch` (5
-seconds after the first queued event, to save battery). Pass a `transport` to
+`createLogBrewNextBrowserClient()` sends events on its own with `fetch` (1
+second after the first queued event). Pass a `transport` to
 replace it, or `transport: null` to keep the client manual. Browser events
 carry the release and environment from `NEXT_PUBLIC_LOGBREW_RELEASE` and
 `NEXT_PUBLIC_LOGBREW_ENVIRONMENT`, or from `NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA`

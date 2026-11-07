@@ -42,7 +42,7 @@ public struct AutomaticDeliveryOptions: Equatable, Sendable {
     public let maxRetryDelay: TimeInterval
 
     public init(
-        interval: TimeInterval = 5,
+        interval: TimeInterval = 1,
         threshold: Int = 100,
         retryBaseDelay: TimeInterval = 0.25,
         maxRetryDelay: TimeInterval = 30,

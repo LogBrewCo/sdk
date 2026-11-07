@@ -10,8 +10,8 @@ const {
 } = require("@logbrew/sdk");
 
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
-// Browsers keep a 5-second interval to save battery and radio; pagehide flushes the rest.
-const DEFAULT_BROWSER_DELIVERY_INTERVAL_MS = 5000;
+// Send 1 second after the first queued event; pagehide flushes the rest when the page closes.
+const DEFAULT_BROWSER_DELIVERY_INTERVAL_MS = 1000;
 const clientEndpoints = new WeakMap();
 
 function createLogBrewNextBrowserClient({

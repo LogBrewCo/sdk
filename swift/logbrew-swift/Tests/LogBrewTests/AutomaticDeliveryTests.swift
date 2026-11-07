@@ -52,6 +52,18 @@ struct AutomaticDeliveryTests {
         _ = try client.shutdown()
     }
 
+    @Test("default options deliver one event within 1.5 s")
+    func defaultOptionsDeliverWithinOneAndAHalfSeconds() throws {
+        let transport = ThreadSafeScriptedTransport(statuses: [202])
+        let client = try makeClient()
+        try client.startAutomaticDelivery(transport: transport, options: AutomaticDeliveryOptions())
+
+        try captureLog(client, id: "default-interval-1")
+
+        #expect(transport.waitForRequestCount(1, timeout: 1.5))
+        _ = try client.shutdown()
+    }
+
     @Test("retry retains exact prefix while later captures remain ordered")
     func retryRetainsExactPrefixAndLaterCaptures() throws {
         let firstAttemptStarted = DispatchSemaphore(value: 0)

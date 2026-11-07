@@ -19,7 +19,7 @@ export type CreateLogBrewNextBrowserClientConfig = {
   eventFilter?: EventFilter;
   maxQueueSize?: number;
   onEventDropped?: (drop: DroppedEvent) => void;
-  /** Delivery interval after the first queued event. Defaults to 5000 ms to save battery. */
+  /** Delivery interval after the first queued event. Defaults to 1000 ms. */
   deliveryIntervalMs?: number;
   /** Ingest endpoint for the built-in fetch transport. */
   endpoint?: string;

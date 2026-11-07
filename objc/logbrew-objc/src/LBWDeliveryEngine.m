@@ -33,7 +33,7 @@ static void *LBWDeliverySchedulerKey = &LBWDeliverySchedulerKey;
 - (instancetype)init {
   self = [super init];
   if (self != nil) {
-    _interval = 5.0;
+    _interval = 1.0;
     _threshold = 100U;
     _retryBaseDelay = 0.25;
     _maxRetryDelay = 30.0;

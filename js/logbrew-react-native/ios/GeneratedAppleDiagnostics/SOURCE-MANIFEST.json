@@ -6,7 +6,7 @@
     "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineAutomatic.swift": "cd05cd45aeea52cde3d228938acf9ff2e784c1e2350cf2473c3b72030a3abf64",
     "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineDurable.swift": "b0d2ca07cce7fe01fc110238c7d10aa9c8ada0d28509e4c022e7fa950a4c79b9",
     "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineQueue.swift": "e187a737e18dd88a4be8719f1a3a07776c6d6eb0edb5b1904a82c5059a0aef57",
-    "swift/logbrew-swift/Sources/LogBrew/DeliveryLifecycle.swift": "af7b36649f9d07ac4567652f578c008e4ec8086f14c157b2d5144df93d211aaf",
+    "swift/logbrew-swift/Sources/LogBrew/DeliveryLifecycle.swift": "61d8d1e30dd716d23ed9da2728be376497549764c39b9b41ffb4ef754357f384",
     "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStore.swift": "7c292dda68efc3de790daf44733b25e4392226793343c21ba5df4f51fc1b402b",
     "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift": "79fee27975b6571954bf0b3692a50e60bbbcf53b5ab47f653a474db5c56d68ba",
     "swift/logbrew-swift/Sources/LogBrew/EventEncoding.swift": "b88b6b2d17f7d0cee9ac1a1f34ef35b192cd33d213ef3c9e1c2d21cbcc304a97",

@@ -251,7 +251,7 @@ Manual delivery remains the default. To let one client own delivery, provide an 
 
 ```objective-c
 LBWAutomaticDeliveryOptions *options = [[LBWAutomaticDeliveryOptions alloc] init];
-options.interval = 5.0;
+options.interval = 1.0;
 options.threshold = 100U;
 
 [client startAutomaticDeliveryWithTransport:transport options:options error:&error];
