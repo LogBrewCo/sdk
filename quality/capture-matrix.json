@@ -398,7 +398,7 @@
       },
       "method": "Gin router with gin.Recovery and the documented middleware (request metrics and server error issues on), the core slog handler, and release, environment, and service in Config.Context; one request that succeeds and one that panics, both with a W3C traceparent",
       "probe": "tools/capture-matrix/probes/go/logbrew/gin",
-      "inputs": "33853aaf768265a569d16c9b9e38f7331b713eca64860b769e84653897fe799d"
+      "inputs": "2303900210bb7a7ef5b88006ec0415fd699f193202cd8b309e45bf118b92c9fa"
     },
     "go/logbrew/otel": {
       "share": 54.5,
