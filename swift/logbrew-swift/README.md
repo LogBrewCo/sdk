@@ -199,7 +199,7 @@ Manual capture and delivery remain the default. When the client should own deliv
 let transport = try HTTPTransport(timeout: 5)
 try client.startAutomaticDelivery(
     transport: transport,
-    options: AutomaticDeliveryOptions(interval: 5, threshold: 100)
+    options: AutomaticDeliveryOptions(interval: 1, threshold: 100)
 )
 
 try client.log(

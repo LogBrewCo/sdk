@@ -273,6 +273,20 @@ static void LBWExerciseAutomaticDelivery(void) {
   LBWAssert(LBWWaitForSentBodies(intervalTransport, 1U, 2.0), @"interval automatic delivery did not run");
   LBWAssert([intervalClient shutdownOwnedTransportWithError:&error] != nil, @"interval shutdown failed");
 
+  LBWRecordingTransport *defaultTransport = [[LBWRecordingTransport alloc] init];
+  LBWClient *defaultClient = LBWNewClient();
+  LBWAssert([defaultClient startAutomaticDeliveryWithTransport:defaultTransport
+                                                        options:[[LBWAutomaticDeliveryOptions alloc] init]
+                                                          error:&error],
+            @"default automatic start failed");
+  LBWAssert([defaultClient logWithID:@"objc-default-interval"
+                           timestamp:@"2026-07-18T12:00:06Z"
+                          attributes:@{ @"message": @"default interval", @"level": @"info" }
+                               error:&error],
+            @"default automatic capture failed");
+  LBWAssert(LBWWaitForSentBodies(defaultTransport, 1U, 1.5), @"the default interval must deliver one event within 1.5 s");
+  LBWAssert([defaultClient shutdownOwnedTransportWithError:&error] != nil, @"default shutdown failed");
+
   LBWRecordingTransport *pausedTransport = [[LBWRecordingTransport alloc] initWithSteps:@[
     [LBWRecordingStep statusCodeStep:401],
     [LBWRecordingStep statusCodeStep:202]
