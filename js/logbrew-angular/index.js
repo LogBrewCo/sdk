@@ -250,7 +250,7 @@ async function captureAngularError(error, context, options = {}) {
     : createAngularErrorEvent(error, options, options);
   try {
     context.client.issue(event.id, event.timestamp, event.attributes);
-    const response = await context.client.shutdown(context.transport);
+    const response = await context.client.flush(context.transport);
     await notifyFlush(options, response, { context });
     return response;
   } catch (captureError) {
