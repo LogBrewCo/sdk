@@ -131,7 +131,7 @@ async function captureHttpError(error, req, res, context, options = {}) {
     : createHttpErrorEvent(error, req, { ...options, trace: context.trace });
   try {
     callMethod(context.client, "issue", [readMember(event, "id"), readMember(event, "timestamp"), readMember(event, "attributes")]);
-    const response = await context.client.shutdown(context.transport);
+    const response = await releaseClient(context.client, context.transport);
     await notifyFlush(options, response, runtime);
     return response;
   } catch (captureError) {
@@ -199,11 +199,32 @@ async function captureHttpRequestFinish({ client, options, req, res, startedAt, 
       ? options.requestEvent(req, res, { client, durationMs, trace })
       : createHttpRequestEvent(req, res, { ...options, durationMs, trace });
     captureRequestEvent(client, event);
-    const response = await (shutdown ? client.shutdown(transport) : client.flush(transport));
+    const response = await (shutdown ? releaseClient(client, transport) : client.flush(transport));
     await notifyFlush(options, response, { client, req, res, trace });
   } catch (error) {
     await notifyFailure(options, error, hookContext({ client, req, res, trace }));
   }
+}
+
+/** @type {WeakSet<LogBrewClient>} */
+const handlerClients = new WeakSet();
+
+/**
+ * @param {LogBrewClient} client
+ * @returns {LogBrewClient}
+ */
+function ownClient(client) {
+  handlerClients.add(client);
+  return client;
+}
+
+/**
+ * @param {LogBrewClient} client
+ * @param {Transport} transport
+ * @returns {Promise<TransportResponse>}
+ */
+async function releaseClient(client, transport) {
+  return handlerClients.has(client) ? client.shutdown(transport) : client.flush(transport);
 }
 
 /**
@@ -214,7 +235,7 @@ async function captureHttpRequestFinish({ client, options, req, res, startedAt, 
  */
 function resolveClient(options, runtime, createClient) {
   if (typeof options.client === "function") {
-    return options.client(runtime);
+    return ownClient(options.client(runtime));
   }
   if (options.client) {
     return options.client;
@@ -222,8 +243,9 @@ function resolveClient(options, runtime, createClient) {
   const transport = typeof options.transport === "function"
     ? undefined
     : options.transport ?? RecordingTransport.alwaysAccept();
-  return createClient({ ...options, automaticDelivery: false, transport });
+  return ownClient(createClient({ ...options, automaticDelivery: false, transport }));
 }
+
 
 /**
  * @param {LogBrewNodeOptions} options
@@ -249,7 +271,7 @@ function resolveTransport(options, runtime) {
 async function shutdownAfterHandler({ client, options, req, res, trace, transport }) {
   try {
     const hasTail = client.pendingEvents() > NO_EVENTS;
-    const response = await client.shutdown(transport);
+    const response = await releaseClient(client, transport);
     if (hasTail) {
       await notifyFlush(options, response, { client, req, res, trace });
     }

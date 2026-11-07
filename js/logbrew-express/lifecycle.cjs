@@ -53,6 +53,26 @@ const NO_EVENTS = 0;
 
 /** @type {WeakMap<Request, RequestLifecycle>} */
 const requestLifecycles = new WeakMap();
+/** @type {WeakSet<LogBrewClient>} */
+const middlewareClients = new WeakSet();
+
+/**
+ * @param {LogBrewClient} client
+ * @returns {LogBrewClient}
+ */
+function ownClient(client) {
+  middlewareClients.add(client);
+  return client;
+}
+
+/**
+ * @param {LogBrewClient} client
+ * @param {Transport} transport
+ * @returns {Promise<TransportResponse>}
+ */
+async function releaseClient(client, transport) {
+  return middlewareClients.has(client) ? client.shutdown(transport) : client.flush(transport);
+}
 
 /**
  * @returns {Promise<unknown>}
@@ -89,7 +109,7 @@ async function shutdownReleasedLifecycle(lifecycle) {
   const context = runtimeContext(lifecycle);
   try {
     const hasTail = lifecycle.client.pendingEvents() > NO_EVENTS;
-    const response = await lifecycle.client.shutdown(lifecycle.transport);
+    const response = await releaseClient(lifecycle.client, lifecycle.transport);
     if (hasTail) {
       await notifyLifecycleFlush([...lifecycle.observers.items()], { context, response });
     }
@@ -210,7 +230,7 @@ function captureFinishedRequest(lifecycle, trace) {
 async function deliverRequestEvents(lifecycle) {
   return lifecycle.deferredShutdown.get()
     ? lifecycle.client.flush(lifecycle.transport)
-    : lifecycle.client.shutdown(lifecycle.transport);
+    : releaseClient(lifecycle.client, lifecycle.transport);
 }
 
 /**
@@ -389,5 +409,7 @@ module.exports = {
   claimRequestLifecycle,
   createRequestLifecycle,
   findDeliveringLifecycle,
+  ownClient,
+  releaseClient,
   settleWrappedHandler
 };
