@@ -214,7 +214,9 @@ app.get("/jobs/:id", withLogBrewExpressHandler(async (req, res) => {
 request telemetry when the response finishes or aborts. If a wrapped handler is
 still pending, it keeps the same request client open. After all wrapped handlers
 settle, it sends their pending events and shuts down the client. Request trace
-context also remains available during that work.
+context also remains available during that work. A client object that you pass
+as `client` stays open for later requests. The middleware only flushes it, and
+your app shuts it down.
 
 The wrapper forwards a promise rejection to `next(error)` once on Express 4 and
 5. Synchronous return values, receiver binding, and thrown errors keep their
