@@ -2,6 +2,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Doubles from maxRetryDelay with each consecutive failure up to 5 minutes, or up to maxRetryDelay when it is
+/// longer, then keeps half to all of that ceiling as jitter.
+NSTimeInterval LBWPauseProbeDelay(NSTimeInterval maxRetryDelay, NSUInteger failures, double jitter);
+
 @interface LBWDeliveryEngine : NSObject
 
 - (instancetype)initWithAPIKey:(NSString *)apiKey

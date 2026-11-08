@@ -138,7 +138,7 @@ typedef NS_ENUM(NSInteger, LBWDeliveryPauseReason) {
 @property(nonatomic, readonly) NSUInteger consecutiveFailures;
 @property(nonatomic, readonly) LBWDeliveryOutcome lastOutcome;
 @property(nonatomic, readonly) LBWDeliveryPauseReason pauseReason;
-/// Seconds until the scheduled automatic retry, or 0 when no retry is scheduled.
+/// Seconds until the scheduled automatic retry or paused-delivery probe, or 0 when none is scheduled.
 @property(nonatomic, readonly) NSTimeInterval nextRetryDelay;
 
 - (NSDictionary<NSString *, id> *)dictionaryValue;
