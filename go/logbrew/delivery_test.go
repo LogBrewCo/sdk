@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -279,6 +280,48 @@ func TestAutomaticDeliveryPausesTerminalResponsesUntilResume(t *testing.T) {
 			transport.waitForSends(t, 1)
 			waitForPendingEvents(t, client, 0)
 		})
+	}
+}
+
+func TestAutomaticDeliveryProbesForbiddenPauseAndResumesOnItsOwn(t *testing.T) {
+	transport := newLifecycleTransport(403, 202)
+	client := newLifecycleClient(t, &AutomaticDeliveryConfig{
+		Transport:      transport,
+		FlushInterval:  time.Hour,
+		FlushThreshold: 1,
+		RetryBaseDelay: 10 * time.Millisecond,
+		RetryMaxDelay:  20 * time.Millisecond,
+	})
+	queueLifecycleLog(t, client, "evt_probe_001")
+	transport.waitForSends(t, 2)
+	waitForPendingEvents(t, client, 0)
+	waitForState(t, client, DeliveryStateRunning)
+
+	bodies := transport.bodiesSnapshot()
+	if len(bodies) != 2 || !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatal("the probe did not resend the exact paused batch")
+	}
+	health := client.DeliveryHealth()
+	if health.LastOutcome != DeliveryOutcomeAccepted || health.FailedFlushes != 1 || health.AcceptedEvents != 1 {
+		t.Fatalf("unexpected health after the probe: %#v", health)
+	}
+}
+
+func TestPauseProbeCeilingDoublesToFiveMinutes(t *testing.T) {
+	for _, current := range []struct {
+		maxDelay time.Duration
+		failures int
+		expected time.Duration
+	}{
+		{maxDelay: 30 * time.Second, failures: 1, expected: 30 * time.Second},
+		{maxDelay: 30 * time.Second, failures: 3, expected: 2 * time.Minute},
+		{maxDelay: 30 * time.Second, failures: 9, expected: 5 * time.Minute},
+		{maxDelay: 30 * time.Second, failures: math.MaxInt, expected: 5 * time.Minute},
+		{maxDelay: 10 * time.Minute, failures: 4, expected: 10 * time.Minute},
+	} {
+		if ceiling := pauseProbeCeiling(current.maxDelay, current.failures); ceiling != current.expected {
+			t.Fatalf("pauseProbeCeiling(%v, %d) = %v, expected %v", current.maxDelay, current.failures, ceiling, current.expected)
+		}
 	}
 }
 
