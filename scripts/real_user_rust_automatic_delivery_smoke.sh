@@ -151,7 +151,7 @@ fn main() {
                 interval: Duration::from_millis(30),
                 threshold: 2,
                 retry_base_delay: Duration::from_millis(10),
-                retry_max_delay: Duration::from_millis(20),
+                retry_max_delay: Duration::from_secs(10),
             },
         )
         .expect("automatic client should build");
