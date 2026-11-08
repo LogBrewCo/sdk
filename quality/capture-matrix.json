@@ -949,7 +949,7 @@
       },
       "method": "React Native client from the package's platform-neutral entry with the Platform, AppState, ErrorUtils, and navigation container shapes its own tests and examples use, createReactNativeFetchTransport, the reversible instrumentation (global fetch, navigation, and AppState spans) under an incoming W3C trace, the global error handler, and console capture; one API call that succeeds, one that fails, a handled error, and a global error",
       "probe": "tools/capture-matrix/probes/js/logbrew-react-native",
-      "inputs": "f93748cce7a6643792f2dc0f0255377d97a9fe20d3ff4e467c6b5c3009e0582b"
+      "inputs": "e181e6dbe8549b69284378164fe65a8bcdc184fc0cbaa9f9f18b1ec595ca249e"
     },
     "js/logbrew-svelte": {
       "share": 75.0,
