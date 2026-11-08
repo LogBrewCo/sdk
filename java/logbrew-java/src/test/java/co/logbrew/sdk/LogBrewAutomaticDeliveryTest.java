@@ -46,7 +46,7 @@ public final class LogBrewAutomaticDeliveryTest {
         testRejectedAndTerminalGuidanceUseSafeFallbacks();
         testStaleGuidanceCannotReplaceExplicitRecovery();
         testStaleExplicitGuidanceCannotReplaceRecovery();
-        testTerminalOutcomesPauseUntilExplicitRecovery();
+        testExplicitRecoveryResumesTerminalPauseBeforeProbe();
         testMalformedTransportPausesWithoutLeakingDetails();
         testRuntimeTransportFailureIsStableAndPrivate();
         testPersistentRecoverySchedulesHydratedWork();
@@ -263,7 +263,7 @@ public final class LogBrewAutomaticDeliveryTest {
         testsRun++;
     }
 
-    private void testTerminalOutcomesPauseUntilExplicitRecovery() {
+    private void testExplicitRecoveryResumesTerminalPauseBeforeProbe() {
         assertTerminalPause(401, DeliveryHealth.PauseReason.AUTHENTICATION);
         assertTerminalPause(429, DeliveryHealth.PauseReason.QUOTA);
         assertTerminalPause(400, DeliveryHealth.PauseReason.NON_RETRYABLE);
@@ -397,9 +397,9 @@ public final class LogBrewAutomaticDeliveryTest {
         terminalSchedulers.scheduler().runNext();
         DeliveryHealth paused = terminal.deliveryHealth();
         assertEquals(DeliveryHealth.PauseReason.AUTHENTICATION, paused.pauseReason(), "terminal pause");
-        assertEquals(DeliveryHealth.RetryDelaySource.NONE, paused.retryDelaySource(), "terminal ignores hint");
+        assertEquals(DeliveryHealth.RetryDelaySource.CLIENT, paused.retryDelaySource(), "terminal ignores hint");
         assertEquals(0L, paused.acceptedServerRetryHints(), "terminal hint not accepted");
-        assertEquals(0, terminalSchedulers.scheduler().pendingTasks(), "terminal schedules no retry");
+        assertEquals(30_000L, terminalSchedulers.scheduler().nextDelayMillis(), "terminal probe ignores hint");
         terminalStatus.set(202);
         terminal.resumeAutomaticDelivery();
         terminalSchedulers.scheduler().runNext();
@@ -707,7 +707,8 @@ public final class LogBrewAutomaticDeliveryTest {
         assertEquals(3, calls.get(), "stable retry attempt count");
         assertEquals(DeliveryHealth.Activity.PAUSED, health.activity(), "retry exhausted pause");
         assertEquals(DeliveryHealth.PauseReason.RETRY_EXHAUSTED, health.pauseReason(), "retry exhausted reason");
-        assertEquals(0, schedulers.scheduler().pendingTasks(), "retry exhausted no hot loop");
+        assertEquals(1, schedulers.scheduler().pendingTasks(), "retry exhausted schedules one probe");
+        assertEquals(32L, schedulers.scheduler().nextDelayMillis(), "retry exhausted probe waits");
         assertEquals(1, health.queuedEvents(), "retry exhausted retains prefix");
         expectSdkException(client::shutdown);
         testsRun++;
@@ -1190,7 +1191,7 @@ public final class LogBrewAutomaticDeliveryTest {
         AtomicInteger calls = new AtomicInteger();
         LogBrewClient client = automaticClient(
             (apiKey, body) -> calls.incrementAndGet() == 1
-                ? new TransportResponse(429, 1, Duration.ofSeconds(30), "usage_limit_exceeded")
+                ? new TransportResponse(429, 1, Duration.ofHours(1), "usage_limit_exceeded")
                 : new TransportResponse(202, 1),
             DeliveryOptions.builder().maxRetries(0).build(),
             automaticOptions(1),
@@ -1202,7 +1203,7 @@ public final class LogBrewAutomaticDeliveryTest {
         DeliveryHealth paused = client.deliveryHealth();
         assertEquals(DeliveryHealth.Activity.PAUSED, paused.activity(), "usage_limit_exceeded pauses");
         assertEquals(DeliveryHealth.PauseReason.QUOTA, paused.pauseReason(), "usage_limit_exceeded reason");
-        assertEquals(0, schedulers.scheduler().pendingTasks(), "usage_limit_exceeded has no timed wake");
+        assertEquals(30_000L, schedulers.scheduler().nextDelayMillis(), "usage_limit_exceeded probe ignores Retry-After");
         client.resumeAutomaticDelivery();
         schedulers.scheduler().runNext();
         assertEquals(0, client.deliveryHealth().queuedEvents(), "usage limit recovers after resume");
@@ -1369,9 +1370,11 @@ public final class LogBrewAutomaticDeliveryTest {
         DeliveryHealth paused = client.deliveryHealth();
         assertEquals(DeliveryHealth.Activity.PAUSED, paused.activity(), "terminal pause " + status);
         assertEquals(expectedReason, paused.pauseReason(), "terminal reason " + status);
-        assertEquals(0, schedulers.scheduler().pendingTasks(), "terminal no wake " + status);
+        ManualTask probe = schedulers.scheduler().nextTask();
+        assertEquals(30_000L, probe.delayMillis, "terminal probe " + status);
         currentStatus.set(202);
         client.resumeAutomaticDelivery();
+        assertTrue(probe.cancelled(), "recovery cancels the probe " + status);
         assertEquals(0L, schedulers.scheduler().nextDelayMillis(), "recovery delay " + status);
         schedulers.scheduler().runNext();
         assertEquals(0, client.deliveryHealth().queuedEvents(), "recovered queue " + status);

@@ -5,6 +5,7 @@ import java.util.function.BooleanSupplier;
 
 /** Owns the single lazy scheduler for an automatic client. */
 final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserver {
+    private static final long PAUSE_PROBE_MAX_DELAY_MILLIS = 300_000L;
     private final LogBrewClient client;
     private final Transport transport;
     private final AutomaticDeliveryOptions options;
@@ -217,7 +218,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
                 if (stopping) {
                     recordOverlappedFailureLocked(observed.failureKind());
                 } else if (operationGeneration == generation) {
-                    handleFailureLocked(observed.failureKind(), observed.retryAfterDirective());
+                    handleFailureLocked(observed);
                 }
             }
             throw stableDeliveryFailure(error);
@@ -301,7 +302,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         boolean needsSession;
         final long operationGeneration;
         synchronized (this) {
-            if (!ownsProcessLocked() || stopping || isPausedLocked() || scheduledGeneration != generation) {
+            if (!ownsProcessLocked() || stopping || scheduledGeneration != generation) {
                 return;
             }
             wake = null;
@@ -343,7 +344,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
                 if (stopping) {
                     recordOverlappedFailureLocked(observed.failureKind());
                 } else if (operationGeneration == generation) {
-                    handleFailureLocked(observed.failureKind(), observed.retryAfterDirective());
+                    handleFailureLocked(observed);
                 }
             }
         } finally {
@@ -368,10 +369,9 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         }
     }
 
-    private void handleFailureLocked(
-        AutomaticDeliveryTransport.FailureKind failureKind,
-        RetryAfterDirective retryAfterDirective
-    ) {
+    private void handleFailureLocked(AutomaticDeliveryTransport observed) {
+        AutomaticDeliveryTransport.FailureKind failureKind = observed.failureKind();
+        RetryAfterDirective retryAfterDirective = observed.retryAfterDirective();
         consecutiveFailures = saturatedIncrement(consecutiveFailures);
         if (failureKind == AutomaticDeliveryTransport.FailureKind.RATE_LIMITED) {
             scheduleRateLimitWaitLocked(retryAfterDirective);
@@ -402,6 +402,34 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             return;
         }
         pauseTerminalLocked(failureKind);
+        if (observed.ingestFailed()) {
+            schedulePauseProbeLocked();
+        }
+    }
+
+    /** Resends the paused batch later, so delivery resumes on its own once ingest accepts it again. */
+    private void schedulePauseProbeLocked() {
+        long delayMillis = pauseProbeDelayMillis(options.maxRetryDelayMillis(), consecutiveFailures, jitter);
+        if (scheduleSafelyLocked(delayMillis, DeliveryHealth.Activity.PAUSED)) {
+            retryDelaySource = DeliveryHealth.RetryDelaySource.CLIENT;
+        }
+    }
+
+    /**
+     * Doubles from the max retry delay with each consecutive failure, up to 5 minutes or the max retry
+     * delay when it is longer, then keeps half to all of that ceiling as jitter.
+     */
+    static long pauseProbeDelayMillis(
+        long maxRetryDelayMillis,
+        int failures,
+        AutomaticDeliveryScheduler.Jitter jitter
+    ) {
+        long maximum = Math.max(maxRetryDelayMillis, PAUSE_PROBE_MAX_DELAY_MILLIS);
+        long ceiling = maxRetryDelayMillis;
+        for (int failure = 1; failure < failures && ceiling < maximum; failure++) {
+            ceiling = Math.min(ceiling * 2L, maximum);
+        }
+        return equalJitter(ceiling, jitter);
     }
 
     /** Waits out a rate limit, then resends the same frozen batch without an application call. */
@@ -474,13 +502,13 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             }
             cap *= 2L;
         }
-        cap = Math.min(cap, options.maxRetryDelayMillis());
+        return equalJitter(Math.min(cap, options.maxRetryDelayMillis()), jitter);
+    }
+
+    private static long equalJitter(long cap, AutomaticDeliveryScheduler.Jitter jitter) {
         long minimum = (cap / 2L) + (cap % 2L);
         long selected = jitter.select(minimum, cap);
-        if (selected < minimum || selected > cap) {
-            return cap;
-        }
-        return selected;
+        return selected < minimum || selected > cap ? cap : selected;
     }
 
     private void scheduleLocked(long delayMillis, DeliveryHealth.Activity scheduledActivity) {

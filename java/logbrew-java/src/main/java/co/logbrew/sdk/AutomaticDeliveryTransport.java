@@ -42,6 +42,11 @@ final class AutomaticDeliveryTransport implements Transport {
         return failureKind;
     }
 
+    /** Reports whether ingest answered with a failure, not a local failure before or after the send. */
+    boolean ingestFailed() {
+        return attempts > 0 && failureKind != FailureKind.NONE;
+    }
+
     long attempts() {
         return attempts;
     }
