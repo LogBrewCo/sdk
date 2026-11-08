@@ -39,6 +39,9 @@ RATE_LIMIT_BODY_LIMIT_BYTES = 4096
 RATE_LIMIT_CODES = frozenset({"rate_limited", "usage_limit_exceeded"})
 MAX_RETRY_DELAY_SECONDS = 300.0
 BASE_RETRY_DELAY_SECONDS = 1.0
+MAX_PAUSE_PROBE_DELAY_SECONDS = 300.0
+# Storage, ownership, and internal pauses are local faults that a resend cannot fix.
+PROBED_PAUSE_REASONS: frozenset[DeliveryPauseReason] = frozenset({"authentication", "quota", "nonretryable"})
 MIN_DELIVERY_INTERVAL_SECONDS = 0.01
 # One second matches the OpenTelemetry log processor default, so a lone event becomes readable quickly.
 DEFAULT_DELIVERY_INTERVAL_SECONDS = 1.0
@@ -180,6 +183,8 @@ class AutomaticDeliveryController:
                 return
             self._has_pending = pending_events > 0
             now = time.monotonic()
+            if self._pause_reason != "none" and self._retry_due_at is None:
+                self._schedule_pause_probe_locked(now)
             self._ensure_worker_locked(now)
             if self._pause_reason != "none":
                 self._condition.notify_all()
@@ -281,7 +286,7 @@ class AutomaticDeliveryController:
             else:
                 self._thread = None
             self._has_pending = pending_events > 0
-            if self._enabled and self._has_pending and self._pause_reason == "none":
+            if self._enabled and self._has_pending and self._sends_automatically_locked():
                 now = time.monotonic()
                 self._due_at = now + self._interval_seconds
                 self._ensure_worker_locked(now)
@@ -330,7 +335,7 @@ class AutomaticDeliveryController:
             )
 
     def _ensure_worker_locked(self, now: float) -> None:
-        if not self._enabled or self._closed or self._shutting_down or self._pause_reason != "none":
+        if not self._enabled or self._closed or self._shutting_down or not self._sends_automatically_locked():
             return
         if self._thread is not None and self._thread.is_alive():
             return
@@ -373,7 +378,7 @@ class AutomaticDeliveryController:
                 while True:
                     if self._stop_requested:
                         return
-                    if self._pause_reason != "none" or not self._has_pending:
+                    if not self._has_pending or not self._sends_automatically_locked():
                         self._condition.wait()
                         continue
                     due_at = self._retry_due_at if self._retry_due_at is not None else self._due_at
@@ -437,6 +442,16 @@ class AutomaticDeliveryController:
         self._wake_coalesced = False
         self._last_outcome = "paused"
         self._pause_reason = _pause_reason(error)
+        self._schedule_pause_probe_locked(now)
+
+    def _schedule_pause_probe_locked(self, now: float) -> None:
+        if self._enabled and self._pause_reason in PROBED_PAUSE_REASONS:
+            self._retry_due_at = now + _pause_probe_delay_seconds(self._consecutive_failures)
+            self._due_at = self._retry_due_at
+
+    def _sends_automatically_locked(self) -> bool:
+        # A paused delivery sends only its scheduled probe of the same batch.
+        return self._pause_reason == "none" or self._retry_due_at is not None
 
     def _lifecycle_locked(self) -> DeliveryLifecycle:
         if self._closed:
@@ -647,6 +662,14 @@ def _retry_delay_seconds(consecutive_failures: int, retry_after_ms: int | None) 
         return bounded_hint / 1000
     exponent = min(max(consecutive_failures - 1, 0), 30)
     ceiling = min(MAX_RETRY_DELAY_SECONDS, BASE_RETRY_DELAY_SECONDS * (2**exponent))
+    return random.uniform(ceiling / 2, ceiling)
+
+
+def _pause_probe_delay_seconds(consecutive_failures: int) -> float:
+    """Double from the max retry delay per failure up to 5 minutes, or that delay when longer, with jitter."""
+    exponent = min(max(consecutive_failures - 1, 0), 30)
+    maximum = max(MAX_RETRY_DELAY_SECONDS, MAX_PAUSE_PROBE_DELAY_SECONDS)
+    ceiling = min(maximum, MAX_RETRY_DELAY_SECONDS * (2**exponent))
     return random.uniform(ceiling / 2, ceiling)
 
 
