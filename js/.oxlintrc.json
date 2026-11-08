@@ -1005,7 +1005,8 @@
     },
     {
       "files": [
-        "logbrew-express/test/mounted-app.js"
+        "logbrew-express/test/mounted-app.js",
+        "logbrew-express/test/mount-templates.test.js"
       ],
       "rules": {
         "eslint/new-cap": [

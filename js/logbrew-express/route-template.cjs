@@ -4,7 +4,13 @@ const UNMATCHED_ROUTE = "<unmatched>";
 const ABSOLUTE_FORM_PREFIX = /^[a-z][\d+.a-z-]*:\/\/[^/?#]*/iu;
 const QUERY_OR_FRAGMENT = /[?#].*$/su;
 const TRAILING_SLASH = /\/$/u;
+const EXPRESS4_PATTERN = /^\^(?<body>.*?)(?:\\\/\?)?\(\?=\\\/\|\$\)$/su;
+const EXPRESS4_TOKEN = /\\\/(?<literal>(?:[\w~-]|\\\.)+)|\(\?:\\(?<separator>[./])\((?:[^()]+)\)\)(?<optional>\??)/gyu;
+const ESCAPED_DOT = /\\\./gu;
+const PATH_TO_REGEXP_MATCHER = "match";
+const PROBE_SEGMENT = "logbrew-mount-probe";
 const NO_PARAMS = 0;
+const FIRST_SEGMENT = 1;
 
 /**
  * @param {unknown} value
@@ -29,44 +35,130 @@ function requestPathname(req) {
 }
 
 /**
- * @param {string} segment
- * @returns {string}
+ * @param {unknown} keys
+ * @returns {readonly unknown[]}
  */
-function decodeSegment(segment) {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
+function keyNames(keys) {
+  return Array.isArray(keys) ? keys.map((key) => member(key, "name")) : [];
 }
 
 /**
- * @param {unknown} params
- * @returns {readonly string[]}
- */
-function paramNames(params) {
-  if (typeof params !== "object" || params === null) {
-    return [];
-  }
-  return Object.keys(params).filter((name) => Reflect.get(params, name) !== undefined);
-}
-
-/**
- * @param {string} matched
- * @param {unknown} params
+ * @param {Readonly<Record<string, string | undefined>> | undefined} groups
+ * @param {unknown} name
  * @returns {string | undefined}
  */
-function mountTemplate(matched, params) {
-  const pending = [...paramNames(params)];
-  const segments = matched.split("/").map((segment) => {
-    const [name] = pending;
-    if (name !== undefined && decodeSegment(segment) === member(params, name)) {
-      pending.shift();
-      return `:${name}`;
+function express4Part(groups, name) {
+  const literal = groups?.["literal"];
+  if (literal !== undefined) {
+    return `/${literal.replaceAll(ESCAPED_DOT, ".")}`;
+  }
+  return groups === undefined || typeof name !== "string" ? undefined : `${String(groups["separator"])}:${name}${String(groups["optional"])}`;
+}
+
+/**
+ * @param {string} body
+ * @returns {readonly Readonly<Record<string, string | undefined>>[] | undefined}
+ */
+function express4Tokens(body) {
+  const tokens = [];
+  EXPRESS4_TOKEN.lastIndex = NO_PARAMS;
+  while (EXPRESS4_TOKEN.lastIndex < body.length) {
+    const groups = EXPRESS4_TOKEN.exec(body)?.groups;
+    if (groups === undefined) {
+      return undefined;
     }
-    return segment;
+    tokens.push(groups);
+  }
+  return tokens;
+}
+
+/**
+ * @param {string} body
+ * @param {readonly unknown[]} names
+ * @returns {string | undefined}
+ */
+function express4Body(body, names) {
+  const tokens = express4Tokens(body);
+  const params = tokens?.filter((groups) => groups["literal"] === undefined) ?? [];
+  if (tokens === undefined || params.length !== names.length) {
+    return undefined;
+  }
+  const parts = tokens.map((groups) => express4Part(groups, names[params.indexOf(groups)]));
+  return parts.includes(undefined) ? undefined : parts.join("");
+}
+
+/**
+ * @param {unknown} layer
+ * @returns {string | undefined}
+ */
+function express4Template(layer) {
+  const regexp = member(layer, "regexp");
+  const body = regexp instanceof RegExp ? EXPRESS4_PATTERN.exec(regexp.source)?.groups?.["body"] : undefined;
+  return body === undefined ? undefined : express4Body(body, keyNames(member(layer, "keys")));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is (path: string) => unknown}
+ */
+function isPathMatcher(value) {
+  return typeof value === "function" && value.name === PATH_TO_REGEXP_MATCHER;
+}
+
+/**
+ * @param {unknown} result
+ * @returns {Readonly<Record<string, unknown>> | undefined}
+ */
+function matchParams(result) {
+  const params = member(result, "params");
+  return typeof params === "object" && params !== null ? Object.fromEntries(Object.entries(params)) : undefined;
+}
+
+/**
+ * @param {(path: string) => unknown} matcher
+ * @param {readonly string[]} segments
+ * @param {number} index
+ * @returns {string | undefined}
+ */
+function probedParam(matcher, segments, index) {
+  const probe = segments.map((segment, at) => (at === index ? PROBE_SEGMENT : segment)).join("/");
+  const params = matchParams(matcher(probe));
+  if (params === undefined) {
+    return "";
+  }
+  return Object.keys(params).find((name) => params[name] === PROBE_SEGMENT);
+}
+
+/**
+ * @param {(path: string) => unknown} matcher
+ * @param {string} matched
+ * @returns {string | undefined}
+ */
+function express5Template(matcher, matched) {
+  const params = matchParams(matcher(matched)) ?? {};
+  const segments = matched.replace(TRAILING_SLASH, "").split("/");
+  const named = new Set();
+  const template = segments.map((segment, index) => {
+    const name = index < FIRST_SEGMENT ? "" : probedParam(matcher, segments, index);
+    named.add(name);
+    return name === "" ? segment : `:${String(name)}`;
   });
-  return pending.length === NO_PARAMS ? segments.join("/").replace(TRAILING_SLASH, "") : undefined;
+  const declared = Object.keys(params).filter((name) => params[name] !== undefined);
+  return named.has(undefined) || declared.some((name) => !named.has(name)) ? undefined : template.join("/");
+}
+
+/**
+ * @param {unknown} layer
+ * @param {string} matched
+ * @returns {string | undefined}
+ */
+function declaredMountTemplate(layer, matched) {
+  const matchers = member(layer, "matchers");
+  if (!Array.isArray(matchers)) {
+    return express4Template(layer);
+  }
+  const matcher = matchers.filter((candidate) => isPathMatcher(candidate)).find((candidate) => candidate(matched) !== false);
+  return matcher === undefined ? undefined : express5Template(matcher, matched);
 }
 
 /**
@@ -98,9 +190,9 @@ function mountedPart(layer, path) {
   if (typeof matched !== "string" || !path.startsWith(matched)) {
     return undefined;
   }
-  const mount = mountTemplate(matched, member(layer, "params"));
+  const mount = declaredMountTemplate(layer, matched);
   const rest = path.slice(matched.length);
-  return mount === undefined ? undefined : { mount, rest: rest.startsWith("/") ? rest : `/${rest}` };
+  return mount === undefined ? undefined : { mount: mount.replace(TRAILING_SLASH, ""), rest: rest.startsWith("/") ? rest : `/${rest}` };
 }
 
 /**
