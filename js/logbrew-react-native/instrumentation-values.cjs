@@ -253,13 +253,21 @@ function toText(value) {
   return typeof value === "string" ? value : String(value);
 }
 
+const RECORD_ID_SEGMENT = /^(?:\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/iu;
+
 /**
+ * Names a request by its path with numeric, UUID, and long hex segments replaced by `:id`, so the
+ * name holds no record ID and stays low-cardinality.
  * @param {{ readonly url: unknown }} context
  * @returns {string}
  */
 function defaultRouteTemplateFactory({ url }) {
   const parsedUrl = parseUrl(url);
-  return parsedUrl === undefined ? stripQueryAndHash(toText(url)) : parsedUrl.pathname;
+  const pathname = parsedUrl === undefined ? stripQueryAndHash(toText(url)) : parsedUrl.pathname;
+  return pathname
+    .split("/")
+    .map((segment) => (RECORD_ID_SEGMENT.test(segment) ? ":id" : segment))
+    .join("/");
 }
 
 module.exports = {
