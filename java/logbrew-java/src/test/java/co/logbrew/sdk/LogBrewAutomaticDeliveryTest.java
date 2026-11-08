@@ -54,6 +54,9 @@ public final class LogBrewAutomaticDeliveryTest {
         testConcurrentAutomaticDeliveryAndShutdownSerialize();
         testFailedShutdownRetainsWorkForExplicitRecovery();
         testRetryBudgetPausesWithoutHotLooping();
+        testForbiddenPauseProbesAndResumesWithoutAppCall();
+        testExhaustedRetriesProbeUntilIngestRecovers();
+        testPauseProbeDelayBackOffIsBounded();
         testReentrantShutdownFailsWithoutLosingOuterDelivery();
         testProcessOwnershipFailsClosed();
         testQueueDropAndHealthSurfaceStayContentFree();
@@ -707,6 +710,105 @@ public final class LogBrewAutomaticDeliveryTest {
         assertEquals(0, schedulers.scheduler().pendingTasks(), "retry exhausted no hot loop");
         assertEquals(1, health.queuedEvents(), "retry exhausted retains prefix");
         expectSdkException(client::shutdown);
+        testsRun++;
+    }
+
+    private void testForbiddenPauseProbesAndResumesWithoutAppCall() {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        List<String> bodies = new ArrayList<>();
+        LogBrewClient client = automaticClient(
+            (apiKey, body) -> {
+                bodies.add(body);
+                return new TransportResponse(bodies.size() == 1 ? 403 : 202, 1);
+            },
+            DeliveryOptions.builder().maxRetries(0).build(),
+            AutomaticDeliveryOptions.builder()
+                .flushInterval(Duration.ofSeconds(1))
+                .queueThreshold(1)
+                .initialRetryDelay(Duration.ofMillis(10))
+                .maxRetryDelay(Duration.ofMillis(40))
+                .build(),
+            schedulers,
+            () -> true
+        );
+        enqueueLog(client, "evt_java_forbidden_probe", "forbidden");
+        schedulers.scheduler().runNext();
+        DeliveryHealth paused = client.deliveryHealth();
+        assertEquals(DeliveryHealth.Activity.PAUSED, paused.activity(), "forbidden pause activity");
+        assertEquals(DeliveryHealth.PauseReason.NON_RETRYABLE, paused.pauseReason(), "forbidden pause reason");
+        assertEquals(40L, paused.scheduledDelayMillis(), "forbidden probe delay in health");
+        assertEquals(40L, schedulers.scheduler().nextDelayMillis(), "forbidden probe wake");
+
+        enqueueLog(client, "evt_java_forbidden_later", "later");
+        assertEquals(1, schedulers.scheduler().pendingTasks(), "capture during pause arms no extra send");
+        assertEquals(40L, schedulers.scheduler().nextDelayMillis(), "capture during pause waits for the probe");
+
+        schedulers.scheduler().runNext();
+        assertEquals(bodies.get(0), bodies.get(1), "probe resends the paused batch");
+        DeliveryHealth resumed = client.deliveryHealth();
+        assertEquals(DeliveryHealth.PauseReason.NONE, resumed.pauseReason(), "accepted probe clears the pause");
+        assertEquals(DeliveryHealth.Activity.SCHEDULED, resumed.activity(), "accepted probe resumes delivery");
+        schedulers.scheduler().runNext();
+        assertContains(bodies.get(2), "evt_java_forbidden_later");
+        assertEquals(0, client.deliveryHealth().queuedEvents(), "probe drains the queue");
+        client.shutdown();
+        testsRun++;
+    }
+
+    private void testExhaustedRetriesProbeUntilIngestRecovers() {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        AtomicInteger calls = new AtomicInteger();
+        LogBrewClient client = automaticClient(
+            (apiKey, body) -> new TransportResponse(calls.incrementAndGet() <= 4 ? 503 : 202, 1),
+            DeliveryOptions.builder().maxRetries(0).build(),
+            AutomaticDeliveryOptions.builder()
+                .flushInterval(Duration.ofSeconds(1))
+                .queueThreshold(1)
+                .initialRetryDelay(Duration.ofMillis(4))
+                .maxRetryDelay(Duration.ofMillis(8))
+                .maxRetryAttempts(2)
+                .build(),
+            schedulers,
+            () -> true
+        );
+        enqueueLog(client, "evt_java_outage_probe", "outage");
+        schedulers.scheduler().runNext();
+        schedulers.scheduler().runNext();
+        schedulers.scheduler().runNext();
+        assertEquals(DeliveryHealth.PauseReason.RETRY_EXHAUSTED, client.deliveryHealth().pauseReason(), "outage pause reason");
+        assertEquals(32L, schedulers.scheduler().nextDelayMillis(), "first probe after 3 failures");
+        schedulers.scheduler().runNext();
+        assertEquals(DeliveryHealth.Activity.PAUSED, client.deliveryHealth().activity(), "failed probe stays paused");
+        assertEquals(64L, schedulers.scheduler().nextDelayMillis(), "failed probe doubles the wait");
+        schedulers.scheduler().runNext();
+        DeliveryHealth recovered = client.deliveryHealth();
+        assertEquals(5, calls.get(), "outage request count");
+        assertEquals(0, recovered.queuedEvents(), "outage queue drains");
+        assertEquals(DeliveryHealth.Activity.IDLE, recovered.activity(), "outage delivery resumes");
+        assertEquals(DeliveryHealth.PauseReason.NONE, recovered.pauseReason(), "outage pause clears");
+        client.shutdown();
+        testsRun++;
+    }
+
+    private void testPauseProbeDelayBackOffIsBounded() {
+        AutomaticDeliveryScheduler.Jitter longest = (minimum, maximum) -> maximum;
+        AutomaticDeliveryScheduler.Jitter shortest = (minimum, maximum) -> minimum;
+        assertEquals(30_000L, AutomaticDeliveryController.pauseProbeDelayMillis(30_000L, 1, longest), "first probe");
+        assertEquals(15_000L, AutomaticDeliveryController.pauseProbeDelayMillis(30_000L, 1, shortest), "jitter keeps half");
+        assertEquals(120_000L, AutomaticDeliveryController.pauseProbeDelayMillis(30_000L, 3, longest), "probe doubles");
+        assertEquals(300_000L, AutomaticDeliveryController.pauseProbeDelayMillis(30_000L, 9, longest), "5 minute bound");
+        assertEquals(
+            300_000L,
+            AutomaticDeliveryController.pauseProbeDelayMillis(30_000L, Integer.MAX_VALUE, longest),
+            "failure count cannot overflow"
+        );
+        assertEquals(600_000L, AutomaticDeliveryController.pauseProbeDelayMillis(600_000L, 4, longest), "longer max delay");
+        assertEquals(1L, AutomaticDeliveryController.pauseProbeDelayMillis(1L, 1, shortest), "1 ms ceiling");
+        assertEquals(
+            30_000L,
+            AutomaticDeliveryController.pauseProbeDelayMillis(30_000L, 1, (minimum, maximum) -> maximum + 1L),
+            "out-of-range jitter uses the ceiling"
+        );
         testsRun++;
     }
 
