@@ -43,12 +43,14 @@ export declare function captureNextClientError(
   options?: NextClientErrorOptions
 ): Promise<TransportResponse | undefined>;
 
-/** Report uncaught browser errors and unhandled rejections, and flush queued events on pagehide. */
+/** Report uncaught browser errors and unhandled rejections, send Web Vitals, and flush queued events on pagehide. */
 export declare function installLogBrewNextClientErrorCapture(options: {
   client: LogBrewClient;
   browserWindow?: Window;
   /** Console, fetch, XHR, and route-change breadcrumbs on each issue. Defaults to true. */
   breadcrumbs?: boolean;
+  /** LCP, INP, CLS, FCP, and TTFB as `browser.web_vital.*` metrics when the page is first hidden. Defaults to true. */
+  webVitals?: boolean;
 }): { uninstall(): void };
 
 export type NextRoutePattern = string;

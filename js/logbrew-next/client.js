@@ -13,6 +13,16 @@ const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 // Send 1 second after the first queued event; pagehide flushes the rest when the page closes.
 const DEFAULT_BROWSER_DELIVERY_INTERVAL_MS = 1000;
 const clientEndpoints = new WeakMap();
+// The first route template each client's navigation hook saw: the route the page loaded on.
+const landingRouteTemplates = new WeakMap();
+// Good and poor limits from https://web.dev/articles/vitals.
+const WEB_VITALS = {
+  cls: { description: "Cumulative Layout Shift of one page load.", good: 0.1, poor: 0.25, unit: "1" },
+  fcp: { description: "First Contentful Paint of one page load.", good: 1800, poor: 3000, unit: "ms" },
+  inp: { description: "Interaction to Next Paint of one page load.", good: 200, poor: 500, unit: "ms" },
+  lcp: { description: "Largest Contentful Paint of one page load.", good: 2500, poor: 4000, unit: "ms" },
+  ttfb: { description: "Time to First Byte of one page load.", good: 800, poor: 1800, unit: "ms" }
+};
 
 export function createLogBrewNextBrowserClient({
   apiKey,
@@ -22,7 +32,7 @@ export function createLogBrewNextBrowserClient({
   endpoint = DEFAULT_ENDPOINT,
   eventFilter,
   sdkName = "logbrew-next-client",
-  sdkVersion = "0.1.16",
+  sdkVersion = "0.1.17",
   maxQueueSize,
   maxRetries = 2,
   onEventDropped,
@@ -72,7 +82,8 @@ export function captureNextClientError(client, error, { digest, routeTemplate, f
 
 // Report uncaught browser errors and unhandled rejections, and flush queued events on pagehide.
 // Console, fetch, XHR, and route-change breadcrumbs ride along with each issue; breadcrumbs: false turns them off.
-export function installLogBrewNextClientErrorCapture({ breadcrumbs = true, browserWindow = globalThis.window, client } = {}) {
+// Web Vitals go out as metrics when the page is first hidden; webVitals: false turns them off.
+export function installLogBrewNextClientErrorCapture({ breadcrumbs = true, browserWindow = globalThis.window, client, webVitals = true } = {}) {
   if (!client || !browserWindow || typeof browserWindow.addEventListener !== "function") {
     throw new SdkError("configuration_error", "installLogBrewNextClientErrorCapture requires a client and a browser window");
   }
@@ -100,14 +111,126 @@ export function installLogBrewNextClientErrorCapture({ breadcrumbs = true, brows
   const uninstallBreadcrumbs = breadcrumbs === false
     ? () => undefined
     : installBrowserBreadcrumbs(browserWindow, client, { ignoredUrls: [clientEndpoints.get(client) ?? DEFAULT_ENDPOINT] });
+  const uninstallWebVitals = webVitals === false ? () => undefined : installWebVitals(browserWindow, client);
   return {
     uninstall() {
       uninstallBreadcrumbs();
+      uninstallWebVitals();
       for (const [type, listener] of Object.entries(listeners)) {
         browserWindow.removeEventListener?.(type, listener);
       }
     }
   };
+}
+
+// Observe the page's performance entries the way https://github.com/GoogleChrome/web-vitals does,
+// without the library, and record each Web Vital once, when the page is first hidden.
+function installWebVitals(browserWindow, client) {
+  const { PerformanceObserver: Observer, document, performance } = browserWindow;
+  if (typeof Observer !== "function" || !document || typeof document.addEventListener !== "function") {
+    return () => undefined;
+  }
+  const navigation = performance?.getEntriesByType?.("navigation")?.[0];
+  const sinceActivation = (time) => Math.max(time - (navigation?.activationStart ?? 0), 0);
+  const values = {};
+  const layoutShift = { first: 0, last: 0, session: 0 };
+  const interactions = new Map();
+  const observers = [];
+  const observe = (type, onEntry, options) => {
+    try {
+      const observer = new Observer((list) => { list.getEntries().forEach(onEntry); });
+      observer.observe({ type, buffered: true, ...options });
+      observers.push([observer, onEntry]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (navigation?.responseStart > 0) {
+    values.ttfb = sinceActivation(navigation.responseStart);
+  }
+  // A page that loads in the background has no meaningful paint timings.
+  if (document.visibilityState !== "hidden") {
+    observe("paint", (entry) => {
+      if (entry.name === "first-contentful-paint") {
+        values.fcp = sinceActivation(entry.startTime);
+      }
+    });
+    observe("largest-contentful-paint", (entry) => { values.lcp = sinceActivation(entry.startTime); });
+  }
+  // CLS is the largest session window: shifts less than 1 s apart, at most 5 s long.
+  if (observe("layout-shift", (entry) => {
+    if (entry.hadRecentInput) {
+      return;
+    }
+    if (layoutShift.session > 0 && (entry.startTime - layoutShift.last >= 1000 || entry.startTime - layoutShift.first >= 5000)) {
+      layoutShift.session = 0;
+    }
+    if (layoutShift.session === 0) {
+      layoutShift.first = entry.startTime;
+    }
+    layoutShift.session += entry.value;
+    layoutShift.last = entry.startTime;
+    values.cls = Math.max(values.cls ?? 0, layoutShift.session);
+  })) {
+    values.cls = 0;
+  }
+  observe("event", (entry) => {
+    if (entry.interactionId > 0) {
+      interactions.set(entry.interactionId, Math.max(interactions.get(entry.interactionId) ?? 0, entry.duration));
+    }
+  }, { durationThreshold: 40 });
+
+  let reported = false;
+  const report = (event) => {
+    if (reported || (document.visibilityState !== "hidden" && event?.type !== "pagehide")) {
+      return;
+    }
+    reported = true;
+    uninstall();
+    // INP skips 1 slowest interaction per 50, as the web-vitals library does.
+    const durations = [...interactions.values()].sort((left, right) => right - left);
+    if (durations.length > 0) {
+      const interactionCount = performance?.interactionCount ?? durations.length;
+      values.inp = durations[Math.min(durations.length - 1, Math.floor(interactionCount / 50))];
+    }
+    const routeTemplate = landingRouteTemplates.get(client);
+    for (const [vital, rawValue] of Object.entries(values)) {
+      const { description, good, poor, unit } = WEB_VITALS[vital];
+      const value = vital === "cls" ? Number(rawValue.toFixed(4)) : Math.round(rawValue);
+      try {
+        client.metric(`evt_next_web_vital_${randomHex(8)}`, new Date().toISOString(), {
+          description,
+          kind: "histogram",
+          metadata: compactMetadata({
+            framework: "nextjs",
+            navigationType: navigation?.type,
+            rating: value <= good ? "good" : value <= poor ? "needs-improvement" : "poor",
+            routeTemplate
+          }),
+          name: `browser.web_vital.${vital}`,
+          temporality: "delta",
+          unit,
+          value
+        });
+      } catch {
+        // Capture failures never reach the page.
+      }
+    }
+    void client.flush?.().catch(() => undefined);
+  };
+  document.addEventListener("visibilitychange", report);
+  browserWindow.addEventListener("pagehide", report);
+  function uninstall() {
+    for (const [observer, onEntry] of observers) {
+      observer.takeRecords?.().forEach(onEntry);
+      observer.disconnect();
+    }
+    observers.length = 0;
+    document.removeEventListener?.("visibilitychange", report);
+    browserWindow.removeEventListener?.("pagehide", report);
+  }
+  return uninstall;
 }
 
 function createNextBrowserTransport(endpoint) {
@@ -222,6 +345,9 @@ export function createNextNavigationSpanEvent({
       status,
       traceId: trace.traceId,
       metadata: compactMetadata({
+        analyticsKind: "page_view",
+        analyticsSchemaVersion: 1,
+        analyticsSurface: safeRouteTemplate,
         framework: "nextjs",
         navigationIndex,
         navigationType,
@@ -243,6 +369,9 @@ export function captureNextNavigation(client, input = {}) {
     return undefined;
   }
   client.span(event.id, event.timestamp, event.attributes);
+  if (!landingRouteTemplates.has(client)) {
+    landingRouteTemplates.set(client, event.attributes.metadata.routeTemplate);
+  }
   return event;
 }
 
