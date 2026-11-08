@@ -921,7 +921,7 @@
       "inputs": "1edbac66c00131b558b8c4e2de6e3ec5444997ade7c42feef55658f9fe1c7ba7"
     },
     "js/logbrew-react-native": {
-      "share": 75.0,
+      "share": 83.3,
       "signals": {
         "errors": "sent",
         "stack": "sent",
@@ -929,7 +929,7 @@
         "logs": "sent",
         "requests": "sent",
         "traces": "missing",
-        "metrics": "missing",
+        "metrics": "sent",
         "user": "sent",
         "session": "missing",
         "release": "sent",
@@ -939,17 +939,17 @@
       "not_applicable": {},
       "missing": [
         "traces",
-        "metrics",
         "session"
       ],
       "events": {
         "issue": 2,
         "log": 2,
+        "metric": 1,
         "span": 6
       },
-      "method": "React Native client from the package's platform-neutral entry with the Platform, AppState, ErrorUtils, and navigation container shapes its own tests and examples use, createReactNativeFetchTransport, the reversible instrumentation (global fetch, navigation, and AppState spans) under an incoming W3C trace, the global error handler, and console capture; one API call that succeeds, one that fails, a handled error, and a global error",
+      "method": "React Native client from the app entry Metro resolves (the react-native export condition, with a stand-in native module that reports the process start), the default app start metric, and the Platform, AppState, ErrorUtils, and navigation container shapes its own tests and examples use, createReactNativeFetchTransport, the reversible instrumentation (global fetch, navigation, and AppState spans) under an incoming W3C trace, the global error handler, and console capture; one API call that succeeds, one that fails, a handled error, and a global error",
       "probe": "tools/capture-matrix/probes/js/logbrew-react-native",
-      "inputs": "e181e6dbe8549b69284378164fe65a8bcdc184fc0cbaa9f9f18b1ec595ca249e"
+      "inputs": "c08725c45bd6f2bac740ebb4fd755e4a178bb76cf151cfb4d2a3913b46419153"
     },
     "js/logbrew-svelte": {
       "share": 75.0,
