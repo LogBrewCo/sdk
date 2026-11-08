@@ -1,4 +1,5 @@
 #import "LogBrew.h"
+#import "../src/LBWDeliveryEngine.h"
 
 static void LBWAssert(BOOL condition, NSString *message) {
   if (!condition) {
@@ -339,6 +340,78 @@ static void LBWExerciseAutomaticDelivery(void) {
   }
 }
 
+static LBWAutomaticDeliveryOptions *LBWPauseProbeOptions(NSTimeInterval retryBaseDelay) {
+  LBWAutomaticDeliveryOptions *options = [[LBWAutomaticDeliveryOptions alloc] init];
+  options.interval = 30.0;
+  options.threshold = 1U;
+  options.retryBaseDelay = retryBaseDelay;
+  options.maxRetryDelay = 0.2;
+  return options;
+}
+
+static void LBWExercisePauseProbe(void) {
+  NSError *error = nil;
+
+  // A 403 pause probes again with the same batch and resumes without an app call.
+  LBWRecordingTransport *forbidden = [[LBWRecordingTransport alloc] initWithSteps:@[
+    [LBWRecordingStep statusCodeStep:403],
+    [LBWRecordingStep statusCodeStep:202]
+  ]];
+  LBWClient *forbiddenClient = LBWNewClient();
+  LBWAssert([forbiddenClient startAutomaticDeliveryWithTransport:forbidden
+                                                          options:LBWPauseProbeOptions(0.05)
+                                                            error:&error],
+            @"forbidden automatic start failed");
+  LBWAssert([forbiddenClient logWithID:@"objc-forbidden"
+                             timestamp:@"2026-07-18T12:00:09Z"
+                            attributes:@{ @"message": @"forbidden", @"level": @"info" }
+                                 error:&error],
+            @"forbidden capture failed");
+  LBWAssert(LBWWaitForDeliveryState(forbiddenClient, LBWDeliveryStatePaused, 2.0), @"403 did not pause");
+  LBWDeliveryHealth *paused = forbiddenClient.deliveryHealth;
+  LBWAssert(paused.pauseReason == LBWDeliveryPauseReasonAuthentication, @"403 pause reason failed");
+  LBWAssert(paused.nextRetryDelay > 0 && paused.nextRetryDelay <= 0.2,
+            [NSString stringWithFormat:@"403 pause probe delay failed: %f", paused.nextRetryDelay]);
+  LBWAssert(LBWWaitForSentBodies(forbidden, 2U, 2.0), @"403 pause did not probe on its own");
+  LBWAssert([forbidden.sentBodies[0] isEqualToString:forbidden.sentBodies[1]], @"403 probe sent a different batch");
+  LBWAssert(LBWWaitForDeliveryState(forbiddenClient, LBWDeliveryStateRunning, 2.0) &&
+                forbiddenClient.pendingEvents == 0U,
+            @"accepted 403 probe did not resume delivery");
+  LBWAssert(forbiddenClient.deliveryHealth.pauseReason == LBWDeliveryPauseReasonNone,
+            @"accepted 403 probe kept the pause reason");
+  LBWAssert([forbiddenClient shutdownOwnedTransportWithError:&error] != nil, @"forbidden shutdown failed");
+
+  // An outage that uses up the retries probes again and drains the queue.
+  LBWRecordingTransport *outage = [[LBWRecordingTransport alloc] initWithSteps:@[
+    [LBWRecordingStep statusCodeStep:503],
+    [LBWRecordingStep statusCodeStep:503],
+    [LBWRecordingStep statusCodeStep:503],
+    [LBWRecordingStep statusCodeStep:202]
+  ]];
+  LBWClient *outageClient = LBWNewClient();
+  LBWAssert([outageClient startAutomaticDeliveryWithTransport:outage
+                                                       options:LBWPauseProbeOptions(0.01)
+                                                         error:&error],
+            @"outage automatic start failed");
+  LBWAssert([outageClient logWithID:@"objc-outage"
+                          timestamp:@"2026-07-18T12:00:10Z"
+                         attributes:@{ @"message": @"outage", @"level": @"info" }
+                              error:&error],
+            @"outage capture failed");
+  LBWAssert(LBWWaitForSentBodies(outage, 4U, 3.0), @"exhausted retries did not probe on its own");
+  LBWAssert(LBWWaitForDeliveryState(outageClient, LBWDeliveryStateRunning, 2.0) && outageClient.pendingEvents == 0U,
+            @"accepted outage probe did not drain the queue");
+  LBWAssert([outageClient shutdownOwnedTransportWithError:&error] != nil, @"outage shutdown failed");
+
+  // Probe waits double from maxRetryDelay up to 5 minutes, or up to maxRetryDelay when it is longer.
+  LBWAssert(LBWPauseProbeDelay(30.0, 1U, 1.0) == 30.0, @"first probe ceiling failed");
+  LBWAssert(LBWPauseProbeDelay(30.0, 1U, 0.0) == 15.0, @"first probe jitter floor failed");
+  LBWAssert(LBWPauseProbeDelay(30.0, 3U, 1.0) == 120.0, @"probe doubling failed");
+  LBWAssert(LBWPauseProbeDelay(30.0, 9U, 1.0) == 300.0, @"probe 5 minute cap failed");
+  LBWAssert(LBWPauseProbeDelay(30.0, NSUIntegerMax, 1.0) == 300.0, @"probe overflow cap failed");
+  LBWAssert(LBWPauseProbeDelay(600.0, 4U, 1.0) == 600.0, @"long maxRetryDelay probe cap failed");
+}
+
 @interface LBWRateLimitTransport : NSObject <LBWTransport>
 
 @property(nonatomic, copy) NSArray<LBWTransportResponse *> *responses;
@@ -435,14 +508,27 @@ static void LBWExerciseRateLimitedDelivery(void) {
   LBWAssert(codeClient.deliveryHealth.state == LBWDeliveryStateRetrying, @"rate_limited manual flush paused");
   LBWAssert([codeClient shutdownOwnedTransportWithError:&error] != nil, @"rate_limited shutdown failed");
 
-  // usage_limit_exceeded pauses even with Retry-After.
+  // usage_limit_exceeded pauses and probes on its own schedule, not Retry-After.
   LBWRateLimitTransport *usage = [[LBWRateLimitTransport alloc] init];
-  usage.responses = @[ LBWRateLimited(@1, @"usage_limit_exceeded") ];
-  LBWClient *usageClient = LBWStartRateLimitClient(usage, @"objc-rate-usage");
+  usage.responses = @[ LBWRateLimited(@3600, @"usage_limit_exceeded") ];
+  LBWClient *usageClient = LBWNewClient();
+  LBWAutomaticDeliveryOptions *usageOptions = [[LBWAutomaticDeliveryOptions alloc] init];
+  usageOptions.interval = 0.05;
+  usageOptions.threshold = 1U;
+  usageOptions.retryBaseDelay = 0.01;
+  usageOptions.maxRetryDelay = 2.0;
+  LBWAssert([usageClient startAutomaticDeliveryWithTransport:usage options:usageOptions error:&error],
+            @"usage limit automatic start failed");
+  LBWAssert([usageClient logWithID:@"objc-rate-usage"
+                         timestamp:@"2026-07-18T12:00:08Z"
+                        attributes:@{ @"message": @"usage limit", @"level": @"info" }
+                             error:&error],
+            @"usage limit capture failed");
   LBWAssert(LBWWaitForDeliveryState(usageClient, LBWDeliveryStatePaused, 2.0), @"usage_limit_exceeded did not pause");
   LBWAssert(usageClient.deliveryHealth.pauseReason == LBWDeliveryPauseReasonQuota, @"usage limit pause reason failed");
-  LBWAssert(usageClient.deliveryHealth.nextRetryDelay == 0, @"usage limit scheduled a retry");
-  LBWAssert(!LBWWaitForRequests(usage, 2U, 1.2), @"usage limit resumed without recovery");
+  health = usageClient.deliveryHealth;
+  LBWAssert(health.nextRetryDelay > 0 && health.nextRetryDelay <= 2.0,
+            [NSString stringWithFormat:@"usage limit probe delay failed: %f", health.nextRetryDelay]);
   [usageClient stopAutomaticDelivery];
 
   // Bounds: waits above 1 hour are capped at 1 hour.
@@ -458,6 +544,7 @@ static void LBWExerciseRateLimitedDelivery(void) {
 int main(void) {
   @autoreleasepool {
     LBWExerciseAutomaticDelivery();
+    LBWExercisePauseProbe();
     LBWExerciseRateLimitedDelivery();
   }
   return 0;
