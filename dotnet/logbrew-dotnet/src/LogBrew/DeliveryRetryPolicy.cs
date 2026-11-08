@@ -6,6 +6,7 @@ namespace LogBrew
     {
         private static readonly TimeSpan MinimumRateLimitWait = TimeSpan.FromSeconds(1);
         private static readonly TimeSpan MaximumRateLimitWait = TimeSpan.FromHours(1);
+        private static readonly TimeSpan MaximumPauseProbeWait = TimeSpan.FromMinutes(5);
         private readonly Random random = new Random();
 
         internal TimeSpan Delay(
@@ -57,6 +58,22 @@ namespace LogBrew
             var ticks = Math.Min(Math.Max(delay.Ticks, MinimumRateLimitWait.Ticks), MaximumRateLimitWait.Ticks);
             ticks += (long)(ticks / 10 * random.NextDouble());
             return TimeSpan.FromTicks(Math.Min(ticks, MaximumRateLimitWait.Ticks));
+        }
+
+        internal TimeSpan PauseProbeDelay(TimeSpan maxRetryDelay, int consecutiveFailures)
+        {
+            return PauseProbeDelay(maxRetryDelay, consecutiveFailures, random.NextDouble());
+        }
+
+        // Doubles from maxRetryDelay per consecutive failure up to 5 minutes, or up to maxRetryDelay when it is
+        // longer, then keeps half to all of that ceiling as jitter.
+        internal static TimeSpan PauseProbeDelay(TimeSpan maxRetryDelay, int consecutiveFailures, double jitter)
+        {
+            var maximum = Math.Max(maxRetryDelay.Ticks, MaximumPauseProbeWait.Ticks);
+            var multiplier = 1L << Math.Min(Math.Max(0, consecutiveFailures - 1), 62);
+            var ceiling = maxRetryDelay.Ticks > maximum / multiplier ? maximum : maxRetryDelay.Ticks * multiplier;
+            var half = ceiling / 2;
+            return TimeSpan.FromTicks(half + (long)((ceiling - half) * jitter));
         }
 
         internal static bool IsRetryableStatus(int statusCode)

@@ -804,7 +804,7 @@ namespace LogBrew
                     return false;
                 }
 
-                while (deliveryInFlight && !workerStopRequested && lifecycle == DeliveryLifecycleState.Running)
+                while (deliveryInFlight && !workerStopRequested && SendsAutomaticallyLocked())
                 {
                     Monitor.Wait(gate);
                 }
@@ -812,7 +812,7 @@ namespace LogBrew
                 if (workerStopRequested
                     || closing
                     || closed
-                    || lifecycle != DeliveryLifecycleState.Running
+                    || !SendsAutomaticallyLocked()
                     || generation != scheduleGeneration)
                 {
                     return false;
@@ -823,6 +823,14 @@ namespace LogBrew
                 activity = DeliveryActivityState.Sending;
                 return true;
             }
+        }
+
+        // Running delivery sends on its schedule; a paused one sends only its probe. A storage pause
+        // waits for explicit recovery, because sending could lose or repeat durable data.
+        private bool SendsAutomaticallyLocked()
+        {
+            return lifecycle == DeliveryLifecycleState.Running
+                || (lifecycle == DeliveryLifecycleState.Paused && pauseReason != DeliveryPauseReason.Storage);
         }
 
         private void ExitDelivery()
@@ -900,7 +908,7 @@ namespace LogBrew
                                 return;
                             }
 
-                            if (lifecycle == DeliveryLifecycleState.Paused || events.Count == 0)
+                            if (lifecycle == DeliveryLifecycleState.Paused ? nextWakeTimestamp == 0 : events.Count == 0)
                             {
                                 activity = DeliveryActivityState.Idle;
                                 Monitor.Wait(gate);
@@ -983,42 +991,39 @@ namespace LogBrew
 
                 batch = GetOrCreateFrozenBatch(targetEvents);
 
-                if (batch == null)
+                if (batch != null)
                 {
-                    return;
-                }
-
-                try
-                {
-                    response = automaticTransport!.Send(apiKey, batch.Body);
-                }
-                catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
-                {
-                    failure = error;
-                }
-
-                if (response != null && response.StatusCode >= 200 && response.StatusCode < 300)
-                {
-                    AcknowledgeBatch(batch, response.StatusCode);
-                    lock (gate)
+                    try
                     {
-                        if (generation == scheduleGeneration && lifecycle == DeliveryLifecycleState.Running && !closing)
-                        {
-                            CompleteAutomaticSuccessLocked();
-                        }
+                        response = automaticTransport!.Send(apiKey, batch.Body);
+                    }
+                    catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
+                    {
+                        failure = error;
                     }
 
-                    return;
+                    if (response == null || response.StatusCode < 200 || response.StatusCode >= 300)
+                    {
+                        lock (gate)
+                        {
+                            if (generation == scheduleGeneration && SendsAutomaticallyLocked() && !closing)
+                            {
+                                CompleteAutomaticFailureLocked(response, failure);
+                            }
+                        }
+
+                        return;
+                    }
+
+                    AcknowledgeBatch(batch, response.StatusCode);
                 }
 
                 lock (gate)
                 {
-                    if (generation != scheduleGeneration || lifecycle != DeliveryLifecycleState.Running || closing)
+                    if (generation == scheduleGeneration && SendsAutomaticallyLocked() && !closing)
                     {
-                        return;
+                        CompleteAutomaticSuccessLocked();
                     }
-
-                    CompleteAutomaticFailureLocked(response, failure);
                 }
             }
             finally
@@ -1029,6 +1034,7 @@ namespace LogBrew
 
         private void CompleteAutomaticSuccessLocked()
         {
+            lifecycle = DeliveryLifecycleState.Running;
             retryAttempt = 0;
             retryDelayMilliseconds = 0;
             consecutiveFailures = 0;
@@ -1104,7 +1110,7 @@ namespace LogBrew
                 retryAttempt = DeliveryRuntimePolicy.SaturatingIncrement(retryAttempt);
                 if (retryAttempt > automaticSettings!.MaxRetries)
                 {
-                    PauseAutomaticLocked(DeliveryPauseReason.RetryExhausted, DeliveryOutcome.RetryExhausted);
+                    PauseAndProbeLocked(DeliveryPauseReason.RetryExhausted, DeliveryOutcome.RetryExhausted);
                     return;
                 }
 
@@ -1116,11 +1122,13 @@ namespace LogBrew
             var reason = response == null
                 ? DeliveryPauseReason.NonRetryable
                 : DeliveryRetryPolicy.PauseReason(response.StatusCode);
-            PauseAutomaticLocked(reason, DeliveryOutcome.TerminalFailure);
+            PauseAndProbeLocked(reason, DeliveryOutcome.TerminalFailure);
         }
 
         private void ScheduleRetryLocked(TimeSpan delay, DeliveryRetrySource source)
         {
+            lifecycle = DeliveryLifecycleState.Running;
+            pauseReason = DeliveryPauseReason.None;
             retryDelayMilliseconds = DeliveryRetryPolicy.BoundedMilliseconds(delay);
             retrySource = source;
             lastOutcome = DeliveryOutcome.RetryScheduled;
@@ -1140,6 +1148,16 @@ namespace LogBrew
             lastOutcome = outcome;
             wakeRequested = false;
             nextWakeTimestamp = 0;
+        }
+
+        // Resends the failed batch later, so delivery resumes on its own once ingest accepts it again.
+        private void PauseAndProbeLocked(DeliveryPauseReason reason, DeliveryOutcome outcome)
+        {
+            PauseAutomaticLocked(reason, outcome);
+            var delay = retryPolicy.PauseProbeDelay(automaticSettings!.MaxRetryDelay, consecutiveFailures);
+            retryDelayMilliseconds = DeliveryRetryPolicy.BoundedMilliseconds(delay);
+            nextWakeTimestamp = DeliveryRuntimePolicy.AddMonotonicDelay(delay);
+            Monitor.PulseAll(gate);
         }
 
         private void RequireOpenLocked()
