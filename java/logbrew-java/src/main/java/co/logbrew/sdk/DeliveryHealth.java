@@ -40,7 +40,7 @@ public final class DeliveryHealth {
         IN_FLIGHT,
         /** A bounded retry wake is scheduled. */
         RETRYING,
-        /** Automatic sends are paused pending explicit recovery. */
+        /** Automatic sends are paused until a scheduled probe is accepted or the application resumes delivery. */
         PAUSED
     }
 
