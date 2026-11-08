@@ -5,7 +5,7 @@ const ABSOLUTE_FORM_PREFIX = /^[a-z][\d+.a-z-]*:\/\/[^/?#]*/iu;
 const QUERY_OR_FRAGMENT = /[?#].*$/su;
 const TRAILING_SLASH = /\/$/u;
 const EXPRESS4_PATTERN = /^\^(?<body>.*?)(?:\\\/\?)?\(\?=\\\/\|\$\)$/su;
-const EXPRESS4_TOKEN = /\\\/(?<literal>(?:[\w~-]|\\\.)+)|\(\?:\\(?<separator>[./])\((?:[^()]+)\)\)(?<optional>\??)/gyu;
+const EXPRESS4_PIECE = /\\\/(?<literal>(?:[\w~-]|\\\.)+)|\(\?:\\(?<separator>[./])\((?:[^()]+)\)\)(?<optional>\??)/gyu;
 const ESCAPED_DOT = /\\\./gu;
 const PATH_TO_REGEXP_MATCHER = "match";
 const PROBE_SEGMENT = "logbrew-mount-probe";
@@ -59,17 +59,17 @@ function express4Part(groups, name) {
  * @param {string} body
  * @returns {readonly Readonly<Record<string, string | undefined>>[] | undefined}
  */
-function express4Tokens(body) {
-  const tokens = [];
-  EXPRESS4_TOKEN.lastIndex = NO_PARAMS;
-  while (EXPRESS4_TOKEN.lastIndex < body.length) {
-    const groups = EXPRESS4_TOKEN.exec(body)?.groups;
+function express4Pieces(body) {
+  const pieces = [];
+  EXPRESS4_PIECE.lastIndex = NO_PARAMS;
+  while (EXPRESS4_PIECE.lastIndex < body.length) {
+    const groups = EXPRESS4_PIECE.exec(body)?.groups;
     if (groups === undefined) {
       return undefined;
     }
-    tokens.push(groups);
+    pieces.push(groups);
   }
-  return tokens;
+  return pieces;
 }
 
 /**
@@ -78,12 +78,12 @@ function express4Tokens(body) {
  * @returns {string | undefined}
  */
 function express4Body(body, names) {
-  const tokens = express4Tokens(body);
-  const params = tokens?.filter((groups) => groups["literal"] === undefined) ?? [];
-  if (tokens === undefined || params.length !== names.length) {
+  const pieces = express4Pieces(body);
+  const params = pieces?.filter((groups) => groups["literal"] === undefined) ?? [];
+  if (pieces === undefined || params.length !== names.length) {
     return undefined;
   }
-  const parts = tokens.map((groups) => express4Part(groups, names[params.indexOf(groups)]));
+  const parts = pieces.map((groups) => express4Part(groups, names[params.indexOf(groups)]));
   return parts.includes(undefined) ? undefined : parts.join("");
 }
 
