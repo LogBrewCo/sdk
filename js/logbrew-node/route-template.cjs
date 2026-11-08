@@ -6,7 +6,6 @@ const { pathOnly } = require("./span-support.cjs");
 const RECORD_ID_SEGMENT = /^(?:\d+|[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[\da-f]{16,})$/iu;
 const DYNAMIC_SEGMENT = /[(*:?{]/u;
 const TRAILING_SLASH = /(?<=.)\/$/u;
-const FIRST_PATH_SEGMENT = 1;
 
 /**
  * @param {string} path
@@ -30,8 +29,9 @@ function requestPath(req) {
 }
 
 /**
- * Rebuilds the full template from the matched `req.route.path` and the request path, so the
- * mount path survives even after a router has restored `req.baseUrl`.
+ * Uses the matched `req.route.path` only when it covers the whole request path. Under a mounted
+ * router the declared mount pattern is not available here, so the request keeps the normalized
+ * path instead of a mount path guessed from the URL.
  * @param {unknown} req
  * @param {string} path
  * @returns {string | undefined}
@@ -41,17 +41,12 @@ function matchedRouteTemplate(req, path) {
   if (typeof routePath !== "string" || !routePath.startsWith("/")) {
     return undefined;
   }
-  const routeSegments = routePath === "/" ? [] : routePath.split("/").slice(FIRST_PATH_SEGMENT);
+  const routeSegments = routePath.replace(TRAILING_SLASH, "").split("/");
   const pathSegments = path.replace(TRAILING_SLASH, "").split("/");
-  const mountLength = pathSegments.length - routeSegments.length;
-  const fits = mountLength >= FIRST_PATH_SEGMENT && routeSegments.every(
-    (segment, index) => DYNAMIC_SEGMENT.test(segment) || segment === pathSegments[mountLength + index]
+  const fits = routeSegments.length === pathSegments.length && routeSegments.every(
+    (segment, index) => DYNAMIC_SEGMENT.test(segment) || segment === pathSegments[index]
   );
-  if (!fits) {
-    return undefined;
-  }
-  const mountPath = templateRecordIds(pathSegments.slice(0, mountLength).join("/"));
-  return routePath === "/" ? mountPath || "/" : `${mountPath}${routePath}`;
+  return fits ? routePath : undefined;
 }
 
 /**
