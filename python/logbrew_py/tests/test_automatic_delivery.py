@@ -23,7 +23,12 @@ from logbrew_sdk import (
     TransportError,
     TransportResponse,
 )
-from logbrew_sdk._automatic_delivery import MAX_HEALTH_COUNTER, _rate_limit_delay_seconds, _saturating_add
+from logbrew_sdk._automatic_delivery import (
+    MAX_HEALTH_COUNTER,
+    _pause_probe_delay_seconds,
+    _rate_limit_delay_seconds,
+    _saturating_add,
+)
 
 HAS_PERSISTENCE_CRYPTO = importlib.util.find_spec("cryptography") is not None
 
@@ -304,7 +309,54 @@ class AutomaticDeliveryPublicContractTests(unittest.TestCase):
                 self.assertEqual(response.accepted_events, 2)
                 self.assertEqual(client.delivery_health().pause_reason, "none")
                 self.assertEqual(client.delivery_health().consecutive_failures, 0)
+                self.assertEqual(client.delivery_health().retry_delay_ms, 0)
                 client.shutdown()
+
+    def test_forbidden_pause_probes_the_same_batch_and_resumes_without_an_application_call(self) -> None:
+        transport = ScriptedTransport(403, 202)
+        with patch("logbrew_sdk._automatic_delivery.MAX_RETRY_DELAY_SECONDS", 0.4):
+            client = create_client(
+                transport,
+                max_retries=0,
+                delivery_interval_seconds=0.05,
+                delivery_queue_threshold=1,
+            )
+            capture_log(client, "evt_forbidden")
+            wait_until(lambda: client.delivery_health().lifecycle == "paused")
+            health = client.delivery_health()
+            self.assertEqual(health.pause_reason, "nonretryable")
+            self.assertGreater(health.retry_delay_ms, 0)
+            self.assertLessEqual(health.retry_delay_ms, 400)
+            capture_log(client, "evt_during_pause")
+            time.sleep(0.05)
+            self.assertEqual(len(transport.sent_bodies), 1)
+
+            wait_until(lambda: client.pending_events() == 0)
+        self.assertEqual(transport.sent_bodies[0], transport.sent_bodies[1])
+        self.assertEqual(
+            [[event["id"] for event in json.loads(body)["events"]] for body in transport.sent_bodies],
+            [["evt_forbidden"], ["evt_forbidden"], ["evt_during_pause"]],
+        )
+        health = client.delivery_health()
+        self.assertEqual(health.lifecycle, "idle")
+        self.assertEqual(health.pause_reason, "none")
+        client.shutdown()
+
+    def test_outage_that_exhausts_retries_sends_again_and_drains_without_an_application_call(self) -> None:
+        outage = TransportResponse(503, 1, retry_after_ms=20)
+        transport = ScriptedTransport(outage, outage, outage, 202)
+        client = create_client(
+            transport,
+            max_retries=2,
+            delivery_interval_seconds=60,
+            delivery_queue_threshold=1,
+        )
+        capture_log(client, "evt_outage")
+        wait_until(lambda: client.pending_events() == 0)
+        self.assertEqual(len(set(transport.sent_bodies)), 1)
+        self.assertEqual(len(transport.sent_bodies), 4)
+        self.assertEqual(client.delivery_health().pause_reason, "none")
+        client.shutdown()
 
     def test_rate_limited_responses_wait_then_resume_without_an_application_call(self) -> None:
         for response in (
@@ -334,14 +386,36 @@ class AutomaticDeliveryPublicContractTests(unittest.TestCase):
                 self.assertEqual(client.delivery_health().last_outcome, "accepted")
                 client.shutdown()
 
-    def test_usage_limit_exceeded_keeps_the_pause_even_with_retry_after(self) -> None:
+    def test_usage_limit_exceeded_pauses_and_probes_on_its_own_schedule_not_retry_after(self) -> None:
         transport = ScriptedTransport(TransportResponse(429, 1, retry_after_ms=1000, error_code="usage_limit_exceeded"))
         client = create_client(transport, delivery_interval_seconds=60, delivery_queue_threshold=1)
         capture_log(client, "evt_usage")
         wait_until(lambda: client.delivery_health().lifecycle == "paused")
-        self.assertEqual(client.delivery_health().pause_reason, "quota")
-        self.assertEqual(client.delivery_health().retry_delay_ms, 0)
+        health = client.delivery_health()
+        self.assertEqual(health.pause_reason, "quota")
+        self.assertGreater(health.retry_delay_ms, 140_000)
+        self.assertLessEqual(health.retry_delay_ms, 300_000)
         client.shutdown()
+
+    def test_pause_probes_back_off_to_5_minutes(self) -> None:
+        for max_retry_delay, failures, jitter_share, expected in (
+            (30.0, 1, 1.0, 30.0),
+            (30.0, 1, 0.0, 15.0),
+            (30.0, 3, 1.0, 120.0),
+            (30.0, 9, 1.0, 300.0),
+            (30.0, MAX_HEALTH_COUNTER, 1.0, 300.0),
+            (600.0, 4, 1.0, 600.0),
+            (300.0, 1, 0.0, 150.0),
+        ):
+            with (
+                self.subTest(max_retry_delay=max_retry_delay, failures=failures, jitter_share=jitter_share),
+                patch("logbrew_sdk._automatic_delivery.MAX_RETRY_DELAY_SECONDS", max_retry_delay),
+                patch(
+                    "logbrew_sdk._automatic_delivery.random.uniform",
+                    side_effect=lambda low, high, share=jitter_share: low + (high - low) * share,
+                ),
+            ):
+                self.assertAlmostEqual(_pause_probe_delay_seconds(failures), expected)
 
     def test_manual_flush_raises_retryable_rate_limited_error(self) -> None:
         client = create_client(automatic_delivery=False)
