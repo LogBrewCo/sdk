@@ -244,3 +244,125 @@ test("the navigation hook accepts a trace ID alone and never throws into the pag
   `, {}, effectReact);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
+
+test("the navigation hook marks each route span as a page view of its route template", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import { createLogBrewNextBrowserClient, useLogBrewNextNavigation } from "@logbrew/next/client";
+
+    const client = createLogBrewNextBrowserClient({ clientKey: "LOGBREW_CLIENT_KEY", transport: null });
+    useLogBrewNextNavigation({ client, pathname: "/projects/p_42/settings", routePatterns: ["/projects/[projectId]/settings"] });
+
+    const [span] = JSON.parse(client.previewJson()).events.map(({ attributes }) => attributes);
+    assert.equal(span.metadata.analyticsKind, "page_view");
+    assert.equal(span.metadata.analyticsSchemaVersion, 1);
+    assert.equal(span.metadata.analyticsSurface, "/projects/[projectId]/settings");
+    assert.ok(!JSON.stringify(span).includes("p_42"));
+  `, {}, effectReact);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+const webVitalsPage = `
+    const listeners = { window: new Map(), document: new Map() };
+    const observers = new Map();
+    class PerformanceObserver {
+      constructor(callback) { this.callback = callback; }
+      observe({ type }) { observers.set(type, this); }
+      takeRecords() { return []; }
+      disconnect() { this.disconnected = true; }
+    }
+    const emit = (type, entries) => observers.get(type).callback({ getEntries: () => entries });
+    const document = {
+      visibilityState: "visible",
+      addEventListener(type, listener) { listeners.document.set(type, listener); },
+      removeEventListener(type) { listeners.document.delete(type); }
+    };
+    const browserWindow = {
+      PerformanceObserver,
+      addEventListener(type, listener) { listeners.window.set(type, listener); },
+      removeEventListener(type) { listeners.window.delete(type); },
+      document,
+      performance: { getEntriesByType: () => [{ activationStart: 0, responseStart: 182.4, type: "navigate" }] }
+    };
+    const hide = () => { document.visibilityState = "hidden"; listeners.document.get("visibilitychange")?.(); };
+`;
+
+test("client capture sends LCP, INP, CLS, FCP, and TTFB as metrics once, when the page is first hidden", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import {
+      createLogBrewNextBrowserClient,
+      installLogBrewNextClientErrorCapture,
+      useLogBrewNextNavigation
+    } from "@logbrew/next/client";
+    ${webVitalsPage}
+    const sent = [];
+    const client = createLogBrewNextBrowserClient({
+      clientKey: "LOGBREW_CLIENT_KEY",
+      transport: { async send(_key, body) { sent.push(...JSON.parse(body).events); return { statusCode: 202, attempts: 1 }; } }
+    });
+    installLogBrewNextClientErrorCapture({ client, browserWindow, breadcrumbs: false });
+    useLogBrewNextNavigation({ client, pathname: "/docs/intro", routePatterns: ["/docs/[slug]"] });
+    emit("paint", [{ name: "first-paint", startTime: 300 }, { name: "first-contentful-paint", startTime: 412.6 }]);
+    emit("largest-contentful-paint", [{ startTime: 900 }, { startTime: 2710.2 }]);
+    emit("layout-shift", [
+      { hadRecentInput: false, startTime: 1000, value: 0.05 },
+      { hadRecentInput: false, startTime: 1500, value: 0.04 },
+      { hadRecentInput: true, startTime: 1600, value: 0.5 },
+      { hadRecentInput: false, startTime: 9000, value: 0.02 }
+    ]);
+    emit("event", [
+      { duration: 64, interactionId: 7 },
+      { duration: 248, interactionId: 14 },
+      { duration: 96, interactionId: 14 },
+      { duration: 500, interactionId: 0 }
+    ]);
+    hide();
+    hide();
+    listeners.window.get("pagehide")?.({ type: "pagehide" });
+    await client.flush();
+    assert.equal(sent.filter(({ type }) => type === "metric").length, 5);
+
+    const metrics = Object.fromEntries(sent.filter(({ type }) => type === "metric").map(({ attributes }) => [attributes.name, attributes]));
+    assert.deepEqual(Object.keys(metrics).sort(), [
+      "browser.web_vital.cls",
+      "browser.web_vital.fcp",
+      "browser.web_vital.inp",
+      "browser.web_vital.lcp",
+      "browser.web_vital.ttfb"
+    ]);
+    const values = Object.fromEntries(Object.entries(metrics).map(([name, { value }]) => [name, value]));
+    assert.deepEqual(values, {
+      "browser.web_vital.cls": 0.09,
+      "browser.web_vital.fcp": 413,
+      "browser.web_vital.inp": 248,
+      "browser.web_vital.lcp": 2710,
+      "browser.web_vital.ttfb": 182
+    });
+    const lcp = metrics["browser.web_vital.lcp"];
+    assert.equal(lcp.kind, "histogram");
+    assert.equal(lcp.temporality, "delta");
+    assert.equal(lcp.unit, "ms");
+    assert.equal(metrics["browser.web_vital.cls"].unit, "1");
+    assert.equal(lcp.metadata.rating, "needs-improvement");
+    assert.equal(metrics["browser.web_vital.ttfb"].metadata.rating, "good");
+    assert.equal(lcp.metadata.routeTemplate, "/docs/[slug]");
+    assert.ok(!JSON.stringify(metrics).includes("intro"));
+    assert.ok([...observers.values()].every(({ disconnected }) => disconnected));
+  `, {}, effectReact);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("webVitals: false observes no performance entries and sends no metrics", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import { createLogBrewNextBrowserClient, installLogBrewNextClientErrorCapture } from "@logbrew/next/client";
+    ${webVitalsPage}
+    const client = createLogBrewNextBrowserClient({ clientKey: "LOGBREW_CLIENT_KEY", transport: null });
+    installLogBrewNextClientErrorCapture({ client, browserWindow, breadcrumbs: false, webVitals: false });
+    assert.equal(observers.size, 0);
+    assert.equal(listeners.document.size, 0);
+    assert.deepEqual(JSON.parse(client.previewJson()).events, []);
+  `);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
