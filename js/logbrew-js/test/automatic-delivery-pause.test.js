@@ -1,13 +1,16 @@
-import { STATUS_ACCEPTED, assertExcludes, assertFields, sampleClient } from "./delivery-helpers.js";
+import { STATUS_ACCEPTED, STATUS_UNAVAILABLE, assertExcludes, assertFields, sampleClient } from "./delivery-helpers.js";
 import {
   activeTimer,
+  fire,
   hasActiveTimer,
   waitForCondition,
   withFakeTimers,
   withReplacements
 } from "./delivery-timer-helpers.js";
+import { recordingEventStore } from "./delivery-store-helpers.js";
 import { RecordingTransport } from "@logbrew/sdk";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import test from "node:test";
 
@@ -18,7 +21,13 @@ import test from "node:test";
  */
 
 const ONE = 1;
+const TWO = 2;
 const NONE = 0;
+const STATUS_FORBIDDEN = 403;
+const OUTAGE_ATTEMPTS = 3;
+const FIRST_PROBE_DELAY_MS = 30_000;
+const SECOND_PROBE_DELAY_MS = 60_000;
+const requireFromTest = createRequire(import.meta.url);
 
 /**
  * @param {LogBrewClient} client
@@ -200,4 +209,71 @@ await rateLimitTest({
 
     errorCode: "rate_limited"
   }
+});
+
+await test("an automatic 403 pause probes the same batch on its own and resumes", async () => withFakeTimers(async (timers) => withReplacements(Math, { random: () => NONE }, async () => {
+  const transport = new RecordingTransport([{ statusCode: STATUS_FORBIDDEN }, { statusCode: STATUS_FORBIDDEN }]);
+  const client = sampleClient({ deliveryQueueThreshold: 1, transport });
+
+  client.log("evt_forbidden", "2026-06-02T10:00:00Z", { level: "info", message: "bounded" });
+  await waitForFirstFailure(client);
+  assertFields(client.deliveryHealth(), { deliveryState: "paused", pausedReason: "non_retryable", retryDelayMs: FIRST_PROBE_DELAY_MS, scheduled: true });
+  assert.equal(activeTimer(timers)?.delay, FIRST_PROBE_DELAY_MS);
+  await assertHeldDuringWait(client, transport);
+
+  fire(activeTimer(timers));
+  await waitForCondition(() => client.deliveryHealth().failures === TWO, "first probe was not sent");
+  assertFields(client.deliveryHealth(), { deliveryState: "paused", pausedReason: "non_retryable", retryDelayMs: SECOND_PROBE_DELAY_MS });
+  assert.equal(activeTimer(timers)?.delay, SECOND_PROBE_DELAY_MS);
+
+  fire(activeTimer(timers));
+  await waitForCondition(() => client.pendingEvents() === NONE, "second probe did not drain the queue");
+  const [firstBody, firstProbe, secondProbe] = transport.sentBodies;
+  assert.equal(firstProbe, firstBody);
+  assert.equal(secondProbe, firstBody);
+  assertFields(client.deliveryHealth(), { consecutiveFailures: 0, deliveryState: "accepted", pausedReason: "none", retryDelayMs: 0 });
+})));
+
+await test("an automatic 503 outage that uses up the retries sends again on its own and drains the queue", async () => withFakeTimers(async (timers) => {
+  const unavailable = { statusCode: STATUS_UNAVAILABLE };
+  const transport = new RecordingTransport([unavailable, unavailable, unavailable]);
+  const client = sampleClient({ deliveryQueueThreshold: 1, maxRetries: 2, transport });
+
+  client.log("evt_outage", "2026-06-02T10:00:00Z", { level: "info", message: "bounded" });
+  await waitForFirstFailure(client);
+  assert.equal(transport.sentBodies.length, OUTAGE_ATTEMPTS);
+  assertFields(client.deliveryHealth(), { deliveryState: "retrying", pausedReason: "none" });
+
+  fire(activeTimer(timers));
+  await waitForCondition(() => client.pendingEvents() === NONE, "outage batch did not resend");
+  assert.equal(transport.sentBodies.length, OUTAGE_ATTEMPTS + ONE);
+}));
+
+await test("a failed event store acknowledgement pauses until explicit recovery, without a probe", async () => withFakeTimers(async (timers) => {
+  const transport = new RecordingTransport();
+  const eventStore = Object.assign(recordingEventStore(), {
+    acknowledge() {
+      throw new Error("store unavailable");
+    }
+  });
+  const client = sampleClient({ deliveryQueueThreshold: 1, eventStore, transport });
+
+  client.log("evt_store", "2026-06-02T10:00:00Z", { level: "info", message: "bounded" });
+  await waitForFirstFailure(client);
+  assertFields(client.deliveryHealth(), { deliveryState: "paused", pausedReason: "non_retryable", retryDelayMs: 0, scheduled: false });
+  assert.equal(hasActiveTimer(timers), false);
+  assert.equal(transport.sentBodies.length, ONE);
+}));
+
+await test("pause probes back off from 60 seconds to 5 minutes", () => {
+  /** @type {unknown} */
+  const retryDelay = requireFromTest("../retry-delay.cjs");
+  const pauseProbeDelayMs = typeof retryDelay === "object" && retryDelay !== null ? Reflect.get(retryDelay, "pauseProbeDelayMs") : undefined;
+  assert.equal(typeof pauseProbeDelayMs, "function");
+  assert.equal(pauseProbeDelayMs(60_000, 1, 1), 60_000);
+  assert.equal(pauseProbeDelayMs(60_000, 1, 0), 30_000);
+  assert.equal(pauseProbeDelayMs(60_000, 3, 1), 240_000);
+  assert.equal(pauseProbeDelayMs(60_000, 9, 1), 300_000);
+  assert.equal(pauseProbeDelayMs(60_000, Number.MAX_SAFE_INTEGER, 1), 300_000);
+  assert.equal(pauseProbeDelayMs(600_000, 4, 1), 600_000);
 });
