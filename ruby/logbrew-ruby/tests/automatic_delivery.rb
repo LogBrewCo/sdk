@@ -270,6 +270,46 @@ automatic_tests += 1
 end
 automatic_tests += 1
 
+transport = AutomaticScriptedTransport.new([403, 202, 202])
+probe_client = automatic_client(transport: transport, flush_threshold: 1, flush_interval: 60, retry_max_delay: 0.2)
+automatic_log(probe_client, "evt_forbidden_probe")
+wait_for_automatic("403 did not pause") { probe_client.delivery_health.state == "paused" }
+paused_health = probe_client.delivery_health
+automatic_log(probe_client, "evt_forbidden_probe_later")
+wait_for_automatic("a 403 pause did not probe on its own") { probe_client.pending_events.zero? }
+assert(paused_health.pause_reason == "authentication", "403 pause reason changed")
+assert(paused_health.retry_delay_ms.between?(100, 200), "a pause must report its next probe delay")
+assert(
+  transport.sent_bodies.map { |body| automatic_ids(body) } == [
+    ["evt_forbidden_probe"], ["evt_forbidden_probe"], ["evt_forbidden_probe_later"]
+  ],
+  "the probe must resend the paused batch, and pause captures must wait for it"
+)
+assert(transport.sent_bodies[0] == transport.sent_bodies[1], "probe body must be byte-identical")
+resumed_health = probe_client.delivery_health
+assert(resumed_health.state == "idle", "an accepted probe must resume automatic delivery")
+assert(resumed_health.pause_reason.nil?, "an accepted probe must clear the pause reason")
+probe_client.shutdown
+automatic_tests += 1
+
+transport = AutomaticScriptedTransport.new([503, 503, 503, 202])
+outage_client = automatic_client(transport: transport, flush_threshold: 1, max_retries: 2, retry_max_delay: 0.2)
+automatic_log(outage_client, "evt_outage")
+wait_for_automatic("an outage that used up its retries did not resume") { outage_client.pending_events.zero? }
+assert(transport.sent_bodies.length == 4, "an outage must send one more request after its retries")
+assert(outage_client.delivery_health.state == "idle", "outage recovery must resume automatic delivery")
+outage_client.shutdown
+automatic_tests += 1
+
+probe_delay = LogBrew.const_get(:AutomaticDelivery).method(:pause_probe_delay)
+assert(probe_delay.call(30.0, 1, 1.0) == 30.0, "the first probe must wait up to retry_max_delay")
+assert(probe_delay.call(30.0, 1, 0.0) == 15.0, "probe jitter must keep half the ceiling")
+assert(probe_delay.call(30.0, 3, 1.0) == 120.0, "each failed probe must double the wait")
+assert(probe_delay.call(30.0, 9, 1.0) == 300.0, "probe waits must stop at 5 minutes")
+assert(probe_delay.call(30.0, (2**63) - 1, 1.0) == 300.0, "a large failure count must not overflow")
+assert(probe_delay.call(600.0, 4, 1.0) == 600.0, "a longer retry_max_delay must cap the probe wait")
+automatic_tests += 1
+
 transport = BlockingTransport.new(block_requests: 1)
 serialized_client = automatic_client(transport: transport, flush_threshold: 1, flush_interval: 60)
 automatic_log(serialized_client, "evt_serialized")
