@@ -28,6 +28,8 @@ module LogBrew
     PAUSE_REASONS = %w[authentication quota validation nonretryable].freeze
     RATE_LIMIT_MIN_WAIT = 1.0
     RATE_LIMIT_MAX_WAIT = 3600.0
+    PAUSE_PROBE_MAX_WAIT = 300.0
+    STORAGE_ERROR_CODES = %w[persistent_queue_error persistence_commit_error].freeze
 
     attr_reader :transport
 
@@ -67,6 +69,14 @@ module LogBrew
       raise SdkError.new("validation_error", "#{label} must be a positive integer")
     end
     private_class_method :validate_positive_integer
+
+    # Doubles from retry_max_delay with each consecutive failure up to 5 minutes, or up to
+    # retry_max_delay when it is longer, then keeps half to all of that ceiling as jitter.
+    def self.pause_probe_delay(retry_max_delay, failures, jitter = Random.rand)
+      maximum = [retry_max_delay, PAUSE_PROBE_MAX_WAIT].max
+      ceiling = [retry_max_delay * (2.0**[failures - 1, 0].max), maximum].min
+      (ceiling / 2.0) + (ceiling / 2.0 * jitter)
+    end
 
     def initialize(
       client:,
@@ -134,8 +144,10 @@ module LogBrew
         if @observed_queue_count.zero?
           @wake_requested = false
           @next_interval_deadline = nil
-          @retry_deadline = nil
-          @retry_delay = nil
+          unless @state == "paused"
+            @retry_deadline = nil
+            @retry_delay = nil
+          end
         end
         @condition.signal
       end
@@ -186,8 +198,7 @@ module LogBrew
           @pause_reason = previous.fetch(1)
           @wake_requested = false
           @next_interval_deadline = nil
-          @retry_delay = nil
-          @retry_deadline = nil
+          schedule_pause_probe(error)
         elsif previous.fetch(0) == "stopped"
           @state = "stopped"
           @wake_requested = false
@@ -375,12 +386,12 @@ module LogBrew
           now = monotonic_time
           retry_ready = !@retry_deadline.nil? && now >= @retry_deadline
           interval_ready = !@next_interval_deadline.nil? && now >= @next_interval_deadline
-          if @state != "paused" && (@wake_requested || retry_ready || interval_ready)
+          if retry_ready || (@state != "paused" && (@wake_requested || interval_ready))
             @wake_requested = false
             @retry_deadline = nil
             @retry_delay = nil if retry_ready
             @next_interval_deadline = nil
-            @state = retry_ready ? "retrying" : "running"
+            @state = retry_ready ? "retrying" : "running" unless @state == "paused"
             @in_flight = true
             return @generation
           end
@@ -414,10 +425,18 @@ module LogBrew
         @condition.signal
       else
         @pause_reason = pause_reason(error)
-        @retry_delay = nil
-        @retry_deadline = nil
         @state = "paused"
+        schedule_pause_probe(error)
       end
+    end
+
+    # A paused delivery resends its batch on its own; a storage failure waits for explicit recovery,
+    # because another send could lose or repeat persisted events.
+    def schedule_pause_probe(error)
+      storage = error.is_a?(SdkError) && STORAGE_ERROR_CODES.include?(error.code)
+      @retry_delay = storage ? nil : self.class.pause_probe_delay(@retry_max_delay, @consecutive_failures)
+      @retry_deadline = @retry_delay.nil? ? nil : monotonic_time + @retry_delay
+      @condition.signal
     end
 
     def schedule_pending_work

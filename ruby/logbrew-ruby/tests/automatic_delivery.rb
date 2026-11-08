@@ -197,7 +197,12 @@ transport = AutomaticScriptedTransport.new([401, 202, 202]) do |index, _body|
   terminal_entered << true
   terminal_release.pop
 end
-stale_terminal_client = automatic_client(transport: transport, flush_threshold: 2, flush_interval: 60)
+stale_terminal_client = automatic_client(
+  transport: transport,
+  flush_threshold: 2,
+  flush_interval: 60,
+  retry_max_delay: 30
+)
 automatic_log(stale_terminal_client, "evt_terminal_inflight")
 automatic_log(stale_terminal_client, "evt_terminal_inflight_2")
 terminal_entered.pop
@@ -255,7 +260,7 @@ automatic_tests += 1
   400 => "validation"
 }.each do |status, reason|
   transport = AutomaticScriptedTransport.new([status, 202, 202])
-  client = automatic_client(transport: transport, flush_threshold: 1)
+  client = automatic_client(transport: transport, flush_threshold: 1, retry_max_delay: 30)
   automatic_log(client, "evt_terminal_#{status}")
   wait_for_automatic("terminal response did not pause") { client.delivery_health.state == "paused" }
   automatic_log(client, "evt_terminal_later_#{status}")
@@ -299,6 +304,19 @@ wait_for_automatic("an outage that used up its retries did not resume") { outage
 assert(transport.sent_bodies.length == 4, "an outage must send one more request after its retries")
 assert(outage_client.delivery_health.state == "idle", "outage recovery must resume automatic delivery")
 outage_client.shutdown
+automatic_tests += 1
+
+storage_error = LogBrew::SdkError.new("persistent_queue_error", "persistent queue could not acknowledge events")
+transport = AutomaticScriptedTransport.new { |index, _body| raise storage_error if index.zero? }
+storage_client = automatic_client(transport: transport, flush_threshold: 1, retry_max_delay: 0.05)
+automatic_log(storage_client, "evt_storage_pause")
+wait_for_automatic("a storage failure did not pause") { storage_client.delivery_health.state == "paused" }
+sleep(0.15)
+assert(transport.sent_bodies.length == 1, "a storage pause must wait for explicit recovery")
+assert(storage_client.delivery_health.retry_delay_ms.zero?, "a storage pause must not report a probe")
+storage_client.recover_automatic_delivery
+assert(storage_client.pending_events.zero?, "storage pause recovery did not send")
+storage_client.shutdown
 automatic_tests += 1
 
 probe_delay = LogBrew.const_get(:AutomaticDelivery).method(:pause_probe_delay)
@@ -648,12 +666,12 @@ flush_client.stop_automatic_delivery
 automatic_tests += 1
 
 transport = AutomaticScriptedTransport.new([rate_limit_response(retry_after: 1, code: "usage_limit_exceeded"), 202])
-usage_client = automatic_client(transport: transport, flush_threshold: 1, flush_interval: 60)
+usage_client = automatic_client(transport: transport, flush_threshold: 1, flush_interval: 60, retry_max_delay: 30)
 automatic_log(usage_client, "evt_usage_limit")
 wait_for_automatic("usage_limit_exceeded did not pause") { usage_client.delivery_health.state == "paused" }
 assert(usage_client.delivery_health.pause_reason == "quota", "usage_limit_exceeded pause reason changed")
 sleep(1.3)
-assert(transport.sent_bodies.length == 1, "usage_limit_exceeded must wait for explicit recovery")
+assert(transport.sent_bodies.length == 1, "usage_limit_exceeded must not follow Retry-After")
 usage_client.recover_automatic_delivery
 assert(usage_client.pending_events.zero?, "usage limit recovery did not send")
 usage_client.shutdown
