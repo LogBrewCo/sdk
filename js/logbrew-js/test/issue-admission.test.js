@@ -172,9 +172,10 @@ await test("filter exceptions preserve the original failure and do not enqueue a
   assert.equal(client.pendingEvents(), NO_EVENTS);
 });
 
-await test("admission rejects invalid and closed-client capture without a success result", async () => {
+await test("admission rejects invalid capture and ignores closed-client capture without a success result", async () => {
   const client = createClient();
   assert.throws(() => client.issueWithAdmission("", TIMESTAMP, ATTRIBUTES), /event id/u);
   await client.shutdown(RecordingTransport.alwaysAccept());
-  assert.throws(() => client.issueWithAdmission("evt_issue_001", TIMESTAMP, ATTRIBUTES), /shut down/u);
+  assert.equal(client.issueWithAdmission("evt_issue_001", TIMESTAMP, ATTRIBUTES).status, "unavailable");
+  assert.equal(client.pendingEvents(), NO_EVENTS);
 });

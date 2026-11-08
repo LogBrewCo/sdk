@@ -36,11 +36,10 @@ function assertClosedAfterShutdown(client, transport, scheduledTimer) {
   assert.equal(scheduledTimer?.cleared, true);
   assert.equal(client.deliveryHealth().lifecycle, "closed");
   assert.equal(transport.sentBodies.length, ONE);
-  assert.throws(
+  assert.doesNotThrow(
     () => {
       client.log("evt_after_shutdown", "2026-06-02T10:00:01Z", { level: "info", message: "ignored" });
-    },
-    /already shut down/u
+    }
   );
 }
 
@@ -127,11 +126,10 @@ await test("shutdown serializes behind active automatic delivery and permits no 
 
   const shutdown = client.shutdown();
   assert.equal(client.deliveryHealth().lifecycle, "shutting_down");
-  assert.throws(
+  assert.doesNotThrow(
     () => {
       client.log("evt_shutdown_race_002", "2026-06-02T10:00:01Z", { level: "info", message: "late" });
-    },
-    /client is shutting down/u
+    }
   );
   gate.response.resolve();
   await assertShutdownDrained(client, gate.bodies, shutdown);
@@ -195,10 +193,9 @@ await test("event store close failure leaves the client terminal instead of reop
   const client = sampleClient({ eventStore: store });
 
   await assert.rejects(client.shutdown(RecordingTransport.alwaysAccept()), /persistent owner release could not be confirmed/u);
-  assert.throws(
+  assert.doesNotThrow(
     () => {
       client.log("evt_after_close_failure", "2026-06-02T10:00:00Z", { level: "info", message: "closed" });
-    },
-    /client is already shut down/u
+    }
   );
 });
