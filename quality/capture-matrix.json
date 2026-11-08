@@ -822,7 +822,7 @@
       },
       "method": "Next.js 16 App Router production build (next build, next start) with the documented instrumentation onRequestError hook, wrapped Route Handlers with request metrics and the request user, and Pino capture from @logbrew/node; one route that succeeds, one that throws, and one server component that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-next",
-      "inputs": "bb7cc68a6ae42baadaae718f37a5778c2d1ee36f601fe62609bf0a6d1e60d689"
+      "inputs": "3d2418e74b8061e058df7d2522207132a4dd736e8fb16f58d4c0591f6349715c"
     },
     "js/logbrew-node": {
       "share": 90.9,

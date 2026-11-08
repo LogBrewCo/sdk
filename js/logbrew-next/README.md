@@ -270,7 +270,7 @@ import {
 const client = createLogBrewNextBrowserClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.16"
+  sdkVersion: "0.1.17"
 });
 
 const routePatterns = [
@@ -293,7 +293,7 @@ export function LogBrewNextNavigationSpans({ traceparent }) {
 }
 ```
 
-`useLogBrewNextNavigation` records one `browser.navigation` span named `next.route <routeTemplate>` when `pathname` changes to a route that matches one of your stable `routePatterns`. Use `createNextRouteTemplate` directly when you want to preview how a concrete `pathname` maps to `/projects/[projectId]/settings`, `[...catchAll]`, `[[...optionalCatchAll]]`, or a route-group pattern such as `/(app)/dashboard/[teamId]`.
+`useLogBrewNextNavigation` records one `browser.navigation` span named `next.route <routeTemplate>` when `pathname` changes to a route that matches one of your stable `routePatterns`. LogBrew counts each of these spans as a page view of its route template. Use `createNextRouteTemplate` directly when you want to preview how a concrete `pathname` maps to `/projects/[projectId]/settings`, `[...catchAll]`, `[[...optionalCatchAll]]`, or a route-group pattern such as `/(app)/dashboard/[teamId]`.
 
 Pass W3C trace context through `traceparent`, `traceId`, or `traceId` plus `spanId`. A missing span ID comes from `spanIdFactory`, and a navigation without trace input starts a new trace. The hook never throws into your page: when a capture fails, for example on a malformed `traceparent`, it drops that span and calls `onCaptureError` if you pass one. It does not patch `fetch`, `XMLHttpRequest`, browser history, or the Next router. It never records the concrete pathname, query string, hash, headers, cookies, request body, or raw `traceparent` value. If a pathname cannot be matched to a stable route template, it skips the span instead of emitting a high-cardinality URL. Metadata is primitive-only.
 
@@ -339,6 +339,15 @@ query, status), and route changes. Requests to the LogBrew endpoint are
 skipped. Pass `breadcrumbs: false` to turn them off. `uninstall()` removes the
 listeners and puts back every patched method.
 
+The same call sends the page's Web Vitals as histogram metrics when the page is
+first hidden: `browser.web_vital.lcp`, `browser.web_vital.inp`,
+`browser.web_vital.fcp`, and `browser.web_vital.ttfb` in milliseconds, and
+`browser.web_vital.cls` as a score. Each metric carries a `rating` (`good`,
+`needs-improvement`, or `poor`) and the route template the page loaded on, from
+`useLogBrewNextNavigation`, never the concrete path. The SDK reads the
+browser's own performance entries and adds no dependency. Pass
+`webVitals: false` to turn them off.
+
 ## Server Client Helper
 
 ```js
@@ -347,7 +356,7 @@ import { createLogBrewNextClient } from "@logbrew/next";
 const client = createLogBrewNextClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "my-next-app",
-  sdkVersion: "0.1.16"
+  sdkVersion: "0.1.17"
 });
 ```
 
