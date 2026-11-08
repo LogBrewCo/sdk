@@ -242,7 +242,7 @@ func TestAutomaticDeliveryRetriesFrozenPrefixAfterBoundedDelay(t *testing.T) {
 	}
 }
 
-func TestAutomaticDeliveryPausesTerminalResponsesUntilResume(t *testing.T) {
+func TestAutomaticDeliveryResumesTerminalPauseBeforeItsProbe(t *testing.T) {
 	for _, current := range []struct {
 		name    string
 		status  int
