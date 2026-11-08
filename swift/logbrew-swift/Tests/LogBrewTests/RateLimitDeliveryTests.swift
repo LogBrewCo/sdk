@@ -42,19 +42,22 @@ struct RateLimitDeliveryTests {
         _ = try client.shutdown()
     }
 
-    @Test("usage_limit_exceeded pauses even with Retry-After")
+    @Test("usage_limit_exceeded pauses and probes on its own schedule, not Retry-After")
     func usageLimitExceededPauses() throws {
         let transport = ThreadSafeScriptedTransport(
-            responses: [rateLimited(retryAfter: 1, code: "usage_limit_exceeded")],
+            responses: [rateLimited(retryAfter: 3600, code: "usage_limit_exceeded")],
         )
-        let client = try startClient(transport)
+        let client = try makeClient()
+        try client.startAutomaticDelivery(
+            transport: transport,
+            options: AutomaticDeliveryOptions(interval: 0.05, threshold: 1, retryBaseDelay: 0.01, maxRetryDelay: 2),
+        )
 
         try captureLog(client, id: "usage-limit")
         #expect(waitUntil(timeout: 2) { client.deliveryHealth().state == .paused })
         #expect(client.deliveryHealth().pauseReason == .quota)
-        #expect(client.deliveryHealth().nextRetryDelay == nil)
-        #expect(!transport.waitForRequestCount(2, timeout: 1.2))
-        _ = try client.shutdown()
+        #expect((0 ... 2).contains(client.deliveryHealth().nextRetryDelay ?? -1))
+        client.stopAutomaticDelivery()
     }
 
     @Test("rate-limit waits stay between 1 second and 1 hour")

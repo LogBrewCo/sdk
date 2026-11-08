@@ -104,7 +104,7 @@ final class DeliveryEngine: @unchecked Sendable {
                 consecutiveFailures: consecutiveFailures,
                 lastOutcome: lastOutcome,
                 pauseReason: pauseReason,
-                nextRetryDelay: state == .retrying ? nextWakeNanoseconds.map { deadline in
+                nextRetryDelay: state == .retrying || state == .paused ? nextWakeNanoseconds.map { deadline in
                     let now = DispatchTime.now().uptimeNanoseconds
                     return TimeInterval(deadline > now ? deadline - now : 0) / 1_000_000_000
                 } : nil,

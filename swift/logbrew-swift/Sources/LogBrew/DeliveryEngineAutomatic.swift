@@ -13,7 +13,7 @@ extension DeliveryEngine {
             return
         }
         nextWakeNanoseconds = nil
-        let active = automaticTransport != nil && (state == .running || state == .retrying)
+        let active = automaticTransport != nil && sendsAutomaticallyLocked
         stateLock.unlock()
         guard active else {
             return
@@ -47,16 +47,22 @@ extension DeliveryEngine {
     private func transportForAutomaticRun(generation currentGeneration: UInt64) -> (any Transport)? {
         stateLock.lock()
         defer { stateLock.unlock() }
-        guard generation == currentGeneration, state == .running || state == .retrying else {
+        guard generation == currentGeneration, sendsAutomaticallyLocked else {
             return nil
         }
         return automaticTransport
     }
 
+    /// Running and retrying deliveries send on their schedule; a paused one sends only its probe.
+    private var sendsAutomaticallyLocked: Bool {
+        state == .running || state == .retrying || (state == .paused && pauseReason != .storage)
+    }
+
     private func finishEmptyAutomaticRun(generation currentGeneration: UInt64) {
         stateLock.lock()
-        if generation == currentGeneration, state != .paused {
+        if generation == currentGeneration, state != .paused || pauseReason != .storage {
             state = .running
+            pauseReason = .none
         }
         stateLock.unlock()
     }
@@ -127,14 +133,13 @@ extension DeliveryEngine {
     private func applyAutomaticResultLocked(_ result: AttemptResult, prefix: FrozenPrefix) -> Bool {
         switch result {
         case .accepted:
-            return applyAcceptedResultLocked(prefix)
+            applyAcceptedResultLocked(prefix)
         case .retryable:
-            return applyRetryableResultLocked()
+            applyRetryableResultLocked()
         case let .terminal(reason, _, _):
             applyTerminalResultLocked(reason: reason)
-            return false
         case let .rateLimited(retryAfter, _, _):
-            return applyRateLimitedResultLocked(retryAfter: retryAfter)
+            applyRateLimitedResultLocked(retryAfter: retryAfter)
         }
     }
 
@@ -170,6 +175,7 @@ extension DeliveryEngine {
             return false
         }
         state = .running
+        pauseReason = .none
         return scheduleLiveQueueLocked()
     }
 
@@ -182,20 +188,45 @@ extension DeliveryEngine {
         guard retryAttempt < maxRetries else {
             state = .paused
             pauseReason = .retryExhausted
-            return false
+            return schedulePauseProbeLocked()
         }
         retryAttempt += 1
         state = .retrying
         return scheduleRetryLocked()
     }
 
-    private func applyTerminalResultLocked(reason: DeliveryPauseReason) {
+    private func applyTerminalResultLocked(reason: DeliveryPauseReason) -> Bool {
         consecutiveFailures += 1
         lastOutcome = .terminalFailure
-        if state != .shuttingDown {
-            state = .paused
-            pauseReason = reason
+        guard state != .shuttingDown else {
+            return false
         }
+        state = .paused
+        pauseReason = reason
+        return schedulePauseProbeLocked()
+    }
+
+    /// Schedules one resend of a paused delivery, so it resumes on its own once ingest accepts it again.
+    /// A storage pause waits for explicit recovery, because sending could lose or repeat durable data.
+    private func schedulePauseProbeLocked() -> Bool {
+        guard let options = automaticOptions, state == .paused, pauseReason != .storage else {
+            return false
+        }
+        nextWakeNanoseconds = nil
+        let delay = Self.pauseProbeDelay(maxRetryDelay: options.maxRetryDelay, failures: consecutiveFailures)
+        return setWakeLocked(delay: delay, replaceLaterWake: true)
+    }
+
+    /// Doubles from `maxRetryDelay` with each consecutive failure up to 5 minutes, or up to
+    /// `maxRetryDelay` when it is longer, then keeps half to all of that ceiling as jitter.
+    static func pauseProbeDelay(
+        maxRetryDelay: TimeInterval,
+        failures: Int,
+        jitter: Double = .random(in: 0 ... 1),
+    ) -> TimeInterval {
+        let maximum = max(maxRetryDelay, 5 * 60)
+        let ceiling = min(maxRetryDelay * pow(2, Double(max(0, failures - 1))), maximum)
+        return ceiling / 2 + ceiling / 2 * jitter
     }
 
     func scheduleCaptureLocked() -> Bool {
@@ -277,6 +308,8 @@ extension DeliveryEngine {
         let shouldSchedule: Bool
         if state == .retrying, nextWakeNanoseconds != nil {
             shouldSchedule = true
+        } else if state == .paused, pauseReason != .storage {
+            shouldSchedule = schedulePauseProbeLocked()
         } else if automaticTransport != nil, state != .paused, state != .shuttingDown, state != .closed {
             state = .running
             retryAttempt = 0
