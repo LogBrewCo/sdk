@@ -277,18 +277,22 @@ const afterShutdownResult = await queueBatchOperationWithLogBrewSpan("email.afte
 });
 assertEqual(afterShutdownResult, "after-shutdown", "queue helper must not interrupt app result after shutdown");
 assertEqual(shutdownClient.pendingEvents(), 0, "shutdown client queue after helper capture failure");
-const shutdownError = await captureError(() => Promise.resolve().then(() => {
-  shutdownClient.span("evt_node_direct_after_shutdown", timestamp(2000), {
-    name: "amqp process email.after_shutdown",
-    traceId: "55555555555555555555555555555555",
-    spanId: "5555555555555555",
-    status: "ok"
-  });
+shutdownClient.span("evt_node_direct_after_shutdown", timestamp(2000), {
+  name: "amqp process email.after_shutdown",
+  traceId: "55555555555555555555555555555555",
+  spanId: "5555555555555555",
+  status: "ok"
+});
+assertEqual(shutdownClient.pendingEvents(), 0, "capture after shutdown ignored");
+const shutdownError = await captureError(() => shutdownClient.shutdown({
+  async send() {
+    return { statusCode: 202 };
+  }
 }));
 if (!(shutdownError instanceof SdkError)) {
-  throw new Error(`expected SdkError after shutdown, got ${shutdownError}`);
+  throw new Error(`expected SdkError from a second shutdown, got ${shutdownError}`);
 }
-assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
+assertEqual(shutdownError.code, "shutdown_error", "second shutdown error code");
 
 console.log(JSON.stringify({
   ok: true,

@@ -354,17 +354,21 @@ assertEqual(JSON.parse(shutdownBodies[0]).events.length, 1, "shutdown retried ev
 assertEqual(JSON.parse(shutdownBodies[0]).events[0].id, "evt_js_shutdown_001", "shutdown retried event");
 assertEqual(JSON.parse(shutdownBodies[1]).events.length, 1, "shutdown later event count");
 assertEqual(JSON.parse(shutdownBodies[1]).events[0].id, "evt_js_shutdown_retry_001", "shutdown later event");
-const shutdownError = await captureError(() => Promise.resolve().then(() => {
-  shutdownClient.log("evt_js_shutdown_after_001", timestamp(3002), {
-    level: "info",
-    logger: "checkout.high-load",
-    message: "after shutdown"
-  });
+shutdownClient.log("evt_js_shutdown_after_001", timestamp(3002), {
+  level: "info",
+  logger: "checkout.high-load",
+  message: "after shutdown"
+});
+assertEqual(shutdownClient.pendingEvents(), 0, "capture after shutdown ignored");
+const shutdownError = await captureError(() => shutdownClient.shutdown({
+  async send() {
+    return { statusCode: 202 };
+  }
 }));
 if (!(shutdownError instanceof SdkError)) {
-  throw new Error(`expected SdkError after shutdown, got ${shutdownError}`);
+  throw new Error(`expected SdkError from a second shutdown, got ${shutdownError}`);
 }
-assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
+assertEqual(shutdownError.code, "shutdown_error", "second shutdown error code");
 
 console.log(JSON.stringify({
   ok: true,

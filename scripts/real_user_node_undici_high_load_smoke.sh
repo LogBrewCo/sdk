@@ -294,18 +294,22 @@ assertEqual(shutdownResponse.statusCode, 202, "shutdown status");
 await fetch(`http://127.0.0.1:${shutdownPort}/after-shutdown`);
 shutdownInstrumentation.uninstall();
 await closeServer(shutdownServer);
-const shutdownError = await captureError(() => Promise.resolve().then(() => {
-  shutdownClient.span("evt_node_direct_after_shutdown", timestamp(2000), {
-    name: "GET /after-shutdown",
-    traceId,
-    spanId: "2222222222222222",
-    status: "ok"
-  });
+shutdownClient.span("evt_node_direct_after_shutdown", timestamp(2000), {
+  name: "GET /after-shutdown",
+  traceId,
+  spanId: "2222222222222222",
+  status: "ok"
+});
+assertEqual(shutdownClient.pendingEvents(), 0, "capture after shutdown ignored");
+const shutdownError = await captureError(() => shutdownClient.shutdown({
+  async send() {
+    return { statusCode: 202 };
+  }
 }));
 if (!(shutdownError instanceof SdkError)) {
-  throw new Error(`expected SdkError after shutdown, got ${shutdownError}`);
+  throw new Error(`expected SdkError from a second shutdown, got ${shutdownError}`);
 }
-assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
+assertEqual(shutdownError.code, "shutdown_error", "second shutdown error code");
 
 console.log(JSON.stringify({
   ok: true,
