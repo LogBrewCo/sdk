@@ -9,8 +9,22 @@ import { fileURLToPath } from "node:url";
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const jsDir = path.resolve(packageDir, "..");
 
+const inertReact = [
+  "class Component { constructor(props) { this.props = props; } setState() {} }",
+  "module.exports = { Component, createContext() { return {}; }, createElement() { return null; }, useContext() {}, useEffect() {}, useRef() { return {}; } };",
+  ""
+].join("\n");
+
+// Runs each effect at once, as React does after a commit, and provides the client from globalThis.
+const effectReact = [
+  "class Component { constructor(props) { this.props = props; } setState() {} }",
+  "module.exports = { Component, createContext() { return {}; }, createElement() { return null; },",
+  "  useContext() { return globalThis.logbrewClient; }, useEffect(effect) { effect(); }, useRef(current) { return { current }; } };",
+  ""
+].join("\n");
+
 // Runs a consumer against the package with a minimal React stand-in, from both module formats.
-function runConsumer(source, extension) {
+function runConsumer(source, extension, reactSource = inertReact) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-react-root-"));
   try {
     const scope = path.join(root, "node_modules", "@logbrew");
@@ -20,11 +34,7 @@ function runConsumer(source, extension) {
     const react = path.join(root, "node_modules", "react");
     fs.mkdirSync(react, { recursive: true });
     fs.writeFileSync(path.join(react, "package.json"), JSON.stringify({ name: "react", main: "index.js" }));
-    fs.writeFileSync(path.join(react, "index.js"), [
-      "class Component { constructor(props) { this.props = props; } setState() {} }",
-      "module.exports = { Component, createContext() { return {}; }, createElement() { return null; }, useContext() {}, useEffect() {}, useRef() { return {}; } };",
-      ""
-    ].join("\n"));
+    fs.writeFileSync(path.join(react, "index.js"), reactSource);
     fs.writeFileSync(path.join(root, `consumer.${extension}`), source);
     return spawnSync(process.execPath, ["--preserve-symlinks", path.join(root, `consumer.${extension}`)], {
       cwd: root,
@@ -102,5 +112,27 @@ test("a failing capture never breaks React's error reporting", () => {
     options.onUncaughtError(new Error("render failed"), { componentStack: "" });
     assert.deepEqual(seen, ["render failed"]);
   `, "mjs");
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("the React Router navigation hook accepts a trace ID alone and never throws into the page", () => {
+  const result = runConsumer(`
+    import assert from "node:assert/strict";
+    import { LogBrewClient } from "@logbrew/sdk";
+    import { useLogBrewReactRouterNavigation } from "@logbrew/react";
+
+    const client = new LogBrewClient({ apiKey: "LOGBREW_CLIENT_KEY" });
+    globalThis.logbrewClient = client;
+    const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+    useLogBrewReactRouterNavigation({ location: "/orders/sample", routeTemplate: "/orders/:orderId", traceId });
+    useLogBrewReactRouterNavigation({ location: "/settings", routeTemplate: "/settings" });
+    useLogBrewReactRouterNavigation({ location: "/help", routeTemplate: "/help", traceparent: "malformed" });
+
+    const spans = JSON.parse(client.previewJson()).events.map(({ attributes }) => attributes);
+    assert.deepEqual(spans.map(({ name }) => name), ["react.route /orders/:orderId", "react.route /settings"]);
+    assert.equal(spans[0].traceId, traceId);
+    assert.match(spans[0].spanId, /^[0-9a-f]{16}$/u);
+    assert.match(spans[1].traceId, /^[0-9a-f]{32}$/u);
+  `, "mjs", effectReact);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
