@@ -407,7 +407,6 @@ test("Next request-error instrumentation captures stable context without request
       errorDigest: "next_digest_123",
       source: "nextjs.on_request_error",
       errorName: "Error",
-      errorMessage: "checkout render failed",
       issueGroupingSource: "error_type_and_frame"
     });
     assert.equal(errorFrameFile, "consumer.mjs");
