@@ -25,6 +25,9 @@ const VENDOR_FRAME = {
   function: "ignored",
   line: 1
 };
+const LONG_TEXT_LENGTH = 2000;
+const FIRST_CHARACTER = 0;
+const MAX_ISSUE_MESSAGE_LENGTH = 1024;
 const MECHANISM = { handled: true, type: "javascript.error" };
 const EXPECTED_ATTRIBUTES = {
   exception: { mechanism: MECHANISM, type: "TypeError" },
@@ -47,7 +50,6 @@ const EXPECTED_ATTRIBUTES = {
     errorFrameColumn: 34,
     errorFrameFile: "https://cdn.example/assets/app.js",
     errorFrameLine: 12,
-    errorMessage: "Checkout exploded",
     errorName: "TypeError",
     issueGroupingKey: "javascript.error:TypeError:https://cdn.example/assets/app.js",
     issueGroupingSource: "error_type_and_frame",
@@ -177,6 +179,16 @@ await test("createIssueAttributesFromError omits local paths and stack text by d
 
   const serialized = JSON.stringify(attributes);
   assert.doesNotMatch(serialized, /\/home\/example|example\/project|errorStack/u);
+});
+
+await test("createIssueAttributesFromError keeps the error message only in the bounded issue message", () => {
+  const error = new Error(`Payment failed for dev@example.test\n\t${"x".repeat(LONG_TEXT_LENGTH)}`);
+
+  const attributes = createIssueAttributesFromError(error);
+
+  assert.equal(pick(attributes, "metadata.errorMessage"), undefined);
+  assert.equal(pick(attributes, "message"), `Payment failed for dev@example.test ${"x".repeat(LONG_TEXT_LENGTH)}`.slice(FIRST_CHARACTER, MAX_ISSUE_MESSAGE_LENGTH));
+  assert.equal(JSON.stringify(attributes.metadata).includes("dev@example.test"), false);
 });
 
 await test("createIssueAttributesFromError includes stack only when explicitly requested", () => {

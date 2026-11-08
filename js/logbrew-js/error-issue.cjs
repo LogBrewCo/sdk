@@ -18,6 +18,9 @@ const { hasUnicodeControlCharacter, isRecord, optionalEntry, stringOrUndefined }
 const MAX_EXCEPTION_TYPE_LENGTH = 256;
 const NO_FRAMES = 0;
 const LOCATION_TEXT_PATTERN = /[?#]/u;
+const FIRST_CHARACTER = 0;
+const MAX_ISSUE_MESSAGE_LENGTH = 1024;
+const WHITESPACE_PATTERN = /\s+/gu;
 
 /**
  * @param {string} value
@@ -34,6 +37,15 @@ function boundedIssueExceptionType(value) {
     return "Error";
   }
   return normalized;
+}
+
+/**
+ * @param {string | undefined} message
+ * @returns {string | undefined}
+ */
+function boundedIssueMessage(message) {
+  const collapsed = message?.replaceAll(WHITESPACE_PATTERN, " ").trim();
+  return collapsed === undefined || collapsed === "" ? undefined : [...collapsed].slice(FIRST_CHARACTER, MAX_ISSUE_MESSAGE_LENGTH).join("");
 }
 
 /**
@@ -136,7 +148,6 @@ function errorIssueMetadata(error, options, parsed) {
     source,
 
     errorName: details.name,
-    ...optionalEntry("errorMessage", details.message),
     ...errorFrameMetadata(frame),
     ...issueGroupingMetadata(`${source}:${details.name}`, frame, issueFingerprintOrUndefined(options["fingerprint"])),
     ...errorCauseMetadata(error),
@@ -175,7 +186,7 @@ function createIssueAttributesFromError(error, options = {}) {
     title: stringOrUndefined(options["title"]) ?? details.name,
 
     level: normalizeSeverity("issue level", options["level"] ?? "error"),
-    ...optionalEntry("message", stringOrUndefined(options["message"]) ?? details.message),
+    ...optionalEntry("message", stringOrUndefined(options["message"]) ?? boundedIssueMessage(details.message)),
     exception,
     exceptionChain,
     ...optionalEntry("stackFrames", stackEvidence.frames.length > NO_FRAMES ? stackEvidence.frames : undefined),

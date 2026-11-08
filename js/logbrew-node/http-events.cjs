@@ -1,5 +1,6 @@
 "use strict";
 
+const { createIssueAttributesFromError } = require("@logbrew/sdk");
 const { createAutomaticEventId } = require("./automatic-event-id.cjs");
 const { applyFunction, isTruthy, readMember, readOptionalMember, templateText } = require("./internal.cjs");
 const {
@@ -71,22 +72,6 @@ function callHook(factory, name, args) {
 }
 
 /**
- * @param {unknown} trace
- * @returns {Readonly<Record<string, unknown>>}
- */
-function traceFields(trace) {
-  if (!isTruthy(trace)) {
-    return {};
-  }
-  return {
-    parentSpanId: readMember(trace, "parentSpanId"),
-    sampled: readMember(trace, "sampled"),
-    spanId: readMember(trace, "spanId"),
-    traceId: readMember(trace, "traceId")
-  };
-}
-
-/**
  * @param {unknown} req
  * @returns {unknown}
  */
@@ -141,10 +126,9 @@ function defaultRequestEventId(req, res) {
  * @param {unknown} req
  * @returns {string}
  */
-function defaultErrorEventId(error, req) {
-  const message = error instanceof Error ? error.message : String(error);
+function defaultErrorEventId(_error, req) {
   const method = templateText(readMember(req, "method") ?? "GET");
-  return createAutomaticEventId("evt_node_error", slugify(`${method}_${requestRoute(req, undefined).route}_${message}`));
+  return createAutomaticEventId("evt_node_error", slugify(`${method}_${requestRoute(req, undefined).route}`));
 }
 
 /**
@@ -224,23 +208,18 @@ function createHttpErrorEvent(error, req, {
 } = {}) {
   const method = readMember(req, "method") ?? "GET";
   const { path, route } = requestRoute(req, routeTemplateFactory);
-  const message = error instanceof Error ? error.message : String(error);
   const traceContext = trace ?? getRequestTraceContext(req) ?? getActiveLogBrewTrace();
   return {
     id: callHook(idFactory, "idFactory", [error, req]),
     timestamp: callHook(now, "now", []),
-
-    attributes: {
+    attributes: createIssueAttributesFromError(error, {
       title: `${templateText(method)} ${route} failed`,
-
-      level: "error",
-      message,
-      metadata: {
-        method,
-        path,
-        ...traceFields(traceContext)
-      }
-    }
+      mechanism: "node.http",
+      handled: false,
+      source: "node.http",
+      ...(isTruthy(traceContext) ? { trace: traceContext } : {}),
+      metadata: { method, path }
+    })
   };
 }
 
