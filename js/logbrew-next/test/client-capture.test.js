@@ -9,7 +9,11 @@ import { fileURLToPath } from "node:url";
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const jsDir = path.resolve(packageDir, "..");
 
-function runClientConsumer(source, env = {}) {
+const inertReact = "module.exports = { useEffect() {}, useRef() { return {}; } };\n";
+// Runs each effect at once, as React does after a commit, so a thrown effect error reaches the caller.
+const effectReact = "module.exports = { useEffect(effect) { effect(); }, useRef(current) { return { current }; } };\n";
+
+function runClientConsumer(source, env = {}, reactSource = inertReact) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-next-client-"));
   try {
     const scope = path.join(root, "node_modules", "@logbrew");
@@ -20,7 +24,7 @@ function runClientConsumer(source, env = {}) {
     const react = path.join(root, "node_modules", "react");
     fs.mkdirSync(react, { recursive: true });
     fs.writeFileSync(path.join(react, "package.json"), JSON.stringify({ name: "react", main: "index.js" }));
-    fs.writeFileSync(path.join(react, "index.js"), "module.exports = { useEffect() {}, useRef() { return {}; } };\n");
+    fs.writeFileSync(path.join(react, "index.js"), reactSource);
     fs.writeFileSync(path.join(root, "consumer.mjs"), source);
     return spawnSync(process.execPath, ["--preserve-symlinks", path.join(root, "consumer.mjs")], {
       cwd: root,
@@ -216,5 +220,27 @@ test("breadcrumbs: false leaves fetch and console untouched", () => {
     assert.equal(browserWindow.fetch, fetch);
     assert.equal(browserWindow.console.warn, originalWarn);
   `);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("the navigation hook accepts a trace ID alone and never throws into the page", () => {
+  const result = runClientConsumer(`
+    import assert from "node:assert/strict";
+    import { createLogBrewNextBrowserClient, useLogBrewNextNavigation } from "@logbrew/next/client";
+
+    const client = createLogBrewNextBrowserClient({ clientKey: "LOGBREW_CLIENT_KEY", transport: null });
+    const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+    useLogBrewNextNavigation({ client, routeTemplate: "/[locale]/privacy", traceId });
+    useLogBrewNextNavigation({ client, routeTemplate: "/[locale]/terms" });
+    useLogBrewNextNavigation({ client, routeTemplate: "/[locale]/help", traceparent: "malformed" });
+    useLogBrewNextNavigation({ routeTemplate: "/[locale]/faq", traceId });
+
+    const spans = JSON.parse(client.previewJson()).events.map(({ attributes }) => attributes);
+    assert.deepEqual(spans.map(({ name }) => name), ["next.route /[locale]/privacy", "next.route /[locale]/terms"]);
+    assert.equal(spans[0].traceId, traceId);
+    assert.match(spans[0].spanId, /^[0-9a-f]{16}$/u);
+    assert.match(spans[1].traceId, /^[0-9a-f]{32}$/u);
+    assert.notEqual(spans[1].traceId, traceId);
+  `, {}, effectReact);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
