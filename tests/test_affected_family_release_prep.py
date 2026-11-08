@@ -55,11 +55,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((project["name"], project["version"]), expected)
 
         rust = tomllib.loads(source_text("rust/logbrew/Cargo.toml"))
-        self.assertEqual(rust["package"]["version"], "0.2.1")
+        self.assertEqual(rust["package"]["version"], "0.2.2")
         ruby_version = source_text("ruby/logbrew-ruby/lib/logbrew/version.rb")
         self.assertIn(f'VERSION = "{CATALOG["rubygems"]}"', ruby_version)
-        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.15")
-        for package, version in (("LogBrew", "0.1.13"), ("LogBrew.HttpClient", "0.1.8")):
+        self.assertEqual(xml_value(ROOT / "java/logbrew-java/pom.xml", "{*}version"), "0.1.16")
+        for package, version in (("LogBrew", "0.1.14"), ("LogBrew.HttpClient", "0.1.9")):
             path = ROOT / f"dotnet/logbrew-dotnet/src/{package}/{package}.csproj"
             with self.subTest(package=package):
                 self.assertEqual(xml_value(path, "./PropertyGroup/Version"), version)
@@ -68,7 +68,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         for path, declaration in (
             ("c/logbrew-c/include/logbrew.h", '#define LOGBREW_C_VERSION "0.2.2"'),
             ("cpp/logbrew-cpp/include/logbrew.hpp", 'inline constexpr const char *version = "0.2.3"'),
-            ("objc/logbrew-objc/src/LogBrew.m", 'LogBrewObjectiveCVersion = @"0.2.4"'),
+            ("objc/logbrew-objc/src/LogBrew.m", 'LogBrewObjectiveCVersion = @"0.2.5"'),
         ):
             with self.subTest(path=path):
                 self.assertIn(declaration, source_text(path))
@@ -239,22 +239,22 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(xml_value(project, "./PropertyGroup/Version"), version)
 
     def test_release_catalog_matches_the_affected_version_matrix(self) -> None:
-        self.assertEqual(CATALOG["rust"], "0.2.1")
+        self.assertEqual(CATALOG["rust"], "0.2.2")
         self.assertEqual(CATALOG["rubygems"], "0.1.19")
         self.assertEqual(CATALOG["packagist"], "0.1.23")
         self.assertEqual(
             {package["id"]: package["version"] for package in CATALOG["nuget"]},
             {
-                "LogBrew": "0.1.13",
+                "LogBrew": "0.1.14",
                 "LogBrew.AspNetCore": "0.1.4",
                 "LogBrew.EntityFrameworkCore": "0.1.0",
                 "LogBrew.Hangfire": "0.1.0",
-                "LogBrew.HttpClient": "0.1.8",
+                "LogBrew.HttpClient": "0.1.9",
                 "LogBrew.StackExchangeRedis": "0.1.0",
                 "LogBrew.OpenTelemetry": "0.1.1",
             },
         )
-        self.assertEqual(CATALOG["java_maven"], "0.1.15")
+        self.assertEqual(CATALOG["java_maven"], "0.1.16")
         self.assertEqual(CATALOG["maven"], "0.2.3")
         self.assertEqual(
             {package["name"]: package["version"] for package in CATALOG["pypi"]},
