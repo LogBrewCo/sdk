@@ -1,5 +1,8 @@
 package co.logbrew.reactnative;
 
+import android.os.Build;
+import android.os.Process;
+import android.os.SystemClock;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReadableArray;
@@ -44,6 +47,17 @@ final class FatalStoreModuleImpl {
     this.context = context;
     File root = context.getNoBackupFilesDir();
     eventStoreParent = root;
+  }
+
+  double processStartTime() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+      return 0;
+    }
+    long startedAt =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            ? Process.getStartRequestedElapsedRealtime()
+            : Process.getStartElapsedRealtime();
+    return System.currentTimeMillis() - (SystemClock.elapsedRealtime() - startedAt);
   }
 
   String secureRandomHex(double length) {

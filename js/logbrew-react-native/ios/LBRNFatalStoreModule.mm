@@ -7,6 +7,8 @@
 #import <Security/SecRandom.h>
 #import <TargetConditionals.h>
 #import <math.h>
+#import <sys/sysctl.h>
+#import <unistd.h>
 
 #ifdef RCT_NEW_ARCH_ENABLED
 #import <LogBrewReactNativeSpec/LogBrewReactNativeSpec.h>
@@ -109,6 +111,21 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(secureRandomHex:(double)length)
         [output appendFormat:@"%02x", bytes[index]];
     }
     return output;
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(processStartTime)
+{
+    if ([NSProcessInfo.processInfo.environment[@"ActivePrewarm"] isEqualToString:@"1"]) {
+        return @0;
+    }
+    struct kinfo_proc process;
+    size_t size = sizeof(process);
+    int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+    if (sysctl(name, 4, &process, &size, NULL, 0) != 0 || size == 0) {
+        return @0;
+    }
+    struct timeval startedAt = process.kp_proc.p_starttime;
+    return @((double)startedAt.tv_sec * 1000.0 + (double)startedAt.tv_usec / 1000.0);
 }
 
 - (nullable LBRNEventRecordStore *)eventStoreForQueueKey:(NSString *)queueKey

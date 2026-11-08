@@ -1,14 +1,31 @@
+import fs from "node:fs";
 import http from "node:http";
-import { installLogBrewConsoleCapture } from "@logbrew/sdk";
-import {
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// The react-native condition resolves the app entry Metro bundles. This stands in for the linked native module.
+const packageEntry = fileURLToPath(import.meta.resolve("@logbrew/react-native"));
+const reactNative = path.resolve(path.dirname(packageEntry), "../../react-native");
+fs.mkdirSync(reactNative, { recursive: true });
+fs.writeFileSync(`${reactNative}/package.json`, JSON.stringify({ name: "react-native", type: "module", main: "index.js" }));
+fs.writeFileSync(`${reactNative}/index.js`, [
+  "const store = { processStartTime: () => performance.timeOrigin };",
+  "export const AppState = { currentState: 'active' };",
+  "export const DeviceEventEmitter = { addListener: () => ({ remove() {} }) };",
+  "export const Platform = { OS: 'android', Version: 35 };",
+  "export const NativeModules = { LogBrewFatalStore: store };",
+  "export const TurboModuleRegistry = { get: (name) => (name === 'LogBrewFatalStore' ? store : undefined) };"
+].join("\n"));
+const { installLogBrewConsoleCapture } = await import("@logbrew/sdk");
+const {
   captureReactNativeError,
   createLogBrewReactNativeClient,
   createReactNativeFetchTransport,
   createReactNativeTraceContext,
   withLogBrewTrace
-} from "@logbrew/react-native";
-import { installLogBrewReactNativeGlobalErrorHandler } from "@logbrew/react-native/global-errors";
-import { createLogBrewReactNativeInstrumentation } from "@logbrew/react-native/instrumentation";
+} = await import("@logbrew/react-native");
+const { installLogBrewReactNativeGlobalErrorHandler } = await import("@logbrew/react-native/global-errors");
+const { createLogBrewReactNativeInstrumentation } = await import("@logbrew/react-native/instrumentation");
 
 const api = http.createServer((request, response) => {
   response.statusCode = request.url.startsWith("/api/fail") ? 500 : 200;
@@ -94,3 +111,4 @@ errorHandler.remove();
 consoleCapture.uninstall();
 await client.shutdown();
 api.close();
+fs.rmSync(reactNative, { recursive: true, force: true });

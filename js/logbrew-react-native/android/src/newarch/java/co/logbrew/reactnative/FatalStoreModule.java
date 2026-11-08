@@ -19,6 +19,11 @@ final class FatalStoreModule extends NativeLogBrewFatalStoreSpec {
   }
 
   @Override
+  public double processStartTime() {
+    return implementation.processStartTime();
+  }
+
+  @Override
   public String secureRandomHex(double length) {
     return implementation.secureRandomHex(length);
   }
