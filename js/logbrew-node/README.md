@@ -91,6 +91,8 @@ server.listen(3000);
 
 `withLogBrewHttpHandler()` attaches `req.logbrew`, can capture completed requests from `finish`, captures thrown or rejected handler errors, and sends a plain `500` fallback when the app has not already written a response. Pass `captureRequests: false` when the app wants to record only its own explicit events.
 
+Without `transport`, the wrapper sends through the client's own transport: the default LogBrew HTTP transport for a client it creates, or the transport of the `client` you pass. Setup throws a `configuration_error` when neither has one, so events are never dropped without notice.
+
 Errors with a 4xx `status` or `statusCode`, such as a thrown 404 for an unknown item or a 400 from input validation, are not issues: they describe the request, not a failure in your app. The fallback response uses that 4xx status instead of `500`, `onError` still receives the error, and the request span keeps the 4xx status. Set `captureClientErrors: true` to report them as issues too.
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.

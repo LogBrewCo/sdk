@@ -1,7 +1,7 @@
 "use strict";
 
 const { STATUS_CODES } = require("node:http");
-const { RecordingTransport, SdkError } = require("@logbrew/sdk");
+const { SdkError } = require("@logbrew/sdk");
 const { applyFunction, callMethod, readMember } = require("./internal.cjs");
 const { runWithLogBrewTrace, setLogBrewUser } = require("./active-trace.cjs");
 const { createHttpErrorEvent, createHttpRequestEvent, createRequestTraceContext } = require("./http-events.cjs");
@@ -240,12 +240,18 @@ function resolveClient(options, runtime, createClient) {
   if (options.client) {
     return options.client;
   }
-  const transport = typeof options.transport === "function"
-    ? undefined
-    : options.transport ?? RecordingTransport.alwaysAccept();
+  const transport = typeof options.transport === "function" ? undefined : options.transport;
   return ownClient(createClient({ ...options, automaticDelivery: false, transport }));
 }
 
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isClient(value) {
+  return value !== null && typeof value === "object";
+}
 
 /**
  * @param {LogBrewNodeOptions} options
@@ -261,7 +267,7 @@ function resolveTransport(options, runtime) {
       client: runtime.client
     });
   }
-  return options.transport ?? RecordingTransport.alwaysAccept();
+  return options.transport ?? readMember(runtime.client, "transport");
 }
 
 /**
@@ -405,6 +411,9 @@ function invokeHandler(handler, { context, request, state }) {
 function createHttpHandler(handler, options, createClient) {
   if (typeof handler !== "function") {
     throw new SdkError("configuration_error", "withLogBrewHttpHandler requires a handler function");
+  }
+  if (options.transport === undefined && isClient(options.client) && readMember(options.client, "transport") === undefined) {
+    throw new SdkError("configuration_error", "withLogBrewHttpHandler requires a transport or a client with a transport");
   }
   return function logBrewHttpHandler(req, res) {
     const { client, startedAt, transport } = prepareHandledRequest(options, { req, res }, createClient);
