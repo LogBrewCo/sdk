@@ -119,6 +119,33 @@ test("React Native instrumentation can opt into reversible global fetch spans", 
   });
 });
 
+test("React Native fetch spans template record IDs in the default route name", async () => {
+  await withInstalledPackage(async ({ createLogBrewReactNativeClient, createLogBrewReactNativeInstrumentation }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const globalObject = { async fetch() { return { status: 200 }; } };
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, { globalObject, instrumentGlobalFetch: true });
+
+    await globalObject.fetch("https://api.example.test/orders/8412/items/77?expand=sizes");
+    await globalObject.fetch("https://api.example.test/sessions/3F2B6C1E-8A4D-4B9E-9C0D-2E1F3A4B5C6D/events/5f8d0c2a9b1e4d3c7a6b5e4f");
+    await globalObject.fetch("https://api.example.test/v2/catalog/shoes/abc123");
+    instrumentation.remove();
+
+    const names = JSON.parse(client.previewJson()).events.map(({ attributes }) => attributes.name);
+    assert.deepEqual(names, ["GET /orders/:id/items/:id", "GET /sessions/:id/events/:id", "GET /v2/catalog/shoes/abc123"]);
+
+    const ownNames = makeClient(createLogBrewReactNativeClient);
+    const ownObject = { async fetch() { return { status: 200 }; } };
+    const own = createLogBrewReactNativeInstrumentation(ownNames, {
+      globalObject: ownObject,
+      instrumentGlobalFetch: true,
+      routeTemplateFactory: ({ url }) => new URL(url).pathname
+    });
+    await ownObject.fetch("https://api.example.test/orders/8412");
+    own.remove();
+    assert.equal(JSON.parse(ownNames.previewJson()).events[0].attributes.name, "GET /orders/8412");
+  });
+});
+
 test("React Native global fetch teardown does not clobber later wrappers", () => {
   return withInstalledPackage(async ({
     createLogBrewReactNativeClient,
