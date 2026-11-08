@@ -8,6 +8,7 @@ static const NSUInteger LBWMaxRequestEvents = 100U;
 static const NSUInteger LBWMaxRequestBytes = 256U * 1024U;
 static const NSTimeInterval LBWMaxScheduleDelay = 24.0 * 60.0 * 60.0;
 static const NSTimeInterval LBWMaxRateLimitDelay = 60.0 * 60.0;
+static const NSTimeInterval LBWMaxPauseProbeDelay = 5.0 * 60.0;
 static void *LBWDeliverySchedulerKey = &LBWDeliverySchedulerKey;
 
 @interface LBWDeliveryHealth ()
@@ -131,6 +132,12 @@ static BOOL LBWIsTimedRateLimit(LBWTransportResponse *response) {
 static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
   NSTimeInterval bounded = fmin(fmax(delay, 1.0), LBWMaxRateLimitDelay);
   return fmin(bounded + bounded * 0.1 * jitter, LBWMaxRateLimitDelay);
+}
+
+NSTimeInterval LBWPauseProbeDelay(NSTimeInterval maxRetryDelay, NSUInteger failures, double jitter) {
+  double doublings = failures > 0U ? (double)(failures - 1U) : 0.0;
+  NSTimeInterval ceiling = fmin(maxRetryDelay * pow(2.0, doublings), fmax(maxRetryDelay, LBWMaxPauseProbeDelay));
+  return ceiling / 2.0 + ceiling / 2.0 * jitter;
 }
 
 @implementation LBWDeliveryEngine
@@ -258,7 +265,7 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
   health.consecutiveFailures = self.consecutiveFailures;
   health.lastOutcome = self.lastOutcome;
   health.pauseReason = self.pauseReason;
-  if (self.state == LBWDeliveryStateRetrying && self.nextWakeUptime > 0) {
+  if ((self.state == LBWDeliveryStateRetrying || self.state == LBWDeliveryStatePaused) && self.nextWakeUptime > 0) {
     health.nextRetryDelay = fmax(0, self.nextWakeUptime - LBWDeliveryUptime());
   }
   [self.stateLock unlock];
@@ -569,8 +576,7 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
     return;
   }
   BOOL due = self.nextWakeUptime > 0 && LBWDeliveryUptime() + 0.0005 >= self.nextWakeUptime;
-  BOOL active = self.automaticTransport != nil &&
-      (self.state == LBWDeliveryStateRunning || self.state == LBWDeliveryStateRetrying);
+  BOOL active = self.automaticTransport != nil && [self sendsAutomaticallyLocked];
   if (due) {
     self.nextWakeUptime = 0;
   }
@@ -584,8 +590,7 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
   [self.flushLock lock];
   [self.stateLock lock];
   id<LBWTransport> transport = self.automaticTransport;
-  BOOL active = generation == self.generation && transport != nil &&
-      (self.state == LBWDeliveryStateRunning || self.state == LBWDeliveryStateRetrying);
+  BOOL active = generation == self.generation && transport != nil && [self sendsAutomaticallyLocked];
   [self.stateLock unlock];
   if (!active) {
     [self.flushLock unlock];
@@ -594,6 +599,13 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
 
   NSError *freezeError = nil;
   if (![self freezePrefixWithError:&freezeError]) {
+    [self.stateLock lock];
+    if (freezeError == nil && generation == self.generation && self.state == LBWDeliveryStatePaused &&
+        self.pauseReason != LBWDeliveryPauseReasonStorage) {
+      self.state = LBWDeliveryStateRunning;
+      self.pauseReason = LBWDeliveryPauseReasonNone;
+    }
+    [self.stateLock unlock];
     [self.flushLock unlock];
     return;
   }
@@ -631,6 +643,7 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
       self.lastOutcome = LBWDeliveryOutcomeAccepted;
       if (self.state != LBWDeliveryStateShuttingDown) {
         self.state = LBWDeliveryStateRunning;
+        self.pauseReason = LBWDeliveryPauseReasonNone;
         shouldSchedule = [self scheduleLiveQueueLocked];
       }
     } else {
@@ -680,6 +693,7 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
     self.state = LBWDeliveryStatePaused;
     self.pauseReason = retryable ? LBWDeliveryPauseReasonRetryExhausted :
         (response == nil ? LBWDeliveryPauseReasonNonRetryable : [self pauseReasonForStatus:response.statusCode]);
+    shouldSchedule = [self schedulePauseProbeLocked];
   }
   [self.stateLock unlock];
   [self.flushLock unlock];
@@ -819,6 +833,23 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
   self.retryAttempt = 0U;
 }
 
+// Running and retrying deliveries send on their schedule; a paused one sends only its probe.
+- (BOOL)sendsAutomaticallyLocked {
+  return self.state == LBWDeliveryStateRunning || self.state == LBWDeliveryStateRetrying ||
+      (self.state == LBWDeliveryStatePaused && self.pauseReason != LBWDeliveryPauseReasonStorage);
+}
+
+// A storage pause waits for explicit recovery, because sending could lose or repeat durable data.
+- (BOOL)schedulePauseProbeLocked {
+  if (self.automaticOptions == nil || self.state != LBWDeliveryStatePaused ||
+      self.pauseReason == LBWDeliveryPauseReasonStorage) {
+    return NO;
+  }
+  self.nextWakeUptime = 0;
+  double jitter = (double)arc4random_uniform(10001U) / 10000.0;
+  return [self setWakeLocked:LBWPauseProbeDelay(self.automaticOptions.maxRetryDelay, self.consecutiveFailures, jitter)];
+}
+
 - (BOOL)scheduleCaptureLocked {
   if (self.automaticTransport == nil ||
       (self.state != LBWDeliveryStateRunning && self.state != LBWDeliveryStateRetrying) ||
@@ -906,6 +937,8 @@ static NSTimeInterval LBWRateLimitDelay(NSTimeInterval delay, double jitter) {
   BOOL shouldSchedule = NO;
   if (self.state == LBWDeliveryStateRetrying && self.nextWakeUptime > 0) {
     shouldSchedule = YES;
+  } else if (self.state == LBWDeliveryStatePaused && !self.closed) {
+    shouldSchedule = [self schedulePauseProbeLocked];
   } else if (self.automaticTransport != nil && self.state != LBWDeliveryStatePaused && !self.closed) {
     self.state = LBWDeliveryStateRunning;
     self.retryAttempt = 0U;
