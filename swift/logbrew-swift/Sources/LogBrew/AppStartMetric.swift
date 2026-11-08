@@ -1,0 +1,115 @@
+import Foundation
+
+struct AppStartSource: Sendable {
+    let processStartMs: Double?
+    let isPrewarmed: Bool
+    let firstFrameNotification: Notification.Name?
+    let notificationCenter: NotificationCenter
+    let nowMs: @Sendable () -> Double
+
+    static let current = AppStartSource(
+        processStartMs: kernelProcessStartMs(),
+        isPrewarmed: ProcessInfo.processInfo.environment["ActivePrewarm"] == "1",
+        firstFrameNotification: platformFirstFrameNotification(),
+        notificationCenter: .default,
+        nowMs: { Date().timeIntervalSince1970 * 1000 },
+    )
+}
+
+final class AppStartRecorder: @unchecked Sendable {
+    static let process = AppStartRecorder(source: .current)
+
+    let source: AppStartSource
+    private let lock = NSLock()
+    private var finished: Bool
+    private var observer: (any NSObjectProtocol)?
+    private weak var client: LogBrewClient?
+
+    init(source: AppStartSource) {
+        self.source = source
+        finished = source.isPrewarmed || source.processStartMs == nil
+    }
+
+    func install(for client: LogBrewClient) {
+        guard let name = source.firstFrameNotification else {
+            return
+        }
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        guard !finished, observer == nil else {
+            return
+        }
+        self.client = client
+        observer = source.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.finish(client: nil)
+            }
+        }
+    }
+
+    @discardableResult
+    func finish(client explicitClient: LogBrewClient?) -> Bool {
+        let endMs = source.nowMs()
+        lock.lock()
+        guard !finished, let startMs = source.processStartMs else {
+            lock.unlock()
+            return false
+        }
+        finished = true
+        let target = explicitClient ?? client
+        let registeredObserver = observer
+        observer = nil
+        client = nil
+        lock.unlock()
+        if let registeredObserver {
+            source.notificationCenter.removeObserver(registeredObserver)
+        }
+        let durationMs = endMs - startMs
+        guard let target, durationMs >= 0, durationMs <= 60000 else {
+            return false
+        }
+        let eventID = "evt_app_start_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())"
+        return (try? target.metric(
+            eventID,
+            timestamp: currentTelemetryTimestamp(),
+            attributes: MetricAttributes(
+                name: "app.start.duration",
+                kind: .histogram,
+                value: durationMs,
+                unit: "ms",
+                temporality: .delta,
+                metadata: ["startType": "cold"],
+                description: "Time from process start to the first frame.",
+            ),
+        )) != nil
+    }
+}
+
+private func platformFirstFrameNotification() -> Notification.Name? {
+    #if os(iOS) || os(tvOS) || os(visionOS)
+        Notification.Name("UIApplicationDidBecomeActiveNotification")
+    #elseif os(watchOS)
+        Notification.Name("WKApplicationDidBecomeActiveNotification")
+    #elseif os(macOS)
+        Notification.Name("NSApplicationDidFinishLaunchingNotification")
+    #else
+        nil
+    #endif
+}
+
+private func kernelProcessStartMs() -> Double? {
+    #if canImport(Darwin)
+        var information = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, u_int(mib.count), &information, &size, nil, 0) == 0 else {
+            return nil
+        }
+        let start = information.kp_proc.p_un.__p_starttime
+        return Double(start.tv_sec) * 1000 + Double(start.tv_usec) / 1000
+    #else
+        nil
+    #endif
+}

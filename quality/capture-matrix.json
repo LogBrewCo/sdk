@@ -949,7 +949,7 @@
       },
       "method": "React Native client from the package's platform-neutral entry with the Platform, AppState, ErrorUtils, and navigation container shapes its own tests and examples use, createReactNativeFetchTransport, the reversible instrumentation (global fetch, navigation, and AppState spans) under an incoming W3C trace, the global error handler, and console capture; one API call that succeeds, one that fails, a handled error, and a global error",
       "probe": "tools/capture-matrix/probes/js/logbrew-react-native",
-      "inputs": "a57a6c7e9fe877c4229b62b4443a155c166837b233ea92577b5e9210c80117ef"
+      "inputs": "f93748cce7a6643792f2dc0f0255377d97a9fe20d3ff4e467c6b5c3009e0582b"
     },
     "js/logbrew-svelte": {
       "share": 75.0,
@@ -1347,7 +1347,7 @@
       },
       "method": "SwiftPM app with LogBrew and LogBrewCrash: one run crashes on an out-of-range index under KSCrash capture with a correlation snapshot and breadcrumbs, the next run replays it, then LogBrewLogger, task-local session and user, a continued W3C trace, LogBrewURLSessionTracer for one request that succeeds against a local backend and one that fails to connect (its onRequestError builds the issue with IssueAttributes.fromError), a breadcrumb, an explicit metric, and HTTPTransport to the collector",
       "probe": "tools/capture-matrix/probes/swift/logbrew-swift",
-      "inputs": "fdfff8f2a03948d9bb5a576fee4e6892a157e3209ddf409114a6aa066dd604a0"
+      "inputs": "1be202f5f2238212dd046fc373e832fda4f183df7708167b6765c7a7e9af235b"
     },
     "unity/logbrew-unity": {
       "share": 100.0,

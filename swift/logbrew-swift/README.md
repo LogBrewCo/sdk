@@ -264,7 +264,15 @@ try client.metric(
 
 Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Gauges use `instant` temporality and may be negative. An optional `description` gives people and investigation tools the stable meaning of the measurement. Keep it generic, single-line, between 1 and 1,024 Unicode scalar values, and free of identifiers, personal data, or changing values. It is not a query dimension. Keep metric metadata low-cardinality and primitive, such as route template or queue name. Put shared service, deployment, runtime, session, subject, trace, and tag evidence in `TelemetryContext` so the metric can be compared with related issues, logs, actions, and spans. Avoid raw URLs, query strings, stack traces, authentication data, and unbounded labels.
 
-The Swift SDK does not automatically collect app runtime, URLSession, SwiftUI, or database metrics. Add explicit measurements where they are meaningful for your product, or keep those signals in framework-owned integrations when you add them.
+### App start
+
+The client sends one `app.start.duration` histogram metric per cold launch. Its value is the milliseconds from the kernel's process start time to the first frame, with metadata `startType: "cold"`. The first frame is the next main run-loop turn after the app first becomes active on iOS, iPadOS, tvOS, visionOS, Mac Catalyst, and watchOS, and after the app finishes launching on macOS. Create the client before that point, for example in `application(_:didFinishLaunchingWithOptions:)` or your `App` initializer.
+
+Call `client.markAppReady()` when your app is usable before its first frame, for example after a splash screen. The first of the two ends the measurement. The client sends the metric at most once per process. It skips prewarmed launches (`ActivePrewarm=1`) and values below 0 or above 60 seconds. Linux sends no app start metric.
+
+Turn it off with `includeAppStartMetric: false` on `LogBrewClient.create(...)` or `ClientConfig`. Then `markAppReady()` sends nothing.
+
+The Swift SDK does not automatically collect other app runtime, URLSession, SwiftUI, or database metrics. Add explicit measurements where they are meaningful for your product, or keep those signals in framework-owned integrations when you add them.
 
 ## Product Timelines
 
@@ -477,7 +485,7 @@ Milestones preserve bounded names, optional RFC 3339 timestamps, and flat primit
 
 Use `LogBrewLifecycleTracker` from your own SwiftUI, UIKit, AppKit, or SceneDelegate lifecycle hooks when you want app state transitions such as `active -> background` to appear as child spans on the active trace. The tracker dedupes repeated states, computes previous-state duration from app-owned timestamps, records primitive metadata only, and overwrites spoofed trace metadata with the active child span context. Use the lower-level `captureLifecycleSpan(...)` helper only when your app already owns previous/current state and duration values.
 
-The Swift SDK does not patch `URLSession`, install notification observers, swizzle SwiftUI/UIKit/AppKit lifecycle APIs, add an OpenTelemetry dependency, install OpenTelemetry exporters or processors, read baggage or tracestate, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, derive local session health, or start automatic database/network child spans. URLSession timing metadata is explicit and limited to numeric phase durations and byte counts; it does not include URLs, headers, payloads, cookies, or response text. URLSession and lifecycle spans are explicit and app-owned; keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
+Apart from the one app start observer, the Swift SDK does not patch `URLSession`, install notification observers, swizzle SwiftUI/UIKit/AppKit lifecycle APIs, add an OpenTelemetry dependency, install OpenTelemetry exporters or processors, read baggage or tracestate, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, derive local session health, or start automatic database/network child spans. URLSession timing metadata is explicit and limited to numeric phase durations and byte counts; it does not include URLs, headers, payloads, cookies, or response text. URLSession and lifecycle spans are explicit and app-owned; keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
 
 ## Native Fatal Crashes
 

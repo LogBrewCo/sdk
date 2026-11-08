@@ -4,6 +4,7 @@ public final class LogBrewClient: @unchecked Sendable {
     private let engine: DeliveryEngine
     private let baseContext: TelemetryContext?
     private let breadcrumbStore = IssueBreadcrumbStore()
+    private let appStart: AppStartRecorder?
 
     public static func create(
         apiKey: String,
@@ -12,6 +13,7 @@ public final class LogBrewClient: @unchecked Sendable {
         maxRetries: Int = 2,
         context: TelemetryContext? = nil,
         includeAutomaticContext: Bool = true,
+        includeAppStartMetric: Bool = true,
     ) throws -> LogBrewClient {
         try LogBrewClient(
             config: ClientConfig(
@@ -21,11 +23,16 @@ public final class LogBrewClient: @unchecked Sendable {
                 maxRetries: maxRetries,
                 context: context,
                 includeAutomaticContext: includeAutomaticContext,
+                includeAppStartMetric: includeAppStartMetric,
             ),
         )
     }
 
-    public init(config: ClientConfig) throws {
+    public convenience init(config: ClientConfig) throws {
+        try self.init(config: config, appStart: .process)
+    }
+
+    init(config: ClientConfig, appStart: AppStartRecorder) throws {
         try requireNonEmpty("api_key", config.apiKey)
         try requireNonEmpty("sdk_name", config.sdkName)
         try requireNonEmpty("sdk_version", config.sdkVersion)
@@ -38,6 +45,14 @@ public final class LogBrewClient: @unchecked Sendable {
             sdk: SDKInfo(name: config.sdkName, language: "swift", version: config.sdkVersion),
             maxRetries: config.maxRetries,
         )
+        self.appStart = config.includeAppStartMetric ? appStart : nil
+        self.appStart?.install(for: self)
+    }
+
+    /// End the cold start measurement now if the first frame has not ended it yet.
+    @discardableResult
+    public func markAppReady() -> Bool {
+        appStart?.finish(client: self) ?? false
     }
 
     public func pendingEvents() -> Int {

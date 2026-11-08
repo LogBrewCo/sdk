@@ -87,6 +87,7 @@ public final class LBRNAppleNativeDiagnostics: NSObject, @unchecked Sendable {
                 apiKey: configuration.apiKey,
                 sdkName: "logbrew-react-native-apple",
                 sdkVersion: Self.sdkVersion,
+                includeAppStartMetric: false,
             )
             let transport = try HTTPTransport(endpoint: configuration.endpoint)
 
