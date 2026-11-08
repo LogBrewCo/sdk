@@ -167,7 +167,7 @@ impl AutomaticDelivery {
                 state.running = false;
                 return WorkerAction::Stop;
             }
-            if state.manual_deliveries > 0 || state.pause_reason != DeliveryPauseReason::None {
+            if state.manual_deliveries > 0 || state.pause_reason == DeliveryPauseReason::State {
                 state = self
                     .wake
                     .wait(state)
@@ -326,33 +326,50 @@ impl AutomaticDelivery {
                 } else {
                     DeliveryPauseReason::None
                 };
-                if pause_reason == DeliveryPauseReason::None {
-                    let backoff = retry_delay(
-                        self.config.retry_base_delay,
+                state.pause_reason = pause_reason;
+                state.retry_at = None;
+                state.next_retry_delay = Duration::ZERO;
+                let delay = match pause_reason {
+                    DeliveryPauseReason::None => {
+                        let backoff = retry_delay(
+                            self.config.retry_base_delay,
+                            self.config.retry_max_delay,
+                            state.consecutive_failures,
+                            jitter_seed(),
+                        );
+                        Some(match rate_limit_wait {
+                            RateLimitWait::NotLimited => backoff,
+                            RateLimitWait::Backoff => rate_limit_delay(backoff, jitter_seed()),
+                            RateLimitWait::RetryAfter(retry_after) => {
+                                rate_limit_delay(retry_after, jitter_seed())
+                            }
+                        })
+                    }
+                    DeliveryPauseReason::State => None,
+                    DeliveryPauseReason::Authentication
+                    | DeliveryPauseReason::Quota
+                    | DeliveryPauseReason::Rejected => Some(pause_probe_delay(
                         self.config.retry_max_delay,
                         state.consecutive_failures,
                         jitter_seed(),
-                    );
-                    let delay = match rate_limit_wait {
-                        RateLimitWait::NotLimited => backoff,
-                        RateLimitWait::Backoff => rate_limit_delay(backoff, jitter_seed()),
-                        RateLimitWait::RetryAfter(retry_after) => {
-                            rate_limit_delay(retry_after, jitter_seed())
-                        }
-                    };
-                    if let Some(deadline) = Instant::now().checked_add(delay) {
-                        state.next_retry_delay = delay;
-                        state.retry_at = Some(deadline);
-                        client.record_automatic_outcome(DeliveryOutcome::RetryScheduled);
-                    } else {
+                    )),
+                };
+                let outcome = if pause_reason == DeliveryPauseReason::None {
+                    DeliveryOutcome::RetryScheduled
+                } else {
+                    DeliveryOutcome::Paused
+                };
+                match delay.map(|wait| (wait, Instant::now().checked_add(wait))) {
+                    Some((_, None)) => {
                         fail_closed_scheduler(&mut state);
                         scheduler_failed = true;
                     }
-                } else {
-                    state.pause_reason = pause_reason;
-                    state.retry_at = None;
-                    state.next_retry_delay = Duration::ZERO;
-                    client.record_automatic_outcome(DeliveryOutcome::Paused);
+                    Some((wait, deadline)) => {
+                        state.next_retry_delay = wait;
+                        state.retry_at = deadline;
+                        client.record_automatic_outcome(outcome);
+                    }
+                    None => client.record_automatic_outcome(outcome),
                 }
             }
         }
@@ -499,6 +516,18 @@ fn retry_delay(base: Duration, maximum: Duration, failures: u32, jitter: u64) ->
         .and_then(|span| jitter.checked_rem(span))
         .unwrap_or(jitter);
     half.saturating_add(Duration::from_nanos(jitter_nanos))
+}
+
+/// A paused delivery resends its batch as a probe, so it resumes on its own once LogBrew accepts it.
+/// Probes double from the retry maximum up to 5 minutes, or up to the retry maximum when it is longer.
+fn pause_probe_delay(retry_max_delay: Duration, failures: u32, jitter: u64) -> Duration {
+    const MAX_PAUSE_PROBE_DELAY: Duration = Duration::from_secs(300);
+    retry_delay(
+        retry_max_delay,
+        retry_max_delay.max(MAX_PAUSE_PROBE_DELAY),
+        failures,
+        jitter,
+    )
 }
 
 fn rate_limit_delay(delay: Duration, jitter: u64) -> Duration {

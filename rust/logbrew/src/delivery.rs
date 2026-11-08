@@ -100,7 +100,7 @@ pub enum DeliveryOutcome {
     Failed,
     /// No delivery or admission result has been recorded.
     Idle,
-    /// Automatic delivery paused until the next manual flush.
+    /// Automatic delivery paused until a probe or a manual flush is accepted.
     Paused,
     /// An event was retained in the bounded queue.
     Queued,
@@ -181,7 +181,7 @@ pub struct DeliveryHealthSnapshot {
     pub consecutive_failures: u32,
     /// Why automatic delivery is paused.
     pub pause_reason: DeliveryPauseReason,
-    /// Delay before the next scheduled retry, or zero when none is scheduled.
+    /// Delay before the next scheduled retry or paused-delivery probe, or zero when none is scheduled.
     pub next_retry_delay: Duration,
 }
 
