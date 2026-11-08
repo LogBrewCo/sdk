@@ -105,6 +105,7 @@ public struct ClientConfig: Equatable, Sendable {
     public let maxRetries: Int
     public let context: TelemetryContext?
     public let includeAutomaticContext: Bool
+    public let includeAppStartMetric: Bool
 
     public init(
         apiKey: String,
@@ -113,6 +114,7 @@ public struct ClientConfig: Equatable, Sendable {
         maxRetries: Int = 2,
         context: TelemetryContext? = nil,
         includeAutomaticContext: Bool = true,
+        includeAppStartMetric: Bool = true,
     ) {
         self.apiKey = apiKey
         self.sdkName = sdkName
@@ -120,6 +122,7 @@ public struct ClientConfig: Equatable, Sendable {
         self.maxRetries = maxRetries
         self.context = context
         self.includeAutomaticContext = includeAutomaticContext
+        self.includeAppStartMetric = includeAppStartMetric
     }
 }
 
