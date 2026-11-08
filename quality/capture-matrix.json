@@ -822,7 +822,7 @@
       },
       "method": "Next.js 16 App Router production build (next build, next start) with the documented instrumentation onRequestError hook, wrapped Route Handlers with request metrics and the request user, and Pino capture from @logbrew/node; one route that succeeds, one that throws, and one server component that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-next",
-      "inputs": "5b9b0abb897cd099c810731c4ab7e44e13b5fa5a9270b45caf11e1b9b108b52e"
+      "inputs": "3e99d5401d9e404a2c3a278c773a16c8e4849026e32185c3bf1e7d2f8932e006"
     },
     "js/logbrew-node": {
       "share": 81.8,
@@ -919,7 +919,7 @@
       },
       "method": "React 19 app rendered with react-dom under happy-dom, with LogBrewProvider, the React 19 root error options, LogBrewErrorBoundary, the React Router route observer, console capture, and the @logbrew/browser fetch transport; one route that renders and one whose component throws during render",
       "probe": "tools/capture-matrix/probes/js/logbrew-react",
-      "inputs": "7b52bb714dcfc7e0541f4eb1170a74034175df7b1ef954e372274c4d2101e999"
+      "inputs": "42bf734bb64ddf55d44132769ecf7f339fd17c6896788bb9ddaf1b5ca331e287"
     },
     "js/logbrew-react-native": {
       "share": 75.0,

@@ -15,7 +15,7 @@ export function createLogBrewReactClient({
   context,
   eventFilter,
   sdkName = "logbrew-react",
-  sdkVersion = "0.1.3",
+  sdkVersion = "0.1.4",
   maxQueueSize,
   maxRetries = 2,
   onEventDropped
