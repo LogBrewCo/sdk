@@ -13,6 +13,7 @@ const (
 	defaultFlushThreshold = 100
 	defaultRetryBaseDelay = 100 * time.Millisecond
 	defaultRetryMaxDelay  = 5 * time.Second
+	maxPauseProbeDelay    = 5 * time.Minute
 )
 
 const (
@@ -182,8 +183,8 @@ func (c *Client) DeliveryHealth() DeliveryHealth {
 	}
 }
 
-// ResumeDelivery resumes an automatically managed client after a terminal
-// authentication, quota, or non-retryable pause.
+// ResumeDelivery resumes a paused automatically managed client at once,
+// without waiting for its next probe.
 func (c *Client) ResumeDelivery() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -325,6 +326,7 @@ func (c *Client) deliveryLoop() {
 	defer timer.Stop()
 	retrying := false
 	retryStreak := uint64(0)
+	pauseProbes := 0
 	c.mu.Lock()
 	generation := c.automatic.generation
 	c.mu.Unlock()
@@ -332,9 +334,15 @@ func (c *Client) deliveryLoop() {
 	for {
 		c.mu.Lock()
 		paused := c.health.state == DeliveryStatePaused
+		// A persistence pause waits for ResumeDelivery, because sending could lose or repeat durable data.
+		probing := paused && c.health.lastOutcome != DeliveryOutcomePersistencePause
 		c.mu.Unlock()
 		if paused {
 			stopTimer(timer)
+			if probing {
+				pauseProbes++
+				timer.Reset(c.automatic.jitter(pauseProbeCeiling(c.automatic.retryMaxDelay, pauseProbes)))
+			}
 			select {
 			case <-c.automatic.stop:
 				return
@@ -345,6 +353,9 @@ func (c *Client) deliveryLoop() {
 				c.mu.Unlock()
 				retrying = false
 				retryStreak = 0
+				pauseProbes = 0
+				probing = false
+			case <-timer.C:
 			}
 		} else {
 			select {
@@ -389,10 +400,10 @@ func (c *Client) deliveryLoop() {
 		if stopped {
 			return
 		}
-		if paused {
+		if paused && !probing {
 			continue
 		}
-		_, result, _ := c.flushSnapshot(c.automatic.transport)
+		_, result, err := c.flushSnapshot(c.automatic.transport)
 		if result.stale {
 			retrying = false
 			retryStreak = 0
@@ -401,10 +412,18 @@ func (c *Client) deliveryLoop() {
 		}
 		c.mu.Lock()
 		paused = c.health.state == DeliveryStatePaused
+		if paused && probing && err == nil {
+			paused = false
+			c.health.state = DeliveryStateRunning
+			if len(c.events) >= c.automatic.flushThreshold {
+				c.signalAutomaticLocked()
+			}
+		}
 		c.mu.Unlock()
 		if paused {
 			continue
 		}
+		pauseProbes = 0
 		retrying = result.retryable
 		delay := c.automatic.flushInterval
 		if retrying {
@@ -466,6 +485,17 @@ func (c *Client) scheduleRetryDelay(result flushResult, retryStreak uint64) (tim
 		c.health.invalidServerBackoffs = incrementCounter(c.health.invalidServerBackoffs)
 	}
 	return selected, true
+}
+
+// pauseProbeCeiling doubles from maxDelay with each failed probe up to five minutes, or up to
+// maxDelay when it is longer.
+func pauseProbeCeiling(maxDelay time.Duration, failures int) time.Duration {
+	limit := max(maxDelay, maxPauseProbeDelay)
+	delay := maxDelay
+	for current := 1; current < failures && delay < limit; current++ {
+		delay = min(delay*2, limit)
+	}
+	return delay
 }
 
 func equalJitter(delay time.Duration) time.Duration {
@@ -578,7 +608,8 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 		}
 	} else {
 		c.health.failedFlushes++
-		if !result.stale {
+		// A failed probe keeps the pause reason in lastOutcome.
+		if !result.stale && c.health.state != DeliveryStatePaused {
 			c.health.lastOutcome = DeliveryOutcomeRetryableFailure
 		}
 		if !result.stale && result.pause != "" && c.automatic != nil {
