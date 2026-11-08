@@ -2047,8 +2047,8 @@ request_span = next(event for event in events if event["id"] == "evt_span_checko
 if request_span["type"] != "span":
     raise SystemExit(f"expected request span, got {request_span}")
 metadata = request_span["attributes"]["metadata"]
-if metadata["path"] != "/checkout/123" or "coupon" in json.dumps(metadata):
-    raise SystemExit(f"request span should omit query text: {metadata}")
+if metadata["path"] != "/checkout/:id" or "coupon" in json.dumps(metadata) or "123" in json.dumps(metadata):
+    raise SystemExit(f"request span should omit query text and record IDs: {metadata}")
 network = next(event for event in events if event["id"] == "evt_network_payment_authorized")
 if network["attributes"]["metadata"]["routeTemplate"] != "/payments/:paymentId":
     raise SystemExit(f"missing network route template: {network}")

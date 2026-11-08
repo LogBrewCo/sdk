@@ -139,8 +139,8 @@ if (!requestSpan || requestSpan.type !== "span") {
 if (requestSpan.attributes.traceId !== traceId || requestSpan.attributes.parentSpanId !== "00f067aa0ba902b7") {
   throw new Error(`unexpected trace context: ${JSON.stringify(requestSpan)}`);
 }
-if (requestSpan.attributes.metadata.path !== "/checkout/123") {
-  throw new Error(`request path should omit query text: ${JSON.stringify(requestSpan)}`);
+if (requestSpan.attributes.metadata.path !== "/checkout/:id" || requestSpan.attributes.name !== "POST /checkout/:id") {
+  throw new Error(`request path should omit query text and record IDs: ${JSON.stringify(requestSpan)}`);
 }
 const logEvent = payload.events.find((event) => event.id === "evt_log_checkout_received");
 if (logEvent?.attributes.metadata.traceId !== traceId || logEvent?.attributes.metadata.spanId !== requestSpan.attributes.spanId) {
