@@ -327,11 +327,10 @@ function useLogBrewReactRouterNavigation(options = {}) {
         options.onNavigation(event);
       }
     } catch (error) {
+      // Telemetry never breaks the page: report the failure to the app if it asked, then drop the event.
       if (typeof options.onCaptureError === "function") {
         options.onCaptureError(error);
-        return;
       }
-      throw error;
     }
   });
 }
@@ -777,18 +776,12 @@ function joinRoutePaths(basePath, childPath) {
 }
 
 function traceContextFromInput({ parentSpanId, spanId, traceId, traceparent }) {
-  if (typeof traceparent === "string") {
-    const parsed = parseTraceparent(traceparent);
-    return {
-      parentSpanId,
-      spanId: spanId ?? parsed.parentSpanId,
-      traceId: traceId ?? parsed.traceId
-    };
-  }
-  if (!traceId || !spanId) {
-    throw new SdkError("configuration_error", "React Router navigation requires traceparent or traceId and spanId");
-  }
-  return { parentSpanId, spanId, traceId };
+  const parsed = typeof traceparent === "string" ? parseTraceparent(traceparent) : undefined;
+  return {
+    parentSpanId,
+    spanId: spanId ?? parsed?.parentSpanId ?? randomHex(8, defaultRandomValues),
+    traceId: traceId ?? parsed?.traceId ?? randomHex(16, defaultRandomValues)
+  };
 }
 
 function matchReactRouterRoutes({ location, matchRoutes, routes }) {

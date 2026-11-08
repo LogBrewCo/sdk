@@ -274,11 +274,10 @@ function useLogBrewNextNavigation(options = {}) {
         options.onNavigation(event);
       }
     } catch (error) {
+      // Telemetry never breaks the page: report the failure to the app if it asked, then drop the event.
       if (typeof options.onCaptureError === "function") {
         options.onCaptureError(error);
-        return;
       }
-      throw error;
     }
   });
 }
@@ -297,18 +296,12 @@ function compactMetadata(metadata) {
 }
 
 function traceContextFromInput({ parentSpanId, spanId, spanIdFactory, traceId, traceparent }) {
-  if (typeof traceparent === "string") {
-    const parsed = parseTraceparent(traceparent);
-    return {
-      parentSpanId: parentSpanId ?? parsed.parentSpanId,
-      spanId: spanId ?? spanIdFactory(),
-      traceId: traceId ?? parsed.traceId
-    };
-  }
-  if (!traceId || !spanId) {
-    throw new SdkError("configuration_error", "Next.js navigation requires traceparent or traceId and spanId");
-  }
-  return { parentSpanId, spanId, traceId };
+  const parsed = typeof traceparent === "string" ? parseTraceparent(traceparent) : undefined;
+  return {
+    parentSpanId: parentSpanId ?? parsed?.parentSpanId,
+    spanId: spanId ?? spanIdFactory(),
+    traceId: traceId ?? parsed?.traceId ?? randomHex(16)
+  };
 }
 
 function normalizeRouteTemplate(value) {
