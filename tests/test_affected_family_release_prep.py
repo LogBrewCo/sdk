@@ -29,8 +29,8 @@ CATALOG = tomllib.loads(source_text("tools/toolchain-probe/release-catalog.toml"
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.42",
-            "js/logbrew-browser/package.json": "0.1.19",
+            "js/logbrew-js/package.json": "0.1.43",
+            "js/logbrew-browser/package.json": "0.1.20",
             "js/logbrew-express/package.json": "0.1.12",
             "js/logbrew-fastify/package.json": "0.1.11",
             "js/logbrew-node/package.json": "0.1.27",
@@ -45,7 +45,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual(json_object(relative_path)["version"], expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.29"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.30"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.14"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.9"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.12"),
@@ -240,7 +240,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_release_catalog_matches_the_affected_version_matrix(self) -> None:
         self.assertEqual(CATALOG["rust"], "0.2.1")
-        self.assertEqual(CATALOG["rubygems"], "0.1.18")
+        self.assertEqual(CATALOG["rubygems"], "0.1.19")
         self.assertEqual(CATALOG["packagist"], "0.1.23")
         self.assertEqual(
             {package["id"]: package["version"] for package in CATALOG["nuget"]},
@@ -259,7 +259,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(
             {package["name"]: package["version"] for package in CATALOG["pypi"]},
             {
-                "logbrew-sdk": "0.1.29",
+                "logbrew-sdk": "0.1.30",
                 "logbrew-fastapi": "0.1.14",
                 "logbrew-flask": "0.1.9",
                 "logbrew-django": "0.1.12",

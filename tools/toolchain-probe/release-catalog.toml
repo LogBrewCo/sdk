@@ -3,7 +3,7 @@
 
 public_version = "0.1.0"
 rust = "0.2.1"
-rubygems = "0.1.18"
+rubygems = "0.1.19"
 packagist = "0.1.23"
 unity = "0.2.2"
 maven = "0.2.3"
@@ -133,7 +133,7 @@ dependencies = ["Flask>=3.1", "logbrew-sdk>=0.1.21,<0.2.0"]
 [[pypi]]
 dir = "python/logbrew_py"
 name = "logbrew-sdk"
-version = "0.1.29"
+version = "0.1.30"
 package = "logbrew_sdk"
 description = "Public LogBrew Python SDK"
 requires_python = ">=3.10"
