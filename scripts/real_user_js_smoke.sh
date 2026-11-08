@@ -2963,11 +2963,13 @@ client.release("evt_release_shutdown", "2026-06-02T10:00:00Z", {
 
 await client.shutdown(RecordingTransport.alwaysAccept());
 
+client.log("evt_log_shutdown", "2026-06-02T10:00:01Z", {
+  message: "ignored after shutdown",
+  level: "info"
+});
+
 try {
-  client.log("evt_log_shutdown", "2026-06-02T10:00:01Z", {
-    message: "should fail",
-    level: "info"
-  });
+  await client.shutdown(RecordingTransport.alwaysAccept());
   console.error("expected shutdown error");
   process.exit(1);
 } catch (error) {

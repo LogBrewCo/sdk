@@ -165,7 +165,9 @@ class LogBrewClient {
    * @returns {void}
    */
   addBreadcrumb(breadcrumb, timestamp = new Date().toISOString()) {
-    this.#requireOpen();
+    if (this.closed || this.closing) {
+      return;
+    }
     const validated = validateIssueBreadcrumb(breadcrumb, timestamp);
     if (this.issueBreadcrumbs.length === MAX_ISSUE_BREADCRUMBS) {
       this.issueBreadcrumbs.shift();
@@ -423,7 +425,9 @@ class LogBrewClient {
    * @returns {EventAdmission}
    */
   #admit(head, attributes) {
-    this.#requireOpen();
+    if (this.closed || this.closing) {
+      return EVENT_ADMISSIONS.unavailable;
+    }
     const id = requireNonEmpty("event id", head.id);
     const timestamp = requireTimestamp(head.timestamp);
     const context = mergeTelemetryContexts(this.#providedContext(), attributes.context);
