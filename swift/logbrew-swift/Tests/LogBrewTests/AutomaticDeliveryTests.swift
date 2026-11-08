@@ -131,7 +131,7 @@ struct AutomaticDeliveryTests {
         client.stopAutomaticDelivery()
     }
 
-    @Test("terminal response pauses until explicit recovery")
+    @Test("explicit recovery resumes a terminal pause before its next probe")
     func terminalResponsePausesUntilRecovery() throws {
         let transport = ThreadSafeScriptedTransport(statuses: [401, 202])
         let client = try makeClient()
@@ -191,6 +191,16 @@ struct AutomaticDeliveryTests {
         #expect(waitUntil(timeout: 2) { client.pendingEvents() == 0 })
         #expect(client.deliveryHealth().state == .running)
         _ = try client.shutdown()
+    }
+
+    @Test("pause probes back off to 5 minutes")
+    func pauseProbeDelayIsBounded() {
+        #expect(DeliveryEngine.pauseProbeDelay(maxRetryDelay: 30, failures: 1, jitter: 1) == 30)
+        #expect(DeliveryEngine.pauseProbeDelay(maxRetryDelay: 30, failures: 1, jitter: 0) == 15)
+        #expect(DeliveryEngine.pauseProbeDelay(maxRetryDelay: 30, failures: 3, jitter: 1) == 120)
+        #expect(DeliveryEngine.pauseProbeDelay(maxRetryDelay: 30, failures: 9, jitter: 1) == 300)
+        #expect(DeliveryEngine.pauseProbeDelay(maxRetryDelay: 30, failures: Int.max, jitter: 1) == 300)
+        #expect(DeliveryEngine.pauseProbeDelay(maxRetryDelay: 600, failures: 4, jitter: 1) == 600)
     }
 
     @Test("recovery clears stale terminal wakes after draining")
