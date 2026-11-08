@@ -208,7 +208,7 @@ export function AppRoutes() {
 }
 ```
 
-`createReactRouterRouteTemplate(routeMatches)` derives names such as `/projects/:projectId/settings` from React Router matches, matching the route-pattern style developers expect from mature SDKs. It does not record route params, history state, query strings, hashes, headers, bodies, or browser storage values. Use `captureReactRouterNavigation(client, input)` or `createReactRouterNavigationSpanEvent(input)` when you already have route matches outside React hooks.
+`createReactRouterRouteTemplate(routeMatches)` derives names such as `/projects/:projectId/settings` from React Router matches, matching the route-pattern style developers expect from mature SDKs. It does not record route params, history state, query strings, hashes, headers, bodies, or browser storage values. The hook accepts `traceparent`, `traceId`, or `traceId` plus `spanId`, and starts a new trace when it gets none. It never throws into your page: when a capture fails, it drops that span and calls `onCaptureError` if you pass one. Use `captureReactRouterNavigation(client, input)` or `createReactRouterNavigationSpanEvent(input)` when you already have route matches outside React hooks.
 
 ## Error Boundary
 
