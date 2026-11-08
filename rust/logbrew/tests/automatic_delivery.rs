@@ -187,9 +187,11 @@ fn exhausted_retry_reuses_identical_prefix_then_accepts() {
 }
 
 #[test]
-fn terminal_pause_requires_explicit_owned_flush_recovery() {
+fn explicit_owned_flush_resumes_a_terminal_pause_before_its_next_probe() {
     let transport = SharedTransport::scripted(vec![Ok(401), Ok(202)]);
-    let mut client = automatic_client(transport.clone(), config(Duration::from_millis(20), 1));
+    let mut paused_config = config(Duration::from_millis(20), 1);
+    paused_config.retry_max_delay = Duration::from_secs(10);
+    let mut client = automatic_client(transport.clone(), paused_config);
     queue_log(&mut client, "evt_paused");
     wait_until(Duration::from_secs(1), || {
         client.delivery_health().pause_reason == DeliveryPauseReason::Authentication
@@ -210,7 +212,9 @@ fn terminal_pause_requires_explicit_owned_flush_recovery() {
 #[test]
 fn terminal_rejection_pauses_with_a_fixed_reason() {
     let transport = SharedTransport::scripted(vec![Ok(403)]);
-    let mut client = automatic_client(transport, config(Duration::from_secs(10), 1));
+    let mut paused_config = config(Duration::from_secs(10), 1);
+    paused_config.retry_max_delay = Duration::from_secs(10);
+    let mut client = automatic_client(transport, paused_config);
     queue_log(&mut client, "evt_rejected");
 
     wait_until(Duration::from_secs(1), || {
@@ -221,6 +225,56 @@ fn terminal_rejection_pauses_with_a_fixed_reason() {
         DeliveryOutcome::Paused
     );
     assert_eq!(client.pending_events(), 1);
+}
+
+#[test]
+fn terminal_pause_probes_the_same_batch_and_resumes_without_an_app_call() {
+    for (status, reason) in [
+        (401, DeliveryPauseReason::Authentication),
+        (403, DeliveryPauseReason::Rejected),
+    ] {
+        let transport = SharedTransport::scripted(vec![Ok(status), Ok(202)]);
+        let mut probe_config = config(Duration::from_secs(10), 1);
+        probe_config.retry_max_delay = Duration::from_millis(200);
+        let mut client = automatic_client(transport.clone(), probe_config);
+        queue_log(&mut client, "evt_probe");
+
+        wait_until(Duration::from_secs(1), || {
+            client.delivery_health().pause_reason == reason
+        });
+        let paused = client.delivery_health();
+        assert_eq!(paused.last_outcome, DeliveryOutcome::Paused);
+        assert!(paused.next_retry_delay > Duration::ZERO);
+        assert!(paused.next_retry_delay <= Duration::from_millis(200));
+
+        wait_until(Duration::from_secs(2), || client.pending_events() == 0);
+        let bodies = transport.bodies();
+        assert_eq!(bodies.len(), 2);
+        assert_eq!(bodies[0], bodies[1]);
+        let health = client.delivery_health();
+        assert_eq!(health.pause_reason, DeliveryPauseReason::None);
+        assert_eq!(health.last_outcome, DeliveryOutcome::Delivered);
+        assert!(health.automatic_running);
+    }
+}
+
+#[test]
+fn outage_that_exhausts_retries_probes_again_and_drains() {
+    let transport = SharedTransport::scripted(vec![Ok(503), Ok(503), Ok(503), Ok(202)]);
+    let mut probe_config = config(Duration::from_secs(10), 1);
+    probe_config.retry_max_delay = Duration::from_millis(200);
+    let mut client = LogBrewClient::builder("logbrew-rust", "0.1.1")
+        .api_key("LOGBREW_API_KEY")
+        .max_retries(2)
+        .build_with_owned_transport(transport.clone(), probe_config)
+        .unwrap();
+    queue_log(&mut client, "evt_outage");
+
+    wait_until(Duration::from_secs(3), || client.pending_events() == 0);
+    assert_eq!(transport.bodies().len(), 4);
+    let health = client.delivery_health();
+    assert_eq!(health.pause_reason, DeliveryPauseReason::None);
+    assert_eq!(health.consecutive_failures, 0);
 }
 
 #[test]
@@ -340,7 +394,13 @@ fn automatic_health_is_fixed_and_content_free() {
     let mut client = LogBrewClient::builder("logbrew-rust", "0.1.1")
         .api_key(fixture)
         .max_retries(0)
-        .build_with_owned_transport(transport, config(Duration::from_secs(10), 1))
+        .build_with_owned_transport(
+            transport,
+            AutomaticDeliveryConfig {
+                retry_max_delay: Duration::from_secs(10),
+                ..config(Duration::from_secs(10), 1)
+            },
+        )
         .unwrap();
     client
         .log(
@@ -576,12 +636,14 @@ fn rate_limited_code_without_retry_after_uses_bounded_backoff() {
 }
 
 #[test]
-fn usage_limit_exceeded_pauses_even_with_retry_after() {
+fn usage_limit_exceeded_pauses_and_probes_on_its_own_schedule_not_retry_after() {
     let transport = SharedTransport::responses(vec![Ok(rate_limited(
-        Some(Duration::from_secs(1)),
+        Some(Duration::from_secs(3_600)),
         Some("usage_limit_exceeded"),
     ))]);
-    let mut client = automatic_client(transport.clone(), config(Duration::from_millis(20), 1));
+    let mut probe_config = config(Duration::from_millis(20), 1);
+    probe_config.retry_max_delay = Duration::from_secs(2);
+    let mut client = automatic_client(transport.clone(), probe_config);
     queue_log(&mut client, "evt_usage_limit");
 
     wait_until(Duration::from_secs(1), || {
@@ -589,8 +651,8 @@ fn usage_limit_exceeded_pauses_even_with_retry_after() {
     });
     let health = client.delivery_health();
     assert_eq!(health.last_outcome, DeliveryOutcome::Paused);
-    assert_eq!(health.next_retry_delay, Duration::ZERO);
-    thread::sleep(Duration::from_millis(1_200));
+    assert!(health.next_retry_delay > Duration::ZERO);
+    assert!(health.next_retry_delay <= Duration::from_secs(2));
     assert_eq!(transport.bodies().len(), 1);
 }
 

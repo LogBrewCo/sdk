@@ -1,5 +1,6 @@
 use super::{
-    AutomaticDelivery, AutomaticDeliveryConfig, pause_reason, rate_limit_delay, retry_delay,
+    AutomaticDelivery, AutomaticDeliveryConfig, pause_probe_delay, pause_reason, rate_limit_delay,
+    retry_delay,
 };
 use crate::{
     DeliveryCodeCategory, DeliveryOutcome, DeliveryPauseReason, LogBrewClient, SdkError, Transport,
@@ -107,6 +108,23 @@ fn equal_jitter_delay_is_exponential_and_capped() {
             Duration::from_millis(100 * (1_u64 << exponent)).min(Duration::from_millis(800));
         assert!(delay >= ceiling / 2);
         assert!(delay <= ceiling);
+    }
+}
+
+#[test]
+fn pause_probe_delay_doubles_from_the_retry_maximum_up_to_five_minutes() {
+    for (retry_max_secs, failures, ceiling_secs) in [
+        (30, 1, 30),
+        (30, 3, 120),
+        (30, 9, 300),
+        (30, u32::MAX, 300),
+        (600, 4, 600),
+    ] {
+        let retry_max = Duration::from_secs(retry_max_secs);
+        let ceiling = Duration::from_secs(ceiling_secs);
+        let full_jitter = u64::try_from((ceiling / 2).as_nanos()).unwrap();
+        assert_eq!(pause_probe_delay(retry_max, failures, 0), ceiling / 2);
+        assert_eq!(pause_probe_delay(retry_max, failures, full_jitter), ceiling);
     }
 }
 
