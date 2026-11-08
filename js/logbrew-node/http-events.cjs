@@ -8,7 +8,8 @@ const {
   defaultTraceIdFactory,
   getActiveLogBrewTrace
 } = require("./active-trace.cjs");
-const { pathOnly, slugify } = require("./span-support.cjs");
+const { requestRoute } = require("./route-template.cjs");
+const { slugify } = require("./span-support.cjs");
 
 /**
  * @import { LogBrewTraceContext } from "./index.cjs"
@@ -19,11 +20,17 @@ const { pathOnly, slugify } = require("./span-support.cjs");
  *   durationMs?: unknown,
  *   idFactory?: unknown,
  *   now?: unknown,
+ *   routeTemplateFactory?: unknown,
  *   spanIdFactory?: unknown,
  *   trace?: LogBrewTraceContext | undefined,
  *   traceIdFactory?: unknown
  * }>} RequestEventOptions
- * @typedef {Readonly<{ idFactory?: unknown, now?: unknown, trace?: LogBrewTraceContext | undefined }>} ErrorEventOptions
+ * @typedef {Readonly<{
+ *   idFactory?: unknown,
+ *   now?: unknown,
+ *   routeTemplateFactory?: unknown,
+ *   trace?: LogBrewTraceContext | undefined
+ * }>} ErrorEventOptions
  * @typedef {Readonly<{ spanIdFactory?: unknown, traceIdFactory?: unknown }>} RequestTraceOptions
  * @typedef {Readonly<{
  *   durationMs: unknown,
@@ -32,7 +39,9 @@ const { pathOnly, slugify } = require("./span-support.cjs");
  *   now: unknown,
  *   path: string,
  *   responseCompleted: boolean,
- *   statusCode: number
+ *   route: string,
+ *   statusCode: number,
+ *   template: string | undefined
  * }>} RequestSpanFields
  */
 
@@ -75,14 +84,6 @@ function traceFields(trace) {
     spanId: readMember(trace, "spanId"),
     traceId: readMember(trace, "traceId")
   };
-}
-
-/**
- * @param {unknown} req
- * @returns {string}
- */
-function getRequestPath(req) {
-  return pathOnly(readMember(req, "url") ?? "/");
 }
 
 /**
@@ -130,9 +131,9 @@ function createRequestTraceContext(req, res, {
  */
 function defaultRequestEventId(req, res) {
   const method = templateText(readMember(req, "method") ?? "GET");
-  const path = getRequestPath(req);
+  const { route } = requestRoute(req, undefined);
   const statusCode = templateText(readMember(res, "statusCode") ?? NO_STATUS);
-  return createAutomaticEventId("evt_node_request", slugify(`${method}_${path}_${statusCode}`));
+  return createAutomaticEventId("evt_node_request", slugify(`${method}_${route}_${statusCode}`));
 }
 
 /**
@@ -143,7 +144,7 @@ function defaultRequestEventId(req, res) {
 function defaultErrorEventId(error, req) {
   const message = error instanceof Error ? error.message : String(error);
   const method = templateText(readMember(req, "method") ?? "GET");
-  return createAutomaticEventId("evt_node_error", slugify(`${method}_${getRequestPath(req)}_${message}`));
+  return createAutomaticEventId("evt_node_error", slugify(`${method}_${requestRoute(req, undefined).route}_${message}`));
 }
 
 /**
@@ -151,14 +152,14 @@ function defaultErrorEventId(error, req) {
  * @param {RequestSpanFields} fields
  * @returns {Readonly<Record<string, unknown>>}
  */
-function createTraceparentRequestSpan(traceContext, { durationMs, id, method, now, path, statusCode, responseCompleted }) {
+function createTraceparentRequestSpan(traceContext, { durationMs, id, method, now, path, route, statusCode, responseCompleted, template }) {
   return {
     id,
     timestamp: callHook(now, "now", []),
     type: "span",
 
     attributes: {
-      name: `${templateText(method)} ${path}`,
+      name: `${templateText(method)} ${route}`,
 
       traceId: readMember(traceContext, "traceId"),
 
@@ -172,6 +173,7 @@ function createTraceparentRequestSpan(traceContext, { durationMs, id, method, no
         framework: "node:http",
         "http.request.method": method,
         "http.response.status_code": statusCode,
+        ...(template === undefined ? {} : { "http.route": template }),
         method,
         path,
         sampled: readMember(traceContext, "sampled"),
@@ -193,18 +195,19 @@ function createHttpRequestEvent(req, res, {
   now = currentTimestamp,
   durationMs = NO_DURATION,
   idFactory = defaultRequestEventId,
+  routeTemplateFactory,
   spanIdFactory = defaultSpanIdFactory,
   traceIdFactory = defaultTraceIdFactory,
   trace
 } = {}) {
   const method = readMember(req, "method") ?? "GET";
-  const path = getRequestPath(req);
+  const { path, route, template } = requestRoute(req, routeTemplateFactory);
   const statusCode = Number(readMember(res, "statusCode") ?? NO_STATUS);
   const id = callHook(idFactory, "idFactory", [req, res]);
   const traceContext = trace ?? getRequestTraceContext(req) ?? createRequestTraceContext(req, res, { spanIdFactory, traceIdFactory });
   const responseCompleted = readMember(req, "aborted") !== true &&
     !(readMember(res, "destroyed") === true && readMember(res, "writableFinished") === false);
-  return createTraceparentRequestSpan(traceContext, { durationMs, id, method, now, path, responseCompleted, statusCode });
+  return createTraceparentRequestSpan(traceContext, { durationMs, id, method, now, path, responseCompleted, route, statusCode, template });
 }
 
 /**
@@ -216,10 +219,11 @@ function createHttpRequestEvent(req, res, {
 function createHttpErrorEvent(error, req, {
   now = currentTimestamp,
   idFactory = defaultErrorEventId,
+  routeTemplateFactory,
   trace
 } = {}) {
   const method = readMember(req, "method") ?? "GET";
-  const path = getRequestPath(req);
+  const { path, route } = requestRoute(req, routeTemplateFactory);
   const message = error instanceof Error ? error.message : String(error);
   const traceContext = trace ?? getRequestTraceContext(req) ?? getActiveLogBrewTrace();
   return {
@@ -227,7 +231,7 @@ function createHttpErrorEvent(error, req, {
     timestamp: callHook(now, "now", []),
 
     attributes: {
-      title: `${templateText(method)} ${path} failed`,
+      title: `${templateText(method)} ${route} failed`,
 
       level: "error",
       message,

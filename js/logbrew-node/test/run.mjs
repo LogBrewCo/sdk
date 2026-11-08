@@ -46,6 +46,7 @@ try {
       "fetch-transport.test.js",
       "http-client-errors.test.js",
       "http-server-delivery.test.js",
+      "http-route-names.test.js",
       "http-shared-client.test.js",
       "process-errors.test.js",
       "request-tracing.test.js",

@@ -73,6 +73,8 @@ type LogBrewNodeOptions = Omit<CreateLogBrewNodeClientConfig, "transport"> & {
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (req: IncomingMessage, res: ServerResponse) => string;
+  /** Names requests and errors yourself, for example `() => "/checkout/:cartId"`. */
+  routeTemplateFactory?: (req: IncomingMessage) => string;
   spanIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
   traceIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
   requestEvent?: (
@@ -102,6 +104,7 @@ type LogBrewHttpRequestEventOptions = {
   now?: () => string;
   durationMs?: number;
   idFactory?: (req: IncomingMessage, res: ServerResponse) => string;
+  routeTemplateFactory?: (req: IncomingMessage) => string;
   spanIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
   traceIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
   trace?: LogBrewTraceContext | undefined;
@@ -110,6 +113,7 @@ type LogBrewHttpRequestEventOptions = {
 type LogBrewHttpErrorEventOptions = {
   now?: () => string;
   idFactory?: (error: unknown, req: IncomingMessage) => string;
+  routeTemplateFactory?: (req: IncomingMessage) => string;
   trace?: LogBrewTraceContext | undefined;
 };
 

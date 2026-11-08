@@ -226,6 +226,18 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 server.listen(3000);
 ```
 
+Request spans and error titles are named by a route template, not by the raw path. The wrapper uses `routeTemplateFactory(req)` when you pass it. Otherwise it replaces each numeric, UUID, or long hex (16 or more characters) path segment with `:id`, so `GET /orders/8412` becomes `GET /orders/:id`. `url.path` gets the same replacement. `http.route` is set only from a template, never from the path:
+
+```js
+const handler = withLogBrewHttpHandler(app, {
+  routeTemplateFactory: (req) => (req.url?.startsWith("/checkout/") ? "/checkout/:cartId" : ""),
+  sdkName: "checkout-api",
+  sdkVersion: "1.4.0"
+});
+```
+
+An empty string falls back to the next source.
+
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
 
 ## Read Events Back
