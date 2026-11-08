@@ -88,11 +88,11 @@ function activeState(state) {
   if (state.inFlight) {
     return "in_flight";
   }
-  if (state.retryDelayMs > NONE) {
-    return "retrying";
-  }
   if (state.pausedReason !== "none") {
     return "paused";
+  }
+  if (state.retryDelayMs > NONE) {
+    return "retrying";
   }
   if (state.queueEvents > NONE) {
     return state.scheduled ? "scheduled" : "queued";

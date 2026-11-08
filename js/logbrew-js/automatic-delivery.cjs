@@ -1,6 +1,6 @@
 const { incrementBounded } = require("./bounded-number.cjs");
 const { propertyOf } = require("./error-details.cjs");
-const { automaticRetryDelayMs, rateLimitWaitMs } = require("./retry-delay.cjs");
+const { MAX_DELIVERY_INTERVAL_MS, automaticRetryDelayMs, pauseProbeDelayMs, rateLimitWaitMs } = require("./retry-delay.cjs");
 const { SdkError } = require("./sdk-error.cjs");
 
 /**
@@ -48,20 +48,22 @@ function deliveryFailure(reason) {
 /**
  * @param {DeliveryFailure} reason
  * @param {number} retryDelayMs
+ * @param {number} probeDelayMs
  * @returns {FailurePlan}
  */
-function sdkFailurePlan(reason, retryDelayMs) {
+function sdkFailurePlan(reason, retryDelayMs, probeDelayMs) {
   if (reason.code === "unauthenticated") {
-    return { pausedReason: "authentication", retryDelayMs: NO_DELAY };
+    return { pausedReason: "authentication", retryDelayMs: probeDelayMs };
   }
   if (reason.code === "rate_limited") {
     return reason.retryable === true
       ? { pausedReason: "none", retryDelayMs: rateLimitWaitMs(reason.retryAfterMs ?? retryDelayMs) }
-      : { pausedReason: "rate_limit", retryDelayMs: NO_DELAY };
+      : { pausedReason: "rate_limit", retryDelayMs: probeDelayMs };
   }
-  return reason.retryable === true
-    ? { pausedReason: "none", retryDelayMs }
-    : { pausedReason: "non_retryable", retryDelayMs: NO_DELAY };
+  if (reason.retryable === true) {
+    return { pausedReason: "none", retryDelayMs };
+  }
+  return { pausedReason: "non_retryable", retryDelayMs: reason.code === "persistence_error" ? NO_DELAY : probeDelayMs };
 }
 
 class AutomaticDelivery {
@@ -76,6 +78,7 @@ class AutomaticDelivery {
     this.automaticFlushPending = false;
     /** @type {PauseReason} */
     this.automaticPauseReason = "none";
+    this.recoveryRequired = false;
     this.consecutiveDeliveryFailures = 0;
     this.retryDelayMs = 0;
   }
@@ -84,7 +87,7 @@ class AutomaticDelivery {
    * @returns {boolean}
    */
   ready() {
-    return this.host.canDeliver() && this.automaticPauseReason === "none";
+    return this.host.canDeliver() && !this.recoveryRequired;
   }
 
   /**
@@ -213,6 +216,7 @@ class AutomaticDelivery {
    */
   recordSuccess() {
     this.automaticPauseReason = "none";
+    this.recoveryRequired = false;
     this.consecutiveDeliveryFailures = 0;
     this.retryDelayMs = 0;
   }
@@ -225,9 +229,11 @@ class AutomaticDelivery {
     this.consecutiveDeliveryFailures = incrementBounded(this.consecutiveDeliveryFailures);
     this.retryDelayMs = 0;
     const failure = deliveryFailure(reason);
-    const plan = failure === undefined ? NON_RETRYABLE : sdkFailurePlan(failure, this.backoffDelayMs(failure));
+    const probeDelayMs = pauseProbeDelayMs(MAX_DELIVERY_INTERVAL_MS, this.consecutiveDeliveryFailures);
+    const plan = failure === undefined ? NON_RETRYABLE : sdkFailurePlan(failure, this.backoffDelayMs(failure), probeDelayMs);
     this.automaticPauseReason = plan.pausedReason;
     this.retryDelayMs = plan.retryDelayMs;
+    this.recoveryRequired = plan.pausedReason !== "none" && plan.retryDelayMs === NO_DELAY;
   }
 
   /**
@@ -244,9 +250,6 @@ class AutomaticDelivery {
    * @returns {void}
    */
   resume() {
-    if (this.automaticPauseReason !== "none") {
-      return;
-    }
     if (this.retryDelayMs > NO_DELAY) {
       this.armTimer(this.retryDelayMs);
       return;

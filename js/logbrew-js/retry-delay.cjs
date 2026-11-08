@@ -1,8 +1,10 @@
 const MAX_DELIVERY_INTERVAL_MS = 60_000;
+const MAX_PAUSE_PROBE_DELAY_MS = 300_000;
 const MIN_RATE_LIMIT_WAIT_MS = 1000;
 const MAX_RATE_LIMIT_WAIT_MS = 3_600_000;
 const MAX_BACKOFF_EXPONENT = 30;
 const FIRST_FAILURE = 1;
+const NO_EXPONENT = 0;
 const BACKOFF_BASE = 2;
 const HALF = 2;
 const INCLUSIVE = 1;
@@ -21,6 +23,18 @@ function automaticRetryDelayMs(deliveryIntervalMs, consecutiveFailures) {
 }
 
 /**
+ * @param {number} maxRetryDelayMs
+ * @param {number} consecutiveFailures
+ * @param {number} [jitter]
+ * @returns {number}
+ */
+function pauseProbeDelayMs(maxRetryDelayMs, consecutiveFailures, jitter = Math.random()) {
+  const exponent = Math.min(Math.max(NO_EXPONENT, consecutiveFailures - FIRST_FAILURE), MAX_BACKOFF_EXPONENT);
+  const ceiling = Math.min(maxRetryDelayMs * (BACKOFF_BASE ** exponent), Math.max(maxRetryDelayMs, MAX_PAUSE_PROBE_DELAY_MS));
+  return Math.floor(ceiling / HALF + (ceiling / HALF) * jitter);
+}
+
+/**
  * @param {number} delayMs
  * @returns {number}
  */
@@ -29,4 +43,4 @@ function rateLimitWaitMs(delayMs) {
   return Math.min(MAX_RATE_LIMIT_WAIT_MS, bounded + Math.floor(Math.random() * (Math.floor(bounded / JITTER_DIVISOR) + INCLUSIVE)));
 }
 
-module.exports = { MAX_DELIVERY_INTERVAL_MS, automaticRetryDelayMs, rateLimitWaitMs };
+module.exports = { MAX_DELIVERY_INTERVAL_MS, automaticRetryDelayMs, pauseProbeDelayMs, rateLimitWaitMs };

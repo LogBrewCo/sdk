@@ -90,7 +90,7 @@ type DeliveryHealthSnapshot = Readonly<{
   lastStatusClass: "none" | "success" | "client_error" | "server_error" | "network_error" | "transport_error" | "invalid_response" | "other_status";
   pausedReason: "none" | "authentication" | "rate_limit" | "non_retryable";
   consecutiveFailures: number;
-  /** Bounded transient retry delay; zero when no automatic retry is scheduled. */
+  /** Bounded transient retry delay or paused-delivery probe delay; zero when neither is scheduled. */
   retryDelayMs: number;
   flushes: number;
   failures: number;

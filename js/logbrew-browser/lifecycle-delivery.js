@@ -22,7 +22,7 @@ import { lifecycleTransportFor } from "./lifecycle-transport.js";
  *   generation: number,
  *   inFlight: object | undefined,
  *   installed: boolean,
- *   paused: boolean
+ *   pausedAtAcceptedEvents: number | undefined
  * }} LifecycleDeliveryState
  * @typedef {{
  *   readonly lifecycleTransport: Transport | undefined,
@@ -63,29 +63,42 @@ function isTerminalLifecycleError(error) {
 }
 
 /**
+ * A terminal outcome pauses lifecycle sends until the client delivers a batch again, through automatic delivery or
+ * an explicit flush.
+ * @param {LifecycleCore} core
+ * @returns {boolean}
+ */
+function pauseEnded(core) {
+  const { pausedAtAcceptedEvents } = core.state;
+  return pausedAtAcceptedEvents === undefined
+    || core.options.client.deliveryHealth().acceptedEvents > pausedAtAcceptedEvents;
+}
+
+/**
  * @param {LifecycleCore} core
  * @returns {boolean}
  */
 function canRequest(core) {
   const { state } = core;
   return state.installed
-    && !state.paused
+    && pauseEnded(core)
     && state.inFlight === undefined
     && core.lifecycleTransport !== undefined
     && core.options.client.pendingEvents() !== NO_PENDING_EVENTS;
 }
 
 /**
- * @param {LifecycleDeliveryState} state
+ * @param {LifecycleCore} core
  * @param {PendingDelivery} pendingDelivery
  * @returns {Promise<void>}
  */
-async function trackDelivery(state, pendingDelivery) {
+async function trackDelivery(core, pendingDelivery) {
+  const { state } = core;
   try {
     await pendingDelivery.pending;
   } catch (error) {
     if (state.installed && state.generation === pendingDelivery.generation && isTerminalLifecycleError(error)) {
-      state.paused = true;
+      state.pausedAtAcceptedEvents = core.options.client.deliveryHealth().acceptedEvents;
     }
   } finally {
     if (state.inFlight === pendingDelivery.marker) {
@@ -107,7 +120,7 @@ function request(core, reason) {
   const pending = Promise.resolve(core.options.deliver(core.lifecycleTransport, reason));
   const marker = {};
   core.state.inFlight = marker;
-  void trackDelivery(core.state, { generation, marker, pending });
+  void trackDelivery(core, { generation, marker, pending });
 }
 
 /**
@@ -152,7 +165,7 @@ function createDelivery(options) {
   const core = {
     lifecycleTransport: lifecycleTransportFor(options.transport),
     options,
-    state: { destroyed: false, generation: 0, inFlight: undefined, installed: false, paused: false }
+    state: { destroyed: false, generation: 0, inFlight: undefined, installed: false, pausedAtAcceptedEvents: undefined }
   };
   return {
     core,
@@ -194,7 +207,7 @@ function installBrowserLifecycleDelivery({
     },
     recover() {
       if (!state.destroyed) {
-        state.paused = false;
+        state.pausedAtAcceptedEvents = undefined;
       }
     },
     resume() {
