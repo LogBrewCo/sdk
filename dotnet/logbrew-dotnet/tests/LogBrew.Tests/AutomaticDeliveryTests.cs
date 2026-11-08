@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -21,7 +22,10 @@ internal static class AutomaticDeliveryTests
         AutomaticIntervalDelivery();
         ExtremeIntervalClampsWithoutOverflow();
         ImmutableRetryRetainsLaterCapture();
-        TerminalPauseRequiresExplicitRecovery();
+        ExplicitRecoveryResumesTerminalPauseBeforeItsProbe();
+        ForbiddenPauseProbesAndResumesWithoutAppCall();
+        ExhaustedRetriesProbeAndDrainWithoutAppCall();
+        PauseProbeDelayIsBounded();
         CaptureDoesNotWaitForTransport();
         ManualFlushRecomputesLiveWakeWithoutConsumingLaterCapture();
         ManualFlushUsesBoundedImmutablePrefixes();
@@ -34,25 +38,26 @@ internal static class AutomaticDeliveryTests
         DefaultIntervalSendsABurstAsOneRequest();
         RateLimitRetryAfterWaitsThenResumes();
         RateLimitedCodeWithoutRetryAfterWaits();
-        UsageLimitPausesEvenWithRetryAfter();
+        UsageLimitPausesAndProbesOnItsOwnSchedule();
         RateLimitWaitBounds();
         HttpTransportReadsRateLimitHeaderAndBoundedCode();
         HttpDateRetryAfterWaitsThenResumes();
-        return 21;
+        return 24;
     }
 
     private static AutomaticDeliveryOptions Options(
         int threshold = 2,
         int maxRetries = 2,
         TimeSpan? interval = null,
-        TimeSpan? retryDelay = null)
+        TimeSpan? retryDelay = null,
+        TimeSpan? maxRetryDelay = null)
     {
         return new AutomaticDeliveryOptions
         {
             FlushAtQueueSize = threshold,
             FlushInterval = interval ?? TimeSpan.FromMilliseconds(120),
             RetryBaseDelay = retryDelay ?? TimeSpan.FromMilliseconds(40),
-            MaxRetryDelay = TimeSpan.FromMilliseconds(250),
+            MaxRetryDelay = maxRetryDelay ?? TimeSpan.FromMilliseconds(250),
             MaxQueueSize = 1000,
             MaxQueueBytes = 4 * 1024 * 1024,
             MaxRetries = maxRetries,
@@ -166,10 +171,10 @@ internal static class AutomaticDeliveryTests
         AssertTrue(client.Shutdown().StatusCode == 204, "retry client shutdown failed");
     }
 
-    private static void TerminalPauseRequiresExplicitRecovery()
+    private static void ExplicitRecoveryResumesTerminalPauseBeforeItsProbe()
     {
         var transport = new ControlledTransport(401, 202, 202);
-        var client = AutomaticClient(transport, Options(threshold: 1));
+        var client = AutomaticClient(transport, Options(threshold: 1, maxRetryDelay: TimeSpan.FromSeconds(5)));
         client.Log("evt_terminal_1", Timestamp, LogAttributes.Create("terminal", "info"));
         AssertTrue(WaitUntil(() => client.DeliveryHealth().Lifecycle == DeliveryLifecycleState.Paused, TimeSpan.FromSeconds(2)), "auth response did not pause delivery");
         AssertTrue(client.DeliveryHealth().PauseReason == DeliveryPauseReason.Authentication, "auth pause reason missing");
@@ -318,6 +323,56 @@ internal static class AutomaticDeliveryTests
                 new AutomaticDeliveryOptions { MaxRetries = 11 }));
     }
 
+    private static void ForbiddenPauseProbesAndResumesWithoutAppCall()
+    {
+        var transport = new ControlledTransport(403, 202, 202);
+        var client = AutomaticClient(transport, Options(threshold: 1));
+        client.Log("evt_forbidden_1", Timestamp, LogAttributes.Create("forbidden", "info"));
+        var paused = client.DeliveryHealth();
+        AssertTrue(WaitUntil(() => (paused = client.DeliveryHealth()).Lifecycle == DeliveryLifecycleState.Paused, TimeSpan.FromSeconds(2)), "403 did not pause delivery");
+        AssertTrue(paused.PauseReason == DeliveryPauseReason.Authentication, "403 pause reason missing");
+        AssertTrue(paused.RetryDelayMilliseconds > 0 && paused.RetryDelayMilliseconds <= 250, "paused health did not report the next probe");
+
+        client.Log("evt_forbidden_2", Timestamp, LogAttributes.Create("queued while paused", "info"));
+        AssertTrue(transport.WaitForRequests(3, TimeSpan.FromSeconds(2)), "paused delivery did not probe and drain without an app call");
+        AssertTrue(transport.Bodies[0] == transport.Bodies[1], "probe did not resend the failed batch");
+        AssertTrue(transport.Bodies[2].Contains("evt_forbidden_2", StringComparison.Ordinal), "capture during the pause was not retained");
+        AssertTrue(WaitUntil(() => client.PendingEvents() == 0, TimeSpan.FromSeconds(2)), "accepted probe did not drain the queue");
+        var resumed = client.DeliveryHealth();
+        AssertTrue(resumed.Lifecycle == DeliveryLifecycleState.Running, "accepted probe did not resume delivery");
+        AssertTrue(resumed.PauseReason == DeliveryPauseReason.None, "accepted probe kept the pause reason");
+        AssertTrue(client.Shutdown().StatusCode == 204, "forbidden client shutdown failed");
+    }
+
+    private static void ExhaustedRetriesProbeAndDrainWithoutAppCall()
+    {
+        var transport = new ControlledTransport(503, 503, 503, 202);
+        var client = AutomaticClient(transport, Options(threshold: 1, retryDelay: TimeSpan.FromMilliseconds(10)));
+        client.Log("evt_outage", Timestamp, LogAttributes.Create("outage", "info"));
+        AssertTrue(transport.WaitForRequests(4, TimeSpan.FromSeconds(3)), "exhausted retries did not probe without an app call");
+        AssertTrue(WaitUntil(() => client.PendingEvents() == 0, TimeSpan.FromSeconds(2)), "accepted probe after an outage did not drain the queue");
+        AssertTrue(client.DeliveryHealth().Lifecycle == DeliveryLifecycleState.Running, "accepted probe after an outage did not resume delivery");
+        AssertTrue(client.Shutdown().StatusCode == 204, "outage client shutdown failed");
+    }
+
+    private static void PauseProbeDelayIsBounded()
+    {
+        var policy = typeof(LogBrewClient).Assembly.GetType("LogBrew.DeliveryRetryPolicy", throwOnError: true)!;
+        var method = policy.GetMethod("PauseProbeDelay", BindingFlags.Static | BindingFlags.NonPublic);
+        AssertTrue(method != null, "pause probe delay is missing");
+        double Delay(double maxRetrySeconds, int failures, double jitter)
+        {
+            return ((TimeSpan)method!.Invoke(null, new object[] { TimeSpan.FromSeconds(maxRetrySeconds), failures, jitter })!).TotalSeconds;
+        }
+
+        AssertTrue(Delay(30, 1, 1) == 30, "first probe exceeded maxRetryDelay");
+        AssertTrue(Delay(30, 1, 0) == 15, "probe jitter kept less than half the ceiling");
+        AssertTrue(Delay(30, 3, 1) == 120, "probe delay did not double per failure");
+        AssertTrue(Delay(30, 9, 1) == 300, "probe delay exceeded 5 minutes");
+        AssertTrue(Delay(30, int.MaxValue, 1) == 300, "probe delay overflowed");
+        AssertTrue(Delay(600, 4, 1) == 600, "probe delay ignored a longer maxRetryDelay");
+    }
+
     private static void RetryExhaustionPausesWithoutLosingWork()
     {
         var transport = new ControlledTransport(503, 503, 202);
@@ -422,16 +477,16 @@ internal static class AutomaticDeliveryTests
         flushClient.Shutdown();
     }
 
-    private static void UsageLimitPausesEvenWithRetryAfter()
+    private static void UsageLimitPausesAndProbesOnItsOwnSchedule()
     {
-        var transport = new ControlledTransport(new TransportResponse(429, 1, TimeSpan.FromSeconds(1), "usage_limit_exceeded"), 202);
+        var transport = new ControlledTransport(new TransportResponse(429, 1, TimeSpan.FromHours(1), "usage_limit_exceeded"), 202);
         var client = AutomaticClient(transport, Options(threshold: 1));
         client.Log("evt_usage_limit", Timestamp, LogAttributes.Create("usage limit", "info"));
-        AssertTrue(WaitUntil(() => client.DeliveryHealth().Lifecycle == DeliveryLifecycleState.Paused, TimeSpan.FromSeconds(2)), "usage_limit_exceeded did not pause");
-        AssertTrue(client.DeliveryHealth().PauseReason == DeliveryPauseReason.Quota, "usage_limit_exceeded pause reason changed");
-        AssertTrue(!transport.WaitForRequests(2, TimeSpan.FromMilliseconds(1300)), "usage_limit_exceeded resumed without recovery");
-        client.RecoverAutomaticDelivery();
-        AssertTrue(transport.WaitForRequests(2, TimeSpan.FromSeconds(2)), "usage limit recovery did not send");
+        var paused = client.DeliveryHealth();
+        AssertTrue(WaitUntil(() => (paused = client.DeliveryHealth()).Lifecycle == DeliveryLifecycleState.Paused, TimeSpan.FromSeconds(2)), "usage_limit_exceeded did not pause");
+        AssertTrue(paused.PauseReason == DeliveryPauseReason.Quota, "usage_limit_exceeded pause reason changed");
+        AssertTrue(paused.RetryDelayMilliseconds > 0 && paused.RetryDelayMilliseconds <= 250, "usage limit probe did not use its own schedule");
+        AssertTrue(transport.WaitForRequests(2, TimeSpan.FromSeconds(2)), "usage limit pause did not probe");
         AssertTrue(client.Shutdown().StatusCode == 204, "usage limit client shutdown failed");
     }
 
