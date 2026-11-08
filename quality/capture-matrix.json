@@ -99,7 +99,7 @@
       },
       "method": "LogBrewClient with automatic HttpTransport delivery, service and deployment context in LogBrewClientOptions, the ILogger provider, and LogBrewHttpRequestTelemetry for one request that succeeds and one whose thrown exception becomes an issue through IssueAttributes.FromException; the core has no framework hooks, so its documented API is the capture path",
       "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew",
-      "inputs": "1b0bc55375ecc77ff4522d1cb2c8fab695e8de0c022e8f449d628f71c330b30b"
+      "inputs": "0d01c2993018e709ffee30c33143ed16f52dbed370c5aeb14de98a006cd107b8"
     },
     "dotnet/logbrew-dotnet/src/LogBrew.AspNetCore": {
       "share": 90.9,
@@ -129,11 +129,11 @@
         "log": 27,
         "metric": 3,
         "release": 1,
-        "span": 8
+        "span": 6
       },
       "method": "ASP.NET Core minimal API with builder.AddLogBrew() configured through LOGBREW_* variables, information-level ILogger capture, dependency telemetry, a request context provider for the user, and app.UseLogBrew(); one request that succeeds and calls a dependency, and one whose handler throws",
       "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.AspNetCore",
-      "inputs": "4c7fca6d4a10ec8c98627b98bed7a60794389cce9a6db6d97dd62ead25ae0f79"
+      "inputs": "261869793722cfd85853d3aaf730d1e445f6e2d18ddd958911462b59de789a1f"
     },
     "dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore": {
       "share": 63.6,
@@ -166,7 +166,7 @@
       },
       "method": "EF Core 10 DbContext on an in-memory SQLite connection with AddLogBrewCommandTelemetry, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; one unit of work under an incoming traceparent that creates, saves, and queries rows, and one raw query that fails in the provider",
       "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore",
-      "inputs": "1eb2176be5e0d46b62b85d8568cd7d3b1eef1e2cea712ce6196c490b1f56ef87"
+      "inputs": "181c82eda6890149f9e1dc74694cdf93c194457f1d77c6c913f8410bd0564bf5"
     },
     "dotnet/logbrew-dotnet/src/LogBrew.Hangfire": {
       "share": 72.7,
@@ -199,7 +199,7 @@
       },
       "method": "Hangfire BackgroundJobServer on Hangfire.InMemory storage (as the package's tests use) with UseLogBrewHangfire, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; one job that succeeds and one that throws with retries off, each logging and activating the user context inside the job",
       "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.Hangfire",
-      "inputs": "1705fc5d687151691d7d8dd25a7a61762e4852da11d646a082593ac10a513229"
+      "inputs": "e73b9513408a4f421eb13ddfffe91203f1cdd3ee8f43def284e050321fe26953"
     },
     "dotnet/logbrew-dotnet/src/LogBrew.HttpClient": {
       "share": 63.6,
@@ -232,7 +232,7 @@
       },
       "method": "IHttpClientFactory named client with AddLogBrewCorrelation, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; under an incoming traceparent, one request to a local HttpListener that succeeds and one to a closed port that throws",
       "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.HttpClient",
-      "inputs": "83dbf8cac6b4abe5c8869112092b9bf7d93ae215ec7e66a9658b717f8c5ada1f"
+      "inputs": "b465489fc89ced3be929fcaef91ddec0b89834c824f4048323131e9d36b4a130"
     },
     "dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry": {
       "share": 54.5,
@@ -266,7 +266,7 @@
       },
       "method": "OpenTelemetry TracerProvider with an app ActivitySource and the built-in System.Net.Http source, AddLogBrew processor with service context, the user context active, a LogBrewClient with automatic HttpTransport delivery, deployment context, and the ILogger provider; one server Activity continued from an incoming traceparent that calls a local HttpListener, and one whose outbound call throws and is recorded with Activity.AddException",
       "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry",
-      "inputs": "7f199eef44311d5627216099a5028d580f83453066bc6077aa9cf54bb6e8f291"
+      "inputs": "5b1ef15e585a1d75156a4ffcf73e43aee4f53faaca81ee6ce4940f193b072f6a"
     },
     "dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis": {
       "share": 63.6,
@@ -299,7 +299,7 @@
       },
       "method": "StackExchange.Redis against a local redis-server started by the probe, with TraceLogBrewCommand and TraceLogBrewCommandAsync, a LogBrewClient with automatic HttpTransport delivery, service and deployment context, and the ILogger provider; under an incoming traceparent, a SET and GET that succeed and an INCR on a text value that the server rejects",
       "probe": "tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis",
-      "inputs": "c853650fa7cf6bf556787141844b5df1a3bcd3b290f6ddb9496e9e66b5961d23"
+      "inputs": "1e44a23eba4fa2d7fd030fcab04922fa81f9c8f88edca07be7169856b5e33825"
     },
     "go/logbrew": {
       "share": 81.8,
@@ -465,7 +465,7 @@
       },
       "method": "Spring Boot 4 web app (embedded Tomcat) with the auto-registered LogBrewServletFilter and LogBrewSpringExceptionResolver, the LogBrewLogbackAppender on an SLF4J logger, an automatic HttpTransport client with the documented service and deployment context, and a W3C traceparent; one request that succeeds and one whose controller throws",
       "probe": "tools/capture-matrix/probes/java/logbrew-java",
-      "inputs": "42702988d36e64507f4f0a84de095793d9e1fbf88002da7cfe0144034026dccc"
+      "inputs": "1de0dda102fff6c58b3ca5e20c88e54d643c4e801fd3195aff50b55819363fb1"
     },
     "js/logbrew-amqplib": {
       "share": 63.6,
@@ -1101,7 +1101,7 @@
       },
       "method": "Objective-C program compiled with the SDK sources the way Install From Source shows, with client resource context, an LBWTelemetry scope for session and user, a continued W3C trace, a breadcrumb, a log, an explicit metric, and NSURLSession requests through startURLSessionSpanForRequest and captureURLSessionSpanWithID: one succeeds against a local backend and one fails to connect, and its NSError becomes an issue through LBWIssueDiagnostics; the source package has no crash engine (LogBrewCrash ships with the Swift package), so its documented API is the capture path",
       "probe": "tools/capture-matrix/probes/objc/logbrew-objc",
-      "inputs": "782841ea5466ef033d0c16c72bd13eaac19e80f6c7d5b1afff54ad86c81be38f"
+      "inputs": "fb1bdba77d1ebe5f6da9f359830dcc4ad0e2c7c9e3f34b1221891922d6c08652"
     },
     "php/logbrew-php": {
       "share": 90.9,
@@ -1319,7 +1319,7 @@
       },
       "method": "Axum 0.8 server with the crate's tower, tracing, and http features: TowerRequestTelemetryLayer as a route layer with error issues on, LogBrewTracingLayer with span events and error issues for logs, an app middleware that sets the user in a scoped TelemetryContext, release, environment, and service in the client context, and automatic HTTP delivery; one request that succeeds and one whose handler returns an error response that logs through tracing::error!, both with a W3C traceparent",
       "probe": "tools/capture-matrix/probes/rust/logbrew",
-      "inputs": "891bce86bf040d69e733f9d1eae65737d591c0340830d805077287ba204e8183"
+      "inputs": "5f5f3a8f606b834723744cdfd3c45d2ce5437b66244c8736f0ee49a04954f7d8"
     },
     "swift/logbrew-swift": {
       "share": 100.0,
