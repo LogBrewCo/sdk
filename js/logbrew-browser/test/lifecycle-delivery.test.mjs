@@ -233,6 +233,51 @@ test("terminal auth, quota, and validation outcomes pause until an explicit succ
   }
 });
 
+test("a 403 lifecycle pause ends when a later capture or online flush delivers a batch", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  try {
+    const browserWindow = createBrowserWindow();
+    const statuses = [403, 202, 202];
+    const requests = [];
+    const errors = [];
+    const context = imported.installLogBrewBrowser({
+      browserWindow,
+      captureGlobalErrors: false,
+      capturePageViews: false,
+      captureUnhandledRejections: false,
+      clientKey: CLIENT_KEY,
+      fetchImpl: async (url, init) => {
+        requests.push({ init, url });
+        return response(statuses.shift());
+      },
+      flushOnOnline: false,
+      maxRetries: 0,
+      onCaptureError(error) {
+        errors.push(error);
+      }
+    });
+
+    queueLog(context.client, "evt_browser_forbidden");
+    browserWindow.dispatchEvent({ type: "pagehide" });
+    await waitFor(() => errors.length === 1);
+    browserWindow.dispatchEvent({ type: "pagehide" });
+    await nextTask();
+    assert.equal(requests.length, 1);
+
+    const delivered = await context.client.flush(context.transport);
+    assert.equal(delivered.statusCode, 202);
+    assert.equal(context.client.pendingEvents(), 0);
+
+    queueLog(context.client, "evt_browser_after_forbidden");
+    browserWindow.dispatchEvent({ type: "pagehide" });
+    await waitFor(() => requests.length === 3);
+    await waitFor(() => context.client.pendingEvents() === 0);
+    context.uninstall();
+  } finally {
+    await removeTempDir();
+  }
+});
+
 test("a rate_limited 429 with Retry-After does not pause later lifecycle sends", async () => {
   const { imported, removeTempDir } = await importBrowserPackage();
   try {
