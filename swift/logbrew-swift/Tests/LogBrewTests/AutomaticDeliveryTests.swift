@@ -154,6 +154,45 @@ struct AutomaticDeliveryTests {
         _ = try client.shutdown()
     }
 
+    @Test("a 403 pause probes again and resumes without an app call")
+    func forbiddenPauseResumesOnItsOwn() throws {
+        let transport = ThreadSafeScriptedTransport(statuses: [403, 202])
+        let client = try makeClient()
+        try client.startAutomaticDelivery(
+            transport: transport,
+            options: AutomaticDeliveryOptions(interval: 30, threshold: 1, retryBaseDelay: 0.05, maxRetryDelay: 0.2),
+        )
+
+        try captureLog(client, id: "forbidden-1")
+        #expect(waitUntil(timeout: 2) { client.deliveryHealth().state == .paused })
+        let paused = client.deliveryHealth()
+        #expect(paused.pauseReason == .authentication)
+        #expect((0 ... 0.2).contains(paused.nextRetryDelay ?? -1))
+
+        try #require(transport.waitForRequestCount(2, timeout: 2))
+        #expect(waitUntil(timeout: 2) { client.pendingEvents() == 0 })
+        #expect(transport.requestBodies[0] == transport.requestBodies[1])
+        #expect(client.deliveryHealth().state == .running)
+        #expect(client.deliveryHealth().pauseReason == .none)
+        _ = try client.shutdown()
+    }
+
+    @Test("an outage that exhausts retries probes again and resumes")
+    func exhaustedRetriesResumeOnTheirOwn() throws {
+        let transport = ThreadSafeScriptedTransport(statuses: [503, 503, 503, 202])
+        let client = try makeClient(maxRetries: 2)
+        try client.startAutomaticDelivery(
+            transport: transport,
+            options: AutomaticDeliveryOptions(interval: 30, threshold: 1, retryBaseDelay: 0.01, maxRetryDelay: 0.2),
+        )
+
+        try captureLog(client, id: "outage-1")
+        #expect(transport.waitForRequestCount(4, timeout: 3))
+        #expect(waitUntil(timeout: 2) { client.pendingEvents() == 0 })
+        #expect(client.deliveryHealth().state == .running)
+        _ = try client.shutdown()
+    }
+
     @Test("recovery clears stale terminal wakes after draining")
     func recoveryClearsStaleTerminalWake() throws {
         let transport = ThreadSafeScriptedTransport(statuses: [401, 202, 202])
