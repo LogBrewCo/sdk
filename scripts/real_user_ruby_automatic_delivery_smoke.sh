@@ -193,18 +193,17 @@ begin
   assert_proof(retry_requests[0].body == retry_requests[1].body, "503 retry body changed")
   retry_client.shutdown
 
-  terminal_client = automatic_client(intake, flush_interval: 1, flush_threshold: 1)
+  terminal_client = automatic_client(intake, flush_interval: 1, flush_threshold: 1, retry_max_delay: 0.3)
   capture_log(terminal_client, "evt_terminal_original", "terminal original")
   wait_for_proof("terminal delivery did not pause") { terminal_client.delivery_health.state == "paused" }
-  capture_log(terminal_client, "evt_terminal_later", "terminal later")
-  sleep(0.08)
-  assert_proof(intake.requests_for("evt_terminal_original").length == 1, "terminal pause retried automatically")
   assert_proof(terminal_client.delivery_health.pause_reason == "authentication", "terminal pause reason changed")
-  terminal_client.recover_automatic_delivery
-  capture_log(terminal_client, "evt_terminal_recovered", "terminal recovered")
-  wait_for_proof("recovered terminal delivery did not run") do
-    intake.requests_for("evt_terminal_recovered").length == 1
+  capture_log(terminal_client, "evt_terminal_later", "terminal later")
+  wait_for_proof("terminal pause did not probe and resume") do
+    intake.requests_for("evt_terminal_original").length == 2 && intake.requests_for("evt_terminal_later").length == 1
   end
+  terminal_requests = intake.requests_for("evt_terminal_original")
+  assert_proof(terminal_requests[0].body == terminal_requests[1].body, "terminal probe body changed")
+  assert_proof(terminal_client.delivery_health.pause_reason.nil?, "accepted probe kept the pause reason")
   terminal_client.shutdown
 
   fork_client = automatic_client(intake, flush_interval: 60, flush_threshold: 2)
@@ -359,8 +358,8 @@ fi
 proof_counts="$(ruby -rjson -e '
   payload = JSON.parse(File.read(ARGV.fetch(0)))
   raise unless payload.fetch("ok") == true
-  raise unless payload.fetch("requests") == 21
-  raise unless payload.fetch("acceptedEvents") == 1_012
+  raise unless payload.fetch("requests") == 20
+  raise unless payload.fetch("acceptedEvents") == 1_011
   raise unless payload.fetch("highLoadAccepted") == 1_000
   raise unless payload.fetch("highLoadDropped") == 500
   raise unless payload.fetch("states") == %w[idle running retrying paused stopped closing closed]
