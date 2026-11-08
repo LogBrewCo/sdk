@@ -25,7 +25,13 @@ import type indexDefault from "./index.js";
 type ReactNativePersistentQueueMode = "auto" | "required" | "disabled";
 
 type CreateNativeLogBrewReactNativeClientConfig =
-  Omit<CreateLogBrewReactNativeClientConfig, "eventStore"> & ({
+  Omit<CreateLogBrewReactNativeClientConfig, "eventStore"> & {
+    /**
+     * Sends one `app.start.duration` metric per process: milliseconds from process start
+     * to the first frame. Defaults to `true`. Set `false` to turn it off.
+     */
+    captureAppStart?: boolean;
+  } & ({
     /**
      * `auto` uses the linked app-private native queue when available and otherwise uses memory.
      * `required` fails client creation when the native queue is unavailable. `disabled` uses memory.

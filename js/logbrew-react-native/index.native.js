@@ -9,6 +9,7 @@ import baseDefault, {
   createLogBrewReactNativeClient as createPlatformNeutralClient,
   getReactNativeContext
 } from "./index.js";
+import { captureAppStart } from "./app-start.js";
 import { bindAndroidNativeDelivery, bindAppleNativeCrashBreadcrumbs } from "./native-client-bindings.js";
 import {
   getLogBrewAndroidNativeDiagnosticsStatus,
@@ -87,6 +88,7 @@ function createLogBrewReactNativeClient(config = {}) {
   const input = isObjectInput(config) ? config : {};
   const {
     apiKey,
+    captureAppStart: shouldCaptureAppStart = true,
     clientKey,
     eventStore,
     maxQueueBytes,
@@ -107,7 +109,11 @@ function createLogBrewReactNativeClient(config = {}) {
     maxQueueSize,
     persistentQueue
   });
-  return createResolvedClient({ ...forwarded, apiKey, clientKey, maxQueueBytes, maxQueueSize }, resolved);
+  const client = createResolvedClient({ ...forwarded, apiKey, clientKey, maxQueueBytes, maxQueueSize }, resolved);
+  if (shouldCaptureAppStart !== false) {
+    captureAppStart(client, nativeRuntime);
+  }
+  return client;
 }
 
 /**

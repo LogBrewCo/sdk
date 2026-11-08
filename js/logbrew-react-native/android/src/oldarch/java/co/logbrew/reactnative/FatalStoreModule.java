@@ -21,6 +21,11 @@ final class FatalStoreModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod(isBlockingSynchronousMethod = true)
+  public double processStartTime() {
+    return implementation.processStartTime();
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
   public String secureRandomHex(double length) {
     return implementation.secureRandomHex(length);
   }

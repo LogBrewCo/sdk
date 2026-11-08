@@ -3,6 +3,7 @@ import { TurboModuleRegistry } from "react-native";
 
 export interface Spec extends TurboModule {
   secureRandomHex(length: number): string;
+  processStartTime(): number;
   loadEventRecords(queueKey: string): CodegenTypes.UnsafeObject;
   appendEventRecord(
     queueKey: string,

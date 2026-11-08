@@ -37,6 +37,58 @@ test("managed and unlinked runtimes use Expo Crypto or fail closed", async () =>
   });
 });
 
+test("native entry sends one cold start metric per process from process start to the first frame", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+    nativeStore.startedAt = Date.now() - 1200;
+    const runtime = await importRuntime("app-start", true);
+    const { client, metrics } = metricClient(runtime);
+    const lateClient = metricClient(runtime);
+    const [metric] = await metrics();
+    assert.equal((await lateClient.metrics()).length, 0);
+    assert.equal(metric.attributes.name, "app.start.duration");
+    assert.equal(metric.attributes.description, "Time from process start to the first frame.");
+    assert.equal(metric.attributes.kind, "histogram");
+    assert.equal(metric.attributes.temporality, "delta");
+    assert.equal(metric.attributes.unit, "ms");
+    assert.deepEqual(metric.attributes.metadata, { startType: "cold" });
+    assert.ok(metric.attributes.value >= 1200 && metric.attributes.value < 10_000, `${metric.attributes.value}`);
+    assert.match(metric.id, /^evt_native_app_start_[0-9a-f]+$/u);
+    await client.shutdown();
+  });
+});
+
+test("cold start metric honors the opt-out and skips unknown or implausible process starts", async () => {
+  await withNativeRuntimes(async ({ importRuntime, nativeStore }) => {
+    nativeStore.startedAt = Date.now() - 1200;
+    const optedOut = metricClient(await importRuntime("app-start-off", true), { captureAppStart: false });
+    assert.equal((await optedOut.metrics()).length, 0);
+    assert.equal(nativeStore.processStartReads, 0);
+    for (const [name, startedAt] of [["unknown", 0], ["future", Date.now() + 5000], ["stale", Date.now() - 61_000]]) {
+      nativeStore.startedAt = startedAt;
+      assert.equal((await metricClient(await importRuntime(`app-start-${name}`, true)).metrics()).length, 0, name);
+    }
+    const unlinked = metricClient(await importRuntime("app-start-unlinked", "legacy"));
+    assert.equal((await unlinked.metrics()).length, 0);
+  });
+});
+
+function metricClient(runtime, overrides = {}) {
+  const bodies = [];
+  const client = nativeClient(runtime, {
+    persistentQueue: "disabled",
+    transport: { async send(_key, body) { bodies.push(body); return { attempts: 1, statusCode: 202 }; } },
+    ...overrides
+  });
+  return {
+    client,
+    async metrics() {
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
+      await client.flush();
+      return bodies.flatMap((body) => JSON.parse(body).events).filter(({ type }) => type === "metric");
+    }
+  };
+}
+
 async function withoutWebCrypto(callback) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
   Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
@@ -643,6 +695,12 @@ function createNativeStore() {
   return {
     calls,
     randomLengths,
+    startedAt: 0,
+    processStartReads: 0,
+    processStartTime() {
+      this.processStartReads += 1;
+      return this.startedAt;
+    },
     records(key) {
       return queue(key);
     },

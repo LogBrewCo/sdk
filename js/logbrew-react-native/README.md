@@ -91,6 +91,32 @@ sends after authentication, usage-limit, or non-retryable failures. Do not add a
 Helpers generate a fresh opaque event ID by default. Explicit `id` and
 `idFactory` values remain available for app-owned idempotency.
 
+### App Start Metric
+
+The React Native client sends one cold start metric per process. You do not
+need extra app code. The metric has these values:
+
+- `name`: `app.start.duration`
+- `kind`: `histogram`, with `temporality` `delta`
+- `unit`: `ms`
+- `value`: the time from process start to the first frame after the package
+  loads
+- `metadata`: `{ startType: "cold" }`
+
+The process start time comes from the linked native module, so the metric
+needs a development build or a bare app. Expo Go sends no metric. The metric
+is not sent for iOS prewarmed launches or for values above 60 seconds.
+Import the package and create the client in your app entry file, before the
+first screen renders. To turn the metric off, set `captureAppStart: false`:
+
+```js
+const client = createLogBrewReactNativeClient({
+  clientKey,
+  captureAppStart: false,
+  transport: createReactNativeFetchTransport()
+});
+```
+
 ## Confirm Hosted Delivery And Event Visibility
 
 Call `verifyLogBrewSetup()` once from a development-only button or setup
