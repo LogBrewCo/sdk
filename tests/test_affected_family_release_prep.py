@@ -29,11 +29,11 @@ CATALOG = tomllib.loads(source_text("tools/toolchain-probe/release-catalog.toml"
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.41",
+            "js/logbrew-js/package.json": "0.1.42",
             "js/logbrew-browser/package.json": "0.1.19",
-            "js/logbrew-express/package.json": "0.1.11",
+            "js/logbrew-express/package.json": "0.1.12",
             "js/logbrew-fastify/package.json": "0.1.11",
-            "js/logbrew-node/package.json": "0.1.26",
+            "js/logbrew-node/package.json": "0.1.27",
             "js/logbrew-nestjs/package.json": "0.1.11",
             "js/logbrew-next/package.json": "0.1.16",
             "js/logbrew-react/package.json": "0.1.4",
