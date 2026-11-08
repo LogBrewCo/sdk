@@ -2,7 +2,6 @@
 
 const {
   getRequestMethod,
-  getRouteTemplate,
   getStatusCode,
   getStatusCodeText,
   getTraceparentHeader,
@@ -14,6 +13,7 @@ const {
   spanStatus,
   statusCodeClass
 } = require("./internal.cjs");
+const { getRouteTemplate } = require("./route-template.cjs");
 const { createLogBrewTraceContext, getActiveLogBrewTrace } = require("@logbrew/node");
 const { createIssueAttributesFromError } = require("@logbrew/sdk");
 

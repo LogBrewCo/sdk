@@ -135,7 +135,7 @@ configure that fetch transport, or pass an explicit LogBrew `Transport`.
 Delivery failures call `onCaptureError`; they are never converted into a
 simulated successful response.
 
-Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request, metric, and error capture records the matched leaf `req.route.path`; it does not copy `originalUrl`, the concrete router mount value, or the query. Unmatched requests use the explicit `<unmatched>` label.
+Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request, metric, and error capture records the full route template: the mount paths of the routers above the route, then the matched `req.route.path`. A route `/:orderId` in a router mounted at `/tenants/:tenantId/orders` is recorded as `/tenants/:tenantId/orders/:orderId`, also when the error reaches an app-level error handler. Mount parameters keep their `:name`; the concrete mount value, `originalUrl`, and the query are never copied. When a mount path cannot be rebuilt, such as under a mounted sub-app, the template falls back to the leaf `req.route.path`. Unmatched requests use the explicit `<unmatched>` label.
 
 String routes retain their declared Express pattern, including optional
 parameters, groups, and quoted parameter names. The SDK does not parse that
