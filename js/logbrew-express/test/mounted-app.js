@@ -79,6 +79,7 @@ import { readFile } from "node:fs/promises";
  *   readonly pattern: string,
  *   readonly recorder: Recorder,
  *   readonly records: MountedRecords,
+ *   readonly routeTemplate: string,
  *   readonly scenario: Scenario,
  *   readonly setMount: (req: Request, mount: Mount) => void,
  *   readonly template: string
@@ -154,6 +155,7 @@ function createMountedRecords(count, ready) {
 function createMountedView(scenario = {}) {
   const count = scenario.overlap === true ? TWO : ONE;
   const pattern = scenario.pattern ?? PATTERN;
+  const routeTemplate = `/tenants/:tenantId/regions/:regionId${pattern}`;
   const handlersReady = createLatch();
   /** @type {WeakMap<Request, Mount>} */
   const mounts = new WeakMap();
@@ -166,11 +168,12 @@ function createMountedView(scenario = {}) {
     pattern,
     recorder: createRecorder(),
     records: createMountedRecords(count, handlersReady),
+    routeTemplate,
     scenario,
     setMount: (req, mount) => {
       mounts.set(req, mount);
     },
-    template: scenario.overrides === true ? "/approved/:itemId" : pattern
+    template: scenario.overrides === true ? "/approved/:itemId" : routeTemplate
   };
 }
 

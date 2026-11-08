@@ -226,7 +226,7 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 server.listen(3000);
 ```
 
-Request spans and error titles are named by a route template, not by the raw path. The wrapper uses `routeTemplateFactory(req)` when you pass it. Otherwise it replaces each numeric, UUID, or long hex (16 or more characters) path segment with `:id`, so `GET /orders/8412` becomes `GET /orders/:id`. `url.path` gets the same replacement. `http.route` is set only from a template, never from the path:
+Request spans and error titles are named by a route template, not by the raw path. The wrapper uses `routeTemplateFactory(req)` when you pass it, then the Express route that handled the request, including the paths of the routers it is mounted under. Otherwise it replaces each numeric, UUID, or long hex (16 or more characters) path segment with `:id`, so `GET /orders/8412` becomes `GET /orders/:id`. `url.path` gets the same replacement. `http.route` is set only from a template, never from the path:
 
 ```js
 const handler = withLogBrewHttpHandler(app, {

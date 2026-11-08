@@ -10,7 +10,6 @@ const { runWithLogBrewTrace } = require("@logbrew/node");
  */
 
 const DEFAULT_METHOD = "GET";
-const UNMATCHED_ROUTE = "<unmatched>";
 const FIRST_ITEM = 0;
 const NO_STATUS_CODE = 0;
 const STATUS_CLASS_SIZE = 100;
@@ -93,15 +92,6 @@ function isRequestHandler(value) {
 function getRequestMethod(req) {
   const method = readField(req, "method") ?? DEFAULT_METHOD;
   return typeof method === "string" ? method : textOf(method);
-}
-
-/**
- * @param {unknown} req
- * @returns {string}
- */
-function getRouteTemplate(req) {
-  const routePath = readField(readField(req, "route"), "path");
-  return typeof routePath === "string" ? routePath : UNMATCHED_ROUTE;
 }
 
 /**
@@ -240,7 +230,6 @@ function readEnvServerApiKey() {
 module.exports = {
   createCell,
   getRequestMethod,
-  getRouteTemplate,
   getStatusCode,
   getStatusCodeText,
   getTraceparentHeader,

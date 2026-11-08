@@ -105,8 +105,8 @@ function assertMountedIssue(issue, view) {
   const breadcrumbs = readPath(issue, ["attributes", "breadcrumbs"]);
   const breadcrumb = isList(breadcrumbs) ? breadcrumbs.find((candidate) => readField(candidate, "category") === "express.request") : undefined;
   assert.equal(readPath(issue, ["attributes", "title"]), `GET ${view.template} failed`);
-  assert.equal(readPath(breadcrumb, ["data", "routeTemplate"]), view.pattern);
-  assert.equal(readField(breadcrumb, "message"), `GET ${view.pattern}`);
+  assert.equal(readPath(breadcrumb, ["data", "routeTemplate"]), view.routeTemplate);
+  assert.equal(readField(breadcrumb, "message"), `GET ${view.routeTemplate}`);
 }
 
 /**
@@ -183,7 +183,7 @@ async function checkMounted(testContext, scenario = {}) {
 
 /** @type {ReadonlyArray<readonly [string, Scenario]>} */
 const SCENARIOS = [
-  ["mounted request telemetry preserves the declared route pattern", {}],
+  ["mounted request telemetry names the mount and route templates", {}],
   ["declared leaf routes exclude mounted URLs and request fields", { failure: true, overlap: true, pattern: "/orders/:orderId" }],
   ["overlapping mounted requests preserve independent clients and traces", { overlap: true }],
   ["mounted failures retain route patterns without concrete mount parameters", { failure: true }],
