@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+vue_package_version="$(node -p "require('${repo_root}/js/logbrew-vue/package.json').version")"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -82,9 +83,9 @@ grep -q '"@logbrew/vue"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/vue vue @vue/server-renderer >/dev/null
 npm explain @logbrew/vue > "$tmp_dir/npm-explain-vue.txt"
-grep -q '@logbrew/vue@0.1.1' "$tmp_dir/npm-explain-vue.txt"
+grep -q "@logbrew/vue@${vue_package_version}" "$tmp_dir/npm-explain-vue.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/vue@0.1.1' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/vue@${vue_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
