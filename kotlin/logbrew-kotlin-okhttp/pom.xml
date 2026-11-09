@@ -8,7 +8,7 @@
   <packaging>jar</packaging>
   <name>LogBrew Kotlin OkHttp Integration</name>
   <description>Optional LogBrew Kotlin OkHttp integration for outbound request spans and W3C traceparent propagation.</description>
-  <url>https://github.com/LogBrewCo/sdk</url>
+  <url>https://logbrew.co</url>
   <licenses>
     <license>
       <name>MIT</name>

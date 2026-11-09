@@ -9,9 +9,10 @@
     "observability",
     "psr-3"
   ],
-  "homepage": "https://github.com/LogBrewCo/sdk/tree/main/php/logbrew-php",
+  "homepage": "https://logbrew.co",
   "readme": "php/logbrew-php/README.md",
   "support": {
+    "docs": "https://docs.logbrew.co",
     "issues": "https://github.com/LogBrewCo/sdk/issues",
     "source": "https://github.com/LogBrewCo/sdk/tree/main/php/logbrew-php"
   },

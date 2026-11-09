@@ -14,7 +14,7 @@
     <Company>LogBrew</Company>
     <Description>Public LogBrew StackExchange.Redis integration for privacy-bounded Redis command trace spans.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <PackageProjectUrl>https://logbrew.co</PackageProjectUrl>
     <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>

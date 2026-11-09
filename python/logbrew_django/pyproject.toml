@@ -31,6 +31,8 @@ dependencies = [
 ]
 
 [project.urls]
+Homepage = "https://logbrew.co"
+Documentation = "https://docs.logbrew.co"
 Repository = "https://github.com/LogBrewCo/sdk"
 
 [tool.setuptools]

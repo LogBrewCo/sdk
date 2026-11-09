@@ -32,7 +32,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://logbrew.co"
-Documentation = "https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_flask"
+Documentation = "https://docs.logbrew.co"
 Repository = "https://github.com/LogBrewCo/sdk"
 Issues = "https://github.com/LogBrewCo/sdk/issues"
 

@@ -5,6 +5,7 @@
   "description": "Unity SDK for building, validating, previewing, and flushing LogBrew event batches.",
   "unity": "2021.3",
   "license": "MIT",
+  "documentationUrl": "https://docs.logbrew.co",
   "author": {
     "name": "LogBrew"
   },

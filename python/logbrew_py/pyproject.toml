@@ -30,6 +30,8 @@ classifiers = [
 ]
 
 [project.urls]
+Homepage = "https://logbrew.co"
+Documentation = "https://docs.logbrew.co"
 Repository = "https://github.com/LogBrewCo/sdk"
 
 [project.optional-dependencies]
