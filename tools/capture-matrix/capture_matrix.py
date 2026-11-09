@@ -259,12 +259,19 @@ def package_directories() -> list[str]:
 
 
 def _hashed_files(directory: Path) -> Iterator[Path]:
-    for path in sorted(directory.rglob("*")):
-        relative = path.relative_to(directory).parts
+    """Files git would commit, so ignored build output never makes a record stale on one machine only."""
+    listing = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=directory,
+        capture_output=True,
+        check=True,
+    ).stdout
+    for name in sorted(set(os.fsdecode(listing).split("\0")) - {""}):
+        path = directory / name
         if (
             path.is_file()
-            and not UNHASHED_DIRS.intersection(relative[:-1])
-            and not path.name.endswith(UNHASHED_SUFFIXES)
+            and not UNHASHED_DIRS.intersection(Path(name).parts[:-1])
+            and not name.endswith(UNHASHED_SUFFIXES)
         ):
             yield path
 
