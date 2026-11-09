@@ -34,6 +34,8 @@ dependencies = [
 celery = ["logbrew-sdk[celery]>=0.1.27,<0.2.0"]
 
 [project.urls]
+Homepage = "https://logbrew.co"
+Documentation = "https://docs.logbrew.co"
 Repository = "https://github.com/LogBrewCo/sdk"
 
 [tool.setuptools]

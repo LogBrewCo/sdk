@@ -18,7 +18,7 @@
     <Company>LogBrew</Company>
     <Description>Public LogBrew .NET SDK for building, validating, and flushing event batches.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <PackageProjectUrl>https://logbrew.co</PackageProjectUrl>
     <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>logbrew-logo-transparent-128.png</PackageIcon>

@@ -9,7 +9,7 @@
   <packaging>jar</packaging>
   <name>LogBrew Java SDK</name>
   <description>Public LogBrew Java SDK for building, validating, and flushing event batches.</description>
-  <url>https://github.com/LogBrewCo/sdk</url>
+  <url>https://logbrew.co</url>
   <licenses>
     <license>
       <name>MIT</name>

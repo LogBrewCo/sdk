@@ -102,7 +102,7 @@
     "node": ">=18"
   },
   "license": "MIT",
-  "homepage": "https://docs.logbrew.co",
+  "homepage": "https://logbrew.co",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/LogBrewCo/sdk.git"

@@ -25,6 +25,8 @@ const (
 	releaseMetadataMode     = "release-metadata"
 	publicLicense           = "MIT"
 	sdkRepoURL              = "https://github.com/LogBrewCo/sdk"
+	websiteURL              = "https://logbrew.co"
+	docsURL                 = "https://docs.logbrew.co"
 	npmRepoURL              = "git+https://github.com/LogBrewCo/sdk.git"
 	openUPMUnityMetadata    = ".github/publishing/openupm-co.logbrew.unity.yml"
 	publishReleaseWorkflow  = ".github/workflows/publish-release.yml"
@@ -467,6 +469,7 @@ func (check *metadataCheck) jsPackage(directory, name, expectedVersion string) {
 	check.require(manifest["private"] != true, location+": public SDK package must not be private")
 	check.contains(location, "description", manifest["description"], "LogBrew")
 	for _, pair := range [][3]any{
+		{"homepage", manifest["homepage"], websiteURL},
 		{"repository.type", field(manifest, "repository", "type"), "git"},
 		{"repository.url", field(manifest, "repository", "url"), npmRepoURL},
 		{"engines.node", field(manifest, "engines", "node"), ">=18"},
@@ -562,7 +565,7 @@ func (check *metadataCheck) rust() {
 	cargo := field(check.readTOML(location), "package")
 	for _, pair := range [][2]string{
 		{"name", "logbrew"}, {"version", check.catalog.Rust}, {"license", publicLicense},
-		{"repository", sdkRepoURL}, {"readme", "README.md"},
+		{"homepage", websiteURL}, {"documentation", docsURL}, {"repository", sdkRepoURL}, {"readme", "README.md"},
 	} {
 		check.equal(location, "package."+pair[0], field(cargo, pair[0]), pair[1])
 	}
@@ -619,8 +622,8 @@ func (check *metadataCheck) pythonPackage(release pypiRelease) {
 		}
 		check.equal(location, "project.optional-dependencies", actual, expected)
 	}
-	if urls, _ := field(project, "urls").(map[string]any); len(urls) > 0 {
-		check.equal(location, "project.urls.Repository", urls["Repository"], sdkRepoURL)
+	for _, pair := range [][2]string{{"Homepage", websiteURL}, {"Documentation", docsURL}, {"Repository", sdkRepoURL}} {
+		check.equal(location, "project.urls."+pair[0], field(project, "urls", pair[0]), pair[1])
 	}
 	source := release.Dir + "/src/" + release.Package
 	check.requirePaths(source+"/py.typed", source+"/examples/__main__.py")
@@ -777,7 +780,7 @@ func (check *metadataCheck) mavenPOM(location, artifact, name string, compilerRe
 	}
 	for _, pair := range [][2]string{
 		{"groupId", "co.logbrew"}, {"artifactId", artifact}, {"version", version}, {"packaging", "jar"},
-		{"name", name}, {"url", sdkRepoURL},
+		{"name", name}, {"url", websiteURL},
 	} {
 		check.equal(location, pair[0], project.text(pair[0]), pair[1])
 	}
@@ -821,6 +824,7 @@ func (check *metadataCheck) unity() {
 	check.equal(location, "author.name", field(manifest, "author", "name"), "LogBrew")
 	check.equal(location, "repository.type", field(manifest, "repository", "type"), "git")
 	check.equal(location, "repository.url", field(manifest, "repository", "url"), npmRepoURL)
+	check.equal(location, "documentationUrl", manifest["documentationUrl"], docsURL)
 	check.require(listHas(manifest["keywords"], "logbrew"), location+": keywords must include 'logbrew'")
 	samples, _ := manifest["samples"].([]any)
 	paths := []any{}
@@ -923,8 +927,9 @@ func (check *metadataCheck) ruby() {
 		{"identity", `Gem::Specification\.new\("logbrew-sdk",\s*LogBrew::VERSION\)`},
 		{"license", `spec\.license\s*=\s*"` + publicLicense + `"`},
 		{"author", `spec\.authors\s*=\s*\["LogBrew"\]`},
-		{"homepage", `spec\.homepage\s*=\s*"` + repository + `"`},
+		{"homepage", `spec\.homepage\s*=\s*"` + regexp.QuoteMeta(websiteURL) + `"`},
 		{"source_code_uri", `"source_code_uri"\s*=>\s*"` + repository + `"`},
+		{"documentation_uri", `"documentation_uri"\s*=>\s*"` + regexp.QuoteMeta(docsURL) + `"`},
 		{"required_ruby_version", `spec\.required_ruby_version\s*=\s*">= 2\.6"`},
 	} {
 		check.require(regexp.MustCompile(rule[1]).MatchString(text), location+": missing "+rule[0]+" metadata")
@@ -968,7 +973,8 @@ func (check *metadataCheck) php() {
 	manifest := check.phpManifest("composer.json", readme, "php/logbrew-php/src/")
 	for _, pair := range [][3]any{
 		{"readme", manifest["readme"], readme},
-		{"homepage", manifest["homepage"], source},
+		{"homepage", manifest["homepage"], websiteURL},
+		{"support.docs", field(manifest, "support", "docs"), docsURL},
 		{"support.issues", field(manifest, "support", "issues"), sdkRepoURL + "/issues"},
 		{"support.source", field(manifest, "support", "source"), source},
 	} {
@@ -1308,7 +1314,7 @@ func (check *metadataCheck) dotnetPackage(spec dotnetPackage) {
 	properties := project.child("PropertyGroup")
 	for _, pair := range slices.Concat(spec.expected, [][2]string{
 		{"Authors", "LogBrew"}, {"Company", "LogBrew"}, {"PackageLicenseExpression", publicLicense},
-		{"PackageProjectUrl", sdkRepoURL}, {"RepositoryUrl", sdkRepoURL}, {"PackageReadmeFile", "README.md"},
+		{"PackageProjectUrl", websiteURL}, {"RepositoryUrl", sdkRepoURL}, {"PackageReadmeFile", "README.md"},
 		{"PackageIcon", icon},
 	}) {
 		actual := properties.rawText(pair[0])
