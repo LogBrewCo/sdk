@@ -26,7 +26,7 @@ const { inject } = require("vue");
  */
 
 const DEFAULT_SDK_NAME = "logbrew-vue";
-const DEFAULT_SDK_VERSION = "0.1.1";
+const DEFAULT_SDK_VERSION = "0.1.2";
 const DEFAULT_MAX_RETRIES = 2;
 
 /** @type {InjectionKey<LogBrewVueContext>} */

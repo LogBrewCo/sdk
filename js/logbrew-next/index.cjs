@@ -23,7 +23,7 @@ function createLogBrewNextClient({
   serverApiKey,
   context,
   sdkName = "logbrew-next",
-  sdkVersion = "0.1.17",
+  sdkVersion = "0.1.18",
   maxRetries = 2
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();

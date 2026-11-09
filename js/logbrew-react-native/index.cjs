@@ -36,7 +36,7 @@ const { getReactNativeContext } = require("./index-values.cjs");
  */
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
-const DEFAULT_SDK_VERSION = "0.1.45";
+const DEFAULT_SDK_VERSION = "0.1.46";
 const DEFAULT_REACT_NATIVE_DELIVERY_INTERVAL_MS = 1000;
 const DEFAULT_MAX_RETRIES = 2;
 
