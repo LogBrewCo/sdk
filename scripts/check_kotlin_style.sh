@@ -14,8 +14,8 @@ remove_tmp_dir() {
 
 trap remove_tmp_dir EXIT
 
-curl -fsSL "$base_url/ktlint-cli-$ktlint_version-all.jar" -o "$jar_path"
-curl -fsSL "$base_url/ktlint-cli-$ktlint_version-all.jar.sha256" -o "$sha256_path"
+curl -fsSL --retry 8 "$base_url/ktlint-cli-$ktlint_version-all.jar" -o "$jar_path"
+curl -fsSL --retry 8 "$base_url/ktlint-cli-$ktlint_version-all.jar.sha256" -o "$sha256_path"
 
 python3 - "$jar_path" "$sha256_path" <<'PY'
 from __future__ import annotations

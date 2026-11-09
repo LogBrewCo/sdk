@@ -18,7 +18,7 @@ case "$(uname -s):$(uname -m)" in
 esac
 
 archive_path="$tmp_dir/$asset"
-curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$shellcheck_version/$asset" -o "$archive_path"
+curl -fsSL --retry 8 "https://github.com/koalaman/shellcheck/releases/download/$shellcheck_version/$asset" -o "$archive_path"
 if [[ "$(uname -s)" == Darwin ]]; then
   actual_sha256="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
 else

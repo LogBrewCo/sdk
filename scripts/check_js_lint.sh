@@ -35,7 +35,7 @@ esac
 
 fetch_verified() {
   local actual_sha256
-  curl -fsSL "$1" -o "$2"
+  curl -fsSL --retry 8 "$1" -o "$2"
   if [[ "$(uname -s)" == Darwin ]]; then
     actual_sha256="$(shasum -a 256 "$2" | awk '{print $1}')"
   else
