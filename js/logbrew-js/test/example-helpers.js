@@ -17,6 +17,7 @@ const PAYMENT_UNAVAILABLE = 503;
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 const NPM_EXAMPLES_DIR = fileURLToPath(new URL("../examples", import.meta.url));
 const PNPM_EXAMPLES_DIR = fileURLToPath(new URL("../examples/", import.meta.url));
+const NO_PACKAGE_MANAGER_DOWNLOAD = "COREPACK_ENABLE_NETWORK=0";
 const PRIVATE_TIMELINE_VALUES = /card=private|coupon=private|#payment|debug heartbeat/u;
 
 /**
@@ -53,7 +54,7 @@ async function runNpm(args) {
  * @returns {Promise<RunResult>}
  */
 async function runPnpm(args) {
-  return runCommand("pnpm", args, PNPM_EXAMPLES_DIR);
+  return runCommand("env", [NO_PACKAGE_MANAGER_DOWNLOAD, "pnpm", ...args], PNPM_EXAMPLES_DIR);
 }
 
 /**
