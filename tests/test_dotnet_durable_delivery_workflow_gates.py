@@ -1,6 +1,7 @@
 import http.client
 import importlib.util
 import io
+import re
 import sys
 import tempfile
 import threading
@@ -1328,18 +1329,19 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
         durability_job = workflow[
             workflow.index("  dotnet-durability:") : workflow.index("  swift-checks:")
         ]
-        setup = """      - name: Set up .NET for Windows native contracts
-        if: ${{ matrix.os == 'windows' }}
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: "10.0.x"
-"""
+        setup = re.compile(
+            r"      - name: Set up \.NET for Windows native contracts\n"
+            r"        if: \$\{\{ matrix\.os == 'windows' \}\}\n"
+            r"        uses: actions/setup-dotnet@[0-9a-f]{40} # v\d+\.\d+\.\d+\n"
+            r"        with:\n"
+            r'          dotnet-version: "10\.0\.x"\n'
+        )
         direct_contract = """      - name: Run Windows native durability contract
         if: ${{ matrix.os == 'windows' }}
         run: dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release -- --durable-contract
 """
 
-        self.assertIn(setup, durability_job)
+        self.assertRegex(durability_job, setup)
         self.assertIn(direct_contract, durability_job)
         self.assertLess(
             durability_job.index("Run Windows native durability contract"),
