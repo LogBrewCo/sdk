@@ -84,7 +84,9 @@ describe("session renewal", () => {
 
   test("renews once and retries when the access token is refused", async () => {
     const target = fake((request) =>
-      request.token === "access-1" ? answer([], status.unauthorized) : answer({ access_token: "access-2", refresh_token: "refresh-2" }),
+      request.token === "access-1"
+        ? answer([], status.unauthorized)
+        : answer({ access_token: "access-2", refresh_token: "refresh-2" }),
     );
     await signedIn(target, start + hour);
     await getAuthorized(target.platform, "/api/projects");

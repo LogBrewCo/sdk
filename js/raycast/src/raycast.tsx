@@ -107,7 +107,11 @@ function useConnection(): Connection | undefined {
   return useMemo(() => connect(), []);
 }
 
-async function signInWith(platform: Platform, cancelled: () => boolean, report: (state: SignIn) => void): Promise<SignIn> {
+async function signInWith(
+  platform: Platform,
+  cancelled: () => boolean,
+  report: (state: SignIn) => void,
+): Promise<SignIn> {
   report({ kind: "starting" });
   const started = await startSignIn(platform);
   report(started);
@@ -118,7 +122,10 @@ async function signInWith(platform: Platform, cancelled: () => boolean, report: 
   return waitForApproval(platform, started.authorization, cancelled);
 }
 
-function useSignIn(connection: Connection | undefined, onSignedIn: () => void): Readonly<{
+function useSignIn(
+  connection: Connection | undefined,
+  onSignedIn: () => void,
+): Readonly<{
   signIn: SignIn;
   start: () => void;
 }> {
@@ -166,7 +173,7 @@ function NextAction(props: StatusProps): JSX.Element | undefined {
   const { connection, onRetry, onSignIn, screen } = props;
   switch (screen.next) {
     case "signIn": {
-      return <Action icon={Icon.Globe} onAction={onSignIn} title="Sign In with Browser" />;
+      return <Action icon={Icon.Globe} onAction={onSignIn} title="Continue in Browser" />;
     }
     case "retry": {
       return <Action icon={Icon.ArrowClockwise} onAction={onRetry} title="Retry" />;
@@ -225,18 +232,9 @@ function SignOutAction(props: Readonly<{ connection: Connection; onSignedOut: ()
         void leave();
       }}
       style={Action.Style.Destructive}
-      title="Sign Out of LogBrew"
+      title="Sign out of LogBrew"
     />
   );
 }
 
-export {
-  type Connection,
-  SignOutAction,
-  StatusView,
-  connect,
-  severityIcon,
-  severityTag,
-  useConnection,
-  useSignIn,
-};
+export { type Connection, SignOutAction, StatusView, connect, severityIcon, severityTag, useConnection, useSignIn };

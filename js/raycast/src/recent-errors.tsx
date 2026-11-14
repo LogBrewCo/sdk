@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Icon, List } from "@raycast/api";
+import { Action, ActionPanel, Icon, Keyboard, List } from "@raycast/api";
 import type { ErrorLog, Outcome, Project } from "./api";
 import { SignOutAction, StatusView, severityIcon, severityTag, useConnection, useSignIn } from "./raycast";
 import { errorLogLink, listProjects, listRecentErrors } from "./logbrew";
@@ -26,10 +26,18 @@ function ErrorItem(props: Readonly<{ connection: Connection; log: ErrorLog; onRe
       ]}
       actions={
         <ActionPanel>
-          <Action.OpenInBrowser title={log.traceId === "" ? "Open Logs in LogBrew" : "Open Trace in LogBrew"} url={link} />
-          <Action.CopyToClipboard content={log.message} shortcut={{ key: "c", modifiers: ["cmd", "shift"] }} title="Copy Message" />
+          <Action.OpenInBrowser
+            title={log.traceId === "" ? "Open Logs in LogBrew" : "Open Trace in LogBrew"}
+            url={link}
+          />
+          <Action.CopyToClipboard content={log.message} shortcut={Keyboard.Shortcut.Common.Copy} title="Copy Message" />
           {log.traceId === "" ? undefined : <Action.CopyToClipboard content={log.traceId} title="Copy Trace ID" />}
-          <Action icon={Icon.ArrowClockwise} onAction={onReload} shortcut={{ key: "r", modifiers: ["cmd"] }} title="Reload" />
+          <Action
+            icon={Icon.ArrowClockwise}
+            onAction={onReload}
+            shortcut={Keyboard.Shortcut.Common.Refresh}
+            title="Reload"
+          />
           <SignOutAction connection={connection} onSignedOut={onReload} />
         </ActionPanel>
       }
@@ -42,7 +50,9 @@ function ErrorItem(props: Readonly<{ connection: Connection; log: ErrorLog; onRe
   );
 }
 
-function ProjectPicker(props: Readonly<{ onChange: (id: string) => void; projects: readonly Project[]; value: string }>): JSX.Element {
+function ProjectPicker(
+  props: Readonly<{ onChange: (id: string) => void; projects: readonly Project[]; value: string }>,
+): JSX.Element {
   const { onChange, projects, value } = props;
   return (
     <List.Dropdown onChange={onChange} tooltip="Project" value={value}>
@@ -57,7 +67,10 @@ async function loadProjects(connection: Connection | undefined): Promise<Outcome
   return connection === undefined ? undefined : listProjects(connection.platform);
 }
 
-async function loadErrors(connection: Connection | undefined, projectId: string): Promise<Outcome<readonly ErrorLog[]> | undefined> {
+async function loadErrors(
+  connection: Connection | undefined,
+  projectId: string,
+): Promise<Outcome<readonly ErrorLog[]> | undefined> {
   if (connection === undefined || projectId === "") {
     return undefined;
   }
@@ -109,7 +122,9 @@ export default function RecentErrors(): JSX.Element {
       filtering
       isLoading={errors.isLoading || projects.isLoading || signIn.kind === "starting" || signIn.kind === "waiting"}
       searchBarAccessory={
-        projectList.length > nothing ? <ProjectPicker onChange={setStored} projects={projectList} value={projectId} /> : undefined
+        projectList.length > nothing ? (
+          <ProjectPicker onChange={setStored} projects={projectList} value={projectId} />
+        ) : undefined
       }
       searchBarPlaceholder="Filter errors by message or service"
     >

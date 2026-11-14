@@ -121,7 +121,11 @@ describe("readErrorLogs", () => {
   });
 
   test("rejects a log without an id, a known severity, or a time", () => {
-    for (const row of [{ ...logRow, id: "" }, { ...logRow, severity: "debug" }, { ...logRow, occurred_at: "" }]) {
+    for (const row of [
+      { ...logRow, id: "" },
+      { ...logRow, severity: "debug" },
+      { ...logRow, occurred_at: "" },
+    ]) {
       expect(readErrorLogs(reply([row]))).toEqual({ failure: "invalid", kind: "failed" });
     }
   });
@@ -150,7 +154,10 @@ describe("readProjects", () => {
 
 describe("originsFrom", () => {
   test("derives the dashboard from the API host", () => {
-    expect(originsFrom("https://api.logbrew.co")).toEqual({ api: "https://api.logbrew.co", dashboard: "https://logbrew.co" });
+    expect(originsFrom("https://api.logbrew.co")).toEqual({
+      api: "https://api.logbrew.co",
+      dashboard: "https://logbrew.co",
+    });
     expect(originsFrom(" http://127.0.0.1:8787/ ")).toEqual({
       api: "http://127.0.0.1:8787",
       dashboard: "http://127.0.0.1:8787",
@@ -158,7 +165,14 @@ describe("originsFrom", () => {
   });
 
   test("refuses addresses it cannot use", () => {
-    for (const address of ["", "logbrew.co", "ftp://api.logbrew.co", "https://user:pw@api.logbrew.co", "https://api.logbrew.co/?a=1", "https://api.logbrew.co/#top"]) {
+    for (const address of [
+      "",
+      "logbrew.co",
+      "ftp://api.logbrew.co",
+      "https://user:pw@api.logbrew.co",
+      "https://api.logbrew.co/?a=1",
+      "https://api.logbrew.co/#top",
+    ]) {
       expect(originsFrom(address)).toBeUndefined();
     }
   });
