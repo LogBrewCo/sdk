@@ -1,0 +1,13 @@
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index 7f82f9735b40d8c5903cd4347d5d6d722d800215..d16bec1e7b9b26ca5f87f0be385948ae196694a5 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -22,7 +22,7 @@ type FunctionReturningPaginatedPromise<T extends any[] = any[], U extends any[]
+     hasMore?: boolean;
+     cursor?: any;
+ }>;
+-type UnwrapReturn<T extends FunctionReturningPromise | FunctionReturningPaginatedPromise> = T extends FunctionReturningPromise ? Awaited<ReturnType<T>> : T extends FunctionReturningPaginatedPromise ? Awaited<ReturnType<ReturnType<T>>>["data"] : never;
++type UnwrapReturn<T extends FunctionReturningPromise | FunctionReturningPaginatedPromise> = T extends FunctionReturningPromise ? Awaited<ReturnType<T>> : T extends (...args: any[]) => (pagination: any) => Promise<{ data: infer Data }> ? Data : never;
+ type Flatten<T> = T extends Array<infer U> ? U : T;
+ export type AsyncState<T> = {
+     isLoading: boolean;
