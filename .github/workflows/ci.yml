@@ -332,7 +332,7 @@ jobs:
 
       - name: Run JavaScript SDK tests
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
-        run: cd js/logbrew-js && bun test && cd ../logbrew-browser && bun test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
+        run: cd js/logbrew-js && bun test && cd ../logbrew-browser && bun test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test && cd ../raycast && bun test
 
       - name: Run JavaScript real-user smoke test
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
