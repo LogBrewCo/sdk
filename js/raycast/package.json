@@ -1,0 +1,72 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "logbrew",
+  "title": "LogBrew",
+  "description": "Search LogBrew issues, watch recent errors, and see new issues in your menu bar.",
+  "icon": "icon.png",
+  "author": "logbrew",
+  "categories": [
+    "Developer Tools"
+  ],
+  "license": "MIT",
+  "platforms": [
+    "macOS"
+  ],
+  "commands": [
+    {
+      "name": "search-issues",
+      "title": "Search Issues",
+      "subtitle": "LogBrew",
+      "description": "Search unresolved issues across your projects, then open or copy one.",
+      "mode": "view"
+    },
+    {
+      "name": "recent-errors",
+      "title": "Recent Errors",
+      "subtitle": "LogBrew",
+      "description": "See the error logs one project sent in the last 24 hours.",
+      "mode": "view"
+    },
+    {
+      "name": "new-issues",
+      "title": "New Issues",
+      "subtitle": "LogBrew",
+      "description": "Show the count of issues first seen in the last 24 hours in the menu bar.",
+      "mode": "menu-bar",
+      "interval": "5m"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "apiUrl",
+      "title": "API URL",
+      "description": "The LogBrew API address. Keep the default unless your team gave you another one.",
+      "type": "textfield",
+      "required": false,
+      "default": "https://api.logbrew.co"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "2.12.1",
+    "@raycast/utils": "2.3.3"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "2.2.0",
+    "@types/bun": "1.3.14",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "eslint": "10.15.0",
+    "prettier": "3.10.1",
+    "typescript": "6.0.3"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "test": "bun test"
+  },
+  "patchedDependencies": {
+    "@raycast/utils@2.3.3": "patches/@raycast%2Futils@2.3.3.patch"
+  }
+}

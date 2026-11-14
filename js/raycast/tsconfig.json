@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["es2024"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "paths": {},
+    "types": ["bun", "node"]
+  },
+  "include": ["src/**/*", "eslint.config.js", "raycast-eslint-config.d.ts"]
+}

@@ -1233,6 +1233,49 @@
           }
         ]
       }
+    },
+    {
+      "files": [
+        "raycast/**"
+      ],
+      "rules": {
+        "eslint/no-duplicate-imports": [
+          "error",
+          {
+            "allowSeparateTypeImports": true
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "raycast/src/new-issues.tsx",
+        "raycast/src/recent-errors.tsx",
+        "raycast/src/search-issues.tsx"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": [
+        "raycast/eslint.config.js"
+      ],
+      "rules": {
+        "import/no-commonjs": "off",
+        "import/unambiguous": "off",
+        "typescript/no-require-imports": "off",
+        "typescript/no-var-requires": "off",
+        "unicorn/prefer-module": "off"
+      }
+    },
+    {
+      "files": [
+        "raycast/raycast-eslint-config.d.ts"
+      ],
+      "rules": {
+        "import/unambiguous": "off"
+      }
     }
   ]
 }
