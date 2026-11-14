@@ -13,10 +13,10 @@ See your LogBrew issues and errors without leaving Raycast. [LogBrew](https://lo
 ## Sign In
 
 1. Run any LogBrew command.
-2. Choose Sign In with Browser. Raycast opens LogBrew in your browser and shows a code.
+2. Choose Continue in Browser. Raycast opens LogBrew in your browser and shows a code.
 3. Make sure the browser shows the same code, then approve the sign-in.
 
-You don't copy or paste anything. To sign out, open the actions of any issue or error and choose Sign Out of LogBrew.
+You don't copy or paste anything. To sign out, open the actions of any issue or error and choose Sign out of LogBrew.
 
 ## Preferences
 

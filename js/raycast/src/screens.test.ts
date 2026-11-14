@@ -25,7 +25,13 @@ const issue: Issue = {
 
 const idle: SignIn = { kind: "idle" };
 const waiting: SignIn = {
-  authorization: { deviceCode: "device", expiresAt: 0, interval: 0, link: "https://logbrew.co/device", userCode: "ABCD-EFGH" },
+  authorization: {
+    deviceCode: "device",
+    expiresAt: 0,
+    interval: 0,
+    link: "https://logbrew.co/device",
+    userCode: "ABCD-EFGH",
+  },
   kind: "waiting",
 };
 const failures: readonly Failure[] = ["forbidden", "invalid", "notFound", "offline", "rateLimited", "unavailable"];

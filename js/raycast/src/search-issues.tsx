@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Icon, List } from "@raycast/api";
+import { Action, ActionPanel, Icon, Keyboard, List } from "@raycast/api";
 import type { Issue, Outcome, Project } from "./api";
 import { SignOutAction, StatusView, severityIcon, severityTag, useConnection, useSignIn } from "./raycast";
 import { issueLink, listIssues, listProjects } from "./logbrew";
@@ -28,9 +28,14 @@ function IssueItem(props: Readonly<{ connection: Connection; issue: Issue; onRel
       actions={
         <ActionPanel>
           <Action.OpenInBrowser title="Open in LogBrew" url={link} />
-          <Action.CopyToClipboard content={link} shortcut={{ key: "c", modifiers: ["cmd", "shift"] }} title="Copy Link" />
+          <Action.CopyToClipboard content={link} shortcut={Keyboard.Shortcut.Common.Copy} title="Copy Link" />
           <Action.CopyToClipboard content={issue.id} title="Copy Issue ID" />
-          <Action icon={Icon.ArrowClockwise} onAction={onReload} shortcut={{ key: "r", modifiers: ["cmd"] }} title="Reload" />
+          <Action
+            icon={Icon.ArrowClockwise}
+            onAction={onReload}
+            shortcut={Keyboard.Shortcut.Common.Refresh}
+            title="Reload"
+          />
           <SignOutAction connection={connection} onSignedOut={onReload} />
         </ActionPanel>
       }
@@ -43,7 +48,9 @@ function IssueItem(props: Readonly<{ connection: Connection; issue: Issue; onRel
   );
 }
 
-function ProjectFilter(props: Readonly<{ onChange: (id: string) => void; projects: readonly Project[]; value: string }>): JSX.Element {
+function ProjectFilter(
+  props: Readonly<{ onChange: (id: string) => void; projects: readonly Project[]; value: string }>,
+): JSX.Element {
   const { onChange, projects, value } = props;
   return (
     <List.Dropdown onChange={onChange} tooltip="Project" value={value}>
@@ -61,7 +68,10 @@ async function loadProjects(connection: Connection | undefined): Promise<Outcome
   return connection === undefined ? undefined : listProjects(connection.platform);
 }
 
-async function loadIssues(connection: Connection | undefined, projectId: string): Promise<Outcome<readonly Issue[]> | undefined> {
+async function loadIssues(
+  connection: Connection | undefined,
+  projectId: string,
+): Promise<Outcome<readonly Issue[]> | undefined> {
   return connection === undefined ? undefined : listIssues(connection.platform, projectId);
 }
 
@@ -89,7 +99,9 @@ export default function SearchIssues(): JSX.Element {
       filtering
       isLoading={issues.isLoading || projects.isLoading || signIn.kind === "starting" || signIn.kind === "waiting"}
       searchBarAccessory={
-        view.kind === "ready" ? <ProjectFilter onChange={setProjectId} projects={projectList} value={projectId} /> : undefined
+        view.kind === "ready" ? (
+          <ProjectFilter onChange={setProjectId} projects={projectList} value={projectId} />
+        ) : undefined
       }
       searchBarPlaceholder="Search issues by title, message, or service"
     >

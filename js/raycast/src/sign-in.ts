@@ -107,9 +107,7 @@ async function startSignIn(platform: Platform): Promise<SignIn> {
       url: `${platform.origin}/api/auth/device`,
     });
     const authorization = readAuthorization(reply, platform.now());
-    return authorization === undefined
-      ? { kind: "stopped", reason: "invalid" }
-      : { authorization, kind: "waiting" };
+    return authorization === undefined ? { kind: "stopped", reason: "invalid" } : { authorization, kind: "waiting" };
   } catch {
     return { kind: "stopped", reason: "offline" };
   }
@@ -129,7 +127,10 @@ function classify(reply: Reply): Poll {
   return pollOutcomes[code] ?? "invalid";
 }
 
-async function pollOnce(platform: Platform, authorization: Authorization): Promise<Readonly<{ poll: Poll; reply?: Reply }>> {
+async function pollOnce(
+  platform: Platform,
+  authorization: Authorization,
+): Promise<Readonly<{ poll: Poll; reply?: Reply }>> {
   try {
     const reply = await platform.send({
       body: form({ client_id: client.id, device_code: authorization.deviceCode, grant_type: grantType }),
@@ -166,7 +167,9 @@ function turnFor(wait: Wait, poll: Exclude<Poll, "approved">): Turn {
     }
     case "unreachable": {
       const failed = wait.failed + step;
-      return failed >= limits.failedPolls ? { kind: "stopped", reason: "offline" } : { kind: "again", wait: { ...wait, failed } };
+      return failed >= limits.failedPolls
+        ? { kind: "stopped", reason: "offline" }
+        : { kind: "again", wait: { ...wait, failed } };
     }
     case "denied":
     case "expired":
@@ -204,11 +207,4 @@ async function waitForApproval(
   return waitFrom(platform, { authorization, cancelled, failed: none, interval: authorization.interval });
 }
 
-export {
-  type Authorization,
-  type SignIn,
-  type Stop,
-  readAuthorization,
-  startSignIn,
-  waitForApproval,
-};
+export { type Authorization, type SignIn, type Stop, readAuthorization, startSignIn, waitForApproval };

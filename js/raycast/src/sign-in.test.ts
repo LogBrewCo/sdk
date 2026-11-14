@@ -1,7 +1,7 @@
+import type { Authorization, SignIn, Stop } from "./sign-in";
 import { answer, fake, start } from "./fake";
 import { describe, expect, test } from "bun:test";
 import { startSignIn, waitForApproval } from "./sign-in";
-import type { Authorization } from "./sign-in";
 import type { Fake } from "./fake";
 import type { Reply } from "./api";
 import { loadSession } from "./session";
@@ -35,6 +35,10 @@ const authorization: Authorization = {
 function polls(replies: readonly Reply[]): Fake {
   const queue = [...replies];
   return fake(() => queue.shift() ?? answer({ error: "authorization_pending" }, status.badRequest));
+}
+
+function stopped(reason: Stop): SignIn {
+  return { kind: "stopped", reason };
 }
 
 function never(): boolean {
@@ -79,7 +83,7 @@ describe("startSignIn", () => {
     ];
     const results = await Promise.all(unusable.map(async (reply) => startSignIn(fake(() => reply).platform)));
     for (const result of results) {
-      expect(result).toEqual({ kind: "stopped", reason: "invalid" });
+      expect(result).toEqual(stopped("invalid"));
     }
   });
 
@@ -87,7 +91,7 @@ describe("startSignIn", () => {
     const target = fake(() => {
       throw new TypeError("fetch failed");
     });
-    expect(await startSignIn(target.platform)).toEqual({ kind: "stopped", reason: "offline" });
+    expect(await startSignIn(target.platform)).toEqual(stopped("offline"));
   });
 });
 
@@ -108,22 +112,22 @@ describe("waitForApproval", () => {
 
   test("stops when the person denies the sign-in or the code expires", async () => {
     const denied = polls([pending("access_denied")]);
-    expect(await waitForApproval(denied.platform, authorization, never)).toEqual({ kind: "stopped", reason: "denied" });
+    expect(await waitForApproval(denied.platform, authorization, never)).toEqual(stopped("denied"));
     const expired = polls([pending("expired_token")]);
-    expect(await waitForApproval(expired.platform, authorization, never)).toEqual({ kind: "stopped", reason: "expired" });
+    expect(await waitForApproval(expired.platform, authorization, never)).toEqual(stopped("expired"));
     const late = polls([]);
     const soon = { ...authorization, expiresAt: start + second };
-    expect(await waitForApproval(late.platform, soon, never)).toEqual({ kind: "stopped", reason: "expired" });
+    expect(await waitForApproval(late.platform, soon, never)).toEqual(stopped("expired"));
   });
 
   test("stops on an approval without a session", async () => {
     const target = polls([answer({ access_token: "" })]);
-    expect(await waitForApproval(target.platform, authorization, never)).toEqual({ kind: "stopped", reason: "invalid" });
+    expect(await waitForApproval(target.platform, authorization, never)).toEqual(stopped("invalid"));
   });
 
   test("stops as offline after repeated server failures", async () => {
     const target = polls(Array.from({ length: failedPolls }, () => answer(undefined, status.unavailable)));
-    expect(await waitForApproval(target.platform, authorization, never)).toEqual({ kind: "stopped", reason: "offline" });
+    expect(await waitForApproval(target.platform, authorization, never)).toEqual(stopped("offline"));
     expect(target.requests).toHaveLength(failedPolls);
   });
 

@@ -71,7 +71,11 @@ describe("listIssues", () => {
 
 describe("listNewIssues", () => {
   test("counts issues first seen in the last 24 hours", async () => {
-    const rows = [issueRow("old", start - counts.two * day), issueRow("new", start - hour), issueRow("newer", start - second)];
+    const rows = [
+      issueRow("old", start - counts.two * day),
+      issueRow("new", start - hour),
+      issueRow("newer", start - second),
+    ];
     const target = await ready(() => answer(rows));
     const outcome = await listNewIssues(target.platform);
     expect(outcome).toMatchObject({ kind: "ok", value: { capped: false, count: counts.two } });
@@ -81,21 +85,28 @@ describe("listNewIssues", () => {
   test("marks a full page as capped", async () => {
     const rows = Array.from({ length: pageLimit }, (_entry, index) => issueRow(String(index), start));
     const target = await ready(() => answer(rows));
-    expect(await listNewIssues(target.platform)).toMatchObject({ kind: "ok", value: { capped: true, count: pageLimit } });
+    expect(await listNewIssues(target.platform)).toMatchObject({
+      kind: "ok",
+      value: { capped: true, count: pageLimit },
+    });
   });
 });
 
 describe("listRecentErrors", () => {
   test("merges critical and error logs, newest first", async () => {
     const target = await ready((request) =>
-      hasCritical(request) ? answer([logRow("critical", start - hour, "critical")]) : answer([logRow("error", start - second, "error")]),
+      hasCritical(request)
+        ? answer([logRow("critical", start - hour, "critical")])
+        : answer([logRow("error", start - second, "error")]),
     );
     expect(ids(await listRecentErrors(target.platform, "project-1"))).toEqual(["error", "critical"]);
     expect(target.requests).toHaveLength(counts.two);
   });
 
   test("fails when one request fails", async () => {
-    const target = await ready((request) => (hasCritical(request) ? answer([]) : answer(undefined, status.unavailable)));
+    const target = await ready((request) =>
+      hasCritical(request) ? answer([]) : answer(undefined, status.unavailable),
+    );
     expect(await listRecentErrors(target.platform, "project-1")).toEqual({ failure: "unavailable", kind: "failed" });
   });
 });

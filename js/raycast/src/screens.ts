@@ -84,15 +84,28 @@ const empty: Readonly<Record<Topic, Screen>> = {
 };
 
 const unmatched: Readonly<Record<Topic, Screen>> = {
-  errors: { description: "Try other words or another project.", mark: "search", next: "none", title: "No Matching Errors" },
-  issues: { description: "Try other words or another project.", mark: "search", next: "none", title: "No Matching Issues" },
+  errors: {
+    description: "Try other words or another project.",
+    mark: "search",
+    next: "none",
+    title: "No Matching Errors",
+  },
+  issues: {
+    description: "Try other words or another project.",
+    mark: "search",
+    next: "none",
+    title: "No Matching Issues",
+  },
 };
 
 function stoppedScreen(reason: Stop): Screen {
   const screens = {
     denied: { description: "The sign-in was denied. Sign in again and approve it.", title: "Sign-In Denied" },
     expired: { description: "Sign in again and approve within 10 minutes.", title: "Sign-In Code Expired" },
-    invalid: { description: "LogBrew sent an unexpected answer. Update the extension, then retry.", title: "Sign-In Failed" },
+    invalid: {
+      description: "LogBrew sent an unexpected answer. Update the extension, then retry.",
+      title: "Sign-In Failed",
+    },
     offline: { description: "Check your internet connection, then sign in again.", title: "Can't Reach LogBrew" },
   } as const;
   return { ...screens[reason], mark: "problem", next: "signIn" };
@@ -110,7 +123,12 @@ function signInScreen(signIn: SignIn): Screen {
     }
     case "starting":
     case "signedIn": {
-      return { description: "Approve the sign-in there, then come back.", mark: "loading", next: "none", title: "Opening Your Browser…" };
+      return {
+        description: "Approve the sign-in there, then come back.",
+        mark: "loading",
+        next: "none",
+        title: "Opening Your Browser…",
+      };
     }
     case "stopped": {
       return stoppedScreen(signIn.reason);
@@ -246,15 +264,4 @@ function menuOf(result: Outcome<NewIssues> | undefined, loading: boolean): Menu 
   return countMenu(result.value);
 }
 
-export {
-  type Inputs,
-  type Mark,
-  type Menu,
-  type Next,
-  type Screen,
-  type Topic,
-  type View,
-  menuOf,
-  screenOf,
-  viewOf,
-};
+export { type Inputs, type Mark, type Menu, type Next, type Screen, type Topic, type View, menuOf, screenOf, viewOf };
