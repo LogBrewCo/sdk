@@ -31,7 +31,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         npm_versions = {
             "js/logbrew-js/package.json": "0.1.44",
             "js/logbrew-browser/package.json": "0.1.21",
-            "js/logbrew-express/package.json": "0.1.13",
+            "js/logbrew-express/package.json": "0.1.14",
             "js/logbrew-fastify/package.json": "0.1.12",
             "js/logbrew-node/package.json": "0.1.28",
             "js/logbrew-nestjs/package.json": "0.1.12",

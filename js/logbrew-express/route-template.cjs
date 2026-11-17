@@ -164,11 +164,14 @@ function declaredMountTemplate(layer, matched) {
 /**
  * @param {unknown} layer
  * @param {string} path
- * @returns {boolean}
+ * @returns {string | undefined}
  */
-function layerMatches(layer, path) {
+function layerMatch(layer, path) {
   const match = member(layer, "match");
-  return typeof match === "function" && Reflect.apply(match, layer, [path]) === true;
+  /** @type {unknown} */
+  const result = typeof match === "function" ? Reflect.apply(match, layer, [path]) : false;
+  const matched = result === true ? member(layer, "path") : member(result, "path");
+  return typeof matched === "string" ? matched : undefined;
 }
 
 /**
@@ -186,8 +189,8 @@ function childStack(handle) {
  * @returns {Readonly<{ mount: string, rest: string }> | undefined}
  */
 function mountedPart(layer, path) {
-  const matched = member(layer, "path");
-  if (typeof matched !== "string" || !path.startsWith(matched)) {
+  const matched = layerMatch(layer, path);
+  if (matched === undefined || !path.startsWith(matched)) {
     return undefined;
   }
   const mount = declaredMountTemplate(layer, matched);
@@ -204,10 +207,10 @@ function mountedPart(layer, path) {
 function mountPathTo(stack, path, route) {
   for (const layer of stack) {
     const children = childStack(member(layer, "handle"));
-    if (member(layer, "route") === route && layerMatches(layer, path)) {
+    if (member(layer, "route") === route && layerMatch(layer, path) !== undefined) {
       return "";
     }
-    const part = children !== undefined && layerMatches(layer, path) ? mountedPart(layer, path) : undefined;
+    const part = children === undefined ? undefined : mountedPart(layer, path);
     const nested = part === undefined ? undefined : mountPathTo(children ?? [], part.rest, route);
     if (part !== undefined && nested !== undefined) {
       return `${part.mount}${nested}`;
