@@ -659,7 +659,7 @@
       },
       "method": "Express 5 app with the documented middleware, error handler, request user, and Pino capture; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-express",
-      "inputs": "707e4fb7111c9b216fd6e51a8e5d7118d976f49e3d9adcccb792b70a6e1480b9"
+      "inputs": "1898d662dad71aab091863066f17f4de717576fe07b0c9978dfd0ca754085bc2"
     },
     "js/logbrew-fastify": {
       "share": 90.9,
