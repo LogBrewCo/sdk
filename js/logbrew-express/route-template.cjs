@@ -162,14 +162,13 @@ function declaredMountTemplate(layer, matched) {
 }
 
 /**
- * The part of path a layer matched. router 2.2 and earlier return true from layer.match and keep
- * the match on layer.path; router 2.3 (Express 5.3) returns the match, with its path, instead.
  * @param {unknown} layer
  * @param {string} path
  * @returns {string | undefined}
  */
 function layerMatch(layer, path) {
   const match = member(layer, "match");
+  /** @type {unknown} */
   const result = typeof match === "function" ? Reflect.apply(match, layer, [path]) : false;
   const matched = result === true ? member(layer, "path") : member(result, "path");
   return typeof matched === "string" ? matched : undefined;
