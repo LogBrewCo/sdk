@@ -113,7 +113,7 @@ class PersistentClientReportTests(unittest.TestCase):
 
         with (
             patch.object(queue, "save_client_report", side_effect=record_save),
-            patch("logbrew_sdk.time.monotonic", side_effect=[100.0, 100.2, 100.5, 101.1, 101.2] + [102.0] * 10),
+            patch("logbrew_sdk._client.time.monotonic", side_effect=[100.0, 100.2, 100.5, 101.1, 101.2] + [102.0] * 10),
         ):
             for index in range(5):
                 log(client, f"evt_dropped_{index}")

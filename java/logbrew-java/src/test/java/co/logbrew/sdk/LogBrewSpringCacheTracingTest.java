@@ -2,15 +2,14 @@ package co.logbrew.sdk;
 
 import java.time.Instant;
 import java.util.Collection;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCache;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 
@@ -348,24 +347,12 @@ public final class LogBrewSpringCacheTracingTest {
         }
     }
 
-    private static final class FakeCache implements Cache {
-        private final String name;
-        private final Map<Object, Object> values = new LinkedHashMap<>();
+    private static final class FakeCache extends ConcurrentMapCache {
         private CompletableFuture<?> retrieveFuture;
         private RuntimeException getFailure;
 
         private FakeCache(String name) {
-            this.name = name;
-        }
-
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public Object getNativeCache() {
-            return values;
+            super(name);
         }
 
         @Override
@@ -373,31 +360,7 @@ public final class LogBrewSpringCacheTracingTest {
             if (getFailure != null) {
                 throw getFailure;
             }
-            Object value = values.get(key);
-            return value == null ? null : () -> value;
-        }
-
-        @Override
-        public <T> T get(Object key, Class<T> type) {
-            Object value = values.get(key);
-            return value == null ? null : type.cast(value);
-        }
-
-        @Override
-        public <T> T get(Object key, Callable<T> valueLoader) {
-            Object value = values.get(key);
-            if (value != null) {
-                @SuppressWarnings("unchecked")
-                T typed = (T) value;
-                return typed;
-            }
-            try {
-                T loaded = valueLoader.call();
-                values.put(key, loaded);
-                return loaded;
-            } catch (Exception error) {
-                throw new ValueRetrievalException(key, valueLoader, error);
-            }
+            return super.get(key);
         }
 
         @Override
@@ -411,39 +374,6 @@ public final class LogBrewSpringCacheTracingTest {
             Supplier<CompletableFuture<T>> valueLoader
         ) {
             return valueLoader.get();
-        }
-
-        @Override
-        public void put(Object key, Object value) {
-            values.put(key, value);
-        }
-
-        @Override
-        public ValueWrapper putIfAbsent(Object key, Object value) {
-            Object existing = values.putIfAbsent(key, value);
-            return existing == null ? null : () -> existing;
-        }
-
-        @Override
-        public void evict(Object key) {
-            values.remove(key);
-        }
-
-        @Override
-        public boolean evictIfPresent(Object key) {
-            return values.remove(key) != null;
-        }
-
-        @Override
-        public void clear() {
-            values.clear();
-        }
-
-        @Override
-        public boolean invalidate() {
-            boolean hadValues = !values.isEmpty();
-            values.clear();
-            return hadValues;
         }
     }
 }

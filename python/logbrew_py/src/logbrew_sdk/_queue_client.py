@@ -11,14 +11,14 @@ from time import perf_counter, time
 from typing import Any, TypeAlias, TypeVar
 from uuid import uuid4
 
-from logbrew_sdk import (
+from logbrew_sdk import _instrumentation
+from logbrew_sdk._client import (
     LogBrewLoggingHandler,
-    SdkError,
-    _instrumentation,
     create_issue_attributes_from_exception,
     create_traceparent,
     parse_traceparent,
 )
+from logbrew_sdk._errors import SdkError
 from logbrew_sdk._trace_context import (
     LogBrewTraceContext,
     get_active_logbrew_trace,

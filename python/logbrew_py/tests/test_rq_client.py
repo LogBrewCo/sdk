@@ -24,7 +24,9 @@ try:
     from redis import Redis
     from rq import Queue, Retry, SimpleWorker, Worker
 except ImportError:
-    fakeredis = Queue = Redis = Retry = SimpleWorker = Worker = None  # type: ignore[assignment,misc]
+    RQ_INSTALLED = False
+else:
+    RQ_INSTALLED = True
 
 
 _JOB_LOGGER = logging.getLogger("logbrew.tests.rq.jobs")
@@ -148,7 +150,7 @@ class RqOperationSpanTests(contract.QueueFrameworkContract):
         )
         assert_worker_parentage(self, publish_spans, process_spans, logs)
 
-    @unittest.skipIf(Queue is None, "RQ test dependencies are not installed")
+    @unittest.skipUnless(RQ_INSTALLED, "RQ test dependencies are not installed")
     def test_instrumentation_correlates_real_producer_worker_logs_and_failure(
         self,
     ) -> None:

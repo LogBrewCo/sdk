@@ -416,28 +416,25 @@ public final class SpringKafkaApp {
 
     private static final class RecordingKafkaOperations implements InvocationHandler {
         private final CompletableFuture<SendResult<String, String>> future;
-        private ProducerRecord<String, String> sentRecord;
+        private ProducerRecord<?, ?> sentRecord;
         private Optional<LogBrewTraceContext> activeTraceDuringSend = Optional.empty();
 
         private RecordingKafkaOperations(CompletableFuture<SendResult<String, String>> future) {
             this.future = future;
         }
 
-        @SuppressWarnings("unchecked")
         private KafkaOperations<String, String> proxy() {
-            return (KafkaOperations<String, String>) Proxy.newProxyInstance(
-                KafkaOperations.class.getClassLoader(),
-                new Class<?>[] {KafkaOperations.class},
+            return StringKafkaOperations.class.cast(Proxy.newProxyInstance(
+                StringKafkaOperations.class.getClassLoader(),
+                new Class<?>[] {StringKafkaOperations.class},
                 this
-            );
+            ));
         }
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
             if ("send".equals(method.getName()) && args != null && args.length == 1 && args[0] instanceof ProducerRecord) {
-                @SuppressWarnings("unchecked")
-                ProducerRecord<String, String> record = (ProducerRecord<String, String>) args[0];
-                sentRecord = record;
+                sentRecord = (ProducerRecord<?, ?>) args[0];
                 activeTraceDuringSend = LogBrewTrace.current();
                 return future;
             }
@@ -447,25 +444,22 @@ public final class SpringKafkaApp {
 
     private static final class RecordingKafkaProducer implements InvocationHandler {
         private final CompletableFuture<RecordMetadata> future = new CompletableFuture<>();
-        private ProducerRecord<String, String> sentRecord;
+        private ProducerRecord<?, ?> sentRecord;
         private org.apache.kafka.clients.producer.Callback callback;
         private Optional<LogBrewTraceContext> activeTraceDuringSend = Optional.empty();
 
-        @SuppressWarnings("unchecked")
         private Producer<String, String> proxy() {
-            return (Producer<String, String>) Proxy.newProxyInstance(
-                Producer.class.getClassLoader(),
-                new Class<?>[] {Producer.class},
+            return StringProducer.class.cast(Proxy.newProxyInstance(
+                StringProducer.class.getClassLoader(),
+                new Class<?>[] {StringProducer.class},
                 this
-            );
+            ));
         }
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
             if ("send".equals(method.getName()) && args != null && args.length == 2 && args[0] instanceof ProducerRecord) {
-                @SuppressWarnings("unchecked")
-                ProducerRecord<String, String> record = (ProducerRecord<String, String>) args[0];
-                sentRecord = record;
+                sentRecord = (ProducerRecord<?, ?>) args[0];
                 callback = (org.apache.kafka.clients.producer.Callback) args[1];
                 activeTraceDuringSend = LogBrewTrace.current();
                 return future;
@@ -478,6 +472,14 @@ public final class SpringKafkaApp {
             }
             throw new UnsupportedOperationException(method.getName());
         }
+    }
+
+    // A non-generic subtype lets the app cast its JDK proxy with Class.cast.
+    private interface StringKafkaOperations extends KafkaOperations<String, String> {
+    }
+
+    // A non-generic subtype lets the app cast its JDK proxy with Class.cast.
+    private interface StringProducer extends Producer<String, String> {
     }
 }
 JAVA

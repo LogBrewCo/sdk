@@ -1,12 +1,15 @@
 package co.logbrew.sdk
 
 import java.lang.reflect.InvocationHandler
+import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
 private const val KOTLINX_THREAD_CONTEXT_ELEMENT_CLASS = "kotlinx.coroutines.ThreadContextElement"
+
+private val FUNCTION2_INVOKE: Method = Function2::class.java.getMethod("invoke", Any::class.java, Any::class.java)
 
 object LogBrewCoroutines {
     @JvmStatic
@@ -121,13 +124,17 @@ private class LogBrewCoroutineElementHandler(
             else -> throw UnsupportedOperationException("Unsupported LogBrew coroutine object method: ${method.name}")
         }
 
-    @Suppress("UNCHECKED_CAST")
     private fun fold(
         proxy: Any,
         args: Array<out Any?>?,
     ): Any? {
-        val operation = args?.getOrNull(1) as? (Any?, CoroutineContext.Element) -> Any?
-        return operation?.invoke(args.getOrNull(0), proxy as CoroutineContext.Element)
+        val operation = args?.getOrNull(1) as? Function2<*, *, *> ?: return null
+        // A star-projected function type cannot be called directly, so call it through the interface method.
+        return try {
+            FUNCTION2_INVOKE.invoke(operation, args.getOrNull(0), proxy)
+        } catch (error: InvocationTargetException) {
+            throw error.targetException
+        }
     }
 
     private fun plus(

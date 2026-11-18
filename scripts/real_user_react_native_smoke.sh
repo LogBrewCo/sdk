@@ -1338,18 +1338,18 @@ const typedStore: EventStore = {
   purge: () => {},
   close: () => {}
 };
-createLogBrewReactNativeClient({
-  clientKey: "LOGBREW_CLIENT_KEY",
-  eventStore: typedStore,
-  // @ts-expect-error eventStore and persistentQueue are mutually exclusive.
-  persistentQueue: "auto"
-});
-LogBrewReactNative.createLogBrewReactNativeClient({
-  clientKey: "LOGBREW_CLIENT_KEY",
-  eventStore: typedStore,
-  // @ts-expect-error the default export preserves the same mutual exclusion.
-  persistentQueue: "required"
-});
+// A config that sets both eventStore and persistentQueue must not type-check.
+type AcceptsBothStores<Config> = {
+  clientKey: string;
+  eventStore: EventStore;
+  persistentQueue: "auto";
+} extends Config ? true : false;
+const namedExportRejectsBothStores: AcceptsBothStores<Parameters<typeof createLogBrewReactNativeClient>[0]> = false;
+const defaultExportRejectsBothStores: AcceptsBothStores<
+  Parameters<typeof LogBrewReactNative.createLogBrewReactNativeClient>[0]
+> = false;
+void namedExportRejectsBothStores;
+void defaultExportRejectsBothStores;
 typedDeliveryClient.log("evt_typed_delivery", "2026-06-02T10:00:00Z", {
   level: "info",
   message: "typed delivery"

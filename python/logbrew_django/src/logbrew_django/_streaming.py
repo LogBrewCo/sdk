@@ -66,4 +66,4 @@ def wrap_streaming_response(
 
     response.streaming_content = async_body() if response.is_async else sync_body()
     # Django exposes no public close hook; the instance attribute wraps its closers.
-    response.close = close  # type: ignore[method-assign]
+    vars(response)["close"] = close

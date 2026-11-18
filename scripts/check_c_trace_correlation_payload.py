@@ -123,13 +123,17 @@ def main() -> None:
         raise SystemExit("metric is missing its stable meaning")
     require_trace_metadata(metric_attributes, span_id)
 
-    product_metadata = product_action.get("attributes", {}).get("metadata")  # type: ignore[union-attr]
-    network_metadata = network.get("attributes", {}).get("metadata")  # type: ignore[union-attr]
+    product_attributes = product_action.get("attributes", {})
+    network_attributes = network.get("attributes", {})
+    if not isinstance(product_attributes, dict) or not isinstance(network_attributes, dict):
+        raise SystemExit("product action and network attributes must be objects")
+    product_metadata = product_attributes.get("metadata")
+    network_metadata = network_attributes.get("metadata")
     if not isinstance(product_metadata, dict) or product_metadata.get("traceId") != TRACE_ID:
         raise SystemExit("missing product trace metadata")
     if not isinstance(network_metadata, dict) or network_metadata.get("traceId") != TRACE_ID:
         raise SystemExit("missing network trace metadata")
-    if network.get("attributes", {}).get("name") != "POST /api/checkout":  # type: ignore[union-attr]
+    if network_attributes.get("name") != "POST /api/checkout":
         raise SystemExit("network route was not sanitized")
     for key, value in {
         "requestQueuedMs": 1.25,

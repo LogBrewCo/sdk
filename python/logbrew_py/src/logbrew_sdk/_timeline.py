@@ -8,16 +8,16 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
-from logbrew_sdk import (
+from logbrew_sdk._client import (
     ACTION_STATUSES,
     ActionAttributes,
     Metadata,
     MetadataValue,
-    SdkError,
     compact_metadata,
     require_allowed_value,
     require_non_empty,
 )
+from logbrew_sdk._errors import SdkError
 
 HTTP_METHOD_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]*$")
 PRODUCT_ANALYTICS_SCHEMA_VERSION = 1

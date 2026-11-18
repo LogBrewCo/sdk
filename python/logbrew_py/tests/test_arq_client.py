@@ -28,9 +28,9 @@ try:
     from fakeredis.aioredis import FakeRedis
     from redis.asyncio.connection import ConnectionPool
 except ImportError:
-    ArqRedis = FakeRedis = Retry = create_worker = func = timestamp_ms = None  # type: ignore[assignment,misc]
-    JobExecutionFailed = RetryJob = None  # type: ignore[assignment,misc]
-    abort_jobs_ss = job_key_prefix = result_key_prefix = ""
+    ARQ_INSTALLED = False
+else:
+    ARQ_INSTALLED = True
 
 _LOGGER = logging.getLogger("logbrew.tests.arq.jobs")
 
@@ -59,7 +59,7 @@ async def retrying_job(ctx: dict[str, Any], private_argument: str) -> None:
         raise Retry(defer=0)
 
 
-@unittest.skipIf(ArqRedis is None, "ARQ test dependencies are not installed")
+@unittest.skipUnless(ARQ_INSTALLED, "ARQ test dependencies are not installed")
 class ArqInstrumentationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         fake = FakeRedis()

@@ -712,7 +712,7 @@ class LogBrewSdkTests(unittest.TestCase):
                     "2026-06-02T10:00:06Z",
                     {
                         "name": "queue.depth",
-                        "description": description,  # type: ignore[typeddict-item]
+                        "description": cast(Any, description),
                         "kind": "gauge",
                         "value": 2,
                         "unit": "{items}",
@@ -845,7 +845,7 @@ class LogBrewSdkTests(unittest.TestCase):
 
     def test_timeline_helpers_reject_invalid_inputs(self) -> None:
         with self.assertRaisesRegex(SdkError, "product action must be a string or object"):
-            create_product_action_attributes(123)  # type: ignore[arg-type]
+            create_product_action_attributes(cast(Any, 123))
         with self.assertRaisesRegex(SdkError, "network milestone statusCode must be an integer from 100 to 599"):
             create_network_milestone_attributes({"routeTemplate": "/payments/:id", "statusCode": 99})
         with self.assertRaisesRegex(SdkError, "network milestone method must be a valid HTTP method"):
@@ -1062,7 +1062,7 @@ class LogBrewSdkTests(unittest.TestCase):
             requests.append((request, timeout))
             return response
 
-        with patch("logbrew_sdk.distribution_version", return_value="9.8.7"):
+        with patch("logbrew_sdk._client.distribution_version", return_value="9.8.7"):
             transport = HttpTransport(
                 endpoint="http://127.0.0.1:9/v1/events",
                 headers={"x-logbrew-source": "unit-test"},
@@ -1094,11 +1094,11 @@ class LogBrewSdkTests(unittest.TestCase):
 
         with (
             patch(
-                "logbrew_sdk.distribution_version",
+                "logbrew_sdk._client.distribution_version",
                 side_effect=AssertionError("custom user agent must skip package lookup"),
             ),
             patch(
-                "logbrew_sdk._default_http_ssl_context",
+                "logbrew_sdk._client._default_http_ssl_context",
                 side_effect=AssertionError("custom opener must skip default TLS setup"),
             ),
         ):
@@ -1120,7 +1120,7 @@ class LogBrewSdkTests(unittest.TestCase):
             return StubHttpResponse(202)
 
         with patch(
-            "logbrew_sdk.distribution_version",
+            "logbrew_sdk._client.distribution_version",
             side_effect=PackageNotFoundError,
         ):
             transport = HttpTransport(
@@ -1133,14 +1133,14 @@ class LogBrewSdkTests(unittest.TestCase):
         self.assertEqual(headers["user-agent"], "logbrew-sdk-python")
 
     def test_client_defaults_sdk_identity_to_installed_package(self) -> None:
-        with patch("logbrew_sdk.distribution_version", return_value="9.8.7") as version:
+        with patch("logbrew_sdk._client.distribution_version", return_value="9.8.7") as version:
             client = LogBrewClient.create(api_key="LOGBREW_API_KEY")
 
         version.assert_called_once_with("logbrew-sdk")
         self.assertEqual(client.sdk, {"name": "logbrew-sdk", "language": "python", "version": "9.8.7"})
 
     def test_client_defaults_sdk_version_without_package_metadata(self) -> None:
-        with patch("logbrew_sdk.distribution_version", side_effect=PackageNotFoundError):
+        with patch("logbrew_sdk._client.distribution_version", side_effect=PackageNotFoundError):
             client = LogBrewClient.create(api_key="LOGBREW_API_KEY")
 
         self.assertEqual(client.sdk["version"], "0+unknown")
@@ -1166,9 +1166,9 @@ class LogBrewSdkTests(unittest.TestCase):
             return StubHttpResponse(202)
 
         with (
-            patch("logbrew_sdk.urlopen", side_effect=open_url),
+            patch("logbrew_sdk._client.urlopen", side_effect=open_url),
             patch(
-                "logbrew_sdk._default_http_ssl_context",
+                "logbrew_sdk._client._default_http_ssl_context",
                 return_value=tls_context,
             ) as create_context,
         ):
@@ -1200,13 +1200,13 @@ class LogBrewSdkTests(unittest.TestCase):
             return StubHttpResponse(202)
 
         with (
-            patch("logbrew_sdk.urlopen", side_effect=open_url),
+            patch("logbrew_sdk._client.urlopen", side_effect=open_url),
             patch(
-                "logbrew_sdk.truststore.SSLContext",
+                "logbrew_sdk._client.truststore.SSLContext",
                 return_value=tls_context,
             ) as create_native_context,
             patch(
-                "logbrew_sdk.certifi.where",
+                "logbrew_sdk._client.certifi.where",
                 return_value="CERTIFI_CA_BUNDLE",
             ) as certifi_bundle,
         ):

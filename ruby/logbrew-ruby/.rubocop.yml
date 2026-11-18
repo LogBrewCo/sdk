@@ -1,0 +1,13 @@
+# The SDK wraps application code: Rails requests and jobs, Sidekiq jobs, and
+# worker runs. It records every exception that leaves that code, including
+# signals and exits, and then raises the same exception object again, so
+# nothing is swallowed. Lint/RescueException cannot tell a rescue that
+# re-raises from one that swallows, so it does not apply to these wrappers.
+# The Sidekiq test helper returns any raised object, an Interrupt included,
+# so that the tests can check that the SDK re-raised that same object.
+Lint/RescueException:
+  Exclude:
+    - lib/logbrew/rails_integration.rb
+    - lib/logbrew/sidekiq.rb
+    - lib/logbrew/worker_lifecycle.rb
+    - tests/sidekiq.rb

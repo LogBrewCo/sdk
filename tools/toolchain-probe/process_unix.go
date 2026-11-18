@@ -21,7 +21,7 @@ const (
 func openCheckInput(path string) (*os.File, error) {
 	// Reviewed 2026-09-05: the local checker intentionally reads its input path.
 	// Its descriptor must be regular, bounded, nonblocking, and never echoed.
-	//nolint:gosec // G304: file-limit, FIFO, and non-reflection tests cover this boundary.
+	// File-limit, FIFO, and non-reflection tests cover this boundary.
 	input, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open package input: %w", err)
@@ -65,7 +65,7 @@ func executeLimited(arguments []string) int {
 		return exitFailure
 	}
 	// Reviewed 2026-09-03: runDeadline validates and bounds this exact command.
-	//nolint:gosec // G204: execution is inside the owned limited process group.
+	// Execution is inside the owned limited process group.
 	if err = syscall.Exec(arguments[1], arguments[1:], os.Environ()); err != nil {
 		return exitFailure
 	}

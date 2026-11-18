@@ -31,7 +31,7 @@ module LogBrew
           result = yield
           finish
           result
-        rescue Exception => error # rubocop:disable Lint/RescueException
+        rescue Exception => error
           finish(error: error, terminal_failure: terminal_failure)
           raise
         end

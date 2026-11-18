@@ -10,12 +10,8 @@ from datetime import datetime, timezone
 from types import TracebackType
 from uuid import uuid4
 
-from logbrew_sdk import (
-    LogBrewClient,
-    SdkError,
-    Transport,
-    create_issue_attributes_from_exception,
-)
+from logbrew_sdk._client import LogBrewClient, Transport, create_issue_attributes_from_exception
+from logbrew_sdk._errors import SdkError
 
 DEFAULT_FLUSH_TIMEOUT_SECONDS = 2.0
 MAX_FLUSH_TIMEOUT_SECONDS = 30.0

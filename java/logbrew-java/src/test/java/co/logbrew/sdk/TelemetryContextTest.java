@@ -40,7 +40,6 @@ public final class TelemetryContextTest {
         testsRun++;
     }
 
-    @SuppressWarnings("unchecked")
     private void testClientAndEventContextsMergeAndDetachInputs() {
         Map<String, String> clientTags = new LinkedHashMap<>();
         clientTags.put("plan", "team");
@@ -78,7 +77,7 @@ public final class TelemetryContextTest {
         eventTags.put("operation", "mutated");
         TelemetryContext merged = TelemetryContext.merge(clientContext, eventContext);
         Map<String, Object> value = merged.asMap();
-        Map<String, Object> resource = (Map<String, Object>) value.get("resource");
+        Map<?, ?> resource = (Map<?, ?>) value.get("resource");
         assertEquals(
             Map.of("name", "checkout-api", "version", "1.5.0"),
             resource.get("service"),
@@ -192,7 +191,6 @@ public final class TelemetryContextTest {
         testsRun++;
     }
 
-    @SuppressWarnings("unchecked")
     private void testTraceHelpersPromoteExactCorrelation() {
         LogBrewTraceContext trace = LogBrewTraceContext.create(
             "4BF92F3577B34DA6A3CE929D0E0E4736",
@@ -202,7 +200,7 @@ public final class TelemetryContextTest {
         );
         TelemetryContext shared = TelemetryContext.builder().tag("operation", "checkout").build();
         TelemetryContext traced = LogBrewTrace.contextWithTrace(trace, shared);
-        Map<String, Object> traceValue = (Map<String, Object>) traced.asMap().get("trace");
+        Map<?, ?> traceValue = (Map<?, ?>) traced.asMap().get("trace");
         assertEquals(trace.traceId(), traceValue.get("traceId"), "trace id");
         assertEquals(trace.spanId(), traceValue.get("spanId"), "span id");
         assertEquals(trace.parentSpanId(), traceValue.get("parentSpanId"), "parent span id");

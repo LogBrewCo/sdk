@@ -57,7 +57,7 @@ func (expression schemaRegexp) MatchString(value string) bool {
 
 // Reviewed 2026-09-05: RegexpEngine requires this interface-returning signature.
 //
-//nolint:ireturn // Canonical-schema, offline-reference, and timeout tests cover the returned adapter.
+// Canonical-schema, offline-reference, and timeout tests cover the returned adapter.
 func (checker *checkedSchema) compileRegexp(pattern string) (jsonschema.Regexp, error) {
 	if len(pattern) > schemaPatternLimit {
 		return nil, errCheckRegex

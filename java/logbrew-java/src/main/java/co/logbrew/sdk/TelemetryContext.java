@@ -43,14 +43,14 @@ public final class TelemetryContext {
 
         Map<String, Object> merged = new LinkedHashMap<>();
         merged.put("schemaVersion", Integer.valueOf(1));
-        Map<String, Object> resource = mergeResources(section(client, "resource"), section(event, "resource"));
+        Map<Object, Object> resource = mergeResources(section(client, "resource"), section(event, "resource"));
         if (resource != null) {
             merged.put("resource", resource);
         }
         putReplacement(merged, "trace", client, event);
         putReplacement(merged, "session", client, event);
         putReplacement(merged, "subject", client, event);
-        Map<String, Object> tags = mergeFlatMaps(section(client, "tags"), section(event, "tags"));
+        Map<Object, Object> tags = mergeFlatMaps(section(client, "tags"), section(event, "tags"));
         if (tags != null) {
             requireTagCount(tags.size());
             merged.put("tags", tags);
@@ -92,15 +92,14 @@ public final class TelemetryContext {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> section(TelemetryContext context, String key) {
+    private static Map<?, ?> section(TelemetryContext context, String key) {
         Object value = context.value.get(key);
-        return value instanceof Map<?, ?> ? (Map<String, Object>) value : null;
+        return value instanceof Map<?, ?> ? (Map<?, ?>) value : null;
     }
 
-    private static Map<String, Object> mergeResources(
-        Map<String, Object> client,
-        Map<String, Object> event
+    private static Map<Object, Object> mergeResources(
+        Map<?, ?> client,
+        Map<?, ?> event
     ) {
         if (client == null) {
             return event == null ? null : TelemetryValues.mutableMap(event);
@@ -108,13 +107,11 @@ public final class TelemetryContext {
         if (event == null) {
             return TelemetryValues.mutableMap(client);
         }
-        Map<String, Object> merged = new LinkedHashMap<>();
+        Map<Object, Object> merged = new LinkedHashMap<>();
         for (String section : RESOURCE_SECTIONS) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> clientSection = (Map<String, Object>) client.get(section);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> eventSection = (Map<String, Object>) event.get(section);
-            Map<String, Object> value = mergeFlatMaps(clientSection, eventSection);
+            Map<?, ?> clientSection = (Map<?, ?>) client.get(section);
+            Map<?, ?> eventSection = (Map<?, ?>) event.get(section);
+            Map<Object, Object> value = mergeFlatMaps(clientSection, eventSection);
             if (value != null) {
                 merged.put(section, value);
             }
@@ -122,11 +119,11 @@ public final class TelemetryContext {
         return merged;
     }
 
-    private static Map<String, Object> mergeFlatMaps(Map<String, Object> client, Map<String, Object> event) {
+    private static Map<Object, Object> mergeFlatMaps(Map<?, ?> client, Map<?, ?> event) {
         if (client == null) {
-            return event == null ? null : new LinkedHashMap<>(event);
+            return event == null ? null : new LinkedHashMap<Object, Object>(event);
         }
-        Map<String, Object> merged = new LinkedHashMap<>(client);
+        Map<Object, Object> merged = new LinkedHashMap<Object, Object>(client);
         if (event != null) {
             merged.putAll(event);
         }
@@ -139,12 +136,12 @@ public final class TelemetryContext {
         TelemetryContext client,
         TelemetryContext event
     ) {
-        Map<String, Object> value = section(event, key);
+        Map<?, ?> value = section(event, key);
         if (value == null) {
             value = section(client, key);
         }
         if (value != null) {
-            target.put(key, new LinkedHashMap<>(value));
+            target.put(key, new LinkedHashMap<Object, Object>(value));
         }
     }
 

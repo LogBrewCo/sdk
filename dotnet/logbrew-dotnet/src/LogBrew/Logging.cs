@@ -160,7 +160,6 @@ namespace LogBrew
                 {
                     options.OnError?.Invoke(error);
                 }
-#pragma warning disable CA1031
                 catch (Exception error)
                 {
                     options.OnError?.Invoke(error);

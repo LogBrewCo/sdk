@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, TypeAlias, cast
 
-from logbrew_sdk import SdkError, _instrumentation
+from logbrew_sdk import _instrumentation
+from logbrew_sdk._errors import SdkError
 from logbrew_sdk._span_events import SPAN_LINK_LIMIT, SpanAttributes
 from logbrew_sdk._trace_context import (
     OPEN_TELEMETRY_SPAN_ID_MAX,

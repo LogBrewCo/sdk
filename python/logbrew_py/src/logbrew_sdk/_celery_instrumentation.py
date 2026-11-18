@@ -10,12 +10,13 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Any
 
-from logbrew_sdk import SdkError, _instrumentation
+from logbrew_sdk import _instrumentation
 from logbrew_sdk._celery_client import (
     _safe_celery_queue_name,
     _safe_task_label,
     logbrew_trace_context_from_celery_headers,
 )
+from logbrew_sdk._errors import SdkError
 from logbrew_sdk._queue_client import (
     _queue_trace_carrier,
     _QueueInstrumentationConfig,

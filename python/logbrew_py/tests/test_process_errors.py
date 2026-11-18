@@ -11,7 +11,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from logbrew_sdk import LogBrewClient, RecordingTransport, SdkError, install_process_error_capture
 
@@ -178,7 +178,7 @@ class ProcessErrorCaptureInstallTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(SdkError):
                 install_process_error_capture(self.client(), **kwargs)
         with self.assertRaises(SdkError):
-            install_process_error_capture(object())  # type: ignore[arg-type]
+            install_process_error_capture(cast(Any, object()))
 
 
 if __name__ == "__main__":

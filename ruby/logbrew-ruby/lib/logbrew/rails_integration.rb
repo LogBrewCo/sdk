@@ -574,7 +574,7 @@ module LogBrew
         result = Trace.with_context(@context) { yield }
         finish
         result
-      rescue Exception => error # rubocop:disable Lint/RescueException
+      rescue Exception => error
         finish(error)
         raise
       end
@@ -691,7 +691,7 @@ module LogBrew
         @logbrew_perform_operation = operation
         begin
           Trace.with_context(operation.context) { super }
-        rescue Exception => error # rubocop:disable Lint/RescueException
+        rescue Exception => error
           operation.finish(error)
           operation.capture_terminal_issue(error)
           raise

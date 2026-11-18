@@ -14,7 +14,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
+from weakref import WeakKeyDictionary
 
+from logbrew_sdk._instrumentation import patch_instance_attributes
 from logbrew_sdk._issue_diagnostics import MAX_ISSUE_BREADCRUMBS, _validate_breadcrumb
 from logbrew_sdk._trace_context import get_active_logbrew_trace
 
@@ -38,6 +40,8 @@ _recording = threading.local()
 _installed: list[bool] = []
 # LogBrew's own delivery requests are not application breadcrumbs.
 _ignored_urls: set[str] = set()
+# The method and URL of the request each http.client connection sent last, read when its response arrives.
+_started_requests: WeakKeyDictionary[http.client.HTTPConnection, tuple[str, str | None] | None] = WeakKeyDictionary()
 
 
 def add_logbrew_breadcrumb(breadcrumb: Mapping[str, Any]) -> None:
@@ -135,7 +139,7 @@ def _patch_logging() -> None:
         finally:
             breadcrumb_handler.handle(record)
 
-    logging.Logger.callHandlers = call_handlers  # type: ignore[method-assign]
+    patch_instance_attributes(logging.Logger, {"callHandlers": call_handlers})
 
 
 def _record_request(method: str, url: object, status: int | None, failed: bool = False) -> None:
@@ -203,11 +207,11 @@ def _patch_http_client() -> None:
     def putrequest(self: http.client.HTTPConnection, method: str, url: str, *args: Any, **kwargs: Any) -> Any:
         with suppress(Exception):
             target = _connection_url(self, url)
-            self._logbrew_breadcrumb = None if target in _ignored_urls else (method, target)  # type: ignore[attr-defined]
+            _started_requests[self] = None if target in _ignored_urls else (method, target)
         return original_putrequest(self, method, url, *args, **kwargs)
 
     def getresponse(self: http.client.HTTPConnection) -> http.client.HTTPResponse:
-        started: tuple[str, str | None] | None = getattr(self, "_logbrew_breadcrumb", None)
+        started = _started_requests.get(self)
         try:
             response = original_getresponse(self)
         except Exception:
@@ -218,8 +222,7 @@ def _patch_http_client() -> None:
             add_logbrew_breadcrumb(_http_breadcrumb(started[0], started[1], response.status))
         return response
 
-    http.client.HTTPConnection.putrequest = putrequest  # type: ignore[method-assign]
-    http.client.HTTPConnection.getresponse = getresponse  # type: ignore[method-assign]
+    patch_instance_attributes(http.client.HTTPConnection, {"putrequest": putrequest, "getresponse": getresponse})
 
 
 def ignore_breadcrumb_url(url: str) -> None:

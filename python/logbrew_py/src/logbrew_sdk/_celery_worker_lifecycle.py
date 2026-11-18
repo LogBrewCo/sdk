@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, cast
 
-from logbrew_sdk import SdkError, TransportResponse, _instrumentation
+from logbrew_sdk import _instrumentation
 from logbrew_sdk._celery_instrumentation import (
     LogBrewCeleryInstrumentation,
     _existing_instrumentation,
@@ -22,6 +22,8 @@ from logbrew_sdk._celery_instrumentation import (
     _notify_capture_error,
     _remember_worker_lifecycle,
 )
+from logbrew_sdk._client import TransportResponse
+from logbrew_sdk._errors import SdkError
 from logbrew_sdk._queue_client import _QueueInstrumentationConfig
 
 _DEFAULT_MAX_IN_FLIGHT_TASKS = 1024

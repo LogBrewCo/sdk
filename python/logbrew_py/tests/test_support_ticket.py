@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from typing import Any, cast
 
 from logbrew_sdk import SdkError, create_support_ticket_draft
 
@@ -27,7 +28,7 @@ class SupportTicketDraftTests(unittest.TestCase):
                 "access_token": "hidden",
                 "cookie_header": "cookie=hidden",
                 "endpoint": "https://api.example.test/v1/events?debug=true#frag",
-                "local_path": "/Users/example/service/app.py",
+                "local_path": "/Users/dev/service/app.py",
                 "headers": {"Authorization": "Bearer hidden", "x-request-id": "req_123"},
                 "events": [{"token": "hidden"}, {"ok": True}],
                 "error": RuntimeError("private failure message"),
@@ -66,14 +67,14 @@ class SupportTicketDraftTests(unittest.TestCase):
         serialized = json.dumps(draft, sort_keys=True)
         self.assertNotIn("hidden", serialized)
         self.assertNotIn("api.example.test", serialized)
-        self.assertNotIn("/Users/example", serialized)
+        self.assertNotIn("/Users/dev/", serialized)
         self.assertNotIn("private failure", serialized)
         self.assertNotIn("Authorization: Bearer", serialized)
 
     def test_rejects_invalid_contract_inputs(self) -> None:
         with self.assertRaisesRegex(SdkError, "support ticket source must be one of: cli, docs, mobile, sdk, website"):
             create_support_ticket_draft(
-                source="desktop",  # type: ignore[arg-type]
+                source=cast(Any, "desktop"),
                 category="sdk_install_failure",
                 title="Install failed",
                 description="Import failed",
@@ -92,7 +93,7 @@ class SupportTicketDraftTests(unittest.TestCase):
                 category="sdk_install_failure",
                 title="Install failed",
                 description="Import failed",
-                diagnostics=["not", "an", "object"],  # type: ignore[arg-type]
+                diagnostics=cast(Any, ["not", "an", "object"]),
             )
 
 

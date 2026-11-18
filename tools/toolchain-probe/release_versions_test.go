@@ -113,7 +113,7 @@ func TestReleaseVersionsCommand(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // Swaps the embedded catalog.
+// Swaps the embedded catalog.
 func TestReleaseVersionsCatalogFailure(t *testing.T) {
 	original := releaseCatalogText
 	releaseCatalogText = "repo_wide = [[\"npm\"]]\n"

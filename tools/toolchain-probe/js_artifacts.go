@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/sha1" //nolint:gosec // G505: UUID version 5 is defined over SHA-1.
+	"crypto/sha1" // UUID version 5 is defined over SHA-1.
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -346,7 +346,7 @@ func (artifact *jsArtifact) plan(strip bool, prefixes []string) (map[string]any,
 			}
 			digest := sha256.Sum256([]byte(artifact.relative + "\x00" + jsDebugIDPattern.ReplaceAllLiteralString(
 				artifact.source, "") + "\x00" + text))
-			name := sha1.Sum(append(slices.Clone(jsDebugIDNamespace), hex.EncodeToString(digest[:])...)) //nolint:gosec
+			name := sha1.Sum(append(slices.Clone(jsDebugIDNamespace), hex.EncodeToString(digest[:])...))
 			name[6], name[8] = name[6]&0x0f|0x50, name[8]&0x3f|0x80
 			debugID = fmt.Sprintf("%x-%x-%x-%x-%x", name[:4], name[4:6], name[6:8], name[8:10], name[10:16])
 		}

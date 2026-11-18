@@ -21,7 +21,7 @@ end
 
 def capture_exception
   yield
-rescue Exception => error # rubocop:disable Lint/RescueException
+rescue Exception => error
   error
 end
 

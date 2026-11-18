@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
 using LogBrew;
@@ -363,7 +364,6 @@ static void Require(bool condition, string message)
     }
 }
 
-#pragma warning disable CS8764, CS8765
 internal sealed class TestDbCommand : DbCommand
 {
     public TestDbCommand(DbConnection connection)
@@ -371,6 +371,7 @@ internal sealed class TestDbCommand : DbCommand
         DbConnection = connection;
     }
 
+    [AllowNull]
     public override string CommandText { get; set; } = string.Empty;
 
     public override int CommandTimeout { get; set; }
@@ -418,6 +419,7 @@ internal sealed class TestDbCommand : DbCommand
 
 internal sealed class TestDbConnection : DbConnection
 {
+    [AllowNull]
     public override string ConnectionString { get; set; } = "Data Source=redacted;Pass" + "word=sample";
 
     public override string Database => "checkout";
