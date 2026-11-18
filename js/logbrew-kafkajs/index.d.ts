@@ -5,7 +5,8 @@ import type {
   Producer,
   ProducerBatch,
   ProducerRecord,
-  RecordMetadata
+  RecordMetadata,
+  logCreator
 } from "kafkajs";
 import type { QueueBatchOperationWithLogBrewSpanOptions, QueueOperationWithLogBrewSpanOptions } from "@logbrew/node";
 import type { LogBrewClient } from "@logbrew/sdk";
@@ -103,9 +104,13 @@ declare function createLogBrewKafkaJsMessage<TMessage extends LogBrewKafkaJsMess
   traceparent?: string
 ): TMessage & { headers?: LogBrewKafkaJsHeaders };
 
+/** A KafkaJS logCreator that sends each KafkaJS log line as a LogBrew log on the active trace. */
+declare function createLogBrewKafkaJsLogCreator(options: { readonly client: LogBrewClient }): logCreator;
+
 declare function extractLogBrewKafkaJsTraceparent(message?: { readonly headers?: ReadonlyHeaders }): string | undefined;
 
 declare const api: {
+  createLogBrewKafkaJsLogCreator: typeof createLogBrewKafkaJsLogCreator;
   createLogBrewKafkaJsMessage: typeof createLogBrewKafkaJsMessage;
   createLogBrewKafkaJsProducerBatch: typeof createLogBrewKafkaJsProducerBatch;
   createLogBrewKafkaJsProducerRecord: typeof createLogBrewKafkaJsProducerRecord;
@@ -129,6 +134,7 @@ export type {
   LogBrewKafkaJsSendOptions
 };
 export {
+  createLogBrewKafkaJsLogCreator,
   createLogBrewKafkaJsMessage,
   createLogBrewKafkaJsProducerBatch,
   createLogBrewKafkaJsProducerRecord,

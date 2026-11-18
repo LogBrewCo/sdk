@@ -293,9 +293,11 @@ module.exports = {
   hasClient,
   isRecord,
   notifyFailure,
+  notifyQuietly,
   nowMs,
   pathOnly,
   primitiveMetadata,
   slugify,
-  spanEvents
+  spanEvents,
+  spanTimestamp
 };

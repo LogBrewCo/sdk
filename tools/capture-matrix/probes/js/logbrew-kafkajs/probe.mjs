@@ -1,11 +1,12 @@
 import { Kafka, logLevel } from "kafkajs";
 import { createLogBrewNodeClient, createLogBrewTraceContext, runWithLogBrewTrace, setLogBrewUser } from "@logbrew/node";
-import { instrumentLogBrewKafkaJsConsumer, instrumentLogBrewKafkaJsProducer } from "@logbrew/kafkajs";
+import { createLogBrewKafkaJsLogCreator, instrumentLogBrewKafkaJsConsumer, instrumentLogBrewKafkaJsProducer } from "@logbrew/kafkajs";
 
 process.env.LOGBREW_RELEASE = "checkout@1.2.3";
 process.env.LOGBREW_ENVIRONMENT = "production";
 process.env.LOGBREW_SERVICE_NAME = "checkout-worker";
-const kafka = new Kafka({ brokers: ["127.0.0.1:9"], clientId: "checkout-worker", logLevel: logLevel.INFO });
+const client = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", endpoint: process.env.LOGBREW_CAPTURE_ENDPOINT });
+const kafka = new Kafka({ brokers: ["127.0.0.1:9"], clientId: "checkout-worker", logLevel: logLevel.INFO, logCreator: createLogBrewKafkaJsLogCreator({ client }) });
 const logger = kafka.logger();
 
 // No Kafka broker runs here, so the producer and consumer are in-memory stand-ins with the KafkaJS
@@ -32,7 +33,6 @@ const consumer = {
   }
 };
 
-const client = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", endpoint: process.env.LOGBREW_CAPTURE_ENDPOINT });
 const producerTracing = instrumentLogBrewKafkaJsProducer(producer, { client });
 const consumerTracing = instrumentLogBrewKafkaJsConsumer(consumer, { client });
 

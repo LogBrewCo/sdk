@@ -91,6 +91,18 @@ function createBreadcrumbProvider(activeTraceProvider) {
 }
 
 /**
+ * @param {object} child
+ * @param {unknown} parent
+ * @returns {void}
+ */
+function inheritBreadcrumbs(child, parent) {
+  const ring = isObjectLike(parent) ? traceRings.get(parent) : undefined;
+  if (ring !== undefined) {
+    traceRings.set(child, { breadcrumbs: [...ring.breadcrumbs], truncated: ring.truncated });
+  }
+}
+
+/**
  * @param {unknown} value
  * @returns {void}
  */
@@ -409,4 +421,4 @@ function installAutomaticBreadcrumbs(activeTraceProvider) {
   installPinoBreadcrumbs(add);
 }
 
-module.exports = { addLogBrewBreadcrumb, createBreadcrumbProvider, ignoreBreadcrumbUrl, installAutomaticBreadcrumbs };
+module.exports = { addLogBrewBreadcrumb, createBreadcrumbProvider, ignoreBreadcrumbUrl, inheritBreadcrumbs, installAutomaticBreadcrumbs };

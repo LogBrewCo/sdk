@@ -855,8 +855,11 @@ if (instrumentationClient.pendingEvents() !== 0) {
   throw new Error("instrumented SQS client queue did not drain");
 }
 
-const highVolumeSqsSpans = 1200;
+const highVolumeSqsSpans = 600;
 const maxQueueSize = 1000;
+const eventsPerSend = 2;
+const expectedSqsDrops = highVolumeSqsSpans * eventsPerSend - maxQueueSize;
+const acceptedSqsSends = maxQueueSize / eventsPerSend;
 const sqsDrops = [];
 const highVolumeClient = LogBrewClient.create({
   apiKey: "LOGBREW_SERVER_API_KEY",
@@ -911,13 +914,13 @@ if (highVolumeSendCount !== highVolumeSqsSpans) {
 if (highVolumeClient.pendingEvents() !== maxQueueSize) {
   throw new Error(`expected bounded SQS queue size ${maxQueueSize}, got ${highVolumeClient.pendingEvents()}`);
 }
-if (highVolumeClient.droppedEvents() !== highVolumeSqsSpans - maxQueueSize) {
-  throw new Error(`expected ${highVolumeSqsSpans - maxQueueSize} SQS drops, got ${highVolumeClient.droppedEvents()}`);
+if (highVolumeClient.droppedEvents() !== expectedSqsDrops) {
+  throw new Error(`expected ${expectedSqsDrops} SQS drops, got ${highVolumeClient.droppedEvents()}`);
 }
-if (sqsDrops.length !== highVolumeSqsSpans - maxQueueSize) {
-  throw new Error(`expected ${highVolumeSqsSpans - maxQueueSize} SQS drop callbacks, got ${sqsDrops.length}`);
+if (sqsDrops.length !== expectedSqsDrops) {
+  throw new Error(`expected ${expectedSqsDrops} SQS drop callbacks, got ${sqsDrops.length}`);
 }
-if (sqsDrops[0].eventId !== "evt_sqs_high_load_1000" || sqsDrops[0].eventType !== "span" || sqsDrops[0].reason !== "queue_overflow") {
+if (sqsDrops[0].eventId !== "evt_sqs_high_load_0500" || sqsDrops[0].eventType !== "span" || sqsDrops[0].reason !== "queue_overflow") {
   throw new Error(`unexpected first SQS drop callback: ${JSON.stringify(sqsDrops[0])}`);
 }
 
@@ -955,9 +958,14 @@ const acceptedSqsEvents = highVolumeEvents.slice(1).flatMap((payload) => payload
 if (acceptedSqsEvents.length !== maxQueueSize) {
   throw new Error(`expected ${maxQueueSize} high-volume SQS events, got ${acceptedSqsEvents.length}`);
 }
-for (let index = 0; index < acceptedSqsEvents.length; index += 1) {
+const acceptedSqsSpans = acceptedSqsEvents.filter((event) => event.type === "span");
+const acceptedSqsMetrics = acceptedSqsEvents.filter((event) => event.type === "metric" && event.attributes.name === "messaging.client.operation.duration");
+if (acceptedSqsSpans.length !== acceptedSqsSends || acceptedSqsMetrics.length !== acceptedSqsSends) {
+  throw new Error(`expected one span and one duration metric per accepted SQS send, got ${acceptedSqsSpans.length} and ${acceptedSqsMetrics.length}`);
+}
+for (let index = 0; index < acceptedSqsSpans.length; index += 1) {
   const expectedId = `evt_sqs_high_load_${index.toString().padStart(4, "0")}`;
-  if (acceptedSqsEvents[index].id !== expectedId) {
+  if (acceptedSqsSpans[index].id !== expectedId) {
     throw new Error(`high-volume SQS event order mismatch at ${index}`);
   }
 }
@@ -975,13 +983,13 @@ for (const forbidden of [
   "burst-msg",
   "123456789012",
   "sqs.us-east-1.amazonaws.com",
-  "evt_sqs_high_load_1000"
+  "evt_sqs_high_load_0500"
 ]) {
   if (highVolumePayloadText.includes(forbidden)) {
     throw new Error(`high-volume SQS payload leaked ${forbidden}`);
   }
 }
-for (const expected of ["aws_sqs", "orders", "publish", "evt_sqs_high_load_0000", "evt_sqs_high_load_0999"]) {
+for (const expected of ["aws_sqs", "orders", "publish", "evt_sqs_high_load_0000", "evt_sqs_high_load_0499"]) {
   if (!highVolumePayloadText.includes(expected)) {
     throw new Error(`high-volume SQS payload missing ${expected}`);
   }
@@ -1005,4 +1013,4 @@ EOF
 
 node smoke.mjs
 
-echo "aws sqs real-user smoke ok: 1200 sends, 1000 flushed, 200 dropped, batches=10, retryAttempts=11"
+echo "aws sqs real-user smoke ok: 600 sends, 1000 events flushed, 200 dropped, batches=10, retryAttempts=11"

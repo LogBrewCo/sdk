@@ -339,6 +339,10 @@ assertEqual(createSpan.attributes.metadata.sampled, true, "sampled");
 assertEqual(findManySpan.attributes.metadata.rowCount, 1, "findMany row count");
 assertEqual(errorSpan.attributes.metadata.errorType, duplicateError.constructor.name, "error type");
 assertEqual(errorSpan.attributes.events[0].metadata.exceptionType, duplicateError.constructor.name, "exception span event type");
+const duplicateIssue = findEvent(events, (event) => event.type === "issue");
+assertEqual(duplicateIssue.attributes.title, "prisma create User failed", "duplicate issue title");
+assertEqual(duplicateIssue.attributes.metadata.spanId, errorSpan.attributes.spanId, "duplicate issue on the failed span");
+assertEqual(events.filter((event) => event.attributes.name === "db.client.operation.duration").length, events.filter((event) => event.type === "span").length, "one duration metric per query");
 assertEqual(directSpan.attributes.metadata.prismaAction, "findFirst", "direct action");
 assertEqual(rawSpan.attributes.metadata.prismaAction, "queryRaw", "raw action");
 assertEqual(rawSpan.attributes.metadata.prismaModel, undefined, "raw model omitted");
@@ -378,7 +382,7 @@ const highLoadExtension = createLogBrewPrismaExtension({
   spanIdFactory: makeSequenceFactory("b"),
   nowMs: makeNowMs()
 });
-for (let index = 0; index < 1500; index += 1) {
+for (let index = 0; index < 750; index += 1) {
   await highLoadExtension.query.$allOperations({
     args: { where: { email: `hidden-${index}@example.test` } },
     model: "User",
@@ -446,9 +450,12 @@ for (let index = 0; index < acceptedPayloads.length; index += 1) {
 const flushedEvents = acceptedPayloads.flatMap((payload) => payload.events);
 assertEqual(flushedEvents.length, 1000, "flushed event count");
 assertEqual(new Set(flushedEvents.map((event) => event.id)).size, 1000, "unique event count");
-for (let index = 0; index < flushedEvents.length; index += 1) {
+const flushedSpans = flushedEvents.filter((event) => event.type === "span");
+assertEqual(flushedSpans.length, 500, "flushed span count");
+assertEqual(flushedEvents.filter((event) => event.attributes.name === "db.client.operation.duration").length, 500, "flushed duration metric count");
+for (let index = 0; index < flushedSpans.length; index += 1) {
   assertEqual(
-    flushedEvents[index].attributes.spanId,
+    flushedSpans[index].attributes.spanId,
     `b${String(index + 1).padStart(15, "0")}`,
     `accepted span order ${index}`
   );

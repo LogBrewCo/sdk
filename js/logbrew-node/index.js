@@ -6,6 +6,7 @@ export const {
   axiosRequestWithLogBrewSpan,
   cacheOperationWithLogBrewSpan,
   captureHttpError,
+  captureLogBrewLog,
   createNodeFetchTransport,
   createHttpErrorEvent,
   createHttpRequestEvent,

@@ -21,7 +21,7 @@ database.close();
 const { PrismaClient } = await import("./generated/index.js");
 
 const logbrew = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", endpoint: process.env.LOGBREW_CAPTURE_ENDPOINT });
-const prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: "file:./checkout.db" }), log: ["query", "info", "warn", "error"] });
+const prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: "file:./checkout.db" }), log: ["info", "warn", "error"].map((level) => ({ emit: "event", level })) });
 const tracing = instrumentLogBrewPrismaClient(prisma, { client: logbrew, databaseName: "checkout" });
 
 const trace = createLogBrewTraceContext("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");

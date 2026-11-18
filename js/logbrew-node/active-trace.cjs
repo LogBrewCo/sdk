@@ -99,6 +99,18 @@ function setLogBrewUser(id, { kind = "user", trace = getActiveLogBrewTrace() } =
 }
 
 /**
+ * @param {LogBrewTraceContext} child
+ * @param {LogBrewTraceContext | undefined} parent
+ * @returns {void}
+ */
+function inheritLogBrewUser(child, parent) {
+  const subject = typeof parent === "object" && parent !== null ? traceSubjects.get(parent) : undefined;
+  if (subject !== undefined) {
+    traceSubjects.set(child, subject);
+  }
+}
+
+/**
  * @param {LogBrewTraceContext} trace
  * @returns {TraceMetadata}
  */
@@ -299,6 +311,7 @@ module.exports = {
   defaultTraceIdFactory,
   enterWithLogBrewTrace,
   getActiveLogBrewTrace,
+  inheritLogBrewUser,
   runWithLogBrewTrace,
   setLogBrewUser,
   traceMetadata,

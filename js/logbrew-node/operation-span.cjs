@@ -1,10 +1,22 @@
 "use strict";
 
-const { SdkError } = require("@logbrew/sdk");
+const { SdkError, createIssueAttributesFromError } = require("@logbrew/sdk");
 const { createAutomaticEventId } = require("./automatic-event-id.cjs");
+const { addLogBrewBreadcrumb, inheritBreadcrumbs } = require("./breadcrumbs.cjs");
 const { applyFunction } = require("./internal.cjs");
-const { createChildTraceContext, getActiveLogBrewTrace, runWithLogBrewTrace } = require("./active-trace.cjs");
-const { durationSince, emitSpan, errorType, filteredMetadata, hasClient, nowMs, slugify, spanEvents } = require("./span-support.cjs");
+const { createChildTraceContext, getActiveLogBrewTrace, inheritLogBrewUser, runWithLogBrewTrace } = require("./active-trace.cjs");
+const {
+  durationSince,
+  emitSpan,
+  errorType,
+  filteredMetadata,
+  hasClient,
+  notifyQuietly,
+  nowMs,
+  slugify,
+  spanEvents,
+  spanTimestamp
+} = require("./span-support.cjs");
 const { createLogBrewQueueBatchSpanOptions, resolveOperationTrace } = require("./trace-context.cjs");
 
 /**
@@ -248,11 +260,89 @@ function operationMetadata(options, { error, kind, operationKind, operationName,
 }
 
 /**
+ * @param {OperationKind} kind
+ * @param {string} operationKind
+ * @returns {string}
+ */
+function durationMetricName(kind, operationKind) {
+  if (kind === "database") {
+    return "db.client.operation.duration";
+  }
+  if (kind === "cache") {
+    return "cache.operation.duration";
+  }
+  return operationKind === "process" ? "messaging.process.duration" : "messaging.client.operation.duration";
+}
+
+/**
+ * @param {CheckedOperationOptions} options
+ * @param {Omit<OperationOutcome, "durationMs" | "error" | "id" | "trace">} outcome
+ * @returns {string}
+ */
+function operationLabel(options, { kind, operationKind, operationName, system }) {
+  const target = kind === "queue" ? trimmedText(options.queueName) ?? operationName.trim() : operationName.trim();
+  return `${system} ${operationKind} ${target}`;
+}
+
+/**
+ * @param {CheckedOperationOptions} options
+ * @param {OperationOutcome} outcome
+ * @returns {Readonly<Record<string, string | number | boolean>>}
+ */
+function outcomeMetadata(options, { error, kind, operationKind, operationName, system }) {
+  return {
+    framework: `node:${kind}`,
+    ...(kind === "database" ? { "db.system.name": system, "db.operation.name": operationKind } : semanticFields(kind, options, { operationKind, system })),
+    operation: operationName.trim(),
+    status: error === undefined ? "ok" : "error",
+    ...(error === undefined ? {} : { errorType: errorType(error) })
+  };
+}
+
+/**
+ * @param {CheckedOperationOptions} options
+ * @param {OperationOutcome} outcome
+ * @returns {void}
+ */
+function captureOperationOutcome(options, outcome) {
+  const { client } = options;
+  const { error, kind, operationKind, system, trace } = outcome;
+  const label = operationLabel(options, outcome);
+  const timestamp = spanTimestamp(options);
+  const metadata = outcomeMetadata(options, outcome);
+  client.metric(createAutomaticEventId(`evt_node_${kind}_metric`, slugify(label)), timestamp, {
+    name: durationMetricName(kind, operationKind),
+    description: `Duration of one ${kind} operation.`,
+    kind: "histogram",
+    value: outcome.durationMs,
+    unit: "ms",
+    temporality: "delta",
+    metadata
+  });
+  if (error !== undefined) {
+    const { errorType: _, status: __, ...issueMetadata } = metadata;
+    client.issue(
+      createAutomaticEventId(`evt_node_${kind}_issue`, slugify(label)),
+      timestamp,
+      createIssueAttributesFromError(error, {
+        title: `${label} failed`,
+        message: `${String(metadata.errorType ?? "Error")} in ${label}`,
+        mechanism: `${system}.${operationKind}`.toLowerCase(),
+        handled: !(kind === "queue" && operationKind === "process"),
+        source: `node.${kind}`,
+        trace,
+        metadata: issueMetadata
+      })
+    );
+  }
+}
+
+/**
  * @param {CheckedOperationOptions} options
  * @param {OperationOutcome} outcome
  * @returns {Promise<void>}
  */
-async function captureOperationSpan(options, outcome) {
+async function captureOperation(options, outcome) {
   const { error, operationKind, operationName, system, trace } = outcome;
   const metadata = operationMetadata(options, outcome);
   const events = spanEvents(options.events, error);
@@ -269,6 +359,11 @@ async function captureOperationSpan(options, outcome) {
     },
     { client: options.client, error, trace }
   );
+  try {
+    captureOperationOutcome(options, outcome);
+  } catch (captureError) {
+    await notifyQuietly(options, captureError, { client: options.client, error, trace });
+  }
 }
 
 /**
@@ -314,6 +409,25 @@ function planOperation(kind, operationName, options) {
 }
 
 /**
+ * Runs inside the operation's trace, so its span, metric, and issue carry that trace and the user set during it.
+ * @param {CheckedOperationOptions} options
+ * @param {Omit<OperationOutcome, "durationMs" | "error">} base
+ * @param {number} startedAt
+ * @returns {Promise<Readonly<{ failed: false, value: unknown } | { failed: true, error: unknown }>>}
+ */
+async function settleInScope(options, base, startedAt) {
+  /** @type {Readonly<{ failed: false, value: unknown } | { failed: true, error: unknown }>} */
+  let settled;
+  try {
+    settled = { failed: false, value: await applyFunction(options.operation, undefined, []) };
+  } catch (error) {
+    settled = { failed: true, error };
+  }
+  await captureOperation(options, { ...base, durationMs: durationSince(options, startedAt), ...(settled.failed ? { error: settled.error } : {}) });
+  return settled;
+}
+
+/**
  * @param {OperationKind} kind
  * @param {string} operationName
  * @param {CheckedOperationOptions} options
@@ -321,15 +435,23 @@ function planOperation(kind, operationName, options) {
  */
 async function runOperation(kind, operationName, options) {
   const { base, startedAt } = planOperation(kind, operationName, options);
-  const { trace } = base;
-  try {
-    const result = await runWithLogBrewTrace(trace, () => applyFunction(options.operation, undefined, []));
-    await captureOperationSpan(options, { ...base, durationMs: durationSince(options, startedAt) });
-    return result;
-  } catch (error) {
-    await captureOperationSpan(options, { ...base, durationMs: durationSince(options, startedAt), error });
-    throw error;
+  const scope = getActiveLogBrewTrace();
+  inheritLogBrewUser(base.trace, scope);
+  inheritBreadcrumbs(base.trace, scope);
+  const settled = await runWithLogBrewTrace(base.trace, () => settleInScope(options, base, startedAt));
+  addLogBrewBreadcrumb(
+    {
+      type: kind === "database" ? "query" : "default",
+      category: `${kind}.${base.system}`,
+      level: settled.failed ? "error" : "info",
+      message: operationLabel(options, base)
+    },
+    getActiveLogBrewTrace
+  );
+  if (settled.failed) {
+    throw settled.error;
   }
+  return settled.value;
 }
 
 /**

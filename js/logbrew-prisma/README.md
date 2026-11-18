@@ -15,17 +15,19 @@ pnpm add @logbrew/sdk @logbrew/node @logbrew/prisma @prisma/client
 Use a project-scoped server ingest key, for example `LOGBREW_SERVER_API_KEY`.
 
 ```js
-import { LogBrewClient } from "@logbrew/sdk";
+import { createLogBrewNodeClient } from "@logbrew/node";
 import { PrismaClient } from "@prisma/client";
 import { instrumentLogBrewPrismaClient } from "@logbrew/prisma";
 
-const logbrew = LogBrewClient.create({
-  apiKey: process.env["LOGBREW_SERVER_API_KEY"] ?? "LOGBREW_SERVER_API_KEY",
+const logbrew = createLogBrewNodeClient({
+  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
   sdkName: "checkout-api",
   sdkVersion: "1.0.0"
 });
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  log: ["info", "warn", "error"].map((level) => ({ emit: "event", level }))
+});
 const prismaTracing = instrumentLogBrewPrismaClient(prisma, {
   client: logbrew,
   databaseName: "app",
@@ -50,9 +52,13 @@ Each Prisma operation creates one database span with:
 - `dbSystem: "prisma"`, operation kind, optional sanitized `databaseName`, duration, status, and array/number row count when available.
 - Exception type only for failed operations.
 
+Each operation also sends one `db.client.operation.duration` histogram in milliseconds and one breadcrumb. A failed operation sends one handled issue, such as `prisma create User failed`, with the error type and stack frames on the span's trace. The Prisma error message is not sent.
+
+When the Prisma Client emits `info`, `warn`, or `error` log events (`log: [{ emit: "event", level: "warn" }]`), LogBrew sends each one as a LogBrew log on the active trace and as a breadcrumb. Prisma `query` events are not captured, so SQL text and parameters stay out of LogBrew.
+
 ## Privacy Defaults
 
-LogBrew intentionally avoids Prisma engine internals and query payload capture. It does not record SQL text, Prisma `args`, result objects, database connection details, arbitrary headers, request/response bodies, exception messages, stacks, baggage, or tracestate.
+LogBrew intentionally avoids Prisma engine internals and query payload capture. It does not record SQL text, Prisma `args`, result objects, database connection details, arbitrary headers, request/response bodies, exception messages, baggage, or tracestate. Issues from failed operations carry the exception type and stack frames.
 
 Use `createLogBrewPrismaExtension()` when you want to attach the extension yourself:
 

@@ -8,6 +8,7 @@ import type {
 import type {
   addLogBrewBreadcrumb,
   captureHttpError,
+  captureLogBrewLog,
   createHttpErrorEvent,
   createHttpRequestEvent,
   createLogBrewNodeClient,
@@ -153,6 +154,7 @@ declare const defaultExport: {
   axiosRequestWithLogBrewSpan: typeof axiosRequestWithLogBrewSpan;
   cacheOperationWithLogBrewSpan: typeof cacheOperationWithLogBrewSpan;
   captureHttpError: typeof captureHttpError;
+  captureLogBrewLog: typeof captureLogBrewLog;
   createNodeFetchTransport: typeof createNodeFetchTransport;
   createHttpErrorEvent: typeof createHttpErrorEvent;
   createHttpRequestEvent: typeof createHttpRequestEvent;
@@ -215,6 +217,7 @@ export {
 export {
   addLogBrewBreadcrumb,
   captureHttpError,
+  captureLogBrewLog,
   createHttpErrorEvent,
   createHttpRequestEvent,
   createLogBrewNodeClient,

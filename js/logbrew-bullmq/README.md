@@ -126,5 +126,7 @@ back on `uninstall()`.
 
 - No job payloads, return values, Redis connection strings, headers, or full URLs are captured.
 - Malformed `opts.telemetry.metadata` is ignored for propagation instead of breaking the job.
-- Worker exceptions record type-only span events through `@logbrew/node`; exception messages and stacks are not added by these helpers.
+- A failed job sends one unhandled issue with the error type and stack frames, on the job's trace. The error message is not sent.
+- Each operation sends one `messaging.process.duration` or `messaging.client.operation.duration` histogram in milliseconds.
+- `job.log()` calls inside an instrumented processor also become LogBrew logs and breadcrumbs. The original `job.log()` still runs.
 - The package does not patch BullMQ globally, patch NestJS decorators, create queues or FlowProducers, own Redis connections, or open support tickets.
