@@ -656,10 +656,10 @@ func (check *metadataCheck) goModules() {
 			{"unexpected module path", `(?m)^module ` + regexp.QuoteMeta("github.com/LogBrewCo/sdk/go/logbrew/"+module[0]) + `$`},
 			{"expected go 1.26.0", goVersion},
 			{"expected parent LogBrew module requirement", `github\.com/LogBrewCo/sdk/go/logbrew ` + module[1]},
-			{"expected framework requirement", regexp.QuoteMeta(module[2])},
 		} {
 			check.require(regexp.MustCompile(rule[1]).MatchString(text), location+"/go.mod: "+rule[0])
 		}
+		check.require(strings.Contains(text, module[2]), location+"/go.mod: expected framework requirement")
 	}
 }
 
