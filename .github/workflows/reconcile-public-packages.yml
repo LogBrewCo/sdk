@@ -88,6 +88,11 @@ jobs:
             echo "Invalid release source checkout." >&2
             exit 1
           fi
+          git -C "$GITHUB_WORKSPACE" fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main
+          if ! git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$source_sha" refs/remotes/origin/main; then
+            echo "Release source must be a commit on main." >&2
+            exit 1
+          fi
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
 
       - name: Check out protected release control
@@ -291,6 +296,11 @@ jobs:
             ! "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ||
             "$source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
             echo "Invalid release source checkout." >&2
+            exit 1
+          fi
+          git -C "$GITHUB_WORKSPACE" fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main
+          if ! git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$source_sha" refs/remotes/origin/main; then
+            echo "Release source must be a commit on main." >&2
             exit 1
           fi
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
