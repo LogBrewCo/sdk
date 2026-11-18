@@ -1019,6 +1019,11 @@ jobs:
             echo "Invalid verify source checkout." >&2
             exit 1
           fi
+          git -C "$GITHUB_WORKSPACE" fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main
+          if ! git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$source_sha" refs/remotes/origin/main; then
+            echo "Release source must be a commit on main." >&2
+            exit 1
+          fi
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
 
       - name: Check out protected verify control
@@ -1168,6 +1173,11 @@ jobs:
           source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
           if [[ ! "$RELEASE_REF" =~ ^[0-9a-f]{40}$ || "$source_sha" != "$RELEASE_REF" ]]; then
             echo "Invalid verify source checkout." >&2
+            exit 1
+          fi
+          git -C "$GITHUB_WORKSPACE" fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main
+          if ! git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$source_sha" refs/remotes/origin/main; then
+            echo "Release source must be a commit on main." >&2
             exit 1
           fi
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
