@@ -94,6 +94,14 @@ http_tracing_test("host normalization omits IP-like forms") do
   )
 end
 
+http_tracing_test("host normalization stays fast on long dot runs") do
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  http_assert(LogBrew::HttpClientTracing.normalize_host("#{"." * 50_000}a").nil?, "expected omitted oversized host")
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  http_assert(elapsed < 0.1, "expected fast host normalization, took #{elapsed} s")
+  http_assert(LogBrew::HttpClientTracing.normalize_host("...").nil?, "expected omitted dot-only host")
+end
+
 http_tracing_test("Net::HTTP propagates one child and returns the request header") do
   http_require_tracing
   client = http_client

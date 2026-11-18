@@ -244,7 +244,9 @@ module LogBrew
     end
 
     def normalize_host(host)
-      value = host.to_s.strip.downcase.sub(/\.+\z/, "")
+      value = host.to_s.strip.downcase
+      last_label_end = value.rindex(/[^.]/)
+      value = last_label_end.nil? ? "" : value[0..last_label_end]
       return nil if value.empty? || value.bytesize > 253
       return nil if value.match?(/\A[0-9.]+\z/)
       return nil unless value.match?(/\A[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\z/)

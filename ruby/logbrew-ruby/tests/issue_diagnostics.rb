@@ -284,4 +284,13 @@ expect_sdk_error("validation_error", "issue stack frame line must be a positive 
   LogBrew::IssueDiagnostics.stack_frame(filename: "checkout.rb", line: 0)
 end
 
+slow_backtrace_error = RuntimeError.new("slow backtrace")
+slow_backtrace_error.set_backtrace(["checkout.rb:12:in 'a" * 20_000, "checkout.rb:12:in 'charge'"])
+slow_backtrace_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+slow_backtrace_attributes = LogBrew::IssueDiagnostics.from_exception(slow_backtrace_error, title: "Slow backtrace")
+slow_backtrace_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - slow_backtrace_started
+raise "backtrace parsing took #{slow_backtrace_elapsed} s" unless slow_backtrace_elapsed < 0.1
+slow_backtrace_frames = slow_backtrace_attributes.dig("exception", "stackFrames") || slow_backtrace_attributes["stackFrames"]
+raise "expected the short backtrace frame, got #{slow_backtrace_frames.inspect}" unless slow_backtrace_frames.map { |frame| frame["function"] } == ["charge"]
+
 puts "ruby issue diagnostics tests passed"
