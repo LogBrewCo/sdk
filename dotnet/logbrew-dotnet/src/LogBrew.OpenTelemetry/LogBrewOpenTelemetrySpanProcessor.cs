@@ -80,7 +80,10 @@ namespace LogBrew.OpenTelemetry
                 return;
             }
 
-            LogBrewActivitySpanTelemetry.Capture(client, data, options.SpanOptions);
+            if (LogBrewActivitySpanTelemetry.Capture(client, data, options.SpanOptions))
+            {
+                LogBrewActivitySpanTelemetry.CaptureOutcome(client, data, options.SpanOptions);
+            }
         }
     }
 

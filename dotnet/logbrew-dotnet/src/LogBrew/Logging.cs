@@ -135,7 +135,7 @@ namespace LogBrew
                     var attributes = LogAttributes.Create(message, LogBrewLoggingMetadata.ToLogBrewLevel(logLevel))
                         .WithLogger(categoryName)
                         .WithMetadata(metadata);
-                    var context = LogBrewTrace.ContextWithCurrentTrace(null);
+                    var context = LogBrewTrace.ContextWithCurrentTrace(null) ?? LogBrewActivitySpanTelemetry.CurrentActivityContext();
                     if (context != null)
                     {
                         attributes.WithContext(context);
@@ -145,6 +145,11 @@ namespace LogBrew
                         options.EventIdPrefix + "_" + eventNumber.ToString(CultureInfo.InvariantCulture),
                         timestamp,
                         attributes);
+                    LogBrewActivitySpanTelemetry.RecordLogBreadcrumb(
+                        categoryName,
+                        LogBrewLoggingMetadata.ToLogBrewLevel(logLevel),
+                        message,
+                        timestamp);
 
                     if (options.FlushOnLog && options.Transport != null)
                     {

@@ -130,7 +130,7 @@ namespace LogBrew
         }
     }
 
-    public static class LogBrewActivitySpanTelemetry
+    public static partial class LogBrewActivitySpanTelemetry
     {
         private const string ZeroSpanId = "0000000000000000";
 

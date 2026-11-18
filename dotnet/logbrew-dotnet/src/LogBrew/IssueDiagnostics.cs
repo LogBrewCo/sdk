@@ -317,7 +317,7 @@ namespace LogBrew
             throw BreadcrumbPrimitiveError(key);
         }
 
-        private static string GeneratedFilename(string? sourceFilename, string? declaringTypeName)
+        internal static string GeneratedFilename(string? sourceFilename, string? declaringTypeName)
         {
             if (!string.IsNullOrWhiteSpace(sourceFilename))
             {
