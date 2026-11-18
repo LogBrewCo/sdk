@@ -770,9 +770,17 @@ function routeTemplateFromMatches(routeMatches) {
 }
 
 function joinRoutePaths(basePath, childPath) {
-  const base = basePath === "/" ? "" : basePath.replace(/\/+$/u, "");
-  const child = childPath.replace(/^\/+/u, "").replace(/\/+$/u, "");
+  const base = basePath === "/" ? "" : withoutTrailingSlashes(basePath);
+  const child = withoutTrailingSlashes(childPath.replace(/^\/+/u, ""));
   return `${base}/${child}`;
+}
+
+function withoutTrailingSlashes(path) {
+  let end = path.length;
+  while (end > 0 && path[end - 1] === "/") {
+    end -= 1;
+  }
+  return path.slice(0, end);
 }
 
 function traceContextFromInput({ parentSpanId, spanId, traceId, traceparent }) {

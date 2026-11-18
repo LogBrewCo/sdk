@@ -6,6 +6,8 @@ const LAST_C0_CONTROL = 31;
 const FIRST_C1_CONTROL = 127;
 const LAST_C1_CONTROL = 159;
 const WHITESPACE_PATTERN = /\s+/gu;
+const EDGE_CHARACTER = "_";
+const ONE_CHARACTER = 1;
 
 /**
  * @param {unknown} value
@@ -157,6 +159,22 @@ function boundedText(value, limit) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function trimUnderscores(value) {
+  let start = TEXT_START;
+  let end = value.length;
+  while (start < end && value[start] === EDGE_CHARACTER) {
+    start += ONE_CHARACTER;
+  }
+  while (end > start && value[end - ONE_CHARACTER] === EDGE_CHARACTER) {
+    end -= ONE_CHARACTER;
+  }
+  return value.slice(start, end);
+}
+
+/**
  * @param {unknown} value
  * @returns {string | undefined}
  */
@@ -183,5 +201,6 @@ module.exports = {
   readOptionalMember,
   sanitizeUrl,
   stringValue,
-  templateText
+  templateText,
+  trimUnderscores
 };

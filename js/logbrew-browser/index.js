@@ -894,11 +894,19 @@ function matchesSuppressionMatcher(value, matcher) {
 
 function safeSuppressionReason(reason) {
   const value = typeof reason === "string" && reason.trim() !== "" ? reason.trim() : "matched_rule";
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9_.:-]+/gu, "_")
-    .replace(/^_+|_+$/gu, "")
-    .slice(0, 80) || "matched_rule";
+  return trimUnderscores(value.toLowerCase().replace(/[^a-z0-9_.:-]+/gu, "_")).slice(0, 80) || "matched_rule";
+}
+
+function trimUnderscores(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === "_") {
+    start += 1;
+  }
+  while (end > start && value[end - 1] === "_") {
+    end -= 1;
+  }
+  return value.slice(start, end);
 }
 
 function sessionStorageOf(browserWindow) {

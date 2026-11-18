@@ -641,6 +641,8 @@
         "logbrew-js/vite-release-artifacts*.cjs",
         "logbrew-angular/examples/**",
         "logbrew-angular/test/**",
+        "logbrew-aws-sqs/test/**",
+        "logbrew-prisma/test/**",
         "logbrew-svelte/examples/**",
         "logbrew-vue/examples/**",
         "logbrew-vue/test/**",

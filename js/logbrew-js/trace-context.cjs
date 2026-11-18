@@ -30,7 +30,7 @@ const TRACEPARENT_PATTERN =
   /^(?<version>[0-9a-fA-F]{2})-(?<traceId>[0-9a-fA-F]{32})-(?<parentSpanId>[0-9a-fA-F]{16})-(?<traceFlags>[0-9a-fA-F]{2})$/u;
 const TRACESTATE_SIMPLE_KEY_PATTERN = /^[a-z0-9][a-z0-9_\-*/]{0,255}$/u;
 const TRACESTATE_TENANT_KEY_PATTERN = /^[a-z0-9][a-z0-9_\-*/]{0,240}@[a-z][a-z0-9_\-*/]{0,13}$/u;
-const TRACESTATE_VALUE_PATTERN = /^[ -+--<>-~]*[!-+--<>-~]$/u;
+const TRACESTATE_VALUE_PATTERN = /^[\u0020-\u002B\u002D-\u003C\u003E-\u007E]*[\u0021-\u002B\u002D-\u003C\u003E-\u007E]$/u;
 const BAGGAGE_KEY_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
 const BAGGAGE_PROPERTY_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+(?:=[!#$%&'*+\-.^_`|~0-9A-Za-z]*)?$/u;
 

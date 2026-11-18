@@ -14,6 +14,7 @@ const { SdkError, parseTraceparent } = require("@logbrew/sdk");
 
 const EMPTY_LENGTH = 0;
 const MAX_LINKS = 8;
+const ONE_CHARACTER = 1;
 
 /**
  * @param {unknown} value
@@ -147,6 +148,23 @@ function mergeLinks(generatedLinks, explicitLinks) {
 }
 
 /**
+ * @param {string} value
+ * @param {string} separators
+ * @returns {string}
+ */
+function lastSegment(value, separators) {
+  let end = value.length;
+  while (end > EMPTY_LENGTH && separators.includes(value.charAt(end - ONE_CHARACTER))) {
+    end -= ONE_CHARACTER;
+  }
+  let start = end;
+  while (start > EMPTY_LENGTH && !separators.includes(value.charAt(start - ONE_CHARACTER))) {
+    start -= ONE_CHARACTER;
+  }
+  return value.slice(start, end);
+}
+
+/**
  * @param {unknown} value
  * @param {string} fallback
  * @returns {string}
@@ -156,7 +174,7 @@ function normalizeArnLabel(value, fallback) {
   if (label === "") {
     return fallback;
   }
-  return normalizeLabel(/(?<last>[^/:]+)[/:]*$/u.exec(label)?.groups?.["last"], fallback);
+  return normalizeLabel(lastSegment(label, "/:"), fallback);
 }
 
 /**
@@ -173,7 +191,7 @@ function resolveQueueName(source, fallback) {
   if (queueUrl === "") {
     return "sqs";
   }
-  return normalizeLabel(/(?<last>[^/]+)\/*$/u.exec(queueUrl)?.groups?.["last"], "sqs");
+  return normalizeLabel(lastSegment(queueUrl, "/"), "sqs");
 }
 
 /**

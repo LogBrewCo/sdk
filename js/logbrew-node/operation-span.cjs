@@ -3,7 +3,7 @@
 const { SdkError, createIssueAttributesFromError } = require("@logbrew/sdk");
 const { createAutomaticEventId } = require("./automatic-event-id.cjs");
 const { addLogBrewBreadcrumb, inheritBreadcrumbs } = require("./breadcrumbs.cjs");
-const { applyFunction } = require("./internal.cjs");
+const { applyFunction, trimUnderscores } = require("./internal.cjs");
 const { createChildTraceContext, getActiveLogBrewTrace, inheritLogBrewUser, runWithLogBrewTrace } = require("./active-trace.cjs");
 const {
   durationSince,
@@ -65,7 +65,6 @@ const NO_COUNT = 0;
 const SINGLE_MESSAGE = 1;
 const UNSAFE_LABEL_CHARACTERS = /[^a-z0-9_.:-]+/gu;
 const UNSAFE_KIND_CHARACTERS = /[^a-z0-9_.:-]+/giu;
-const EDGE_UNDERSCORES = /^_+|_+$/gu;
 const BLOCKED_METADATA_KEYS = {
   cache: new Set(["cachekey", "command", "cookie", "headers", "key", "rawcommand", ["se", "cret"].join(""), ["to", "ken"].join(""), "value"]),
   database: new Set([
@@ -117,7 +116,7 @@ function normalizeOperationLabel(value, fallback) {
   if (typeof value !== "string" || value.trim() === "") {
     return fallback;
   }
-  return value.trim().toLowerCase().replaceAll(UNSAFE_LABEL_CHARACTERS, "_").replaceAll(EDGE_UNDERSCORES, "") || fallback;
+  return trimUnderscores(value.trim().toLowerCase().replaceAll(UNSAFE_LABEL_CHARACTERS, "_")) || fallback;
 }
 
 /**
@@ -128,7 +127,7 @@ function normalizeOperationKind(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return "operation";
   }
-  const normalized = value.trim().replaceAll(UNSAFE_KIND_CHARACTERS, "_").replaceAll(EDGE_UNDERSCORES, "");
+  const normalized = trimUnderscores(value.trim().replaceAll(UNSAFE_KIND_CHARACTERS, "_"));
   return normalized.toUpperCase() === normalized ? normalized : normalized.toLowerCase();
 }
 

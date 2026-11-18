@@ -1013,4 +1013,7 @@ EOF
 
 node smoke.mjs
 
+cp "$repo_root"/js/logbrew-aws-sqs/test/*.test.mjs "$app_dir/"
+node --test "$app_dir"/*.test.mjs >/dev/null
+
 echo "aws sqs real-user smoke ok: 600 sends, 1000 events flushed, 200 dropped, batches=10, retryAttempts=11"
