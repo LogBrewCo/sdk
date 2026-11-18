@@ -80,7 +80,7 @@ async function requestIdentity() {
  */
 async function exchangeGrant(packageName) {
   const identity = await requestIdentity();
-  const exchangeUrl = `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${packageName.replace("/", "%2f")}`;
+  const exchangeUrl = `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${packageName.replaceAll("/", "%2f")}`;
   const exchange = await fetchJson(
     exchangeUrl,
     { headers: { Authorization: `Bearer ${identity}` }, method: "POST" },
