@@ -25,7 +25,7 @@ GEM_HOME="$integration_home" GEM_PATH="$integration_home" gem install --no-docum
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" gem install --ignore-dependencies --no-document --install-dir "$integration_home" faraday -v 2.8.1 >/dev/null
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" gem install --ignore-dependencies --no-document --install-dir "$integration_home" faraday-net_http -v 3.0.2 >/dev/null
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" ruby "$package_dir/tests/http_client_tracing.rb" > "$tmp_dir/focused-tests.out"
-grep -qx 'ruby HTTP client tracing tests ok (28 tests)' "$tmp_dir/focused-tests.out"
+grep -qx 'ruby HTTP client tracing tests ok (29 tests)' "$tmp_dir/focused-tests.out"
 GEM_HOME="$integration_home" GEM_PATH="$integration_home" gem install --local --install-dir "$integration_home" --no-document "$gem_path" >/dev/null
 
 cat > "$tmp_dir/consumer.rb" <<'RUBY'
