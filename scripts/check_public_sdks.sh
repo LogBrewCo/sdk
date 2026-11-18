@@ -22,6 +22,7 @@ lock_dir="${TMPDIR:-/tmp}/logbrewco-sdk-public-checks.lock"
 lock_pid_file="$lock_dir/pid"
 STEP_LABELS=(
   "Root contract tests"
+  "Inline suppression check"
   "Rust tests"
   "Rust package dry-run"
   "JavaScript tests"
@@ -307,6 +308,10 @@ begin_next_step() {
 
 begin_next_step "Root contract tests"
 run_shell_step "python3 scripts/run_python_contract_tests.py"
+mark_step_complete
+
+begin_next_step "Inline suppression check"
+run_shell_step "bash scripts/check-suppressions.sh && bash scripts/test-check-suppressions.sh"
 mark_step_complete
 
 begin_next_step "Rust tests"

@@ -343,6 +343,22 @@ replaces = "none"
 checked = 2026-11-19
 
 [[tool]]
+id = "suppressions"
+risk = "an inline lint or type suppression that hides a finding instead of fixing it"
+tool = "scripts/check-suppressions.sh and its seeded tests"
+version = "repository"
+unpinned = "repository script, versioned by commit"
+commands = ["scripts/check-suppressions.sh", "scripts/test-check-suppressions.sh"]
+runs_in = "CI Contract checks: Check for inline lint suppressions; scripts/check_public_sdks.sh step Inline suppression check"
+config = "the pattern in scripts/check-suppressions.sh and quality/suppressions-allowlist.tsv"
+conflicts = "none known"
+exceptions = "quality/suppressions-allowlist.tsv: 3 Java unchecked casts from Object to a parameterized type (JLS 5.1.9, 5.5); an entry with no matching line fails"
+runtime = "new; record from CI runs at the next check"
+findings = "seeded: each suppression form fails with its path and line; an allowlisted line passes; a stale, extra, or malformed entry fails; a directory outside Git fails"
+replaces = "none"
+checked = 2026-11-18
+
+[[tool]]
 id = "tool-matrix"
 risk = "a gate tool without an entry, a pin that differs from its entry, an entry not checked for 30 days"
 tool = "scripts/check-tool-matrix.sh and its seeded tests"
