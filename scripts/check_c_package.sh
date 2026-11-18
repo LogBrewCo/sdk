@@ -78,7 +78,7 @@ CPP
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/rich.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_c_rich_telemetry_payload.py" "$tmp_dir/rich.stdout.json" >/dev/null
 grep -q 'c rich telemetry tests passed' "$tmp_dir/rich.stderr.txt"
-sanitizer_cflags=("${cflags[@]}" -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all)
+sanitizer_cflags=("${cflags[@]}" -g -O1 -fno-omit-frame-pointer "-fsanitize=address,undefined" -fno-sanitize-recover=all)
 for sanitized_program in tests/test_logbrew.c tests/test_rich_telemetry.c examples/readme_example.c examples/real_user_smoke.c examples/trace_correlation.c; do
   sanitized_binary="$tmp_dir/build/sanitized_$(basename "$sanitized_program" .c)"
   "$cc_command" "${sanitizer_cflags[@]}" "${sdk_sources[@]}" "$package_dir/$sanitized_program" -o "$sanitized_binary"
