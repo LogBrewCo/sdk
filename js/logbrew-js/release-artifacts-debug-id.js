@@ -6,13 +6,15 @@ import { createHash } from "node:crypto";
 
 const DEBUG_ID_NAMESPACE = "16f4a837-7e0b-4d7c-97d9-8a7af1fd2768";
 const DEBUG_ID_RE = /(?:\/\/#|\/\*#)\s*debugId=(?<debugId>[A-Za-z0-9._:-]+)/giu;
-const DEBUG_ID_REGISTRY_NAME = "logbrew.release-artifact.debug-ids";
-const DEBUG_ID_REGISTRY_EXPRESSION = `Symbol.for(${JSON.stringify(DEBUG_ID_REGISTRY_NAME)})`;
+const DEBUG_ID_REGISTRY_EXPRESSION = 'Symbol.for("logbrew.release-artifact.debug-ids")';
 const HERMES_RUNTIME_DEBUG_ID_RE =
   /\/\*logbrew-runtime-debug-id\*\/\/\/# debugId=(?<debugId>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/iu;
 const RUNTIME_DEBUG_ID_MARKER = "/*logbrew-runtime-debug-id*/";
 const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
 const SOURCE_MAPPING_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=(?<url>[^\s*]+)/iu;
+const SCRIPT_UNSAFE_CHARACTER_RE = /[<>\u2028\u2029]/gu;
+/** @type {Readonly<Record<string, string>>} */
+const SCRIPT_SAFE_ESCAPES = Object.freeze({ "<": String.raw`\u003c`, ">": String.raw`\u003e`, "\u2028": String.raw`\u2028`, "\u2029": String.raw`\u2029` });
 const SHEBANG_LINE_RE = /^#![^\r\n]*(?:\r?\n|$)/u;
 const LEADING_TRIVIA_RE = /^(?:\s|\/\/[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)+/u;
 const UUID_BYTE_LENGTH = 16;
@@ -132,6 +134,14 @@ function sourceStartsWithDirective(source) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function scriptStringLiteral(value) {
+  return JSON.stringify(value).replaceAll(SCRIPT_UNSAFE_CHARACTER_RE, (character) => SCRIPT_SAFE_ESCAPES[character] ?? character);
+}
+
+/**
  * @param {string} source
  * @param {string} debugId
  * @param {string} relativePath
@@ -141,7 +151,7 @@ function sourceWithRuntimeDebugId(source, debugId, relativePath) {
   if (source.includes(RUNTIME_DEBUG_ID_MARKER)) {
     return source;
   }
-  const registryLine = `;try{${RUNTIME_DEBUG_ID_MARKER}(function(){var g=globalThis,s=${DEBUG_ID_REGISTRY_EXPRESSION},r=g[s];if(!r||typeof r!=="object")r=g[s]=Object.create(null);r[${JSON.stringify(relativePath)}]=${JSON.stringify(debugId)}})()}catch(_){}\n`;
+  const registryLine = `;try{${RUNTIME_DEBUG_ID_MARKER}(function(){var g=globalThis,s=${DEBUG_ID_REGISTRY_EXPRESSION},r=g[s];if(!r||typeof r!=="object")r=g[s]=Object.create(null);r[${scriptStringLiteral(relativePath)}]=${scriptStringLiteral(debugId)}})()}catch(_){}\n`;
   const shebang = executableShebang(source);
   const separator = shebang === source && shebang !== "" ? "\n" : "";
   return `${shebang}${separator}${registryLine}${source.slice(shebang.length)}`;
