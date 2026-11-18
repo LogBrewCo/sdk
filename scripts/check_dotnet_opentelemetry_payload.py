@@ -24,7 +24,14 @@ def main() -> None:
     require(stderr == "", "expected OpenTelemetry example stderr to be empty")
     events = payload.get("events")
     require(isinstance(events, list), "expected events list")
-    require(len(events) == 2, f"expected two OpenTelemetry spans, got {len(events)}")
+    require(len(events) == 3, f"expected two OpenTelemetry spans and one metric, got {len(events)}")
+    metrics = [item for item in events if isinstance(item, dict) and item.get("type") == "metric"]
+    require(len(metrics) == 1, "expected one server duration metric")
+    metric_attrs = metrics[0].get("attributes")
+    require(isinstance(metric_attrs, dict), "expected metric attributes")
+    require(metric_attrs.get("name") == "http.server.duration", "expected server duration metric name")
+    require(metric_attrs.get("unit") == "ms", "expected millisecond server duration")
+    require(metric_attrs.get("metadata", {}).get("status") == "ok", "expected ok server duration status")
     event = next(
         (
             item

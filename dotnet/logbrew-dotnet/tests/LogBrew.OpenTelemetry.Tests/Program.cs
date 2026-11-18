@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using LogBrew;
 using LogBrew.OpenTelemetry;
+using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 
@@ -26,6 +27,8 @@ tests++;
 OpenTelemetryExporterReturnsFailureWhenCaptureFails();
 tests++;
 OpenTelemetryProcessorHandlesHighVolumeQueuePressure();
+tests++;
+OpenTelemetryProcessorSendsFailedRequestOutcome();
 tests++;
 
 await Console.Error.WriteLineAsync("{\"tests\":" + tests.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}").ConfigureAwait(false);
@@ -258,10 +261,98 @@ static void OpenTelemetryProcessorHandlesHighVolumeQueuePressure()
     Require(!payload.Contains("omitted payload", StringComparison.Ordinal), "expected high-volume payload text to be omitted");
 }
 
+static void OpenTelemetryProcessorSendsFailedRequestOutcome()
+{
+    var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-opentelemetry-tests", "0.1.0");
+    const string sourceName = "LogBrew.Tests.OpenTelemetry.Outcome";
+    using var source = new ActivitySource(sourceName);
+    using var factory = LoggerFactory.Create(builder => builder.AddLogBrew(client));
+    var logger = factory.CreateLogger("Checkout");
+    using (Sdk.CreateTracerProviderBuilder()
+        .AddSource(sourceName)
+        .AddLogBrew(client, options => options.WithEventIdPrefix("dotnet_otel_outcome"))
+        .Build())
+    {
+        using var request = source.StartActivity("POST /checkout/{cartId}", ActivityKind.Server);
+        Require(request != null, "expected sampled request activity");
+        request!.SetTag("http.request.method", "POST");
+        request.SetTag("http.route", "/checkout/{cartId}");
+        using (var payment = source.StartActivity("POST", ActivityKind.Client))
+        {
+            payment!.SetTag("http.request.method", "POST");
+            payment.SetStatus(ActivityStatusCode.Error);
+        }
+
+        try
+        {
+            ThrowPaymentFailure();
+        }
+        catch (InvalidOperationException error)
+        {
+            TestLogs.PaymentDeclined(logger, error);
+            request.AddException(error);
+            request.SetStatus(ActivityStatusCode.Error);
+        }
+    }
+
+    using var document = JsonDocument.Parse(client.PreviewJson());
+    var events = new List<JsonElement>();
+    foreach (var item in document.RootElement.GetProperty("events").EnumerateArray())
+    {
+        events.Add(item);
+    }
+
+    var spans = events.FindAll(item => item.GetProperty("type").GetString() == "span");
+    var requestSpan = spans.Find(item => item.GetProperty("attributes").GetProperty("name").GetString() == "POST /checkout/{cartId}").GetProperty("attributes");
+    var issues = events.FindAll(item => item.GetProperty("type").GetString() == "issue");
+    var metrics = events.FindAll(item => item.GetProperty("type").GetString() == "metric");
+    var logs = events.FindAll(item => item.GetProperty("type").GetString() == "log");
+    Require(issues.Count == 1, "expected one issue for the failed request, not for the client call");
+    Require(metrics.Count == 1, "expected one duration metric for the server request");
+    var issue = issues[0].GetProperty("attributes");
+    Require(issue.GetProperty("title").GetString() == "POST /checkout/{cartId} failed", "expected request issue title");
+    Require(issue.GetProperty("exception").GetProperty("type").GetString() == "System.InvalidOperationException", "expected exception type");
+    Require(issue.GetProperty("exception").GetProperty("mechanism").GetProperty("type").GetString() == "dotnet.activity", "expected activity mechanism");
+    var frame = issue.GetProperty("stackFrames")[0];
+    Require(frame.GetProperty("function").GetString()!.Contains("ThrowPaymentFailure", StringComparison.Ordinal), "expected the throwing function first");
+    Require(frame.GetProperty("filename").GetString() == "Program.cs", "expected a file name without its directory");
+    var breadcrumbs = new List<string>();
+    foreach (var breadcrumb in issue.GetProperty("breadcrumbs").EnumerateArray())
+    {
+        breadcrumbs.Add(breadcrumb.GetProperty("category").GetString() + "|" + breadcrumb.GetProperty("level").GetString() + "|" + breadcrumb.GetProperty("message").GetString());
+    }
+
+    Require(string.Join(",", breadcrumbs) == "activity.client|error|POST,log.Checkout|error|payment declined", "expected client call and log breadcrumbs: " + string.Join(",", breadcrumbs));
+    var traceId = requestSpan.GetProperty("traceId").GetString();
+    var spanId = requestSpan.GetProperty("spanId").GetString();
+    foreach (var item in new[] { issue, metrics[0].GetProperty("attributes"), logs[0].GetProperty("attributes") })
+    {
+        var trace = item.GetProperty("context").GetProperty("trace");
+        Require(trace.GetProperty("traceId").GetString() == traceId, "expected the request trace");
+        Require(trace.GetProperty("spanId").GetString() == spanId, "expected the request span");
+    }
+
+    var metric = metrics[0].GetProperty("attributes");
+    Require(metric.GetProperty("name").GetString() == "http.server.duration", "expected server duration metric");
+    Require(metric.GetProperty("unit").GetString() == "ms", "expected millisecond metric");
+    Require(metric.GetProperty("metadata").GetProperty("status").GetString() == "error", "expected failed status on metric");
+}
+
+static void ThrowPaymentFailure()
+{
+    throw new InvalidOperationException("payment declined");
+}
+
 internal sealed class NoopTransport : ITransport
 {
     public TransportResponse Send(string apiKey, string body)
     {
         return new TransportResponse(202, 1);
     }
+}
+
+internal static class TestLogs
+{
+    internal static readonly Action<ILogger, Exception?> PaymentDeclined =
+        LoggerMessage.Define(LogLevel.Error, new EventId(1, "PaymentDeclined"), "payment declined");
 }
