@@ -75,9 +75,12 @@ import {
 } from "@logbrew/node";
 
 const highVolumeQueueSpans = 1500;
+// Each operation queues its span, then its duration metric.
+const eventsPerOperation = 2;
 const maxBatchBytes = 256 * 1024;
 const maxBatchEvents = 100;
 const maxQueueSize = 1000;
+const keptOperations = maxQueueSize / eventsPerOperation;
 const serverApiKey = "LOGBREW_SERVER_API_KEY";
 const drops = [];
 const intakeRequests = [];
@@ -124,9 +127,9 @@ for (let index = 0; index < highVolumeQueueSpans; index += 1) {
 }
 
 assertEqual(client.pendingEvents(), maxQueueSize, "bounded queue size");
-assertEqual(client.droppedEvents(), highVolumeQueueSpans - maxQueueSize, "dropped event count");
-assertEqual(drops.length, highVolumeQueueSpans - maxQueueSize, "drop callback count");
-assertEqual(drops[0].eventId, "evt_node_queue_high_load_1000", "first dropped event id");
+assertEqual(client.droppedEvents(), highVolumeQueueSpans * eventsPerOperation - maxQueueSize, "dropped event count");
+assertEqual(drops.length, highVolumeQueueSpans * eventsPerOperation - maxQueueSize, "drop callback count");
+assertEqual(drops[0].eventId, `evt_node_queue_high_load_${keptOperations.toString().padStart(4, "0")}`, "first dropped event id");
 assertEqual(drops[0].eventType, "span", "first dropped event type");
 assertEqual(drops[0].reason, "queue_overflow", "drop reason");
 
@@ -158,7 +161,7 @@ await queueBatchOperationWithLogBrewSpan("email.advisory_drop", {
   traceIdFactory: () => "22222222222222222222222222222222"
 });
 assertEqual(advisoryClient.pendingEvents(), 1, "advisory queue size");
-assertEqual(advisoryClient.droppedEvents(), 1, "advisory drops");
+assertEqual(advisoryClient.droppedEvents(), 2 * eventsPerOperation - 1, "advisory drops");
 
 const intakeServer = http.createServer((req, res) => {
   let body = "";
@@ -219,17 +222,17 @@ for (let index = 0; index < acceptedPayloads.length; index += 1) {
 }
 const flushedEvents = acceptedPayloads.flatMap((payload) => payload.events);
 assertEqual(flushedEvents.length, maxQueueSize, "flushed event count");
-for (let index = 0; index < flushedEvents.length; index += 1) {
-  assertEqual(
-    flushedEvents[index].id,
-    `evt_node_queue_high_load_${index.toString().padStart(4, "0")}`,
-    `accepted event order ${index}`
-  );
+for (let index = 0; index < keptOperations; index += 1) {
+  const [span, metric] = flushedEvents.slice(index * eventsPerOperation, (index + 1) * eventsPerOperation);
+  assertEqual(span.type, "span", `accepted span ${index} type`);
+  assertEqual(span.id, `evt_node_queue_high_load_${index.toString().padStart(4, "0")}`, `accepted event order ${index}`);
+  assertEqual(metric.type, "metric", `accepted metric ${index} type`);
+  assertEqual(metric.attributes.name, "messaging.process.duration", `accepted metric ${index} name`);
 }
 assertEqual(flushedEvents[0].type, "span", "first event type");
 assertEqual(flushedEvents[0].id, "evt_node_queue_high_load_0000", "first flushed id");
-assertEqual(flushedEvents.at(-1).id, "evt_node_queue_high_load_0999", "last flushed id");
-if (flushedEvents.some((event) => event.id === "evt_node_queue_high_load_1000")) {
+assertEqual(flushedEvents.at(-2).id, `evt_node_queue_high_load_${(keptOperations - 1).toString().padStart(4, "0")}`, "last flushed span id");
+if (flushedEvents.some((event) => event.id === `evt_node_queue_high_load_${keptOperations.toString().padStart(4, "0")}`)) {
   throw new Error("dropped queue span leaked into flushed payload");
 }
 const firstSpan = flushedEvents[0].attributes;
@@ -299,7 +302,8 @@ console.log(JSON.stringify({
   acceptedBatches: acceptedPayloads.length,
   batches: response.batches,
   droppedEvents: client.droppedEvents(),
-  flushedSpans: flushedEvents.length,
+  flushedEvents: flushedEvents.length,
+  flushedSpans: flushedEvents.filter((event) => event.type === "span").length,
   highVolumeQueueSpans,
   pendingEvents: client.pendingEvents(),
   requestCount: intakeRequests.length,
@@ -371,8 +375,9 @@ expected = {
     "ok": True,
     "acceptedBatches": 10,
     "batches": 10,
-    "droppedEvents": 500,
-    "flushedSpans": 1000,
+    "droppedEvents": 2000,
+    "flushedEvents": 1000,
+    "flushedSpans": 500,
     "highVolumeQueueSpans": 1500,
     "pendingEvents": 0,
     "requestCount": 11,
