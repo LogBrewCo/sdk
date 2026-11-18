@@ -24,6 +24,7 @@ module LogBrew
     MAX_BREADCRUMB_DATA_FIELDS = 8
     MAX_BREADCRUMB_DATA_STRING = 256
     MAX_COORDINATE = 2_147_483_647
+    MAX_BACKTRACE_LINE = MAX_FRAME_FILENAME + MAX_FRAME_FUNCTION + 64
 
     MACHINE_NAME = /\A[A-Za-z][A-Za-z0-9_.:-]{0,63}\z/.freeze
     DATA_KEY = /\A[A-Za-z][A-Za-z0-9_.-]{0,63}\z/.freeze
@@ -611,7 +612,7 @@ module LogBrew
     end
 
     def frame_from_backtrace_line(line)
-      return nil unless line.is_a?(String) && line.valid_encoding?
+      return nil unless line.is_a?(String) && line.valid_encoding? && line.length <= MAX_BACKTRACE_LINE
 
       match = line.match(/\A(.+):(\d+)(?::in [`'](.+?)[`'])?\z/)
       return nil unless match
