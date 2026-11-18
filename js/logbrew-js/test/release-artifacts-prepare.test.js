@@ -15,9 +15,10 @@ import {
   succeeded,
   withBuild
 } from "./release-artifacts-helpers.js";
+import { rename, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
-import { writeFile } from "node:fs/promises";
 
 /**
  * @import { Build } from "./release-artifacts-helpers.js"
@@ -93,6 +94,17 @@ await test("prepare-js injects Debug IDs and strips source content from a local 
     assertExcludes(result.stdout, ["source-fixture-marker", build.root]);
     assertPreparedFiles(await readText(jsPath(build)), await readJson(mapPath(build)));
     await assertSecondRunUnchanged(build);
+  });
+});
+
+await test("prepare-js escapes HTML markup from a build path in the runtime Debug ID registry", async () => {
+  await withBuild(async (build) => {
+    const markupDirectory = path.join(build.buildDir, "<script>");
+    await rename(path.join(build.buildDir, "assets"), markupDirectory);
+    await prepareBuild(build, true);
+    const prepared = await readText(path.join(markupDirectory, "app.js"));
+    assert.ok(!prepared.includes("<script>"), "the build path cannot open or close an inline script");
+    assert.ok(prepared.includes(String.raw`r["\u003cscript\u003e/app.js"]`), "the registry keeps the escaped build path");
   });
 });
 
