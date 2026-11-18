@@ -54,6 +54,7 @@ try {
       "process-errors.test.js",
       "request-tracing.test.js",
       "runtime-context.test.js",
+      "slow-input.test.js",
       "user-context.test.js"
     ],
     {

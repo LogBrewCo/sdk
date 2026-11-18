@@ -4,6 +4,7 @@ import { cp, mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 
 const CLIENT_KEY = "LOGBREW_BROWSER_KEY";
 const TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
@@ -27,6 +28,7 @@ async function importBrowserPackage() {
   const imported = await import(pathToFileURL(join(tempDir, "node_modules", "@logbrew", "browser", "index.js")));
   return {
     imported,
+    tempDir,
     async removeTempDir() {
       await rm(tempDir, { force: true, recursive: true });
     }
@@ -386,6 +388,35 @@ test("installed browser error suppression rules drop noisy issues with safe summ
       source: "browser.error"
     });
     assert.doesNotMatch(JSON.stringify(suppressed[0]), /hidden@example|12345|cdn\.example|email=|widget|ResizeObserver loop failed/u);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("installed browser suppression keeps a long rule reason fast in both module formats", async () => {
+  const { imported, removeTempDir, tempDir } = await importBrowserPackage();
+  const required = createRequire(join(tempDir, "package.json"))("@logbrew/browser");
+  const reason = `a${"_".repeat(50_000)}b`;
+  try {
+    for (const { captureBrowserError, installLogBrewBrowser } of [imported, required]) {
+      const context = installLogBrewBrowser({
+        browserWindow: createFakeBrowserWindow("https://app.example.test/checkout"),
+        capturePageViews: false,
+        clientKey: CLIENT_KEY,
+        transport: {
+          async send() {
+            return { statusCode: 202 };
+          }
+        }
+      });
+      const started = performance.now();
+      const result = await captureBrowserError(new Error("slow rule"), context, {
+        errorSuppressionRules: [{ errorName: "Error", reason }]
+      });
+      const elapsed = performance.now() - started;
+      assert.deepEqual(result, { reason: `a${"_".repeat(79)}`, suppressed: true });
+      assert.ok(elapsed < 100, `suppression took ${elapsed} ms`);
+    }
   } finally {
     await removeTempDir();
   }

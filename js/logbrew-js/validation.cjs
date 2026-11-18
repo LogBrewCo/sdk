@@ -16,7 +16,7 @@ const ZERO_SPAN_ID = "0000000000000000";
 const TRACE_ID_PATTERN = /^[0-9a-fA-F]{32}$/u;
 const SPAN_ID_PATTERN = /^[0-9a-fA-F]{16}$/u;
 const TRACE_FLAGS_PATTERN = /^[0-9a-fA-F]{2}$/u;
-const NEGATIVE_OFFSET_PATTERN = /.+-.+/u;
+const NEGATIVE_OFFSET_PATTERN = /.-./u;
 const RFC3339_TIMESTAMP_PATTERN =
   /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
 const EPOCH_MS = 0;

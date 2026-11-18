@@ -2,6 +2,7 @@
 
 const { SdkError } = require("@logbrew/sdk");
 const { createAutomaticEventId } = require("./automatic-event-id.cjs");
+const { trimUnderscores } = require("./internal.cjs");
 const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const INSTRUMENTED_REDIS_SEND_COMMAND = Symbol.for("@logbrew/node.instrumentedRedisSendCommand");
@@ -484,7 +485,7 @@ function redisCommandName(value) {
   if (typeof value !== "string" && typeof value !== "number") {
     return "COMMAND";
   }
-  const normalized = String(value).trim().replace(/[^A-Za-z0-9_.:-]+/g, "_").replace(/^_+|_+$/g, "");
+  const normalized = trimUnderscores(String(value).trim().replace(/[^A-Za-z0-9_.:-]+/g, "_"));
   if (!normalized || normalized.length > 64) {
     return "COMMAND";
   }
@@ -495,7 +496,7 @@ function normalizeRedisOperationName(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return "redis.command";
   }
-  const normalized = value.trim().replace(/[^a-z0-9_.:-]+/gi, "_").replace(/^_+|_+$/g, "");
+  const normalized = trimUnderscores(value.trim().replace(/[^a-z0-9_.:-]+/gi, "_"));
   if (!normalized || normalized.length > 80 || normalized.includes("@")) {
     return "redis.command";
   }

@@ -522,3 +522,6 @@ function closeServer(server) {
 EOF
 
 node smoke.mjs
+
+cp "$repo_root"/js/logbrew-prisma/test/*.test.mjs "$app_dir/"
+node --test "$app_dir"/*.test.mjs >/dev/null

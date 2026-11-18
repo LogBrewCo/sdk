@@ -2,6 +2,7 @@
 
 const { SdkError } = require("@logbrew/sdk");
 const { createAutomaticEventId } = require("./automatic-event-id.cjs");
+const { trimUnderscores } = require("./internal.cjs");
 const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const INSTRUMENTED_PG_QUERY = Symbol.for("@logbrew/node.instrumentedPgQuery");
@@ -232,7 +233,7 @@ function normalizePgOperationKind(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return "query";
   }
-  const normalized = value.trim().replace(/[^a-z0-9_.:-]+/gi, "_").replace(/^_+|_+$/g, "");
+  const normalized = trimUnderscores(value.trim().replace(/[^a-z0-9_.:-]+/gi, "_"));
   return normalized.toUpperCase() === normalized ? normalized : normalized.toLowerCase();
 }
 

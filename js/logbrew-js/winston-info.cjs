@@ -12,7 +12,7 @@ const { isObjectValue, isRecord, isTruthy, optionalProperty } = require("./valid
 const WINSTON_RESERVED_FIELDS = new Set(["level", "message", "timestamp", "time", "err", "error", "stack"]);
 const LINE_BREAK_PATTERN = /\r?\n/u;
 const FIRST_LINE = 0;
-const STACK_HEADLINE_PATTERN = /^(?<name>[A-Za-z][A-Za-z0-9_.]*(?:Error|Exception)?):\s*(?<message>.*)$/u;
+const STACK_HEADLINE_PATTERN = /^(?<name>[A-Za-z][A-Za-z0-9_.]*(?:Error|Exception)?):\s*(?<message>(?:\S.*)?)$/u;
 /** @type {ReadonlyMap<string, Severity>} */
 const LOGBREW_LEVELS = new Map([
   ["warn", "warning"],

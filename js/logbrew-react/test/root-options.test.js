@@ -136,3 +136,34 @@ test("the React Router navigation hook accepts a trace ID alone and never throws
   `, "mjs", effectReact);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
+
+const slowRouteScenario = `
+  const slashes = "/".repeat(50000);
+  const started = performance.now();
+  const template = createReactRouterRouteTemplate([
+    { route: { path: slashes + "shop" } },
+    { route: { path: "items" + slashes + "list" } }
+  ]);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 100, "route template took " + elapsed + " ms");
+  assert.equal(template, slashes + "shop/items" + slashes + "list");
+  assert.equal(createReactRouterRouteTemplate([{ route: { path: "/shop//" } }, { route: { path: "items//" } }]), "/shop/items");
+`;
+
+test("React Router route templates stay fast on long slash runs (ESM)", () => {
+  const result = runConsumer(`
+    import assert from "node:assert/strict";
+    import { createReactRouterRouteTemplate } from "@logbrew/react";
+    ${slowRouteScenario}
+  `, "mjs");
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("React Router route templates stay fast on long slash runs (CommonJS)", () => {
+  const result = runConsumer(`
+    const assert = require("node:assert/strict");
+    const { createReactRouterRouteTemplate } = require("@logbrew/react");
+    ${slowRouteScenario}
+  `, "cjs");
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});

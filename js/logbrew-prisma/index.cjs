@@ -22,8 +22,26 @@ const DEFAULT_MODEL_OPERATION_NAME = "client";
 const MAX_OPERATION_LENGTH = 64;
 const MAX_MODEL_LENGTH = 80;
 const LABEL_START = 0;
+const EDGE_CHARACTER = "_";
+const ONE_CHARACTER = 1;
 /** @type {readonly ("info" | "warn" | "error")[]} */
 const PRISMA_LOG_LEVELS = Object.freeze(["info", "warn", "error"]);
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function trimUnderscores(value) {
+  let start = LABEL_START;
+  let end = value.length;
+  while (start < end && value[start] === EDGE_CHARACTER) {
+    start += ONE_CHARACTER;
+  }
+  while (end > start && value[end - ONE_CHARACTER] === EDGE_CHARACTER) {
+    end -= ONE_CHARACTER;
+  }
+  return value.slice(start, end);
+}
 
 /**
  * @param {unknown} value
@@ -35,7 +53,7 @@ function normalizeLabel(value, fallback, maxLength) {
   if (typeof value !== "string") {
     return fallback;
   }
-  const normalized = value.trim().replaceAll(/[^\w.:-]+/gu, "_").replaceAll(/^_+|_+$/gu, "");
+  const normalized = trimUnderscores(value.trim().replaceAll(/[^\w.:-]+/gu, "_"));
   if (normalized === "") {
     return fallback;
   }
