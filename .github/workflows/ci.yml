@@ -73,6 +73,9 @@ jobs:
       - name: Check the tool matrix
         run: bash scripts/check-tool-matrix.sh && bash scripts/test-check-tool-matrix.sh
 
+      - name: Check for inline lint suppressions
+        run: bash scripts/check-suppressions.sh && bash scripts/test-check-suppressions.sh
+
       - name: Run shell static analysis
         run: bash scripts/check_shell_static.sh
 

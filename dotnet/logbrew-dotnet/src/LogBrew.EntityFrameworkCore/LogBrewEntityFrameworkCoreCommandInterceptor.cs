@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using System.Threading;
@@ -237,14 +236,12 @@ namespace LogBrew.EntityFrameworkCore
             return Task.CompletedTask;
         }
 
-        [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "EF Core cancellation callbacks are guarded with ThrowIfNull; the analyzer flags this overload as a false positive.")]
         public override void CommandCanceled(DbCommand command, CommandEndEventData eventData)
         {
             ArgumentNullException.ThrowIfNull(eventData);
             FinishCommand(command, eventData, NormalizeExecuteMethod(eventData.ExecuteMethod), null, new OperationCanceledException());
         }
 
-        [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "EF Core cancellation callbacks are guarded with ThrowIfNull; the analyzer flags this overload as a false positive.")]
         public override Task CommandCanceledAsync(DbCommand command, CommandEndEventData eventData, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(eventData);
@@ -400,7 +397,6 @@ namespace LogBrew.EntityFrameworkCore
             return metadata;
         }
 
-        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "User-provided metadata callbacks must not change EF Core command behavior.")]
         private IDictionary<string, object?>? ProviderMetadata(LogBrewEntityFrameworkCoreCommandSnapshot snapshot)
         {
             if (options.MetadataProvider == null)
@@ -418,7 +414,6 @@ namespace LogBrew.EntityFrameworkCore
             }
         }
 
-        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "User-provided filters must fail closed without changing EF Core command behavior.")]
         private bool ShouldCapture(LogBrewEntityFrameworkCoreCommandSnapshot snapshot)
         {
             if (options.CommandFilter == null)
@@ -507,7 +502,6 @@ namespace LogBrew.EntityFrameworkCore
             return builder.ToString();
         }
 
-        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Provider context access is optional telemetry metadata and must not change EF Core command behavior.")]
         private static string? ContextType(CommandEventData eventData)
         {
             try
@@ -520,7 +514,6 @@ namespace LogBrew.EntityFrameworkCore
             }
         }
 
-        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Provider name access is optional telemetry metadata and must not change EF Core command behavior.")]
         private static string? ProviderName(CommandEventData eventData)
         {
             try
@@ -622,7 +615,6 @@ namespace LogBrew.EntityFrameworkCore
             }
         }
 
-        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "User-provided error callbacks must not change EF Core command behavior.")]
         private void ReportCaptureError(SdkException error)
         {
             if (options.OnErrorCallback == null)

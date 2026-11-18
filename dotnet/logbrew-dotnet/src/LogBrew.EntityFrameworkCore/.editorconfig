@@ -1,0 +1,7 @@
+root = false
+
+# The interceptor runs inside the application's EF Core command pipeline. It calls the application's metadata,
+# filter, and error callbacks and reads the provider's context and name. It catches every exception from them so
+# that telemetry never changes a command result: a failed filter skips capture, and a failed read drops the value.
+[LogBrewEntityFrameworkCoreCommandInterceptor.cs]
+dotnet_diagnostic.CA1031.severity = none
