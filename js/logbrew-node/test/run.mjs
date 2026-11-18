@@ -50,6 +50,7 @@ try {
       "http-express-routes.test.js",
       "http-error-privacy.test.js",
       "http-shared-client.test.js",
+      "operation-capture.test.js",
       "process-errors.test.js",
       "request-tracing.test.js",
       "runtime-context.test.js",

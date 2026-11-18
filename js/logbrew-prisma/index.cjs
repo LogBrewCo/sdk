@@ -1,10 +1,11 @@
 "use strict";
 
 const { SdkError } = require("@logbrew/sdk");
-const { databaseOperationWithLogBrewSpan } = require("@logbrew/node");
+const { captureLogBrewLog, databaseOperationWithLogBrewSpan } = require("@logbrew/node");
 
 /**
  * @import { DatabaseOperationWithLogBrewSpanOptions } from "@logbrew/node"
+ * @import { LogBrewClient } from "@logbrew/sdk"
  * @import {
  *   LogBrewPrismaExtension,
  *   LogBrewPrismaInstrumentation,
@@ -21,6 +22,8 @@ const DEFAULT_MODEL_OPERATION_NAME = "client";
 const MAX_OPERATION_LENGTH = 64;
 const MAX_MODEL_LENGTH = 80;
 const LABEL_START = 0;
+/** @type {readonly ("info" | "warn" | "error")[]} */
+const PRISMA_LOG_LEVELS = Object.freeze(["info", "warn", "error"]);
 
 /**
  * @param {unknown} value
@@ -169,6 +172,52 @@ function isExtensiblePrismaClient(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @param {string} name
+ * @returns {unknown}
+ */
+function readMember(value, name) {
+  return typeof value === "object" && value !== null ? Reflect.get(value, name) : undefined;
+}
+
+/**
+ * @param {LogBrewClient} logbrew
+ * @param {Readonly<{ installed: boolean }>} state
+ * @param {"info" | "warn" | "error"} level
+ * @returns {(event: unknown) => void}
+ */
+function createPrismaLogCapture(logbrew, state, level) {
+  return (event) => {
+    const message = readMember(event, "message");
+    const target = readMember(event, "target");
+    if (state.installed && typeof message === "string") {
+      captureLogBrewLog(logbrew, {
+        level,
+        logger: "prisma",
+        message,
+        metadata: typeof target === "string" && target !== "" ? { target } : {}
+      });
+    }
+  };
+}
+
+/**
+ * @param {unknown} prismaClient
+ * @param {LogBrewClient} logbrew
+ * @param {Readonly<{ installed: boolean }>} state
+ * @returns {void}
+ */
+function subscribePrismaLogs(prismaClient, logbrew, state) {
+  const on = readMember(prismaClient, "$on");
+  if (typeof on !== "function") {
+    return;
+  }
+  for (const level of PRISMA_LOG_LEVELS) {
+    Reflect.apply(on, prismaClient, [level, createPrismaLogCapture(logbrew, state, level)]);
+  }
+}
+
+/**
  * @param {unknown} prismaClient
  * @param {LogBrewPrismaSpanOptions} [options]
  * @returns {LogBrewPrismaInstrumentation<unknown>}
@@ -178,11 +227,10 @@ function instrumentLogBrewPrismaClient(prismaClient, options) {
     throw new SdkError("configuration_error", "instrumentLogBrewPrismaClient requires a PrismaClient with $extends");
   }
   const state = { installed: true };
-  const extension = createLogBrewPrismaExtension({
-    ...requireSpanOptions(options, "createLogBrewPrismaExtension"),
-    shouldCapture: () => state.installed
-  });
+  const spanOptions = requireSpanOptions(options, "createLogBrewPrismaExtension");
+  const extension = createLogBrewPrismaExtension({ ...spanOptions, shouldCapture: () => state.installed });
   const client = prismaClient.$extends(extension);
+  subscribePrismaLogs(prismaClient, spanOptions.client, state);
   return Object.freeze({
     client,
     isInstalled() {

@@ -1,10 +1,11 @@
 "use strict";
 
-const { isObject, missingClientError, normalizeName, readField, resolveQueueName } = require("./internal.cjs");
+const { hasFields, isCallable, isObject, missingClientError, normalizeName, readField, resolveQueueName } = require("./internal.cjs");
 const { extractLogBrewBullMqTraceparent } = require("./jobs.cjs");
-const { queueOperationWithLogBrewSpan } = require("@logbrew/node");
+const { captureLogBrewLog, queueOperationWithLogBrewSpan } = require("@logbrew/node");
 
 /**
+ * @import { LogBrewClient } from "@logbrew/sdk"
  * @import { LogBrewBullMqSpanOptions } from "./index.cjs"
  * @import { Callable } from "./internal.cjs"
  * @typedef {LogBrewBullMqSpanOptions["metadata"]} SpanMetadata
@@ -58,6 +59,35 @@ function createBullMqProcessorMetadata(job, metadata) {
 }
 
 /**
+ * @param {Callable} log
+ * @param {object} job
+ * @param {Readonly<{ client: LogBrewClient, metadata: Readonly<{ jobName: string, queueName: string }> }>} target
+ * @returns {(...args: readonly unknown[]) => unknown}
+ */
+function createJobLog(log, job, { client, metadata }) {
+  return (...args) => {
+    const [line] = args;
+    captureLogBrewLog(client, { logger: "bullmq", message: typeof line === "string" ? line : "", metadata });
+    return Reflect.apply(log, job, args);
+  };
+}
+
+/**
+ * @param {unknown} job
+ * @param {LogBrewClient} client
+ * @param {Readonly<{ queueName: string, taskName: string }>} names
+ * @returns {void}
+ */
+function captureJobLogs(job, client, { queueName, taskName }) {
+  const log = readField(job, "log");
+  if (!hasFields(job) || !isCallable(log) || Object.hasOwn(job, "log")) {
+    return;
+  }
+  const value = createJobLog(log, job, { client, metadata: { jobName: taskName, queueName } });
+  Reflect.defineProperty(job, "log", { configurable: true, value, writable: true });
+}
+
+/**
  * @template Result
  * @param {unknown} job
  * @param {() => Result | Promise<Result>} operation
@@ -78,7 +108,10 @@ async function processWithLogBrewBullMqSpan(job, operation, options) {
   return queueOperationWithLogBrewSpan("process", {
     ...spanOptions,
     ...(metadata === undefined ? {} : { metadata }),
-    operation,
+    async operation() {
+      captureJobLogs(job, spanOptions.client, { queueName, taskName });
+      return operation();
+    },
     operationKind: "process",
     queueName,
     system: DEFAULT_SYSTEM,

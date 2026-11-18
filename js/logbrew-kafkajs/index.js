@@ -1,4 +1,10 @@
 import {
+  captureLogBrewLog,
+  createLogBrewQueueTraceHeaders,
+  queueBatchOperationWithLogBrewSpan,
+  queueOperationWithLogBrewSpan
+} from "@logbrew/node";
+import {
   cloneObject,
   createInstrumentationState,
   installMethod,
@@ -12,14 +18,10 @@ import {
   readList,
   requireSpanOptions
 } from "./internal.js";
-import {
-  createLogBrewQueueTraceHeaders,
-  queueBatchOperationWithLogBrewSpan,
-  queueOperationWithLogBrewSpan
-} from "@logbrew/node";
 import { SdkError } from "@logbrew/sdk";
 
 /**
+ * @import { LogBrewClient } from "@logbrew/sdk"
  * @import { Callable } from "./internal.js"
  * @import {
  *   LogBrewKafkaJsBatchProcessOptions,
@@ -318,7 +320,43 @@ function instrumentLogBrewKafkaJsConsumer(consumer, options) {
   return state.handle;
 }
 
+const KAFKAJS_ERROR = 1;
+const KAFKAJS_WARN = 2;
+const KAFKAJS_INFO = 4;
+const KAFKAJS_DEBUG = 5;
+/** @type {ReadonlyMap<number, "error" | "warn" | "info" | "debug">} */
+const KAFKAJS_LOG_LEVELS = new Map([
+  [KAFKAJS_ERROR, "error"],
+  [KAFKAJS_WARN, "warn"],
+  [KAFKAJS_INFO, "info"],
+  [KAFKAJS_DEBUG, "debug"]
+]);
+
+/**
+ * @param {Readonly<{ client: LogBrewClient }>} options
+ * @returns {() => (entry: unknown) => void}
+ */
+function createLogBrewKafkaJsLogCreator(options) {
+  const client = isObjectLike(options) ? options.client : undefined;
+  if (!isObjectLike(client)) {
+    throw new SdkError("configuration_error", "createLogBrewKafkaJsLogCreator requires client");
+  }
+  return () => (entry) => {
+    const log = readField(entry, "log");
+    const message = readField(log, "message");
+    const namespace = normalizeLabel(readField(entry, "namespace"), "kafkajs");
+    const level = KAFKAJS_LOG_LEVELS.get(Number(readField(entry, "level"))) ?? "info";
+    captureLogBrewLog(client, {
+      level,
+      logger: "kafkajs",
+      message: typeof message === "string" ? message : "",
+      metadata: { namespace }
+    });
+  };
+}
+
 const defaultExport = {
+  createLogBrewKafkaJsLogCreator,
   createLogBrewKafkaJsMessage,
   createLogBrewKafkaJsProducerBatch,
   createLogBrewKafkaJsProducerRecord,
@@ -332,6 +370,7 @@ const defaultExport = {
 };
 
 export {
+  createLogBrewKafkaJsLogCreator,
   createLogBrewKafkaJsMessage,
   createLogBrewKafkaJsProducerBatch,
   createLogBrewKafkaJsProducerRecord,

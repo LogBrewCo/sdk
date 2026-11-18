@@ -33,6 +33,7 @@ const { createHttpErrorEvent, createHttpRequestEvent } = require("./http-events.
 const { captureHttpError, createHttpHandler, createLogBrewNodeContext } = require("./http-handler.cjs");
 const {
   addLogBrewBreadcrumb,
+  captureLogBrewLog,
   installLogBrewPinoInstrumentation,
   installLogBrewProcessErrorCapture,
   installLogBrewUndiciInstrumentation,
@@ -376,6 +377,7 @@ const exported = {
   axiosRequestWithLogBrewSpan,
   cacheOperationWithLogBrewSpan,
   captureHttpError,
+  captureLogBrewLog,
   createNodeFetchTransport,
 
   createHttpErrorEvent,

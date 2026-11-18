@@ -127,7 +127,7 @@ function recordedSpans(client) {
   /** @type {unknown} */
   const preview = JSON.parse(client.previewJson());
   const events = readField(preview, "events");
-  return isList(events) ? events.map((event) => toRecordedSpan(event)) : [];
+  return isList(events) ? events.filter((event) => readField(event, "type") === "span").map((event) => toRecordedSpan(event)) : [];
 }
 
 /**

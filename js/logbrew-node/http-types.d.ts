@@ -150,6 +150,17 @@ declare function createLogBrewNodeContext(
 /** Add an app-owned breadcrumb to the active request scope, or the process scope outside a request. */
 declare function addLogBrewBreadcrumb(breadcrumb: LogBrewBreadcrumbInput): void;
 
+/** A line from a framework's own logger, such as BullMQ job.log, the KafkaJS logCreator, or Prisma log events. */
+interface LogBrewLogInput {
+  readonly message: string;
+  readonly level?: "trace" | "debug" | "info" | "warn" | "warning" | "error" | "fatal" | "critical";
+  readonly logger?: string;
+  readonly metadata?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+/** Send a framework log line as a log on the active trace and keep it as a breadcrumb for the next issue. Never throws. */
+declare function captureLogBrewLog(client: LogBrewClient, record: LogBrewLogInput): void;
+
 /**
  * Tag every event of the active request with an opaque app-owned user ID (not an email or name).
  * Returns false outside a request trace, so one request's user never reaches another request.
@@ -181,6 +192,7 @@ declare function captureHttpError(
 
 export type {
   LogBrewBreadcrumbInput,
+  LogBrewLogInput,
   LogBrewClientFactory,
   LogBrewHttpErrorEvent,
   LogBrewHttpErrorEventOptions,
@@ -198,6 +210,7 @@ export type {
 export {
   addLogBrewBreadcrumb,
   captureHttpError,
+  captureLogBrewLog,
   createHttpErrorEvent,
   createHttpRequestEvent,
   createLogBrewNodeClient,

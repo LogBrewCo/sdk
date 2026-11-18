@@ -14,20 +14,24 @@ pnpm add @logbrew/sdk @logbrew/node @logbrew/kafkajs kafkajs
 Use a project-scoped server ingest key from your LogBrew project settings:
 
 ```js
-import { instrumentLogBrewKafkaJsConsumer, instrumentLogBrewKafkaJsProducer } from "@logbrew/kafkajs";
+import {
+  createLogBrewKafkaJsLogCreator,
+  instrumentLogBrewKafkaJsConsumer,
+  instrumentLogBrewKafkaJsProducer
+} from "@logbrew/kafkajs";
+import { createLogBrewNodeClient } from "@logbrew/node";
 import { Kafka } from "kafkajs";
-import { LogBrewClient } from "@logbrew/sdk";
 
-const client = LogBrewClient.create({
-  apiKey: process.env["LOGBREW_SERVER_API_KEY"] ?? "LOGBREW_SERVER_API_KEY",
-  context: { resource: { deployment: { environment: "production", release: "checkout-worker@1.0.0" } }, schemaVersion: 1 },
+const client = createLogBrewNodeClient({
+  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
   sdkName: "checkout-worker",
   sdkVersion: "1.0.0"
 });
 
 const kafka = new Kafka({
   brokers: [process.env["KAFKA_BROKER"] ?? "localhost:9092"],
-  clientId: "checkout-worker"
+  clientId: "checkout-worker",
+  logCreator: createLogBrewKafkaJsLogCreator({ client })
 });
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: "checkout-worker" });
@@ -89,10 +93,13 @@ await consumer.run({
 - Consumer helpers continue a single-message trace from a valid `traceparent`; malformed propagation is ignored without failing the message.
 - Batch consumers use bounded span links from message headers and derive `messaging.batch.message_count`.
 - Spans use safe metadata such as `messaging.system=kafka`, `messaging.destination.name`, `messaging.operation.name`, and `messaging.operation.type`.
+- A failed send or a failed `eachMessage` or `eachBatch` handler sends one issue with the error type and stack frames, on the operation's trace. A failed handler is marked unhandled.
+- Each operation sends one `messaging.process.duration` or `messaging.client.operation.duration` histogram in milliseconds.
+- `createLogBrewKafkaJsLogCreator({ client })` is a KafkaJS `logCreator`. It sends KafkaJS `ERROR`, `WARN`, `INFO`, and `DEBUG` lines as LogBrew logs on the active trace, with the KafkaJS namespace, and adds them as breadcrumbs. Other log fields, such as broker addresses and error text, are not sent.
 - The package keeps KafkaJS connections, producer/consumer lifecycle, retries, commits, and shutdown behavior app-owned.
 
 ## Privacy Boundary
 
-The helpers do not patch KafkaJS globally, do not capture message keys or values, do not capture arbitrary headers, do not store broker URLs, partitions, offsets, auth material, baggage, tracestate, payloads, stack traces, or exception messages, and do not open support tickets.
+The helpers do not patch KafkaJS globally, do not capture message keys or values, do not capture arbitrary headers, do not store broker URLs, partitions, offsets, auth material, baggage, tracestate, payloads, or exception messages, and do not open support tickets. Issues from failed operations carry the exception type and stack frames.
 
 Use `@logbrew/kafkajs` when you want explicit trace correlation for the KafkaJS calls you choose. Use lower-level `@logbrew/node` queue helpers when your app needs a custom queue abstraction.

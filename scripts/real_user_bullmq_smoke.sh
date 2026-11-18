@@ -455,7 +455,13 @@ assertEqual(intakeRequests[1].url, "/v1/events", "path-only fake intake");
 
 const payload = JSON.parse(intakeRequests.at(-1).body);
 assertEqual(payload.sdk.name, "bullmq-smoke-app", "sdk name");
-assertEqual(payload.events.length, 7, "span event count");
+const eventsOfType = (events, type) => events.filter((event) => event.type === type);
+assertEqual(eventsOfType(payload.events, "span").length, 7, "span event count");
+assertEqual(eventsOfType(payload.events, "metric").length, 7, "duration metric count");
+const [processorIssue] = eventsOfType(payload.events, "issue");
+assertEqual(eventsOfType(payload.events, "issue").length, 1, "processor failure issue count");
+assertEqual(processorIssue.attributes.exception.type, "TypeError", "processor issue exception type");
+assertEqual(processorIssue.attributes.exception.mechanism.handled, false, "processor issue is unhandled");
 const producerSpan = payload.events.find((event) => event.id === "evt_bullmq_add_001").attributes;
 assertEqual(producerSpan.name, "bullmq publish add", "producer span name");
 assertEqual(producerSpan.metadata.framework, "node:queue", "producer framework");
@@ -634,7 +640,7 @@ assertEqual(postInstrumentationResponse.statusCode, 202, "post-instrumentation f
 assertEqual(postInstrumentationResponse.attempts, 1, "post-instrumentation attempts");
 assertEqual(restartIntakeRequests.length, 1, "post-instrumentation request count");
 const instrumentationPayload = JSON.parse(restartIntakeRequests.at(-1).body);
-assertEqual(instrumentationPayload.events.length, 3, "instrumented queue span count");
+assertEqual(eventsOfType(instrumentationPayload.events, "span").length, 3, "instrumented queue span count");
 const instrumentedAddSpan = instrumentationPayload.events.find((event) => event.attributes.name === "bullmq publish add").attributes;
 assertEqual(instrumentedAddSpan.metadata["messaging.destination.name"], "notifications", "instrumented queue destination");
 const instrumentedBulkSpan = instrumentationPayload.events.find((event) => event.attributes.name === "bullmq publish addBulk").attributes;
