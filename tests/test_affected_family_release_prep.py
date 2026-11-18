@@ -29,14 +29,14 @@ CATALOG = tomllib.loads(source_text("tools/toolchain-probe/release-catalog.toml"
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": "0.1.44",
-            "js/logbrew-browser/package.json": "0.1.21",
+            "js/logbrew-js/package.json": "0.1.45",
+            "js/logbrew-browser/package.json": "0.1.22",
             "js/logbrew-express/package.json": "0.1.14",
             "js/logbrew-fastify/package.json": "0.1.12",
-            "js/logbrew-node/package.json": "0.1.29",
+            "js/logbrew-node/package.json": "0.1.30",
             "js/logbrew-nestjs/package.json": "0.1.12",
             "js/logbrew-next/package.json": "0.1.18",
-            "js/logbrew-react/package.json": "0.1.5",
+            "js/logbrew-react/package.json": "0.1.6",
             "js/logbrew-react-native/package.json": "0.1.46",
             "js/logbrew-svelte/package.json": "0.1.8",
             "js/logbrew-angular/package.json": "0.1.3",
@@ -240,7 +240,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_release_catalog_matches_the_affected_version_matrix(self) -> None:
         self.assertEqual(CATALOG["rust"], "0.2.2")
-        self.assertEqual(CATALOG["rubygems"], "0.1.19")
+        self.assertEqual(CATALOG["rubygems"], "0.1.20")
         self.assertEqual(CATALOG["packagist"], "0.1.23")
         self.assertEqual(
             {package["id"]: package["version"] for package in CATALOG["nuget"]},
