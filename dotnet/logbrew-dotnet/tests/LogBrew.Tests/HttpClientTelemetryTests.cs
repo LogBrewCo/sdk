@@ -7,33 +7,31 @@ using System.Threading;
 using System.Threading.Tasks;
 using LogBrew;
 
-#pragma warning disable CA2025 // Tests synchronously wait for SendAsync before disposing request/response instances.
-
 internal static class HttpClientTelemetryTests
 {
     private const string IncomingTraceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
 
-    internal static int Run()
+    internal static async Task<int> RunAsync()
     {
         var tests = 0;
-        OutboundHttpClientHelperInjectsTraceparentAndCapturesSpan();
+        await OutboundHttpClientHelperInjectsTraceparentAndCapturesSpanAsync().ConfigureAwait(false);
         tests++;
-        OutboundHttpClientHandlerInjectsTraceparentAndCapturesSpan();
+        await OutboundHttpClientHandlerInjectsTraceparentAndCapturesSpanAsync().ConfigureAwait(false);
         tests++;
-        OutboundHttpClientHandlerSkipsCaptureWhenRequestFilterRejects();
+        await OutboundHttpClientHandlerSkipsCaptureWhenRequestFilterRejectsAsync().ConfigureAwait(false);
         tests++;
-        OutboundHttpClientHandlerUsesRouteTemplateSelector();
+        await OutboundHttpClientHandlerUsesRouteTemplateSelectorAsync().ConfigureAwait(false);
         tests++;
-        OutboundHttpClientHelperPreservesOriginalException();
+        await OutboundHttpClientHelperPreservesOriginalExceptionAsync().ConfigureAwait(false);
         tests++;
-        CaptureFailureDoesNotReplaceHttpResponse();
+        await CaptureFailureDoesNotReplaceHttpResponseAsync().ConfigureAwait(false);
         tests++;
-        OutboundHttpClientHelperValidatesInputs();
+        await OutboundHttpClientHelperValidatesInputsAsync().ConfigureAwait(false);
         tests++;
         return tests;
     }
 
-    private static void OutboundHttpClientHelperInjectsTraceparentAndCapturesSpan()
+    private static async Task OutboundHttpClientHelperInjectsTraceparentAndCapturesSpanAsync()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
         var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
@@ -55,7 +53,7 @@ internal static class HttpClientTelemetryTests
 
         using (LogBrewTrace.Activate(root))
         {
-            using var response = LogBrewHttpClientTelemetry.SendAsync(
+            using var response = await LogBrewHttpClientTelemetry.SendAsync(
                     client,
                     httpClient,
                     request,
@@ -71,8 +69,7 @@ internal static class HttpClientTelemetryTests
                             ["body"] = "card=sample",
                             ["ignored"] = new object()
                         }))
-                .GetAwaiter()
-                .GetResult();
+                .ConfigureAwait(false);
             Require(response.StatusCode == HttpStatusCode.Created, "expected response status");
         }
 
@@ -109,7 +106,7 @@ internal static class HttpClientTelemetryTests
         }
     }
 
-    private static void OutboundHttpClientHandlerInjectsTraceparentAndCapturesSpan()
+    private static async Task OutboundHttpClientHandlerInjectsTraceparentAndCapturesSpanAsync()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
         var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
@@ -144,7 +141,7 @@ internal static class HttpClientTelemetryTests
 
         using (LogBrewTrace.Activate(root))
         {
-            using var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
+            using var response = await httpClient.SendAsync(request).ConfigureAwait(false);
             Require(response.StatusCode == HttpStatusCode.OK, "expected handler response status");
         }
 
@@ -176,7 +173,7 @@ internal static class HttpClientTelemetryTests
         }
     }
 
-    private static void OutboundHttpClientHandlerSkipsCaptureWhenRequestFilterRejects()
+    private static async Task OutboundHttpClientHandlerSkipsCaptureWhenRequestFilterRejectsAsync()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
         var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
@@ -204,7 +201,7 @@ internal static class HttpClientTelemetryTests
 
         using (LogBrewTrace.Activate(root))
         {
-            using var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
+            using var response = await httpClient.SendAsync(request).ConfigureAwait(false);
             Require(response.StatusCode == HttpStatusCode.NoContent, "expected filtered response status");
         }
 
@@ -214,7 +211,7 @@ internal static class HttpClientTelemetryTests
         Require(!client.PreviewJson().Contains("dotnet_filtered", StringComparison.Ordinal), "expected filtered request to skip span capture");
     }
 
-    private static void OutboundHttpClientHandlerUsesRouteTemplateSelector()
+    private static async Task OutboundHttpClientHandlerUsesRouteTemplateSelectorAsync()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
         var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
@@ -239,7 +236,7 @@ internal static class HttpClientTelemetryTests
 
         using (LogBrewTrace.Activate(root))
         {
-            using var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
+            using var response = await httpClient.SendAsync(request).ConfigureAwait(false);
             Require(response.StatusCode == HttpStatusCode.OK, "expected selector response status");
         }
 
@@ -252,7 +249,7 @@ internal static class HttpClientTelemetryTests
         Require(!payload.Contains("card=sample", StringComparison.Ordinal), "expected query to be omitted");
     }
 
-    private static void OutboundHttpClientHelperPreservesOriginalException()
+    private static async Task OutboundHttpClientHelperPreservesOriginalExceptionAsync()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
         var original = new HttpRequestException("upstream private detail leaked in exception message");
@@ -262,13 +259,12 @@ internal static class HttpClientTelemetryTests
 
         try
         {
-            LogBrewHttpClientTelemetry.SendAsync(
+            await LogBrewHttpClientTelemetry.SendAsync(
                     client,
                     httpClient,
                     request,
                     LogBrewHttpClientOptions.Create().WithRouteTemplate("/private"))
-                .GetAwaiter()
-                .GetResult();
+                .ConfigureAwait(false);
             throw new InvalidOperationException("expected original HTTP exception");
         }
         catch (HttpRequestException error)
@@ -284,7 +280,7 @@ internal static class HttpClientTelemetryTests
         Require(!payload.Contains("debug=sample", StringComparison.Ordinal), "expected query to be omitted");
     }
 
-    private static void CaptureFailureDoesNotReplaceHttpResponse()
+    private static async Task CaptureFailureDoesNotReplaceHttpResponseAsync()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
         client.Shutdown(RecordingTransport.AlwaysAccept());
@@ -293,7 +289,7 @@ internal static class HttpClientTelemetryTests
         using var httpClient = new HttpClient(handler, disposeHandler: false);
         using var request = new HttpRequestMessage(HttpMethod.Delete, "https://api.example/cache/42");
 
-        using var response = LogBrewHttpClientTelemetry.SendAsync(
+        using var response = await LogBrewHttpClientTelemetry.SendAsync(
                 client,
                 httpClient,
                 request,
@@ -305,35 +301,32 @@ internal static class HttpClientTelemetryTests
                         captureErrors++;
                         throw new InvalidOperationException("diagnostics callback failed");
                     }))
-            .GetAwaiter()
-            .GetResult();
+            .ConfigureAwait(false);
 
         Require(response.StatusCode == HttpStatusCode.Accepted, "expected HTTP response to win over capture failure");
         Require(captureErrors == 1, "expected one capture failure callback");
     }
 
-    private static void OutboundHttpClientHelperValidatesInputs()
+    private static async Task OutboundHttpClientHelperValidatesInputsAsync()
     {
         using var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
         using var httpClient = new HttpClient(handler, disposeHandler: false);
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.example/health");
 
-        ExpectSdkError("validation_error", "HTTP client routeTemplate must be non-empty", () =>
-            LogBrewHttpClientTelemetry.SendAsync(
+        await ExpectSdkErrorAsync("validation_error", "HTTP client routeTemplate must be non-empty", async () =>
+            await LogBrewHttpClientTelemetry.SendAsync(
                     LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0"),
                     httpClient,
                     request,
                     LogBrewHttpClientOptions.Create().WithRouteTemplate("   "))
-                .GetAwaiter()
-                .GetResult());
-        ExpectSdkError("validation_error", "HTTP client eventIdPrefix must be non-empty", () =>
-            LogBrewHttpClientTelemetry.SendAsync(
+                .ConfigureAwait(false)).ConfigureAwait(false);
+        await ExpectSdkErrorAsync("validation_error", "HTTP client eventIdPrefix must be non-empty", async () =>
+            await LogBrewHttpClientTelemetry.SendAsync(
                     LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0"),
                     httpClient,
                     request,
                     LogBrewHttpClientOptions.Create().WithEventIdPrefix("   "))
-                .GetAwaiter()
-                .GetResult());
+                .ConfigureAwait(false)).ConfigureAwait(false);
     }
 
     private static void Require(bool condition, string message)
@@ -344,11 +337,11 @@ internal static class HttpClientTelemetryTests
         }
     }
 
-    private static void ExpectSdkError(string code, string messageFragment, Action callback)
+    private static async Task ExpectSdkErrorAsync(string code, string messageFragment, Func<Task> callback)
     {
         try
         {
-            callback();
+            await callback().ConfigureAwait(false);
         }
         catch (SdkException error)
         {

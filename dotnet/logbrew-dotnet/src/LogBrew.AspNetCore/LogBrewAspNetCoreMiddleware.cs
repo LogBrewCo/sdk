@@ -9,8 +9,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-#pragma warning disable CA1031 // Middleware diagnostics callbacks must never break app-owned requests.
-
 namespace LogBrew
 {
     public sealed class LogBrewAspNetCoreOptions

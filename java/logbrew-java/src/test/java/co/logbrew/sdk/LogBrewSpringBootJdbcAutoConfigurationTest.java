@@ -168,9 +168,8 @@ public final class LogBrewSpringBootJdbcAutoConfigurationTest {
         return proxy(ResultSet.class, (proxy, method, args) -> defaultValue(method.getReturnType()));
     }
 
-    @SuppressWarnings("unchecked")
-    private static <T> T proxy(Class<?> interfaceType, InvocationHandler handler) {
-        return (T) Proxy.newProxyInstance(
+    private static <T> T proxy(Class<T> interfaceType, InvocationHandler handler) {
+        return interfaceType.cast(Proxy.newProxyInstance(
             interfaceType.getClassLoader(),
             new Class<?>[] {interfaceType},
             (proxy, method, args) -> {
@@ -185,7 +184,7 @@ public final class LogBrewSpringBootJdbcAutoConfigurationTest {
                 }
                 return handler.invoke(proxy, method, args == null ? new Object[0] : args);
             }
-        );
+        ));
     }
 
     private static Object defaultValue(Class<?> type) throws SQLException {

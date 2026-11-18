@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from typing import Any
+from typing import Any, cast
 
 from logbrew_sdk import (
     LogBrewClient,
@@ -23,7 +23,7 @@ def log_context(target: LogBrewClient, context: Any = None) -> Any:
     attributes: dict[str, Any] = {"message": "checkout", "level": "info"}
     if context is not None:
         attributes["context"] = context
-    target.log("evt_log", TIMESTAMP, attributes)  # type: ignore[arg-type]
+    target.log("evt_log", TIMESTAMP, cast(Any, attributes))
     return json.loads(target.preview_json())["events"][-1]["attributes"].get("context", {})
 
 
@@ -55,7 +55,7 @@ class UserContextTests(unittest.TestCase):
         with use_logbrew_trace(create_logbrew_trace_context()):
             for user_id, kind in (("", "user"), ("x" * 201, "user"), ("user-1", "admin")):
                 with self.subTest(user_id=user_id[:10], kind=kind), self.assertRaises(SdkError):
-                    set_logbrew_user(user_id, kind=kind)  # type: ignore[arg-type]
+                    set_logbrew_user(user_id, kind=cast(Any, kind))
 
 
 if __name__ == "__main__":

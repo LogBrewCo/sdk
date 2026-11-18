@@ -11,8 +11,9 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from logbrew_sdk import SdkError, _instrumentation
+from logbrew_sdk import _instrumentation
 from logbrew_sdk._db_client import _DB_SPAN_EVENT_METADATA_DENYLIST, _db_span_request
+from logbrew_sdk._errors import SdkError
 from logbrew_sdk._trace_context import LogBrewTraceContext, use_logbrew_trace
 
 _CONTEXT_STATE_ATTR = "_logbrew_sqlalchemy_span_state"

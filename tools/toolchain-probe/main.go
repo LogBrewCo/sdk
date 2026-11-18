@@ -93,7 +93,7 @@ func probe(
 	defer cancel()
 
 	// Reviewed 2026-09-03: only inventoryCommands or fixture inputs reach here.
-	//nolint:gosec // G204: argument tests prove CLI input is rejected.
+	// Argument tests prove CLI input is rejected.
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 
 	stdout, stderr := new(boundedOutput), new(boundedOutput)
@@ -308,7 +308,7 @@ func runDeadline(arguments []string) int {
 		arguments[deadlineArgumentCount:]...)
 	// Reviewed 2026-09-03: deadline mode intentionally executes its caller's
 	// bounded command through the isolated, limited child mode below.
-	//nolint:gosec // G204: timeout, process group, output, and file size are bounded.
+	// Timeout, process group, output, and file size are bounded.
 	command := exec.CommandContext(ctx, self, childArguments...)
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr
 	if err := runManagedProcess(command); err != nil || ctx.Err() != nil {

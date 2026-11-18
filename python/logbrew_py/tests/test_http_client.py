@@ -7,7 +7,7 @@ import unittest
 from functools import partial
 from itertools import product
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import http_span_contract as http_contract
@@ -499,11 +499,11 @@ class HttpClientInstrumentationTests(unittest.TestCase):
             self.assertEqual(getattr(sync_client.calls[0]["activeTrace"], "span_id", None), "b7ad6b7169203345")
             self.assertEqual(getattr(async_client.calls[0]["activeTrace"], "span_id", None), "b7ad6b7169203346")
             self.assertEqual(
-                sync_client.calls[0]["headers"]["traceparent"],  # type: ignore[index]
+                cast("dict[str, str]", sync_client.calls[0]["headers"])["traceparent"],
                 "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203345-00",
             )
             self.assertEqual(
-                async_client.calls[0]["headers"]["traceparent"],  # type: ignore[index]
+                cast("dict[str, str]", async_client.calls[0]["headers"])["traceparent"],
                 "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203346-00",
             )
             sync_instrumentation.uninstall()

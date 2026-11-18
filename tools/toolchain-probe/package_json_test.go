@@ -232,7 +232,7 @@ func TestPackageJSONFileLimit(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "oversized.json")
 	// Reviewed 2026-09-05: only this test's private directory receives the sparse fixture.
-	//nolint:gosec // G304: the filename is fixed and the directory is owned by testing.T.
+	// The filename is fixed and the directory is owned by testing.T.
 	file, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)

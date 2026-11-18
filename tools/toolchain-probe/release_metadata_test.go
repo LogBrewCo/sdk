@@ -441,7 +441,7 @@ func TestReleaseCatalogErrors(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // Swaps the embedded catalog.
+// Swaps the embedded catalog.
 func TestReleaseMetadataCatalogFailure(t *testing.T) {
 	original := releaseCatalogText
 	releaseCatalogText = "rust = 1\n"

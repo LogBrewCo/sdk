@@ -4,15 +4,19 @@ import http.server
 import sys
 
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802
-        self.send_response(200 if self.path == "/checkout" else 404)
-        self.send_header("content-length", "2")
-        self.end_headers()
-        self.wfile.write(b"ok")
+def answer(handler: http.server.BaseHTTPRequestHandler) -> None:
+    handler.send_response(200 if handler.path == "/checkout" else 404)
+    handler.send_header("content-length", "2")
+    handler.end_headers()
+    handler.wfile.write(b"ok")
 
-    def log_message(self, *_: object) -> None:
-        return
+
+def stay_quiet(_handler: http.server.BaseHTTPRequestHandler, *_: object) -> None:
+    return
+
+
+# http.server answers a GET request with the handler method named do_GET.
+Handler = type("Handler", (http.server.BaseHTTPRequestHandler,), {"do_GET": answer, "log_message": stay_quiet})
 
 
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)

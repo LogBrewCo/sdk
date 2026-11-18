@@ -77,7 +77,6 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
         testsRun++;
     }
 
-    @SuppressWarnings("unchecked")
     private void testPostProcessorAddsProducerPostProcessorWithoutLeakingKafkaConfig() throws Exception {
         LogBrewClient client = sampleClient();
         BeanPostProcessor processor = postProcessor(
@@ -415,16 +414,15 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
 
     private static final class RecordingKafkaProducer implements InvocationHandler {
         private final CompletableFuture<RecordMetadata> future = new CompletableFuture<>();
-        private ProducerRecord<String, String> sentRecord;
+        private ProducerRecord<?, ?> sentRecord;
         private Callback callback;
 
-        @SuppressWarnings("unchecked")
         private Producer<String, String> proxy() {
-            return (Producer<String, String>) Proxy.newProxyInstance(
-                Producer.class.getClassLoader(),
-                new Class<?>[] {Producer.class},
+            return StringProducer.class.cast(Proxy.newProxyInstance(
+                StringProducer.class.getClassLoader(),
+                new Class<?>[] {StringProducer.class},
                 this
-            );
+            ));
         }
 
         private String sentSpanId() {
@@ -435,9 +433,7 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
             if ("send".equals(method.getName()) && args != null && args.length == 2 && args[0] instanceof ProducerRecord) {
-                @SuppressWarnings("unchecked")
-                ProducerRecord<String, String> record = (ProducerRecord<String, String>) args[0];
-                sentRecord = record;
+                sentRecord = (ProducerRecord<?, ?>) args[0];
                 callback = (Callback) args[1];
                 return future;
             }
@@ -477,5 +473,9 @@ public final class LogBrewSpringBootKafkaAutoConfigurationTest {
         public LogBrewClient getObject() {
             return client;
         }
+    }
+
+    // A non-generic subtype lets the test cast its JDK proxy with Class.cast.
+    private interface StringProducer extends Producer<String, String> {
     }
 }

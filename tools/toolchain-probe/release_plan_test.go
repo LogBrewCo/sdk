@@ -430,7 +430,7 @@ func TestReleasePlanUsage(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // Swaps the embedded catalog.
+// Swaps the embedded catalog.
 func TestReleasePlanCatalogFailure(t *testing.T) {
 	original := releaseCatalogText
 	releaseCatalogText = "maven_artifacts = [[\"logbrew-sdk\"]]\n"

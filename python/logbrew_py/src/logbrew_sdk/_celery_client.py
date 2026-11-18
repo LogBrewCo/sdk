@@ -6,7 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from typing import Any, TypeVar
 
-from logbrew_sdk import _instrumentation, create_traceparent, parse_traceparent
+from logbrew_sdk import _instrumentation
+from logbrew_sdk._client import create_traceparent, parse_traceparent
 from logbrew_sdk._queue_client import Operation, queue_operation_with_logbrew_span
 from logbrew_sdk._trace_context import LogBrewTraceContext, get_active_logbrew_trace
 

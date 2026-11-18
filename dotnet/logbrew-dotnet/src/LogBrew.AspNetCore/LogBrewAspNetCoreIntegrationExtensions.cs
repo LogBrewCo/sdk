@@ -5,8 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-#pragma warning disable CA2000 // ASP.NET Core owns the registered runtime and logging provider.
-
 namespace LogBrew
 {
     public static class LogBrewAspNetCoreIntegrationExtensions

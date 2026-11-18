@@ -628,7 +628,7 @@ public final class Main {
         );
         String authHeader = "Author" + "ization";
         String authValue = "Bea" + "rer redacted";
-        RecordingHttpClient okHttpClient = RecordingHttpClient.responding(202, "accepted");
+        RecordingHttpClient okHttpClient = RecordingHttpClient.responding(202);
         HttpRequest outboundRequest = HttpRequest.newBuilder(
                 URI.create("https://api.example.invalid/orders/123?debug=redacted#frag"))
             .header("traceparent", "00-11111111111111111111111111111111-2222222222222222-01")
@@ -670,7 +670,7 @@ public final class Main {
         );
         require(authValue.equals(firstHeader(okHttpClient.lastRequest, authHeader)), "HTTP headers preserved");
 
-        RecordingHttpClient busyHttpClient = RecordingHttpClient.responding(503, "busy");
+        RecordingHttpClient busyHttpClient = RecordingHttpClient.responding(503);
         LogBrewHttpClientTracing.sendAsync(
             outbound,
             busyHttpClient,
@@ -1095,7 +1095,7 @@ public final class Main {
         });
     }
 
-    private static <T> T fakeStatement(RecordingJdbc jdbc, Class<?> interfaceType) {
+    private static Statement fakeStatement(RecordingJdbc jdbc, Class<? extends Statement> interfaceType) {
         return proxy(interfaceType, (proxy, method, args) -> {
             if (method.getName().startsWith("execute")) {
                 if (jdbc.failure != null) {
@@ -1119,9 +1119,8 @@ public final class Main {
         return proxy(ResultSet.class, (proxy, method, args) -> defaultValue(method.getReturnType()));
     }
 
-    @SuppressWarnings("unchecked")
-    private static <T> T proxy(Class<?> interfaceType, InvocationHandler handler) {
-        return (T) Proxy.newProxyInstance(
+    private static <T> T proxy(Class<T> interfaceType, InvocationHandler handler) {
+        return interfaceType.cast(Proxy.newProxyInstance(
             interfaceType.getClassLoader(),
             new Class<?>[] {interfaceType},
             (proxy, method, args) -> {
@@ -1136,7 +1135,7 @@ public final class Main {
                 }
                 return handler.invoke(proxy, method, args == null ? new Object[0] : args);
             }
-        );
+        ));
     }
 
     private static Object defaultValue(Class<?> type) {
@@ -1228,16 +1227,14 @@ public final class Main {
 
     private static final class RecordingHttpClient extends HttpClient {
         private final int statusCode;
-        private final String body;
         private HttpRequest lastRequest;
 
-        private RecordingHttpClient(int statusCode, String body) {
+        private RecordingHttpClient(int statusCode) {
             this.statusCode = statusCode;
-            this.body = body;
         }
 
-        static RecordingHttpClient responding(int statusCode, String body) {
-            return new RecordingHttpClient(statusCode, body);
+        static RecordingHttpClient responding(int statusCode) {
+            return new RecordingHttpClient(statusCode);
         }
 
         @Override
@@ -1291,7 +1288,7 @@ public final class Main {
             HttpResponse.BodyHandler<T> responseBodyHandler
         ) {
             lastRequest = request;
-            return new RecordingHttpResponse<>(request, statusCode, body);
+            return new RecordingHttpResponse<>(request, statusCode);
         }
 
         @Override
@@ -1300,7 +1297,7 @@ public final class Main {
             HttpResponse.BodyHandler<T> responseBodyHandler
         ) {
             lastRequest = request;
-            return CompletableFuture.completedFuture(new RecordingHttpResponse<>(request, statusCode, body));
+            return CompletableFuture.completedFuture(new RecordingHttpResponse<>(request, statusCode));
         }
 
         @Override
@@ -1316,12 +1313,10 @@ public final class Main {
     private static final class RecordingHttpResponse<T> implements HttpResponse<T> {
         private final HttpRequest request;
         private final int statusCode;
-        private final Object body;
 
-        private RecordingHttpResponse(HttpRequest request, int statusCode, Object body) {
+        private RecordingHttpResponse(HttpRequest request, int statusCode) {
             this.request = request;
             this.statusCode = statusCode;
-            this.body = body;
         }
 
         @Override
@@ -1340,9 +1335,8 @@ public final class Main {
         }
 
         @Override
-        @SuppressWarnings("unchecked")
         public T body() {
-            return (T) body;
+            throw new UnsupportedOperationException("the recording client does not run body handlers, so it has no body");
         }
 
         @Override

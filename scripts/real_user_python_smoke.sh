@@ -362,6 +362,7 @@ PACKAGE_FILES = {
     "logbrew_sdk/_arq_client.py",
     "logbrew_sdk/_cache_client.py",
     "logbrew_sdk/_celery_client.py",
+    "logbrew_sdk/_client.py",
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_dbapi_client.py",
     "logbrew_sdk/_django_cache_client.py",

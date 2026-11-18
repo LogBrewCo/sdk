@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from logbrew_sdk import LogBrewClient, SdkError, TransportResponse
@@ -85,7 +85,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
 
             for invalid in (b"", bytes(16), bytes(31), bytes(33), "not-bytes"):
                 with self.subTest(length=len(invalid)), self.assertRaises(SdkError) as raised:
-                    create_encrypted_client(directory, encryption_key=invalid)  # type: ignore[arg-type]
+                    create_encrypted_client(directory, encryption_key=cast(Any, invalid))
                 self.assertEqual(raised.exception.code, "configuration_error")
                 self.assertNotIn(str(directory), str(raised.exception))
 

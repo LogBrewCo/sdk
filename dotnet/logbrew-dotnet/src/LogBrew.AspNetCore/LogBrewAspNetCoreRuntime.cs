@@ -4,8 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 
-#pragma warning disable CA1031 // Telemetry lifecycle failures must not change the application lifecycle.
-
 namespace LogBrew
 {
     public sealed class LogBrewAspNetCoreHealthSnapshot
@@ -346,5 +344,3 @@ namespace LogBrew
         }
     }
 }
-
-#pragma warning restore CA1031

@@ -75,7 +75,7 @@ module LogBrew
         result = nil
         begin
           result = yield
-        rescue Exception => error # rubocop:disable Lint/RescueException
+        rescue Exception => error
           application_error = error
         ensure
           finish_work_boundary(application_error)

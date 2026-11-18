@@ -1,11 +1,11 @@
 Metadata-Version: 2.4
 Name: logbrew-flask
-Version: 0.1.8
+Version: 0.1.9
 Summary: Flask integration for capturing LogBrew request spans and exceptions.
 Author: LogBrew
 License-Expression: MIT
 Project-URL: Homepage, https://logbrew.co
-Project-URL: Documentation, https://github.com/LogBrewCo/sdk/tree/main/python/logbrew_flask
+Project-URL: Documentation, https://docs.logbrew.co
 Project-URL: Repository, https://github.com/LogBrewCo/sdk
 Project-URL: Issues, https://github.com/LogBrewCo/sdk/issues
 Keywords: logbrew,observability,flask,wsgi,logs

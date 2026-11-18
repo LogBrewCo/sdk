@@ -87,29 +87,29 @@ final class TelemetryValues {
     static Map<String, Object> immutableMap(Map<String, Object> source) {
         Map<String, Object> copied = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : source.entrySet()) {
-            Object value = entry.getValue();
-            if (value instanceof Map<?, ?>) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> nested = (Map<String, Object>) value;
-                value = immutableMap(nested);
-            }
-            copied.put(entry.getKey(), value);
+            copied.put(entry.getKey(), immutableValue(entry.getValue()));
         }
         return Collections.unmodifiableMap(copied);
     }
 
-    static Map<String, Object> mutableMap(Map<String, Object> source) {
-        Map<String, Object> copied = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : source.entrySet()) {
+    static Map<Object, Object> mutableMap(Map<?, ?> source) {
+        Map<Object, Object> copied = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
             Object value = entry.getValue();
-            if (value instanceof Map<?, ?>) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> nested = (Map<String, Object>) value;
-                value = mutableMap(nested);
-            }
-            copied.put(entry.getKey(), value);
+            copied.put(entry.getKey(), value instanceof Map<?, ?> ? mutableMap((Map<?, ?>) value) : value);
         }
         return copied;
+    }
+
+    private static Object immutableValue(Object value) {
+        if (!(value instanceof Map<?, ?>)) {
+            return value;
+        }
+        Map<Object, Object> copied = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            copied.put(entry.getKey(), immutableValue(entry.getValue()));
+        }
+        return Collections.unmodifiableMap(copied);
     }
 
     static SdkException invalid(String message) {

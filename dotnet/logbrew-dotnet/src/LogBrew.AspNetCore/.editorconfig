@@ -1,0 +1,12 @@
+root = false
+
+# AddLogBrew hands the runtime to the service container and the logger provider to the logging builder.
+# The host disposes both when it stops, so passing them to those methods transfers ownership.
+[LogBrewAspNetCoreIntegrationExtensions.cs]
+dotnet_code_quality.CA2000.dispose_ownership_transfer_at_method_call = true
+
+# The middleware and the hosted runtime run inside the application's request pipeline and host lifecycle.
+# They catch every exception from capture, delivery, and diagnostics callbacks so that telemetry never fails a request
+# or stops the host. Each catch reports the error to the diagnostics callback or records it as a lifecycle error.
+[{LogBrewAspNetCoreMiddleware.cs,LogBrewAspNetCoreRuntime.cs}]
+dotnet_diagnostic.CA1031.severity = none

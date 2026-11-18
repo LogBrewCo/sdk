@@ -23,7 +23,7 @@ func TestProcessStopIsIdempotent(t *testing.T) {
 	defer cancel()
 
 	// Reviewed 2026-09-03: this test invokes its own compiled sleep fixture.
-	//nolint:gosec // G204: no caller-selected executable or arguments.
+	// No caller-selected executable or arguments.
 	command := exec.CommandContext(ctx, os.Args[0], "fixture:sleep")
 
 	stop, err := configureProcess(command)

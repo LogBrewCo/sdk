@@ -2,7 +2,6 @@ package co.logbrew.sdk;
 
 import java.lang.reflect.Field;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.kafka.clients.producer.Producer;
@@ -59,29 +58,26 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
         return ORDER;
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private void instrumentProducerFactory(ProducerFactory<?, ?> factory, LogBrewClient client) {
-        List<ProducerPostProcessor<?, ?>> postProcessors = (List) factory.getPostProcessors();
-        for (ProducerPostProcessor<?, ?> postProcessor : postProcessors) {
+    private <K, V> void instrumentProducerFactory(ProducerFactory<K, V> factory, LogBrewClient client) {
+        for (ProducerPostProcessor<K, V> postProcessor : factory.getPostProcessors()) {
             if (postProcessor instanceof LogBrewKafkaProducerPostProcessor) {
                 return;
             }
         }
-        ((ProducerFactory) factory).addPostProcessor(new LogBrewKafkaProducerPostProcessor<>(client, this));
+        factory.addPostProcessor(new LogBrewKafkaProducerPostProcessor<>(client, this));
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private void instrumentListenerFactory(
-        AbstractKafkaListenerContainerFactory<?, ?, ?> factory,
+    private <K, V> void instrumentListenerFactory(
+        AbstractKafkaListenerContainerFactory<?, K, V> factory,
         LogBrewClient client
     ) {
-        RecordInterceptor existing = recordInterceptor(factory);
+        RecordInterceptor<K, V> existing = recordInterceptor(factory);
         if (LogBrewSpringKafkaTracing.isInstrumentedRecordInterceptor(existing)) {
             return;
         }
-        LogBrewSpringKafkaTracing.ConsumerConfig config = LogBrewSpringKafkaTracing
+        LogBrewSpringKafkaTracing.ConsumerConfig<K, V> config = LogBrewSpringKafkaTracing
             .ConsumerConfig
-            .create()
+            .<K, V>create()
             .eventIdPrefix(eventIdPrefix())
             .recordTimestampLatency(recordTimestampLatency())
             .metadata(springMetadata());
@@ -91,11 +87,14 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
         factory.setRecordInterceptor(LogBrewSpringKafkaTracing.recordInterceptor(client, config));
     }
 
-    private static RecordInterceptor<?, ?> recordInterceptor(AbstractKafkaListenerContainerFactory<?, ?, ?> factory) {
+    // Spring Kafka 3.x has no getter for the interceptor, so this reads the field that setRecordInterceptor typed as
+    // RecordInterceptor<K, V>. Reflection returns Object, and Java cannot check type arguments at run time.
+    @SuppressWarnings("unchecked")
+    private static <K, V> RecordInterceptor<K, V> recordInterceptor(AbstractKafkaListenerContainerFactory<?, K, V> factory) {
         try {
             Field field = AbstractKafkaListenerContainerFactory.class.getDeclaredField("recordInterceptor");
             field.setAccessible(true);
-            return (RecordInterceptor<?, ?>) field.get(factory);
+            return (RecordInterceptor<K, V>) field.get(factory);
         } catch (ReflectiveOperationException | RuntimeException error) {
             throw new IllegalStateException("spring kafka record interceptor cannot be inspected", error);
         }

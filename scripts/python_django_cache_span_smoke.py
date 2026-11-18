@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 
+import django
 from django.conf import settings
+from django.core.cache import caches
 
 from logbrew_sdk import (
     LogBrewClient,
@@ -24,10 +26,6 @@ if not settings.configured:
         INSTALLED_APPS=[],
         USE_TZ=True,
     )
-
-import django  # noqa: E402
-from django.core.cache import caches  # noqa: E402
-
 
 django.setup()
 

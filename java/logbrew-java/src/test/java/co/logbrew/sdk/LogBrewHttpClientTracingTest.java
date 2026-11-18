@@ -47,7 +47,7 @@ public final class LogBrewHttpClientTracingTest {
 
     private void testSendInjectsTraceparentAndQueuesSanitizedSpan() {
         LogBrewClient client = sampleClient();
-        FakeHttpClient httpClient = FakeHttpClient.responding(202, "accepted");
+        FakeHttpClient httpClient = FakeHttpClient.responding(202);
         LogBrewTraceContext parent = LogBrewTraceContext.fromTraceparent(
             "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
             "a7ad6b7169203330"
@@ -169,7 +169,7 @@ public final class LogBrewHttpClientTracingTest {
 
     private void testSendAsyncRecordsCompletionSpan() {
         LogBrewClient client = sampleClient();
-        FakeHttpClient httpClient = FakeHttpClient.responding(503, "busy");
+        FakeHttpClient httpClient = FakeHttpClient.responding(503);
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.example.invalid/retry"))
             .POST(HttpRequest.BodyPublishers.ofString("payload should not be captured"))
             .build();
@@ -375,29 +375,27 @@ public final class LogBrewHttpClientTracingTest {
 
     private static final class FakeHttpClient extends HttpClient {
         private final int statusCode;
-        private final String body;
         private final IOException error;
         private final Error dispatchError;
         private HttpRequest lastRequest;
         private HttpResponse<?> lastResponse;
 
-        private FakeHttpClient(int statusCode, String body, IOException error, Error dispatchError) {
+        private FakeHttpClient(int statusCode, IOException error, Error dispatchError) {
             this.statusCode = statusCode;
-            this.body = body;
             this.error = error;
             this.dispatchError = dispatchError;
         }
 
-        static FakeHttpClient responding(int statusCode, String body) {
-            return new FakeHttpClient(statusCode, body, null, null);
+        static FakeHttpClient responding(int statusCode) {
+            return new FakeHttpClient(statusCode, null, null);
         }
 
         static FakeHttpClient throwing(IOException error) {
-            return new FakeHttpClient(0, null, error, null);
+            return new FakeHttpClient(0, error, null);
         }
 
         static FakeHttpClient failingDispatch(Error dispatchError) {
-            return new FakeHttpClient(0, null, null, dispatchError);
+            return new FakeHttpClient(0, null, dispatchError);
         }
 
         @Override
@@ -457,7 +455,7 @@ public final class LogBrewHttpClientTracingTest {
             if (error != null) {
                 throw error;
             }
-            HttpResponse<T> response = new FakeHttpResponse<>(request, statusCode, body);
+            HttpResponse<T> response = new FakeHttpResponse<>(request, statusCode);
             lastResponse = response;
             return response;
         }
@@ -476,7 +474,7 @@ public final class LogBrewHttpClientTracingTest {
                 future.completeExceptionally(error);
                 return future;
             }
-            HttpResponse<T> response = new FakeHttpResponse<>(request, statusCode, body);
+            HttpResponse<T> response = new FakeHttpResponse<>(request, statusCode);
             lastResponse = response;
             return CompletableFuture.completedFuture(response);
         }
@@ -494,12 +492,10 @@ public final class LogBrewHttpClientTracingTest {
     private static final class FakeHttpResponse<T> implements HttpResponse<T> {
         private final HttpRequest request;
         private final int statusCode;
-        private final Object body;
 
-        private FakeHttpResponse(HttpRequest request, int statusCode, Object body) {
+        private FakeHttpResponse(HttpRequest request, int statusCode) {
             this.request = request;
             this.statusCode = statusCode;
-            this.body = body;
         }
 
         @Override
@@ -518,9 +514,8 @@ public final class LogBrewHttpClientTracingTest {
         }
 
         @Override
-        @SuppressWarnings("unchecked")
         public T body() {
-            return (T) body;
+            throw new UnsupportedOperationException("the fake client does not run body handlers, so it has no body");
         }
 
         @Override

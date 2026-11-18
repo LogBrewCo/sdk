@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from celery import Celery  # type: ignore[import-untyped]
+from celery import Celery
 from logbrew_sdk import (
     HttpTransport,
     LogBrewClient,

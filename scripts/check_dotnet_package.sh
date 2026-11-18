@@ -26,20 +26,33 @@ if ! acquire_dotnet_verifier_lock; then
 fi
 
 package_ids=(LogBrew LogBrew.AspNetCore LogBrew.EntityFrameworkCore LogBrew.Hangfire LogBrew.HttpClient LogBrew.StackExchangeRedis LogBrew.OpenTelemetry)
+nupkg_paths=()
 for package_id in "${package_ids[@]}"; do
   project="$package_dir/src/$package_id/$package_id.csproj"
   dotnet build "$project" --configuration Release -warnaserror >/dev/null
   dotnet pack "$project" --configuration Release --output "$tmp_dir/packages" >/dev/null
   version="$(dotnet msbuild "$project" -nologo -getProperty:Version | tail -n 1 | xargs)"
-  archive_variable="${package_id//./_}_nupkg"
-  printf -v "$archive_variable" '%s' "$tmp_dir/packages/$package_id.${version}.nupkg"
-  test -f "${!archive_variable}"
+  nupkg_paths+=("$tmp_dir/packages/$package_id.${version}.nupkg")
+  test -f "${nupkg_paths[${#nupkg_paths[@]} - 1]}"
 done
+
+# Prints the path of the package archive that the loop above packed for package id $1.
+nupkg_for() {
+  local index
+  for index in "${!package_ids[@]}"; do
+    if [[ "${package_ids[$index]}" == "$1" ]]; then
+      printf '%s\n' "${nupkg_paths[$index]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 for package_id in "${package_ids[@]}"; do
   dotnet run --project "$package_dir/tests/$package_id.Tests/$package_id.Tests.csproj" --configuration Release
 done
-# shellcheck disable=SC2154
-python3 - "$LogBrew_nupkg" <<'PY'
+logbrew_nupkg="$(nupkg_for LogBrew)"
+python3 - "$logbrew_nupkg" <<'PY'
 import sys
 import zipfile
 
@@ -178,8 +191,8 @@ for needle in (
         raise SystemExit(f"missing README guidance: {needle}")
 PY
 
-# shellcheck disable=SC2154
-for integration_nupkg in "$LogBrew_AspNetCore_nupkg" "$LogBrew_EntityFrameworkCore_nupkg" "$LogBrew_Hangfire_nupkg" "$LogBrew_OpenTelemetry_nupkg" "$LogBrew_StackExchangeRedis_nupkg"; do
+for integration_id in LogBrew.AspNetCore LogBrew.EntityFrameworkCore LogBrew.Hangfire LogBrew.OpenTelemetry LogBrew.StackExchangeRedis; do
+  integration_nupkg="$(nupkg_for "$integration_id")"
   python3 "$repo_root/scripts/check_dotnet_integration_nupkg.py" "$integration_nupkg" >/dev/null
 done
 

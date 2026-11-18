@@ -591,7 +591,7 @@ class AutomaticDeliveryPublicContractTests(unittest.TestCase):
         for forbidden in ("evt_kept", "evt_hidden_identifier", "lb_test_key", "message"):
             self.assertNotIn(forbidden, repr(health))
         with self.assertRaises(FrozenInstanceError):
-            health.pending_events = 99  # type: ignore[misc]
+            cast(Any, health).pending_events = 99
         self.assertEqual(_saturating_add(MAX_HEALTH_COUNTER, 1), MAX_HEALTH_COUNTER)
         client.shutdown()
 

@@ -20,7 +20,7 @@ DEFAULT_SOURCE_FILES = (
     "kotlin/logbrew-kotlin/src/main/kotlin/co/logbrew/sdk/PublicTypes.kt",
     "objc/logbrew-objc/src/LBWHTTPTransport.m",
     "php/logbrew-php/src/HttpTransport.php",
-    "python/logbrew_py/src/logbrew_sdk/__init__.py",
+    "python/logbrew_py/src/logbrew_sdk/_client.py",
     "ruby/logbrew-ruby/lib/logbrew.rb",
     "rust/logbrew/src/lib.rs",
     "swift/logbrew-swift/Sources/LogBrew/Transport.swift",

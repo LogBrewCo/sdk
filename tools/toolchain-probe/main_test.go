@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 		strings.HasPrefix(os.Args[1], "fixture:") {
 		// Fixture modes bypass m.Run; their exit code belongs to the fixture.
 		// Reviewed 2026-09-03; TestArgumentDiagnosticWriteFailure checks exits.
-		//nolint:revive // Fixture exit is not the redundant m.Run exit pattern.
+		// Fixture exit is not the redundant m.Run exit pattern.
 		os.Exit(runFixture(strings.TrimPrefix(os.Args[1], "fixture:")))
 	}
 
@@ -110,7 +110,7 @@ func runArgumentFixture(mode string) int {
 func runChildFixture(mode string) int {
 	// Reviewed 2026-09-03: TestProbeReapsChild needs a child to outlive its
 	// parent. The child self-exits in one minute; the probe kills its group.
-	//nolint:gosec,noctx // G204: owned fixture with an independent lifetime.
+	// Owned fixture with an independent lifetime.
 	child := exec.Command(os.Args[fixtureExecutableIndex], "fixture:sleep")
 	child.Stdout, child.Stderr = os.Stdout, os.Stderr
 
@@ -122,7 +122,7 @@ func runChildFixture(mode string) int {
 	data := []byte(strconv.Itoa(child.Process.Pid))
 
 	// Reviewed 2026-09-03: TestProbeReapsChild passes its own t.TempDir file.
-	//nolint:gosec // G703: writes only the parent fixture's child-PID receipt.
+	// Writes only the parent fixture's child-PID receipt.
 	err = os.WriteFile(os.Args[fixturePIDFileIndex], data, fixtureReceiptMode)
 	if err != nil {
 		return exitFailure
@@ -154,7 +154,7 @@ func TestArgumentDiagnosticWriteFailure(t *testing.T) {
 			defer cancel()
 
 			// Reviewed 2026-09-03: modes above select this test binary only.
-			//nolint:gosec // G204: fixed fixtures exercise real exit behavior.
+			// Fixed fixtures exercise real exit behavior.
 			command := exec.CommandContext(ctx,
 				os.Args[fixtureExecutableIndex], "fixture:"+test.mode)
 
@@ -254,7 +254,7 @@ func assertChildStopped(t *testing.T, pidFile string) {
 	t.Helper()
 
 	// Reviewed 2026-09-03: TestProbeReapsChild supplies its own t.TempDir file.
-	//nolint:gosec // G304: bounded fixture PID receipt, not an external path.
+	// Bounded fixture PID receipt, not an external path.
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		t.Fatal(err)
