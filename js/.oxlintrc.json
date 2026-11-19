@@ -1236,7 +1236,7 @@
     },
     {
       "files": [
-        "raycast/**"
+        "**/apps/raycast/**"
       ],
       "rules": {
         "eslint/no-duplicate-imports": [
@@ -1249,9 +1249,9 @@
     },
     {
       "files": [
-        "raycast/src/new-issues.tsx",
-        "raycast/src/recent-errors.tsx",
-        "raycast/src/search-issues.tsx"
+        "**/apps/raycast/src/new-issues.tsx",
+        "**/apps/raycast/src/recent-errors.tsx",
+        "**/apps/raycast/src/search-issues.tsx"
       ],
       "rules": {
         "import/no-default-export": "off"
@@ -1259,7 +1259,7 @@
     },
     {
       "files": [
-        "raycast/eslint.config.js"
+        "**/apps/raycast/eslint.config.js"
       ],
       "rules": {
         "import/no-commonjs": "off",
@@ -1271,7 +1271,7 @@
     },
     {
       "files": [
-        "raycast/raycast-eslint-config.d.ts"
+        "**/apps/raycast/raycast-eslint-config.d.ts"
       ],
       "rules": {
         "import/unambiguous": "off"

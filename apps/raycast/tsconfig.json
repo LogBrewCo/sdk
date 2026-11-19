@@ -1,5 +1,5 @@
 {
-  "extends": "../tsconfig.base.json",
+  "extends": "../../js/tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["es2024"],
