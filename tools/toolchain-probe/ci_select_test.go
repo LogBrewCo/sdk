@@ -61,6 +61,7 @@ func TestCISelectAreas(t *testing.T) {
 		"tools/toolchain-probe/native_symbols.go":                    {"go", "release_artifacts"},
 		"tools/toolchain-probe/js_artifacts.go":                      {"go", "release_artifacts"},
 		"scripts/real_user_native_release_public_smoke.sh":           {"c"},
+		"apps/raycast/src/raycast.tsx":                               {"javascript"},
 		"js/logbrew-react-native/README.md":                          {"javascript"},
 		"js/logbrew-react-native/src/NativeStore.ts":                 {"javascript", "react_native_native"},
 		"js/logbrew-react-native/persistent-delivery.native.js":      {"javascript", "react_native_native"},
