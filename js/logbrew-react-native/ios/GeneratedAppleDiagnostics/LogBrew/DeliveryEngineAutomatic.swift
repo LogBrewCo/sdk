@@ -6,11 +6,7 @@ extension DeliveryEngine {
     func timerFired(generation ownerGeneration: UInt64) {
         let now = DispatchTime.now().uptimeNanoseconds
         stateLock.lock()
-        guard generation == ownerGeneration else {
-            stateLock.unlock()
-            return
-        }
-        guard let deadline = nextWakeNanoseconds, now >= deadline else {
+        guard generation == ownerGeneration, let deadline = nextWakeNanoseconds, now >= deadline else {
             stateLock.unlock()
             return
         }
