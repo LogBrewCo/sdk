@@ -5,21 +5,21 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/swift/logbrew-swift"
 tmp_dir="$(mktemp -d)"
 swiftlint_version="0.65.1"
-swiftformat_version="0.63.1"
+swiftformat_version="0.64.7"
 trap 'find "$tmp_dir" -depth -delete' EXIT
 
 case "$(uname -s):$(uname -m)" in
   Darwin:*)
     swiftlint_asset="portable_swiftlint.zip"; swiftlint_sha256="c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0"
-    swiftformat_asset="swiftformat.zip"; swiftformat_sha256="385ef1a263ba28685157b98c5536b9c9105e124518f28b7ef8a2bee4b167eaeb"; swiftformat_name="swiftformat"
+    swiftformat_asset="swiftformat.zip"; swiftformat_sha256="e82e224325cbd3403fc7b68caf6c917926dc106de3af875fca4b87e3c4634038"; swiftformat_name="swiftformat"
     ;;
   Linux:x86_64)
     swiftlint_asset="swiftlint_linux_amd64.zip"; swiftlint_sha256="caeed6f4a679c35539ffaf124f6c4ab4a8416917f7d8796279dc52b74026059d"
-    swiftformat_asset="swiftformat_linux.zip"; swiftformat_sha256="9e10090e0213378c68cedb42adc2c6461916a9c8e457cf452b5585b84096c333"; swiftformat_name="swiftformat_linux"
+    swiftformat_asset="swiftformat_linux.zip"; swiftformat_sha256="819aea026e1c630f46b234ed84481e56d9eb3cfe7024cd51b1af55169c8e13bb"; swiftformat_name="swiftformat_linux"
     ;;
   Linux:arm64 | Linux:aarch64)
     swiftlint_asset="swiftlint_linux_arm64.zip"; swiftlint_sha256="9ffa52f478e6d8eb485d37d14715ffac90abc81c58f3370d598bf75be05605f8"
-    swiftformat_asset="swiftformat_linux_aarch64.zip"; swiftformat_sha256="5ef87b1732964b0efc08eb66fc6c2a6ad01e3de26aa7bcccbf2cfbf983fb3ead"; swiftformat_name="swiftformat_linux_aarch64"
+    swiftformat_asset="swiftformat_linux_aarch64.zip"; swiftformat_sha256="f42267d050f863047f6a90a1e268dd90e2145ab6c81144c304afbdc438617efd"; swiftformat_name="swiftformat_linux_aarch64"
     ;;
   *)
     printf 'unsupported Swift style platform: %s\n' "$(uname -s):$(uname -m)" >&2

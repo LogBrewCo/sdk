@@ -40,7 +40,7 @@ Issues = "https://github.com/LogBrewCo/sdk/issues"
 dev = ["typing-extensions==4.16.0"]
 
 [tool.ruff]
-required-version = "==0.15.15"
+required-version = "==0.17.5"
 target-version = "py310"
 line-length = 120
 preview = true
@@ -49,7 +49,11 @@ preview = true
 select = ["ALL"]
 # Ruff declares D203/D211 and D212/D213 mutually exclusive. Keep D211/D212.
 # Its formatter owns trailing commas; Ruff documents COM812 as conflicting.
-ignore = ["COM812", "D203", "D213"]
+# PLR0913 counts keyword-only parameters too. The public helpers take keyword-only
+# options whose names and defaults are a released contract with compatibility
+# tests, and PLR0917 still limits positional parameters. The repository Python
+# check already ignores PLR0913 for the other packages.
+ignore = ["COM812", "D203", "D213", "PLR0913"]
 
 [tool.ruff.lint.per-file-ignores]
 # Reviewed 2026-09-05; revisit when the test runner changes.
@@ -60,6 +64,10 @@ ignore = ["COM812", "D203", "D213"]
 # https://docs.astral.sh/ruff/rules/pytest-unittest-assertion/
 # https://docs.astral.sh/ruff/rules/pytest-unittest-raises-assertion/
 "tests/test_flask_integration.py" = ["PT009", "PT027"]
+# This example must not change an embedding application's registered logger, so it
+# builds an unregistered one; LOG001 asks for logging.getLogger, which registers it.
+# The package test checks the registered logger's handlers, level, and propagation.
+"src/logbrew_flask/examples/real_user_smoke.py" = ["LOG001"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

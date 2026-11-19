@@ -4,17 +4,17 @@
 from __future__ import annotations
 
 import os
-import time
 import uuid
 
 # Runtime lookup supports get_type_hints on the public config and callables.
 # Reviewed 2026-09-05; public annotation resolution is covered by contract tests.
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from importlib.metadata import version
+from time import perf_counter
 from typing import cast
 
 from flask import Flask, Response, has_request_context, request
@@ -83,7 +83,7 @@ class _StreamingResponse(Iterator[str | bytes]):
         self._environ = environ
 
     @contextmanager
-    def _activate(self) -> Iterator[None]:
+    def _activate(self) -> Generator[None]:
         previous = self._environ.get(_REQUEST_STATE_KEY)
         self._environ[_REQUEST_STATE_KEY] = self._state
         try:
@@ -164,10 +164,7 @@ class LogBrewFlaskConfig:
     span_id_factory: Callable[[], str] | None = None
 
 
-# The four PLR0913 exceptions preserve released keyword-only call contracts.
-# Reviewed 2026-09-05; exact signatures and defaults have compatibility tests.
-# Revisit only with an explicitly versioned public API change.
-def init_logbrew(  # noqa: PLR0913
+def init_logbrew(
     app: Flask,
     *,
     api_key: str | None = None,
@@ -424,7 +421,7 @@ def _metric_attributes(
     return attributes
 
 
-def capture_request_metric(  # noqa: PLR0913
+def capture_request_metric(
     client: LogBrewClient,
     *,
     status_code: int,
@@ -452,7 +449,7 @@ def capture_request_metric(  # noqa: PLR0913
     return metric_event_id
 
 
-def capture_request_span(  # noqa: PLR0913
+def capture_request_span(
     client: LogBrewClient,
     *,
     status_code: int,
@@ -528,7 +525,7 @@ def _issue_attributes(
     )
 
 
-def add_logbrew_middleware(  # noqa: PLR0913
+def add_logbrew_middleware(
     app: Flask,
     *,
     client: LogBrewClient,
@@ -572,7 +569,7 @@ def add_logbrew_middleware(  # noqa: PLR0913
     def logbrew_request_started(_sender: Flask, **_: object) -> None:
         trace_context = create_request_trace_context(span_id_factory=config.span_id_factory)
         state = _RequestState(
-            trace_context, time.perf_counter(), utc_timestamp(), ExitStack(), request_name(), request_metadata()
+            trace_context, perf_counter(), utc_timestamp(), ExitStack(), request_name(), request_metadata()
         )
         state.activation.enter_context(use_logbrew_trace(trace_context))
         request.environ[_REQUEST_STATE_KEY] = state
@@ -643,7 +640,7 @@ def _capture_completed_request(
     if state is None or state.completed:
         return
     state.completed = True
-    duration_ms = max(0.0, (time.perf_counter() - state.started_at) * 1000)
+    duration_ms = max(0.0, (perf_counter() - state.started_at) * 1000)
     capture_span = (
         config.capture_successful_requests
         or status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
@@ -703,7 +700,7 @@ def request_duration_ms() -> float:
 
     """
     state = _request_state()
-    return max(0.0, (time.perf_counter() - state.started_at) * 1000) if state is not None else 0.0
+    return max(0.0, (perf_counter() - state.started_at) * 1000) if state is not None else 0.0
 
 
 def create_request_trace_context(

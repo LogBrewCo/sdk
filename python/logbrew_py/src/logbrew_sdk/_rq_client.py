@@ -115,12 +115,12 @@ def instrument_rq_queue_with_logbrew_spans(
         _QueueInstrumentationConfig.create(
             "rq",
             "RQ",
-            metadata,
-            event_id_factory,
-            span_id_factory,
-            clock,
-            wall_clock,
-            on_capture_error,
+            metadata=metadata,
+            event_id_factory=event_id_factory,
+            span_id_factory=span_id_factory,
+            clock=clock,
+            wall_clock=wall_clock,
+            on_capture_error=on_capture_error,
         ),
     )
 
@@ -149,12 +149,12 @@ def instrument_rq_worker_processes_with_logbrew(
         _QueueInstrumentationConfig.create(
             "rq",
             "RQ",
-            metadata,
-            event_id_factory,
-            span_id_factory,
-            clock,
-            wall_clock,
-            on_capture_error,
+            metadata=metadata,
+            event_id_factory=event_id_factory,
+            span_id_factory=span_id_factory,
+            clock=clock,
+            wall_clock=wall_clock,
+            on_capture_error=on_capture_error,
         ),
     )
 
@@ -248,7 +248,7 @@ class LogBrewRqWorkerInstrumentation:
                 client,
                 job,
                 queue,
-                _queue_trace_from_carrier(_rq_job_carrier(job)),
+                trace=_queue_trace_from_carrier(_rq_job_carrier(job)),
             )
         except Exception as error:
             self._config.notify(error)
@@ -313,6 +313,7 @@ def _rq_request(
     client: Any,
     job: Any,
     queue: Any,
+    *,
     trace: LogBrewTraceContext | None = None,
 ) -> _QueueSpanRequest:
     task_name = _safe_job_label(job, "func_name")

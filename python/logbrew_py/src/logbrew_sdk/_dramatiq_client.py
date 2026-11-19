@@ -57,16 +57,16 @@ def instrument_dramatiq_broker_with_logbrew_spans(
         _QueueInstrumentationConfig.create(
             "dramatiq",
             "Dramatiq",
-            metadata,
-            event_id_factory,
-            span_id_factory,
-            clock,
-            wall_clock,
-            on_capture_error,
+            metadata=metadata,
+            event_id_factory=event_id_factory,
+            span_id_factory=span_id_factory,
+            clock=clock,
+            wall_clock=wall_clock,
+            on_capture_error=on_capture_error,
         ),
-        max_in_flight_jobs,
-        middleware_module.Retries,
-        retry_type,
+        max_in_flight_jobs=max_in_flight_jobs,
+        retries_type=middleware_module.Retries,
+        retry_type=retry_type,
     )
 
 
@@ -79,6 +79,7 @@ class LogBrewDramatiqInstrumentation:
         client: Any,
         logger_names: Sequence[str],
         config: _QueueInstrumentationConfig,
+        *,
         max_in_flight_jobs: int,
         retries_type: type[Any],
         retry_type: type[BaseException],

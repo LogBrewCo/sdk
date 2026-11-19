@@ -1,9 +1,9 @@
 import Foundation
+import LogBrew
+import Testing
 #if canImport(FoundationNetworking)
     import FoundationNetworking
 #endif
-import LogBrew
-import Testing
 
 @Suite("LogBrew Swift trace correlation")
 struct TraceContextTests {

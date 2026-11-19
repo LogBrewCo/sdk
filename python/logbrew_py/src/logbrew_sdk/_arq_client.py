@@ -102,12 +102,12 @@ def instrument_arq_pool_with_logbrew_spans(
         _QueueInstrumentationConfig.create(
             "arq",
             "ARQ",
-            metadata,
-            event_id_factory,
-            span_id_factory,
-            clock,
-            wall_clock,
-            on_capture_error,
+            metadata=metadata,
+            event_id_factory=event_id_factory,
+            span_id_factory=span_id_factory,
+            clock=clock,
+            wall_clock=wall_clock,
+            on_capture_error=on_capture_error,
         ),
     )
 
@@ -136,12 +136,12 @@ def instrument_arq_worker_with_logbrew_spans(
         _QueueInstrumentationConfig.create(
             "arq",
             "ARQ",
-            metadata,
-            event_id_factory,
-            span_id_factory,
-            clock,
-            wall_clock,
-            on_capture_error,
+            metadata=metadata,
+            event_id_factory=event_id_factory,
+            span_id_factory=span_id_factory,
+            clock=clock,
+            wall_clock=wall_clock,
+            on_capture_error=on_capture_error,
         ),
     )
 
