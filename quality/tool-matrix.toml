@@ -350,11 +350,11 @@ version = "repository"
 unpinned = "repository script, versioned by commit"
 commands = ["scripts/check-suppressions.sh", "scripts/test-check-suppressions.sh"]
 runs_in = "CI Contract checks: Check for inline lint suppressions; scripts/check_public_sdks.sh step Inline suppression check"
-config = "the pattern in scripts/check-suppressions.sh and quality/suppressions-allowlist.tsv"
+config = "the pattern in scripts/check-suppressions.sh"
 conflicts = "none known"
-exceptions = "quality/suppressions-allowlist.tsv: 3 Java unchecked casts from Object to a parameterized type (JLS 5.1.9, 5.5); an entry with no matching line fails"
+exceptions = "none"
 runtime = "new; record from CI runs at the next check"
-findings = "seeded: each suppression form fails with its path and line; an allowlisted line passes; a stale, extra, or malformed entry fails; a directory outside Git fails"
+findings = "seeded: each suppression form fails with its path and line; a directory outside Git fails"
 replaces = "none"
 checked = 2026-11-18
 

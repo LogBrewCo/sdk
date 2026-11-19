@@ -18,6 +18,7 @@ import org.springframework.kafka.listener.RecordInterceptor;
 final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor, Ordered {
     private static final int ORDER = Ordered.LOWEST_PRECEDENCE - 12;
     private static final String SCOPED_TARGET_PREFIX = "scopedTarget.";
+    private static final boolean HAS_RECORD_INTERCEPTOR_GETTER = hasRecordInterceptorGetter();
 
     private final ObjectProvider<LogBrewClient> clientProvider;
     private final Environment environment;
@@ -71,30 +72,42 @@ final class LogBrewSpringBootKafkaBeanPostProcessor implements BeanPostProcessor
         AbstractKafkaListenerContainerFactory<?, K, V> factory,
         LogBrewClient client
     ) {
-        RecordInterceptor<K, V> existing = recordInterceptor(factory);
-        if (LogBrewSpringKafkaTracing.isInstrumentedRecordInterceptor(existing)) {
-            return;
-        }
         LogBrewSpringKafkaTracing.ConsumerConfig<K, V> config = LogBrewSpringKafkaTracing
             .ConsumerConfig
             .<K, V>create()
             .eventIdPrefix(eventIdPrefix())
             .recordTimestampLatency(recordTimestampLatency())
             .metadata(springMetadata());
-        if (existing != null) {
-            config.delegate(existing);
+        if (HAS_RECORD_INTERCEPTOR_GETTER) {
+            RecordInterceptor<K, V> existing = factory.getRecordInterceptor();
+            if (LogBrewSpringKafkaTracing.isInstrumentedRecordInterceptor(existing)) {
+                return;
+            }
+            if (existing != null) {
+                config.delegate(existing);
+            }
+        } else if (legacyRecordInterceptor(factory) != null) {
+            // Spring Kafka 3.x cannot return the app interceptor with its types, so the app interceptor stays in
+            // place. Apps compose it with LogBrewSpringKafkaTracing.ConsumerConfig.delegate instead.
+            return;
         }
         factory.setRecordInterceptor(LogBrewSpringKafkaTracing.recordInterceptor(client, config));
     }
 
-    // Spring Kafka 3.x has no getter for the interceptor, so this reads the field that setRecordInterceptor typed as
-    // RecordInterceptor<K, V>. Reflection returns Object, and Java cannot check type arguments at run time.
-    @SuppressWarnings("unchecked")
-    private static <K, V> RecordInterceptor<K, V> recordInterceptor(AbstractKafkaListenerContainerFactory<?, K, V> factory) {
+    private static boolean hasRecordInterceptorGetter() {
+        try {
+            AbstractKafkaListenerContainerFactory.class.getMethod("getRecordInterceptor");
+            return true;
+        } catch (NoSuchMethodException error) {
+            return false;
+        }
+    }
+
+    private static Object legacyRecordInterceptor(AbstractKafkaListenerContainerFactory<?, ?, ?> factory) {
         try {
             Field field = AbstractKafkaListenerContainerFactory.class.getDeclaredField("recordInterceptor");
             field.setAccessible(true);
-            return (RecordInterceptor<K, V>) field.get(factory);
+            return field.get(factory);
         } catch (ReflectiveOperationException | RuntimeException error) {
             throw new IllegalStateException("spring kafka record interceptor cannot be inspected", error);
         }

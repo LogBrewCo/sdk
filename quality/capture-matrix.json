@@ -461,7 +461,7 @@
       },
       "method": "Spring Boot 4 web app (embedded Tomcat) with the auto-registered LogBrewServletFilter and LogBrewSpringExceptionResolver, the LogBrewLogbackAppender on an SLF4J logger, an automatic HttpTransport client with the documented service and deployment context, and a W3C traceparent; one request that succeeds and one whose controller throws",
       "probe": "tools/capture-matrix/probes/java/logbrew-java",
-      "inputs": "7a488dc64909c0aa2f48bde68e3186450abf529245df090c2bf880b711e01f00"
+      "inputs": "f409342240211dc04e6d0d298a90606457e64f7fb75bd98ab8b4ba1759585fef"
     },
     "js/logbrew-amqplib": {
       "share": 100.0,

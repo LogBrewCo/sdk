@@ -2,6 +2,7 @@ package co.logbrew.sdk;
 
 import java.nio.charset.StandardCharsets;
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.time.Instant;
@@ -12,11 +13,15 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.springframework.kafka.core.KafkaOperations;
@@ -30,11 +35,11 @@ import org.springframework.kafka.support.SendResult;
 public final class LogBrewSpringKafkaTracingTest {
     private int testsRun;
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws ReflectiveOperationException {
         new LogBrewSpringKafkaTracingTest().run();
     }
 
-    private void run() {
+    private void run() throws ReflectiveOperationException {
         testRecordInterceptorContinuesTraceDuringListenerAndCapturesSanitizedSpan();
         testRecordInterceptorTreatsMalformedTraceAndListenerFailureAsSafeDiagnostics();
         testRecordInterceptorClearThreadStateFinishesActiveRecordWithOkStatus();
@@ -44,6 +49,7 @@ public final class LogBrewSpringKafkaTracingTest {
         testProducerWrapperInjectsTraceparentAndCapturesCallbackSpan();
         testProducerWrapperRethrowsSynchronousSendFailureWithoutLeakingDetails();
         testProducerPostProcessorWrapsAppOwnedProducer();
+        testProducerWrapperForwardsOtherCallsAndTheKafka3OffsetsOverload();
         System.out.println("java spring kafka tracing tests ok (" + testsRun + " tests)");
     }
 
@@ -150,6 +156,34 @@ public final class LogBrewSpringKafkaTracingTest {
         assertNotContains(payload, "private-key");
         assertNotContains(payload, "private value");
         assertNotContains(payload, "traceparent");
+        testsRun++;
+    }
+
+    private void testProducerWrapperForwardsOtherCallsAndTheKafka3OffsetsOverload() throws ReflectiveOperationException {
+        RecordingKafkaProducer delegate = new RecordingKafkaProducer();
+        Producer<String, String> producer = LogBrewSpringKafkaTracing.producer(sampleClient(), delegate.proxy());
+        Map<TopicPartition, OffsetAndMetadata> offsets = Map.of(
+            new TopicPartition("orders-events", 0),
+            new OffsetAndMetadata(7)
+        );
+
+        producer.sendOffsetsToTransaction(offsets, new MockConsumer<String, String>("earliest").groupMetadata());
+        try {
+            producer.getClass()
+                .getMethod("sendOffsetsToTransaction", Map.class, String.class)
+                .invoke(producer, offsets, "billing");
+            throw new AssertionError("the Kafka 3.x offsets overload must fail on a Kafka 4 client");
+        } catch (InvocationTargetException error) {
+            assertTrue(error.getCause() instanceof UnsupportedOperationException, "Kafka 3.x offsets overload names the missing method");
+        }
+        producer.flush();
+
+        assertEquals(
+            List.of("sendOffsetsToTransaction dummy.group.id 7", "flush"),
+            delegate.calls,
+            "producer wrapper forwards calls it does not trace"
+        );
+        assertEquals("LogBrewSpringKafkaProducer[delegate=RecordingKafkaProducer]", producer.toString(), "producer wrapper names its delegate");
         testsRun++;
     }
 
@@ -639,6 +673,7 @@ public final class LogBrewSpringKafkaTracingTest {
         private ProducerRecord<?, ?> sentRecord;
         private Callback callback;
         private Optional<LogBrewTraceContext> activeTraceDuringSend = Optional.empty();
+        private final List<String> calls = new ArrayList<>();
 
         private RecordingKafkaProducer() {
             this(null);
@@ -670,7 +705,17 @@ public final class LogBrewSpringKafkaTracingTest {
             if ("toString".equals(method.getName())) {
                 return "RecordingKafkaProducer";
             }
-            if ("close".equals(method.getName()) || "flush".equals(method.getName())) {
+            if ("sendOffsetsToTransaction".equals(method.getName()) && args[1] instanceof ConsumerGroupMetadata) {
+                Map<?, ?> offsets = (Map<?, ?>) args[0];
+                OffsetAndMetadata offset = (OffsetAndMetadata) offsets.values().iterator().next();
+                calls.add(method.getName() + " " + ((ConsumerGroupMetadata) args[1]).groupId() + " " + offset.offset());
+                return null;
+            }
+            if ("flush".equals(method.getName())) {
+                calls.add("flush");
+                return null;
+            }
+            if ("close".equals(method.getName())) {
                 return null;
             }
             throw new UnsupportedOperationException(method.getName());
