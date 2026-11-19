@@ -198,7 +198,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertIn(needle, selector)
         for needle in (
             "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
-            'bun-version: "1.3.14"',
+            'bun-version: "1.4.4"',
             "actions: read",
             "bun pm pack --dry-run --ignore-scripts",
             "bun install --cwd tools/npm-publish --frozen-lockfile --ignore-scripts",

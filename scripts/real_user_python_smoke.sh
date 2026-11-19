@@ -321,7 +321,7 @@ run_sdist_install_checks() {
     deactivate
 }
 
-smoke_seed="${LOGBREW_PYTHON_SMOKE_SEED:-${LOGBREW_PYTHON_STATIC_ENV:-${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/python-static/ruff-0.15.15-mypy-2.1.0}}"
+smoke_seed="${LOGBREW_PYTHON_SMOKE_SEED:-${LOGBREW_PYTHON_STATIC_ENV:-${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/python-static/ruff-0.17.5-mypy-2.4.1}}"
 if [[ "$(uname -s)" == "Darwin" && -x "$smoke_seed/bin/python" ]]; then
     LOGBREW_PYTHON_STATIC_ENV="$smoke_seed" bash "$repo_root/scripts/check_python_static.sh" >/dev/null
     export PIP_NO_INDEX=1 PIP_FIND_LINKS="$smoke_seed/wheelhouse"

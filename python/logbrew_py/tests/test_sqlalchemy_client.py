@@ -26,12 +26,25 @@ def sample_client() -> LogBrewClient:
     )
 
 
+# SQLAlchemy passes these names to a listener registered with named=True.
+CURSOR_EVENT_ARGUMENTS = ("conn", "cursor", "statement", "parameters", "context", "executemany")
+
+
 class FakeSqlAlchemyEvent:
     def __init__(self) -> None:
         self.listeners: dict[str, list[Any]] = {}
+        self.named: set[str] = set()
 
-    def listen(self, engine: object, event_name: str, listener: Any) -> None:
+    def listen(self, engine: object, event_name: str, listener: Any, *, named: bool = False) -> None:
         self.listeners.setdefault(event_name, []).append(listener)
+        if named:
+            self.named.add(event_name)
+
+    def fire(self, event_name: str, *arguments: Any) -> Any:
+        listener = self.listeners[event_name][0]
+        if event_name in self.named:
+            return listener(**dict(zip(CURSOR_EVENT_ARGUMENTS, arguments, strict=True)))
+        return listener(*arguments)
 
     def remove(self, engine: object, event_name: str, listener: Any) -> None:
         self.listeners[event_name].remove(listener)
@@ -94,7 +107,8 @@ class SqlAlchemyEngineInstrumentationTests(unittest.TestCase):
                 )
 
                 context = SimpleNamespace()
-                fake_event.listeners["before_cursor_execute"][0](
+                fake_event.fire(
+                    "before_cursor_execute",
                     None,
                     None,
                     "SELECT * FROM users WHERE email = :email",
@@ -112,7 +126,8 @@ class SqlAlchemyEngineInstrumentationTests(unittest.TestCase):
                         sampled=True,
                     ),
                 )
-                fake_event.listeners["after_cursor_execute"][0](
+                fake_event.fire(
+                    "after_cursor_execute",
                     None,
                     SimpleNamespace(rowcount=4),
                     "SELECT * FROM users WHERE email = :email",
@@ -176,7 +191,8 @@ class SqlAlchemyEngineInstrumentationTests(unittest.TestCase):
                     clock=lambda: next(clock_values),
                 )
                 context = SimpleNamespace()
-                fake_event.listeners["before_cursor_execute"][0](
+                fake_event.fire(
+                    "before_cursor_execute",
                     None,
                     None,
                     "INSERT INTO users(email) VALUES (:email)",
@@ -184,7 +200,8 @@ class SqlAlchemyEngineInstrumentationTests(unittest.TestCase):
                     context,
                     False,
                 )
-                result = fake_event.listeners["handle_error"][0](
+                result = fake_event.fire(
+                    "handle_error",
                     SimpleNamespace(
                         execution_context=context,
                         original_exception=StubSqlAlchemyError("duplicate private@example.test"),
@@ -227,8 +244,9 @@ class SqlAlchemyEngineInstrumentationTests(unittest.TestCase):
                 on_capture_error=lambda error: capture_errors.append(str(error)),
             )
             context = SimpleNamespace()
-            fake_event.listeners["before_cursor_execute"][0](None, None, "SELECT 1", (), context, False)
-            fake_event.listeners["after_cursor_execute"][0](
+            fake_event.fire("before_cursor_execute", None, None, "SELECT 1", (), context, False)
+            fake_event.fire(
+                "after_cursor_execute",
                 None,
                 SimpleNamespace(rowcount=-1),
                 "SELECT 1",
@@ -260,7 +278,8 @@ class SqlAlchemyEngineInstrumentationTests(unittest.TestCase):
             )
 
             with use_logbrew_trace(parent_trace):
-                fake_event.listeners["before_cursor_execute"][0](
+                fake_event.fire(
+                    "before_cursor_execute",
                     None,
                     None,
                     "SELECT 1",

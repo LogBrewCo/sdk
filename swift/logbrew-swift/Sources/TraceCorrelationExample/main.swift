@@ -1,8 +1,8 @@
 import Foundation
+import LogBrew
 #if canImport(FoundationNetworking)
     import FoundationNetworking
 #endif
-import LogBrew
 
 struct AppOwnedOpenTelemetrySpanContext: LogBrewOpenTelemetrySpanContextCarrier {
     let logBrewOpenTelemetryTraceId: String

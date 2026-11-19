@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tool_env="${LOGBREW_PYTHON_STATIC_ENV:-${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/python-static/ruff-0.15.15-mypy-2.1.0}"
-cache_dir="${LOGBREW_PYTHON_STATIC_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/logbrew/python-static/ruff-0.15.15-mypy-2.1.0}"
+tool_env="${LOGBREW_PYTHON_STATIC_ENV:-${XDG_DATA_HOME:-$HOME/.local/share}/logbrew-tools/python-static/ruff-0.17.5-mypy-2.4.1}"
+cache_dir="${LOGBREW_PYTHON_STATIC_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/logbrew/python-static/ruff-0.17.5-mypy-2.4.1}"
 mkdir -p "$cache_dir"
 
 tool_python="$tool_env/bin/python"

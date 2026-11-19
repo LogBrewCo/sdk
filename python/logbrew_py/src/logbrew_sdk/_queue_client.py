@@ -224,6 +224,7 @@ class _QueueInstrumentationConfig:
         cls,
         system: str,
         display_name: str,
+        *,
         metadata: Mapping[str, Any] | None,
         event_id_factory: Callable[[], str] | None,
         span_id_factory: Callable[[], str] | None,

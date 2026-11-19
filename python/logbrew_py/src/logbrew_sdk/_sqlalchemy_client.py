@@ -130,8 +130,8 @@ class LogBrewSqlAlchemyInstrumentation:
 
         if self._installed:
             return
-        self._event.listen(self.engine, "before_cursor_execute", self._before_cursor_execute)
-        self._event.listen(self.engine, "after_cursor_execute", self._after_cursor_execute)
+        self._event.listen(self.engine, "before_cursor_execute", self._before_cursor_execute, named=True)
+        self._event.listen(self.engine, "after_cursor_execute", self._after_cursor_execute, named=True)
         self._event.listen(self.engine, "handle_error", self._handle_error)
         self._installed = True
 
@@ -150,15 +150,7 @@ class LogBrewSqlAlchemyInstrumentation:
         self._installed = False
         _forget_instrumentation(self.engine, self)
 
-    def _before_cursor_execute(
-        self,
-        connection: Any,
-        cursor: Any,
-        statement: Any,
-        parameters: Any,
-        context: Any,
-        executemany: bool,
-    ) -> None:
+    def _before_cursor_execute(self, *, statement: Any, context: Any, **_arguments: Any) -> None:
         if not self._installed:
             return
         try:
@@ -193,15 +185,7 @@ class LogBrewSqlAlchemyInstrumentation:
         except Exception as error:
             _notify_capture_error(self._on_capture_error, error)
 
-    def _after_cursor_execute(
-        self,
-        connection: Any,
-        cursor: Any,
-        statement: Any,
-        parameters: Any,
-        context: Any,
-        executemany: bool,
-    ) -> None:
+    def _after_cursor_execute(self, *, cursor: Any, context: Any, **_arguments: Any) -> None:
         state = _take_state(context)
         if state is not None:
             state.finish("ok", result=cursor)

@@ -22,7 +22,7 @@ SupportTicketCategory: TypeAlias = Literal[
     "other",
 ]
 SupportDiagnosticsValue: TypeAlias = (
-    str | int | float | bool | None | list["SupportDiagnosticsValue"] | dict[str, "SupportDiagnosticsValue"]
+    str | int | float | bool | list["SupportDiagnosticsValue"] | dict[str, "SupportDiagnosticsValue"] | None
 )
 
 

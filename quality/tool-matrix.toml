@@ -18,18 +18,17 @@ utilities = ["[", "[[", "awk", "basename", "bash", "break", "cat", "cd", "chmod"
 id = "ruff"
 risk = "Python lint and formatting"
 tool = "Ruff (native Rust)"
-version = "0.15.15"
+version = "0.17.5"
 pins = ["scripts/python_static_tools.txt::ruff==@VERSION@"]
 commands = ["scripts/check_python_static.sh"]
 runs_in = "CI Contract checks: Run Python static analysis"
 config = "pyproject settings in each Python package"
 conflicts = "none known"
-exceptions = "none"
-runtime = "with mypy: push n=6, max 33 s; pull request n=9, max 36 s"
-findings = "unknown: findings are fixed before merge"
+exceptions = "Flask: PLR0913 is off because the public helpers take keyword-only options that are a released contract (PLR0917 still limits positional parameters), and LOG001 is off in the real-user example, which must not register a logger; these replace inline noqa comments, which Ruff 0.16 and later report (noqa-comments). The repository check ignores PLR2004 and PLR0913 for the other packages"
+runtime = "with mypy, 2026-10-19 to 2026-11-19: push n=57, max 43 s; pull request n=123, p99 44 s"
+findings = "2026-11-19: Ruff 0.17.5 found 17 issues that 0.15.15 passed, all fixed: PLR0917 (too many positional arguments, now stable) 5 times in the queue, Dramatiq, RQ, and SQLAlchemy instrumentation; RUF036 once; in Flask (preview rules) 1 context-manager-iterator, 5 shared-clock-mock in the tests, and 5 noqa-comments"
 replaces = "none"
-status = "behind: 0.17.1 released 2026-10-15"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "rust"
@@ -68,7 +67,7 @@ checked = 2026-10-30
 id = "mypy"
 risk = "Python type errors"
 tool = "mypy"
-version = "2.1.0"
+version = "2.4.1"
 pins = ["scripts/python_static_tools.txt::mypy==@VERSION@"]
 commands = ["scripts/check_python_static.sh"]
 runs_in = "CI Contract checks: Run Python static analysis"
@@ -76,10 +75,9 @@ config = "pyproject settings in each Python package"
 conflicts = "a Python tool, not native; a native type checker with equal coverage would replace it"
 exceptions = "none"
 runtime = "with ruff (see ruff)"
-findings = "unknown: findings are fixed before merge"
+findings = "2026-11-19: mypy 2.4.1 --strict finds 0 issues in the 143 source files"
 replaces = "none"
-status = "behind: 2.4.0 released"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "oxlint"
@@ -118,7 +116,7 @@ id = "typescript-native"
 risk = "JavaScript type errors, implicit and explicit any, unchecked assertions, suppression and prose comments, and declaration drift in the @logbrew packages that joined the strict gate"
 tool = "TypeScript native compiler (tsc 7, Go)"
 version = "7.0.2"
-pins = ["scripts/check_js_lint.sh::typescript_version=\"@VERSION@\"", "js/package.json::\"@types/node\": \"26.6.6\"", "js/package.json::\"fastify\": \"5.12.7\"", "js/package.json::\"@aws-sdk/client-sqs\": \"3.1161.0\"", "js/package.json::\"bullmq\": \"6.5.2\"", "js/package.json::\"@types/bun\": \"1.3.14\"", "benchmarks/package.json::\"@types/node\": \"26.6.6\"", "tools/npm-publish/package.json::\"@types/bun\": \"1.3.14\"", "js/package.json::\"prisma\": \"7.10.1\"", "js/package.json::\"@prisma/client\": \"7.10.1\"", "js/package.json::\"@nestjs/common\": \"12.1.3\"", "js/package.json::\"@nestjs/core\": \"12.1.3\"", "js/package.json::\"@types/express\": \"5.0.6\"", "js/package.json::\"reflect-metadata\": \"0.2.2\"", "js/package.json::\"rxjs\": \"7.8.2\"", "js/package.json::\"express\": \"5.3.0\"", "js/package.json::\"@angular/core\": \"22.2.4\"", "js/package.json::\"vue\": \"3.5.44\"", "js/package.json::\"svelte\": \"5.57.3\""]
+pins = ["scripts/check_js_lint.sh::typescript_version=\"@VERSION@\"", "js/package.json::\"@types/node\": \"26.6.6\"", "js/package.json::\"fastify\": \"5.12.7\"", "js/package.json::\"@aws-sdk/client-sqs\": \"3.1161.0\"", "js/package.json::\"bullmq\": \"6.5.2\"", "js/package.json::\"@types/bun\": \"1.4.4\"", "benchmarks/package.json::\"@types/node\": \"26.6.6\"", "tools/npm-publish/package.json::\"@types/bun\": \"1.4.4\"", "js/package.json::\"prisma\": \"7.10.1\"", "js/package.json::\"@prisma/client\": \"7.10.1\"", "js/package.json::\"@nestjs/common\": \"12.1.3\"", "js/package.json::\"@nestjs/core\": \"12.1.3\"", "js/package.json::\"@types/express\": \"5.0.6\"", "js/package.json::\"reflect-metadata\": \"0.2.2\"", "js/package.json::\"rxjs\": \"7.8.2\"", "js/package.json::\"express\": \"5.3.0\"", "js/package.json::\"@angular/core\": \"22.2.4\"", "js/package.json::\"vue\": \"3.5.44\"", "js/package.json::\"svelte\": \"5.57.3\""]
 commands = ["scripts/check_js_lint.sh", "bun js/node_modules/.bin/prisma"]
 runs_in = "CI Contract checks: Run JavaScript lint (when JavaScript changed)"
 config = "js/tsconfig.base.json: strict plus noUncheckedIndexedAccess, exactOptionalPropertyTypes, noImplicitOverride, noPropertyAccessFromIndexSignature, noImplicitReturns, noFallthroughCasesInSwitch, noUnusedLocals, noUnusedParameters, allowUnreachableCode and allowUnusedLabels false, noUncheckedSideEffectImports, isolatedModules, verbatimModuleSyntax, erasableSyntaxOnly, libReplacement false, skipLibCheck false, and checkJs, with lib es2022 for the Node 18 floor. A project joins with a tsconfig.json that extends it and names its entry files, declarations included, in files: a wildcard include drops a JavaScript file whose declaration of the same name it also matches, and a declaration outside the program is linted without the project's paths, so its imports from other LogBrew packages read as error types; its JavaScript is typed with JSDoc against the package's own declarations, and every JavaScript and TypeScript file under it, tests, examples, and scripts included, must be in the program. Every JavaScript or TypeScript file in the repository must sit in a joined project or a `pending` entry, so nothing stays outside the check once `pending` is empty. Typed peers come from js/package.json and js/bun.lock (frozen install); a joined project outside js with its own bun.lock (benchmarks, tools/npm-publish) installs from it, @types/bun matches the pinned Bun, and the benchmarks set lib es2024 and dom (they need Node.js 22 and run in Chrome) and drop the path map, so that they type-check against the installed packages they measure. skipLibCheck stays false: a dependency whose own types fail is upgraded, patched through Bun patchedDependencies recorded here, or replaced, never skipped. A joined package that holds prisma/schema.prisma gets its Prisma client generated before the type check (prisma generate from js/node_modules, telemetry off), so its examples type against a real client. The same gate fails on suppression comments (eslint-disable, oxlint-disable, @ts-ignore, @ts-expect-error, @ts-nocheck), on any, *, or ? in a JSDoc type, and on comment text other than JSDoc type tags outside declaration files; a seeded example of each, plus an implicit any, must fail on every run"
@@ -142,10 +140,10 @@ runs_in = "CI Contract checks: Run Java static analysis; Java and Kotlin jobs"
 config = "Java 17 (setup-java); javac targets release 11"
 conflicts = "none known"
 exceptions = "none"
-runtime = "pull request n=2, max 23 s"
-findings = "unknown: findings are fixed before merge"
+runtime = "2026-10-19 to 2026-11-19: push n=1, max 12 s; pull request n=7, max 22 s"
+findings = "unknown: findings are fixed before merge; 2026-11-19: SpotBugs 4.10.5 is the latest release, no advisories; setup-java v6.3.0 no longer registers the Java problem matcher by default (annotations only)"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "ktlint"
@@ -167,7 +165,7 @@ checked = 2026-10-23
 id = "phpstan"
 risk = "PHP type and logic errors"
 tool = "PHPStan"
-version = "2.3.1"
+version = "2.3.6"
 pins = ["scripts/check_php_static.sh::\"phpstan/phpstan\": \"@VERSION@\""]
 uses = ["shivammathur/setup-php"]
 commands = ["scripts/check_php_static.sh", "composer", "php"]
@@ -175,27 +173,26 @@ runs_in = "CI Contract checks: Run PHP static analysis; PHP jobs"
 config = "the phpstan.neon the script writes"
 conflicts = "none known"
 exceptions = "none"
-runtime = "pull request n=2, max 8 s"
-findings = "unknown: findings are fixed before merge"
+runtime = "2026-10-19 to 2026-11-19: the CI step was skipped in 198 runs and failed in 2; local run 35 s with a cold Composer cache"
+findings = "2026-11-19: the 2 CI failures were Composer refusing symfony/framework-bundle 8.1.9 (advisory PKSA-jvt1-tggb-8w72); the script now installs Symfony 8.1.11, Guzzle 7.16.3, and Monolog 3.13.0, and PHPStan 2.3.6 at level max finds 0 errors"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "swift-style"
 risk = "Swift lint and formatting"
 tool = "SwiftLint and SwiftFormat"
 version = "0.65.1"
-pins = ["scripts/check_swift_style.sh::swiftlint_version=\"@VERSION@\"", "scripts/check_swift_style.sh::swiftformat_version=\"0.63.1\""]
+pins = ["scripts/check_swift_style.sh::swiftlint_version=\"@VERSION@\"", "scripts/check_swift_style.sh::swiftformat_version=\"0.64.7\""]
 commands = ["scripts/check_swift_style.sh", "swift run"]
 runs_in = "CI Contract checks: Run Swift style checks; Swift jobs"
 config = "SwiftLint and SwiftFormat settings in swift/logbrew-swift; downloads verified against pinned SHA-256"
 conflicts = "none known"
 exceptions = "none"
-runtime = "push n=1, max 13 s; pull request n=2, max 23 s"
-findings = "unknown: findings are fixed before merge"
+runtime = "2026-10-19 to 2026-11-19: push n=4, max 17 s; pull request n=5, max 161 s"
+findings = "2026-11-19: SwiftFormat 0.64.7 reformatted 4 files (the new repeatedGuard rule merged 2 guard pairs, and sortImports moved imports in 2 files); SwiftLint 0.65.1 finds 0 violations"
 replaces = "none"
-status = "SwiftFormat behind: 0.64.0 released 2026-10-16"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "staticcheck"
@@ -209,10 +206,10 @@ runs_in = "CI Contract checks: Run Go static analysis; Go jobs"
 config = "Go version from tools/toolchain-probe/.go-version"
 conflicts = "none known"
 exceptions = "none"
-runtime = "push n=1, max 21 s; pull request n=2, max 18 s"
-findings = "unknown: findings are fixed before merge"
+runtime = "2026-10-19 to 2026-11-19: push n=8, max 88 s; pull request n=17, max 63 s"
+findings = "unknown: findings are fixed before merge; 2026-11-19: 2026.2.2 is the latest release, no advisories; setup-go moves to v7.1.0"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "shellcheck"
@@ -225,16 +222,16 @@ runs_in = "CI Contract checks: Run shell static analysis"
 config = "downloads verified against pinned SHA-256 per platform"
 conflicts = "a compiled Haskell binary; no Rust or Go shell linter gives equal coverage"
 exceptions = "none"
-runtime = "push n=6, max 19 s; pull request n=9, max 20 s"
-findings = "unknown: findings are fixed before merge"
+runtime = "2026-10-19 to 2026-11-19: push n=57, max 30 s; pull request n=124, p99 29 s"
+findings = "2026-11-19: 0.11.0 is the latest release, no advisories; 0 findings"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "javascript-toolchain"
 risk = "JavaScript SDK builds, tests, audits, and package-manager compatibility"
 tool = "Bun, plus npm, pnpm, Yarn, and Corepack for compatibility tests"
-version = "1.3.14"
+version = "1.4.4"
 pins = [".github/workflows/ci.yml::bun-version: \"@VERSION@\"", ".github/workflows/ci.yml::pnpm@12.18.0+sha512."]
 uses = ["oven-sh/setup-bun", "actions/setup-node"]
 commands = ["bun", "bun add", "bun audit", "bun install", "bun pm", "bun run", "bun test", "npm ci", "npm install", "npm pack", "npm test", "pnpm", "yarn", "corepack", "js/logbrew-react-native/test/run-native-store-tests.sh"]
@@ -243,10 +240,9 @@ config = "package.json in each package; js/package.json and js/bun.lock pin the 
 conflicts = "npm, pnpm, and Yarn are package managers under test, not quality tools"
 exceptions = "none"
 runtime = "see the JavaScript jobs in the CI workflow runs"
-findings = "unknown: no recorded finding"
+findings = "2026-11-19: Bun 1.3.14 is affected by GHSA-cf8x-9m69-3gg3, GHSA-663w-cv8g-jj2p, and GHSA-26q8-h657-pf84, fixed in 1.4.4; with Bun 1.4.4 and @types/bun 1.4.4 the JavaScript lint and the logbrew-js and logbrew-browser Bun tests pass"
 replaces = "none"
-status = "behind: Bun 1.4.3 released 2026-10-10"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "language-runtimes"
@@ -261,9 +257,9 @@ config = "the workflows"
 conflicts = "none known"
 exceptions = "none"
 runtime = "see the language jobs in the CI workflow runs"
-findings = "not a check; runtimes under test"
+findings = "not a check; runtimes under test. 2026-11-19: CI uses Python 3.13 and 3.10, .NET 10 and 8, Ruby 3.3, and Node.js 22; .NET 8 reached end of support on 2026-11-10 and Python 3.10 on 2026-10-31, and both stay because the SDKs still support them (net8.0 target, requires-python >=3.10); setup-ruby moves to v1.341.0"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "repository-checks"
@@ -278,9 +274,9 @@ config = "each script"
 conflicts = "none known"
 exceptions = "none"
 runtime = "see the CI workflow runs"
-findings = "unknown: no recorded finding"
+findings = "unknown: no recorded finding; 2026-11-19: download-artifact v8.0.2 and upload-artifact v7.0.2 are the latest releases, no advisories"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "benchmarks"
@@ -326,9 +322,9 @@ config = "scripts/public-guard.toml"
 conflicts = "none known"
 exceptions = "false positives are fixed in their own pull request"
 runtime = "see the Public guard workflow runs"
-findings = "unknown: findings are fixed before merge"
+findings = "unknown: findings are fixed before merge; 2026-11-19: gitleaks 8.30.1 is the latest release, no advisories; scripts/test-public-guard.sh passes"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "actions-checkout"
@@ -342,9 +338,9 @@ config = "fetch-depth where a job compares history"
 conflicts = "none known"
 exceptions = "none"
 runtime = "a few seconds per run"
-findings = "not a check; supply-chain pin"
+findings = "not a check; supply-chain pin; 2026-11-19: v7.0.1 is the latest release, no advisories"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "tool-matrix"
@@ -357,10 +353,10 @@ runs_in = "CI Contract checks: Check the tool matrix"
 config = "this file"
 conflicts = "reads commands with a small shell reader; a command built at run time or named by a variable is invisible to it, so tools a gate script runs through a variable are listed under that script"
 exceptions = "none"
-runtime = "new; record from CI runs at the next check"
+runtime = "2026-10-19 to 2026-11-19: push n=57, p99 26 s; pull request n=126, p99 26 s"
 findings = "seeded: an unlisted command, a changed pin, a changed action commit, a stale or future date, and a missing field each fail"
 replaces = "none"
-checked = 2026-10-19
+checked = 2026-11-19
 
 [[tool]]
 id = "npm-release"

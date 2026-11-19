@@ -580,7 +580,7 @@ class FlaskIntegrationTests(_FlaskTestCase):
                     patch.multiple(
                         logger, handlers=[LogBrewLoggingHandler(self.sdk_client)], level=logging.INFO, propagate=False
                     ),
-                    patch("logbrew_flask._middleware.time.perf_counter", side_effect=(1.0, 2.0, 3.0, 4.0)),
+                    patch("logbrew_flask._middleware.perf_counter", side_effect=(1.0, 2.0, 3.0, 4.0)),
                 ):
                     response = self.app.test_client().get(f"/outer/{status}", buffered=True)
                 self.assertEqual(response.status_code, 200)
@@ -652,7 +652,7 @@ class FlaskIntegrationTests(_FlaskTestCase):
         ):
             with (
                 self.subTest(mode=mode, metrics=metrics, exceptions=exceptions),
-                patch("logbrew_flask._middleware.time.perf_counter", return_value=1.0) as clock,
+                patch("logbrew_flask._middleware.perf_counter", return_value=1.0) as clock,
                 patch("logbrew_flask._middleware.utc_timestamp", return_value="2026-01-01T00:00:00.000Z") as timestamp,
             ):
                 sdk_client = _make_client()
@@ -741,7 +741,7 @@ class FlaskStreamingTests(_FlaskTestCase):
         self.addCleanup(logger.setLevel, logger.level)
         logger.setLevel(logging.INFO)
         add_logbrew_middleware(self.app, client=self.sdk_client, transport=self.transport, capture_request_metrics=True)
-        with patch("logbrew_flask._middleware.time.perf_counter", return_value=1.0) as clock:
+        with patch("logbrew_flask._middleware.perf_counter", return_value=1.0) as clock:
 
             @self.app.get("/stream/<int:order_id>")
             def streamed_order(**_: int) -> Response:
@@ -788,7 +788,7 @@ class FlaskStreamingTests(_FlaskTestCase):
         for failing, context, successful, exceptions in product((False, True), repeat=4):
             with (
                 self.subTest(failing=failing, context=context, successful=successful, exceptions=exceptions),
-                patch("logbrew_flask._middleware.time.perf_counter", return_value=1.0) as clock,
+                patch("logbrew_flask._middleware.perf_counter", return_value=1.0) as clock,
             ):
                 self._check_stream_policy(
                     failing=failing, context=context, successful=successful, exceptions=exceptions, clock=clock
@@ -860,7 +860,7 @@ class FlaskStreamingTests(_FlaskTestCase):
         for mode, direct in product(("unconsumed", "partial", "exhausted", "head", "close_failure"), (False, True)):
             with (
                 self.subTest(mode=mode, direct=direct),
-                patch("logbrew_flask._middleware.time.perf_counter", return_value=1.0) as clock,
+                patch("logbrew_flask._middleware.perf_counter", return_value=1.0) as clock,
             ):
                 self._check_wsgi_close(mode, direct=direct, clock=clock)
 
