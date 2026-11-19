@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import inspect
 import json
 import threading
 import time
 import unittest
-from typing import Any
+from typing import Any, get_type_hints
 
+import logbrew_sdk
 from logbrew_sdk import EventDrop, EventDropReason, LogBrewClient, SdkError, TransportResponse
 
 
@@ -33,6 +35,13 @@ def compact_json(value: Any) -> str:
 class LogBrewDeliveryAdmissionTests(unittest.TestCase):
     def test_public_sdk_error_keeps_its_original_module_identity(self) -> None:
         self.assertEqual(SdkError.__module__, "logbrew_sdk")
+
+    def test_public_class_type_hints_resolve_from_the_package(self) -> None:
+        for name in logbrew_sdk.__all__:
+            public = getattr(logbrew_sdk, name)
+            if inspect.isclass(public):
+                with self.subTest(name=name):
+                    get_type_hints(public, include_extras=True)
 
     def test_delivery_limits_must_be_positive_non_boolean_integers(self) -> None:
         for option in ("max_queue_bytes", "max_batch_events", "max_batch_bytes"):
