@@ -56,11 +56,10 @@ test("console, HTTP, and Pino records inside a request become that request's iss
   });
 
   const crumbs = issue.breadcrumbs.map(({ category, level, message, data }) => ({ category, level, message, data }));
-  // Bun has no Node HTTP diagnostics channels, so only Node.js records HTTP client breadcrumbs.
-  const http = process.versions.bun ? [] : [
-    { category: "http.client", level: "info", message: undefined, data: { method: "GET", url: `${origin}/inventory`, status_code: 200 } },
-    { category: "http.client", level: "warning", message: undefined, data: { method: "GET", url: `${origin}/missing/price`, status_code: 404 } }
-  ];
+  const fetchCrumb = { category: "http.client", level: "info", message: undefined, data: { method: "GET", url: `${origin}/inventory`, status_code: 200 } };
+  const httpGetCrumb = { category: "http.client", level: "warning", message: undefined, data: { method: "GET", url: `${origin}/missing/price`, status_code: 404 } };
+  // Bun publishes the Node HTTP diagnostics channels for node:http requests but not for fetch.
+  const http = process.versions.bun ? [httpGetCrumb] : [fetchCrumb, httpGetCrumb];
   assert.deepEqual(crumbs, [
     { category: "console", level: "info", message: "checkout started for cart %s", data: undefined },
     ...http,
