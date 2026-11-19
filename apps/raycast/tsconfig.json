@@ -8,5 +8,5 @@
     "paths": {},
     "types": ["bun", "node"]
   },
-  "include": ["src/**/*", "eslint.config.js", "raycast-eslint-config.d.ts"]
+  "include": ["src/**/*", "eslint.config.mjs", "raycast-eslint-config.d.ts"]
 }
