@@ -223,11 +223,9 @@ public enum LogBrewTrace {
     }
 
     public static func continueOrCreateContext(fromTraceparent traceparent: String?) -> LogBrewTraceContext {
-        guard let traceparent, !traceparent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return LogBrewTraceContext.fallbackRoot()
-        }
-
-        guard let remoteParent = try? parseTraceparent(traceparent) else {
+        guard let traceparent, !traceparent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let remoteParent = try? parseTraceparent(traceparent)
+        else {
             return LogBrewTraceContext.fallbackRoot()
         }
 

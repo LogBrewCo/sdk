@@ -927,7 +927,7 @@
       },
       "method": "React Native client from the app entry Metro resolves (the react-native export condition, with a stand-in native module that reports the process start), the default app start metric, and the Platform, AppState, ErrorUtils, and navigation container shapes its own tests and examples use, createReactNativeFetchTransport, the reversible instrumentation (global fetch, navigation, and AppState spans) under an incoming W3C trace, the global error handler, and console capture; one API call that succeeds, one that fails, a handled error, and a global error",
       "probe": "tools/capture-matrix/probes/js/logbrew-react-native",
-      "inputs": "2aa4f3266f456f22809d66b6ada2f82a6e68b83b1f7ce928fd06b33c9eea81b6"
+      "inputs": "f67ddccf9999c97ac94d2bdbc64be06416499afb487aaaedf44b439ad26bdc5a"
     },
     "js/logbrew-svelte": {
       "share": 75.0,
