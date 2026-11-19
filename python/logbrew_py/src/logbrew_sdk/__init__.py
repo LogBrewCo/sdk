@@ -5,6 +5,8 @@ project read key: ``LOGBREW_TOKEN=<read key> logbrew read traces --since 1h --js
 ``logbrew issues``). See https://docs.logbrew.co/guides/verify-setup.
 """
 
+import typing as _typing
+
 from logbrew_sdk._arq_client import (
     LogBrewArqPoolInstrumentation,
     LogBrewArqWorkerInstrumentation,
@@ -357,11 +359,11 @@ from logbrew_sdk._user_context import (
 )
 
 # Keep the long-standing public identity of classes whose implementation moved to _client.
-SdkError.__module__ = __name__
-TransportError.__module__ = __name__
-RecordingTransport.__module__ = __name__
-HttpTransport.__module__ = __name__
-LogBrewClient.__module__ = __name__
+# get_type_hints reads names from a class's module, so resolve the annotations in _client first.
+for _moved in (SdkError, TransportError, RecordingTransport, HttpTransport, LogBrewClient):
+    _moved.__annotations__ = _typing.get_type_hints(_moved, include_extras=True)
+    _moved.__module__ = __name__
+del _moved, _typing
 
 
 __all__ = [
