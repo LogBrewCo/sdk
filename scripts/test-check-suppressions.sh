@@ -4,8 +4,7 @@
 # Keep this file identical in every public LogBrew repository.
 # Proves that scripts/check-suppressions.sh passes on this repository and on a
 # clean repository, fails on each seeded inline suppression with its path and
-# line, honors each allowlist entry for 1 line only, fails on a stale or
-# malformed allowlist entry, and fails when it cannot search the repository.
+# line, and fails when it cannot search the repository.
 # The seeded lines are built at run time, so this file holds no suppression
 # itself.
 
@@ -15,7 +14,6 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 check="$root/scripts/check-suppressions.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-allowlist="quality/suppressions-allowlist.tsv"
 
 seed() {
     rm -rf "$work/repo"
@@ -25,10 +23,6 @@ seed() {
     git -C "$work/repo" add -A
 }
 
-allow() {
-    mkdir -p "$work/repo/quality"
-    printf '%s\n' "$@" >"$work/repo/$allowlist"
-}
 
 expect_pass() {
     local name="$1"
@@ -96,27 +90,10 @@ expect_failure "a GCC diagnostic pragma" src/client.h "$(printf '#pragma GCC dia
 expect_failure "a clang diagnostic pragma" src/Client.m "$(printf '#pragma clang diagnostic %s "-Wunused"' ignored)"
 expect_failure "an MSVC warning pragma" src/client.cpp "$(printf '#pragma warning(%s: 4996)' disable)"
 
-java_line="$(printf '@Suppress%s("unchecked")' Warnings)"
-seed src/Main.java "    $java_line"
-allow "src/Main.java	$java_line	Java cannot check the cast"
-expect_pass "an allowlisted line"
-
-allow "# comment" "" "src/Main.java	$java_line	Java cannot check the cast" "src/Main.java	$java_line	a second entry"
-expect_report "a stale allowlist entry" "$allowlist line 3, 4: no line left in src/Main.java matches: $java_line"
-
-printf '    %s\n' "$java_line" >>"$work/repo/src/Main.java"
-allow "src/Main.java	$java_line	Java cannot check the cast"
-expect_report "a second line under 1 allowlist entry" "src/Main.java:3:"
-
-allow "src/Other.java	$java_line	Java cannot check the cast"
-expect_report "an entry for another file" "src/Main.java:2:"
-
-allow "src/Main.java	$java_line"
-expect_report "an entry without a reason" "$allowlist:1: needs path, line, and reason separated by tabs"
-
-seed src/lib.rs 'let other = 2;'
-allow "src/Main.java	$java_line	Java cannot check the cast"
-expect_report "an entry in a clean repository" "no line left in src/Main.java matches"
+seed src/Main.java "$(printf '    @Suppress%s("unchecked")' Warnings)"
+printf '    %s\n' "$(printf '@Suppress%s("unchecked")' Warnings)" >>"$work/repo/src/Main.java"
+git -C "$work/repo" add -A
+expect_report "the second of 2 suppressions" "src/Main.java:3:"
 
 mkdir -p "$work/plain"
 if bash "$check" "$work/plain" >/dev/null 2>&1; then

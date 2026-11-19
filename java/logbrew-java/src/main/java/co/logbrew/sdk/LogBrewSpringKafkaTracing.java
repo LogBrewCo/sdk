@@ -1,14 +1,11 @@
 package co.logbrew.sdk;
 
-import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -17,13 +14,22 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.Metric;
+import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.apache.kafka.common.metrics.KafkaMetric;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.core.ProducerPostProcessor;
 import org.springframework.kafka.listener.RecordInterceptor;
@@ -138,7 +144,7 @@ public final class LogBrewSpringKafkaTracing {
         Objects.requireNonNull(client, "client");
         Producer<K, V> delegate = Objects.requireNonNull(producer, "producer");
         ProducerConfig<K, V> safeConfig = config == null ? ProducerConfig.<K, V>create() : config;
-        return new LogBrewProducer<>(client, delegate, safeConfig).proxy();
+        return new LogBrewProducer<>(client, delegate, safeConfig);
     }
 
     /**
@@ -468,7 +474,7 @@ public final class LogBrewSpringKafkaTracing {
         }
     }
 
-    private static final class LogBrewProducer<K, V> implements InvocationHandler {
+    private static final class LogBrewProducer<K, V> implements Producer<K, V> {
         private final LogBrewClient client;
         private final Producer<K, V> delegate;
         private final ProducerConfig<K, V> config;
@@ -479,37 +485,109 @@ public final class LogBrewSpringKafkaTracing {
             this.config = config;
         }
 
-        @SuppressWarnings("unchecked")
-        private Producer<K, V> proxy() {
-            return (Producer<K, V>) Proxy.newProxyInstance(
-                Producer.class.getClassLoader(),
-                new Class<?>[] { Producer.class },
-                this
-            );
+        @Override
+        public Future<RecordMetadata> send(ProducerRecord<K, V> record) {
+            return send(record, null);
         }
 
         @Override
-        @SuppressWarnings("unchecked")
-        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-            if (method.getDeclaringClass() == Object.class) {
-                if (method.getName().equals("toString")) {
-                    return "LogBrewSpringKafkaProducer[delegate=" + delegate + "]";
-                }
-                return method.getName().equals("hashCode")
-                    ? System.identityHashCode(proxy)
-                    : proxy == args[0];
-            }
-            if (method.getName().equals("send") && args != null && args.length <= 2) {
-                return send((ProducerRecord<K, V>) args[0], args.length == 2 ? (Callback) args[1] : null);
-            }
+        public void initTransactions() {
+            delegate.initTransactions();
+        }
+
+        @Override
+        public void beginTransaction() {
+            delegate.beginTransaction();
+        }
+
+        @Override
+        public void sendOffsetsToTransaction(
+            Map<TopicPartition, OffsetAndMetadata> offsets,
+            ConsumerGroupMetadata groupMetadata
+        ) {
+            delegate.sendOffsetsToTransaction(offsets, groupMetadata);
+        }
+
+        // Kafka 3.x declares this overload and Kafka 4 removed it, so only a Kafka 3.x delegate can take the call.
+        public void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets, String consumerGroupId) {
             try {
-                return method.invoke(delegate, args);
+                Producer.class
+                    .getMethod("sendOffsetsToTransaction", Map.class, String.class)
+                    .invoke(delegate, offsets, consumerGroupId);
             } catch (InvocationTargetException error) {
-                throw error.getCause();
+                Throwable cause = error.getCause();
+                if (cause instanceof KafkaException) {
+                    throw (KafkaException) cause;
+                }
+                if (cause instanceof IllegalStateException) {
+                    throw (IllegalStateException) cause;
+                }
+                if (cause instanceof Error) {
+                    throw (Error) cause;
+                }
+                throw new KafkaException(cause);
+            } catch (ReflectiveOperationException error) {
+                throw new UnsupportedOperationException("this Kafka client has no sendOffsetsToTransaction(Map, String)", error);
             }
         }
 
-        private Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
+        @Override
+        public void commitTransaction() {
+            delegate.commitTransaction();
+        }
+
+        @Override
+        public void abortTransaction() {
+            delegate.abortTransaction();
+        }
+
+        @Override
+        public void registerMetricForSubscription(KafkaMetric metric) {
+            delegate.registerMetricForSubscription(metric);
+        }
+
+        @Override
+        public void unregisterMetricFromSubscription(KafkaMetric metric) {
+            delegate.unregisterMetricFromSubscription(metric);
+        }
+
+        @Override
+        public void flush() {
+            delegate.flush();
+        }
+
+        @Override
+        public List<PartitionInfo> partitionsFor(String topic) {
+            return delegate.partitionsFor(topic);
+        }
+
+        @Override
+        public Map<MetricName, ? extends Metric> metrics() {
+            return delegate.metrics();
+        }
+
+        @Override
+        public Uuid clientInstanceId(Duration timeout) {
+            return delegate.clientInstanceId(timeout);
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
+        }
+
+        @Override
+        public void close(Duration timeout) {
+            delegate.close(timeout);
+        }
+
+        @Override
+        public String toString() {
+            return "LogBrewSpringKafkaProducer[delegate=" + delegate + "]";
+        }
+
+        @Override
+        public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
             Objects.requireNonNull(record, "record");
             Instant startedAt = config.currentInstant();
             LogBrewTraceContext trace = producerTrace(config);

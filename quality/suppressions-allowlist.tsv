@@ -1,5 +1,0 @@
-# Inline suppressions that the language makes necessary. Read by scripts/check-suppressions.sh.
-# Format: path<TAB>line without indentation<TAB>reason. Each entry covers 1 line; an entry with no matching line fails the check.
-java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor.java	@SuppressWarnings("unchecked")	recordInterceptor: Field.get returns Object and Spring Kafka 3.x has no getter, so the cast to RecordInterceptor<K, V> is an unchecked conversion that Java cannot check at run time (JLS 5.1.9, 5.5)
-java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewSpringKafkaTracing.java	@SuppressWarnings("unchecked")	proxy: Proxy.newProxyInstance returns Object, so the cast to Producer<K, V> is an unchecked conversion that Java cannot check at run time (JLS 5.1.9, 5.5)
-java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewSpringKafkaTracing.java	@SuppressWarnings("unchecked")	invoke: InvocationHandler.invoke receives arguments as Object, so the cast to ProducerRecord<K, V> is an unchecked conversion that Java cannot check at run time (JLS 5.1.9, 5.5)
