@@ -1259,14 +1259,10 @@
     },
     {
       "files": [
-        "**/apps/raycast/eslint.config.js"
+        "**/apps/raycast/eslint.config.mjs"
       ],
       "rules": {
-        "import/no-commonjs": "off",
-        "import/unambiguous": "off",
-        "typescript/no-require-imports": "off",
-        "typescript/no-var-requires": "off",
-        "unicorn/prefer-module": "off"
+        "import/no-default-export": "off"
       }
     },
     {
