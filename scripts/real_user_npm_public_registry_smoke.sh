@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 registry="https://registry.npmjs.org"
 tmp_dir="$(mktemp -d)"
 
@@ -322,6 +323,10 @@ cd "$app_dir"
 
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
+settled_versions="$(npm_config_registry="$registry" python3 "$repo_root/scripts/npm_settled_versions.py" \
+  bullmq kafkajs amqplib @aws-sdk/client-sqs @aws-sdk/client-sns @aws-sdk/client-eventbridge)"
+read -r bullmq_library_version kafkajs_library_version amqplib_library_version \
+  client_sqs_version client_sns_version client_eventbridge_version <<<"$settled_versions"
 npm install \
   --save-exact \
   --ignore-scripts \
@@ -332,12 +337,12 @@ npm install \
   "@logbrew/kafkajs@${kafkajs_version}" \
   "@logbrew/amqplib@${amqplib_version}" \
   "@logbrew/aws-sqs@${aws_sqs_version}" \
-  bullmq \
-  kafkajs \
-  amqplib \
-  @aws-sdk/client-sqs \
-  @aws-sdk/client-sns \
-  @aws-sdk/client-eventbridge \
+  "bullmq@$bullmq_library_version" \
+  "kafkajs@$kafkajs_library_version" \
+  "amqplib@$amqplib_library_version" \
+  "@aws-sdk/client-sqs@$client_sqs_version" \
+  "@aws-sdk/client-sns@$client_sns_version" \
+  "@aws-sdk/client-eventbridge@$client_eventbridge_version" \
   >/dev/null
 
 npm ls \

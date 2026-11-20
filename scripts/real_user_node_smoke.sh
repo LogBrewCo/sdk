@@ -116,14 +116,16 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" pg pg-mem typescript @types/node)"
+read -r pg_version pg_mem_version typescript_version types_node_version <<<"$settled_versions"
 npm install \
   --save-exact \
   "$core_tgz" \
   "$node_tgz" \
-  "pg" \
-  "pg-mem" \
-  "typescript" \
-  "@types/node" \
+  "pg@$pg_version" \
+  "pg-mem@$pg_mem_version" \
+  "typescript@$typescript_version" \
+  "@types/node@$types_node_version" \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json

@@ -130,6 +130,7 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
+typescript_version="$(python3 "$repo_root/scripts/npm_settled_versions.py" typescript)"
 npm install \
   --save-exact \
   --no-audit \
@@ -137,7 +138,7 @@ npm install \
   "$core_tgz" \
   "$browser_tgz" \
   happy-dom@20.10.1 \
-  typescript \
+  "typescript@$typescript_version" \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json

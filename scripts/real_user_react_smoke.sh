@@ -79,9 +79,8 @@ app_dir="$tmp_dir/react-smoke-app"
 mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
-react_version="$(npm view react version)"
-react_dom_version="$(npm view react-dom version)"
-renderer_version="$(npm view react-test-renderer version)"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" react react-dom react-test-renderer jsdom typescript @types/react @types/react-dom)"
+read -r react_version react_dom_version renderer_version jsdom_version typescript_version types_react_version types_react_dom_version <<<"$settled_versions"
 npm install --save-exact \
   "$core_tgz" \
   "$browser_tgz" \
@@ -89,10 +88,10 @@ npm install --save-exact \
   "react@$react_version" \
   "react-dom@$react_dom_version" \
   "react-test-renderer@$renderer_version" \
-  jsdom \
-  typescript \
-  @types/react \
-  @types/react-dom >/dev/null
+  "jsdom@$jsdom_version" \
+  "typescript@$typescript_version" \
+  "@types/react@$types_react_version" \
+  "@types/react-dom@$types_react_dom_version" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/browser": "file:' package.json

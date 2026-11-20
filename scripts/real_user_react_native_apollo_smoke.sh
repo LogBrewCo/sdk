@@ -47,10 +47,8 @@ cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
 
-react_native_version="$(npm view react-native version)"
-react_version="$(npm view react version)"
-apollo_version="$(npm view @apollo/client version)"
-graphql_version="$(npm view graphql version)"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" react-native react @apollo/client graphql typescript @types/react)"
+read -r react_native_version react_version apollo_version graphql_version typescript_version types_react_version <<<"$settled_versions"
 npm install \
   --save-exact \
   "$core_tgz" \
@@ -59,8 +57,8 @@ npm install \
   "react-native@$react_native_version" \
   "@apollo/client@$apollo_version" \
   "graphql@$graphql_version" \
-  typescript \
-  @types/react \
+  "typescript@$typescript_version" \
+  "@types/react@$types_react_version" \
   >/dev/null
 
 grep -q '"./apollo"' node_modules/@logbrew/react-native/package.json

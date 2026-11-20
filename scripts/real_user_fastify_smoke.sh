@@ -104,8 +104,8 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-fastify_version="$(npm view fastify version)"
-pino_version="$(npm view pino version)"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" fastify pino typescript)"
+read -r fastify_version pino_version typescript_version <<<"$settled_versions"
 npm install \
   --save-exact \
   "$core_tgz" \
@@ -113,7 +113,7 @@ npm install \
   "$fastify_tgz" \
   "fastify@$fastify_version" \
   "pino@$pino_version" \
-  "typescript" \
+  "typescript@$typescript_version" \
   "@types/node@22" \
   >/dev/null
 

@@ -123,9 +123,8 @@ cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
 npm pkg set scripts.build="next build" >/dev/null
-next_version="$(npm view next version)"
-react_version="$(npm view react version)"
-react_dom_version="$(npm view react-dom version)"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" next react react-dom typescript @types/node @types/react @types/react-dom)"
+read -r next_version react_version react_dom_version typescript_version types_node_version types_react_version types_react_dom_version <<<"$settled_versions"
 npm install \
   --save-exact \
   "$core_tgz" \
@@ -135,10 +134,10 @@ npm install \
   "react@$react_version" \
   "react-dom@$react_dom_version" \
   "react-test-renderer@$react_version" \
-  typescript \
-  @types/node \
-  @types/react \
-  @types/react-dom \
+  "typescript@$typescript_version" \
+  "@types/node@$types_node_version" \
+  "@types/react@$types_react_version" \
+  "@types/react-dom@$types_react_dom_version" \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json

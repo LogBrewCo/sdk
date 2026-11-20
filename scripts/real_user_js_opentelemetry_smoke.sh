@@ -69,15 +69,17 @@ node no-otel.mjs > "$tmp_dir/no-otel.stdout.json"
 grep -q '"ok":true' "$tmp_dir/no-otel.stdout.json"
 
 # The newest API release can be ahead of the newest SDK's peer range; install the newest API it accepts.
-otel_api_range="$(npm view "@opentelemetry/sdk-trace@latest" "peerDependencies.@opentelemetry/api")"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" @opentelemetry/sdk-trace @opentelemetry/context-async-hooks typescript)"
+read -r sdk_trace_version context_async_hooks_version typescript_version <<<"$settled_versions"
+otel_api_range="$(npm view "@opentelemetry/sdk-trace@$sdk_trace_version" "peerDependencies.@opentelemetry/api")"
 npm install \
   --save-exact \
   --no-audit \
   --fund=false \
   "@opentelemetry/api@$otel_api_range" \
-  "@opentelemetry/context-async-hooks@latest" \
-  "@opentelemetry/sdk-trace@latest" \
-  "typescript@latest" \
+  "@opentelemetry/context-async-hooks@$context_async_hooks_version" \
+  "@opentelemetry/sdk-trace@$sdk_trace_version" \
+  "typescript@$typescript_version" \
   >/dev/null
 npm ls @logbrew/sdk @opentelemetry/api @opentelemetry/context-async-hooks @opentelemetry/sdk-trace > "$tmp_dir/npm-list-after-otel.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-after-otel.txt"
