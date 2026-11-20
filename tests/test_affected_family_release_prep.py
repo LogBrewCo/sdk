@@ -37,7 +37,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-nestjs/package.json": "0.1.12",
             "js/logbrew-next/package.json": "0.1.18",
             "js/logbrew-react/package.json": "0.1.6",
-            "js/logbrew-react-native/package.json": "0.1.47",
+            "js/logbrew-react-native/package.json": "0.1.48",
             "js/logbrew-svelte/package.json": "0.1.8",
             "js/logbrew-angular/package.json": "0.1.3",
         }
