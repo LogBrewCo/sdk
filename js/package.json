@@ -30,6 +30,7 @@
     "thread-stream@4.2.0": "patches/thread-stream@4.2.0.patch"
   },
   "overrides": {
+    "effect": "3.22.5",
     "glob": "14.0.3",
     "minimatch": "11.0.3"
   }
