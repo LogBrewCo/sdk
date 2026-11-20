@@ -132,8 +132,7 @@ if [[ "$uv_report" != "uv $uv_version"* ]]; then
     exit 1
 fi
 
-if ! (cd tools/toolchain-probe && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off \
-    go build -o "$tmp_dir/toolchain-probe" .) >"$tmp_dir/probe-build.out" 2>"$tmp_dir/probe-build.err"; then
+if ! build_native_verifier "$tmp_dir/toolchain-probe" >"$tmp_dir/probe-build.out" 2>"$tmp_dir/probe-build.err"; then
     printf '%s\n' "native deadline tool unavailable" >&2
     exit 1
 fi

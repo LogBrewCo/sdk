@@ -20,7 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_native_release_public_smoke.sh"
 ARTIFACT_ID = "native:LogBrewCo/sdk"
 VERSION = "0.2.2"
-GO_CACHE = subprocess.check_output(["go", "env", "GOCACHE"], text=True).strip()
+GO_CACHE, GO_MODULE_CACHE = subprocess.check_output(
+    ["go", "env", "GOCACHE", "GOMODCACHE"], text=True
+).splitlines()
 SOURCE_PATHS = (
     "LICENSE",
     "README.md",
@@ -132,6 +134,7 @@ class NativeReleasePublicSmokeTests(unittest.TestCase):
         env = {
             **os.environ,
             "GOCACHE": GO_CACHE,
+            "GOMODCACHE": GO_MODULE_CACHE,
             "HOME": str(temp_dir / "home"),
             "LOGBREW_SDK_ROOT": str(ROOT),
             "LOGBREW_RELEASE_RECEIPT_MODE": "1",
