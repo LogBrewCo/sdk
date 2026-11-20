@@ -115,6 +115,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         fake_go.write_text(
             "#!/bin/sh\n"
             f'if [ "$1" = version ]; then printf "go version go{pinned} fixture\\n"; exit 0; fi\n'
+            'if [ "$1" = mod ]; then exit 0; fi\n'
             '[ "$GOTOOLCHAIN:$GOPROXY:$GOSUMDB" = "local:off:off" ] || printf "unexpected build policy\\n" >&2\n'
             "exit 7\n"
         )

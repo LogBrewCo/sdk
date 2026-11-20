@@ -546,8 +546,8 @@ install_dir="$tmp_dir/install"
 if [[ -n "${LOGBREW_TOOLCHAIN_PROBE_BIN:-}" ]]; then
   [[ "$toolchain_probe_bin" == /* && -f "$toolchain_probe_bin" &&
     ! -L "$toolchain_probe_bin" && -x "$toolchain_probe_bin" ]] || fail_stage "toolchain"
-elif ! (cd "$repo_root/tools/toolchain-probe" && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off \
-  go build -o "$toolchain_probe_bin" .) >"$tmp_dir/probe-build.out" 2>"$tmp_dir/probe-build.err"; then
+elif ! { source "$repo_root/scripts/native_verifier.sh" && build_native_verifier "$toolchain_probe_bin"; } \
+  >"$tmp_dir/probe-build.out" 2>"$tmp_dir/probe-build.err"; then
   fail_stage "toolchain"
 fi
 mkdir -p "$build_dir/objects" "$install_dir/include" "$install_dir/lib" \
