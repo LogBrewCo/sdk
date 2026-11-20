@@ -33,6 +33,7 @@ import { readdir } from "node:fs/promises";
  *   readonly jsSource: string,
  *   readonly mapDebugId: string | undefined,
  *   readonly relJs: string,
+ *   readonly skipped: boolean,
  *   readonly sourceMapPath: string | undefined,
  *   readonly sourceMapPayload: JsonObject | undefined,
  *   readonly sourceMapRel: string | undefined,
@@ -87,8 +88,9 @@ async function resolveReferencedSourceMap(jsPath, buildDir, reference) {
 async function resolveSourceMapPath(jsPath, buildDir, sourceMappingUrl) {
   if (sourceMappingUrl === undefined) {
     const fallback = `${jsPath}.map`;
-    const warnings = ["sourceMappingURL comment missing; checked sibling .map fallback"];
-    return (await pathExists(fallback)) ? { errors: [], path: fallback, warnings } : { errors: [], warnings };
+    return (await pathExists(fallback))
+      ? { errors: [], path: fallback, warnings: ["sourceMappingURL comment missing; checked sibling .map fallback"] }
+      : { errors: [], warnings: ["no sourceMappingURL comment or sibling .map; skipped"] };
   }
   const reference = fileReference(sourceMappingUrl);
   if (reference.startsWith("data:")) {
@@ -157,14 +159,11 @@ async function inspectSourceMapPayload(sourceMapPath, relativePath, size) {
 }
 
 /**
- * @param {string | undefined} sourceMapPath
+ * @param {string} sourceMapPath
  * @param {string} buildDir
  * @returns {Promise<SourceMapInspection>}
  */
 async function inspectSourceMap(sourceMapPath, buildDir) {
-  if (sourceMapPath === undefined) {
-    return { errors: ["source map file is missing"] };
-  }
   if (!(await pathExists(sourceMapPath))) {
     return { errors: [`source map file is missing: ${relativeTo(buildDir, sourceMapPath)}`] };
   }
@@ -186,7 +185,8 @@ async function inspectArtifactFiles(jsPath, buildDir) {
   const jsDebugId = findDebugId(jsSource);
   const sourceMappingUrl = findSourceMappingUrl(jsSource);
   const location = await resolveSourceMapPath(jsPath, buildDir, sourceMappingUrl);
-  const sourceMap = await inspectSourceMap(location.path, buildDir);
+  const skipped = sourceMappingUrl === undefined && location.path === undefined;
+  const sourceMap = location.path === undefined ? { errors: [] } : await inspectSourceMap(location.path, buildDir);
   const { mapDebugId } = sourceMap;
   const mismatch = jsDebugId !== undefined && mapDebugId !== undefined && jsDebugId !== mapDebugId;
   return {
@@ -201,6 +201,7 @@ async function inspectArtifactFiles(jsPath, buildDir) {
     jsSource,
     mapDebugId,
     relJs: relativeTo(buildDir, jsPath),
+    skipped,
     sourceMapPath: location.path,
     sourceMapPayload: sourceMap.payload,
     sourceMapRel: sourceMap.relativePath,

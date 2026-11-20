@@ -383,13 +383,24 @@ function runReleaseArtifactCli(cliPath, command, args) {
 
 /**
  * @param {unknown} report
+ * @param {string} name
+ * @returns {number}
+ */
+function reportCount(report, name) {
+  const count = field(report, name);
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= START ? count : START;
+}
+
+/**
+ * @param {unknown} report
  * @returns {string}
  */
 function formatReleaseArtifactUploadSummary(report) {
-  const count = field(report, "artifactCount");
-  const artifactCount = typeof count === "number" && Number.isSafeInteger(count) && count >= START ? count : START;
+  const artifactCount = reportCount(report, "artifactCount");
+  const skippedCount = reportCount(report, "skippedSourceCount");
   const artifactLabel = artifactCount === ONE_ARTIFACT ? "artifact" : "artifacts";
-  return `LogBrew release artifacts: ${safeReportStatus(report) ?? "unknown"} (${String(artifactCount)} ${artifactLabel})`;
+  const skipped = skippedCount === START ? "" : `, ${String(skippedCount)} without a source map skipped`;
+  return `LogBrew release artifacts: ${safeReportStatus(report) ?? "unknown"} (${String(artifactCount)} ${artifactLabel}${skipped})`;
 }
 
 module.exports = {
