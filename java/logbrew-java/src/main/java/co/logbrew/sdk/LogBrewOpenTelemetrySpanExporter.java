@@ -213,6 +213,7 @@ public final class LogBrewOpenTelemetrySpanExporter implements SpanExporter {
             case "http.response.status_code":
             case "http.status_code":
                 return "httpStatusCode";
+            case "db.system.name":
             case "db.system":
                 return "dbSystem";
             case "db.operation.name":
@@ -221,6 +222,7 @@ public final class LogBrewOpenTelemetrySpanExporter implements SpanExporter {
             case "db.namespace":
             case "db.name":
                 return "dbNamespace";
+            case "messaging.system.name":
             case "messaging.system":
                 return "messagingSystem";
             case "messaging.operation.name":
@@ -232,6 +234,7 @@ public final class LogBrewOpenTelemetrySpanExporter implements SpanExporter {
                 return "messagingDestination";
             case "messaging.batch.message_count":
                 return "messagingBatchMessageCount";
+            case "rpc.system.name":
             case "rpc.system":
                 return "rpcSystem";
             case "rpc.service":

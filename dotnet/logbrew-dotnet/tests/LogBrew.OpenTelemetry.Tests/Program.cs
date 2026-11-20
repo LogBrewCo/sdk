@@ -30,6 +30,8 @@ OpenTelemetryProcessorHandlesHighVolumeQueuePressure();
 tests++;
 OpenTelemetryProcessorSendsFailedRequestOutcome();
 tests++;
+OpenTelemetryProcessorKeepsCurrentSemconvSystemNames();
+tests++;
 
 await Console.Error.WriteLineAsync("{\"tests\":" + tests.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}").ConfigureAwait(false);
 
@@ -336,6 +338,36 @@ static void OpenTelemetryProcessorSendsFailedRequestOutcome()
     Require(metric.GetProperty("name").GetString() == "http.server.duration", "expected server duration metric");
     Require(metric.GetProperty("unit").GetString() == "ms", "expected millisecond metric");
     Require(metric.GetProperty("metadata").GetProperty("status").GetString() == "error", "expected failed status on metric");
+}
+
+static void OpenTelemetryProcessorKeepsCurrentSemconvSystemNames()
+{
+    var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-opentelemetry-tests", "0.1.0");
+    const string sourceName = "LogBrew.Tests.OpenTelemetry.CurrentSemconv";
+    using var source = new ActivitySource(sourceName);
+    using (Sdk.CreateTracerProviderBuilder()
+        .AddSource(sourceName)
+        .AddLogBrew(client)
+        .Build())
+    {
+        using var activity = source.StartActivity("checkout.Payments/Charge", ActivityKind.Server);
+        Require(activity != null, "expected sampled server activity");
+        activity!.SetTag("db.system.name", "postgresql");
+        activity.SetTag("messaging.system.name", "kafka");
+        activity.SetTag("rpc.system.name", "grpc");
+    }
+
+    var payload = client.PreviewJson();
+    foreach (var expected in new[]
+    {
+        "\"dbSystem\": \"postgresql\"",
+        "\"messagingSystem\": \"kafka\"",
+        "\"rpcSystem\": \"grpc\"",
+        "\"name\": \"rpc.server.duration\"",
+    })
+    {
+        Require(payload.Contains(expected, StringComparison.Ordinal), "missing current semconv value: " + expected);
+    }
 }
 
 static void ThrowPaymentFailure()

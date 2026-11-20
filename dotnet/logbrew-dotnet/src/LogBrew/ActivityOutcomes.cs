@@ -141,7 +141,9 @@ namespace LogBrew
                 return "messaging.process.duration";
             }
 
-            return activity.GetTagItem("rpc.system") == null ? "http.server.duration" : "rpc.server.duration";
+            return activity.GetTagItem("rpc.system.name") == null && activity.GetTagItem("rpc.system") == null
+                ? "http.server.duration"
+                : "rpc.server.duration";
         }
 
         private static Dictionary<string, object?> OutcomeMetadata(Activity activity, bool failed)

@@ -30,6 +30,7 @@ const { isList, isRecord, requireNonEmpty } = require("./validation.cjs");
 const SPAN_ATTRIBUTE_KEYS = [
   "db.operation.name",
   "db.system",
+  "db.system.name",
   "faas.trigger",
   "graphql.operation.name",
   "graphql.operation.type",
@@ -40,9 +41,11 @@ const SPAN_ATTRIBUTE_KEYS = [
   "http.status_code",
   "messaging.operation.name",
   "messaging.system",
+  "messaging.system.name",
   "rpc.method",
   "rpc.service",
-  "rpc.system"
+  "rpc.system",
+  "rpc.system.name"
 ];
 const RESOURCE_ATTRIBUTE_KEYS = [
   "deployment.environment",

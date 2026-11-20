@@ -203,3 +203,52 @@ func mustSpanContext(t *testing.T, traceValue, spanValue string, flags oteltrace
 		TraceID: traceID, SpanID: spanID, TraceFlags: flags, Remote: true,
 	})
 }
+
+func TestSpanExporterKeepsCurrentSemconvSystemNames(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{APIKey: "LOGBREW_API_KEY"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exporter, err := NewSpanExporter(client, SpanExporterConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)))
+	_, span := provider.Tracer("checkout-service").Start(
+		context.Background(),
+		"checkout.process",
+		oteltrace.WithAttributes(
+			attribute.String("db.system.name", "postgresql"),
+			attribute.String("messaging.system.name", "kafka"),
+			attribute.String("rpc.system.name", "grpc"),
+		),
+	)
+	span.End()
+	if err := provider.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown provider: %v", err)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Events []struct {
+			Attributes struct {
+				Metadata map[string]any `json:"metadata"`
+			} `json:"attributes"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Events) != 1 {
+		t.Fatalf("expected one span event: %s", payload)
+	}
+	metadata := parsed.Events[0].Attributes.Metadata
+	for key, want := range map[string]string{"dbSystem": "postgresql", "messagingSystem": "kafka", "rpcSystem": "grpc"} {
+		if metadata[key] != want {
+			t.Errorf("metadata[%q] = %#v, want %q", key, metadata[key], want)
+		}
+	}
+}
