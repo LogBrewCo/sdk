@@ -147,7 +147,7 @@ class NpmSettledVersionsTests(unittest.TestCase):
             script = path.read_text(encoding="utf-8")
             for command in install_commands(script):
                 arguments = shlex.split(INSTALL_COMMAND.sub("", command))
-                for argument in itertools.takewhile(lambda token: token not in {"|", "||", "&&", ";"}, arguments):
+                for argument in itertools.takewhile(lambda word: word not in {"|", "||", "&&", ";"}, arguments):
                     if argument.startswith(("-", "$", "/", ".", ">", "2>")) or has_fixed_spec(argument):
                         continue
                     findings.append(f"{path.name}: install without a fixed version: {argument}")
