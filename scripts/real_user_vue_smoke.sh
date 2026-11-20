@@ -63,16 +63,16 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-vue_version="$(npm view vue version)"
-vue_server_renderer_version="$(npm view @vue/server-renderer version)"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" vue @vue/server-renderer typescript @types/node)"
+read -r vue_version vue_server_renderer_version typescript_version types_node_version <<<"$settled_versions"
 npm install \
   --save-exact \
   "$core_tgz" \
   "$vue_tgz" \
   "vue@$vue_version" \
   "@vue/server-renderer@$vue_server_renderer_version" \
-  "typescript" \
-  "@types/node" \
+  "typescript@$typescript_version" \
+  "@types/node@$types_node_version" \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json

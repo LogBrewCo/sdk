@@ -38,7 +38,9 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-npm install --save-exact "$core_tgz" "$node_tgz" typescript @types/node >/dev/null
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" typescript @types/node)"
+read -r typescript_version types_node_version <<<"$settled_versions"
+npm install --save-exact "$core_tgz" "$node_tgz" "typescript@$typescript_version" "@types/node@$types_node_version" >/dev/null
 
 cat > smoke.mjs <<'EOF'
 import {

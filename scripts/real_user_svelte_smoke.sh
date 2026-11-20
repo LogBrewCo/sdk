@@ -55,15 +55,16 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-svelte_version="$(npm view svelte version)"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" svelte typescript @types/node)"
+read -r svelte_version typescript_version types_node_version <<<"$settled_versions"
 npm install \
   --save-exact \
   "$core_tgz" \
   "$browser_tgz" \
   "$svelte_tgz" \
   "svelte@$svelte_version" \
-  typescript \
-  @types/node \
+  "typescript@$typescript_version" \
+  "@types/node@$types_node_version" \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json

@@ -99,12 +99,8 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-nest_common_version="$(npm view @nestjs/common version)"
-nest_core_version="$(npm view @nestjs/core version)"
-nest_platform_express_version="$(npm view @nestjs/platform-express version)"
-reflect_metadata_version="$(npm view reflect-metadata version)"
-rxjs_version="$(npm view rxjs version)"
-types_express_version="$(npm view @types/express version)"
+settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs @types/express typescript @types/node)"
+read -r nest_common_version nest_core_version nest_platform_express_version reflect_metadata_version rxjs_version types_express_version typescript_version types_node_version <<<"$settled_versions"
 npm install \
   --save-exact \
   "$core_tgz" \
@@ -115,8 +111,8 @@ npm install \
   "@nestjs/platform-express@$nest_platform_express_version" \
   "reflect-metadata@$reflect_metadata_version" \
   "rxjs@$rxjs_version" \
-  "typescript" \
-  "@types/node" \
+  "typescript@$typescript_version" \
+  "@types/node@$types_node_version" \
   "@types/express@$types_express_version" \
   >/dev/null
 
