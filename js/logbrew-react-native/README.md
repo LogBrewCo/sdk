@@ -854,6 +854,20 @@ captureReactNativeResourceSpan(client, {
 });
 ```
 
+You can create `navigationRef` with `createNavigationContainerRef()` or `useNavigationContainerRef()` and pass it before `NavigationContainer` mounts, for example in the module that creates the client. While `navigationRef.current` is empty, LogBrew waits and attaches when the navigation tree is ready. With `captureInitialRoute: true`, it then records the first route.
+
+```js
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
+
+export const navigationRef = createNavigationContainerRef();
+
+createReactNavigationSpanListener(client, navigationRef, { trace });
+
+export function App() {
+  return <NavigationContainer ref={navigationRef}>{/* screens */}</NavigationContainer>;
+}
+```
+
 `createReactNavigationSpanListener()` listens for React Navigation `state` changes and uses `__unsafe_action__` dispatch timing when the container exposes it. Route names and query-stripped route paths are captured; route keys are omitted unless `includeRouteKey: true` is set because they can be high-cardinality. `captureReactNativeResourceSpan()` records app-owned resource spans without patching global `fetch`/XHR, reading request bodies, copying headers, or storing full URLs with query text.
 
 For app-owned fetch calls where you want the resource span and outbound `traceparent` in one place, use the explicit resource-fetch subpath:
@@ -963,6 +977,8 @@ await instrumentation.resourceFetch("https://api.example.com/checkout", {
 
 instrumentation.remove();
 ```
+
+`navigationContainer` can be a ref that is not mounted yet, as shown in the React Navigation section above. If navigation setup fails, the instrumentation sends the error to `onError`, keeps the other pieces running, and does not throw into your app. One cause is a value that is not a React Navigation container or ref.
 
 `createLogBrewReactNativeInstrumentation()` composes existing AppState lifecycle spans, React Navigation spans, target-scoped resource fetch spans, and native bridge scope sync into a removable handle. It does not patch global `fetch`, XHR, React Navigation, AppState, or native modules by default; it only subscribes to the objects your app passes in and returns `remove()`/`stop()` so setup is reversible. Keep `tracePropagationTargets` narrow and continue to avoid request bodies, response bodies, arbitrary headers, full URLs with query text, and high-cardinality route keys.
 

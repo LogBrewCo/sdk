@@ -164,7 +164,22 @@ function installListeners({ client, settings }, teardown) {
   const resolvedNavigation = settings.navigationContainer ?? settings.navigation;
   const hasNavigation = Boolean(resolvedNavigation);
   if (hasNavigation) {
-    teardown.add(indexRuntime.createReactNavigationSpanListener(client, resolvedNavigation, {
+    installNavigationListener({ client, settings }, resolvedNavigation, teardown);
+  }
+}
+
+/**
+ * Navigation spans are optional, so a navigation setup failure goes to `onError` and the rest of
+ * the instrumentation keeps running.
+ *
+ * @param {InstrumentationContext} context
+ * @param {unknown} navigation
+ * @param {InstrumentationTeardown} teardown
+ * @returns {void}
+ */
+function installNavigationListener({ client, settings }, navigation, teardown) {
+  try {
+    teardown.add(indexRuntime.createReactNavigationSpanListener(client, navigation, {
       appState: settings.appState,
       captureInitialRoute: settings.captureInitialNavigationRoute,
       includeRouteKey: settings.includeRouteKey,
@@ -175,6 +190,8 @@ function installListeners({ client, settings }, teardown) {
       platform: settings.platform,
       trace: settings.trace
     }));
+  } catch (error) {
+    settings.onError?.(error);
   }
 }
 

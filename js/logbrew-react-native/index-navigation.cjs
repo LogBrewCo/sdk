@@ -51,6 +51,7 @@ const { normalizeMetadataValue, readField, requireClient, stripQueryAndHash, sub
 const NO_DURATION = 0;
 const NO_FAILURES = 0;
 const FIRST = 0;
+const MOUNT_RETRY_MS = 100;
 
 /**
  * @returns {string}
@@ -80,6 +81,31 @@ function isNavigationContainer(value) {
  */
 function isErrorHandler(value) {
   return typeof value === "function";
+}
+
+/**
+ * @param {NavigationContainerLike} container
+ * @returns {boolean}
+ */
+function isReady(container) {
+  const ready = readField(container, "isReady");
+  return typeof ready !== "function" || ready.call(container) === true;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isMissing(value) {
+  return value === null || value === undefined;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isUnmountedRef(value) {
+  return typeof value === "object" && value !== null && "current" in value && isMissing(value.current);
 }
 
 /**
@@ -301,14 +327,13 @@ function attachNavigationListeners({ captureCurrentRoute, captureInitialRoute, c
 /**
  * @param {ClientLike} client
  * @param {unknown} navigationContainer
- * @param {NavigationListenerOptions} [options]
+ * @param {NavigationListenerOptions} options
  * @returns {() => void}
  */
-function createReactNavigationSpanListener(client, navigationContainer, {
+function attachToContainer(client, navigationContainer, {
   captureInitialRoute = false, includeRouteKey = false, metadata = {}, now = currentTimestamp,
   nowMs = currentTimeMs, onError, platform, appState, trace
-} = {}) {
-  requireClient(client);
+}) {
   const container = resolveNavigationContainer(navigationContainer);
   if (!isNavigationContainer(container)) {
     throw new SdkError("configuration_error", "createReactNavigationSpanListener requires a React Navigation container ref with addListener and getCurrentRoute");
@@ -322,6 +347,62 @@ function createReactNavigationSpanListener(client, navigationContainer, {
   const removers = createListenerRemovers();
   attachNavigationListeners({ captureCurrentRoute, captureInitialRoute, container, now, nowMs, removers, store });
   return removers.removeListeners;
+}
+
+/**
+ * React sets `ref.current` when `NavigationContainer` mounts and gives no callback for it, so
+ * check again until the navigation tree is ready. Errors go to `onError`, never to the timer.
+ *
+ * @param {unknown} navigationRef
+ * @param {(container: unknown) => () => void} attach
+ * @param {unknown} onError
+ * @returns {() => void}
+ */
+function attachWhenReady(navigationRef, attach, onError) {
+  /** @type {(() => void) | undefined} */
+  let detach;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+
+  /**
+   * @returns {void}
+   */
+  function retry() {
+    timer = undefined;
+    try {
+      const container = readField(navigationRef, "current");
+      if (isMissing(container) || (isNavigationContainer(container) && !isReady(container))) {
+        timer = setTimeout(retry, MOUNT_RETRY_MS);
+        return;
+      }
+      detach = attach(container);
+    } catch (error) {
+      if (isErrorHandler(onError)) {
+        onError(error);
+      }
+    }
+  }
+
+  timer = setTimeout(retry, MOUNT_RETRY_MS);
+  return () => {
+    clearTimeout(timer);
+    timer = undefined;
+    detach?.();
+  };
+}
+
+/**
+ * @param {ClientLike} client
+ * @param {unknown} navigationContainer
+ * @param {NavigationListenerOptions} [options]
+ * @returns {() => void}
+ */
+function createReactNavigationSpanListener(client, navigationContainer, options = {}) {
+  requireClient(client);
+  if (isUnmountedRef(navigationContainer)) {
+    return attachWhenReady(navigationContainer, container => attachToContainer(client, container, options), options.onError);
+  }
+  return attachToContainer(client, navigationContainer, options);
 }
 
 module.exports = { createReactNavigationSpanListener };
