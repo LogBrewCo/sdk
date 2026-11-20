@@ -25,6 +25,7 @@ import path from "node:path";
 const DEFAULT_UPLOAD_TOKEN_ENV = "LOGBREW_RELEASE_ARTIFACT_TOKEN";
 const SCRIPT_VERSION = "0.1.0";
 const NO_RETRIES = 0;
+const NO_SKIPPED_SOURCES = 0;
 const DECIMAL = 10;
 const NON_NEGATIVE_INTEGER_RE = /^\d+$/u;
 const UPLOADER = { name: "logbrew-js-release-artifact-upload-verifier", version: SCRIPT_VERSION };
@@ -113,6 +114,7 @@ async function prepareUpload(options) {
       filePartCount: files.length,
       release: manifest["release"],
       service: manifest["service"],
+      skippedSourceCount: Array.isArray(manifest["skippedSources"]) ? manifest["skippedSources"].length : NO_SKIPPED_SOURCES,
       uploader: UPLOADER
     }
   };

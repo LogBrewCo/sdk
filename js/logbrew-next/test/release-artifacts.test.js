@@ -28,6 +28,8 @@ function writeNextChunk(buildDir) {
   };
   fs.writeFileSync(jsPath, "console.log('checkout');\n//# sourceMappingURL=checkout.js.map\n", "utf8");
   fs.writeFileSync(mapPath, JSON.stringify(map), "utf8");
+  // Turbopack emits its polyfill chunk with no sourceMappingURL comment and no map.
+  fs.writeFileSync(path.join(buildDir, "polyfills.js"), "self.polyfilled=!0;\n", "utf8");
   return { jsPath, mapPath };
 }
 
@@ -75,6 +77,7 @@ test("Next release-artifact helper wraps config and writes a ready manifest afte
     assert.equal(manifest.service, "checkout-next-web");
     assert.equal(manifest.projectId, PROJECT_ID);
     assert.equal(manifest.artifacts.length, 1);
+    assert.deepEqual(manifest.skippedSources, ["polyfills.js"]);
     assert.equal(manifest.artifacts[0].minifiedSource.minifiedUrl, "app:///_next/static/chunks/checkout.js");
     assert.equal(manifest.artifacts[0].sourceMap.hasSourcesContent, false);
     assert.equal(sourceMap.sourcesContent, undefined);
@@ -139,7 +142,7 @@ test("Next release-artifact helper can dry-run hosted upload after the app hook"
     await config.compiler.runAfterProductionCompile({ distDir });
 
     assert.deepEqual(calls, ["app"]);
-    assert.deepEqual(messages, ["LogBrew release artifacts: dry_run (1 artifact)"]);
+    assert.deepEqual(messages, ["LogBrew release artifacts: dry_run (1 artifact, 1 without a source map skipped)"]);
   } finally {
     console.info = originalInfo;
     fs.rmSync(root, { recursive: true, force: true });

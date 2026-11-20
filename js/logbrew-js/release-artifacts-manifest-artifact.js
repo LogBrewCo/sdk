@@ -71,11 +71,11 @@ async function sourceMapEntry(inspection, allowSourcesContent) {
 
 /**
  * @param {string} jsPath
+ * @param {ArtifactInspection} inspection
  * @param {ManifestArtifactOptions} options
  * @returns {Promise<ManifestArtifact & JsonObject>}
  */
-async function buildManifestArtifact(jsPath, { allowSourcesContent, buildDir, minifiedPathPrefix }) {
-  const inspection = await inspectArtifactFiles(jsPath, buildDir);
+async function manifestArtifact(jsPath, inspection, { allowSourcesContent, minifiedPathPrefix }) {
   const { jsDebugId, jsSize, mapDebugId, relJs, sourceMappingUrl } = inspection;
   const sourceMap = await sourceMapEntry(inspection, allowSourcesContent);
   const errors = [...inspection.errors, ...sourceMap.errors];
@@ -102,6 +102,16 @@ async function buildManifestArtifact(jsPath, { allowSourcesContent, buildDir, mi
     sourceMap: sourceMap.entry ?? null,
     validation: { errors, status: errors.length > NO_ITEMS ? "blocked" : "ready", warnings }
   };
+}
+
+/**
+ * @param {string} jsPath
+ * @param {ManifestArtifactOptions} options
+ * @returns {Promise<(ManifestArtifact & JsonObject) | undefined>} undefined when the file has no source map to upload
+ */
+async function buildManifestArtifact(jsPath, options) {
+  const inspection = await inspectArtifactFiles(jsPath, options.buildDir);
+  return inspection.skipped ? undefined : manifestArtifact(jsPath, inspection, options);
 }
 
 export { buildManifestArtifact };

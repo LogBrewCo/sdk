@@ -121,6 +121,8 @@ export default withLogBrewNextReleaseArtifacts(
 
 The helper defaults minified URLs to `app:///_next/static/chunks/...`. Use `minifiedPathPrefix`, `manifestPath`, `repositoryUrl`, `commitSha`, or `stripSourcePrefix` when your deploy needs explicit paths or source-link metadata. Set `LOGBREW_RELEASE_ARTIFACT_TOKEN` in the build environment to a dedicated release-artifact token. Use `tokenEnv` for a different CI variable, or `dryRun: true` to prepare the complete build output without a network request. Existing `compiler.runAfterProductionCompile` work runs first. Upload is disabled when `upload` is omitted, and any unsafe preparation or upload result fails the production build without exposing response text or secret values.
 
+The helper uploads every chunk in `.next/static/chunks` that has a source map. It skips a chunk that has no `sourceMappingURL` comment and no `.map` file next to it, such as the polyfill chunk that Turbopack builds without a source map, lists it in the manifest's `skippedSources`, and counts it in the upload summary. A chunk that names a source map that is missing or empty still fails the build.
+
 ## App Router Request Errors
 
 Use Next.js's root `instrumentation.ts` file when you want one server error hook

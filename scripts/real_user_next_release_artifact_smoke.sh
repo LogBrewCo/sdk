@@ -141,9 +141,9 @@ cat > "$app_dir/package.json" <<'JSON'
     "@logbrew/browser": "file:../logbrew-browser.tgz",
     "@logbrew/sdk": "file:../logbrew-sdk.tgz",
     "@logbrew/next": "file:../logbrew-next.tgz",
-    "next": "16.2.9",
-    "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }
 JSON
@@ -267,10 +267,7 @@ print(os.path.realpath(os.path.join(sys.argv[2], artifact["sourceMapPath"])))
 PY
 )"
 
-if grep -R -q "sourcesContent" "$chunks_dir" --include='*.map'; then
-  echo "LogBrew Next helper did not strip sourcesContent from Next source maps" >&2
-  exit 1
-fi
+# Turbopack also writes an unlinked map that embeds the Next.js polyfill source, so check app source by sentinel.
 if grep -R -q "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" "$chunks_dir" --include='*.map'; then
   echo "raw Next source content leaked into stripped source maps" >&2
   exit 1
@@ -331,7 +328,7 @@ PY
   fi
 )
 
-python3 - "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" "$symbolication_report" "$js_count" <<'PY'
+python3 - "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" "$symbolication_report" "$js_count" "$app_dir/.next/build-manifest.json" "$tmp_dir/next-build.log" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -348,7 +345,19 @@ serialized_symbolication = json.dumps(symbolication_report)
 artifact = next(candidate for candidate in manifest["artifacts"] if candidate["minifiedSource"]["path"] == target_rel)
 debug_id = artifact["debugId"]
 
-assert len(manifest["artifacts"]) == js_count
+# Turbopack emits its polyfill chunk with no source map; the helper skips it and uploads every mapped chunk.
+chunks_dir = Path(sys.argv[4])
+skipped = manifest["skippedSources"]
+polyfills = [Path(name).relative_to("static/chunks").as_posix() for name in json.loads(Path(sys.argv[7]).read_text(encoding="utf-8"))["polyfillFiles"]]
+assert polyfills and set(polyfills) <= set(skipped), (polyfills, skipped)
+assert all("sourceMappingURL=" not in (chunks_dir / name).read_text(encoding="utf-8") for name in skipped)
+assert len(manifest["artifacts"]) + len(skipped) == js_count
+for mapped_artifact in manifest["artifacts"]:
+    assert mapped_artifact["sourceMap"]["hasSourcesContent"] is False
+    assert "sourcesContent" not in json.loads((chunks_dir / mapped_artifact["sourceMap"]["path"]).read_text(encoding="utf-8"))
+mapped = len(manifest["artifacts"])
+summary = f"LogBrew release artifacts: uploaded ({mapped} artifact{'s' if mapped != 1 else ''}, {len(skipped)} without a source map skipped)"
+assert summary in Path(sys.argv[8]).read_text(encoding="utf-8"), summary
 assert "debugId=" in bundle_source
 assert source_map["debug_id"] == debug_id
 assert "sourcesContent" not in source_map

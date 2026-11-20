@@ -1,6 +1,6 @@
+import { mapInOrder, relativeTo } from "./release-artifacts-common.js";
 import { buildManifestArtifact } from "./release-artifacts-manifest-artifact.js";
 import { iterMinifiedSourceFiles } from "./release-artifacts-inspect.js";
-import { mapInOrder } from "./release-artifacts-common.js";
 import { normalizeUrlOrPath } from "./release-artifacts-urls.js";
 
 /**
@@ -51,10 +51,16 @@ function gitMetadata(repositoryUrl, commitSha) {
 async function createManifest(options) {
   const { allowSourcesContent, buildDir, environment, projectId, release, service } = options;
   const minifiedPathPrefix = normalizeUrlOrPath(options.minifiedPathPrefix.trim());
-  const artifacts = await mapInOrder(await iterMinifiedSourceFiles(buildDir), async (filePath) =>
+  const files = await iterMinifiedSourceFiles(buildDir);
+  const built = await mapInOrder(files, async (filePath) =>
     buildManifestArtifact(filePath, { allowSourcesContent, buildDir, minifiedPathPrefix }));
+  const artifacts = built.filter((artifact) => artifact !== undefined);
+  const skippedSources = files.flatMap((filePath, index) => (built[index] === undefined ? [relativeTo(buildDir, filePath)] : []));
   const errors = [
-    ...(artifacts.length === NO_ITEMS ? ["no JavaScript release artifact files found in build directory"] : []),
+    ...(files.length === NO_ITEMS ? ["no JavaScript release artifact files found in build directory"] : []),
+    ...(files.length > NO_ITEMS && artifacts.length === NO_ITEMS
+      ? ["no JavaScript file in the build directory has a source map; enable source maps for the production build"]
+      : []),
     ...prefixedMessages(artifacts, (artifact) => artifact.validation.errors)
   ];
   const warnings = prefixedMessages(artifacts, (artifact) => artifact.validation.warnings);
@@ -69,6 +75,7 @@ async function createManifest(options) {
     ...(projectId === undefined ? {} : { projectId }),
     release,
     service,
+    skippedSources,
     uploader: { name: "logbrew-js-release-artifact-manifest", version: SCRIPT_VERSION },
     validation: { errors, status: errors.length > NO_ITEMS ? "blocked" : "ready", warnings }
   };
