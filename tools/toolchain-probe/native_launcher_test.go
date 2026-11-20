@@ -24,20 +24,39 @@ const (
 )
 
 const nativeLauncherGo = `#!/bin/sh
-printf '%s\n' "$*" >> "$NATIVE_TEST_CALLS"
+printf '%s %s\n' "${0#"$NATIVE_TEST_ROOT"/}" "$1" >> "$NATIVE_TEST_CALLS"
+fetch='-mod=readonly:https://proxy.golang.org:sum.golang.org'
+if [ "$*" = 'env GOROOT' ]; then
+  test "$GOENV:$GOWORK:$GOTOOLCHAIN:$GOFLAGS:$GOPROXY:$GOSUMDB" = "off:off:go$NATIVE_TEST_PIN:$fetch" || exit 9
+  test -n "$NATIVE_TEST_GOROOT" || exit 12
+  printf '%s\n' "$NATIVE_TEST_GOROOT"
+  exit 0
+fi
+if [ "$*" = 'mod download' ]; then
+  test "$GOENV:$GOWORK:$GOTOOLCHAIN:$GOFLAGS:$GOPROXY:$GOSUMDB" = "off:off:local:$fetch" || exit 9
+  test "$PWD" = "$NATIVE_TEST_ROOT/tools/toolchain-probe" || exit 11
+  exit 0
+fi
 test "$GOENV:$GOWORK:$GOTOOLCHAIN:$GOFLAGS:$GOPROXY:$GOSUMDB" = 'off:off:local:-mod=readonly:off:off' || exit 9
 if [ "$1" = version ]; then
   printf 'go version go%s fixture\n' "$NATIVE_TEST_VERSION"
   exit 0
 fi
-test "$#" = 3 && test "$1:$2:$3" = 'run:.:clock' || exit 10
+test "$#" = 4 && test "$1:$2:$4" = 'build:-o:.' || exit 10
 test "$PWD" = "$NATIVE_TEST_ROOT/tools/toolchain-probe" || exit 11
+cat > "$3" <<'PROBE'
+#!/bin/sh
+test "$*" = clock || exit 10
 printf 'local-clock\n'
+PROBE
+chmod 700 "$3"
 `
 
 type nativeLauncherFixture struct {
 	root    string
+	pin     string
 	version string
+	goroot  string
 }
 
 type nativeLauncherResult struct {
@@ -84,7 +103,8 @@ func newNativeLauncherFixture(t *testing.T) nativeLauncherFixture {
 			"fixture\n", nativeLauncherFileMode)
 	}
 	writeNativeLauncherFile(t, root, "bin/go", nativeLauncherGo, nativeLauncherDirectoryMode)
-	return nativeLauncherFixture{root: root, version: strings.TrimSpace(string(pin))}
+	version := strings.TrimSpace(string(pin))
+	return nativeLauncherFixture{root: root, pin: version, version: version}
 }
 
 func runNativeLauncher(t *testing.T, fixture nativeLauncherFixture, binary string) nativeLauncherResult {
@@ -97,7 +117,9 @@ func runNativeLauncher(t *testing.T, fixture nativeLauncherFixture, binary strin
 		"PATH=" + filepath.Join(fixture.root, "bin") + ":/usr/bin:/bin",
 		"LOGBREW_TOOLCHAIN_PROBE_BIN=" + binary,
 		"NATIVE_TEST_ROOT=" + fixture.root,
+		"NATIVE_TEST_PIN=" + fixture.pin,
 		"NATIVE_TEST_VERSION=" + fixture.version,
+		"NATIVE_TEST_GOROOT=" + fixture.goroot,
 		"NATIVE_TEST_CALLS=" + filepath.Join(fixture.root, "calls"),
 		"GOENV=unexpected", "GOWORK=unexpected", "GOTOOLCHAIN=auto",
 		"GOFLAGS=-mod=mod", "GOPROXY=https://example.invalid", "GOSUMDB=unexpected",
@@ -134,7 +156,7 @@ func TestNativeLauncherUsesPinnedOfflineCompiler(t *testing.T) {
 	if result.err != nil || result.output != "local-clock\n" || result.diagnostic != "" {
 		t.Fatalf("local execution: %+v", result)
 	}
-	requireNativeLauncherCalls(t, fixture, "version\nrun . clock\n")
+	requireNativeLauncherCalls(t, fixture, "bin/go version\nbin/go mod\nbin/go build\n")
 }
 
 func TestNativeLauncherUsesProvidedBinary(t *testing.T) {
@@ -220,20 +242,45 @@ func TestNativeLauncherAllowsModuleWithoutDependencies(t *testing.T) {
 	if result.err != nil || result.output != "local-clock\n" || result.diagnostic != "" {
 		t.Fatalf("standard-library module rejected: %+v", result)
 	}
-	requireNativeLauncherCalls(t, fixture, "version\nrun . clock\n")
+	requireNativeLauncherCalls(t, fixture, "bin/go version\nbin/go mod\nbin/go build\n")
 }
 
-func TestNativeLauncherRejectsCompilerMismatch(t *testing.T) {
+func TestNativeLauncherFetchesPinnedCompiler(t *testing.T) {
 	t.Parallel()
 	fixture := newNativeLauncherFixture(t)
-	expected := fixture.version
+	fixture.version = "0.0.0"
+	fixture.goroot = filepath.Join(fixture.root, "pinned")
+	writeNativeLauncherFile(t, fixture.root, "pinned/bin/go", nativeLauncherGo, nativeLauncherDirectoryMode)
+	result := runNativeLauncher(t, fixture, "")
+	if result.err != nil || result.output != "local-clock\n" || result.diagnostic != "" {
+		t.Fatalf("pinned compiler fetch: %+v", result)
+	}
+	requireNativeLauncherCalls(t, fixture, "bin/go version\nbin/go env\npinned/bin/go mod\npinned/bin/go build\n")
+}
+
+func TestNativeLauncherRejectsUnavailablePinnedCompiler(t *testing.T) {
+	t.Parallel()
+	fixture := newNativeLauncherFixture(t)
 	fixture.version = "0.0.0"
 	result := runNativeLauncher(t, fixture, "")
 	if result.err == nil || result.output != "" ||
-		result.diagnostic != "native SDK verifier requires Go "+expected+"\n" {
-		t.Fatalf("compiler mismatch accepted: %+v", result)
+		result.diagnostic != "native SDK verifier requires Go "+fixture.pin+"\n" {
+		t.Fatalf("unavailable pinned compiler accepted: %+v", result)
 	}
-	requireNativeLauncherCalls(t, fixture, "version\n")
+	requireNativeLauncherCalls(t, fixture, "bin/go version\nbin/go env\n")
+}
+
+func TestNativeLauncherKeepsVerifierExitStatus(t *testing.T) {
+	t.Parallel()
+	fixture := newNativeLauncherFixture(t)
+	writeNativeLauncherFile(t, fixture.root, "bin/go", strings.Replace(nativeLauncherGo,
+		"printf 'local-clock\\n'", "exit 7", 1), nativeLauncherDirectoryMode)
+	result := runNativeLauncher(t, fixture, "")
+	var exitError *exec.ExitError
+	if !errors.As(result.err, &exitError) || exitError.ExitCode() != nativeLauncherFailure ||
+		result.output != "" || result.diagnostic != "" {
+		t.Fatalf("verifier failure changed: %+v", result)
+	}
 }
 
 func TestNativeLauncherRejectsMalformedPin(t *testing.T) {
