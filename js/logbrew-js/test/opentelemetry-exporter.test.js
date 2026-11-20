@@ -149,6 +149,20 @@ await test("OpenTelemetry span exporter exports batches through standard exporte
   assert.equal(closedResult.code, EXPORT_FAILED);
 });
 
+await test("OpenTelemetry span exporter keeps current semantic convention system names", async () => {
+  const { exporter, transport } = exportScenario();
+  const currentNames = {
+    "db.system.name": "postgresql",
+    "messaging.system.name": "kafka",
+    "rpc.system.name": "grpc"
+  };
+
+  await exportSpans(exporter, [{ ...sampleOpenTelemetryReadableSpan(), attributes: currentNames }]);
+
+  const metadata = pick(lastPayload(transport), "events.0.attributes.metadata");
+  assert.deepEqual(Object.fromEntries(Object.keys(currentNames).map((key) => [key, member(metadata, key)])), currentNames);
+});
+
 await test("OpenTelemetry span exporter drains spans submitted during an in-flight export", async () => {
   const { client, exporter, gate } = drainExport();
 

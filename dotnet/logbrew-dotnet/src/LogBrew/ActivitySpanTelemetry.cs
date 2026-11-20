@@ -415,6 +415,7 @@ namespace LogBrew
                 case "http.status_code":
                     AddStatusCode(metadata, value);
                     break;
+                case "db.system.name":
                 case "db.system":
                     AddString(metadata, "dbSystem", value);
                     break;
@@ -422,8 +423,13 @@ namespace LogBrew
                 case "db.operation":
                     AddString(metadata, "dbOperation", value);
                     break;
+                case "messaging.system.name":
                 case "messaging.system":
                     AddString(metadata, "messagingSystem", value);
+                    break;
+                case "rpc.system.name":
+                case "rpc.system":
+                    AddString(metadata, "rpcSystem", value);
                     break;
                 case "messaging.operation.name":
                 case "messaging.operation":

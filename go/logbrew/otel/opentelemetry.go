@@ -41,9 +41,11 @@ var safeAttributeKeys = map[string]string{
 	"messaging.operation":       "messagingOperation",
 	"messaging.operation.name":  "messagingOperation",
 	"messaging.system":          "messagingSystem",
+	"messaging.system.name":     "messagingSystem",
 	"rpc.method":                "rpcMethod",
 	"rpc.service":               "rpcService",
 	"rpc.system":                "rpcSystem",
+	"rpc.system.name":           "rpcSystem",
 	"server.port":               "serverPort",
 	"url.scheme":                "urlScheme",
 }

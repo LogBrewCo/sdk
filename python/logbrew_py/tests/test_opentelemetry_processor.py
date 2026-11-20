@@ -279,6 +279,27 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
         with self.assertRaisesRegex(SdkError, "cannot include sensitive key: messaging.message.id"):
             span_attributes_from_open_telemetry_readable_span(span, link_attribute_keys=["messaging.message.id"])
 
+    def test_open_telemetry_readable_span_keeps_current_semconv_system_names(self) -> None:
+        current_names = {
+            "db.system.name": "postgresql",
+            "messaging.system.name": "kafka",
+            "rpc.system.name": "grpc",
+        }
+        span = FakeOpenTelemetryReadableSpan(
+            name="checkout.process",
+            context=FakeOpenTelemetrySpanContext(
+                trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+                span_id=int("b7ad6b7169203331", 16),
+                trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+            ),
+            attributes=current_names,
+        )
+
+        attributes = span_attributes_from_open_telemetry_readable_span(span)
+
+        assert attributes is not None
+        self.assertEqual({key: attributes["metadata"].get(key) for key in current_names}, current_names)
+
     def test_open_telemetry_span_processor_queues_details_and_trace_summary(self) -> None:
         client = sample_client()
         root_context = FakeOpenTelemetrySpanContext(

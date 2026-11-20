@@ -31,6 +31,7 @@ public final class LogBrewOpenTelemetryTest {
         testCurrentSpanAndExplicitContextCopyActiveOtelContext();
         testInvalidAndMissingOtelContextsReturnEmpty();
         testSpanExporterQueuesSanitizedEndedOpenTelemetrySpan();
+        testSpanExporterKeepsCurrentSemconvSystemNames();
         System.out.println("java opentelemetry context tests ok (" + testsRun + " tests)");
     }
 
@@ -203,6 +204,31 @@ public final class LogBrewOpenTelemetryTest {
         assertNotContains(payload, "db.statement");
         assertNotContains(payload, "debug=blocked");
         assertNotContains(payload, "traceparent");
+        testsRun++;
+    }
+
+    private void testSpanExporterKeepsCurrentSemconvSystemNames() {
+        LogBrewClient client = LogBrewClient.create("lbw_ingest_java_otel", "logbrew-java", "0.1.0");
+        SdkTracerProvider provider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(LogBrewOpenTelemetrySdk.spanExporter(client)))
+            .build();
+
+        try {
+            provider.get("checkout-service")
+                .spanBuilder("checkout.process")
+                .setAttribute("db.system.name", "postgresql")
+                .setAttribute("messaging.system.name", "kafka")
+                .setAttribute("rpc.system.name", "grpc")
+                .startSpan()
+                .end();
+        } finally {
+            provider.shutdown().join(5, TimeUnit.SECONDS);
+        }
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"dbSystem\": \"postgresql\"");
+        assertContains(payload, "\"messagingSystem\": \"kafka\"");
+        assertContains(payload, "\"rpcSystem\": \"grpc\"");
         testsRun++;
     }
 

@@ -29,6 +29,7 @@ DEFAULT_OTEL_SPAN_ATTRIBUTE_KEYS = frozenset(
     {
         "db.operation.name",
         "db.system",
+        "db.system.name",
         "faas.trigger",
         "graphql.operation.name",
         "graphql.operation.type",
@@ -39,9 +40,11 @@ DEFAULT_OTEL_SPAN_ATTRIBUTE_KEYS = frozenset(
         "http.status_code",
         "messaging.operation.name",
         "messaging.system",
+        "messaging.system.name",
         "rpc.method",
         "rpc.service",
         "rpc.system",
+        "rpc.system.name",
     }
 )
 DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS = frozenset(
@@ -57,26 +60,7 @@ DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS = frozenset(
 )
 DEFAULT_OTEL_EVENT_ATTRIBUTE_KEYS = frozenset({"exception.escaped", "exception.type"})
 DEFAULT_OTEL_LINK_ATTRIBUTE_KEYS: frozenset[str] = frozenset()
-TRACE_SUMMARY_METADATA_KEYS = frozenset(
-    {
-        *DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS,
-        "db.operation.name",
-        "db.system",
-        "faas.trigger",
-        "graphql.operation.name",
-        "graphql.operation.type",
-        "http.method",
-        "http.request.method",
-        "http.response.status_code",
-        "http.route",
-        "http.status_code",
-        "messaging.operation.name",
-        "messaging.system",
-        "rpc.method",
-        "rpc.service",
-        "rpc.system",
-    }
-)
+TRACE_SUMMARY_METADATA_KEYS = DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS | DEFAULT_OTEL_SPAN_ATTRIBUTE_KEYS
 OTEL_SPAN_KIND_NAMES = {
     0: "internal",
     1: "server",
