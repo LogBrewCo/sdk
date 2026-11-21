@@ -48,7 +48,6 @@ tests/test_release_metadata.py	*	ihas	secret names only
 tests/test_release_metadata.py	*	ihas	secret-token
 tests/test_release_metadata.py	*	ihas	secret_names_only
 tests/test_release_metadata.py	*	ihas	user-token
-.github/workflows/publish-packages.yml	*	line	secrets: inherit
 .github/workflows/**	*	ihas	apitoken=${packagist_api_token}
 .github/workflows/**	*	ihas	cargo_registry_token
 .github/workflows/**	*	ihas	central portal credentials
@@ -81,6 +80,14 @@ quality/tool-matrix.toml	credential,restore	re	^(?:uses|commands) = \[(?i:.*"rub
 quality/tool-matrix.toml	token	has	endpoints, options, tokens, and intake status sequences
 quality/tool-matrix.toml	token	has	a token that is not ASCII is sent as UTF-8
 quality/tool-matrix.toml	token	has	reads the upload token from the variable that --token-env names
+
+# The zizmor workflow and its tool matrix entry name the audits and risks that zizmor checks.
+.github/workflows/zizmor.yml	token	has	broad token permissions,
+.github/workflows/zizmor.yml	credential	has	persisted credentials, and unpinned
+quality/tool-matrix.toml	credential,token	has	broad token permissions, persisted credentials,
+quality/tool-matrix.toml	credential	has	persist-credentials: false on every checkout
+quality/tool-matrix.toml	secret	has	1 secrets-inherit);
+
 .github/workflows/ci.yml	strategy	line	strategy:
 {.github/workflows/publish-nuget.yml,tests/test_release_metadata.py}	restore	has	dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-restore
 {.github/workflows/publish-nuget.yml,tests/test_release_metadata.py}	restore	has	dotnet restore dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj

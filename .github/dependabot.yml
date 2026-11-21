@@ -1,7 +1,7 @@
 # Dependabot checks every ecosystem daily and opens one grouped pull request per
-# ecosystem. It waits 2 days after a release, so a release that its publisher
-# pulls soon after publishing never lands. scripts/check-dependabot.sh fails
-# when a tracked manifest has no entry here.
+# ecosystem. It waits 7 days after a release, so a release that its publisher
+# pulls or replaces within a week never lands. Security updates do not wait.
+# scripts/check-dependabot.sh fails when a tracked manifest has no entry here.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,7 +11,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       github-actions:
         patterns: ["*"]
@@ -21,7 +21,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       rust-toolchain:
         patterns: ["*"]
@@ -64,7 +64,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       bun:
         patterns: ["*"]
@@ -74,7 +74,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       bundler:
         patterns: ["*"]
@@ -84,7 +84,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       cargo:
         patterns: ["*"]
@@ -95,7 +95,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       composer:
         patterns: ["*"]
@@ -115,7 +115,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       gomod:
         patterns: ["*"]
@@ -126,7 +126,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       gradle:
         patterns: ["*"]
@@ -142,7 +142,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       maven:
         patterns: ["*"]
@@ -187,7 +187,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       npm:
         patterns: ["*"]
@@ -220,7 +220,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       nuget:
         patterns: ["*"]
@@ -234,7 +234,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       pip:
         patterns: ["*"]
@@ -245,7 +245,7 @@ updates:
     schedule:
       interval: daily
     cooldown:
-      default-days: 2
+      default-days: 7
     groups:
       swift:
         patterns: ["*"]

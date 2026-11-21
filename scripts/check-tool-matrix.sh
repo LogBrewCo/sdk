@@ -204,18 +204,18 @@ done <"$work/commands"
 # Actions: the matrix lists each action by name; the workflows hold its pin.
 # Every remote action is pinned to a full commit with a version comment, and
 # one action has one pin across all workflows, so an update changes only the
-# workflows. A local action (./path) needs no pin.
+# workflows. A local action (./path or $/path) needs no pin.
 for workflow in "$root"/.github/workflows/*.y*ml; do
     awk -v file="${workflow##*/}" '/^[ -]*uses: / { sub(/^[ -]*uses: */, ""); sub(/ +$/, ""); print file "\t" $0 }' "$workflow"
 done >"$work/actions"
 while IFS=$'\t' read -r file uses; do
     name="${uses%%@*}"
     grep -qxF -- "$name" "$work/uses" || fail "$file: action \`$name\` is not in any tool's \`uses\`; add it to quality/tool-matrix.toml"
-    [[ "$name" == ./* ]] && continue
+    [[ "$name" == ./* || "$name" == \$/* ]] && continue
     [[ "${uses#*@}" =~ ^[0-9a-f]{40}\ \#\ [^\ ]+$ ]] ||
         fail "$file: \`uses: $uses\` is not pinned to a commit; use $name@<40-hex commit> # <version>"
 done <"$work/actions"
-cut -f 2 "$work/actions" | grep -v '^\./' | sort -u | awk -F '@' '{ n[$1]++ } n[$1] == 2 { print $1 }' |
+cut -f 2 "$work/actions" | grep -v -E '^(\.|\$)/' | sort -u | awk -F '@' '{ n[$1]++ } n[$1] == 2 { print $1 }' |
     while IFS= read -r name; do
         echo "action \`$name\` is pinned to more than one commit or version across workflows; use one pin"
     done >"$work/pin-errors"

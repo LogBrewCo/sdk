@@ -306,6 +306,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          SELECTED_PACKAGE_VERSIONS: ${{ steps.npm-packages.outputs.selected_package_versions }}
         run: |
           set -Eeuo pipefail
           dispatch_epoch="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
@@ -317,7 +318,7 @@ jobs:
             [[ -n "$package_version" && "$package_version" != co.logbrew.unity=* ]] || continue
             verify_args+=(--npm-package "${package_version%%=*}" --npm-version "$package_version")
             install_specs+=("${package_version/=/@}")
-          done <<< "${{ steps.npm-packages.outputs.selected_package_versions }}"
+          done <<< "${SELECTED_PACKAGE_VERSIONS}"
 
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             verify_args+=(--include-unity-npm)
@@ -431,15 +432,20 @@ jobs:
 
       - name: Create Python release manifest
         shell: bash
+        env:
+          CORE_VERSION: ${{ steps.pypi-version.outputs.core_version }}
+          FASTAPI_VERSION: ${{ steps.pypi-version.outputs.fastapi_version }}
+          FLASK_VERSION: ${{ steps.pypi-version.outputs.flask_version }}
+          DJANGO_VERSION: ${{ steps.pypi-version.outputs.django_version }}
         run: |
           set -Eeuo pipefail
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts python create \
             --directory dist/pypi \
             --source-commit "$(git rev-parse HEAD)" \
-            --python-version "logbrew-sdk=${{ steps.pypi-version.outputs.core_version }}" \
-            --python-version "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}" \
-            --python-version "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}" \
-            --python-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}" \
+            --python-version "logbrew-sdk=${CORE_VERSION}" \
+            --python-version "logbrew-fastapi=${FASTAPI_VERSION}" \
+            --python-version "logbrew-flask=${FLASK_VERSION}" \
+            --python-version "logbrew-django=${DJANGO_VERSION}" \
             --manifest dist/pypi/python-release-artifacts.json
 
       - name: Verify reproducible Python distributions
@@ -513,16 +519,21 @@ jobs:
       - name: Verify public PyPI packages
         if: ${{ ! inputs.dry_run }}
         shell: bash
+        env:
+          FASTAPI_VERSION: ${{ steps.pypi-version.outputs.fastapi_version }}
+          FLASK_VERSION: ${{ steps.pypi-version.outputs.flask_version }}
+          DJANGO_VERSION: ${{ steps.pypi-version.outputs.django_version }}
+          PYPI_VERSION: ${{ steps.pypi-version.outputs.version }}
         run: |
           set -Eeuo pipefail
           verify_args=(--target pypi)
           if [[ "${{ inputs.include_pypi_extras }}" == "true" ]]; then
             verify_args+=(--include-pypi-extras)
-            verify_args+=(--pypi-version "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}")
-            verify_args+=(--pypi-version "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}")
-            verify_args+=(--pypi-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}")
+            verify_args+=(--pypi-version "logbrew-fastapi=${FASTAPI_VERSION}")
+            verify_args+=(--pypi-version "logbrew-flask=${FLASK_VERSION}")
+            verify_args+=(--pypi-version "logbrew-django=${DJANGO_VERSION}")
           fi
-          verify_args+=(--version "${{ steps.pypi-version.outputs.version }}")
+          verify_args+=(--version "${PYPI_VERSION}")
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication "${verify_args[@]}"
 
       - name: Resolve public PyPI artifacts
@@ -602,8 +613,10 @@ jobs:
 
       - name: Verify public crates.io package
         if: ${{ ! inputs.dry_run && inputs.include_crates_publish }}
+        env:
+          CRATE_VERSION: ${{ steps.crate-version.outputs.version }}
         run: |
-          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target crates --version "${{ steps.crate-version.outputs.version }}"
+          "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" registry-publication --target crates --version "${CRATE_VERSION}"
 
       - name: Explain skipped crate publish
         if: ${{ ! inputs.dry_run && ! inputs.include_crates_publish && inputs.target == 'all' }}
@@ -681,7 +694,6 @@ jobs:
       ref: ${{ inputs.ref }}
       dry_run: ${{ inputs.dry_run }}
       nuget_packages: ${{ inputs.nuget_packages }}
-    secrets: inherit
   packagist:
     name: Packagist package
     if: ${{ inputs.target == 'packagist' || (inputs.target == 'all' && (inputs.dry_run || inputs.include_packagist_update)) }}
