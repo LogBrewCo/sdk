@@ -73,6 +73,9 @@ jobs:
       - name: Check the tool matrix
         run: bash scripts/check-tool-matrix.sh && bash scripts/test-check-tool-matrix.sh
 
+      - name: Check that Dependabot covers every manifest
+        run: bash scripts/check-dependabot.sh && bash scripts/test-check-dependabot.sh
+
       - name: Check for inline lint suppressions
         run: bash scripts/check-suppressions.sh && bash scripts/test-check-suppressions.sh
 
