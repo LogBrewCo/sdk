@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
@@ -104,18 +105,13 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" fastify pino typescript)"
-read -r fastify_version pino_version typescript_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+locked_versions="$(npm_locked_versions fastify fastify pino)"
+read -r fastify_version pino_version <<<"$locked_versions"
+npm_ci_locked fastify >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$node_tgz" \
-  "$fastify_tgz" \
-  "fastify@$fastify_version" \
-  "pino@$pino_version" \
-  "typescript@$typescript_version" \
-  "@types/node@22" \
-  >/dev/null
+  "$fastify_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json

@@ -198,18 +198,34 @@ checked = 2026-11-19
 id = "staticcheck"
 risk = "Go bugs, simplifications, and style"
 tool = "Staticcheck (native Go)"
-version = "2026.2.2"
-pins = ["scripts/check_go_static.sh::version=\"@VERSION@\""]
+version = "0.8.2"
+pins = ["tools/staticcheck/go.mod::honnef.co/go/tools v@VERSION@", "tools/staticcheck/go.mod::tool honnef.co/go/tools/cmd/staticcheck", ".github/dependabot.yml::- /tools/staticcheck"]
 uses = ["actions/setup-go"]
 commands = ["scripts/check_go_static.sh", "go install", "go test", "go work"]
 runs_in = "CI Contract checks: Run Go static analysis; Go jobs"
-config = "Go version from tools/toolchain-probe/.go-version"
+config = "Go version from tools/toolchain-probe/.go-version; tools/staticcheck/go.mod and go.sum pin the module (Staticcheck 2026.2.2 is module v0.8.2), and Dependabot proposes each new release"
 conflicts = "none known"
 exceptions = "none"
 runtime = "2026-10-19 to 2026-11-19: push n=8, max 88 s; pull request n=17, max 63 s"
-findings = "unknown: findings are fixed before merge; 2026-11-19: 2026.2.2 is the latest release, no advisories; setup-go moves to v7.1.0"
+findings = "unknown: findings are fixed before merge; 2026-11-21: v0.8.2 (2026.2.2) is the latest release, no advisories"
 replaces = "none"
-checked = 2026-11-19
+checked = 2026-11-21
+
+[[tool]]
+id = "pin-check"
+risk = "a workflow or script that installs a tool or package the registry can change under us (an unpinned action, install, or download)"
+tool = "tools/pin-check (native Go), which runs the OpenSSF Scorecard Pinned-Dependencies check on the checkout"
+version = "5.7.0"
+pins = ["tools/pin-check/go.mod::github.com/ossf/scorecard/v5 v@VERSION@", ".github/dependabot.yml::- /tools/pin-check"]
+commands = ["go run"]
+runs_in = "CI Contract checks: Check that every install is pinned"
+config = "quality/unpinned-installs.tsv lists each install that stays unpinned on purpose, with its reason; a row that no longer matches an install fails"
+conflicts = "none known"
+exceptions = "the 16 rows in quality/unpinned-installs.tsv: LogBrew packages under test, offline installs of the build under test, and minimum-version tests"
+runtime = "local n=1, 2 s on the whole repository after the build"
+findings = "2026-11-21: 74 unpinned installs on main before this check (9 in workflows), 17 after, all listed in quality/unpinned-installs.tsv; Scorecard 5.7.0 is the latest release, no advisories"
+replaces = "none"
+checked = 2026-11-21
 
 [[tool]]
 id = "shellcheck"

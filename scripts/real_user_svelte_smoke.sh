@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(bun -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 svelte_package_version="$(bun -p "require('${repo_root}/js/logbrew-svelte/package.json').version")"
@@ -55,17 +56,13 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" svelte typescript @types/node)"
-read -r svelte_version typescript_version types_node_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+locked_versions="$(npm_locked_versions svelte svelte)"
+read -r svelte_version <<<"$locked_versions"
+npm_ci_locked svelte >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$browser_tgz" \
-  "$svelte_tgz" \
-  "svelte@$svelte_version" \
-  "typescript@$typescript_version" \
-  "@types/node@$types_node_version" \
-  >/dev/null
+  "$svelte_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/browser": "file:' package.json

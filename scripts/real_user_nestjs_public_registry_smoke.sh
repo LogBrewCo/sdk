@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-nestjs-public.XXXXXX")"
 registry="https://registry.npmjs.org"
@@ -10,12 +11,8 @@ receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 nestjs_version="${LOGBREW_NPM_NESTJS_VERSION:-0.1.6}"
 node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.11}"
 sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.16}"
-nest_common_version="11.1.28"
-reflect_metadata_version="0.2.2"
-rxjs_version="7.8.2"
-typescript_version="7.0.2"
-types_express_version="5.0.6"
-types_node_version="26.1.2"
+locked_versions="$(npm_locked_versions nestjs-public-registry @nestjs/common rxjs)"
+read -r nest_common_version rxjs_version <<<"$locked_versions"
 
 if [[ $# -ne 0 ]] \
   || { [[ "$receipt_mode" != "0" ]] && [[ "$receipt_mode" != "1" ]]; }; then
@@ -61,22 +58,11 @@ install_and_execute() {
 
   npm init -y >"$tmp_dir/npm-init.out" 2>"$tmp_dir/npm-init.err"
   npm pkg set type=module >"$tmp_dir/npm-pkg.out" 2>"$tmp_dir/npm-pkg.err"
-  npm install \
-    --save-exact \
-    --ignore-scripts \
-    --no-audit \
-    --no-fund \
-    --registry "$registry" \
+  npm_ci_locked nestjs-public-registry --ignore-scripts >"$tmp_dir/npm-ci.out" 2>"$tmp_dir/npm-ci.err"
+  npm_add_logbrew --ignore-scripts --registry "$registry" \
     "$nestjs_source" \
     "@logbrew/node@${node_version}" \
-    "@logbrew/sdk@${sdk_version}" \
-    "@nestjs/common@${nest_common_version}" \
-    "reflect-metadata@${reflect_metadata_version}" \
-    "rxjs@${rxjs_version}" \
-    "typescript@${typescript_version}" \
-    "@types/express@${types_express_version}" \
-    "@types/node@${types_node_version}" \
-    >"$tmp_dir/npm-install.out" 2>"$tmp_dir/npm-install.err"
+    "@logbrew/sdk@${sdk_version}" >"$tmp_dir/npm-install.out" 2>"$tmp_dir/npm-install.err"
 
   EXPECTED_NESTJS_VERSION="$nestjs_version" \
   EXPECTED_NODE_VERSION="$node_version" \

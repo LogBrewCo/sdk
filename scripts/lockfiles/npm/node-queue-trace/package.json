@@ -1,0 +1,8 @@
+{
+  "name": "node-queue-trace",
+  "private": true,
+  "dependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
+  }
+}

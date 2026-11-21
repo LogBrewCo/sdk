@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 angular_package_version="$(node -p "require('${repo_root}/js/logbrew-angular/package.json').version")"
@@ -63,21 +64,14 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" @angular/core rxjs zone.js typescript @types/node)"
-read -r angular_version rxjs_version zone_version typescript_version types_node_version <<<"$settled_versions"
+locked_versions="$(npm_locked_versions angular @angular/core rxjs zone.js)"
+read -r angular_version rxjs_version zone_version <<<"$locked_versions"
 angular_engine="$(npm view "@angular/core@$angular_version" engines.node)"
 node_version="$(node -p 'process.version')"
-npm_config_loglevel=error npm_config_engine_strict=false npm install \
-  --save-exact \
+npm_config_loglevel=error npm_config_engine_strict=false npm_ci_locked angular >/dev/null
+npm_config_loglevel=error npm_config_engine_strict=false npm_add_logbrew \
   "$core_tgz" \
-  "$angular_tgz" \
-  "@angular/core@$angular_version" \
-  "@angular/compiler@$angular_version" \
-  "rxjs@$rxjs_version" \
-  "zone.js@$zone_version" \
-  "typescript@$typescript_version" \
-  "@types/node@$types_node_version" \
-  >/dev/null
+  "$angular_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/angular": "file:' package.json

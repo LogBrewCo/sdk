@@ -386,8 +386,10 @@ jobs:
 
       - name: Install build tooling and core SDK dependencies
         run: |
-          python3 -m pip install --upgrade build twine
-          python3 -m pip install ./python/logbrew_py httpx==0.28.1 httpx2==2.14.0 aiohttp==3.14.5
+          python3 -m pip install --require-hashes --requirement scripts/lockfiles/python/requirements-release-tools.txt
+          python3 -m pip install --require-hashes --requirement scripts/lockfiles/python/requirements-ci-tests.txt
+          python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/logbrew-wheel" ./python/logbrew_py
+          python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" logbrew-sdk
 
       - name: Run Python package tests
         shell: bash

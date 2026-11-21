@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 vue_package_version="$(node -p "require('${repo_root}/js/logbrew-vue/package.json').version")"
@@ -63,17 +64,12 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" vue @vue/server-renderer typescript @types/node)"
-read -r vue_version vue_server_renderer_version typescript_version types_node_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+locked_versions="$(npm_locked_versions vue vue @vue/server-renderer)"
+read -r vue_version vue_server_renderer_version <<<"$locked_versions"
+npm_ci_locked vue >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$vue_tgz" \
-  "vue@$vue_version" \
-  "@vue/server-renderer@$vue_server_renderer_version" \
-  "typescript@$typescript_version" \
-  "@types/node@$types_node_version" \
-  >/dev/null
+  "$vue_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/vue": "file:' package.json

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 server_pid=""
@@ -85,27 +86,14 @@ react_native_tgz="$pack_dir/$react_native_tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 cp "$react_native_tgz" "$tmp_dir/logbrew-react-native.tgz"
 
-react_native_version="${LOGBREW_REACT_NATIVE_VERSION:-0.87.1}"
-react_version="${LOGBREW_REACT_VERSION:-19.2.8}"
-react_native_cli_version="${LOGBREW_REACT_NATIVE_CLI_VERSION:-20.2.0}"
-react_native_metro_config_version="${LOGBREW_REACT_NATIVE_METRO_CONFIG_VERSION:-$react_native_version}"
-typescript_version="${LOGBREW_TYPESCRIPT_VERSION:-7.0.2}"
+read -r react_native_version react_version react_native_cli_version <<<"$(
+  npm_locked_versions react-native-release-artifact react-native react @react-native-community/cli
+)"
 
 cat > "$app_dir/package.json" <<JSON
 {
   "private": true,
-  "type": "commonjs",
-  "dependencies": {
-    "@logbrew/sdk": "file:../logbrew-sdk.tgz",
-    "@logbrew/react-native": "file:../logbrew-react-native.tgz",
-    "react": "$react_version",
-    "react-native": "$react_native_version"
-  },
-  "devDependencies": {
-    "@react-native-community/cli": "$react_native_cli_version",
-    "@react-native/metro-config": "$react_native_metro_config_version",
-    "typescript": "$typescript_version"
-  }
+  "type": "commonjs"
 }
 JSON
 
@@ -166,7 +154,8 @@ JS
 
 (
   cd "$app_dir"
-  npm install --loglevel=error
+  npm_ci_locked react-native-release-artifact --loglevel=error
+  npm_add_logbrew --loglevel=error ../logbrew-sdk.tgz ../logbrew-react-native.tgz
   npm ls @logbrew/sdk @logbrew/react-native react react-native @react-native-community/cli @react-native/metro-config typescript >/dev/null
   node --input-type=module - <<'JS'
 import assert from "node:assert/strict";

@@ -10,7 +10,7 @@ class JsHighLoadSmokeTests(unittest.TestCase):
     def test_js_high_load_smoke_exists_and_exercises_installed_artifact_flow(self):
         text = SMOKE.read_text()
 
-        self.assertIn("npm install", text)
+        self.assertIn("npm_add_logbrew", text)
         self.assertIn("node_modules/@logbrew/sdk", text)
         self.assertIn("node_modules/@logbrew/node", text)
         self.assertIn("node_modules/@logbrew/browser", text)

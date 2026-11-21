@@ -1,0 +1,9 @@
+{
+  "name": "node-axios",
+  "private": true,
+  "dependencies": {
+    "@types/node": "24.10.1",
+    "axios": "1.18.1",
+    "typescript": "5.9.3"
+  }
+}

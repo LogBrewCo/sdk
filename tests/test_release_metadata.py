@@ -205,21 +205,16 @@ class ReleaseMetadataTests(unittest.TestCase):
         reconcile = (
             ROOT / ".github" / "workflows" / "reconcile-public-packages.yml"
         ).read_text(encoding="utf-8")
-        tools = (ROOT / "scripts" / "python_release_tools.txt").read_text(
-            encoding="utf-8"
-        )
+        tools = (
+            ROOT / "scripts" / "lockfiles" / "python" / "requirements-release-tools.txt"
+        ).read_text(encoding="utf-8")
 
-        for expected in (
-            "build==1.5.0",
-            "setuptools==83.0.0",
-            "twine==7.0.0",
-            "uv==0.12.9",
-            "wheel==0.47.0",
-        ):
-            self.assertIn(expected, tools)
+        for tool in ("build", "setuptools", "twine", "uv", "wheel"):
+            self.assertRegex(tools, rf"(?m)^{tool}==\S+ \\\n    --hash=sha256:")
         for workflow in (publish, reconcile):
             for expected in (
-                "scripts/python_release_tools.txt",
+                "scripts/lockfiles/python/requirements-release-tools.txt",
+                "--require-hashes",
                 "SOURCE_DATE_EPOCH",
                 "PYTHONHASHSEED=0",
                 "TZ=UTC",

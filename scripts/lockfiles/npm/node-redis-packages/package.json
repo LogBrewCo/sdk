@@ -1,0 +1,8 @@
+{
+  "name": "node-redis-packages",
+  "private": true,
+  "dependencies": {
+    "ioredis": "5.11.1",
+    "redis": "6.1.0"
+  }
+}

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
 aws_sqs_package_version="$(node -p "require('${repo_root}/js/logbrew-aws-sqs/package.json').version")"
@@ -67,26 +68,20 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-npm install \
-  --save-exact \
-  --no-audit \
-  --fund=false \
+locked_versions="$(npm_locked_versions aws-sqs @aws-sdk/client-eventbridge @aws-sdk/client-sns @aws-sdk/client-sqs)"
+read -r client_eventbridge_library_version client_sns_library_version client_sqs_library_version <<<"$locked_versions"
+npm_ci_locked aws-sqs >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$node_tgz" \
-  "$sqs_tgz" \
-  @aws-sdk/client-eventbridge@3.1075.0 \
-  @aws-sdk/client-sns@3.1075.0 \
-  @aws-sdk/client-sqs@3.1075.0 \
-  typescript@6.0.3 \
-  @types/node@26.0.1 \
-  >/dev/null
+  "$sqs_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json
 grep -q '"@logbrew/aws-sqs": "file:' package.json
-grep -q '"@aws-sdk/client-eventbridge": "3.1075.0"' package.json
-grep -q '"@aws-sdk/client-sns": "3.1075.0"' package.json
-grep -q '"@aws-sdk/client-sqs": "3.1075.0"' package.json
+grep -q "\"@aws-sdk/client-eventbridge\": \"${client_eventbridge_library_version}\"" package.json
+grep -q "\"@aws-sdk/client-sns\": \"${client_sns_library_version}\"" package.json
+grep -q "\"@aws-sdk/client-sqs\": \"${client_sqs_library_version}\"" package.json
 grep -q '"@logbrew/aws-sqs"' package-lock.json
 grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
@@ -95,9 +90,9 @@ npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/aws-sqs@${aws_sqs_package_version}" "$tmp_dir/npm-list-depth0.txt"
-grep -q '@aws-sdk/client-eventbridge@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
-grep -q '@aws-sdk/client-sns@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
-grep -q '@aws-sdk/client-sqs@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@aws-sdk/client-eventbridge@${client_eventbridge_library_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "@aws-sdk/client-sns@${client_sns_library_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "@aws-sdk/client-sqs@${client_sqs_library_version}" "$tmp_dir/npm-list-depth0.txt"
 test -f node_modules/@logbrew/aws-sqs/index.js
 test -f node_modules/@logbrew/aws-sqs/index.cjs
 test -f node_modules/@logbrew/aws-sqs/index.d.ts

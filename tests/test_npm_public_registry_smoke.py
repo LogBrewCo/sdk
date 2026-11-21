@@ -225,6 +225,11 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             script_body = SCRIPT.read_text(encoding="utf-8")
             bounded_body = script_body.replace("}, 10_000);", "}, 1_000);", 1)
             self.assertNotEqual(bounded_body, script_body)
+            bounded_body = bounded_body.replace(
+                'source "$repo_root/scripts/npm_locked.sh"',
+                f'source "{ROOT / "scripts" / "npm_locked.sh"}"',
+                1,
+            )
             bounded_script.write_text(bounded_body, encoding="utf-8")
             started_at = time.monotonic()
             result = self._run_receipt(
@@ -275,7 +280,8 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
             '"status":"passed"',
             "sha256:",
             "--offline",
-            "npm install",
+            "npm_ci_locked npm-public-registry",
+            "npm_add_logbrew",
             "npm ls",
             "package-lock.json",
             "RecordingTransport",

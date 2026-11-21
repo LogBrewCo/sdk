@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 core_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
 tmp_dir="$(mktemp -d)"
@@ -48,12 +49,10 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-npm install --save-exact --no-audit --fund=false \
+npm_ci_locked node-automatic-delivery >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$node_tgz" \
-  @types/node@22.18.0 \
-  typescript@6.0.3 \
-  >/dev/null
+  "$node_tgz" >/dev/null
 npm ls @logbrew/sdk @logbrew/node >/dev/null
 
 cat > tsconfig.json <<'EOF'

@@ -2,9 +2,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
-mongoose_version="${LOGBREW_NODE_MONGOOSE_PACKAGE_VERSION:-9.7.4}"
+mongoose_version="$(npm_locked_versions node-mongoose mongoose)"
 tmp_dir="$(mktemp -d)"
 export npm_config_cache="$tmp_dir/npm-cache"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -35,19 +36,13 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-npm install \
-  --save-exact \
-  --no-audit \
-  --fund=false \
+npm_ci_locked node-mongoose >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$node_tgz" \
-  "mongoose@${mongoose_version}" \
-  "typescript@5.9.3" \
-  "@types/node@24.10.1" \
-  >/dev/null
+  "$node_tgz" >/dev/null
 
 npm uninstall @logbrew/node >/dev/null
-npm install --save-exact --no-audit --fund=false "$node_tgz" >/dev/null
+npm_add_logbrew "$node_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json

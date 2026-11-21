@@ -3,6 +3,7 @@ set -euo pipefail
 trap 'printf "browser smoke failed at line %s\n" "$LINENO" >&2' ERR
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 browser_package_version="$(
@@ -130,16 +131,10 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-typescript_version="$(python3 "$repo_root/scripts/npm_settled_versions.py" typescript)"
-npm install \
-  --save-exact \
-  --no-audit \
-  --fund=false \
+npm_ci_locked browser >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$browser_tgz" \
-  happy-dom@20.10.1 \
-  "typescript@$typescript_version" \
-  >/dev/null
+  "$browser_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/browser": "file:' package.json

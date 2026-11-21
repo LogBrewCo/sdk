@@ -2,8 +2,9 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 tmp_dir="$(mktemp -d)"
-publint_version="0.3.21"
+publint_version="$(npm_locked_versions publint publint)"
 
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
@@ -12,15 +13,7 @@ remove_tmp_dir() {
 trap remove_tmp_dir EXIT
 
 cd "$tmp_dir"
-npm init -y >/dev/null
-npm install \
-  --save-exact \
-  --no-package-lock \
-  --ignore-scripts \
-  --no-audit \
-  --fund=false \
-  "publint@$publint_version" \
-  >/dev/null
+npm_ci_locked publint --ignore-scripts >/dev/null
 
 installed_version="$(node -p 'require("./node_modules/publint/package.json").version')"
 if [[ "$installed_version" != "$publint_version" ]]; then

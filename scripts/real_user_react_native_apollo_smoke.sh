@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -47,19 +48,10 @@ cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
 
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" react-native react @apollo/client graphql typescript @types/react)"
-read -r react_native_version react_version apollo_version graphql_version typescript_version types_react_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+npm_ci_locked react-native-apollo >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$native_tgz" \
-  "react@$react_version" \
-  "react-native@$react_native_version" \
-  "@apollo/client@$apollo_version" \
-  "graphql@$graphql_version" \
-  "typescript@$typescript_version" \
-  "@types/react@$types_react_version" \
-  >/dev/null
+  "$native_tgz" >/dev/null
 
 grep -q '"./apollo"' node_modules/@logbrew/react-native/package.json
 node --check node_modules/@logbrew/react-native/apollo.js

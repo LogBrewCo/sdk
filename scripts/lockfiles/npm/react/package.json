@@ -1,0 +1,13 @@
+{
+  "name": "react",
+  "private": true,
+  "dependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "31.0.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-test-renderer": "19.3.1",
+    "typescript": "7.0.2"
+  }
+}

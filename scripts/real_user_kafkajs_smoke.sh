@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
 kafkajs_package_version="$(node -p "require('${repo_root}/js/logbrew-kafkajs/package.json').version")"
@@ -63,22 +64,18 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-npm install \
-  --save-exact \
-  --no-audit \
-  --fund=false \
+locked_versions="$(npm_locked_versions kafkajs kafkajs)"
+read -r kafkajs_library_version <<<"$locked_versions"
+npm_ci_locked kafkajs >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$node_tgz" \
-  "$kafkajs_tgz" \
-  kafkajs@2.2.4 \
-  typescript@6.0.3 \
-  @types/node@26.0.1 \
-  >/dev/null
+  "$kafkajs_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json
 grep -q '"@logbrew/kafkajs": "file:' package.json
-grep -q '"kafkajs": "2.2.4"' package.json
+grep -q "\"kafkajs\": \"${kafkajs_library_version}\"" package.json
 grep -q '"@logbrew/kafkajs"' package-lock.json
 grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
@@ -87,7 +84,7 @@ npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/kafkajs@${kafkajs_package_version}" "$tmp_dir/npm-list-depth0.txt"
-grep -q 'kafkajs@2.2.4' "$tmp_dir/npm-list-depth0.txt"
+grep -q "kafkajs@${kafkajs_library_version}" "$tmp_dir/npm-list-depth0.txt"
 test -f node_modules/@logbrew/kafkajs/index.js
 test -f node_modules/@logbrew/kafkajs/index.cjs
 test -f node_modules/@logbrew/kafkajs/index.d.ts

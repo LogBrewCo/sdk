@@ -109,12 +109,16 @@ if (mobile !== core) {
             encoding="utf-8"
         )
 
-        self.assertIn('react_native_version="0.86.0"', script)
+        locked = json.loads(
+            (ROOT / "scripts" / "lockfiles" / "npm" / "react-native-bundle" / "package.json").read_text(encoding="utf-8")
+        )["dependencies"]
+        self.assertIn("npm_ci_locked react-native-bundle", script)
+        self.assertEqual(locked["react-native"], "0.86.0")
         self.assertIn("createLogBrewReactNativeClient", script)
         self.assertIn("--conditions=react-native", script)
         self.assertIn("nodeBuiltinReferences", script)
-        self.assertIn('expo_version="57.0.8"', script)
-        self.assertIn('worklets_version="0.10.0"', script)
+        self.assertEqual(locked["expo"], "57.0.8")
+        self.assertEqual(locked["react-native-worklets"], "0.10.0")
         self.assertIn("getLogBrewExpoConfig", script)
         self.assertIn("getBundleModeMetroConfig", script)
         self.assertIn("--source-maps external", script)

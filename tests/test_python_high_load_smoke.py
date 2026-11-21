@@ -25,7 +25,10 @@ class PythonHighLoadSmokeTests(unittest.TestCase):
 
         self.assertIn('python3 -m venv "$tmp_dir/build-venv"', script)
         self.assertIn('"$tmp_dir/build-venv/bin/python" -m build', script)
-        self.assertIn('python -m pip install "opentelemetry-sdk>=1,<2"', script)
+        self.assertIn(
+            'python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-opentelemetry.txt"',
+            script,
+        )
         self.assertIn("BatchSpanProcessor", script)
         self.assertIn("create_logbrew_open_telemetry_span_exporter", script)
         self.assertIn("HIGH_VOLUME_OTEL_SPANS = 1500", script)
@@ -39,9 +42,9 @@ class PythonHighLoadSmokeTests(unittest.TestCase):
         for smoke in (SMOKE, OTEL_SMOKE, AUTOMATIC_SMOKE):
             with self.subTest(smoke=smoke.name):
                 script = smoke.read_text(encoding="utf-8")
-                self.assertIn(
-                    "certifi==2026.7.22 truststore==0.10.4",
-                    script,
+                self.assertTrue(
+                    "certifi==2026.7.22 truststore==0.10.4" in script
+                    or '--require-hashes --requirement "$python_lockfiles/requirements-sdk.txt"' in script,
                 )
                 self.assertIn("--no-deps", script)
                 self.assertIn("--no-index", script)

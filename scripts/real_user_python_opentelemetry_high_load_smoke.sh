@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python_lockfiles="$repo_root/scripts/lockfiles/python"
 tmp_dir="$(mktemp -d)"
 python_package_version="$(
     python3 - "$repo_root/python/logbrew_py/pyproject.toml" <<'PY'
@@ -12,7 +13,6 @@ with open(sys.argv[1], "rb") as handle:
     print(tomllib.load(handle)["project"]["version"])
 PY
 )"
-wheel_artifact="logbrew_sdk-${python_package_version}-py3-none-any.whl"
 
 on_error() {
     local status=$?
@@ -39,8 +39,8 @@ trap cleanup EXIT
 trap on_error ERR
 
 python3 -m venv "$tmp_dir/build-venv"
-"$tmp_dir/build-venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check build >/dev/null
-"$tmp_dir/build-venv/bin/python" -m build "$repo_root/python/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
+"$tmp_dir/build-venv/bin/python" -m pip install --require-hashes --requirement "$python_lockfiles/requirements-build.txt" >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build --no-isolation "$repo_root/python/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
 
 python3 -m venv "$tmp_dir/venv"
 # shellcheck source=/dev/null
@@ -48,9 +48,9 @@ source "$tmp_dir/venv/bin/activate"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 export PIP_CACHE_DIR="$tmp_dir/pip-cache"
 
-python -m pip install certifi==2026.7.22 truststore==0.10.4 >/dev/null
-python -m pip install --no-index --no-deps "$tmp_dir/dist/$wheel_artifact" >/dev/null
-python -m pip install "opentelemetry-sdk>=1,<2" >/dev/null
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
+python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-opentelemetry.txt" >/dev/null
 
 python - <<'PY' > "$tmp_dir/high-load.stdout.json"
 from __future__ import annotations

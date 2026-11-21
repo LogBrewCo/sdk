@@ -1,0 +1,8 @@
+{
+  "name": "browser",
+  "private": true,
+  "dependencies": {
+    "happy-dom": "20.10.1",
+    "typescript": "7.0.2"
+  }
+}

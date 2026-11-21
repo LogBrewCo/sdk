@@ -1,0 +1,9 @@
+{
+  "name": "svelte",
+  "private": true,
+  "dependencies": {
+    "@types/node": "26.6.6",
+    "svelte": "5.59.1",
+    "typescript": "7.0.2"
+  }
+}

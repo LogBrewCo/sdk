@@ -10,7 +10,7 @@ class NodeQueueHighLoadSmokeTests(unittest.TestCase):
     def test_node_queue_high_load_smoke_exercises_installed_transport_flow(self):
         text = SMOKE.read_text()
 
-        self.assertIn("npm install", text)
+        self.assertIn("npm_add_logbrew", text)
         self.assertIn("node_modules/@logbrew/sdk", text)
         self.assertIn("node_modules/@logbrew/node", text)
         self.assertIn("127.0.0.1", text)
