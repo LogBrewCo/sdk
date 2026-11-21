@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 react_native_package_version="$(
@@ -145,18 +146,12 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" react-native react react-test-renderer typescript @types/react)"
-read -r react_native_version react_version renderer_version typescript_version types_react_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+locked_versions="$(npm_locked_versions react-native react-native react react-test-renderer)"
+read -r react_native_version react_version renderer_version <<<"$locked_versions"
+npm_ci_locked react-native >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$native_tgz" \
-  "react@$react_version" \
-  "react-native@$react_native_version" \
-  "react-test-renderer@$renderer_version" \
-  "typescript@$typescript_version" \
-  "@types/react@$types_react_version" \
-  >/dev/null
+  "$native_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/react-native": "file:' package.json

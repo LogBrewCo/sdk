@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
@@ -99,22 +100,13 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs @types/express typescript @types/node)"
-read -r nest_common_version nest_core_version nest_platform_express_version reflect_metadata_version rxjs_version types_express_version typescript_version types_node_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+locked_versions="$(npm_locked_versions nestjs @nestjs/common @nestjs/core @nestjs/platform-express)"
+read -r nest_common_version nest_core_version nest_platform_express_version <<<"$locked_versions"
+npm_ci_locked nestjs >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$node_tgz" \
-  "$nestjs_tgz" \
-  "@nestjs/common@$nest_common_version" \
-  "@nestjs/core@$nest_core_version" \
-  "@nestjs/platform-express@$nest_platform_express_version" \
-  "reflect-metadata@$reflect_metadata_version" \
-  "rxjs@$rxjs_version" \
-  "typescript@$typescript_version" \
-  "@types/node@$types_node_version" \
-  "@types/express@$types_express_version" \
-  >/dev/null
+  "$nestjs_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json

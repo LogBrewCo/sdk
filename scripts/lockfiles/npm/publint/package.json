@@ -1,0 +1,7 @@
+{
+  "name": "publint",
+  "private": true,
+  "dependencies": {
+    "publint": "0.3.21"
+  }
+}

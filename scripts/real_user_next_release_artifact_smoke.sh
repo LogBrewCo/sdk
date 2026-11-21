@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
@@ -136,14 +137,6 @@ cat > "$app_dir/package.json" <<'JSON'
   "type": "module",
   "scripts": {
     "build": "next build"
-  },
-  "dependencies": {
-    "@logbrew/browser": "file:../logbrew-browser.tgz",
-    "@logbrew/sdk": "file:../logbrew-sdk.tgz",
-    "@logbrew/next": "file:../logbrew-next.tgz",
-    "next": "16.4.6",
-    "react": "19.3.1",
-    "react-dom": "19.3.1"
   }
 }
 JSON
@@ -208,7 +201,8 @@ JS
 
 (
   cd "$app_dir"
-  npm install --silent
+  npm_ci_locked next-release-artifact --silent
+  npm_add_logbrew --silent ../logbrew-browser.tgz ../logbrew-sdk.tgz ../logbrew-next.tgz
   node --input-type=module - <<'JS'
 import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
 

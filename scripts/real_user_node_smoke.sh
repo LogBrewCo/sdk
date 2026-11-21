@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
@@ -116,17 +117,10 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" pg pg-mem typescript @types/node)"
-read -r pg_version pg_mem_version typescript_version types_node_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+npm_ci_locked node >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$node_tgz" \
-  "pg@$pg_version" \
-  "pg-mem@$pg_mem_version" \
-  "typescript@$typescript_version" \
-  "@types/node@$types_node_version" \
-  >/dev/null
+  "$node_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json

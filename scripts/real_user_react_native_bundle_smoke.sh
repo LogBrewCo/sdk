@@ -2,12 +2,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
-react_native_version="0.86.0"
-react_version="19.2.3"
-react_native_cli_version="20.1.0"
-expo_version="57.0.8"
-worklets_version="0.10.0"
+locked_versions="$(npm_locked_versions react-native-bundle react-native)"
+read -r react_native_version <<<"$locked_versions"
 expected_sdk_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 expected_react_native_package_version="$(node -p "require('${repo_root}/js/logbrew-react-native/package.json').version")"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rn-bundle.XXXXXX")"
@@ -39,24 +37,10 @@ mkdir "$app_root"
 (
   cd "$app_root"
   npm init --yes >/dev/null
-  npm install \
-    --silent \
-    --ignore-scripts \
-    --no-audit \
-    --no-fund \
-    --save-exact \
+  npm_ci_locked react-native-bundle --silent --ignore-scripts
+  npm_add_logbrew --silent --ignore-scripts \
     "$core_tarball" \
-    "$native_tarball" \
-    "@babel/core@^7.25.2" \
-    "@babel/runtime@^7.25.0" \
-    "@react-native-community/cli@$react_native_cli_version" \
-    "@react-native-community/cli-platform-android@$react_native_cli_version" \
-    "@react-native/babel-preset@$react_native_version" \
-    "@react-native/metro-config@$react_native_version" \
-    "expo@$expo_version" \
-    "react@$react_version" \
-    "react-native@$react_native_version" \
-    "react-native-worklets@$worklets_version"
+    "$native_tarball"
 
   installed_react_native="$(
     node -p "require('react-native/package.json').version"

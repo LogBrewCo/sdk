@@ -1,0 +1,9 @@
+{
+  "name": "js",
+  "private": true,
+  "dependencies": {
+    "pino": "10.3.1",
+    "typescript": "6.0.3",
+    "winston": "3.19.0"
+  }
+}

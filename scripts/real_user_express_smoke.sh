@@ -3,6 +3,7 @@ set -euo pipefail
 trap 'printf "express smoke failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
@@ -96,18 +97,13 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" express @types/express typescript @types/node)"
-read -r express_version types_express_version typescript_version types_node_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+locked_versions="$(npm_locked_versions express express @types/express)"
+read -r express_version types_express_version <<<"$locked_versions"
+npm_ci_locked express >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$node_tgz" \
-  "$express_tgz" \
-  "express@$express_version" \
-  "typescript@$typescript_version" \
-  "@types/node@$types_node_version" \
-  "@types/express@$types_express_version" \
-  >/dev/null
+  "$express_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json

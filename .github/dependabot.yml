@@ -109,6 +109,8 @@ updates:
       - /tools/capture-matrix/probes/go/logbrew/asynq
       - /tools/capture-matrix/probes/go/logbrew/gin
       - /tools/capture-matrix/probes/go/logbrew/otel
+      - /tools/pin-check
+      - /tools/staticcheck
       - /tools/toolchain-probe
     schedule:
       interval: daily
@@ -143,6 +145,51 @@ updates:
       default-days: 2
     groups:
       maven:
+        patterns: ["*"]
+  # The smoke scripts install third-party packages with npm ci from these
+  # lockfiles, the way a user installs them with npm.
+  - package-ecosystem: npm
+    directories:
+      - /scripts/lockfiles/npm/amqplib
+      - /scripts/lockfiles/npm/angular
+      - /scripts/lockfiles/npm/aws-sqs
+      - /scripts/lockfiles/npm/browser
+      - /scripts/lockfiles/npm/browser-fake-intake
+      - /scripts/lockfiles/npm/bullmq
+      - /scripts/lockfiles/npm/capture-matrix-js
+      - /scripts/lockfiles/npm/express
+      - /scripts/lockfiles/npm/fastify
+      - /scripts/lockfiles/npm/js
+      - /scripts/lockfiles/npm/js-opentelemetry
+      - /scripts/lockfiles/npm/kafkajs
+      - /scripts/lockfiles/npm/nestjs
+      - /scripts/lockfiles/npm/nestjs-public-registry
+      - /scripts/lockfiles/npm/next
+      - /scripts/lockfiles/npm/next-release-artifact
+      - /scripts/lockfiles/npm/node
+      - /scripts/lockfiles/npm/node-automatic-delivery
+      - /scripts/lockfiles/npm/node-axios
+      - /scripts/lockfiles/npm/node-http-client
+      - /scripts/lockfiles/npm/node-mongoose
+      - /scripts/lockfiles/npm/node-persistent-delivery
+      - /scripts/lockfiles/npm/node-queue-trace
+      - /scripts/lockfiles/npm/node-redis-packages
+      - /scripts/lockfiles/npm/npm-public-registry
+      - /scripts/lockfiles/npm/prisma
+      - /scripts/lockfiles/npm/publint
+      - /scripts/lockfiles/npm/react
+      - /scripts/lockfiles/npm/react-native
+      - /scripts/lockfiles/npm/react-native-apollo
+      - /scripts/lockfiles/npm/react-native-bundle
+      - /scripts/lockfiles/npm/react-native-release-artifact
+      - /scripts/lockfiles/npm/svelte
+      - /scripts/lockfiles/npm/vue
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      npm:
         patterns: ["*"]
   - package-ecosystem: nuget
     directories:
@@ -183,6 +230,7 @@ updates:
       - /python/logbrew_fastapi
       - /python/logbrew_flask
       - /python/logbrew_py
+      - /scripts/lockfiles/python
     schedule:
       interval: daily
     cooldown:

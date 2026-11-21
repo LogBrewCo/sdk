@@ -118,7 +118,13 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         )
 
         workflow = source_text(".github/workflows/ci.yml")
-        install = "python3 -m pip install certifi==2026.7.22 truststore==0.10.4"
+        install = (
+            "python3 -m pip install --require-hashes "
+            "--requirement scripts/lockfiles/python/requirements-ci-tests.txt"
+        )
+        requirements = source_text("scripts/lockfiles/python/requirements-ci-tests.in")
+        self.assertIn("certifi==2026.7.22", requirements)
+        self.assertIn("truststore==0.10.4", requirements)
         source_tests = (
             "PYTHONPATH=python/logbrew_py/src python3 -m unittest discover "
             "-s python/logbrew_py/tests -p 'test_*.py'"
@@ -128,7 +134,9 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertLess(workflow.index(install), workflow.index(source_tests))
 
         readiness = source_text(".github/workflows/release-readiness.yml")
-        metadata_install = "python3 -m pip install ./python/logbrew_py"
+        metadata_install = (
+            'python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" logbrew-sdk'
+        )
         self.assertIn(metadata_install, readiness)
         self.assertIn(source_tests, readiness)
         self.assertLess(readiness.index(metadata_install), readiness.index(source_tests))
@@ -342,9 +350,11 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
     def test_next_instrumentation_type_smoke_installs_framework_types(self) -> None:
         smoke = source_text("scripts/real_user_next_smoke.sh")
+        locked = json.loads(source_text("scripts/lockfiles/npm/next/package.json"))
 
-        self.assertIn("@types/react", smoke)
-        self.assertIn("@types/react-dom", smoke)
+        self.assertIn("npm_ci_locked next", smoke)
+        self.assertIn("@types/react", locked["dependencies"])
+        self.assertIn("@types/react-dom", locked["dependencies"])
         self.assertIn("cat > instrumentation-consumer.ts", smoke)
         self.assertIn("--lib ESNext,DOM,DOM.Iterable", smoke)
         self.assertIn("--skipLibCheck true", smoke)

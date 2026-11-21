@@ -1,0 +1,8 @@
+{
+  "name": "node-automatic-delivery",
+  "private": true,
+  "dependencies": {
+    "@types/node": "22.18.0",
+    "typescript": "6.0.3"
+  }
+}

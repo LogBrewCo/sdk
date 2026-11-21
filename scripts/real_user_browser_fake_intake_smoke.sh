@@ -2,11 +2,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 browser_package_version="$(node -p "require('${repo_root}/js/logbrew-browser/package.json').version")"
-vite_version="8.0.16"
-next_version="16.2.10"
-react_version="19.2.7"
+read -r vite_version next_version react_version <<<"$(npm_locked_versions browser-fake-intake vite next react)"
 tmp_dir="$(mktemp -d)"
 export npm_config_cache="$tmp_dir/npm-cache"
 export npm_config_update_notifier=false
@@ -54,17 +53,10 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-npm install \
-  --save-exact \
-  --no-audit \
-  --fund=false \
+npm_ci_locked browser-fake-intake >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
-  "$browser_tgz" \
-  "vite@$vite_version" \
-  "next@$next_version" \
-  "react@$react_version" \
-  "react-dom@$react_version" \
-  >/dev/null
+  "$browser_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/browser": "file:' package.json

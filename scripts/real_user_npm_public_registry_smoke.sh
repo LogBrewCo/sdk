@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 registry="https://registry.npmjs.org"
 tmp_dir="$(mktemp -d)"
 
@@ -152,13 +153,7 @@ JS
   export NPM_CONFIG_USERCONFIG="$tmp_dir/npmrc"
   npm init -y >"$tmp_dir/npm-init.out" 2>"$tmp_dir/npm-init.err" || fail_receipt_stage "application setup"
   npm pkg set type=module >"$tmp_dir/npm-pkg.out" 2>"$tmp_dir/npm-pkg.err" || fail_receipt_stage "application setup"
-  npm install \
-    --save-exact \
-    --ignore-scripts \
-    --legacy-peer-deps \
-    --no-audit \
-    --no-fund \
-    --offline \
+  npm_add_logbrew --ignore-scripts --legacy-peer-deps --offline \
     "$tmp_dir/artifacts/0.tgz" \
     "$tmp_dir/artifacts/1.tgz" \
     "$tmp_dir/artifacts/2.tgz" \
@@ -323,27 +318,14 @@ cd "$app_dir"
 
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(npm_config_registry="$registry" python3 "$repo_root/scripts/npm_settled_versions.py" \
-  bullmq kafkajs amqplib @aws-sdk/client-sqs @aws-sdk/client-sns @aws-sdk/client-eventbridge)"
-read -r bullmq_library_version kafkajs_library_version amqplib_library_version \
-  client_sqs_version client_sns_version client_eventbridge_version <<<"$settled_versions"
-npm install \
-  --save-exact \
-  --ignore-scripts \
-  --registry "$registry" \
+npm_ci_locked npm-public-registry --ignore-scripts >/dev/null
+npm_add_logbrew --ignore-scripts --registry "$registry" \
   "@logbrew/sdk@${sdk_version}" \
   "@logbrew/node@${node_version}" \
   "@logbrew/bullmq@${bullmq_version}" \
   "@logbrew/kafkajs@${kafkajs_version}" \
   "@logbrew/amqplib@${amqplib_version}" \
-  "@logbrew/aws-sqs@${aws_sqs_version}" \
-  "bullmq@$bullmq_library_version" \
-  "kafkajs@$kafkajs_library_version" \
-  "amqplib@$amqplib_library_version" \
-  "@aws-sdk/client-sqs@$client_sqs_version" \
-  "@aws-sdk/client-sns@$client_sns_version" \
-  "@aws-sdk/client-eventbridge@$client_eventbridge_version" \
-  >/dev/null
+  "@logbrew/aws-sqs@${aws_sqs_version}" >/dev/null
 
 npm ls \
   "@logbrew/sdk@${sdk_version}" \

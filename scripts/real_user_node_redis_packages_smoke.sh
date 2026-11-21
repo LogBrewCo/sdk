@@ -2,10 +2,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
-redis_version="${LOGBREW_NODE_REDIS_PACKAGE_VERSION:-6.1.0}"
-ioredis_version="${LOGBREW_NODE_IOREDIS_PACKAGE_VERSION:-5.11.1}"
+read -r redis_version ioredis_version <<<"$(npm_locked_versions node-redis-packages redis ioredis)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -35,13 +35,8 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-npm install \
-  --save-exact \
-  "$core_tgz" \
-  "$node_tgz" \
-  "redis@${redis_version}" \
-  "ioredis@${ioredis_version}" \
-  >/dev/null
+npm_ci_locked node-redis-packages >/dev/null
+npm_add_logbrew "$core_tgz" "$node_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json

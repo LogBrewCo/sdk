@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 tmp_dir="$(mktemp -d)"
 
 remove_tmp_dir() {
@@ -54,7 +55,7 @@ EOF
 
 cd "$tmp_dir"
 npm init -y >/dev/null
-npm install --ignore-scripts --no-audit --fund=false "$package_path" >/dev/null
+npm_add_logbrew --ignore-scripts "$package_path" >/dev/null
 
 test -x node_modules/.bin/logbrew-release-artifacts
 node_modules/.bin/logbrew-release-artifacts --help > "$tmp_dir/cli-help.txt"

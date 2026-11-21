@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python_lockfiles="$repo_root/scripts/lockfiles/python"
 tmp_dir="$(mktemp -d)"
 python_package_version="$(
     python3 - "$repo_root/python/logbrew_py/pyproject.toml" <<'PY'
@@ -12,7 +13,6 @@ with open(sys.argv[1], "rb") as handle:
     print(tomllib.load(handle)["project"]["version"])
 PY
 )"
-wheel_artifact="logbrew_sdk-${python_package_version}-py3-none-any.whl"
 
 on_error() {
     local status=$?
@@ -41,9 +41,10 @@ source "$tmp_dir/venv/bin/activate"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 export PIP_CACHE_DIR="$tmp_dir/pip-cache"
 
-python -m pip install --upgrade pip build >/dev/null
-python -m build "$repo_root/python/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
-python -m pip install "$tmp_dir/dist/$wheel_artifact" >/dev/null
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-build.txt" >/dev/null
+python -m build --no-isolation "$repo_root/python/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
+python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
 
 python - <<'PY' > "$tmp_dir/no-otel.stdout.json"
 import json
@@ -54,7 +55,7 @@ print(json.dumps({"ok": logbrew_trace_context_from_current_open_telemetry_span()
 PY
 grep -q '"ok": true' "$tmp_dir/no-otel.stdout.json"
 
-python -m pip install "opentelemetry-sdk>=1,<2" >/dev/null
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-opentelemetry.txt" >/dev/null
 
 python - <<'PY' > "$tmp_dir/otel.stdout.json"
 import json

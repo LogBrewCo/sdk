@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -38,9 +39,10 @@ mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" typescript @types/node)"
-read -r typescript_version types_node_version <<<"$settled_versions"
-npm install --save-exact "$core_tgz" "$node_tgz" "typescript@$typescript_version" "@types/node@$types_node_version" >/dev/null
+npm_ci_locked node-queue-trace >/dev/null
+npm_add_logbrew \
+  "$core_tgz" \
+  "$node_tgz" >/dev/null
 
 cat > smoke.mjs <<'EOF'
 import {

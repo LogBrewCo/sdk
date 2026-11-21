@@ -42,8 +42,7 @@ RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check \
   python/logbrew_django/src \
   python/logbrew_django/examples \
   python/logbrew_django/tests \
-  scripts/check_python_sources.py \
-  scripts/npm_settled_versions.py
+  scripts/check_python_sources.py
 
 # Flask uses its package's all-rules policy and reviewed compatibility exceptions.
 (
@@ -68,8 +67,7 @@ MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_py/tests:$r
   python/logbrew_django/src \
   python/logbrew_django/examples \
   python/logbrew_django/tests \
-  scripts/check_python_sources.py \
-  scripts/npm_settled_versions.py
+  scripts/check_python_sources.py
 
 # The capture matrix tool reads TOML with the standard library, which needs Python 3.11.
 RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check \

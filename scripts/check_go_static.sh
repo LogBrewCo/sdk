@@ -3,13 +3,14 @@ set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
-version="2026.2.2"
+# tools/staticcheck/go.mod pins the release; Dependabot keeps it current.
+version="$(awk '{ for (i = 1; i < NF; i++) if ($i == "honnef.co/go/tools") v = $(i + 1) } END { sub(/^v/, "", v); print v }' "$repo_root/tools/staticcheck/go.mod")"
 trap 'find "$tmp_dir" -depth -delete' EXIT
 
 staticcheck_bin="$(command -v staticcheck || true)"
 if [[ -z "$staticcheck_bin" ]] || \
-	[[ "$("$staticcheck_bin" -version)" != "staticcheck $version (0.8.2)" ]]; then
-	printf '%s\n' "Staticcheck $version is required on PATH" >&2
+	[[ "$("$staticcheck_bin" -version)" != *" ($version)" ]]; then
+	printf '%s\n' "Staticcheck $version is required on PATH. Run: go -C tools/staticcheck install tool" >&2
 	exit 1
 fi
 

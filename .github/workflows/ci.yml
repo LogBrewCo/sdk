@@ -156,6 +156,16 @@ jobs:
             go/logbrew/otel/go.mod
             go/logbrew/otel/go.sum
             tools/toolchain-probe/go.mod
+            tools/pin-check/go.sum
+            tools/staticcheck/go.sum
+
+      - name: Check that every install is pinned
+        # Runs the OpenSSF Scorecard Pinned-Dependencies check on this tree. Go
+        # downloads the toolchain that tools/pin-check/go.mod names, if needed,
+        # and checks it against the Go checksum database.
+        env:
+          GOTOOLCHAIN: auto
+        run: go -C tools/pin-check test ./... && go -C tools/pin-check run .
 
       - name: Set up Java
         if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
@@ -201,7 +211,7 @@ jobs:
           LOGBREW_GO_BIN: ${{ runner.tool_cache }}/go/${{ steps.setup-go.outputs.go-version }}/${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}/bin
         run: |
           export PATH="$LOGBREW_GO_BIN:$PATH"
-          GOBIN="$LOGBREW_STATICCHECK_BIN" go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
+          GOBIN="$LOGBREW_STATICCHECK_BIN" go -C tools/staticcheck install tool
           PATH="$LOGBREW_STATICCHECK_BIN:$PATH" bash scripts/check_go_static.sh
 
       - name: Run Kotlin style checks
@@ -461,7 +471,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends redis-server
           redis-cli ping >/dev/null 2>&1 || sudo redis-server --daemonize yes
           trap 'redis-cli shutdown >/dev/null 2>&1 || true' EXIT
-          python3 -m pip install certifi==2026.7.22 truststore==0.10.4 arq==0.28.0 dramatiq==2.2.1 fakeredis==2.31.3 rq==2.12.0 httpx==0.28.1 httpx2==2.14.0 aiohttp==3.14.5
+          python3 -m pip install --require-hashes --requirement scripts/lockfiles/python/requirements-ci-tests.txt
           PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run FastAPI package checks
@@ -722,7 +732,10 @@ jobs:
 
       - name: Run installed core SDK tests
         run: |
-          python3 -m pip install --no-cache-dir --disable-pip-version-check './python/logbrew_py[arq,dramatiq,rq]' fakeredis==2.31.3 httpx==0.28.1 httpx2==2.14.0 aiohttp==3.14.5
+          python3 -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --requirement scripts/lockfiles/python/requirements-build.txt
+          python3 -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --requirement scripts/lockfiles/python/requirements-ci-tests.txt
+          python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/logbrew-wheel" ./python/logbrew_py
+          python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" 'logbrew-sdk[arq,dramatiq,rq]'
           PYTHONPATH="" python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run installed FastAPI and Flask package checks

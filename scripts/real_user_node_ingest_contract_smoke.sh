@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 tmp_dir="$(mktemp -d)"
 export npm_config_cache="$tmp_dir/npm-cache"
 export npm_config_update_notifier=false
@@ -421,7 +422,7 @@ JS
 
 (
   cd "$app_dir"
-  npm install --silent --ignore-scripts
+  npm_add_logbrew --silent --ignore-scripts
   npm ls @logbrew/sdk @logbrew/node >/dev/null
   node index.mjs
 )

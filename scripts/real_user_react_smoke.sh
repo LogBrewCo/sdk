@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 package_version() {
   node -e '
@@ -79,19 +80,13 @@ app_dir="$tmp_dir/react-smoke-app"
 mkdir -p "$app_dir"
 cd "$app_dir"
 npm init -y >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" react react-dom react-test-renderer jsdom typescript @types/react @types/react-dom)"
-read -r react_version react_dom_version renderer_version jsdom_version typescript_version types_react_version types_react_dom_version <<<"$settled_versions"
-npm install --save-exact \
+locked_versions="$(npm_locked_versions react react react-dom react-test-renderer)"
+read -r react_version react_dom_version renderer_version <<<"$locked_versions"
+npm_ci_locked react >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$browser_tgz" \
-  "$react_tgz" \
-  "react@$react_version" \
-  "react-dom@$react_dom_version" \
-  "react-test-renderer@$renderer_version" \
-  "jsdom@$jsdom_version" \
-  "typescript@$typescript_version" \
-  "@types/react@$types_react_version" \
-  "@types/react-dom@$types_react_dom_version" >/dev/null
+  "$react_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/browser": "file:' package.json

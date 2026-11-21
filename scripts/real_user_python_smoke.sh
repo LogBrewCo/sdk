@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python_lockfiles="$repo_root/scripts/lockfiles/python"
 source "$repo_root/scripts/native_verifier.sh"
 tmp_dir="$(mktemp -d)"
 python_package_version="$(
@@ -242,7 +243,7 @@ run_requirement_reinstalls() {
 
     python -m pip uninstall -y logbrew-sdk >/dev/null
     assert_python_package_removed
-    python -m pip install --report "$freeze_report" -r "$freeze_file" >/dev/null
+    python -m pip install --no-index --report "$freeze_report" -r "$freeze_file" >/dev/null
     python -m pip check >/dev/null
     verify_direct_install "$expected_suffix" "$freeze_report"
 
@@ -309,7 +310,9 @@ run_sdist_install_checks() {
     python3 -m venv "$tmp_dir/sdist-venv"
     source "$tmp_dir/sdist-venv/bin/activate"
 
-    python -m pip install --report "$tmp_dir/sdist-pip-install-report.json" "$sdist_path" >/dev/null
+    python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-build.txt" >/dev/null
+    python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
+    python -m pip install --no-index --no-build-isolation --report "$tmp_dir/sdist-pip-install-report.json" "$sdist_path" >/dev/null
     python -m pip check >/dev/null
     python -m pip freeze > "$tmp_dir/sdist-pip-freeze.txt"
     grep -q "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt"
@@ -510,10 +513,12 @@ for needle in (
         raise SystemExit(f"missing sdist pyproject metadata: {needle}")
 PY
 
-python -m pip install "$wheel_path" >/dev/null
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
+python -m pip install --no-index "$wheel_path" >/dev/null
 python3 -m venv "$tmp_dir/receipt-venv"
 receipt_python="$tmp_dir/receipt-venv/bin/python"
-"$receipt_python" -m pip install --report "$tmp_dir/pip-install-report.json" "$wheel_path" >/dev/null
+"$receipt_python" -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
+"$receipt_python" -m pip install --no-index --report "$tmp_dir/pip-install-report.json" "$wheel_path" >/dev/null
 "$receipt_python" -m pip check >/dev/null
 "$receipt_python" -m pip show logbrew-sdk > "$tmp_dir/pip-show.txt"
 "$receipt_python" -m pip show -f logbrew-sdk > "$tmp_dir/pip-show-files.txt"

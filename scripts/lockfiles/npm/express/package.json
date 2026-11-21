@@ -1,0 +1,10 @@
+{
+  "name": "express",
+  "private": true,
+  "dependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.6",
+    "express": "5.3.0",
+    "typescript": "7.0.2"
+  }
+}

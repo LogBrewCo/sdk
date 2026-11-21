@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
@@ -123,22 +124,13 @@ cd "$app_dir"
 npm init -y >/dev/null
 npm pkg set type=module >/dev/null
 npm pkg set scripts.build="next build" >/dev/null
-settled_versions="$(python3 "$repo_root/scripts/npm_settled_versions.py" next react react-dom typescript @types/node @types/react @types/react-dom)"
-read -r next_version react_version react_dom_version typescript_version types_node_version types_react_version types_react_dom_version <<<"$settled_versions"
-npm install \
-  --save-exact \
+locked_versions="$(npm_locked_versions next next react react-dom)"
+read -r next_version react_version react_dom_version <<<"$locked_versions"
+npm_ci_locked next >/dev/null
+npm_add_logbrew \
   "$core_tgz" \
   "$node_tgz" \
-  "$next_tgz" \
-  "next@$next_version" \
-  "react@$react_version" \
-  "react-dom@$react_dom_version" \
-  "react-test-renderer@$react_version" \
-  "typescript@$typescript_version" \
-  "@types/node@$types_node_version" \
-  "@types/react@$types_react_version" \
-  "@types/react-dom@$types_react_dom_version" \
-  >/dev/null
+  "$next_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json

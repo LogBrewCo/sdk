@@ -30,7 +30,7 @@ class NodePersistentDeliveryWorkflowGateTests(unittest.TestCase):
 
         for expected in (
             "npm pack --json",
-            "typescript@6.0.3",
+            "npm_ci_locked node-persistent-delivery",
             "process.exit(0)",
             "persistent_queue_in_use",
             "requests[0].body, requests[1].body",

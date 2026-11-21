@@ -2,12 +2,13 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 sdk_package_tgz="logbrew-sdk-${sdk_package_version}.tgz"
-smoke_typescript_version="6.0.3"
-smoke_pino_version="10.3.1"
-smoke_winston_version="3.19.0"
+read -r smoke_typescript_version smoke_pino_version smoke_winston_version <<<"$(
+  npm_locked_versions js typescript pino winston
+)"
 export LOGBREW_JS_PACKAGE_TGZ="$sdk_package_tgz"
 export LOGBREW_JS_PACKAGE_VERSION="$sdk_package_version"
 export LOGBREW_JS_SMOKE_TYPESCRIPT_VERSION="$smoke_typescript_version"
@@ -1469,11 +1470,8 @@ EOF
 
 case "$package_manager" in
   npm)
-    npm install --save-exact \
-      "$package_tgz" \
-      "typescript@$smoke_typescript_version" \
-      "pino@$smoke_pino_version" \
-      "winston@$smoke_winston_version" >/dev/null
+    npm_ci_locked js >/dev/null
+    npm_add_logbrew "$package_tgz" >/dev/null
     test -f package-lock.json
     node - "$package_tgz" <<'EOF'
 const fs = require("node:fs");
@@ -1685,7 +1683,7 @@ assert_removed_package_surface "$package_manager" package-list-removed.json
 
 case "$package_manager" in
   npm)
-    npm install "$package_tgz" >/dev/null
+    npm_add_logbrew "$package_tgz" >/dev/null
     ;;
   pnpm)
     pnpm add "$package_tgz" >/dev/null

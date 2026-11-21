@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python_lockfiles="$repo_root/scripts/lockfiles/python"
 tmp_dir="$(mktemp -d)"
 load_tasks="${LOGBREW_CELERY_LOAD_TASKS:-25}"
 python_package_version="$(
@@ -13,7 +14,6 @@ with open(sys.argv[1], "rb") as handle:
     print(tomllib.load(handle)["project"]["version"])
 PY
 )"
-wheel_artifact="logbrew_sdk-${python_package_version}-py3-none-any.whl"
 
 if [[ ! "$load_tasks" =~ ^[0-9]+$ ]] || (( load_tasks < 1 || load_tasks > 2000 )); then
     echo "LOGBREW_CELERY_LOAD_TASKS must be an integer from 1 through 2000" >&2
@@ -41,22 +41,23 @@ source "$tmp_dir/venv/bin/activate"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 export PIP_CACHE_DIR="$tmp_dir/pip-cache"
 
-python -m pip install --upgrade pip build >/dev/null
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-build.txt" >/dev/null
 cp -R "$repo_root/python/logbrew_py" "$tmp_dir/logbrew_py"
 rm -rf \
     "$tmp_dir/logbrew_py/build" \
     "$tmp_dir/logbrew_py/dist" \
     "$tmp_dir/logbrew_py/src/logbrew_sdk.egg-info"
 find "$tmp_dir/logbrew_py" -type d -name __pycache__ -prune -exec rm -rf {} +
-python -m build "$tmp_dir/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
-python -m pip install "$tmp_dir/dist/${wheel_artifact}[celery]" "celery==5.6.3" >/dev/null
+python -m build --no-isolation "$tmp_dir/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
+python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-celery.txt" >/dev/null
+python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
 python -m pip check >/dev/null
 python -m pip uninstall -y logbrew-sdk >/dev/null
 if python -c 'import logbrew_sdk' 2>/dev/null; then
     echo "expected logbrew-sdk to be removed by pip uninstall" >&2
     exit 1
 fi
-python -m pip install "$tmp_dir/dist/${wheel_artifact}[celery]" "celery==5.6.3" >/dev/null
+python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
 python -m pip check >/dev/null
 python -m pip freeze > "$tmp_dir/pip-freeze.txt"
 

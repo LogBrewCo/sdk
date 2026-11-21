@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/npm_locked.sh"
 tmp_dir="$(mktemp -d)"
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -31,7 +32,7 @@ package_path="$tmp_dir/$package_tgz"
 (
   cd "$tmp_dir"
   npm init -y >/dev/null
-  npm install --ignore-scripts --no-audit --fund=false "$package_path" >/dev/null
+  npm_add_logbrew --ignore-scripts "$package_path" >/dev/null
 )
 
 release_artifacts_cli="$tmp_dir/node_modules/.bin/logbrew-release-artifacts"
