@@ -64,7 +64,6 @@ printf '%s\n' "$files" | awk '
         if (base == "Gemfile" || base == "gems.rb" || base ~ /\.gemspec$/) return "bundler"
         if (base ~ /^(Dockerfile|Containerfile)(\..+)?$/ || base ~ /\.Dockerfile$/) return "docker"
         if (base ~ /^(docker-)?compose(\..+)?\.ya?ml$/) return "docker-compose"
-        if (base ~ /\.tf$/) return "terraform"
         if (path ~ /^\.devcontainer(\.json|\/(.+\/)?devcontainer\.json)$/) { dir = "/"; return "devcontainers" }
         if (path == ".pre-commit-config.yaml") { dir = "/"; return "pre-commit" }
         return ""
