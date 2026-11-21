@@ -2,8 +2,8 @@
   "name": "kafkajs",
   "private": true,
   "dependencies": {
-    "@types/node": "26.0.1",
+    "@types/node": "26.6.6",
     "kafkajs": "2.2.4",
-    "typescript": "6.0.3"
+    "typescript": "7.0.2"
   }
 }

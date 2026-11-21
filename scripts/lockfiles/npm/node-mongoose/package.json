@@ -2,8 +2,8 @@
   "name": "node-mongoose",
   "private": true,
   "dependencies": {
-    "@types/node": "24.10.1",
-    "mongoose": "9.7.4",
-    "typescript": "5.9.3"
+    "@types/node": "26.6.6",
+    "mongoose": "9.12.2",
+    "typescript": "7.0.2"
   }
 }
