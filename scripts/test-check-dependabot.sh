@@ -20,7 +20,7 @@ entry() {
     shift
     printf '  - package-ecosystem: %s\n    directories:\n' "$ecosystem"
     for directory in "$@"; do printf '      - %s\n' "$directory"; done
-    printf '    schedule:\n      interval: daily\n    cooldown:\n      default-days: 2\n'
+    printf '    schedule:\n      interval: daily\n    cooldown:\n      default-days: 7\n'
     printf '    groups:\n      %s:\n        patterns: ["*"]\n' "$ecosystem"
 }
 
@@ -100,7 +100,7 @@ seed "$(base | sed '/ecosystem: gomod/,$ s/daily/weekly/')" "${files[@]}"
 expect_report "a weekly schedule" 'gomod: schedule interval is "weekly"; use daily'
 
 seed "$(base | sed '/ecosystem: gomod/,$ {/cooldown/d;/default-days/d;}')" "${files[@]}"
-expect_report "a missing cooldown" 'gomod: cooldown default-days is ""; use 2'
+expect_report "a missing cooldown" 'gomod: cooldown default-days is ""; use 7'
 
 seed "$(base | sed '/ecosystem: gomod/,$ {/groups/d;/gomod:$/d;/patterns/d;}')" "${files[@]}"
 expect_report "ungrouped updates" 'gomod: needs a group with patterns: ["*"]'

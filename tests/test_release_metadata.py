@@ -49,7 +49,8 @@ class ReleaseMetadataTests(unittest.TestCase):
             "-p:EnableSourceLink=true",
             "steps.nuget-artifacts.outputs.httpclient_content_sha256",
             "while IFS= read -r package_path",
-            '"${{ steps.nuget-version.outputs.httpclient_version }}"',
+            "HTTPCLIENT_VERSION: ${{ steps.nuget-version.outputs.httpclient_version }}",
+            '"${HTTPCLIENT_VERSION}"',
             '"$(git rev-parse HEAD)"',
         ):
             self.assertIn(expected, workflow)
@@ -186,7 +187,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         for expected in (
             "release-artifacts python create",
             "--source-commit",
-            "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}",
+            "FLASK_VERSION: ${{ steps.pypi-version.outputs.flask_version }}",
+            "logbrew-flask=${FLASK_VERSION}",
             "python-release-artifacts.json",
             "real_user_python_public_pypi_smoke.sh --manifest",
             "--artifact-root dist/pypi",

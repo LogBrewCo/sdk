@@ -350,7 +350,7 @@ version = "pinned in the workflows"
 unpinned = "each workflow pins the commit with a version comment; the check requires one such pin per action"
 uses = ["actions/checkout"]
 runs_in = "every workflow"
-config = "fetch-depth where a job compares history"
+config = "fetch-depth where a job compares history; persist-credentials: false on every checkout"
 conflicts = "none known"
 exceptions = "none"
 runtime = "a few seconds per run"
@@ -392,7 +392,7 @@ checked = 2026-11-19
 
 [[tool]]
 id = "dependabot-coverage"
-risk = "a dependency or tool manifest that Dependabot never updates, or an entry that is not daily, has no 2-day cooldown, or splits updates into many pull requests"
+risk = "a dependency or tool manifest that Dependabot never updates, or an entry that is not daily, has no 7-day cooldown, or splits updates into many pull requests"
 tool = "scripts/check-dependabot.sh and its seeded tests"
 version = "repository"
 unpinned = "repository script, versioned by commit"
@@ -437,6 +437,23 @@ runtime = "local n=1, 20 s for the whole repository"
 findings = "seeded 2026-10-25: a throwaway branch pinning golang.org/x/text v0.3.0 failed with GO-2020-0015 and opened issue #424 (run 40185016916; branch deleted); local run on main 2026-10-25: 17 advisories in 6 packages (Go: quic-go, golang.org/x/net, otel/sdk; Maven: spring-webflux, spring-webmvc, lz4-java) that Dependabot did not report; 2026-10-25 upgrades cleared the quic-go, Spring, and lz4-java findings (quic-go v0.59.1, Spring Framework 7.0.10, lz4-java 1.12.1) and the 5 Go findings (GO-2026-6603, GO-2026-6611, GO-2026-6612, GO-2026-6617, GO-2026-6505) became reviewed exceptions until the Go modules moved to Go 1.26.0 with golang.org/x/net v0.61.0 and go.opentelemetry.io/otel/sdk v1.47.0, which removed them; the scan is clean with no exceptions"
 replaces = "none"
 checked = 2026-10-25
+
+
+[[tool]]
+id = "zizmor"
+risk = "GitHub Actions workflows, actions, and Dependabot settings that an attacker can turn against the repository: template injection, broad token permissions, persisted credentials, dangerous triggers, cache poisoning, and unpinned or known-vulnerable actions"
+tool = "zizmor through zizmorcore/zizmor-action"
+version = "1.32.0"
+unpinned = "the zizmor workflow pins zizmorcore/zizmor-action to a commit with a version comment; that commit's lock file pins zizmor by version and wheel hashes, so a Dependabot update of the action updates zizmor"
+uses = ["zizmorcore/zizmor-action"]
+runs_in = "zizmor workflow: every pull request and push to main"
+config = ".github/zizmor.yml; regular persona with online audits; every finding fails the run"
+conflicts = "none known"
+exceptions = "dangerous-triggers in public-guard.yml and public-text-guard.yml: the guard needs the term list on fork pull requests and never runs their content; github-env in tools/toolchain-probe/action.yml: it writes only the checked Go toolchain and the probe it builds; self-repository in 6 workflows: actionlint and the toolchain probe tests read only the ./ form; .github/zizmor.yml gives each reason"
+runtime = "not yet recorded; the workflow is new"
+findings = "2026-11-21 before: 115 (37 self-repository, 28 template-injection, 27 artipacked, 13 dependabot-cooldown, 4 cache-poisoning, 3 dangerous-triggers, 2 github-env, 1 secrets-inherit); after: 0, with 42 ignored (37 self-repository, 3 dangerous-triggers, 2 github-env); a seeded workflow with template injection and an unpinned action fails the run"
+replaces = "none"
+checked = 2026-11-21
 
 [[tool]]
 id = "openssf-scorecard"

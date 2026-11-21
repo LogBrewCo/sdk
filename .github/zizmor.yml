@@ -1,0 +1,32 @@
+# zizmor settings. Each ignored finding gives its reason. An ignore names a
+# line, so an edit that moves the line makes zizmor report it again.
+rules:
+  dangerous-triggers:
+    ignore:
+      # The scan job needs pull_request_target so fork pull requests get the
+      # full term list. It runs the base branch copy of the guard and reads the
+      # pull request only as Git objects. It never checks out or runs it.
+      - public-guard.yml:9
+      # issue_comment and pull_request_target let the guard scan new comments
+      # and fork pull request text with the full term list. The job runs the
+      # default branch copy of the guard and reads only the event payload.
+      - public-text-guard.yml:16
+      - public-text-guard.yml:18
+  github-env:
+    ignore:
+      # The toolchain probe adds the bin folder of the Go toolchain that it
+      # installs and checks against sum.golang.org to GITHUB_PATH, and writes
+      # the path of the probe that it builds in RUNNER_TEMP to GITHUB_ENV. No
+      # value comes from the event or the pull request.
+      - action.yml:64
+  self-repository:
+    ignore:
+      # actionlint 1.7.12, the latest release, rejects the $/ form, and the
+      # toolchain probe tests read the ./ form. These files keep ./ until
+      # both accept $/.
+      - ci.yml
+      - publish-nuget.yml
+      - publish-packages.yml
+      - publish-release.yml
+      - reconcile-public-packages.yml
+      - release-readiness.yml
