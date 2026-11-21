@@ -1,3 +1,7 @@
+# Dependabot checks every ecosystem daily and opens one grouped pull request per
+# ecosystem. It waits 2 days after a release, so a release that its publisher
+# pulls soon after publishing never lands. scripts/check-dependabot.sh fails
+# when a tracked manifest has no entry here.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -5,10 +9,195 @@ updates:
       - /
       - /tools/toolchain-probe
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: rust-toolchain
-    directory: /
+    directories:
+      - /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      rust-toolchain:
+        patterns: ["*"]
+  - package-ecosystem: bun
+    directories:
+      - /apps/raycast
+      - /benchmarks
+      - /js
+      - /js/logbrew-amqplib
+      - /js/logbrew-angular
+      - /js/logbrew-angular/examples
+      - /js/logbrew-aws-sqs
+      - /js/logbrew-browser
+      - /js/logbrew-browser/examples
+      - /js/logbrew-bullmq
+      - /js/logbrew-express
+      - /js/logbrew-express/examples
+      - /js/logbrew-fastify
+      - /js/logbrew-fastify/examples
+      - /js/logbrew-js
+      - /js/logbrew-js/examples
+      - /js/logbrew-kafkajs
+      - /js/logbrew-nestjs
+      - /js/logbrew-nestjs/examples
+      - /js/logbrew-next
+      - /js/logbrew-next/examples
+      - /js/logbrew-node
+      - /js/logbrew-node/examples
+      - /js/logbrew-prisma
+      - /js/logbrew-react
+      - /js/logbrew-react-native
+      - /js/logbrew-react-native/examples
+      - /js/logbrew-react/examples
+      - /js/logbrew-svelte
+      - /js/logbrew-svelte/examples
+      - /js/logbrew-vue
+      - /js/logbrew-vue/examples
+      - /tools/npm-publish
+      - /unity/logbrew-unity
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      bun:
+        patterns: ["*"]
+  - package-ecosystem: bundler
+    directories:
+      - /ruby/logbrew-ruby
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      bundler:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directories:
+      - /
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      cargo:
+        patterns: ["*"]
+  - package-ecosystem: composer
+    directories:
+      - /
+      - /php/logbrew-php
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      composer:
+        patterns: ["*"]
+  - package-ecosystem: gomod
+    directories:
+      - /go/logbrew
+      - /go/logbrew/asynq
+      - /go/logbrew/gin
+      - /go/logbrew/otel
+      - /tools/capture-matrix/probes/go/logbrew
+      - /tools/capture-matrix/probes/go/logbrew/asynq
+      - /tools/capture-matrix/probes/go/logbrew/gin
+      - /tools/capture-matrix/probes/go/logbrew/otel
+      - /tools/toolchain-probe
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      gomod:
+        patterns: ["*"]
+  - package-ecosystem: gradle
+    directories:
+      - /js/logbrew-react-native/android
+      - /js/logbrew-react-native/test/android-gradle-smoke
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      gradle:
+        patterns: ["*"]
+    ignore:
+      # The Android smoke build uses React Native 0.72.17, the oldest version
+      # the package supports.
+      - dependency-name: com.facebook.react:react-android
+  - package-ecosystem: maven
+    directories:
+      - /java/logbrew-java
+      - /kotlin/logbrew-kotlin
+      - /kotlin/logbrew-kotlin-okhttp
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      maven:
+        patterns: ["*"]
+  - package-ecosystem: nuget
+    directories:
+      - /dotnet/logbrew-dotnet/src/LogBrew
+      - /dotnet/logbrew-dotnet/src/LogBrew.AspNetCore
+      - /dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore
+      - /dotnet/logbrew-dotnet/src/LogBrew.Hangfire
+      - /dotnet/logbrew-dotnet/src/LogBrew.HttpClient
+      - /dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry
+      - /dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis
+      - /dotnet/logbrew-dotnet/tests/LogBrew.AspNetCore.Tests
+      - /dotnet/logbrew-dotnet/tests/LogBrew.EntityFrameworkCore.Tests
+      - /dotnet/logbrew-dotnet/tests/LogBrew.Hangfire.Tests
+      - /dotnet/logbrew-dotnet/tests/LogBrew.HttpClient.Tests
+      - /dotnet/logbrew-dotnet/tests/LogBrew.OpenTelemetry.Tests
+      - /dotnet/logbrew-dotnet/tests/LogBrew.StackExchangeRedis.Tests
+      - /dotnet/logbrew-dotnet/tests/LogBrew.Tests
+      - /tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew
+      - /tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.AspNetCore
+      - /tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore
+      - /tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.Hangfire
+      - /tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.HttpClient
+      - /tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry
+      - /tools/capture-matrix/probes/dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis
+      - /tools/capture-matrix/probes/unity/logbrew-unity
+      - /unity/logbrew-unity/tests/LogBrew.Unity.Compatibility
+      - /unity/logbrew-unity/tests/LogBrew.Unity.Tests
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      nuget:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directories:
+      - /python/logbrew_django
+      - /python/logbrew_fastapi
+      - /python/logbrew_flask
+      - /python/logbrew_py
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      pip:
+        patterns: ["*"]
+  - package-ecosystem: swift
+    directories:
+      - /
+      - /swift/logbrew-swift
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      swift:
+        patterns: ["*"]

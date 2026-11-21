@@ -375,6 +375,22 @@ replaces = "none"
 checked = 2026-11-19
 
 [[tool]]
+id = "dependabot-coverage"
+risk = "a dependency or tool manifest that Dependabot never updates, or an entry that is not daily, has no 2-day cooldown, or splits updates into many pull requests"
+tool = "scripts/check-dependabot.sh and its seeded tests"
+version = "repository"
+unpinned = "repository script, versioned by commit"
+commands = ["scripts/check-dependabot.sh", "scripts/test-check-dependabot.sh"]
+runs_in = "CI Contract checks: Check that Dependabot covers every manifest"
+config = ".github/dependabot.yml"
+conflicts = "reads a YAML subset with a small awk reader; a glob in `directories` fails, so every directory is listed"
+exceptions = "none"
+runtime = "new; record from CI runs at the next check"
+findings = "seeded: an unlisted manifest directory, an unlisted Cargo workspace root, a listed directory without a manifest, a glob, a second entry for one ecosystem, a weekly schedule, a missing cooldown, and ungrouped updates each fail"
+replaces = "none"
+checked = 2026-11-21
+
+[[tool]]
 id = "npm-release"
 risk = "a merged change to a published npm file that never reaches npm"
 tool = "scripts/npm_release.sh and its seeded tests"
