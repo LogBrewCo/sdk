@@ -653,6 +653,91 @@ jobs:
         run: |
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" confidentiality-scan .
 
+  capture-dependency-updates:
+    # The capture matrix record ignores version-only dependency changes, so
+    # this job runs the probes of each package whose dependency manifests or
+    # lockfiles changed and fails when its captured signals differ.
+    name: Capture matrix after dependency changes
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Select packages whose dependency files changed
+        id: select
+        run: python3 tools/capture-matrix/dependency_changes.py affected HEAD^1 --github-output
+
+      - name: Set up Node.js
+        if: ${{ contains(steps.select.outputs.families, ' js ') }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Set up Go
+        if: ${{ contains(steps.select.outputs.families, ' go ') }}
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: tools/toolchain-probe/.go-version
+          cache: false
+
+      - name: Set up Java
+        if: ${{ contains(steps.select.outputs.families, ' java ') || contains(steps.select.outputs.families, ' kotlin ') }}
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        if: ${{ contains(steps.select.outputs.families, ' java ') }}
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: current
+          cache-disabled: true
+
+      - name: Set up .NET
+        if: ${{ contains(steps.select.outputs.families, ' dotnet ') || contains(steps.select.outputs.families, ' unity ') }}
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Ruby
+        if: ${{ contains(steps.select.outputs.families, ' ruby ') }}
+        uses: ruby/setup-ruby@20eb24b0d509e2b9ed9b6d42ddfeb992915e0564 # v1.341.0
+        with:
+          ruby-version: "3.3"
+
+      - name: Set up PHP
+        if: ${{ contains(steps.select.outputs.families, ' php ') }}
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.4"
+          tools: composer
+
+      - name: Set up Rust
+        if: ${{ contains(steps.select.outputs.families, ' rust ') }}
+        run: |
+          rustup toolchain install --no-self-update
+          rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
+
+      - name: Run the probes and compare captured signals with the record
+        if: ${{ steps.select.outputs.packages != '' }}
+        env:
+          PACKAGES: ${{ steps.select.outputs.packages }}
+        run: |
+          read -r -a packages <<<"$PACKAGES"
+          python3 tools/capture-matrix/dependency_changes.py compare "${packages[@]}"
+
   php-compatibility:
     name: PHP 8.2 / Symfony 6.4 compatibility
     needs: changed-areas
