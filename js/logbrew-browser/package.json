@@ -19,6 +19,8 @@
     }
   },
   "files": [
+    "anonymous-subject.cjs",
+    "anonymous-subject.js",
     "attribution.cjs",
     "attribution.js",
     "beacon-transport.cjs",
