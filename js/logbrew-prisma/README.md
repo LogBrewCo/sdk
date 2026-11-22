@@ -12,12 +12,15 @@ npm install @logbrew/sdk @logbrew/node @logbrew/prisma @prisma/client
 pnpm add @logbrew/sdk @logbrew/node @logbrew/prisma @prisma/client
 ```
 
+The package supports Prisma ORM 7 and later. Prisma 7 connects through a driver adapter, so also install the adapter for your database, for example `@prisma/adapter-better-sqlite3` for SQLite. On Prisma 5 or 6, use `@logbrew/prisma@0.1.4`.
+
 Use a project-scoped server ingest key, for example `LOGBREW_SERVER_API_KEY`.
 
-```js
+```ts
 import { createLogBrewNodeClient } from "@logbrew/node";
-import { PrismaClient } from "@prisma/client";
 import { instrumentLogBrewPrismaClient } from "@logbrew/prisma";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaClient } from "./generated/prisma/client";
 
 const logbrew = createLogBrewNodeClient({
   serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
@@ -26,6 +29,7 @@ const logbrew = createLogBrewNodeClient({
 });
 
 const prisma = new PrismaClient({
+  adapter: new PrismaBetterSqlite3({ url: "file:./dev.db" }),
   log: ["info", "warn", "error"].map((level) => ({ emit: "event", level }))
 });
 const prismaTracing = instrumentLogBrewPrismaClient(prisma, {
@@ -39,6 +43,8 @@ const prismaTracing = instrumentLogBrewPrismaClient(prisma, {
 
 await prismaTracing.client.order.findMany();
 ```
+
+Import `PrismaClient` from the `output` path of your `prisma-client` generator, or from `@prisma/client` if you use the `prisma-client-js` generator.
 
 ## What It Captures
 
