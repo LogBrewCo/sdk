@@ -224,6 +224,14 @@ updates:
     groups:
       nuget:
         patterns: ["*"]
+    ignore:
+      # LogBrew and LogBrew.HttpClient target net8.0. Microsoft.Extensions 11
+      # targets net10.0 and later and fails a net8.0 build with "doesn't
+      # support net8.0". Remove this when the SDK drops net8.0.
+      - dependency-name: Microsoft.Extensions.Http
+        versions: [">= 11"]
+      - dependency-name: Microsoft.Extensions.Logging
+        versions: [">= 11"]
   - package-ecosystem: pip
     directories:
       - /python/logbrew_django
