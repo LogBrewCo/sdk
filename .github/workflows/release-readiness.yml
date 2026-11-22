@@ -400,7 +400,7 @@ jobs:
           python3 -m pip install --require-hashes --requirement scripts/lockfiles/python/requirements-release-tools.txt
           python3 -m pip install --require-hashes --requirement scripts/lockfiles/python/requirements-ci-tests.txt
           python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/logbrew-wheel" ./python/logbrew_py
-          python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" logbrew-sdk
+          bash scripts/pip_install_built.sh python3 "$RUNNER_TEMP"/logbrew-wheel/logbrew_sdk-*.whl logbrew-sdk
 
       - name: Run Python package tests
         shell: bash

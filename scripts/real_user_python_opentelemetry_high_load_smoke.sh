@@ -49,7 +49,7 @@ export PIP_DISABLE_PIP_VERSION_CHECK=1
 export PIP_CACHE_DIR="$tmp_dir/pip-cache"
 
 python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
-python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
+bash "$repo_root/scripts/pip_install_built.sh" python "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" logbrew-sdk --no-deps >/dev/null
 python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-opentelemetry.txt" >/dev/null
 
 python - <<'PY' > "$tmp_dir/high-load.stdout.json"
