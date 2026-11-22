@@ -8,5 +8,8 @@
     "@types/node": "26.0.1",
     "prisma": "7.10.1",
     "typescript": "6.0.3"
+  },
+  "overrides": {
+    "effect": "3.22.5"
   }
 }

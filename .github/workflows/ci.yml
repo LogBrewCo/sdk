@@ -730,6 +730,11 @@ jobs:
           rustup toolchain install --no-self-update
           rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
 
+      # The BullMQ, Asynq, and StackExchange.Redis probes start their own redis-server.
+      - name: Install Redis
+        if: ${{ contains(steps.select.outputs.packages, 'bullmq') || contains(steps.select.outputs.packages, 'asynq') || contains(steps.select.outputs.packages, 'StackExchangeRedis') }}
+        run: sudo apt-get install --yes --no-install-recommends redis-server
+
       - name: Run the probes and compare captured signals with the record
         if: ${{ steps.select.outputs.packages != '' }}
         env:
