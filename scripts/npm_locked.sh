@@ -20,6 +20,7 @@ const app = fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, "utf8")) 
 const manifest = JSON.parse(fs.readFileSync(locked, "utf8"));
 app.dependencies = manifest.dependencies;
 app.devDependencies = manifest.devDependencies;
+app.overrides = manifest.overrides;
 fs.writeFileSync(target, `${JSON.stringify(app, null, 2)}\n`);
 JS
   cp "$deps/package-lock.json" package-lock.json

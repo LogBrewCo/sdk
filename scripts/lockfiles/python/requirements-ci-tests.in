@@ -1,4 +1,4 @@
-certifi==2026.7.22
+certifi==2026.11.20
 truststore==0.10.4
 arq==0.28.0
 dramatiq==2.2.1
