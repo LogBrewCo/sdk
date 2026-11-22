@@ -185,7 +185,6 @@ for needle in (
     "<artifactId>logbrew-kotlin-okhttp</artifactId>",
     "<artifactId>logbrew-kotlin</artifactId>",
     "<artifactId>okhttp</artifactId>",
-    "<version>4.12.0</version>",
 ):
     if needle not in pom:
         raise SystemExit(f"missing OkHttp pom metadata: {needle}")

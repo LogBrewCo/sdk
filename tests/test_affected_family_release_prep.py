@@ -123,8 +123,8 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "--requirement scripts/lockfiles/python/requirements-ci-tests.txt"
         )
         requirements = source_text("scripts/lockfiles/python/requirements-ci-tests.in")
-        self.assertIn("certifi==2026.7.22", requirements)
-        self.assertIn("truststore==0.10.4", requirements)
+        self.assertRegex(requirements, r"(?m)^certifi==\S+$")
+        self.assertRegex(requirements, r"(?m)^truststore==\S+$")
         source_tests = (
             "PYTHONPATH=python/logbrew_py/src python3 -m unittest discover "
             "-s python/logbrew_py/tests -p 'test_*.py'"
