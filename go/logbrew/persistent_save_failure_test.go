@@ -258,7 +258,7 @@ func TestPersistentClientStaysStoppedAfterAnIntegrityFailure(t *testing.T) {
 	if err := os.WriteFile(queuePath, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	assertSDKErrorCode(t, captureTestLog(client, "evt_after_restore"), "persistence_integrity_error")
+	assertSDKErrorCode(t, captureTestLog(client, "evt_after_original_bytes"), "persistence_integrity_error")
 	_, err = client.Flush(transport)
 	assertSDKErrorCode(t, err, "persistence_integrity_error")
 	if sent := len(transport.bodiesSnapshot()); sent != 0 {
