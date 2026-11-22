@@ -216,9 +216,9 @@ exceptiongroup==1.3.2 ; python_full_version < '3.11' \
     --hash=sha256:41c6a70dfec22050d3d8b43386b059a4dc0bca3f3d40a40971cb206fff1785af \
     --hash=sha256:ca82e69f0cb535fbde934885744b67669a3efddd50fe7bc00d3398839fcaddec
     # via anyio
-fakeredis==2.31.3 \
-    --hash=sha256:12aa54a3fb00984c18b28956addb91683aaf55b2dc2ef4b09d49bd481032e57a \
-    --hash=sha256:76dfb92855f0787a4936a5b4fdb1905c5909ec790e62dff2b8896b412905deb0
+fakeredis==2.40.0 \
+    --hash=sha256:16eb05a3e97c37a033c73d1da7e885eb2aa47ba7604cc377144339efa2780a02 \
+    --hash=sha256:b155ef2442134372eb1cc5664cf5638ccbe0a6dde9d1942153708e2782f315c9
     # via -r requirements-ci-tests.in
 frozenlist==1.8.0 \
     --hash=sha256:0325024fe97f94c41c08872db482cf8ac4800d80e79222c6b0b7b162d5b13686 \
@@ -1008,9 +1008,9 @@ redis==5.3.1 \
     #   arq
     #   fakeredis
     #   rq
-rq==2.12.0 \
-    --hash=sha256:78116d0c860f6285817b52d7d6d0b16a726372073ce8ea1d229732ce74ef9378 \
-    --hash=sha256:97e349a00e9f2a18962102b3dca156cb5ce315d3ef38145e24ba9cabd16a9361
+rq==3.0.0 \
+    --hash=sha256:71b92cb7b2880e0d0ac2a462945e3f09243122f61465cec4238689d8ddf2abf4 \
+    --hash=sha256:b41e39b3c36ec3faf9e2402c638a0b25fe18ebb93a1cb15193bc69694f054618
     # via -r requirements-ci-tests.in
 six==1.17.0 ; python_full_version < '3.11' \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
