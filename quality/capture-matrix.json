@@ -1051,7 +1051,7 @@
       },
       "method": "OkHttp 4 client with LogBrewOkHttpInterceptor, phase timings, and LogBrewOkHttpCallFactory under a W3C trace and session, on a LogBrewAndroid client with the documented service, deployment, and subject context; one call that succeeds against a local API, one that fails to connect, and Android log capture from the core for each",
       "probe": "tools/capture-matrix/probes/kotlin/logbrew-kotlin-okhttp",
-      "inputs": "48500ef41e4a3d0622de4f9a9d3fbdcc288fe3f5ba9fa6b13f0f94ff145fd228"
+      "inputs": "98d1d4c07e864715402cd4bae1d252dfba16ac777a42eaa16f1be3e7f9ff5fdf"
     },
     "objc/logbrew-objc": {
       "share": 100.0,

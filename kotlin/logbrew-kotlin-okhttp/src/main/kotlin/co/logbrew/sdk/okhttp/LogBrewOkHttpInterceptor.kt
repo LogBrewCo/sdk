@@ -111,7 +111,7 @@ class LogBrewOkHttpInterceptor
                 response = requestSpan.withTrace { chain.proceed(tracedRequest) }
                 statusCode = response.code
                 val responseBody = response.body
-                if (finishSpanOnResponseBodyClose && responseBody != null) {
+                if (finishSpanOnResponseBodyClose) {
                     val returnedResponse =
                         response
                             .newBuilder()
