@@ -230,7 +230,6 @@ updates:
       - /python/logbrew_fastapi
       - /python/logbrew_flask
       - /python/logbrew_py
-      - /scripts/lockfiles/python
     schedule:
       interval: daily
     cooldown:
@@ -248,4 +247,16 @@ updates:
       default-days: 7
     groups:
       swift:
+        patterns: ["*"]
+  # uv pip compile wrote these lockfiles. The uv updater runs it again with the
+  # header's options; the pip updater drops --universal, pip, and setuptools.
+  - package-ecosystem: uv
+    directories:
+      - /scripts/lockfiles/python
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 7
+    groups:
+      uv:
         patterns: ["*"]
