@@ -2,7 +2,7 @@
   "name": "browser",
   "private": true,
   "dependencies": {
-    "happy-dom": "20.10.1",
+    "happy-dom": "21.0.4",
     "typescript": "7.0.2"
   }
 }
