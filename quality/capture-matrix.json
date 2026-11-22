@@ -328,7 +328,7 @@
       },
       "method": "net/http server whose ServeMux is wrapped with NewHTTPHandlerWithOptions (request metric and server error issues on), with the slog handler and release, environment, and service in Config.Context; one request that succeeds and one that panics, both with a W3C traceparent",
       "probe": "tools/capture-matrix/probes/go/logbrew",
-      "inputs": "6d31610318beabb9a177c463dae21b78918472d6a173c5d17472486be90a3e48"
+      "inputs": "beb16cf0439fe1ec12ad35279c4f47ae816c813ebabd9a174296be58d3f50e0f"
     },
     "go/logbrew/asynq": {
       "share": 72.7,
@@ -361,7 +361,7 @@
       },
       "method": "Asynq producer and worker against a local redis-server: EnqueueContext from a context that continues a W3C traceparent, the documented worker middleware, the core slog handler, and release, environment, and service in Config.Context; one task that succeeds and one that returns an error on its last attempt",
       "probe": "tools/capture-matrix/probes/go/logbrew/asynq",
-      "inputs": "0f052c77624b53b2e0e48658baa0e3bc6e27e7ae5a2ad69443eecbb45c658480"
+      "inputs": "acc565c72cd918c1274835dd43a3f73318bf62c1352f0f714c304154296444bf"
     },
     "go/logbrew/gin": {
       "share": 81.8,
@@ -394,7 +394,7 @@
       },
       "method": "Gin router with gin.Recovery and the documented middleware (request metrics and server error issues on), the core slog handler, and release, environment, and service in Config.Context; one request that succeeds and one that panics, both with a W3C traceparent",
       "probe": "tools/capture-matrix/probes/go/logbrew/gin",
-      "inputs": "89461f101aa8b662c80128dd35f8da5319139ef52325f94019715b9c4cbc60d0"
+      "inputs": "808c04d2d2ab7ea7767cf716c0069cad66d2410fadcf9bdced12add0866b2c7a"
     },
     "go/logbrew/otel": {
       "share": 54.5,
@@ -428,7 +428,7 @@
       },
       "method": "net/http server instrumented with the OpenTelemetry Go API (W3C propagator, server spans, RecordError on failure) and a TracerProvider whose SimpleSpanProcessor uses the documented LogBrew span exporter; logs go through the core slog handler after the documented OTel context copy; one request that succeeds and one that fails, both with a W3C traceparent",
       "probe": "tools/capture-matrix/probes/go/logbrew/otel",
-      "inputs": "f3baf537f8dd0699b1c2c48238615d27cc9ea1fec11f17164ea2f7afc458431f"
+      "inputs": "a36d3a12dc3f56ef201270cfeb2600b7f01082b706430ceb1a20e269a278428e"
     },
     "java/logbrew-java": {
       "share": 81.8,
