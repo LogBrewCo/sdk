@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"regexp"
@@ -440,12 +441,41 @@ func (s *persistentStore) writeQueue(queue persistedQueue) error {
 	if s.queueDigestSet {
 		expected = &s.queueDigest
 	}
+	written := sha256.Sum256(encoded)
 	if err := s.files.atomicReplace(persistentQueueFile, encoded, expected); err != nil {
-		return s.fail(err)
+		return s.settleQueueWrite(err, written)
 	}
-	s.queueDigest = sha256.Sum256(encoded)
+	s.queueDigest = written
 	s.queueDigestSet = true
 	return nil
+}
+
+// settleQueueWrite finishes or discards a queue replacement that failed with
+// an I/O error, through the same recovery that runs at open, so the next call
+// reads a queue file that passes its digest. It returns nil when the
+// replacement committed and writeErr when the previous queue is still in
+// place. If neither can be confirmed, the store stops until restart.
+func (s *persistentStore) settleQueueWrite(writeErr error, written [sha256.Size]byte) error {
+	if !persistenceRetryable(writeErr) {
+		return s.fail(writeErr)
+	}
+	unconfirmed := persistenceSDKError("persistence_commit_error")
+	if err := s.files.recoverTransaction(); err != nil {
+		return s.fail(unconfirmed)
+	}
+	current, err := s.files.read(persistentQueueFile, s.maxFileBytes())
+	if err != nil {
+		return s.fail(unconfirmed)
+	}
+	switch sha256.Sum256(current) {
+	case written:
+		s.queueDigest = written
+		s.queueDigestSet = true
+		return nil
+	case s.queueDigest:
+		return writeErr
+	}
+	return s.fail(unconfirmed)
 }
 
 func (s *persistentStore) validateQueue(queue persistedQueue) error {
@@ -586,12 +616,20 @@ func (s *persistentStore) ensureUsable() error {
 	return nil
 }
 
+// fail stops the store for every later call unless err is retryable.
 func (s *persistentStore) fail(err error) error {
-	if err == nil {
-		return nil
+	if err != nil && !persistenceRetryable(err) {
+		s.failed = err
 	}
-	s.failed = err
 	return err
+}
+
+// persistenceRetryable reports whether a failed storage operation leaves the
+// store usable. Only an I/O failure that left the files consistent qualifies.
+// Integrity, ownership, key, and unconfirmed commit failures stop the store.
+func persistenceRetryable(err error) bool {
+	var sdkErr *SdkError
+	return errors.As(err, &sdkErr) && sdkErr.Code == "persistence_io_error"
 }
 
 func (s *persistentStore) close() error {
@@ -628,6 +666,7 @@ func persistenceSDKError(code string) *SdkError {
 		"persistence_key_mismatch":        "persistent delivery key does not match",
 		"persistence_integrity_error":     "persistent delivery state failed integrity checks",
 		"persistence_io_error":            "persistent delivery storage operation failed",
+		"persistence_commit_error":        "persistent delivery could not confirm a storage write",
 		"persistence_overflow":            "persistent delivery storage limit exceeded",
 	}
 	message, ok := messages[code]

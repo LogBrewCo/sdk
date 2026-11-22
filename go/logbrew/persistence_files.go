@@ -14,6 +14,7 @@ type persistentFiles interface {
 	exists(name string) (bool, error)
 	read(name string, maxBytes int64) ([]byte, error)
 	atomicReplace(name string, data []byte, expected *[32]byte) error
+	recoverTransaction() error
 	ownerMarker() ([]byte, error)
 	freshBoundary() (bool, error)
 	verifyBoundary() error

@@ -254,8 +254,8 @@ func TestPersistentStoreAtomicIntentRecoversOnlyCommittedAdmission(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.admit(persistenceEvent("evt_committed")); err == nil {
-		t.Fatal("expected post-rename failure")
+	if err := store.admit(persistenceEvent("evt_committed")); err != nil {
+		t.Fatalf("post-rename failure did not settle as committed: %v", err)
 	}
 	if err := store.close(); err != nil {
 		t.Fatal(err)
@@ -282,8 +282,8 @@ func TestPersistentStoreAtomicIntentRecoversOnlyCommittedAdmission(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.admit(persistenceEvent("evt_intent_committed")); err == nil {
-		t.Fatal("expected post-intent failure")
+	if err := store.admit(persistenceEvent("evt_intent_committed")); err != nil {
+		t.Fatalf("post-intent failure did not settle as committed: %v", err)
 	}
 	if err := store.close(); err != nil {
 		t.Fatal(err)
@@ -310,9 +310,7 @@ func TestPersistentStoreAtomicIntentRecoversOnlyCommittedAdmission(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.admit(persistenceEvent("evt_uncommitted")); err == nil {
-		t.Fatal("expected pre-intent failure")
-	}
+	assertSDKErrorCode(t, store.admit(persistenceEvent("evt_uncommitted")), "persistence_io_error")
 	if err := store.close(); err != nil {
 		t.Fatal(err)
 	}
