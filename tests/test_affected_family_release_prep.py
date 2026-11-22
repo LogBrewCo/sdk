@@ -135,7 +135,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         readiness = source_text(".github/workflows/release-readiness.yml")
         metadata_install = (
-            'python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" logbrew-sdk'
+            'bash scripts/pip_install_built.sh python3 "$RUNNER_TEMP"/logbrew-wheel/logbrew_sdk-*.whl logbrew-sdk'
         )
         self.assertIn(metadata_install, readiness)
         self.assertIn(source_tests, readiness)

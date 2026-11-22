@@ -312,7 +312,7 @@ run_sdist_install_checks() {
 
     python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-build.txt" >/dev/null
     python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
-    python -m pip install --no-index --no-build-isolation --report "$tmp_dir/sdist-pip-install-report.json" "$sdist_path" >/dev/null
+    bash "$repo_root/scripts/pip_install_built.sh" python "$sdist_path" logbrew-sdk --no-build-isolation --report "$tmp_dir/sdist-pip-install-report.json" >/dev/null
     python -m pip check >/dev/null
     python -m pip freeze > "$tmp_dir/sdist-pip-freeze.txt"
     grep -q "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt"
@@ -514,7 +514,7 @@ for needle in (
 PY
 
 python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
-python -m pip install --no-index "$wheel_path" >/dev/null
+bash "$repo_root/scripts/pip_install_built.sh" python "$wheel_path" logbrew-sdk >/dev/null
 python3 -m venv "$tmp_dir/receipt-venv"
 receipt_python="$tmp_dir/receipt-venv/bin/python"
 "$receipt_python" -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null

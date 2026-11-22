@@ -221,7 +221,7 @@ commands = ["go run"]
 runs_in = "CI Contract checks: Check that every install is pinned"
 config = "quality/unpinned-installs.tsv lists each install that stays unpinned on purpose, with its reason; a row that no longer matches an install fails"
 conflicts = "none known"
-exceptions = "the 16 rows in quality/unpinned-installs.tsv: LogBrew packages under test, offline installs of the build under test, and minimum-version tests"
+exceptions = "the 9 rows in quality/unpinned-installs.tsv: LogBrew packages under test, the offline reinstall from pip freeze output, and minimum-version tests"
 runtime = "local n=1, 2 s on the whole repository after the build"
 findings = "2026-11-21: 74 unpinned installs on main before this check (9 in workflows), 17 after, all listed in quality/unpinned-installs.tsv; Scorecard 5.7.0 is the latest release, no advisories"
 replaces = "none"

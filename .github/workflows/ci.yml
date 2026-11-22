@@ -167,7 +167,7 @@ jobs:
         # and checks it against the Go checksum database.
         env:
           GOTOOLCHAIN: auto
-        run: go -C tools/pin-check test ./... && go -C tools/pin-check run .
+        run: go -C tools/pin-check test ./... && go -C tools/pin-check run . "$GITHUB_WORKSPACE"
 
       - name: Set up Java
         if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
@@ -828,7 +828,7 @@ jobs:
           python3 -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --requirement scripts/lockfiles/python/requirements-build.txt
           python3 -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --requirement scripts/lockfiles/python/requirements-ci-tests.txt
           python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/logbrew-wheel" ./python/logbrew_py
-          python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" 'logbrew-sdk[arq,dramatiq,rq]'
+          bash scripts/pip_install_built.sh python3 "$RUNNER_TEMP"/logbrew-wheel/logbrew_sdk-*.whl 'logbrew-sdk[arq,dramatiq,rq]'
           PYTHONPATH="" python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run installed FastAPI and Flask package checks
