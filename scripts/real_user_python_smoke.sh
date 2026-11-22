@@ -1587,7 +1587,7 @@ if not required_transport_dependencies.issubset(requires_dist):
         "missing installed transport dependencies: "
         f"{sorted(required_transport_dependencies - requires_dist)}"
     )
-if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requirement in requires_dist):
+if not any("rq<4,>=2" in requirement and 'extra == "rq"' in requirement for requirement in requires_dist):
     raise SystemExit("missing installed RQ extra metadata")
 if not any("arq<1,>=0.28" in requirement and 'extra == "arq"' in requirement for requirement in requires_dist):
     raise SystemExit("missing installed ARQ extra metadata")
