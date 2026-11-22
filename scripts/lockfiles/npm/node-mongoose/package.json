@@ -3,7 +3,7 @@
   "private": true,
   "dependencies": {
     "@types/node": "24.10.1",
-    "mongoose": "9.7.4",
+    "mongoose": "9.11.4",
     "typescript": "5.9.3"
   }
 }
