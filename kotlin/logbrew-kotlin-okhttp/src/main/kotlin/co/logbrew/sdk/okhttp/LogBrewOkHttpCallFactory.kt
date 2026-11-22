@@ -4,10 +4,12 @@ import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.LogBrewTraceContext
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.EventListener
 import okhttp3.Request
 import okhttp3.Response
 import okio.Timeout
 import java.io.IOException
+import kotlin.reflect.KClass
 
 class LogBrewOkHttpCallFactory(
     private val delegate: Call.Factory,
@@ -52,6 +54,24 @@ class LogBrewOkHttpCallFactory(
             )
 
         override fun timeout(): Timeout = delegate.timeout()
+
+        override fun addEventListener(eventListener: EventListener) {
+            delegate.addEventListener(eventListener)
+        }
+
+        override fun <T : Any> tag(type: KClass<T>): T? = delegate.tag(type)
+
+        override fun <T> tag(type: Class<out T>): T? = delegate.tag(type)
+
+        override fun <T : Any> tag(
+            type: KClass<T>,
+            computeIfAbsent: () -> T,
+        ): T = delegate.tag(type, computeIfAbsent)
+
+        override fun <T : Any> tag(
+            type: Class<T>,
+            computeIfAbsent: () -> T,
+        ): T = delegate.tag(type, computeIfAbsent)
     }
 }
 

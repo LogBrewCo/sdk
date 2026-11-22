@@ -71,7 +71,7 @@ fun main() {
                 ).execute()
                 .use { response ->
                     check(response.code == 202)
-                    check(response.body?.string() == "accepted")
+                    check(response.body.string() == "accepted")
                 }
 
             tracedCalls
@@ -86,7 +86,7 @@ fun main() {
                 ).execute()
                 .use { response ->
                     check(response.code == 202)
-                    check(response.body?.string() == "accepted")
+                    check(response.body.string() == "accepted")
                 }
 
             tracedCalls
@@ -114,7 +114,7 @@ fun main() {
                         ) {
                             response.use {
                                 check(it.code == 202)
-                                check(it.body?.string() == "accepted")
+                                check(it.body.string() == "accepted")
                                 callbackTraceSpanId.set(LogBrewTrace.currentTraceContext()?.spanId)
                             }
                             latch.countDown()
