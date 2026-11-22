@@ -441,7 +441,11 @@ if os.environ["EXPECTED_LOGBREW_SDK_ARQ_EXTRA"] == "1":
     versions["arq"] = arq.__version__
     if not any("arq<1,>=0.28" in requirement and 'extra == "arq"' in requirement for requirement in sdk_requirements):
         raise AssertionError("installed core package does not expose the ARQ extra")
-if not any("rq<3,>=2" in requirement and 'extra == "rq"' in requirement for requirement in sdk_requirements):
+# Releases before RQ 3 support declare rq<3; later ones declare rq<4.
+if not any(
+    ("rq<3,>=2" in requirement or "rq<4,>=2" in requirement) and 'extra == "rq"' in requirement
+    for requirement in sdk_requirements
+):
     raise AssertionError("installed core package does not expose the RQ extra")
 if os.environ["EXPECTED_LOGBREW_SDK_DRAMATIQ_EXTRA"] == "1":
     import dramatiq
