@@ -4,9 +4,9 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 ktlint_version="1.8.0"
+ktlint_sha256="369ad2b789f95a011f807e1fcb690ccef80bd7cd014fd139e73ae82dcc0baeab"
 base_url="https://repo.maven.apache.org/maven2/com/pinterest/ktlint/ktlint-cli/$ktlint_version"
 jar_path="$tmp_dir/ktlint-cli-$ktlint_version-all.jar"
-sha256_path="$tmp_dir/ktlint-cli-$ktlint_version-all.jar.sha256"
 
 remove_tmp_dir() {
 	rm -rf "$tmp_dir"
@@ -14,10 +14,10 @@ remove_tmp_dir() {
 
 trap remove_tmp_dir EXIT
 
-curl -fsSL --retry 8 "$base_url/ktlint-cli-$ktlint_version-all.jar" -o "$jar_path"
-curl -fsSL --retry 8 "$base_url/ktlint-cli-$ktlint_version-all.jar.sha256" -o "$sha256_path"
+# Maven Central answers 429 to busy CI runners; wait between retries instead of retrying at once.
+curl -fsSL --retry 8 --retry-delay 15 --retry-max-time 300 "$base_url/ktlint-cli-$ktlint_version-all.jar" -o "$jar_path"
 
-python3 - "$jar_path" "$sha256_path" <<'PY'
+python3 - "$jar_path" "$ktlint_sha256" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -25,8 +25,7 @@ import sys
 from pathlib import Path
 
 jar_path = Path(sys.argv[1])
-sha256_path = Path(sys.argv[2])
-expected = sha256_path.read_text(encoding="utf-8").strip().split()[0]
+expected = sys.argv[2]
 actual = hashlib.sha256(jar_path.read_bytes()).hexdigest()
 if actual != expected:
     raise SystemExit(f"ktlint checksum mismatch: expected {expected}, got {actual}")
