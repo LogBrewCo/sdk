@@ -335,7 +335,10 @@ type Client struct {
 	events        []Event
 	pendingBody   []byte
 	pendingPrefix int
-	droppedEvents int
+	// pendingAccepted marks a pending prefix that LogBrew accepted but whose
+	// removal failed to save; the next flush saves it instead of resending.
+	pendingAccepted bool
+	droppedEvents   int
 	// unreportedDrops wait for the next request body; pendingReport is frozen
 	// in the body being sent or retried until LogBrew accepts it.
 	unreportedDrops map[string]int

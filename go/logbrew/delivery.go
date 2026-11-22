@@ -535,6 +535,14 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 			return nil, flushResult{generation: generation}, err
 		}
 	}
+	if c.pendingAccepted {
+		if err := c.acceptPendingLocked(); err != nil {
+			result := flushResult{generation: generation}
+			c.persistenceFailedLocked(&result, err)
+			c.mu.Unlock()
+			return nil, result, err
+		}
+	}
 	if len(c.events) == 0 {
 		c.mu.Unlock()
 		return &TransportResponse{StatusCode: http.StatusNoContent, Attempts: 0}, flushResult{generation: generation}, nil
@@ -543,10 +551,9 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 		c.mu.Unlock()
 		return nil, flushResult{generation: generation}, &SdkError{Code: "configuration_error", Message: "transport must be configured"}
 	}
-	prefixLength := c.pendingPrefix
 	body := c.pendingBody
 	if body == nil {
-		prefixLength = len(c.events)
+		prefixLength := len(c.events)
 		var err error
 		batch := eventBatch{SDK: c.sdk, Events: c.events[:prefixLength], ClientReport: c.freezeClientReportLocked()}
 		body, err = json.MarshalIndent(batch, "", "  ")
@@ -556,12 +563,10 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 		}
 		if c.persistent != nil {
 			if err := c.persistent.retainPending(body, prefixLength, c.unreportedDrops); err != nil {
-				c.health.failedFlushes++
-				c.health.state = DeliveryStatePaused
-				c.health.lastOutcome = DeliveryOutcomePersistencePause
-				c.health.wakePending = false
+				result := flushResult{generation: generation}
+				c.persistenceFailedLocked(&result, err)
 				c.mu.Unlock()
-				return nil, flushResult{pause: DeliveryOutcomePersistencePause, generation: generation}, err
+				return nil, result, err
 			}
 		}
 		// The in-flight prefix stays fixed, so a crash report never evicts an event being sent.
@@ -580,26 +585,11 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	c.health.inFlight = false
 	c.health.attempts += uint64(result.attempts)
 	if sendErr == nil {
-		if c.persistent != nil {
-			if err := c.persistent.acknowledge(prefixLength, c.unreportedDrops); err != nil {
-				c.health.failedFlushes++
-				c.health.state = DeliveryStatePaused
-				c.health.lastOutcome = DeliveryOutcomePersistencePause
-				c.health.wakePending = false
-				result.retryable = false
-				result.pause = DeliveryOutcomePersistencePause
-				c.mu.Unlock()
-				return response, result, err
-			}
+		if err := c.acceptPendingLocked(); err != nil {
+			c.persistenceFailedLocked(&result, err)
+			c.mu.Unlock()
+			return response, result, err
 		}
-		remaining := copy(c.events, c.events[prefixLength:])
-		clear(c.events[remaining:])
-		c.events = c.events[:remaining]
-		c.pendingBody = nil
-		c.pendingPrefix = 0
-		// Drops recorded while this body was in flight wait under a new report ID.
-		c.pendingReport = nil
-		c.health.acceptedEvents += uint64(prefixLength)
 		if !result.stale {
 			c.health.lastOutcome = DeliveryOutcomeAccepted
 		}
@@ -624,6 +614,48 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	}
 	c.mu.Unlock()
 	return response, result, sendErr
+}
+
+// acceptPendingLocked removes the accepted pending prefix, durably first when
+// persistent. If that save fails with a retryable error, the prefix stays
+// pending and marked accepted, so the next flush saves it without resending.
+func (c *Client) acceptPendingLocked() error {
+	prefixLength := c.pendingPrefix
+	if c.persistent != nil {
+		if err := c.persistent.acknowledge(prefixLength, c.unreportedDrops); err != nil {
+			c.pendingAccepted = persistenceRetryable(err)
+			return err
+		}
+	}
+	remaining := copy(c.events, c.events[prefixLength:])
+	clear(c.events[remaining:])
+	c.events = c.events[:remaining]
+	c.pendingBody = nil
+	c.pendingPrefix = 0
+	c.pendingAccepted = false
+	// Drops recorded while this body was in flight wait under a new report ID.
+	c.pendingReport = nil
+	c.health.acceptedEvents += uint64(prefixLength)
+	return nil
+}
+
+// persistenceFailedLocked records a failed save. A retryable failure leaves
+// the store consistent, so delivery retries it; any other failure pauses
+// delivery until ResumeDelivery, because sending could lose or repeat data.
+func (c *Client) persistenceFailedLocked(result *flushResult, err error) {
+	c.health.failedFlushes++
+	if persistenceRetryable(err) {
+		result.retryable = true
+		if !result.stale {
+			c.health.lastOutcome = DeliveryOutcomeRetryableFailure
+		}
+		return
+	}
+	c.health.state = DeliveryStatePaused
+	c.health.lastOutcome = DeliveryOutcomePersistencePause
+	c.health.wakePending = false
+	result.retryable = false
+	result.pause = DeliveryOutcomePersistencePause
 }
 
 func (c *Client) sendBody(transport Transport, body []byte) (*TransportResponse, flushResult, error) {
