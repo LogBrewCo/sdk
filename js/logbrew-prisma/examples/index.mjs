@@ -1,4 +1,5 @@
 import { LogBrewClient } from "@logbrew/sdk";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@prisma/client";
 import { instrumentLogBrewPrismaClient } from "@logbrew/prisma";
 
@@ -8,7 +9,7 @@ const client = LogBrewClient.create({
   sdkVersion: "0.1.0"
 });
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: "file:./dev.db" }) });
 const instrumentation = instrumentLogBrewPrismaClient(prisma, {
   client,
   databaseName: "app",
