@@ -101,9 +101,7 @@ BEHAVIOR = {
 
 class InputHashTest(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.write(PACKAGE)
         (self.root / "tool.py").write_text("tool\n", encoding="utf-8")
         subprocess.run(["git", "init", "--quiet"], cwd=self.root, check=True)
@@ -113,9 +111,7 @@ class InputHashTest(unittest.TestCase):
             "FAMILIES": self.root / "families",
             "__file__": str(self.root / "tool.py"),
         }.items():
-            patcher = mock.patch.object(capture_matrix, name, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+            self.enterContext(mock.patch.object(capture_matrix, name, value))
         self.probe = capture_matrix.Probe(
             package="probe", family="fam", run=(), inputs=("pkg",), not_applicable={}, parts=(), method="m"
         )
