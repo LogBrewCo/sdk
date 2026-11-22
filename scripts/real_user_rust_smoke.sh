@@ -216,12 +216,14 @@ grep -q 'run-actix-request-middleware -> make run-actix-request-middleware' "$cr
 grep -q 'run-rocket-request-fairing -> make run-rocket-request-fairing' "$crate_examples_makefile"
 grep -q 'run-tracing-bridge -> make run-tracing-bridge' "$crate_examples_makefile"
 grep -q 'run-opentelemetry-exporter -> make run-opentelemetry-exporter' "$crate_examples_makefile"
-python3 - "$crate_manifest" <<'PY'
+python3 - "$crate_manifest" "$repo_root/rust/logbrew/Cargo.toml" <<'PY'
 import os
 from pathlib import Path
+import sys
 import tomllib
 
-manifest = tomllib.loads(Path(__import__("sys").argv[1]).read_text())
+manifest = tomllib.loads(Path(sys.argv[1]).read_text())
+source_dependencies = tomllib.loads(Path(sys.argv[2]).read_text()).get("dependencies", {})
 package = manifest.get("package", {})
 if package.get("name") != "logbrew":
     raise SystemExit(f"unexpected packaged crate name: {package.get('name')!r}")
@@ -253,20 +255,11 @@ if features.get("opentelemetry-exporter") != ["dep:opentelemetry", "dep:opentele
         f"unexpected packaged opentelemetry-exporter feature: {features.get('opentelemetry-exporter')!r}"
     )
 dependencies = manifest.get("dependencies", {})
-expected_optional = {
-    "http_types": "1",
-    "opentelemetry": "0.32",
-    "opentelemetry_sdk": "0.32",
-    "tower": "0.5",
-    "tracing-core": "0.1",
-    "tracing-subscriber": "0.3",
-    "ureq": "3.3",
-}
-for name, version in expected_optional.items():
+for name in ("http_types", "opentelemetry", "opentelemetry_sdk", "tower", "tracing-core", "tracing-subscriber", "ureq"):
     dependency = dependencies.get(name)
     if not isinstance(dependency, dict):
         raise SystemExit(f"expected packaged optional {name} dependency, found: {dependency!r}")
-    if dependency.get("version") != version:
+    if dependency.get("version") != source_dependencies[name]["version"]:
         raise SystemExit(f"unexpected packaged {name} version requirement: {dependency.get('version')!r}")
     if dependency.get("optional") is not True:
         raise SystemExit(f"expected packaged {name} dependency to stay optional")
