@@ -2,9 +2,9 @@
   "name": "prisma",
   "private": true,
   "dependencies": {
-    "@prisma/client": "6.17.0",
-    "@types/node": "26.0.1",
+    "@prisma/client": "7.10.1",
+    "@types/node": "26.6.6",
     "prisma": "7.10.1",
-    "typescript": "6.0.3"
+    "typescript": "7.0.2"
   }
 }
