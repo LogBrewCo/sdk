@@ -236,7 +236,7 @@ class LogBrewRqWorkerInstrumentation:
         worker._logbrew_worker_instrumentation = self
         self.installed = True
 
-    def _perform(self, job: Any, queue: Any) -> Any:
+    def _perform(self, job: Any, queue: Any, *args: Any, **kwargs: Any) -> Any:
         client: Any = None
         try:
             client = self._client_factory()
@@ -251,14 +251,14 @@ class LogBrewRqWorkerInstrumentation:
         except Exception as error:
             self._config.notify(error)
             _shutdown(client, self._config)
-            return self._perform_job(job, queue)
+            return self._perform_job(job, queue, *args, **kwargs)
         state = _RqJobState(request)
         self._active[id(job)] = state
         context_marker = _ACTIVE_RQ_CLIENT.set((id(self), client))
         result: Any = False
         with use_logbrew_trace(request.trace):
             try:
-                result = self._perform_job(job, queue)
+                result = self._perform_job(job, queue, *args, **kwargs)
             except BaseException as error:
                 state.error_type = type(error).__name__
                 raise
