@@ -95,8 +95,29 @@ jobs:
       - name: Check Python syntax
         run: python3 scripts/check_python_sources.py
 
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: tools/toolchain-probe/.go-version
+          cache-dependency-path: |
+            go/logbrew/go.mod
+            go/logbrew/asynq/go.mod
+            go/logbrew/asynq/go.sum
+            go/logbrew/gin/go.mod
+            go/logbrew/gin/go.sum
+            go/logbrew/otel/go.mod
+            go/logbrew/otel/go.sum
+            tools/toolchain-probe/go.mod
+            tools/pin-check/go.sum
+            tools/staticcheck/go.sum
+
+      # Go is set up first, and its cache restores the module and build caches.
+      # The verifier's own cache would restore over those same files.
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
 
       - name: Test native SDK verifier
         run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go -C tools/toolchain-probe test -race ./...
@@ -144,30 +165,16 @@ jobs:
           rustup toolchain install --no-self-update
           rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
 
-      - name: Set up Go
-        id: setup-go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: tools/toolchain-probe/.go-version
-          cache-dependency-path: |
-            go/logbrew/go.mod
-            go/logbrew/asynq/go.mod
-            go/logbrew/asynq/go.sum
-            go/logbrew/gin/go.mod
-            go/logbrew/gin/go.sum
-            go/logbrew/otel/go.mod
-            go/logbrew/otel/go.sum
-            tools/toolchain-probe/go.mod
-            tools/pin-check/go.sum
-            tools/staticcheck/go.sum
-
       - name: Check that every install is pinned
         # Runs the OpenSSF Scorecard Pinned-Dependencies check on this tree. Go
         # downloads the toolchain that tools/pin-check/go.mod names, if needed,
         # and checks it against the Go checksum database.
         env:
           GOTOOLCHAIN: auto
-        run: go -C tools/pin-check test ./... && go -C tools/pin-check run . "$GITHUB_WORKSPACE"
+        run: |
+          go -C tools/pin-check test ./...
+          go -C tools/pin-check run . "$GITHUB_WORKSPACE"
+          bash scripts/test-npm-locked.sh
 
       - name: Set up Java
         if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
