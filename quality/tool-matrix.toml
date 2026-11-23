@@ -213,6 +213,22 @@ replaces = "none"
 checked = 2026-11-21
 
 [[tool]]
+id = "npm-locked-tests"
+risk = "a smoke test that installs an npm package other than the LogBrew build or release under test"
+tool = "scripts/npm_locked.sh and its seeded tests"
+version = "repository"
+unpinned = "repository script, versioned by commit"
+commands = ["scripts/test-npm-locked.sh"]
+runs_in = "CI Contract checks: Check that every install is pinned"
+config = "none"
+conflicts = "none known"
+exceptions = "none"
+runtime = "new; local n=1, 9 s; record from CI runs at the next check"
+findings = "seeded: npm ci refuses a tarball and a registry release whose sha512 differs from the lockfile, and a new build of the same version replaces the old one"
+replaces = "none"
+checked = 2026-11-23
+
+[[tool]]
 id = "pin-check"
 risk = "a workflow or script that installs a tool or package the registry can change under us (an unpinned action, install, or download)"
 tool = "tools/pin-check (native Go), which runs the OpenSSF Scorecard Pinned-Dependencies check on the checkout"
@@ -222,7 +238,7 @@ commands = ["go run"]
 runs_in = "CI Contract checks: Check that every install is pinned"
 config = "quality/unpinned-installs.tsv lists each install that stays unpinned on purpose, with its reason; a row that no longer matches an install fails"
 conflicts = "none known"
-exceptions = "the 9 rows in quality/unpinned-installs.tsv: LogBrew packages under test, the offline reinstall from pip freeze output, and minimum-version tests"
+exceptions = "the 7 rows in quality/unpinned-installs.tsv: .NET restores of the LogBrew packages under test, a lockfile-only npm resolve, and minimum-version tests"
 runtime = "local n=1, 2 s on the whole repository after the build"
 findings = "2026-11-21: 74 unpinned installs on main before this check (9 in workflows), 17 after, all listed in quality/unpinned-installs.tsv; Scorecard 5.7.0 is the latest release, no advisories"
 replaces = "none"
