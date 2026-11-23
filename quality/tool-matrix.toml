@@ -157,9 +157,9 @@ config = "ktlint defaults; the jar is verified against the SHA-256 pinned in scr
 conflicts = "none known"
 exceptions = "none"
 runtime = "local 2026-10-23: 6.3 s including the jar download; CI uses the runner's preinstalled Java 17"
-findings = "2026-10-23: 0 on main; a seeded invalid file fails"
+findings = "2026-10-23: 0 on main; a seeded invalid file fails. 2026-11-23: 1.8.0 is still the latest release and has 0 published security advisories"
 replaces = "none"
-checked = 2026-10-23
+checked = 2026-11-23
 
 [[tool]]
 id = "phpstan"
