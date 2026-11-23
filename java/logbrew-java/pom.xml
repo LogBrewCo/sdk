@@ -34,7 +34,7 @@
       <dependency>
         <groupId>at.yawk.lz4</groupId>
         <artifactId>lz4-java</artifactId>
-        <version>1.12.1</version>
+        <version>1.14.0</version>
       </dependency>
       <!-- Kafka clients also pull an older Snappy release; keep it on a fixed one. -->
       <dependency>
@@ -54,31 +54,31 @@
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
-      <version>1.6.6</version>
+      <version>1.6.7</version>
       <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>io.opentelemetry</groupId>
       <artifactId>opentelemetry-api</artifactId>
-      <version>1.67.0</version>
+      <version>1.68.0</version>
       <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>io.opentelemetry</groupId>
       <artifactId>opentelemetry-context</artifactId>
-      <version>1.67.0</version>
+      <version>1.68.0</version>
       <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>io.opentelemetry</groupId>
       <artifactId>opentelemetry-common</artifactId>
-      <version>1.67.0</version>
+      <version>1.68.0</version>
       <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>io.opentelemetry</groupId>
       <artifactId>opentelemetry-sdk-trace</artifactId>
-      <version>1.67.0</version>
+      <version>1.68.0</version>
       <optional>true</optional>
     </dependency>
     <dependency>
