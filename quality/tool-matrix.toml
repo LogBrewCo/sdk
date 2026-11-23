@@ -154,7 +154,7 @@ pins = ["scripts/check_kotlin_style.sh::ktlint_version=\"@VERSION@\""]
 commands = ["scripts/check_kotlin_style.sh"]
 uses = ["actions/cache"]
 runs_in = "CI Contract checks (required): Run Kotlin style checks, on every run"
-config = "ktlint defaults; the jar is verified against the SHA-256 pinned in scripts/check_kotlin_style.sh, before use and when actions/cache v6.1.0 restores it"
+config = "ktlint defaults; the jar is verified against the SHA-256 pinned in scripts/check_kotlin_style.sh, before use and when actions/cache v6.1.0 brings it back"
 conflicts = "none known"
 exceptions = "none"
 runtime = "local 2026-10-23: 6.3 s including the jar download; CI uses the runner's preinstalled Java 17"
