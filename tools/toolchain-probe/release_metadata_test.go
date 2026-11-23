@@ -71,6 +71,27 @@ func TestReleaseMetadataFixturePasses(t *testing.T) {
 	}
 }
 
+func TestReleaseMetadataAllowsThirdPartyRangeUpdates(t *testing.T) {
+	t.Parallel()
+	const core = "python/logbrew_py/pyproject.toml"
+	for _, test := range []struct {
+		edit func(string) string
+		path string
+	}{
+		{replaceOnce("cryptography>=49,<50", "cryptography>=49,<51"), core},
+		{replaceOnce("certifi>=2026.7.22", "certifi>=2026.11.1"), core},
+		{replaceOnce("typing-extensions>=4.1;", "typing-extensions>=4.6;"), core},
+		{replaceOnce("Flask>=3.1", "Flask>=3.2"), "python/logbrew_flask/pyproject.toml"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			t.Parallel()
+			if failures := editedFailures(t, test.path, test.edit); len(failures) > 0 {
+				t.Errorf("range update failures: %q", failures)
+			}
+		})
+	}
+}
+
 func replaceOnce(old, replacement string) func(string) string {
 	return func(text string) string { return strings.Replace(text, old, replacement, 1) }
 }
@@ -148,9 +169,13 @@ func TestReleaseMetadataFindings(t *testing.T) {
 			[]string{"rust/logbrew/README.md: missing guidance Metrics"}},
 		{nil, "rust/logbrew/Cargo.toml", []string{"missing required path: rust/logbrew/Cargo.toml"}},
 		{nil, flask, []string{"missing required path: " + flask}},
-		{replaceOnce("Flask>=3.1", "Flask>=3.0"), flask, []string{
-			flask + ": expected project.dependencies {'Flask>=3.1', 'logbrew-sdk>=0.1.21,<0.2.0'}, " +
-				"got {'Flask>=3.0', 'logbrew-sdk>=0.1.21,<0.2.0'}",
+		{replaceOnce("Flask>=3.1", "Quart>=0.20"), flask, []string{
+			flask + ": expected project.dependencies {'Flask', 'logbrew-sdk>=0.1.21,<0.2.0'}, " +
+				"got {'Quart', 'logbrew-sdk>=0.1.21,<0.2.0'}",
+		}},
+		{replaceOnce("logbrew-sdk>=0.1.21,<0.2.0", "logbrew-sdk>=0.1.20,<0.2.0"), flask, []string{
+			flask + ": expected project.dependencies {'Flask', 'logbrew-sdk>=0.1.21,<0.2.0'}, " +
+				"got {'Flask', 'logbrew-sdk>=0.1.20,<0.2.0'}",
 		}},
 		{replaceOnce(`Repository = "https://github.com/LogBrewCo/sdk"`, `Repository = "https://example.com"`), flask,
 			[]string{flask + ": expected project.urls.Repository 'https://github.com/LogBrewCo/sdk', got 'https://example.com'"}},

@@ -327,6 +327,26 @@ func stringSet(value any) pySet {
 	return newPySet(values...)
 }
 
+// requirementPattern splits a PEP 508 requirement into its name with extras and its marker.
+var requirementPattern = regexp.MustCompile(`^\s*([A-Za-z0-9][A-Za-z0-9._-]*(?:\[[^\]]*\])?)[^;]*(?:;\s*(.*?))?\s*$`)
+
+// requirementSet drops the version range of each third-party requirement, because Dependabot updates
+// ranges in pyproject.toml alone. LogBrew requirements keep their range: a release sets it on purpose.
+func requirementSet(value any) pySet {
+	requirements := stringSet(value)
+	for index, requirement := range requirements {
+		match := requirementPattern.FindStringSubmatch(requirement)
+		switch {
+		case match == nil || strings.HasPrefix(strings.ToLower(match[1]), "logbrew"):
+		case match[2] == "":
+			requirements[index] = match[1]
+		default:
+			requirements[index] = match[1] + "; " + match[2]
+		}
+	}
+	return newPySet(requirements...)
+}
+
 // pyRepr prints a value the way Python's repr does, so findings keep the
 // wording of the Python check this mode replaced.
 func pyRepr(value any) string {
@@ -609,7 +629,7 @@ func (check *metadataCheck) pythonPackage(release pypiRelease) {
 	check.require(listHas(field(project, "authors"), map[string]any{"name": "LogBrew"}),
 		location+": authors must include LogBrew")
 	check.require(listHas(field(project, "keywords"), "logbrew"), location+": keywords must include 'logbrew'")
-	check.equal(location, "project.dependencies", stringSet(field(project, "dependencies")),
+	check.equal(location, "project.dependencies", requirementSet(field(project, "dependencies")),
 		newPySet(release.Dependencies...))
 	if release.OptionalDependencies != nil {
 		expected, actual := map[string]pySet{}, map[string]pySet{}
@@ -618,7 +638,7 @@ func (check *metadataCheck) pythonPackage(release pypiRelease) {
 		}
 		optional, _ := field(project, "optional-dependencies").(map[string]any)
 		for extra, requirements := range optional {
-			actual[extra] = stringSet(requirements)
+			actual[extra] = requirementSet(requirements)
 		}
 		check.equal(location, "project.optional-dependencies", actual, expected)
 	}
