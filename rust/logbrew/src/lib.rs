@@ -37,7 +37,8 @@
 //! No feature is enabled by default.
 //!
 //! - `http`: the blocking `HttpTransport` and outbound spans for `ureq` calls.
-//! - `reqwest`: outbound spans for `reqwest` calls.
+//! - `reqwest`: outbound spans for `reqwest` 0.13 calls.
+//! - `reqwest-0-12`: outbound spans for `reqwest` 0.12 calls.
 //! - `hyper`: outbound spans for Hyper or any client built on `http::Request`.
 //! - `tower`: Tower layers for server request telemetry and client spans.
 //! - `tracing`: a `tracing` layer that queues app log events as LogBrew logs.
@@ -94,6 +95,8 @@ pub use delivery::{
 };
 #[cfg(feature = "hyper")]
 pub use http_client::HttpRequestCaptureError;
+#[cfg(feature = "reqwest-0-12")]
+pub use http_client::Reqwest012CaptureError;
 #[cfg(feature = "reqwest")]
 pub use http_client::ReqwestCaptureError;
 pub use http_client::{HttpClientSpan, HttpClientSpanEvents};

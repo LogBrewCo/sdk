@@ -255,7 +255,7 @@ if features.get("opentelemetry-exporter") != ["dep:opentelemetry", "dep:opentele
         f"unexpected packaged opentelemetry-exporter feature: {features.get('opentelemetry-exporter')!r}"
     )
 dependencies = manifest.get("dependencies", {})
-for name in ("http_types", "opentelemetry", "opentelemetry_sdk", "tower", "tracing-core", "tracing-subscriber", "ureq"):
+for name in ("http_types", "opentelemetry", "opentelemetry_sdk", "reqwest", "reqwest_0_12", "tower", "tracing-core", "tracing-subscriber", "ureq"):
     dependency = dependencies.get(name)
     if not isinstance(dependency, dict):
         raise SystemExit(f"expected packaged optional {name} dependency, found: {dependency!r}")

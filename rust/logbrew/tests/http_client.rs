@@ -1,36 +1,116 @@
 //! Integration tests for HTTP client spans.
 #![cfg(test)]
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 extern crate alloc;
 
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 use alloc::collections::BTreeMap;
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 use alloc::sync::Arc;
 #[cfg(feature = "hyper")]
 use core::convert::Infallible;
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 use core::time::Duration;
 #[cfg(feature = "hyper")]
 use logbrew::HttpRequestCaptureError;
 use logbrew::{HttpClientSpan, LogBrewClient, Metadata, MetadataValue, Traceparent};
 use serde_json::Value;
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 use std::io::{Read as _, Write as _};
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 use std::net::{TcpListener, TcpStream};
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 use std::sync::Mutex;
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 use std::thread;
 
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "reqwest", feature = "reqwest-0-12"))]
+macro_rules! reqwest_capture_test {
+    ($test:ident, $reqwest:ident, $capture:ident) => {
+        #[tokio::test]
+        async fn $test() {
+            let context =
+                Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+                    .unwrap();
+            let http = $reqwest::Client::builder()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .unwrap();
+            let mut client = LogBrewClient::builder("rust-reqwest-test", "0.1.0")
+                .api_key("LOGBREW_API_KEY")
+                .build()
+                .unwrap();
+
+            let ok_intake = UreqIntake::start(204);
+            let ok_response = HttpClientSpan::new(
+                format!(
+                    "{}/api/orders/:order_id?coupon=sample#debug",
+                    ok_intake.endpoint
+                ),
+                "post",
+                "2222222222222222",
+            )
+            .$capture(
+                &mut client,
+                "evt_reqwest_success",
+                "2026-06-02T10:00:09Z",
+                &context,
+                http.post(format!(
+                    "{}/api/orders/123?coupon=sample#debug",
+                    ok_intake.endpoint
+                )),
+            )
+            .await
+            .unwrap();
+            assert_eq!(ok_response.status().as_u16(), 204);
+            let ok_requests = ok_intake.requests();
+            assert_eq!(ok_requests.len(), 1);
+            assert_eq!(
+                ok_requests[0].header("traceparent"),
+                Some("00-4bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01")
+            );
+
+            let failing_intake = UreqIntake::start(502);
+            let error = HttpClientSpan::new(
+                format!("{}/api/orders/:order_id", failing_intake.endpoint),
+                "post",
+                "3333333333333333",
+            )
+            .$capture(
+                &mut client,
+                "evt_reqwest_failure",
+                "2026-06-02T10:00:10Z",
+                &context,
+                http.post(format!("{}/api/orders/456", failing_intake.endpoint)),
+            )
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap_err();
+            assert_eq!(error.status().map(|status| status.as_u16()), Some(502));
+
+            let preview = client.preview_json().unwrap();
+            assert!(preview.contains("\"id\": \"evt_reqwest_success\""));
+            assert!(preview.contains("\"name\": \"http.client:POST /api/orders/:order_id\""));
+            assert!(preview.contains("\"statusCode\": 204"));
+            assert!(preview.contains("\"statusCodeClass\": \"2xx\""));
+            assert!(preview.contains("\"id\": \"evt_reqwest_failure\""));
+            assert!(preview.contains("\"statusCode\": 502"));
+            assert!(preview.contains("\"statusCodeClass\": \"5xx\""));
+            assert!(preview.contains("\"status\": \"error\""));
+            assert!(!preview.contains("coupon=sample"));
+            assert!(!preview.contains("#debug"));
+        }
+    };
+}
+
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 #[derive(Clone, Debug)]
 struct UreqRecordedRequest {
     headers: BTreeMap<String, String>,
 }
 
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 impl UreqRecordedRequest {
     fn header(&self, name: &str) -> Option<&str> {
         self.headers
@@ -39,13 +119,13 @@ impl UreqRecordedRequest {
     }
 }
 
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 struct UreqIntake {
     endpoint: String,
     requests: Arc<Mutex<Vec<UreqRecordedRequest>>>,
 }
 
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 impl UreqIntake {
     fn requests(&self) -> Vec<UreqRecordedRequest> {
         self.requests.lock().unwrap().clone()
@@ -278,79 +358,17 @@ fn http_client_span_captures_ureq_call_result_and_preserves_error() {
 }
 
 #[cfg(feature = "reqwest")]
-#[tokio::test]
-async fn http_client_span_captures_reqwest_send_result_and_preserves_error() {
-    let context =
-        Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .unwrap();
-    let mut client = LogBrewClient::builder("rust-reqwest-test", "0.1.0")
-        .api_key("LOGBREW_API_KEY")
-        .build()
-        .unwrap();
-
-    let ok_intake = UreqIntake::start(204);
-    let ok_response = HttpClientSpan::new(
-        format!(
-            "{}/api/orders/:order_id?coupon=sample#debug",
-            ok_intake.endpoint
-        ),
-        "post",
-        "2222222222222222",
-    )
-    .capture_reqwest_send(
-        &mut client,
-        "evt_reqwest_success",
-        "2026-06-02T10:00:09Z",
-        &context,
-        http.post(format!(
-            "{}/api/orders/123?coupon=sample#debug",
-            ok_intake.endpoint
-        )),
-    )
-    .await
-    .unwrap();
-    assert_eq!(ok_response.status().as_u16(), 204);
-    let ok_requests = ok_intake.requests();
-    assert_eq!(ok_requests.len(), 1);
-    assert_eq!(
-        ok_requests[0].header("traceparent"),
-        Some("00-4bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01")
-    );
-
-    let failing_intake = UreqIntake::start(502);
-    let error = HttpClientSpan::new(
-        format!("{}/api/orders/:order_id", failing_intake.endpoint),
-        "post",
-        "3333333333333333",
-    )
-    .capture_reqwest_send(
-        &mut client,
-        "evt_reqwest_failure",
-        "2026-06-02T10:00:10Z",
-        &context,
-        http.post(format!("{}/api/orders/456", failing_intake.endpoint)),
-    )
-    .await
-    .unwrap()
-    .error_for_status()
-    .unwrap_err();
-    assert_eq!(error.status().map(|status| status.as_u16()), Some(502));
-
-    let preview = client.preview_json().unwrap();
-    assert!(preview.contains("\"id\": \"evt_reqwest_success\""));
-    assert!(preview.contains("\"name\": \"http.client:POST /api/orders/:order_id\""));
-    assert!(preview.contains("\"statusCode\": 204"));
-    assert!(preview.contains("\"statusCodeClass\": \"2xx\""));
-    assert!(preview.contains("\"id\": \"evt_reqwest_failure\""));
-    assert!(preview.contains("\"statusCode\": 502"));
-    assert!(preview.contains("\"statusCodeClass\": \"5xx\""));
-    assert!(preview.contains("\"status\": \"error\""));
-    assert!(!preview.contains("coupon=sample"));
-    assert!(!preview.contains("#debug"));
-}
+reqwest_capture_test!(
+    http_client_span_captures_reqwest_send_result_and_preserves_error,
+    reqwest,
+    capture_reqwest_send
+);
+#[cfg(feature = "reqwest-0-12")]
+reqwest_capture_test!(
+    http_client_span_captures_reqwest_0_12_send_result_and_preserves_error,
+    reqwest_0_12,
+    capture_reqwest_0_12_send
+);
 
 #[cfg(feature = "hyper")]
 #[tokio::test]
@@ -441,7 +459,7 @@ async fn http_client_span_captures_http_request_result_for_hyper_compatible_clie
     assert!(!preview.contains("safe app-owned body"));
 }
 
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(any(feature = "http", feature = "reqwest", feature = "reqwest-0-12"))]
 fn read_request(stream: &mut TcpStream) -> UreqRecordedRequest {
     let mut buffer = [0_u8; 4096];
     let bytes = stream.read(&mut buffer).unwrap();

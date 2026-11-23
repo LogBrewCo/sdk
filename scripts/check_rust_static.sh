@@ -7,7 +7,7 @@ cd "$repo_root/rust/logbrew"
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --all-features -- -D warnings
-for feature in http hyper reqwest tower tracing opentelemetry-exporter tracing-opentelemetry; do
+for feature in http hyper reqwest reqwest-0-12 tower tracing opentelemetry-exporter tracing-opentelemetry; do
   cargo clippy --all-targets --no-default-features --features "$feature" -- -D warnings
 done
 cargo clippy --lib --all-features -- -D warnings -D unused_crate_dependencies
