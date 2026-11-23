@@ -112,8 +112,8 @@ jobs:
             tools/pin-check/go.sum
             tools/staticcheck/go.sum
 
-      # Go is set up first, and its cache restores the module and build caches.
-      # The verifier's own cache would restore over those same files.
+      # Go is set up first, and its cache fills the module and build caches.
+      # The verifier's own cache would then write over those read-only files.
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
         with:
