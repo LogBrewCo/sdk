@@ -20,6 +20,7 @@ default = []
 http = ["dep:ureq"]
 hyper = ["dep:http_types"]
 reqwest = ["dep:reqwest"]
+reqwest-0-12 = ["dep:reqwest_0_12"]
 tower = ["dep:http_types", "dep:tower"]
 tracing = ["dep:tracing-core", "dep:tracing-subscriber"]
 opentelemetry-exporter = ["dep:opentelemetry", "dep:opentelemetry_sdk"]
@@ -36,7 +37,8 @@ opentelemetry = { version = "0.33", default-features = false, features = ["trace
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.12", default-features = false, optional = true }
+reqwest = { version = "0.13", default-features = false, optional = true }
+reqwest_0_12 = { package = "reqwest", version = "0.12", default-features = false, optional = true }
 tower = { version = "0.5", optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 tracing-core = { version = "0.1", optional = true }
