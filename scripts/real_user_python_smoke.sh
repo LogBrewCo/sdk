@@ -243,7 +243,7 @@ run_requirement_reinstalls() {
 
     python -m pip uninstall -y logbrew-sdk >/dev/null
     assert_python_package_removed
-    python -m pip install --no-index --report "$freeze_report" -r "$freeze_file" >/dev/null
+    python -m pip install --no-index --require-hashes --report "$freeze_report" -r "$freeze_file" >/dev/null
     python -m pip check >/dev/null
     verify_direct_install "$expected_suffix" "$freeze_report"
 
