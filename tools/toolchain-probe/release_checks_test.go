@@ -672,8 +672,13 @@ func TestMavenDeploymentCapture(t *testing.T) {
 		"fixture:"+releaseChecksMode, "maven-deployment", "capture", "--deployment-id-file", path+"3")
 	command.Stdin = strings.NewReader(testDeployment)
 	diagnostic, runError := command.CombinedOutput()
+	got := string(diagnostic)
+	if testing.CoverMode() != "" {
+		// A coverage build also writes its counters at exit, which the same limit refuses.
+		got, _, _ = strings.Cut(got, "error: coverage meta-data emit failed")
+	}
 	if _, err := os.Lstat(path + "3"); command.ProcessState.ExitCode() != exitFailure || !errors.Is(err, os.ErrNotExist) ||
-		string(diagnostic) != "Maven Central deployment identifier could not be stored.\n" {
+		got != "Maven Central deployment identifier could not be stored.\n" {
 		t.Fatalf("short write = %v, %q, %v", runError, diagnostic, err)
 	}
 }
