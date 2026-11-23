@@ -1297,7 +1297,7 @@
       },
       "method": "Axum 0.8 server with the crate's tower, tracing, and http features: TowerRequestTelemetryLayer as a route layer with error issues on, LogBrewTracingLayer with span events and error issues for logs, an app middleware that sets the user in a scoped TelemetryContext, release, environment, and service in the client context, and automatic HTTP delivery; one request that succeeds and one whose handler returns an error response that logs through tracing::error!, both with a W3C traceparent",
       "probe": "tools/capture-matrix/probes/rust/logbrew",
-      "inputs": "4808c358f1bcb47c58b530245b2a606fa89bfa535210c1ec1ad8da847e1c4e98"
+      "inputs": "b0de6a4de76799202b56e627e45a47823c836ed9b0457e3f57b675268dc3aa39"
     },
     "swift/logbrew-swift": {
       "share": 100.0,
