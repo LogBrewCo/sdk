@@ -2,6 +2,6 @@
   "name": "publint",
   "private": true,
   "dependencies": {
-    "publint": "0.3.21"
+    "publint": "0.3.25"
   }
 }

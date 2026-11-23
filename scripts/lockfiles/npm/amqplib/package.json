@@ -2,8 +2,8 @@
   "name": "amqplib",
   "private": true,
   "dependencies": {
-    "@types/node": "26.0.1",
-    "amqplib": "0.10.9",
-    "typescript": "6.0.3"
+    "@types/node": "26.6.6",
+    "amqplib": "2.4.0",
+    "typescript": "7.0.2"
   }
 }
