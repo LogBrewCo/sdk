@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -78,10 +79,10 @@ func TestReleaseMetadataAllowsThirdPartyRangeUpdates(t *testing.T) {
 		edit func(string) string
 		path string
 	}{
-		{replaceOnce("cryptography>=49,<50", "cryptography>=49,<51"), core},
-		{replaceOnce("certifi>=2026.7.22", "certifi>=2026.11.1"), core},
-		{replaceOnce("typing-extensions>=4.1;", "typing-extensions>=4.6;"), core},
-		{replaceOnce("Flask>=3.1", "Flask>=3.2"), "python/logbrew_flask/pyproject.toml"},
+		{raiseBound("cryptography", `>=[0-9.]+,<([0-9]+)`), core},
+		{raiseBound("certifi", `>=([0-9.]+)`), core},
+		{raiseBound("typing-extensions", `>=([0-9.]+)`), core},
+		{raiseBound("Flask", `>=([0-9.]+)`), "python/logbrew_flask/pyproject.toml"},
 	} {
 		t.Run(test.path, func(t *testing.T) {
 			t.Parallel()
@@ -89,6 +90,19 @@ func TestReleaseMetadataAllowsThirdPartyRangeUpdates(t *testing.T) {
 				t.Errorf("range update failures: %q", failures)
 			}
 		})
+	}
+}
+
+// raiseBound appends ".1" to the version that bound captures after name, so
+// the case still edits the file after Dependabot moves the range.
+func raiseBound(name, bound string) func(string) string {
+	pattern := regexp.MustCompile(regexp.QuoteMeta(name) + bound)
+	return func(text string) string {
+		match := pattern.FindStringSubmatchIndex(text)
+		if match == nil {
+			return text
+		}
+		return text[:match[3]] + ".1" + text[match[3]:]
 	}
 }
 
