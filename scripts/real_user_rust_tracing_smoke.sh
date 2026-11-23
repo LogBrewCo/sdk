@@ -11,6 +11,13 @@ source "$repo_root/scripts/native_verifier.sh"
 crate_version="$(run_native_verifier release-versions --rust "$repo_root")"
 crate_name="logbrew-$crate_version"
 export LOGBREW_RUST_CRATE_VERSION="$crate_version"
+manifest_requirement() {
+	python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["dependencies"][sys.argv[2]]["version"])' \
+		"$repo_root/rust/logbrew/Cargo.toml" "$1"
+}
+otel_version="$(manifest_requirement opentelemetry)"
+otel_sdk_version="$(manifest_requirement opentelemetry_sdk)"
+tracing_otel_version="$(manifest_requirement tracing-opentelemetry)"
 
 assert_logbrew_path_dependency() {
 	local manifest_path="$1"
@@ -111,22 +118,22 @@ cargo run --quiet --locked > tracing.stdout.json 2> tracing.stderr.json
 python3 "$repo_root/scripts/check_rust_tracing_payload.py" tracing.stdout.json tracing.stderr.json >/dev/null
 
 start_app tracing-otel-app tracing-opentelemetry tracing_opentelemetry_bridge.rs
-cargo add opentelemetry@0.32 --no-default-features --features trace >/dev/null
+cargo add "opentelemetry@$otel_version" --no-default-features --features trace >/dev/null
 cargo add tracing@0.1 >/dev/null
-cargo add tracing-opentelemetry@0.33 --no-default-features >/dev/null
+cargo add "tracing-opentelemetry@$tracing_otel_version" --no-default-features >/dev/null
 cargo add tracing-subscriber@0.3 --no-default-features --features registry,std >/dev/null
 cargo metadata --locked --format-version 1 > tracing-otel-cargo-metadata.json
 assert_resolved_dependencies tracing-otel-cargo-metadata.json tracing-otel-app tracing-opentelemetry opentelemetry tracing tracing-opentelemetry tracing-subscriber
-assert_cargo_tree tracing-otel-app 'opentelemetry v0\.32\.' 'tracing-opentelemetry v0\.33\.'
+assert_cargo_tree tracing-otel-app "opentelemetry v${otel_version//./\\.}\\." "tracing-opentelemetry v${tracing_otel_version//./\\.}\\."
 cargo run --quiet --locked > tracing-otel.stdout.json 2> tracing-otel.stderr.json
 python3 "$repo_root/scripts/check_rust_tracing_opentelemetry_payload.py" tracing-otel.stdout.json tracing-otel.stderr.json >/dev/null
 
 start_app otel-exporter-app opentelemetry-exporter opentelemetry_exporter.rs
-cargo add opentelemetry@0.32 --no-default-features --features trace >/dev/null
-cargo add opentelemetry_sdk@0.32 --no-default-features --features trace >/dev/null
+cargo add "opentelemetry@$otel_version" --no-default-features --features trace >/dev/null
+cargo add "opentelemetry_sdk@$otel_sdk_version" --no-default-features --features trace >/dev/null
 cargo metadata --locked --format-version 1 > otel-exporter-cargo-metadata.json
 assert_resolved_dependencies otel-exporter-cargo-metadata.json otel-exporter-app opentelemetry-exporter opentelemetry opentelemetry_sdk
-assert_cargo_tree otel-exporter-app 'opentelemetry v0\.32\.' 'opentelemetry_sdk v0\.32\.'
+assert_cargo_tree otel-exporter-app "opentelemetry v${otel_version//./\\.}\\." "opentelemetry_sdk v${otel_sdk_version//./\\.}\\."
 cargo run --quiet --locked > otel-exporter.stdout.json 2> otel-exporter.stderr.json
 python3 - <<'PY'
 import json

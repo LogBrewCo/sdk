@@ -32,15 +32,15 @@ tracing-opentelemetry = [
 
 [dependencies]
 http_types = { package = "http", version = "1", optional = true }
-opentelemetry = { version = "0.32", default-features = false, features = ["trace"], optional = true }
-opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"], optional = true }
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"], optional = true }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 reqwest = { version = "0.12", default-features = false, optional = true }
 tower = { version = "0.5", optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 tracing-core = { version = "0.1", optional = true }
-tracing-opentelemetry = { version = "0.33", default-features = false, optional = true }
+tracing-opentelemetry = { version = "0.34", default-features = false, optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"], optional = true }
 ureq = { version = "3.3", optional = true }
 
@@ -48,7 +48,7 @@ ureq = { version = "3.3", optional = true }
 actix-web = { version = "4", default-features = false, features = ["macros"] }
 axum = "0.8"
 rocket = "0.5"
-time = "=0.3.51"
+time = "=0.3.55"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
