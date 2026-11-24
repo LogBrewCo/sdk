@@ -846,21 +846,21 @@ const typescript = dependencies.typescript;
 if (!typescript) {
   throw new Error(`missing ${packageManager} package-list typescript entry`);
 }
-if (typescript.version !== "6.0.3") {
+if (typescript.version !== process.env.LOGBREW_JS_SMOKE_TYPESCRIPT_VERSION) {
   throw new Error(`unexpected ${packageManager} typescript version: ${typescript.version}`);
 }
 const pino = dependencies.pino;
 if (!pino) {
   throw new Error(`missing ${packageManager} package-list pino entry`);
 }
-if (pino.version !== "10.3.1") {
+if (pino.version !== process.env.LOGBREW_JS_SMOKE_PINO_VERSION) {
   throw new Error(`unexpected ${packageManager} pino version: ${pino.version}`);
 }
 const winston = dependencies.winston;
 if (!winston) {
   throw new Error(`missing ${packageManager} package-list winston entry`);
 }
-if (winston.version !== "3.19.0") {
+if (winston.version !== process.env.LOGBREW_JS_SMOKE_WINSTON_VERSION) {
   throw new Error(`unexpected ${packageManager} winston version: ${winston.version}`);
 }
 EOF
@@ -874,18 +874,18 @@ case "$package_manager" in
   npm)
     grep -q '^smoke-app@1\.0\.0 .*$' "$output_file"
     grep -q "^├── @logbrew/sdk@${sdk_package_version}$" "$output_file"
-    grep -q '^├── pino@10\.3\.1$' "$output_file"
-    grep -q '^├── typescript@6\.0\.3$' "$output_file"
-    grep -q '^└── winston@3\.19\.0$' "$output_file"
+    grep -qxF "├── pino@${smoke_pino_version}" "$output_file"
+    grep -qxF "├── typescript@${smoke_typescript_version}" "$output_file"
+    grep -qxF "└── winston@${smoke_winston_version}" "$output_file"
     ;;
   pnpm)
     grep -q '^Legend: production dependency, optional only, dev only$' "$output_file"
     grep -q '^smoke-app@1\.0\.0 .* (PRIVATE)$' "$output_file"
     grep -q '^│   dependencies:$' "$output_file"
     grep -q "^├── @logbrew/sdk@${sdk_package_version}$" "$output_file"
-    grep -q '^├── pino@10\.3\.1$' "$output_file"
-    grep -q '^├── typescript@6\.0\.3$' "$output_file"
-    grep -q '^└── winston@3\.19\.0$' "$output_file"
+    grep -qxF "├── pino@${smoke_pino_version}" "$output_file"
+    grep -qxF "├── typescript@${smoke_typescript_version}" "$output_file"
+    grep -qxF "└── winston@${smoke_winston_version}" "$output_file"
     grep -q '^4 packages$' "$output_file"
     ;;
   *)
@@ -939,21 +939,21 @@ const typescript = dependencies.typescript;
 if (!typescript) {
   throw new Error(`missing ${packageManager} package-list typescript entry after removal`);
 }
-if (typescript.version !== "6.0.3") {
+if (typescript.version !== process.env.LOGBREW_JS_SMOKE_TYPESCRIPT_VERSION) {
   throw new Error(`unexpected ${packageManager} typescript version after removal: ${typescript.version}`);
 }
 const pino = dependencies.pino;
 if (!pino) {
   throw new Error(`missing ${packageManager} package-list pino entry after removal`);
 }
-if (pino.version !== "10.3.1") {
+if (pino.version !== process.env.LOGBREW_JS_SMOKE_PINO_VERSION) {
   throw new Error(`unexpected ${packageManager} pino version after removal: ${pino.version}`);
 }
 const winston = dependencies.winston;
 if (!winston) {
   throw new Error(`missing ${packageManager} package-list winston entry after removal`);
 }
-if (winston.version !== "3.19.0") {
+if (winston.version !== process.env.LOGBREW_JS_SMOKE_WINSTON_VERSION) {
   throw new Error(`unexpected ${packageManager} winston version after removal: ${winston.version}`);
 }
 
@@ -971,9 +971,9 @@ local output_file="$2"
 case "$package_manager" in
   npm)
     grep -q '^smoke-app@1\.0\.0 .*$' "$output_file"
-    grep -q '^├── pino@10\.3\.1$' "$output_file"
-    grep -q '^├── typescript@6\.0\.3$' "$output_file"
-    grep -q '^└── winston@3\.19\.0$' "$output_file"
+    grep -qxF "├── pino@${smoke_pino_version}" "$output_file"
+    grep -qxF "├── typescript@${smoke_typescript_version}" "$output_file"
+    grep -qxF "└── winston@${smoke_winston_version}" "$output_file"
     if grep -q "@logbrew/sdk@${sdk_package_version}" "$output_file"; then
       echo "unexpected npm plain package list still contains @logbrew/sdk after uninstall" >&2
       exit 1
@@ -983,9 +983,9 @@ case "$package_manager" in
     grep -q '^Legend: production dependency, optional only, dev only$' "$output_file"
     grep -q '^smoke-app@1\.0\.0 .* (PRIVATE)$' "$output_file"
     grep -q '^│   dependencies:$' "$output_file"
-    grep -q '^├── pino@10\.3\.1$' "$output_file"
-    grep -q '^├── typescript@6\.0\.3$' "$output_file"
-    grep -q '^└── winston@3\.19\.0$' "$output_file"
+    grep -qxF "├── pino@${smoke_pino_version}" "$output_file"
+    grep -qxF "├── typescript@${smoke_typescript_version}" "$output_file"
+    grep -qxF "└── winston@${smoke_winston_version}" "$output_file"
     grep -q '^3 packages$' "$output_file"
     if grep -q "@logbrew/sdk@${sdk_package_version}" "$output_file"; then
       echo "unexpected pnpm plain package list still contains @logbrew/sdk after removal" >&2
