@@ -106,6 +106,10 @@ expect_commit "shared-address network IP" 1 "private-network:" "$shared_ip" src/
 expect_commit "agent attribution in message" 1 "agent-attribution: commit message" "" src/app.txt "public" "$(printf 'fix: x\n\n%s' "$attribution")"
 expect_commit "access key" 1 "access-key" "$access_key" src/app.txt "key = \"$access_key\""
 expect_commit "bidirectional control character" 1 "hidden-text:" "" src/app.txt "$bidi"
+zwsp="$(utf8 226 128 139)"
+expect_commit "zero-width space after @ or # stays allowed" 0 "clean" "" src/app.txt "by @${zwsp}octocat in [#${zwsp}12]"
+expect_commit "zero-width space elsewhere" 1 "hidden-text:" "" src/app.txt "a${zwsp}b"
+expect_commit "project term after a link break" 1 "infrastructure:" "" src/app.txt "see #${zwsp}$term"
 expect_commit "inline allow comment is ignored" 1 "infrastructure:" "" src/app.txt "host $term # gitleaks:allow"
 patch_file="thread-stream@""4.2.0.patch"
 expect_commit "package patch file name stays allowed" 0 "clean" "" package.json \

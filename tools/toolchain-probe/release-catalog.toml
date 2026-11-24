@@ -109,7 +109,7 @@ version = "0.1.12"
 package = "logbrew_django"
 description = "Django integration"
 requires_python = ">=3.10"
-dependencies = ["Django>=4.2.30,<7", "logbrew-sdk>=0.1.27,<0.2.0"]
+dependencies = ["Django", "logbrew-sdk>=0.1.27,<0.2.0"]
 
 [[pypi]]
 dir = "python/logbrew_fastapi"
@@ -118,7 +118,7 @@ version = "0.1.14"
 package = "logbrew_fastapi"
 description = "FastAPI integration"
 requires_python = ">=3.10"
-dependencies = ["fastapi>=0.111.1", "logbrew-sdk>=0.1.27,<0.2.0"]
+dependencies = ["fastapi", "logbrew-sdk>=0.1.27,<0.2.0"]
 optional_dependencies = { celery = ["logbrew-sdk[celery]>=0.1.27,<0.2.0"] }
 
 [[pypi]]
@@ -128,7 +128,7 @@ version = "0.1.9"
 package = "logbrew_flask"
 description = "Flask integration"
 requires_python = ">=3.10"
-dependencies = ["Flask>=3.1", "logbrew-sdk>=0.1.21,<0.2.0"]
+dependencies = ["Flask", "logbrew-sdk>=0.1.21,<0.2.0"]
 
 [[pypi]]
 dir = "python/logbrew_py"
@@ -138,8 +138,8 @@ package = "logbrew_sdk"
 description = "Public LogBrew Python SDK"
 requires_python = ">=3.10"
 dependencies = [
-  "certifi>=2026.7.22",
-  "truststore>=0.10.4,<1",
-  "typing-extensions>=4.1; python_version < '3.11'",
+  "certifi",
+  "truststore",
+  "typing-extensions; python_version < '3.11'",
 ]
-optional_dependencies = { arq = ["arq>=0.28,<1"], celery = ["celery>=5,<6"], dramatiq = ["dramatiq>=2.2.1,<3"], persistence = ["cryptography>=49,<50"], rq = ["rq>=2,<3"] }
+optional_dependencies = { arq = ["arq"], celery = ["celery"], dramatiq = ["dramatiq"], persistence = ["cryptography"], rq = ["rq"] }

@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - id: detect
         name: Detect manifests
@@ -134,6 +136,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -150,6 +154,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
+          no-cache: true
 
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'
@@ -213,6 +218,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -221,11 +228,13 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
+          package-manager-cache: false
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
+          no-cache: true
 
       - name: Install dependencies and package-manager shims
         run: |
@@ -375,6 +384,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -389,7 +400,7 @@ jobs:
           python3 -m pip install --require-hashes --requirement scripts/lockfiles/python/requirements-release-tools.txt
           python3 -m pip install --require-hashes --requirement scripts/lockfiles/python/requirements-ci-tests.txt
           python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/logbrew-wheel" ./python/logbrew_py
-          python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" logbrew-sdk
+          bash scripts/pip_install_built.sh python3 "$RUNNER_TEMP"/logbrew-wheel/logbrew_sdk-*.whl logbrew-sdk
 
       - name: Run Python package tests
         shell: bash
@@ -452,6 +463,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -505,6 +518,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -513,6 +528,7 @@ jobs:
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.26.x"
+          cache: false
 
       - name: Run Go tests
         run: bash scripts/check_go_tests.sh
@@ -544,6 +560,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -571,6 +589,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -598,6 +618,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -625,6 +647,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -671,6 +695,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -701,6 +727,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -728,6 +756,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -762,6 +792,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -789,6 +821,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -842,6 +876,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe

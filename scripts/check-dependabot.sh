@@ -8,8 +8,8 @@
 #   (a Cargo workspace member counts as listed when an ancestor directory is);
 # - an entry lists a directory that holds no tracked manifest of its ecosystem;
 # - an ecosystem has more than one entry, or an entry lists a glob;
-# - an entry does not check daily, wait 2 days after a release
-#   (`cooldown: default-days: 2`), or group all updates into one pull request
+# - an entry does not check daily, wait 7 days after a release
+#   (`cooldown: default-days: 7`), or group all updates into one pull request
 #   (a group with `patterns: ["*"]`).
 # The config uses a YAML subset: block style, one key per line, `directories`
 # as a block list, and group patterns on one line.
@@ -105,7 +105,7 @@ printf '%s\n' "$files" | awk '
             split(dirs[i], each, " ")
             for (d in each) if (!((name, each[d]) in found)) problem[++problems] = name ": " each[d] " holds no tracked " name " manifest"
             if (interval[i] != "daily") problem[++problems] = name ": schedule interval is \"" interval[i] "\"; use daily"
-            if (days[i] != "2") problem[++problems] = name ": cooldown default-days is \"" days[i] "\"; use 2"
+            if (days[i] != "7") problem[++problems] = name ": cooldown default-days is \"" days[i] "\"; use 7"
             if (!grouped[i]) problem[++problems] = name ": needs a group with patterns: [\"*\"] so one pull request carries its updates"
         }
         for (i = 1; i <= problems; i++) print "dependabot: " problem[i] > "/dev/stderr"

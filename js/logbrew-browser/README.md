@@ -63,6 +63,35 @@ logbrew analytics compare --project "<project_id>" --since 24h \
   --segment forum=Forum --segment-property forum:tag.referrer_domain=forum.example.org --json
 ```
 
+## Returning Visitors
+
+A site without sign-in can count returning visitors with an anonymous ID. Set `anonymousSubject: true` and the SDK keeps 1 random ID per browser. It adds the ID to every event as `context.subject` with `kind: "anonymous"`, so LogBrew retention and lifecycle analytics can count the same visitor across visits.
+
+```js
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  anonymousSubject: true
+});
+```
+
+This option is off by default. When it is off, the SDK stores no ID.
+
+When it is on, the SDK stores 1 record in `localStorage` under the key `logbrew:browser:anonymous-subject`. The record holds a random UUID, its creation time, and its expiry time. Nothing else goes into the record: no IP address, user agent, or fingerprint. The ID expires 395 days (13 months) after the SDK creates it. Later visits do not extend this time. After expiry, the next event gets a new ID. Set a shorter time with `anonymousSubject: { maxAgeDays: 90 }`; the limit is 1 to 395 days. If `localStorage` is not available, the ID stays in page memory and ends when the page closes.
+
+A subject that your app sets wins. If you set `context.subject` on the client or on an event, for example `{ id: "user_42", kind: "user" }` after sign-in, that event carries your subject and not the anonymous ID.
+
+Control the ID after install:
+
+```js
+logbrew.anonymousSubject.enable();  // consent given: start or continue the ID
+logbrew.anonymousSubject.reset();   // sign-out: remove the ID; the next event gets a new one
+logbrew.anonymousSubject.disable(); // consent withdrawn: remove the ID and stop adding it
+```
+
+The ID is stored on the visitor's device. You own the site, so you decide if the law requires consent for it, for example under the ePrivacy rules in the EU. If it does, get consent before you set `anonymousSubject: true` or call `enable()`, and call `disable()` when the visitor withdraws consent. Tell visitors about the ID in your privacy policy.
+
+`anonymousSubject` works only when `installLogBrewBrowser()` creates the client. It throws a configuration error together with the `client` option.
+
 ## Read Events Back
 
 A successful send shows that LogBrew accepted the request. It does not show
@@ -136,7 +165,7 @@ const logbrew = installLogBrewBrowser({
 Use `debugIdMap` only as an explicit override for a different app-owned build
 flow that cannot register Debug IDs at runtime.
 
-Browser issues record a typed exception, an explicit unhandled capture mechanism, prior bounded breadcrumbs, a fixed error summary, path-only frames, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. Automatic capture does not send exception messages. Every exception-chain message reports `redacted`, and `errorMessage` is absent from metadata. Raw stack text also stays out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files, grouping keys, and automatic breadcrumbs use sanitized event fields, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
+Browser issues record a typed exception, an explicit unhandled capture mechanism, prior bounded breadcrumbs, a fixed error summary, path-only frames, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. Automatic capture does not send exception messages. Every exception-chain message reports `redacted`, and `errorMessage` is absent from metadata. A frame from a browser extension script keeps its extension URL, such as `chrome-extension://<extension-id>/content.js`, so the `browser_extensions` inbound filter can drop errors that extensions throw on your pages. Raw stack text also stays out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files, grouping keys, and automatic breadcrumbs use sanitized event fields, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
 
 ## Browser Error Suppression
 

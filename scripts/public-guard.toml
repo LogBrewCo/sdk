@@ -40,8 +40,9 @@ regex = '''(?i)(?:<c[o]dex_delegation|<h[e]artbeat|autom[a]tion_id|source_th[r]e
 [[rules]]
 id = "hidden-text.1"
 description = "Invisible or bidirectional control character"
-# A zero-width space right after @ is how dependency update notes break mentions.
-regex = '''(?:^|[^@])\x{200B}|[\x{200C}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{2066}-\x{2069}]'''
+# A zero-width space right after @ or # is how dependency update notes break
+# mentions and issue links.
+regex = '''(?:^|[^@#])\x{200B}|[\x{200C}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{2066}-\x{2069}]'''
 
 [[rules]]
 id = "personal-data.1"

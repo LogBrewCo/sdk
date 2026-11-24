@@ -76,7 +76,8 @@ RUFF_CACHE_DIR="$cache_dir/ruff" "$tool_ruff" check \
   --line-length 120 \
   --select E,F,I,UP,B,SIM,PERF,RUF,PL \
   --ignore PLR2004,PLR0913 \
-  tools/capture-matrix/capture_matrix.py
-"$tool_python" -m mypy --strict --python-version 3.11 --cache-dir "$cache_dir/mypy" tools/capture-matrix/capture_matrix.py
+  tools/capture-matrix/capture_matrix.py tools/capture-matrix/dependency_changes.py
+"$tool_python" -m mypy --strict --python-version 3.11 --cache-dir "$cache_dir/mypy" \
+  tools/capture-matrix/capture_matrix.py tools/capture-matrix/dependency_changes.py
 
 printf '%s\n' "python static analysis ok"

@@ -8,6 +8,7 @@ import {
   installBrowserBreadcrumbs
 } from "@logbrew/sdk";
 import { transportResponse } from "./rate-limit-response.js";
+import { createAnonymousSubject } from "./anonymous-subject.js";
 import { createBeaconTransport } from "./beacon-transport.js";
 import { addBrowserAttributionContext, browserAttributionTags } from "./attribution.js";
 import { addBrowserRuntimeContext } from "./runtime-context.js";
@@ -87,7 +88,8 @@ export {
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
-const DEFAULT_SDK_VERSION = "0.1.22";
+const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
+const DEFAULT_SDK_VERSION = "0.1.24";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -118,7 +120,8 @@ export function createLogBrewBrowserClient({
   service,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
-  [CLIENT_REPORT_STORE]: clientReportStore
+  [CLIENT_REPORT_STORE]: clientReportStore,
+  [CONTEXT_PROVIDER]: contextProvider
 } = {}) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
@@ -143,7 +146,8 @@ export function createLogBrewBrowserClient({
     onEventDropped,
     sdkName,
     sdkVersion,
-    [CLIENT_REPORT_STORE]: clientReportStore
+    [CLIENT_REPORT_STORE]: clientReportStore,
+    [CONTEXT_PROVIDER]: clientContext?.subject === undefined ? contextProvider : undefined
   });
 }
 
@@ -196,6 +200,10 @@ export function installLogBrewBrowser(options = {}) {
   if (!browserWindow || typeof browserWindow.addEventListener !== "function") {
     throw new SdkError("configuration_error", "installLogBrewBrowser requires a browser window");
   }
+  if (options.client && options.anonymousSubject !== undefined && options.anonymousSubject !== false) {
+    throw new SdkError("configuration_error", "anonymousSubject needs the client that installLogBrewBrowser creates");
+  }
+  const anonymousSubject = options.client ? undefined : createAnonymousSubject(browserWindow, options.anonymousSubject);
 
   const client = options.client ?? createLogBrewBrowserClient({
     ...options,
@@ -205,7 +213,8 @@ export function installLogBrewBrowser(options = {}) {
     browserNavigator: options.browserNavigator ?? browserWindow.navigator,
     [CLIENT_REPORT_STORE]: options.persistOffline
       ? createBrowserClientReportStore(sessionStorageOf(browserWindow), options.persistOffline.storageKey)
-      : undefined
+      : undefined,
+    [CONTEXT_PROVIDER]: anonymousSubject?.provider
   });
   const transport = createBrowserTransport(options, browserWindow);
   const traceContext = resolveBrowserTraceContext(options);
@@ -224,6 +233,7 @@ export function installLogBrewBrowser(options = {}) {
     removeListeners(browserWindow, listeners);
     lifecycleDelivery.destroy();
   }, traceContext);
+  context.anonymousSubject = anonymousSubject?.controls;
 
   const listeners = {
     error: (event) => {
@@ -1120,6 +1130,14 @@ function browserIssueGroupingKey(value) {
   return frameFile ? `${trimmed.slice(0, secondSeparator + 1)}${frameFile}` : trimmed;
 }
 
+const BROWSER_EXTENSION_PROTOCOLS = new Set([
+  "chrome-extension:",
+  "moz-extension:",
+  "safari-extension:",
+  "safari-web-extension:",
+  "ms-browser-extension:"
+]);
+
 function browserCodePath(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return undefined;
@@ -1127,7 +1145,11 @@ function browserCodePath(value) {
   const trimmed = value.trim();
   if (/^[a-z][a-z0-9+.-]*:/iu.test(trimmed)) {
     try {
-      return new URL(trimmed).pathname || undefined;
+      const url = new URL(trimmed);
+      if (BROWSER_EXTENSION_PROTOCOLS.has(url.protocol)) {
+        return `${url.protocol}//${url.host}${url.pathname}`;
+      }
+      return url.pathname || undefined;
     } catch {
       return pathBasename(trimmed);
     }

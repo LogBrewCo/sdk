@@ -4,28 +4,28 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 seeded_dir="$repo_root/js/.strict-gate-seeded"
-oxlint_version="1.90.0"
-tsgolint_version="7.0.2005"
+oxlint_version="1.94.0"
+tsgolint_version="7.0.2007"
 typescript_version="7.0.2"
 written=()
 trap 'rm -rf ${written[@]+"${written[@]}"}; find "$tmp_dir" -depth -delete' EXIT
 
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64 | Darwin:aarch64)
-    target="aarch64-apple-darwin" expected_sha256="4654e2b8b450f25d3b3186b8e88ffbaf5c20b991a61243758a0944bc46726791"
-    npm_target="darwin-arm64" tsgolint_sha256="50942d103d4eb269f7ae6db02698480b28bceba499d162bac911d6132ab63a68"
+    target="aarch64-apple-darwin" expected_sha256="d31a59e3b11511075c13173f3c0b63fc0baa51477d73276dded7c308f4c26dc0"
+    npm_target="darwin-arm64" tsgolint_sha256="2366d0f0d1ddc601de717b1f15afe45a8c9c849a9198821fefd6c8db030126ea"
     typescript_sha256="902e2fe1cf0799198ef902c6b8c310a450fef629a6baba41d45641ef75c04ebd" ;;
   Darwin:x86_64)
-    target="x86_64-apple-darwin" expected_sha256="c5a633a676cc1efd5ae60b5afc0e36c77fa86a52f0409050b5ec2920f5c1646e"
-    npm_target="darwin-x64" tsgolint_sha256="5ac99b907d6259a5c8bec9e205a000a027b6023bdfd2be8dd7ec6a90bd6311a0"
+    target="x86_64-apple-darwin" expected_sha256="7fe811a85916436e786836b84f9b976b824cdc050c54f9359dbc31f16cfc5f44"
+    npm_target="darwin-x64" tsgolint_sha256="1b682cd735fe901054ea2bb9f1f9ca8d771a8ac37c29f15ded1ca5f9c56bfc2b"
     typescript_sha256="eba158cb54050f723d5ff781438f33de5640054440bb4f2bd170cfe9bc2eb551" ;;
   Linux:arm64 | Linux:aarch64)
-    target="aarch64-unknown-linux-gnu" expected_sha256="dda6ccf8e94d4cddb82672c9d230ab04cc52e13a31075e88e53bb97b31311468"
-    npm_target="linux-arm64" tsgolint_sha256="5119c7fbbfe9775b0a8e6bad4f71eb488a3f535892e46af70de312f69bb3680a"
+    target="aarch64-unknown-linux-gnu" expected_sha256="ae4f0f826d3a96f529e197e460c9e4ffb4450528f55f4c688f6f6936f4660159"
+    npm_target="linux-arm64" tsgolint_sha256="239f7f35483dbb711beb1cf565b46664bb4764d04f29bcf3e26e60e9c48a094d"
     typescript_sha256="c83d931ac9dd7549cde6e71246aa9d6a9812843023df3e277fe3b5dcf41dd0ea" ;;
   Linux:x86_64)
-    target="x86_64-unknown-linux-gnu" expected_sha256="dd5b0c99ca7917fd6d3caabae260acc5bf7d65ae094541971862602fe288dca4"
-    npm_target="linux-x64" tsgolint_sha256="3cd257574f2b3f0de69904ead10ca49397184e70cff481c905dd00cc4aa77554"
+    target="x86_64-unknown-linux-gnu" expected_sha256="fc1a189a35417ebda77cac83b8bfe9e9d10a7eb27e0d2fe005d222fa01261e64"
+    npm_target="linux-x64" tsgolint_sha256="279fc23cc6f33ea9a6c2c088adad7bc539f243f20c81800f89ca51dfb13c4b18"
     typescript_sha256="7ecad6f67377e831856367ab062ef394f21506a611405bf8ac0ff039348637d3" ;;
   *)
     printf 'unsupported Oxlint platform: %s\n' "$(uname -s):$(uname -m)" >&2

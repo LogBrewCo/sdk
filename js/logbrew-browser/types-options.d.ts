@@ -14,7 +14,24 @@ type BrowserEventIdContext = {
   source?: string | undefined;
 };
 
+/** Turns the stored anonymous visitor ID on or off after install, for example when consent changes. */
+type BrowserAnonymousSubject = {
+  /** Start adding the anonymous ID to events. Reads the stored ID or creates one on the next event. */
+  enable: () => void;
+  /** Stop adding the anonymous ID and remove it from storage. */
+  disable: () => void;
+  /** Remove the stored ID. If the ID is on, the next event gets a new ID. */
+  reset: () => void;
+};
+
+type BrowserAnonymousSubjectOption = boolean | {
+  /** Days the ID lasts from its creation, 1 to 395 (13 months). Defaults to 395. Later visits do not extend it. */
+  maxAgeDays?: number | undefined;
+};
+
 type LogBrewBrowserContext = {
+  /** Set by installLogBrewBrowser when it creates the client. */
+  anonymousSubject?: BrowserAnonymousSubject | undefined;
   browserWindow?: Window | undefined;
   client: LogBrewClient;
   logbrew: LogBrewClient;
@@ -36,6 +53,12 @@ type BrowserFlushDetails = {
 type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportConfig & {
   browserWindow?: Window | undefined;
   client?: LogBrewClient | undefined;
+  /**
+   * Keep a random anonymous visitor ID in localStorage and add it to every event as
+   * `context.subject` with kind `anonymous`, so returning visitors can be counted. Defaults to false:
+   * nothing is stored. A subject the app sets wins. Get consent where the law requires it.
+   */
+  anonymousSubject?: BrowserAnonymousSubjectOption | undefined;
   /** App-owned transports remain available to explicit flush, but are not invoked by page-exit lifecycle signals. */
   transport?: Transport | undefined;
   /**
@@ -135,6 +158,8 @@ type BrowserInstrumentationOptions = Omit<LogBrewBrowserOptions, "traceContext">
 };
 
 export type {
+  BrowserAnonymousSubject,
+  BrowserAnonymousSubjectOption,
   BrowserEventIdContext,
   BrowserFlushDetails,
   BrowserFlushReason,

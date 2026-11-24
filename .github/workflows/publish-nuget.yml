@@ -176,6 +176,9 @@ jobs:
       - name: Pack NuGet package
         id: nuget-artifacts
         shell: bash
+        env:
+          CORE_DEPENDENCY_RANGE_MSBUILD: ${{ steps.nuget-version.outputs.core_dependency_range_msbuild }}
+          CORE_DEPENDENCY_RANGE: ${{ steps.nuget-version.outputs.core_dependency_range }}
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
@@ -197,7 +200,7 @@ jobs:
             "${pack_args[@]}"
             -p:GenerateDocumentationFile=true
             -p:BuildProjectReferences=false
-            "-p:LogBrewProjectReferenceVersion=${{ steps.nuget-version.outputs.core_dependency_range_msbuild }}"
+            "-p:LogBrewProjectReferenceVersion=${CORE_DEPENDENCY_RANGE_MSBUILD}"
           )
           while IFS=$'\t' read -r package_id project_path package_version; do
             if [[ "$package_id" == "LogBrew.HttpClient" ]]; then
@@ -221,7 +224,7 @@ jobs:
             fi
           done < <("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
           if [[ "$selected_httpclient" == "true" ]]; then
-            artifact_args+=(--dependency-range "LogBrew.HttpClient:LogBrew=${{ steps.nuget-version.outputs.core_dependency_range }}")
+            artifact_args+=(--dependency-range "LogBrew.HttpClient:LogBrew=${CORE_DEPENDENCY_RANGE}")
           fi
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-artifacts dotnet "${artifact_args[@]}"
 
@@ -244,16 +247,18 @@ jobs:
       - name: Publish NuGet package
         if: ${{ ! inputs.dry_run }}
         shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget validate --root "$GITHUB_WORKSPACE" --plan "$plan"
           while IFS= read -r package_path; do
             dotnet nuget push "$package_path" \
-              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --api-key "${NUGET_API_KEY}" \
               --source https://api.nuget.org/v3/index.json \
               --symbol-source https://api.nuget.org/v3/index.json \
-              --symbol-api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --symbol-api-key "${NUGET_API_KEY}" \
               --skip-duplicate
           done < <(find dist/nuget -maxdepth 1 -type f -name '*.nupkg' -print | sort)
 
@@ -274,6 +279,15 @@ jobs:
       - name: Verify public NuGet install
         if: ${{ ! inputs.dry_run }}
         shell: bash
+        env:
+          CORE_VERSION: ${{ steps.nuget-version.outputs.core_version }}
+          ASPNETCORE_VERSION: ${{ steps.nuget-version.outputs.aspnetcore_version }}
+          EFCORE_VERSION: ${{ steps.nuget-version.outputs.efcore_version }}
+          HTTPCLIENT_VERSION: ${{ steps.nuget-version.outputs.httpclient_version }}
+          REDIS_VERSION: ${{ steps.nuget-version.outputs.redis_version }}
+          OTEL_VERSION: ${{ steps.nuget-version.outputs.otel_version }}
+          SOURCE_COMMIT: ${{ steps.nuget-artifacts.outputs.source_commit }}
+          HTTPCLIENT_CONTENT_SHA256: ${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
@@ -281,14 +295,14 @@ jobs:
           selection_mode="$("${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" release-plan nuget entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format mode)"
           if [[ "$selection_mode" == "all" ]]; then
             bash scripts/real_user_dotnet_public_nuget_smoke.sh \
-              "${{ steps.nuget-version.outputs.core_version }}" \
-              "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-              "${{ steps.nuget-version.outputs.efcore_version }}" \
-              "${{ steps.nuget-version.outputs.httpclient_version }}" \
-              "${{ steps.nuget-version.outputs.redis_version }}" \
-              "${{ steps.nuget-version.outputs.otel_version }}" \
-              "${{ steps.nuget-artifacts.outputs.source_commit }}" \
-              "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
+              "${CORE_VERSION}" \
+              "${ASPNETCORE_VERSION}" \
+              "${EFCORE_VERSION}" \
+              "${HTTPCLIENT_VERSION}" \
+              "${REDIS_VERSION}" \
+              "${OTEL_VERSION}" \
+              "${SOURCE_COMMIT}" \
+              "${HTTPCLIENT_CONTENT_SHA256}"
           else
             bash scripts/real_user_dotnet_selected_public_nuget_smoke.sh "$plan"
             mapfile -t selected_ids < <(
@@ -297,14 +311,19 @@ jobs:
             )
             if [[ ${#selected_ids[@]} -eq 1 && "${selected_ids[0]}" == "LogBrew.AspNetCore" ]]; then
               bash scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh \
-                "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-                "${{ steps.nuget-artifacts.outputs.source_commit }}"
+                "${ASPNETCORE_VERSION}" \
+                "${SOURCE_COMMIT}"
             fi
           fi
 
       - name: Verify public HttpClient package compatibility
         if: ${{ ! inputs.dry_run }}
         shell: bash
+        env:
+          CORE_VERSION: ${{ steps.nuget-version.outputs.core_version }}
+          HTTPCLIENT_VERSION: ${{ steps.nuget-version.outputs.httpclient_version }}
+          SOURCE_COMMIT: ${{ steps.nuget-artifacts.outputs.source_commit }}
+          HTTPCLIENT_CONTENT_SHA256: ${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}
         run: |
           set -Eeuo pipefail
           plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
@@ -317,8 +336,8 @@ jobs:
           done
           if [[ "$has_core" == "true" && "$has_httpclient" == "true" ]]; then
             bash scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh \
-              "${{ steps.nuget-version.outputs.core_version }}" \
-              "${{ steps.nuget-version.outputs.httpclient_version }}" \
-              "${{ steps.nuget-artifacts.outputs.source_commit }}" \
-              "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
+              "${CORE_VERSION}" \
+              "${HTTPCLIENT_VERSION}" \
+              "${SOURCE_COMMIT}" \
+              "${HTTPCLIENT_CONTENT_SHA256}"
           fi

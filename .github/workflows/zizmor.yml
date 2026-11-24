@@ -1,0 +1,38 @@
+name: zizmor
+
+# zizmor audits every workflow, action, and Dependabot file in this repository
+# for security problems, such as template injection, broad token permissions,
+# persisted credentials, and unpinned or known-vulnerable actions. Every
+# finding fails the run. .github/zizmor.yml lists each ignored finding with
+# the reason.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: zizmor-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The action's lock file pins the zizmor version and its wheel hashes.
+      - name: Audit workflows
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          advanced-security: false
+          annotations: true

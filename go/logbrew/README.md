@@ -439,6 +439,8 @@ Event content remains application-controlled sensitive data even when encrypted.
 
 An accepted prefix is removed from restart recovery only after its replacement queue snapshot and parent directory are durable. A crash after the remote service accepts a request but before that local acknowledgement completes can still resend the encrypted prefix after restart; transports and event processing should therefore remain idempotent. No local design can atomically commit a remote response and a filesystem update.
 
+A save that fails with `persistence_io_error` (for example, a full disk, a short write, or a file the SDK cannot create) fails only that operation, and persistent delivery continues. Before the error returns, the SDK completes or discards the interrupted write, so the stored files stay consistent. A capture that returns this error is not stored. Automatic delivery retries a failed request save with its normal backoff and does not pause. If LogBrew accepts a request but the SDK cannot save that result, the next flush saves it and does not send the request again. If the SDK cannot confirm whether an interrupted write completed, it returns `persistence_commit_error` and stops persistent delivery until the next restart, where recovery completes the write. Integrity, ownership, and key failures also stop persistent delivery.
+
 The app and its local filesystem owner remain inside the trust boundary. Without an external monotonic authority, the SDK cannot distinguish restoration of an entire older but internally valid persistence directory from a normal restart. Protect or back up the directory as one unit, and purge it if owner-driven rollback is suspected.
 
 ## First Useful Telemetry

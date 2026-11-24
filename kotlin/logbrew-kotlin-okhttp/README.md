@@ -14,7 +14,7 @@ dependencies {
 }
 ```
 
-The package depends on `co.logbrew:logbrew-kotlin:0.2.3` and OkHttp `4.12.0`.
+The package depends on `co.logbrew:logbrew-kotlin:0.2.3` and OkHttp `5.5.1`.
 
 ## Usage
 

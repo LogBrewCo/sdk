@@ -582,9 +582,9 @@ private class FakeChain(
     private val failure: IOException? = null,
     private val priorResponse: Response? = null,
     private val call: Call? = null,
-    private val responseBody: ResponseBody? = null,
+    private val responseBody: ResponseBody = ResponseBody.EMPTY,
     private val assertion: (Request) -> Unit = {},
-) : Interceptor.Chain {
+) : Interceptor.Chain by unsupported<Interceptor.Chain>() {
     var proceededRequest: Request? = null
 
     override fun request(): Request = initialRequest
@@ -608,7 +608,7 @@ private class FakeChain(
 
     override fun call(): Call =
         call
-            ?: object : Call {
+            ?: object : Call by unsupported<Call>() {
                 override fun request(): Request = initialRequest
 
                 override fun execute(): Response = proceed(initialRequest)
@@ -650,7 +650,7 @@ private class FakeChain(
 
 private class FakeCall(
     private val request: Request,
-) : Call {
+) : Call by unsupported<Call>() {
     override fun request(): Request = request
 
     override fun execute(): Response = fakeResponse(request, 200)
@@ -669,6 +669,15 @@ private class FakeCall(
 
     override fun timeout(): Timeout = Timeout.NONE
 }
+
+// OkHttp adds members to Call and Interceptor.Chain in minor releases. The fakes
+// implement what the tests use and fail loudly on anything else.
+private inline fun <reified T : Any> unsupported(): T =
+    T::class.java.cast(
+        java.lang.reflect.Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { _, method, _ ->
+            throw UnsupportedOperationException("${T::class.java.simpleName}.${method.name} is not faked")
+        },
+    )
 
 private fun fakeResponse(
     request: Request,

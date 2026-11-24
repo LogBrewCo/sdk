@@ -359,7 +359,8 @@ cat > tsconfig.json <<'EOF'
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "target": "ES2022"
+    "target": "ES2022",
+    "types": ["node"]
   },
   "include": ["types-smoke.ts"]
 }

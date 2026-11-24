@@ -1,16 +1,22 @@
 name: CI
 
+# A pull request or push checks the areas its changes select. The daily run
+# checks every area on main, so a broken check turns main red within a day even
+# when no commit touched it (tools/toolchain-probe/ci_select.go).
 on:
   pull_request:
   push:
     branches:
       - main
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -43,6 +49,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -59,12 +66,18 @@ jobs:
     needs: changed-areas
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # Every bash in this job reads this file first, so a failed check or smoke
+    # names the command that stopped it. The unit test steps clear it: their
+    # tests compare the exact error output of the scripts they run.
+    env:
+      BASH_ENV: ${{ github.workspace }}/scripts/ci_failure_reason.sh
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
+          persist-credentials: false
 
       - name: Check that changed npm packages advance their version
         if: ${{ github.event_name == 'pull_request' }}
@@ -93,8 +106,29 @@ jobs:
       - name: Check Python syntax
         run: python3 scripts/check_python_sources.py
 
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: tools/toolchain-probe/.go-version
+          cache-dependency-path: |
+            go/logbrew/go.mod
+            go/logbrew/asynq/go.mod
+            go/logbrew/asynq/go.sum
+            go/logbrew/gin/go.mod
+            go/logbrew/gin/go.sum
+            go/logbrew/otel/go.mod
+            go/logbrew/otel/go.sum
+            tools/toolchain-probe/go.mod
+            tools/pin-check/go.sum
+            tools/staticcheck/go.sum
+
+      # Go is set up first, and its cache fills the module and build caches.
+      # The verifier's own cache would then write over those read-only files.
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
+        with:
+          cache: "false"
 
       - name: Test native SDK verifier
         run: GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go -C tools/toolchain-probe test -race ./...
@@ -142,30 +176,16 @@ jobs:
           rustup toolchain install --no-self-update
           rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
 
-      - name: Set up Go
-        id: setup-go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: tools/toolchain-probe/.go-version
-          cache-dependency-path: |
-            go/logbrew/go.mod
-            go/logbrew/asynq/go.mod
-            go/logbrew/asynq/go.sum
-            go/logbrew/gin/go.mod
-            go/logbrew/gin/go.sum
-            go/logbrew/otel/go.mod
-            go/logbrew/otel/go.sum
-            tools/toolchain-probe/go.mod
-            tools/pin-check/go.sum
-            tools/staticcheck/go.sum
-
       - name: Check that every install is pinned
         # Runs the OpenSSF Scorecard Pinned-Dependencies check on this tree. Go
         # downloads the toolchain that tools/pin-check/go.mod names, if needed,
         # and checks it against the Go checksum database.
         env:
           GOTOOLCHAIN: auto
-        run: go -C tools/pin-check test ./... && go -C tools/pin-check run .
+        run: |
+          go -C tools/pin-check test ./...
+          go -C tools/pin-check run . "$GITHUB_WORKSPACE"
+          bash scripts/test-npm-locked.sh
 
       - name: Set up Java
         if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
@@ -214,6 +234,16 @@ jobs:
           GOBIN="$LOGBREW_STATICCHECK_BIN" go -C tools/staticcheck install tool
           PATH="$LOGBREW_STATICCHECK_BIN:$PATH" bash scripts/check_go_static.sh
 
+      - name: Name the ktlint cache
+        id: ktlint-cache
+        run: echo "key=ktlint-$(sed -n 's/^ktlint_sha256="\(.*\)"$/\1/p' scripts/check_kotlin_style.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the ktlint jar
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/logbrew-tools
+          key: ${{ steps.ktlint-cache.outputs.key }}
+
       - name: Run Kotlin style checks
         run: bash scripts/check_kotlin_style.sh
 
@@ -232,6 +262,7 @@ jobs:
       - name: Run focused unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all != 'true' }}
         env:
+          BASH_ENV: ""
           UNIT_TEST_MODULES: ${{ needs.changed-areas.outputs.unit_test_modules }}
         run: |
           read -r -a modules <<< "$UNIT_TEST_MODULES"
@@ -239,6 +270,8 @@ jobs:
 
       - name: Run full unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all == 'true' }}
+        env:
+          BASH_ENV: ""
         run: python3 scripts/run_python_contract_tests.py
 
       - name: Install canonical brand renderer
@@ -651,6 +684,96 @@ jobs:
         run: |
           "${LOGBREW_TOOLCHAIN_PROBE_BIN:?}" confidentiality-scan .
 
+  capture-dependency-updates:
+    # The capture matrix record ignores version-only dependency changes, so
+    # this job runs the probes of each package whose dependency manifests or
+    # lockfiles changed and fails when its captured signals differ.
+    name: Capture matrix after dependency changes
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Select packages whose dependency files changed
+        id: select
+        run: python3 tools/capture-matrix/dependency_changes.py affected HEAD^1 --github-output
+
+      - name: Set up Node.js
+        if: ${{ contains(steps.select.outputs.families, ' js ') }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Set up Go
+        if: ${{ contains(steps.select.outputs.families, ' go ') }}
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: tools/toolchain-probe/.go-version
+          cache: false
+
+      - name: Set up Java
+        if: ${{ contains(steps.select.outputs.families, ' java ') || contains(steps.select.outputs.families, ' kotlin ') }}
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        if: ${{ contains(steps.select.outputs.families, ' java ') }}
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: current
+          cache-disabled: true
+
+      - name: Set up .NET
+        if: ${{ contains(steps.select.outputs.families, ' dotnet ') || contains(steps.select.outputs.families, ' unity ') }}
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Ruby
+        if: ${{ contains(steps.select.outputs.families, ' ruby ') }}
+        uses: ruby/setup-ruby@20eb24b0d509e2b9ed9b6d42ddfeb992915e0564 # v1.341.0
+        with:
+          ruby-version: "3.3"
+
+      - name: Set up PHP
+        if: ${{ contains(steps.select.outputs.families, ' php ') }}
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.4"
+          tools: composer
+
+      - name: Set up Rust
+        if: ${{ contains(steps.select.outputs.families, ' rust ') }}
+        run: |
+          rustup toolchain install --no-self-update
+          rustup default "$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)"
+
+      # The BullMQ, Asynq, and StackExchange.Redis probes start their own redis-server.
+      - name: Install Redis
+        if: ${{ contains(steps.select.outputs.packages, 'bullmq') || contains(steps.select.outputs.packages, 'asynq') || contains(steps.select.outputs.packages, 'StackExchangeRedis') }}
+        run: sudo apt-get install --yes --no-install-recommends redis-server
+
+      - name: Run the probes and compare captured signals with the record
+        if: ${{ steps.select.outputs.packages != '' }}
+        env:
+          PACKAGES: ${{ steps.select.outputs.packages }}
+        run: |
+          read -r -a packages <<<"$PACKAGES"
+          python3 tools/capture-matrix/dependency_changes.py compare "${packages[@]}"
+
   php-compatibility:
     name: PHP 8.2 / Symfony 6.4 compatibility
     needs: changed-areas
@@ -661,6 +784,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up PHP
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
@@ -683,6 +808,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -721,6 +848,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -735,7 +864,7 @@ jobs:
           python3 -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --requirement scripts/lockfiles/python/requirements-build.txt
           python3 -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --requirement scripts/lockfiles/python/requirements-ci-tests.txt
           python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/logbrew-wheel" ./python/logbrew_py
-          python3 -m pip install --no-index --find-links "$RUNNER_TEMP/logbrew-wheel" 'logbrew-sdk[arq,dramatiq,rq]'
+          bash scripts/pip_install_built.sh python3 "$RUNNER_TEMP"/logbrew-wheel/logbrew_sdk-*.whl 'logbrew-sdk[arq,dramatiq,rq]'
           PYTHONPATH="" python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run installed FastAPI and Flask package checks
@@ -781,6 +910,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -820,6 +951,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -929,6 +1062,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Java
         uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
@@ -961,6 +1096,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe
@@ -986,6 +1123,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build native SDK verifier
         uses: ./tools/toolchain-probe

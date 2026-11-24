@@ -28,6 +28,13 @@ grep -q 'capture_http_request_send' "$crate_dir/README.md"
 grep -q 'capture_reqwest_send' "$crate_dir/README.md"
 grep -q 'rust_http_client' "$crate_dir/README.md"
 
+manifest_requirement() {
+  python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["dependencies"][sys.argv[2]]["version"])' \
+    "$repo_root/rust/logbrew/Cargo.toml" "$1"
+}
+reqwest_version="$(manifest_requirement reqwest)"
+reqwest_0_12_version="$(manifest_requirement reqwest_0_12)"
+
 mkdir -p "$tmp_dir/app/src/bin"
 cat > "$tmp_dir/app/Cargo.toml" <<EOF
 [package]
@@ -36,9 +43,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-logbrew = { path = "$crate_dir", features = ["http", "hyper", "reqwest"] }
+logbrew = { path = "$crate_dir", features = ["http", "hyper", "reqwest", "reqwest-0-12"] }
 hyper = "1"
-reqwest = "0.12"
+reqwest = "$reqwest_version"
+reqwest_0_12 = { package = "reqwest", version = "$reqwest_0_12_version" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ureq = "3.3"
 EOF
@@ -285,7 +293,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 EOF
 
-cat > "$tmp_dir/app/src/bin/reqwest_http_client_span.rs" <<'EOF'
+write_reqwest_bin() {
+  local bin="$1" crate="$2" method="$3"
+  cat > "$tmp_dir/app/src/bin/$bin.rs" <<EOF
 #[path = "../intake.rs"]
 mod intake;
 
@@ -296,7 +306,7 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let intake = Intake::start(502);
-    let http = reqwest::Client::builder()
+    let http = $crate::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()?;
     let context =
@@ -310,9 +320,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "post",
         "2222222222222222",
     )
-    .capture_reqwest_send(
+    .$method(
         &mut client,
-        "evt_reqwest_http_client_span",
+        "evt_$bin",
         "2026-06-02T10:00:22Z",
         &context,
         http.post(format!("{}/api/orders/123?coupon=sample#debug", intake.endpoint)),
@@ -329,7 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let preview = client.preview_json()?;
-    assert!(preview.contains("\"id\": \"evt_reqwest_http_client_span\""));
+    assert!(preview.contains("\"id\": \"evt_$bin\""));
     assert!(preview.contains("\"name\": \"http.client:POST /api/orders/:order_id\""));
     assert!(preview.contains("\"source\": \"rust_http_client\""));
     assert!(preview.contains("\"statusCode\": 502"));
@@ -337,11 +347,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(preview.contains("\"status\": \"error\""));
     assert!(!preview.contains("coupon=sample"));
     assert!(!preview.contains("#debug"));
-    println!("{{\"ok\":true,\"reqwestHttpClientSpans\":1}}");
+    println!("{{\"ok\":true,\"bin\":\"$bin\"}}");
     Ok(())
 }
 
 EOF
+}
+write_reqwest_bin reqwest_http_client_span reqwest capture_reqwest_send
+write_reqwest_bin reqwest_0_12_http_client_span reqwest_0_12 capture_reqwest_0_12_send
 
 (
   cd "$tmp_dir/app"
@@ -349,7 +362,9 @@ EOF
   cargo run --quiet --locked --bin http_client_span > http-client-span.stdout.json
   cargo run --quiet --locked --bin hyper_http_client_span > hyper-http-client-span.stdout.json
   cargo run --quiet --locked --bin ureq_http_client_span > ureq-http-client-span.stdout.json
+  test "$(grep -c '^name = "reqwest"$' Cargo.lock)" -eq 2
   cargo run --quiet --locked --bin reqwest_http_client_span > reqwest-http-client-span.stdout.json
+  cargo run --quiet --locked --bin reqwest_0_12_http_client_span > reqwest-0-12-http-client-span.stdout.json
 )
 
 grep -q '"ok":true' "$tmp_dir/app/http-client-span.stdout.json"
@@ -359,5 +374,7 @@ grep -q '"hyperHttpClientSpans":1' "$tmp_dir/app/hyper-http-client-span.stdout.j
 grep -q '"ok":true' "$tmp_dir/app/ureq-http-client-span.stdout.json"
 grep -q '"ureqHttpClientSpans":1' "$tmp_dir/app/ureq-http-client-span.stdout.json"
 grep -q '"ok":true' "$tmp_dir/app/reqwest-http-client-span.stdout.json"
-grep -q '"reqwestHttpClientSpans":1' "$tmp_dir/app/reqwest-http-client-span.stdout.json"
+grep -q '"bin":"reqwest_http_client_span"' "$tmp_dir/app/reqwest-http-client-span.stdout.json"
+grep -q '"ok":true' "$tmp_dir/app/reqwest-0-12-http-client-span.stdout.json"
+grep -q '"bin":"reqwest_0_12_http_client_span"' "$tmp_dir/app/reqwest-0-12-http-client-span.stdout.json"
 printf 'rust http-client real-user smoke passed\n'

@@ -87,20 +87,42 @@ test -f node_modules/@logbrew/prisma/index.js
 test -f node_modules/@logbrew/prisma/index.cjs
 test -f node_modules/@logbrew/prisma/index.d.ts
 
+# Prisma 7 reads the connection URL from prisma.config.ts, and the client
+# connects through a driver adapter.
 cat > prisma/schema.prisma <<'EOF'
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
 }
 
 model User {
   id    Int     @id @default(autoincrement())
   email String  @unique
   name  String?
+}
+EOF
+
+cat > prisma.config.ts <<'EOF'
+import { defineConfig } from "prisma/config";
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  datasource: {
+    url: "file:./prisma/dev.db"
+  }
+});
+EOF
+
+cat > db.ts <<'EOF'
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaClient } from "./generated/prisma/client.ts";
+
+export function createPrismaClient() {
+  return new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: "file:./prisma/dev.db" }) });
 }
 EOF
 
@@ -118,6 +140,7 @@ cat > tsconfig.json <<'EOF'
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "strict": true,
     "target": "ES2022",
@@ -128,20 +151,20 @@ cat > tsconfig.json <<'EOF'
 EOF
 
 cat > types.ts <<'EOF'
-import { PrismaClient } from "@prisma/client";
 import { LogBrewClient } from "@logbrew/sdk";
 import {
   createLogBrewPrismaExtension,
   instrumentLogBrewPrismaClient,
   prismaOperationWithLogBrewSpan
 } from "@logbrew/prisma";
+import { createPrismaClient } from "./db.ts";
 
 const client = LogBrewClient.create({
   apiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "prisma-type-smoke",
   sdkVersion: "0.1.0"
 });
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const extension = createLogBrewPrismaExtension({ client });
 const extended = prisma.$extends(extension);
 const instrumentation = instrumentLogBrewPrismaClient(prisma, { client, databaseName: "app" });
@@ -195,7 +218,6 @@ node cjs-smoke.cjs
 cat > smoke.mjs <<'EOF'
 import http from "node:http";
 import { once } from "node:events";
-import { PrismaClient } from "@prisma/client";
 import { LogBrewClient } from "@logbrew/sdk";
 import { createNodeFetchTransport } from "@logbrew/node";
 import {
@@ -203,6 +225,7 @@ import {
   instrumentLogBrewPrismaClient,
   prismaOperationWithLogBrewSpan
 } from "@logbrew/prisma";
+import { createPrismaClient } from "./db.ts";
 
 const serverApiKey = "LOGBREW_SERVER_API_KEY";
 const trace = {
@@ -222,7 +245,7 @@ const client = LogBrewClient.create({
     drops.push(drop);
   }
 });
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const instrumentation = instrumentLogBrewPrismaClient(prisma, {
   client,
   databaseName: "app",

@@ -50,14 +50,14 @@ rm -rf \
 find "$tmp_dir/logbrew_py" -type d -name __pycache__ -prune -exec rm -rf {} +
 python -m build --no-isolation "$tmp_dir/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
 python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-celery.txt" >/dev/null
-python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
+bash "$repo_root/scripts/pip_install_built.sh" python "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" logbrew-sdk --no-deps >/dev/null
 python -m pip check >/dev/null
 python -m pip uninstall -y logbrew-sdk >/dev/null
 if python -c 'import logbrew_sdk' 2>/dev/null; then
     echo "expected logbrew-sdk to be removed by pip uninstall" >&2
     exit 1
 fi
-python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
+bash "$repo_root/scripts/pip_install_built.sh" python "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" logbrew-sdk --no-deps >/dev/null
 python -m pip check >/dev/null
 python -m pip freeze > "$tmp_dir/pip-freeze.txt"
 

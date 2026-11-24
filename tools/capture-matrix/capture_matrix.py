@@ -5,6 +5,9 @@ Each package has a probe under tools/capture-matrix/probes/<package path>/: a pr
 small program that uses the package the way its README tells an app to, against a local
 collector. `generate` runs the probes and writes quality/capture-matrix.json; `check` fails when
 a package has no probe, or when a package, its probe, or this tool changed since the last run.
+A dependency version change alone does not count as a change: the record hashes dependency
+manifests with their version numbers masked and leaves out lockfiles, so a dependency update that
+changes only versions passes `check`. A new, removed, or reconfigured dependency still fails it.
 
 probe.toml holds `family` (families/<family>.sh installs the packages into a work directory once
 per run), `run` (the command, run in a copy of the probe directory inside that work directory;
@@ -32,6 +35,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -120,6 +124,32 @@ UNHASHED_DIRS = frozenset(
     }
 )
 UNHASHED_SUFFIXES = (".md",)
+LOCKFILES = frozenset(
+    [
+        "go.sum",
+        "bun.lock",
+        "bun.lockb",
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "composer.lock",
+        "Gemfile.lock",
+        "poetry.lock",
+        "uv.lock",
+        "packages.lock.json",
+        "Package.resolved",
+        "gradle.lockfile",
+    ]
+)
+DEPENDENCY_MANIFESTS = MANIFESTS - {"CMakeLists.txt", "Makefile"}
+# A version or version range in a dependency manifest: 1.2.3, v0.44.0, =0.3.51, ^7.9 || ^8.0,
+# >=49,<50, ~8.9.0, 10.0.0-preview.1. Each one hashes as "V".
+VERSION = re.compile(
+    rb"(?:[\^~<>=!]=?\s*)?(?<![\w.])v?\d+(?:\.(?:\d+|[x*]))*(?:[-+][0-9A-Za-z][0-9A-Za-z.+-]*)?"
+    rb"(?:\s*(?:\|\||,)?\s*[\^~<>=!]=?\s*v?\d+(?:\.(?:\d+|[x*]))*(?:[-+][0-9A-Za-z][0-9A-Za-z.+-]*)?)*"
+)
 PROBE_TIMEOUT_SECONDS = 600
 SETTLE_SECONDS = 1.0
 
@@ -276,6 +306,16 @@ def _hashed_files(directory: Path) -> Iterator[Path]:
             yield path
 
 
+def _hashed_content(path: Path) -> bytes | None:
+    """What a file adds to the hash: lockfiles add nothing, and manifests add no version numbers."""
+    if path.name in LOCKFILES:
+        return None
+    content = path.read_bytes()
+    if path.name in DEPENDENCY_MANIFESTS or path.name.endswith(MANIFEST_SUFFIXES):
+        return VERSION.sub(b"V", content)
+    return content
+
+
 def input_hash(probe: Probe, probes: dict[str, Probe]) -> str:
     """One hash over this tool, the family setup, the probe, and the package's runtime inputs.
 
@@ -294,9 +334,10 @@ def input_hash(probe: Probe, probes: dict[str, Probe]) -> str:
     ):
         for path in [root] if root.is_file() else _hashed_files(root):
             relative = path.relative_to(ROOT).as_posix()
-            if not relative.startswith(excluded):
+            content = path.read_bytes() if root.is_file() else _hashed_content(path)
+            if content is not None and not relative.startswith(excluded):
                 digest.update(f"{relative}\0".encode())
-                digest.update(hashlib.sha256(path.read_bytes()).digest())
+                digest.update(hashlib.sha256(content).digest())
     return digest.hexdigest()
 
 

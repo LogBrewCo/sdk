@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -68,6 +69,40 @@ func TestReleaseMetadataFixturePasses(t *testing.T) {
 	t.Parallel()
 	if failures := fixtureFailures(releaseFixture(t)); len(failures) > 0 {
 		t.Fatalf("fixture failures: %q", failures)
+	}
+}
+
+func TestReleaseMetadataAllowsThirdPartyRangeUpdates(t *testing.T) {
+	t.Parallel()
+	const core = "python/logbrew_py/pyproject.toml"
+	for _, test := range []struct {
+		edit func(string) string
+		path string
+	}{
+		{raiseBound("cryptography", `>=[0-9.]+,<([0-9]+)`), core},
+		{raiseBound("certifi", `>=([0-9.]+)`), core},
+		{raiseBound("typing-extensions", `>=([0-9.]+)`), core},
+		{raiseBound("Flask", `>=([0-9.]+)`), "python/logbrew_flask/pyproject.toml"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			t.Parallel()
+			if failures := editedFailures(t, test.path, test.edit); len(failures) > 0 {
+				t.Errorf("range update failures: %q", failures)
+			}
+		})
+	}
+}
+
+// raiseBound appends ".1" to the version that bound captures after name, so
+// the case still edits the file after Dependabot moves the range.
+func raiseBound(name, bound string) func(string) string {
+	pattern := regexp.MustCompile(regexp.QuoteMeta(name) + bound)
+	return func(text string) string {
+		match := pattern.FindStringSubmatchIndex(text)
+		if match == nil {
+			return text
+		}
+		return text[:match[3]] + ".1" + text[match[3]:]
 	}
 }
 
@@ -148,9 +183,13 @@ func TestReleaseMetadataFindings(t *testing.T) {
 			[]string{"rust/logbrew/README.md: missing guidance Metrics"}},
 		{nil, "rust/logbrew/Cargo.toml", []string{"missing required path: rust/logbrew/Cargo.toml"}},
 		{nil, flask, []string{"missing required path: " + flask}},
-		{replaceOnce("Flask>=3.1", "Flask>=3.0"), flask, []string{
-			flask + ": expected project.dependencies {'Flask>=3.1', 'logbrew-sdk>=0.1.21,<0.2.0'}, " +
-				"got {'Flask>=3.0', 'logbrew-sdk>=0.1.21,<0.2.0'}",
+		{replaceOnce("Flask>=3.1", "Quart>=0.20"), flask, []string{
+			flask + ": expected project.dependencies {'Flask', 'logbrew-sdk>=0.1.21,<0.2.0'}, " +
+				"got {'Quart', 'logbrew-sdk>=0.1.21,<0.2.0'}",
+		}},
+		{replaceOnce("logbrew-sdk>=0.1.21,<0.2.0", "logbrew-sdk>=0.1.20,<0.2.0"), flask, []string{
+			flask + ": expected project.dependencies {'Flask', 'logbrew-sdk>=0.1.21,<0.2.0'}, " +
+				"got {'Flask', 'logbrew-sdk>=0.1.20,<0.2.0'}",
 		}},
 		{replaceOnce(`Repository = "https://github.com/LogBrewCo/sdk"`, `Repository = "https://example.com"`), flask,
 			[]string{flask + ": expected project.urls.Repository 'https://github.com/LogBrewCo/sdk', got 'https://example.com'"}},

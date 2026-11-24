@@ -6,7 +6,7 @@
 # on each seeded mistake: an unlisted gate command, a changed pin, an action
 # pinned to a tag, an unlisted action, one action pinned two ways, an entry not
 # checked for 30 days, and a missing field. An action update across every
-# workflow passes without a matrix edit.
+# workflow and a listed self-repository action ($/path) pass without a pin.
 
 set -euo pipefail
 
@@ -93,6 +93,14 @@ for workflow in "$work/repo"/.github/workflows/*.y*ml; do
 done
 bash "$check" "$work/repo" >/dev/null
 printf 'ok: an action update in every workflow passes without a matrix edit\n'
+
+copy
+# A self-repository action ($/path) runs at the caller's commit, so it needs no pin.
+append_step '$/.github/actions/example'
+awk '!done && /^uses = \[/ { sub(/^uses = \[/, "uses = [\"$/.github/actions/example\", "); done = 1 } { print }' \
+    "$root/quality/tool-matrix.toml" >"$work/repo/quality/tool-matrix.toml"
+bash "$check" "$work/repo" >/dev/null
+printf 'ok: a listed self-repository action needs no pin\n'
 
 copy
 expect_failure "an entry not checked for 30 days" "more than 30 days ago" "2099-01-01"

@@ -13,16 +13,20 @@ intake_pid=""
 # shellcheck source=scripts/kotlin_okhttp_deps.sh
 source "$repo_root/scripts/kotlin_okhttp_deps.sh"
 
+# Prints the project version, or the version of the dependency named by $2.
 read_pom_version() {
-  python3 - "$1" <<'PY'
+  python3 - "$@" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
 root = ET.parse(sys.argv[1]).getroot()
 namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
-version = root.findtext("m:version", namespaces=namespace)
+path = "m:version"
+if len(sys.argv) > 2:
+    path = f"m:dependencies/m:dependency[m:artifactId='{sys.argv[2]}']/m:version"
+version = root.findtext(path, namespaces=namespace)
 if not version:
-    raise SystemExit(f"missing POM version in {sys.argv[1]}")
+    raise SystemExit(f"missing POM version {path} in {sys.argv[1]}")
 print(version)
 PY
 }
@@ -296,7 +300,7 @@ cp "$okhttp_package_dir/examples/okhttp_request/OkHttpRequestExample.kt" "$okhtt
 (cd "$okhttp_app" && gradle --no-daemon -q dependencies --configuration runtimeClasspath > "$tmp_dir/okhttp-gradle-deps.txt")
 grep -q "co.logbrew:logbrew-kotlin-okhttp:$okhttp_version" "$tmp_dir/okhttp-gradle-deps.txt"
 grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/okhttp-gradle-deps.txt"
-grep -q 'com.squareup.okhttp3:okhttp:4.12.0' "$tmp_dir/okhttp-gradle-deps.txt"
+grep -q "com.squareup.okhttp3:okhttp:$(read_pom_version "$okhttp_package_dir/pom.xml" okhttp)" "$tmp_dir/okhttp-gradle-deps.txt"
 (cd "$okhttp_app" && gradle --no-daemon -q printRuntimeClasspath > "$tmp_dir/okhttp-classpath.txt")
 okhttp_runtime_classpath="$(cat "$tmp_dir/okhttp-classpath.txt")"
 kotlinc "$okhttp_app/OkHttpApp.kt" \

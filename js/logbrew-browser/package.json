@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/browser",
-  "version": "0.1.22",
+  "version": "0.1.24",
   "description": "Browser error, page-view, action, network, and fetch transport helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
@@ -19,6 +19,8 @@
     }
   },
   "files": [
+    "anonymous-subject.cjs",
+    "anonymous-subject.js",
     "attribution.cjs",
     "attribution.js",
     "beacon-transport.cjs",

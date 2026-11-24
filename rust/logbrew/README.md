@@ -433,7 +433,7 @@ If your app already uses `reqwest`, enable LogBrew's `reqwest` feature and pass 
 ```toml
 [dependencies]
 logbrew = { version = "0.2", features = ["reqwest"] }
-reqwest = "0.12"
+reqwest = "0.13"
 ```
 
 ```rust
@@ -446,6 +446,14 @@ let response = HttpClientSpan::new("/api/payments/:payment_id", "GET", "22222222
         reqwest_client.get("https://payments.example.invalid/api/payments/123"),
     )
     .await?;
+```
+
+If your app still uses `reqwest` 0.12, enable the `reqwest-0-12` feature and call `capture_reqwest_0_12_send` with the same arguments. It returns the original `reqwest::Response` or a `Reqwest012CaptureError::Request(reqwest::Error)`:
+
+```toml
+[dependencies]
+logbrew = { version = "0.2", features = ["reqwest-0-12"] }
+reqwest = "0.12"
 ```
 
 If your app uses Hyper or another client built on `http::Request`/`http::Response`, enable LogBrew's `hyper` feature. The helper injects one `traceparent` into the request you already own, awaits your send closure, records response status or an error-type-only failure, and returns either the original response or a typed setup/request error. LogBrew depends only on the `http` crate for this helper, not Hyper itself:

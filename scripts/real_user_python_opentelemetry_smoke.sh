@@ -44,7 +44,7 @@ export PIP_CACHE_DIR="$tmp_dir/pip-cache"
 python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-build.txt" >/dev/null
 python -m build --no-isolation "$repo_root/python/logbrew_py" --wheel --outdir "$tmp_dir/dist" > "$tmp_dir/build.log"
 python -m pip install --require-hashes --requirement "$python_lockfiles/requirements-sdk.txt" >/dev/null
-python -m pip install --no-index --no-deps "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" >/dev/null
+bash "$repo_root/scripts/pip_install_built.sh" python "$tmp_dir/dist/logbrew_sdk-${python_package_version}-py3-none-any.whl" logbrew-sdk --no-deps >/dev/null
 
 python - <<'PY' > "$tmp_dir/no-otel.stdout.json"
 import json

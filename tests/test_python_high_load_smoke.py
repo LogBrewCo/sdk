@@ -47,7 +47,9 @@ class PythonHighLoadSmokeTests(unittest.TestCase):
                     or '--require-hashes --requirement "$python_lockfiles/requirements-sdk.txt"' in script,
                 )
                 self.assertIn("--no-deps", script)
-                self.assertIn("--no-index", script)
+                self.assertTrue("--no-index" in script or "scripts/pip_install_built.sh" in script)
+        helper = (REPO_ROOT / "scripts" / "pip_install_built.sh").read_text(encoding="utf-8")
+        self.assertIn("-m pip install --no-index --require-hashes", helper)
 
     def test_flask_high_load_smoke_exercises_installed_artifact_flow(self) -> None:
         self.assertTrue(FLASK_SMOKE.exists(), "Flask high-load installed-artifact smoke is missing")
