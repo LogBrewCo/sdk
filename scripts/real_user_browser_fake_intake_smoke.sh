@@ -306,13 +306,15 @@ try {
     endpoint: `${shutdownIntake.url}/v1/events`
   }));
   assertEqual(shutdownResponse.statusCode, 202, "shutdown status");
-  const shutdownError = await captureError(() => Promise.resolve().then(() => {
-    shutdownClient.log("evt_browser_shutdown_after_001", timestamp(701), {
-      level: "info",
-      message: "after shutdown"
-    });
-  }));
-  assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
+  shutdownClient.log("evt_browser_shutdown_after_001", timestamp(701), {
+    level: "info",
+    message: "ignored after shutdown"
+  });
+  assertEqual(shutdownClient.pendingEvents(), 0, "post-shutdown log is ignored");
+  const shutdownError = await captureError(() => shutdownClient.shutdown(createFetchTransport({
+    endpoint: `${shutdownIntake.url}/v1/events`
+  })));
+  assertEqual(shutdownError.code, "shutdown_error", "second shutdown error code");
 
   let keepaliveFetchCalls = 0;
   const keepaliveLimitedTransport = createFetchTransport({
