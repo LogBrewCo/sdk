@@ -89,7 +89,7 @@ export {
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
 const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
-const DEFAULT_SDK_VERSION = "0.1.23";
+const DEFAULT_SDK_VERSION = "0.1.24";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -1130,6 +1130,14 @@ function browserIssueGroupingKey(value) {
   return frameFile ? `${trimmed.slice(0, secondSeparator + 1)}${frameFile}` : trimmed;
 }
 
+const BROWSER_EXTENSION_PROTOCOLS = new Set([
+  "chrome-extension:",
+  "moz-extension:",
+  "safari-extension:",
+  "safari-web-extension:",
+  "ms-browser-extension:"
+]);
+
 function browserCodePath(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return undefined;
@@ -1137,7 +1145,11 @@ function browserCodePath(value) {
   const trimmed = value.trim();
   if (/^[a-z][a-z0-9+.-]*:/iu.test(trimmed)) {
     try {
-      return new URL(trimmed).pathname || undefined;
+      const url = new URL(trimmed);
+      if (BROWSER_EXTENSION_PROTOCOLS.has(url.protocol)) {
+        return `${url.protocol}//${url.host}${url.pathname}`;
+      }
+      return url.pathname || undefined;
     } catch {
       return pathBasename(trimmed);
     }
