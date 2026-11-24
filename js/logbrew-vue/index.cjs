@@ -1,7 +1,9 @@
 "use strict";
 
-const { LogBrewClient, RecordingTransport, SdkError } = require("@logbrew/sdk");
+const { LogBrewClient, SdkError, createIssueAttributesFromError } = require("@logbrew/sdk");
 const { createRandomTraceparent, createTracedFetch, shouldPropagateTraceparent: shouldPropagate } = require("./trace-fetch.cjs");
+const { findBrowserWindow, startBrowserCapture } = require("./browser-capture.cjs");
+const { createFetchTransport } = require("@logbrew/browser");
 const { inject } = require("vue");
 
 /**
@@ -22,11 +24,12 @@ const { inject } = require("vue");
  *   TracePropagationTarget,
  *   VueTraceparentConfig
  * } from "./index.cjs"
+ * @import { BrowserDelivery } from "./browser-capture.cjs"
  * @typedef {(error: unknown, instance: ComponentPublicInstance | null, info: string) => void} VueErrorHandler
  */
 
 const DEFAULT_SDK_NAME = "logbrew-vue";
-const DEFAULT_SDK_VERSION = "0.1.2";
+const DEFAULT_SDK_VERSION = "0.1.3";
 const DEFAULT_MAX_RETRIES = 2;
 
 /** @type {InjectionKey<LogBrewVueContext>} */
@@ -85,27 +88,34 @@ function currentTime() {
 }
 
 /**
- * @param {CreateLogBrewVueClientConfig} [config]
- * @returns {LogBrewClient}
+ * @param {CreateLogBrewVueClientConfig} config
+ * @returns {string}
  */
-function createLogBrewVueClient(config = {}) {
-  const {
-    apiKey = readEnv("LOGBREW_API_KEY"),
-    clientKey = readEnv("LOGBREW_CLIENT_KEY"),
-    context,
-    maxRetries = DEFAULT_MAX_RETRIES,
-    sdkName = DEFAULT_SDK_NAME,
-    sdkVersion = DEFAULT_SDK_VERSION
-  } = config;
+function requireAuthKey(config) {
+  const { apiKey = readEnv("LOGBREW_API_KEY"), clientKey = readEnv("LOGBREW_CLIENT_KEY") } = config;
   const authKey = clientKey ?? apiKey;
-  const hasAuthKey = Boolean(authKey);
-  if (authKey === undefined || !hasAuthKey) {
+  if (authKey === undefined || !authKey) {
     throw new SdkError(
       "configuration_error",
       "createLogBrewVueClient requires clientKey, apiKey, LOGBREW_CLIENT_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, maxRetries, sdkName, sdkVersion, ...(context === undefined ? {} : { context }) });
+  return authKey;
+}
+
+/**
+ * @param {CreateLogBrewVueClientConfig} [config]
+ * @returns {LogBrewClient}
+ */
+function createLogBrewVueClient(config = {}) {
+  const {
+    context,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    sdkName = DEFAULT_SDK_NAME,
+    sdkVersion = DEFAULT_SDK_VERSION
+  } = config;
+  const apiKey = requireAuthKey(config);
+  return LogBrewClient.create({ apiKey, maxRetries, sdkName, sdkVersion, ...(context === undefined ? {} : { context }) });
 }
 
 /**
@@ -209,20 +219,20 @@ function createVueViewEvent(name, options = {}) {
  * @returns {LogBrewVueErrorEvent}
  */
 function createVueErrorEvent(error, instance, info, options = {}) {
-  const { idFactory = defaultErrorEventId, now = currentTime } = options;
-  const message = errorMessage(error);
+  const { handled = true, idFactory = defaultErrorEventId, now = currentTime, trace } = options;
   const component = getComponentName(instance);
   return {
     id: idFactory(error, instance, info),
     timestamp: now(),
 
-    attributes: {
+    attributes: createIssueAttributesFromError(error, {
+      handled,
+      mechanism: "vue.error_handler",
+      metadata: { component, info },
+      source: "vue.error",
       title: component ? `${component} failed` : "Vue component failed",
-
-      level: "error",
-      message,
-      metadata: { component, info }
-    }
+      ...(trace === undefined ? {} : { trace })
+    })
   };
 }
 
@@ -260,7 +270,7 @@ async function captureWithContext(error, errorContext, options) {
   const { context, info, instance } = errorContext;
   const event = options.errorEvent !== undefined && isFunction(options.errorEvent)
     ? options.errorEvent(error, errorContext)
-    : createVueErrorEvent(error, instance, info, options);
+    : createVueErrorEvent(error, instance, info, { ...options, trace: context.traceContext });
   try {
     context.client.issue(event.id, event.timestamp, event.attributes);
     const response = await context.client.flush(context.transport);
@@ -320,7 +330,41 @@ function resolveTransport(options, app, client) {
   if (typeof options.transport === "function") {
     return options.transport({ app, client });
   }
-  return options.transport ?? RecordingTransport.alwaysAccept();
+  return options.transport ?? createFetchTransport(options);
+}
+
+/**
+ * @param {LogBrewVueOptions} options
+ * @param {App} app
+ * @returns {BrowserDelivery}
+ */
+function browserDelivery(options, app) {
+  const { client, sdkName = DEFAULT_SDK_NAME, sdkVersion = DEFAULT_SDK_VERSION, transport } = options;
+  if (client !== undefined || typeof transport === "function") {
+    const resolved = resolveClient(options, app);
+    return { client: resolved, sdkName, sdkVersion, transport: resolveTransport(options, app, resolved) };
+  }
+  return { clientKey: requireAuthKey(options), sdkName, sdkVersion, ...(transport === undefined ? {} : { transport }) };
+}
+
+/**
+ * @param {LogBrewVueOptions} options
+ * @param {App} app
+ * @returns {LogBrewVueContext}
+ */
+function createPluginContext(options, app) {
+  const browserWindow = findBrowserWindow(options.browserWindow);
+  if (browserWindow === undefined) {
+    const client = resolveClient(options, app);
+    return createVueContext(client, resolveTransport(options, app, client));
+  }
+  const capture = startBrowserCapture(options, browserWindow, browserDelivery(options, app));
+  if (isFunction(readField(app, "onUnmount"))) {
+    app.onUnmount(() => {
+      capture.uninstall();
+    });
+  }
+  return capture.context;
 }
 
 /**
@@ -331,7 +375,7 @@ function resolveTransport(options, app, client) {
  */
 function createErrorHandler(context, options, previousErrorHandler) {
   return (error, instance, info) => {
-    void captureQuietly(error, { context, info, instance }, options);
+    void captureQuietly(error, { context, info, instance }, { ...options, handled: false });
     if (previousErrorHandler !== undefined && isFunction(previousErrorHandler)) {
       return previousErrorHandler(error, instance, info);
     }
@@ -346,8 +390,7 @@ function createErrorHandler(context, options, previousErrorHandler) {
 function createLogBrewVuePlugin(options = {}) {
   return {
     install(app) {
-      const client = resolveClient(options, app);
-      const context = createVueContext(client, resolveTransport(options, app, client));
+      const context = createPluginContext(options, app);
       app.provide(LOG_BREW_VUE_KEY, context);
       app.config.globalProperties.$logbrew = context;
       if (options.captureErrors !== false) {

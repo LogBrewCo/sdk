@@ -39,7 +39,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-react/package.json": "0.1.6",
             "js/logbrew-react-native/package.json": "0.1.48",
             "js/logbrew-svelte/package.json": "0.1.8",
-            "js/logbrew-angular/package.json": "0.1.3",
+            "js/logbrew-angular/package.json": "0.1.4",
         }
         for relative_path, expected in npm_versions.items():
             self.assertEqual(json_object(relative_path)["version"], expected)

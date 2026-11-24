@@ -792,6 +792,7 @@
     {
       "files": [
         "logbrew-vue/examples/real-user-smoke.mjs",
+        "logbrew-vue/test/browser-capture.test.mjs",
         "logbrew-vue/test/error-handler-ownership.test.mjs"
       ],
       "rules": {
