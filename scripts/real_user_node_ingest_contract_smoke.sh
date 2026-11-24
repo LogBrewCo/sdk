@@ -206,8 +206,8 @@ try {
     endpoint,
   }));
 
-  assert.deepEqual(releaseResult, { statusCode: 202, attempts: 1 });
-  assert.deepEqual(signalResult, { statusCode: 202, attempts: 2 });
+  assert.deepEqual(releaseResult, { statusCode: 202, attempts: 1, batches: 1 });
+  assert.deepEqual(signalResult, { statusCode: 202, attempts: 2, batches: 1 });
   assert.equal(releaseClient.pendingEvents(), 0);
   assert.equal(signalClient.pendingEvents(), 0);
   assert.equal(requests.length, 3);
@@ -422,7 +422,7 @@ JS
 
 (
   cd "$app_dir"
-  npm_add_logbrew --loglevel=error --ignore-scripts
+  npm_add_logbrew --loglevel=error --ignore-scripts "../$sdk_tgz" "../$node_tgz"
   npm ls @logbrew/sdk @logbrew/node >/dev/null
   node index.mjs
 )
