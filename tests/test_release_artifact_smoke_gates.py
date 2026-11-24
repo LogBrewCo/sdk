@@ -119,7 +119,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
     def test_next_smoke_links_runtime_browser_error_to_release_artifact_debug_id(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_next_release_artifact_smoke.sh").read_text(encoding="utf-8")
 
-        self.assertIn("npm_add_logbrew --silent ../logbrew-browser.tgz", smoke)
+        self.assertIn("npm_add_logbrew --loglevel=error ../logbrew-browser.tgz", smoke)
         self.assertIn("createBrowserErrorEvent", smoke)
         self.assertIn("debugIdMap", smoke)
         self.assertIn('assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id', smoke)

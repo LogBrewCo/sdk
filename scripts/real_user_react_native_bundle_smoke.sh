@@ -37,8 +37,8 @@ mkdir "$app_root"
 (
   cd "$app_root"
   npm init --yes >/dev/null
-  npm_ci_locked react-native-bundle --silent --ignore-scripts
-  npm_add_logbrew --silent --ignore-scripts \
+  npm_ci_locked react-native-bundle --loglevel=error --ignore-scripts
+  npm_add_logbrew --loglevel=error --ignore-scripts \
     "$core_tarball" \
     "$native_tarball"
 

@@ -60,6 +60,11 @@ jobs:
     needs: changed-areas
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # Every bash in this job reads this file first, so a failed check or smoke
+    # names the command that stopped it. The unit test steps clear it: their
+    # tests compare the exact error output of the scripts they run.
+    env:
+      BASH_ENV: ${{ github.workspace }}/scripts/ci_failure_reason.sh
 
     steps:
       - name: Check out repository
@@ -251,6 +256,7 @@ jobs:
       - name: Run focused unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all != 'true' }}
         env:
+          BASH_ENV: ""
           UNIT_TEST_MODULES: ${{ needs.changed-areas.outputs.unit_test_modules }}
         run: |
           read -r -a modules <<< "$UNIT_TEST_MODULES"
@@ -258,6 +264,8 @@ jobs:
 
       - name: Run full unit tests
         if: ${{ needs.changed-areas.outputs.unit_test_run_all == 'true' }}
+        env:
+          BASH_ENV: ""
         run: python3 scripts/run_python_contract_tests.py
 
       - name: Install canonical brand renderer

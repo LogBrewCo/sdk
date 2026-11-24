@@ -33,11 +33,11 @@ sdk_pack_json="$tmp_dir/sdk-pack.json"
 react_native_pack_json="$tmp_dir/react-native-pack.json"
 (
   cd "$repo_root/js/logbrew-js"
-  npm pack --silent --json --pack-destination "$pack_dir" > "$sdk_pack_json"
+  npm pack --loglevel=error --json --pack-destination "$pack_dir" > "$sdk_pack_json"
 )
 (
   cd "$repo_root/js/logbrew-react-native"
-  npm pack --silent --json --pack-destination "$pack_dir" > "$react_native_pack_json"
+  npm pack --loglevel=error --json --pack-destination "$pack_dir" > "$react_native_pack_json"
 )
 sdk_tgz="$(
   python3 - "$sdk_pack_json" <<'PY'

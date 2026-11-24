@@ -42,8 +42,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sdk_tgz="$(cd "$repo_root/js/logbrew-js" && npm pack --silent --pack-destination "$tmp_dir")"
-node_tgz="$(cd "$repo_root/js/logbrew-node" && npm pack --silent --pack-destination "$tmp_dir")"
+sdk_tgz="$(cd "$repo_root/js/logbrew-js" && npm pack --loglevel=error --pack-destination "$tmp_dir")"
+node_tgz="$(cd "$repo_root/js/logbrew-node" && npm pack --loglevel=error --pack-destination "$tmp_dir")"
 app_dir="$tmp_dir/app"
 mkdir -p "$app_dir"
 
@@ -422,7 +422,7 @@ JS
 
 (
   cd "$app_dir"
-  npm_add_logbrew --silent --ignore-scripts
+  npm_add_logbrew --loglevel=error --ignore-scripts
   npm ls @logbrew/sdk @logbrew/node >/dev/null
   node index.mjs
 )
