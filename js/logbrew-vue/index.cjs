@@ -114,13 +114,8 @@ function createLogBrewVueClient(config = {}) {
     sdkName = DEFAULT_SDK_NAME,
     sdkVersion = DEFAULT_SDK_VERSION
   } = config;
-  return LogBrewClient.create({
-    apiKey: requireAuthKey(config),
-    maxRetries,
-    sdkName,
-    sdkVersion,
-    ...(context === undefined ? {} : { context })
-  });
+  const apiKey = requireAuthKey(config);
+  return LogBrewClient.create({ apiKey, maxRetries, sdkName, sdkVersion, ...(context === undefined ? {} : { context }) });
 }
 
 /**
