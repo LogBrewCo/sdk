@@ -256,9 +256,14 @@ const expectedBrowserRuntimeContext = {
     runtime: { name: "Google Chrome", version: "126" },
     operatingSystem: { name: "macOS" },
     device: { family: "desktop" }
-  }
+  },
+  trace: { traceId: traceContext.traceId, spanId: traceContext.spanId, sampled: true }
 };
-deepStrictEqual(pagePayload.events[0].attributes.context, expectedBrowserRuntimeContext);
+const { session: pageSession, ...pageContext } = pagePayload.events[0].attributes.context;
+deepStrictEqual(pageContext, expectedBrowserRuntimeContext);
+if (!/^[0-9a-f]{32}$/u.test(pageSession?.id ?? "")) {
+  throw new Error(`expected a 32-hex session id in the event context: ${transport.sentBodies[0]}`);
+}
 if (pagePayload.events[0].attributes.traceId !== traceContext.traceId || pagePayload.events[0].attributes.spanId !== traceContext.spanId) {
   throw new Error(`expected shared page trace context: ${transport.sentBodies[0]}`);
 }
@@ -284,8 +289,9 @@ if (actionPayload.events[0].type !== "action") {
 if (actionPayload.events[0].attributes.metadata.sessionId !== "sess_browser_001") {
   throw new Error(`expected session correlation metadata: ${transport.sentBodies[1]}`);
 }
-if (actionPayload.events[0].attributes.metadata.traceId !== traceContext.traceId || actionPayload.events[0].attributes.metadata.spanId !== traceContext.spanId) {
-  throw new Error(`expected action trace correlation metadata: ${transport.sentBodies[1]}`);
+deepStrictEqual(actionPayload.events[0].attributes.context?.trace, expectedBrowserRuntimeContext.trace);
+if (actionPayload.events[0].attributes.context?.session?.id !== pageSession.id) {
+  throw new Error(`expected the page session on the action: ${transport.sentBodies[1]}`);
 }
 if (actionPayload.events[0].attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested action metadata should be dropped: ${transport.sentBodies[1]}`);
@@ -319,8 +325,9 @@ if (networkPayload.events[0].attributes.metadata.routeTemplate !== "/api/checkou
 if (networkPayload.events[0].attributes.metadata.durationMs !== 842) {
   throw new Error(`expected network duration metadata: ${transport.sentBodies[2]}`);
 }
-if (networkPayload.events[0].attributes.metadata.traceId !== traceContext.traceId || networkPayload.events[0].attributes.metadata.spanId !== traceContext.spanId) {
-  throw new Error(`expected network trace correlation metadata: ${transport.sentBodies[2]}`);
+deepStrictEqual(networkPayload.events[0].attributes.context?.trace, expectedBrowserRuntimeContext.trace);
+if (networkPayload.events[0].attributes.metadata.traceId !== traceContext.traceId || networkPayload.events[0].attributes.context?.session?.id !== pageSession.id) {
+  throw new Error(`expected network trace metadata and the page session: ${transport.sentBodies[2]}`);
 }
 if (networkPayload.events[0].attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested network metadata should be dropped: ${transport.sentBodies[2]}`);
@@ -852,7 +859,7 @@ try {
 if (!browserFetchFailureCaptured) {
   throw new Error("fetch wrapper should rethrow the original network error");
 }
-const browserFetchFailureBody = JSON.stringify(JSON.parse(browserFetchContext.previewJson()).events.at(-1));
+const browserFetchFailureBody = JSON.stringify(JSON.parse(browserFetchContext.previewJson()).events.filter((event) => event.type === "span").at(-1));
 if (!browserFetchFailureBody.includes('"errorType":"TypeError"') || browserFetchFailureBody.includes("sample=hidden") || browserFetchFailureBody.includes("hidden query")) {
   throw new Error(`fetch failure span should keep only the error type: ${browserFetchFailureBody}`);
 }
@@ -876,7 +883,7 @@ browserFetchInstrumentation.uninstall();
 if (browserFetchWindow.fetch !== originalWindowFetch) {
   throw new Error("fetch instrumentation should restore the original fetch");
 }
-if (!JSON.stringify(JSON.parse(browserFetchContext.previewJson()).events.at(-1)).includes("browser.fetch GET /api/accounts/:id")) {
+if (!JSON.stringify(JSON.parse(browserFetchContext.previewJson()).events.filter((event) => event.type === "span").at(-1)).includes("browser.fetch GET /api/accounts/:id")) {
   throw new Error("fetch instrumentation did not capture the route-templated fetch span");
 }
 
@@ -940,7 +947,7 @@ const browserXhrFailure = new browserXhrWindow.XMLHttpRequest();
 browserXhrFailure.open("PATCH", "/api/profile/42?sample=hidden");
 browserXhrFailure.send("hidden body");
 browserXhrFailure.dispatchEvent({ type: "timeout" });
-const browserXhrFailureBody = JSON.stringify(JSON.parse(browserXhrContext.previewJson()).events.at(-1));
+const browserXhrFailureBody = JSON.stringify(JSON.parse(browserXhrContext.previewJson()).events.filter((event) => event.type === "span").at(-1));
 if (!browserXhrFailureBody.includes('"errorType":"timeout"') || browserXhrFailureBody.includes("sample=hidden") || browserXhrFailureBody.includes("hidden body")) {
   throw new Error(`XHR failure span should keep only the event type: ${browserXhrFailureBody}`);
 }
@@ -968,7 +975,7 @@ await captureBrowserXhrSpan({
   flushOnCapture: false,
   resourcePathTemplate: ({ path }) => path.replace(/\/\d+$/u, "/:id")
 });
-if (!JSON.stringify(JSON.parse(browserXhrContext.previewJson()).events.at(-1)).includes("browser.xhr DELETE /api/accounts/:id")) {
+if (!JSON.stringify(JSON.parse(browserXhrContext.previewJson()).events.filter((event) => event.type === "span").at(-1)).includes("browser.xhr DELETE /api/accounts/:id")) {
   throw new Error("direct XHR capture did not capture the route-templated span");
 }
 
@@ -1329,7 +1336,7 @@ if (navigationSpan.attributes.metadata.navigationType !== "pushState") {
 if (navigationSpan.attributes.traceId !== "11111111111111111111111111111111" || navigationSpan.attributes.spanId !== "2222222222222222") {
   throw new Error(`expected renewed navigation trace context, got ${navigationBody}`);
 }
-if (navigationAction.attributes.metadata.traceId !== navigationSpan.attributes.traceId || navigationAction.attributes.metadata.spanId !== navigationSpan.attributes.spanId) {
+if (navigationAction.attributes.context?.trace?.traceId !== navigationSpan.attributes.traceId || navigationAction.attributes.context?.trace?.spanId !== navigationSpan.attributes.spanId) {
   throw new Error(`expected action to use route trace context, got ${navigationBody}`);
 }
 if (navigationAction.attributes.metadata.ignoredNested !== undefined) {
@@ -2288,7 +2295,7 @@ grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-default.stdout.json" >/dev/null
-grep -q '"pagehideDeferredEvents":13' "$tmp_dir/example-default.stderr.json"
+grep -q '"pagehideDeferredEvents":16' "$tmp_dir/example-default.stderr.json"
 grep -q '"hiddenDeferredEvents":1' "$tmp_dir/example-default.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/example-default.stderr.json"
@@ -2304,7 +2311,7 @@ npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-hel
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-grep -q '"pagehideDeferredEvents":13' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"pagehideDeferredEvents":16' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"hiddenDeferredEvents":1' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/npm-helper-smoke.stderr.json"

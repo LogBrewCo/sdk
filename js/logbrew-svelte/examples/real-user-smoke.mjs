@@ -70,8 +70,8 @@ function correlatedEvidence(span, issue) {
     && readPath(issue, ["attributes", "breadcrumbs", FIRST, "category"]) === "sveltekit.request"
     && readPath(issue, ["attributes", "metadata", "routeTemplate"]) === "/orders/[id]"
     && readPath(issue, ["attributes", "metadata", "errorStack"]) === undefined
-    && readPath(issue, ["attributes", "metadata", "traceId"]) === readPath(span, ["attributes", "traceId"])
-    && readPath(issue, ["attributes", "metadata", "spanId"]) === readPath(span, ["attributes", "spanId"])
+    && readPath(issue, ["attributes", "context", "trace", "traceId"]) === readPath(span, ["attributes", "traceId"])
+    && readPath(issue, ["attributes", "context", "trace", "spanId"]) === readPath(span, ["attributes", "spanId"])
     && readPath(issue, ["attributes", "evidence", "likelyFixArea", "file"]) === "src/lib/orders.js";
 }
 
