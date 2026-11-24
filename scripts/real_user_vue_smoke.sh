@@ -10,11 +10,22 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 core_pack_json="$tmp_dir/core-pack.json"
+browser_pack_json="$tmp_dir/browser-pack.json"
 vue_pack_json="$tmp_dir/vue-pack.json"
 (cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
+(cd "$repo_root/js/logbrew-browser" && npm pack --json --pack-destination "$tmp_dir") > "$browser_pack_json"
 (cd "$repo_root/js/logbrew-vue" && npm pack --json --pack-destination "$tmp_dir") > "$vue_pack_json"
 
 core_tgz="$(python3 - "$core_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload[0]["filename"])
+PY
+)"
+browser_tgz="$(python3 - "$browser_pack_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -33,8 +44,10 @@ print(payload[0]["filename"])
 PY
 )"
 core_tgz="$tmp_dir/$core_tgz"
+browser_tgz="$tmp_dir/$browser_tgz"
 vue_tgz="$tmp_dir/$vue_tgz"
 test -f "$core_tgz"
+test -f "$browser_tgz"
 test -f "$vue_tgz"
 
 tar -tzf "$vue_tgz" > "$tmp_dir/vue-tarball.txt"
@@ -48,8 +61,8 @@ grep -q '^package/examples/package.json$' "$tmp_dir/vue-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/vue-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/vue-tarball.txt"
 tar -xOf "$vue_tgz" package/README.md > "$tmp_dir/vue-readme.md"
-grep -q 'npm install @logbrew/sdk @logbrew/vue vue' "$tmp_dir/vue-readme.md"
-grep -q 'pnpm add @logbrew/sdk @logbrew/vue vue' "$tmp_dir/vue-readme.md"
+grep -q 'npm install @logbrew/sdk @logbrew/browser @logbrew/vue vue' "$tmp_dir/vue-readme.md"
+grep -q 'pnpm add @logbrew/sdk @logbrew/browser @logbrew/vue vue' "$tmp_dir/vue-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/vue-readme.md"
 grep -q 'LOGBREW_CLIENT_KEY' "$tmp_dir/vue-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/vue-readme.md"
@@ -69,6 +82,7 @@ read -r vue_version vue_server_renderer_version <<<"$locked_versions"
 npm_ci_locked vue >/dev/null
 npm_add_logbrew \
   "$core_tgz" \
+  "$browser_tgz" \
   "$vue_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json

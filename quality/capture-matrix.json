@@ -494,13 +494,13 @@
       "inputs": "024ec00ca6f164197b0c7c3644ce50dec409707d838b300b7f7b618b5996bfda"
     },
     "js/logbrew-angular": {
-      "share": 50.0,
+      "share": 75.0,
       "signals": {
         "errors": "sent",
-        "stack": "missing",
-        "breadcrumbs": "missing",
+        "stack": "sent",
+        "breadcrumbs": "sent",
         "logs": "sent",
-        "requests": "missing",
+        "requests": "sent",
         "traces": "missing",
         "metrics": "missing",
         "user": "sent",
@@ -511,20 +511,18 @@
       },
       "not_applicable": {},
       "missing": [
-        "stack",
-        "breadcrumbs",
-        "requests",
         "traces",
         "metrics",
         "session"
       ],
       "events": {
-        "issue": 1,
-        "log": 2
+        "issue": 2,
+        "log": 3,
+        "span": 1
       },
-      "method": "Angular 22 standalone app bootstrapped with JIT and zoneless change detection under happy-dom, with provideLogBrew and its ErrorHandler, injectLogBrew, console capture, and the @logbrew/browser fetch transport; one traced API call through createTraceparentFetch and a click handler that throws",
+      "method": "Angular 22 standalone app bootstrapped with JIT and zoneless change detection under happy-dom, with provideLogBrew, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, its ErrorHandler, injectLogBrew, and console capture; one HttpClient call under tracePropagationTargets and a click handler that throws twice",
       "probe": "tools/capture-matrix/probes/js/logbrew-angular",
-      "inputs": "402c6770050ee8eca1f16077851bf7bbbc5a3ec6798f393e27181b80e5916847"
+      "inputs": "5fc83479a09cd2c7cd1fe6e2b8fd4255f1b8d45a34e9b52bc2a3ebe47da41739"
     },
     "js/logbrew-aws-sqs": {
       "share": 100.0,
@@ -961,13 +959,13 @@
       "inputs": "dfc017425f8d13d820f876baec70905b473eafe05c149bd7b486a8e184b7be0c"
     },
     "js/logbrew-vue": {
-      "share": 50.0,
+      "share": 75.0,
       "signals": {
         "errors": "sent",
-        "stack": "missing",
-        "breadcrumbs": "missing",
+        "stack": "sent",
+        "breadcrumbs": "sent",
         "logs": "sent",
-        "requests": "missing",
+        "requests": "sent",
         "traces": "missing",
         "metrics": "missing",
         "user": "sent",
@@ -978,20 +976,18 @@
       },
       "not_applicable": {},
       "missing": [
-        "stack",
-        "breadcrumbs",
-        "requests",
         "traces",
         "metrics",
         "session"
       ],
       "events": {
-        "issue": 1,
-        "log": 2
+        "issue": 2,
+        "log": 2,
+        "span": 2
       },
-      "method": "Vue 3 app mounted under happy-dom with createLogBrewVuePlugin, its error handler, useLogBrew, console capture, and the @logbrew/browser fetch transport; one traced API call through createTraceparentFetch and a click handler that throws",
+      "method": "Vue 3 app mounted under happy-dom with createLogBrewVuePlugin, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, plus $logbrew and console capture; one API call through window.fetch under tracePropagationTargets and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-vue",
-      "inputs": "fe44a7d37e1d40084b29310a829b8fa5a07cce215111cebee15602497d67dc2d"
+      "inputs": "a1f2e201c126434def8d7ca363f3cfb7e84793ea241ccd4c273c4efa93d37407"
     },
     "kotlin/logbrew-kotlin": {
       "share": 100.0,

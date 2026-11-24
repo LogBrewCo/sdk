@@ -1,4 +1,5 @@
 import type { App, ComponentPublicInstance, InjectionKey } from "vue";
+import type { BrowserTraceContext, LogBrewBrowserOptions } from "@logbrew/browser";
 import type {
   IssueAttributes,
   LogAttributes,
@@ -55,6 +56,8 @@ type LogBrewVueContext = {
   readonly previewJson: () => string;
   readonly flush: () => Promise<TransportResponse>;
   readonly shutdown: () => Promise<TransportResponse>;
+  /** The page trace that issues and request spans share. Set when the plugin runs in a browser. */
+  readonly traceContext?: BrowserTraceContext | undefined;
 };
 
 type LogBrewVueRuntimeContext = {
@@ -91,11 +94,28 @@ type LogBrewVueViewEventOptions = {
 };
 
 type LogBrewVueErrorEventOptions = {
+  /** Whether app code handled the error. The plugin's error handler sets false. Defaults to true. */
+  handled?: boolean | undefined;
   now?: (() => string) | undefined;
+  /** The trace the issue belongs to. */
+  trace?: BrowserTraceContext | undefined;
   idFactory?: ((error: unknown, instance: ComponentPublicInstance | null, info: string) => string) | undefined;
 };
 
-type LogBrewVueOptions = CreateLogBrewVueClientConfig & LogBrewVueErrorEventOptions & {
+/** Options `installLogBrewBrowser` reads when the plugin runs in a browser. */
+type LogBrewVueBrowserOptions = Omit<
+  LogBrewBrowserOptions,
+  "apiKey" | "client" | "clientKey" | "context" | "errorEvent" | "idFactory" | "maxRetries" | "now" | "onCaptureError"
+  | "onFlush" | "sdkName" | "sdkVersion" | "transport"
+>;
+
+type LogBrewVueOptions = CreateLogBrewVueClientConfig & LogBrewVueErrorEventOptions & LogBrewVueBrowserOptions & {
+  /** Record a span for each fetch and XHR request the page makes. Defaults to true. */
+  captureRequests?: boolean | undefined;
+  /** Record spans only for requests that match. Defaults to every request except LogBrew delivery. */
+  captureTargets?: TracePropagationTarget[] | undefined;
+  /** Add a traceparent header to requests that match. Defaults to none. */
+  tracePropagationTargets?: TracePropagationTarget[] | undefined;
   client?: LogBrewClient | LogBrewClientFactory | undefined;
   transport?: Transport | LogBrewTransportFactory | undefined;
   captureErrors?: boolean | undefined;
@@ -159,6 +179,7 @@ export type {
   LogBrewClientFactory,
   LogBrewTransportFactory,
   LogBrewViewEvent,
+  LogBrewVueBrowserOptions,
   LogBrewVueContext,
   LogBrewVueErrorContext,
   LogBrewVueErrorEvent,

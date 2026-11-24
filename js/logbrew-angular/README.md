@@ -6,31 +6,47 @@
 
 Angular providers and DI helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds Angular `providers`, an injection token, `injectLogBrew()`, view helper events, and optional `ErrorHandler` capture while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds Angular `providers`, an injection token, `injectLogBrew()`, view helper events, and optional `ErrorHandler` capture. In the browser it runs on `@logbrew/browser`, which sends events, records breadcrumbs, and times requests. `@logbrew/sdk` keeps event validation, retry, flush, and shutdown.
 
 ## Install
 
 ```bash
-npm install @logbrew/sdk @logbrew/angular @angular/core
-pnpm add @logbrew/sdk @logbrew/angular @angular/core
+npm install @logbrew/sdk @logbrew/browser @logbrew/angular @angular/core
+pnpm add @logbrew/sdk @logbrew/browser @logbrew/angular @angular/core
 ```
 
 ## Providers
 
 ```ts
 import { ApplicationConfig } from "@angular/core";
-import { RecordingTransport } from "@logbrew/sdk";
 import { provideLogBrew } from "@logbrew/angular";
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideLogBrew({
       clientKey: "LOGBREW_CLIENT_KEY",
-      transport: RecordingTransport.alwaysAccept()
+      context: {
+        schemaVersion: 1,
+        resource: {
+          service: { name: "checkout-web" },
+          deployment: { environment: "production", release: "web@1.2.3" }
+        }
+      },
+      tracePropagationTargets: [/^\/api\//u]
     })
   ]
 };
 ```
+
+In the browser the provider starts `installLogBrewBrowser()` from `@logbrew/browser` when Angular first needs it, so with no other setup it:
+
+- sends events to LogBrew with the fetch transport, and again when the page is hidden or closed;
+- sends every error that reaches Angular's `ErrorHandler` as an issue with stack frames and the current route;
+- adds breadcrumbs for console calls, `fetch` and XHR requests, and route changes to each issue;
+- records a page view span and a span for each `fetch` and XHR request, `HttpClient` calls included, all in one page trace;
+- adds a `traceparent` header to requests that match `tracePropagationTargets`, so backend spans join the page trace.
+
+Set `captureRequests: false` to stop request spans, or `captureTargets` to keep only some requests. The provider also accepts the other `installLogBrewBrowser()` options, such as `endpoint`, `persistOffline`, and `breadcrumbs`. It removes its listeners when the injector is destroyed. During server rendering there is no window, so the provider creates a client and sends with the fetch transport only. Pass `client` and `transport` to use your own.
 
 For Angular browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples and server-side use.
 
@@ -74,7 +90,7 @@ export class DashboardComponent {
 
 ## Trace Propagation
 
-Use `createTraceparentFetch()` when Angular frontend work should connect to backend traces. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
+In the browser, set `tracePropagationTargets` on the provider, as shown above. Use `createTraceparentFetch()` to add a `traceparent` header to a single fetch function without the provider. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
 
 ```ts
 import { createAngularTraceparent, createTraceparentFetch } from "@logbrew/angular";

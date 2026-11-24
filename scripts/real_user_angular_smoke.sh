@@ -10,11 +10,22 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 core_pack_json="$tmp_dir/core-pack.json"
+browser_pack_json="$tmp_dir/browser-pack.json"
 angular_pack_json="$tmp_dir/angular-pack.json"
 (cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
+(cd "$repo_root/js/logbrew-browser" && npm pack --json --pack-destination "$tmp_dir") > "$browser_pack_json"
 (cd "$repo_root/js/logbrew-angular" && npm pack --json --pack-destination "$tmp_dir") > "$angular_pack_json"
 
 core_tgz="$(python3 - "$core_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload[0]["filename"])
+PY
+)"
+browser_tgz="$(python3 - "$browser_pack_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -33,8 +44,10 @@ print(payload[0]["filename"])
 PY
 )"
 core_tgz="$tmp_dir/$core_tgz"
+browser_tgz="$tmp_dir/$browser_tgz"
 angular_tgz="$tmp_dir/$angular_tgz"
 test -f "$core_tgz"
+test -f "$browser_tgz"
 test -f "$angular_tgz"
 
 tar -tzf "$angular_tgz" > "$tmp_dir/angular-tarball.txt"
@@ -48,8 +61,8 @@ grep -q '^package/examples/package.json$' "$tmp_dir/angular-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/angular-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/angular-tarball.txt"
 tar -xOf "$angular_tgz" package/README.md > "$tmp_dir/angular-readme.md"
-grep -q 'npm install @logbrew/sdk @logbrew/angular @angular/core' "$tmp_dir/angular-readme.md"
-grep -q 'pnpm add @logbrew/sdk @logbrew/angular @angular/core' "$tmp_dir/angular-readme.md"
+grep -q 'npm install @logbrew/sdk @logbrew/browser @logbrew/angular @angular/core' "$tmp_dir/angular-readme.md"
+grep -q 'pnpm add @logbrew/sdk @logbrew/browser @logbrew/angular @angular/core' "$tmp_dir/angular-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/angular-readme.md"
 grep -q 'LOGBREW_CLIENT_KEY' "$tmp_dir/angular-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/angular-readme.md"
@@ -71,6 +84,7 @@ node_version="$(node -p 'process.version')"
 npm_config_loglevel=error npm_config_engine_strict=false npm_ci_locked angular >/dev/null
 npm_config_loglevel=error npm_config_engine_strict=false npm_add_logbrew \
   "$core_tgz" \
+  "$browser_tgz" \
   "$angular_tgz" >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
