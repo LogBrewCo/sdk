@@ -41,6 +41,15 @@ var (
 		"java":  {"real_user_spring_"},
 		"maven": {"real_user_maven_", "build_maven_", "check_maven_"},
 	}
+	// Each smoke installs its third-party packages from one of these lockfile
+	// directories, so a dependency update there runs the smokes of these areas.
+	ciLockfileAreas = map[string][]string{
+		"scripts/lockfiles/npm/":    {"javascript", "release_artifacts"},
+		"scripts/lockfiles/python/": {"python"},
+	}
+	// A scheduled or manual run checks every area, so a dependency or registry
+	// change that no commit touched still fails within a day.
+	ciFullRunEvents           = []string{"schedule", "workflow_dispatch"}
 	reactNativeNativePrefixes = []string{
 		"js/logbrew-react-native/android/", "js/logbrew-react-native/ios/", "js/logbrew-react-native/src/",
 		"swift/logbrew-swift/Sources/LogBrew",
@@ -98,14 +107,18 @@ func checkCISelect(arguments []string, getenv func(string) string, git func(...s
 			paths = append(paths, argument)
 		}
 	}
-	if len(paths) == 0 {
+	var report string
+	if len(paths) == 0 && slices.Contains(ciFullRunEvents, getenv("GITHUB_EVENT_NAME")) {
+		report = ciFullSelection()
+	} else if len(paths) == 0 {
 		changed, err := ciChangedPaths(getenv, git)
 		if err != nil {
 			return writeText(diagnostic, "changed paths unavailable: "+err.Error()+"\n", exitFailure)
 		}
-		paths = changed
+		report = ciSelection(changed)
+	} else {
+		report = ciSelection(paths)
 	}
-	report := ciSelection(paths)
 	if !githubOutput {
 		return writeText(output, report, exitOK)
 	}
@@ -161,11 +174,23 @@ func ciSelection(paths []string) string {
 			ciPathAreas(path, enabled)
 		}
 	}
+	modules, runAll := ciUnitTests(normalized)
+	return ciReport(enabled, modules, runAll)
+}
+
+func ciFullSelection() string {
+	enabled := map[string]bool{}
+	for _, area := range ciAreas {
+		enabled[area] = true
+	}
+	return ciReport(enabled, nil, true)
+}
+
+func ciReport(enabled map[string]bool, modules []string, runAll bool) string {
 	var report strings.Builder
 	for _, area := range ciAreas {
 		report.WriteString(area + "=" + strconv.FormatBool(enabled[area]) + "\n")
 	}
-	modules, runAll := ciUnitTests(normalized)
 	report.WriteString("run_all=" + strconv.FormatBool(runAll) + "\n")
 	report.WriteString("modules=" + strings.Join(modules, " ") + "\n")
 	return report.String()
@@ -181,6 +206,13 @@ func ciPathAreas(path string, enabled map[string]bool) {
 		}
 		for area, prefixes := range ciScriptPrefixes {
 			if slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(name, prefix) }) {
+				enabled[area] = true
+			}
+		}
+	}
+	for prefix, areas := range ciLockfileAreas {
+		if strings.HasPrefix(path, prefix) {
+			for _, area := range areas {
 				enabled[area] = true
 			}
 		}

@@ -1,16 +1,22 @@
 name: CI
 
+# A pull request or push checks the areas its changes select. The daily run
+# checks every area on main, so a broken check turns main red within a day even
+# when no commit touched it (tools/toolchain-probe/ci_select.go).
 on:
   pull_request:
   push:
     branches:
       - main
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
