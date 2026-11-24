@@ -2,7 +2,7 @@
   "name": "nestjs-public-registry",
   "private": true,
   "dependencies": {
-    "@nestjs/common": "12.5.0",
+    "@nestjs/common": "12.5.1",
     "@types/express": "5.0.6",
     "@types/node": "26.6.6",
     "reflect-metadata": "0.2.2",
