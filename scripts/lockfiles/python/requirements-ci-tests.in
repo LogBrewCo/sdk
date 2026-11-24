@@ -1,5 +1,5 @@
 certifi==2026.11.20
-truststore==0.10.4
+truststore==0.10.5
 arq==0.28.0
 dramatiq==2.2.1
 fakeredis==2.40.0
