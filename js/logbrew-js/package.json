@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/sdk",
-  "version": "0.1.47",
+  "version": "0.1.48",
   "description": "Public LogBrew JavaScript SDK for building, validating, and flushing event batches.",
   "type": "module",
   "main": "./index.cjs",
@@ -58,6 +58,7 @@
     "event-store.cjs",
     "provided-breadcrumbs.cjs",
     "random-hex.cjs",
+    "session.cjs",
     "retry-delay.cjs",
     "stored-events.cjs",
     "utf8.cjs",

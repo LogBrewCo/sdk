@@ -11,7 +11,7 @@ const api = http.createServer((request, response) => {
 });
 await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${api.address().port}`;
-const browserWindow = new Window({ url: "https://shop.example.test/checkout" });
+const browserWindow = new Window({ url: `${origin}/checkout` });
 for (const name of ["window", "document", "navigator", "Element", "SVGElement", "HTMLElement", "Node", "Event", "MouseEvent"]) {
   Object.defineProperty(globalThis, name, { configurable: true, value: name === "window" ? browserWindow : browserWindow[name] });
 }

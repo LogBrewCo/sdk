@@ -31,6 +31,7 @@ function runConsumer(source, extension, reactSource = inertReact) {
     fs.mkdirSync(scope, { recursive: true });
     fs.symlinkSync(path.join(jsDir, "logbrew-js"), path.join(scope, "sdk"), "dir");
     fs.symlinkSync(packageDir, path.join(scope, "react"), "dir");
+    fs.symlinkSync(path.join(jsDir, "logbrew-browser"), path.join(scope, "browser"), "dir");
     const react = path.join(root, "node_modules", "react");
     fs.mkdirSync(react, { recursive: true });
     fs.writeFileSync(path.join(react, "package.json"), JSON.stringify({ name: "react", main: "index.js" }));
@@ -165,5 +166,56 @@ test("React Router route templates stay fast on long slash runs (CommonJS)", () 
     const { createReactRouterRouteTemplate } = require("@logbrew/react");
     ${slowRouteScenario}
   `, "cjs");
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("React events carry the router trace and 1 tab session, and 2 identical errors get different IDs", () => {
+  const result = runConsumer(`
+    import assert from "node:assert/strict";
+    import { captureReactError, captureReactRouterNavigation, createLogBrewReactClient } from "@logbrew/react";
+    const client = createLogBrewReactClient({ clientKey: "LOGBREW_CLIENT_KEY" });
+    captureReactRouterNavigation(client, {
+      routeTemplate: "/checkout/:cartId",
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    });
+    captureReactError(client, new Error("payment declined"));
+    captureReactError(client, new Error("payment declined"));
+    client.log("evt_react_log_test", "2026-11-24T10:00:00Z", { level: "warn", message: "payment step failing" });
+    const [span, first, second, log] = JSON.parse(client.previewJson()).events;
+    assert.notEqual(first.id, second.id);
+    assert.match(first.id, /^evt_react_error_payment_declined_[0-9a-f]{32}$/u);
+    for (const event of [first, second, log]) {
+      assert.deepEqual(event.attributes.context.trace, { traceId: span.attributes.traceId, spanId: span.attributes.spanId });
+    }
+    const sessionIds = new Set([span, first, second, log].map((event) => event.attributes.context.session.id));
+    assert.equal(sessionIds.size, 1);
+    assert.match([...sessionIds][0], /^[0-9a-f]{32}$/u);
+    const off = createLogBrewReactClient({ clientKey: "LOGBREW_CLIENT_KEY", session: false });
+    off.log("evt_react_log_off", "2026-11-24T10:00:00Z", { level: "info", message: "opened" });
+    assert.equal(JSON.parse(off.previewJson()).events[0].attributes.context, undefined);
+  `, "mjs");
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("the browser hook's fetch option sends request timings as spans and metrics", () => {
+  const result = runConsumer(`
+    import assert from "node:assert/strict";
+    import { createLogBrewReactClient } from "@logbrew/react";
+    import { useLogBrewBrowserInstrumentation } from "@logbrew/react/browser";
+    const client = createLogBrewReactClient({ clientKey: "LOGBREW_CLIENT_KEY" });
+    globalThis.logbrewClient = client;
+    const browserWindow = {
+      addEventListener() {},
+      fetch: async () => ({ headers: new Headers(), status: 200 }),
+      location: { hash: "", href: "https://shop.example.test/checkout", pathname: "/checkout", search: "" },
+      removeEventListener() {}
+    };
+    useLogBrewBrowserInstrumentation({ browserWindow, fetch: true, interactionTiming: false, raiseCaptureErrors: true });
+    await browserWindow.fetch("/api/cart");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const events = JSON.parse(client.previewJson()).events;
+    assert.deepEqual(events.map(({ type }) => type), ["span", "metric"]);
+    assert.equal(events[1].attributes.name, "http.client.duration");
+  `, "mjs", effectReact);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });

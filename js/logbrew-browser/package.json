@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/browser",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "Browser error, page-view, action, network, and fetch transport helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
@@ -53,6 +53,8 @@
     "runtime-context.js",
     "trace-context.cjs",
     "trace-context.js",
+    "timing-metrics.cjs",
+    "timing-metrics.js",
     "web-vitals.cjs",
     "web-vitals.js",
     "xhr-spans.cjs",
@@ -91,7 +93,7 @@
     "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "peerDependencies": {
-    "@logbrew/sdk": "^0.1.33"
+    "@logbrew/sdk": "^0.1.48"
   },
   "scripts": {
     "test": "bun test"

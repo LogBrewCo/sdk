@@ -1,4 +1,5 @@
 const { installBrowserBreadcrumbs } = require("./browser-breadcrumbs.cjs");
+const { createLogBrewSession } = require("./session.cjs");
 const { LogBrewClient } = require("./client.cjs");
 const { installLogBrewConsoleCapture } = require("./console-capture.cjs");
 const { logAttributesFromConsoleArgs, logbrewLevelFromConsoleMethod } = require("./console-arguments.cjs");
@@ -54,6 +55,7 @@ module.exports = {
   createTracestate,
 
   createLogBrewPinoDestination,
+  createLogBrewSession,
   installLogBrewConsoleCapture,
 
   LogBrewClient,

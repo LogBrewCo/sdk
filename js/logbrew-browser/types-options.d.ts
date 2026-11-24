@@ -59,6 +59,13 @@ type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportCo
    * nothing is stored. A subject the app sets wins. Get consent where the law requires it.
    */
   anonymousSubject?: BrowserAnonymousSubjectOption | undefined;
+  /**
+   * Add a session ID to every event as `context.session.id`. Defaults to true. The ID lives in the tab's
+   * `sessionStorage`, so it survives reloads in that tab. A session ends after 30 minutes without events or
+   * 4 hours after it starts, and the next event starts a new one. Set false to send no session ID. A
+   * `session` in `context` replaces it.
+   */
+  session?: boolean | undefined;
   /** App-owned transports remain available to explicit flush, but are not invoked by page-exit lifecycle signals. */
   transport?: Transport | undefined;
   /**

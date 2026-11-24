@@ -53,6 +53,9 @@ declare function createFetchTransport(config?: FetchTransportConfig): Transport;
 
 declare function createBeaconTransport(config: BeaconTransportConfig): BeaconTransport;
 
+/** Build an event ID that is unique per event: `<prefix>_<slug of semanticValue>_<32 random hex digits>`. */
+declare function createAutomaticBrowserEventId(prefix: string, semanticValue: string): string;
+
 declare function createPersistentBrowserTransport(config: PersistentBrowserTransportConfig): PersistentBrowserTransport;
 
 declare function createBrowserTraceparent(config?: BrowserTraceparentConfig): string;
@@ -192,6 +195,7 @@ export {
   captureBrowserXhrSpan,
   capturePageView,
   captureUnhandledRejection,
+  createAutomaticBrowserEventId,
   createBeaconTransport,
   createBrowserActionEvent,
   createBrowserErrorEvent,

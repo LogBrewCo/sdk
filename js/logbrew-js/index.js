@@ -15,6 +15,7 @@ export const {
   createTraceparentHeaders,
   createTracestate,
   createLogBrewPinoDestination,
+  createLogBrewSession,
   createLogBrewWinstonTransport,
   installBrowserBreadcrumbs,
   installLogBrewConsoleCapture,

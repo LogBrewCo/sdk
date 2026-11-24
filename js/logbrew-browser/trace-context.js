@@ -2,7 +2,7 @@ import { SdkError, createTraceparent, parseTraceparent } from "@logbrew/sdk";
 import { isFunction, isList, readField, slugify, stringOrUndefined } from "./values.js";
 
 /**
- * @import { Metadata, TraceparentContext } from "@logbrew/sdk"
+ * @import { TelemetryContext, TraceparentContext } from "@logbrew/sdk"
  * @import { BrowserTraceContext, BrowserTraceContextConfig, BrowserTraceContextSource, BrowserTraceparentConfig } from "./index.js"
  * @typedef {(length: number) => ArrayLike<number>} RandomValues
  * @typedef {{ readonly traceContext?: BrowserTraceContext | undefined }} TraceContextHolder
@@ -12,6 +12,7 @@ import { isFunction, isList, readField, slugify, stringOrUndefined } from "./val
 const AUTOMATIC_EVENT_ID_SUFFIX_BYTES = 16;
 const MAX_AUTOMATIC_EVENT_ID_LENGTH = 200;
 const EVENT_ID_SEPARATORS = 2;
+const CONTEXT_SCHEMA_VERSION = 1;
 const SPAN_ID_BYTES = 8;
 const TRACE_ID_BYTES = 16;
 const MIN_BYTE = 0;
@@ -213,39 +214,20 @@ function resolveTraceContext(context, options) {
 
 
 /**
- * @param {Readonly<Record<string, unknown>>} metadata
- * @returns {Metadata}
- */
-function compactMetadata(metadata) {
-  /** @type {Metadata} */
-  const compacted = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) {
-      compacted[key] = value;
-    }
-  }
-  return compacted;
-}
-
-
-/**
  * @param {BrowserTraceContext | undefined} traceContext
- * @param {Readonly<{ traceId?: string | undefined }>} [options]
- * @returns {Metadata}
+ * @returns {TelemetryContext | undefined}
  */
-function browserTraceMetadata(traceContext, { traceId } = {}) {
-  if (traceContext === undefined && traceId === undefined) {
-    return {};
-  }
-  return compactMetadata({
-    spanId: traceContext?.spanId,
-    traceId: traceId ?? traceContext?.traceId,
-    traceSampled: traceContext?.sampled
-  });
+function browserTraceTelemetryContext(traceContext) {
+  return traceContext === undefined
+    ? undefined
+    : {
+      schemaVersion: CONTEXT_SCHEMA_VERSION,
+      trace: { sampled: traceContext.sampled, spanId: traceContext.spanId, traceId: traceContext.traceId }
+    };
 }
 
 export {
-  browserTraceMetadata,
+  browserTraceTelemetryContext,
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
   createBrowserTraceparent,

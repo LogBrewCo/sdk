@@ -1,6 +1,7 @@
 import React from "react";
 import {
   createLogBrewBrowserContext,
+  installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserInteractionTimingInstrumentation,
   installLogBrewBrowserWebVitalsInstrumentation
 } from "@logbrew/browser";
@@ -44,6 +45,14 @@ export function useLogBrewBrowserInstrumentation(options = {}) {
       context,
       options,
       installLogBrewBrowserWebVitalsInstrumentation
+    );
+    installOptionalInstrumentation(
+      installed,
+      "fetch",
+      options.fetch ?? false,
+      context,
+      options,
+      installLogBrewBrowserFetchInstrumentation
     );
 
     return () => {

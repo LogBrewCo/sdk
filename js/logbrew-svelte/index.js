@@ -1,6 +1,6 @@
 import { LogBrewClient, SdkError } from "@logbrew/sdk";
-import { captureSvelteError, createSvelteErrorEvent, currentTime, isLogBrewSvelteContext, readField, slugify } from "./capture.js";
-import { createBrowserTraceparent, createFetchTransport, createTraceparentFetch, shouldPropagateTraceparent } from "@logbrew/browser";
+import { captureSvelteError, createSvelteErrorEvent, currentTime, isLogBrewSvelteContext, readField } from "./capture.js";
+import { createAutomaticBrowserEventId, createBrowserTraceparent, createFetchTransport, createTraceparentFetch, shouldPropagateTraceparent } from "@logbrew/browser";
 import { getContext, hasContext, setContext } from "svelte";
 import { createLogBrewSvelteKitHooks } from "./sveltekit.js";
 
@@ -16,7 +16,7 @@ import { createLogBrewSvelteKitHooks } from "./sveltekit.js";
  */
 
 const DEFAULT_SDK_NAME = "logbrew-svelte";
-const DEFAULT_SDK_VERSION = "0.1.8";
+const DEFAULT_SDK_VERSION = "0.1.9";
 const DEFAULT_MAX_RETRIES = 2;
 
 const LOG_BREW_SVELTE_KEY = Symbol.for("logbrew.svelte");
@@ -129,7 +129,7 @@ const getLogBrewContext = useLogBrew;
  * @returns {string}
  */
 function defaultViewEventId(name, path) {
-  return `evt_svelte_view_${slugify(`${name}_${path}`)}`;
+  return createAutomaticBrowserEventId("evt_svelte_view", `${name}_${path}`);
 }
 
 /**

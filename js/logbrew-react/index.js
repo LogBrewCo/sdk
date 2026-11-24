@@ -1,6 +1,7 @@
 import React from "react";
 import {
   createIssueAttributesFromError,
+  createLogBrewSession,
   createTraceparent,
   LogBrewClient,
   parseTraceparent,
@@ -8,6 +9,11 @@ import {
 } from "@logbrew/sdk";
 
 const LogBrewContext = React.createContext(null);
+const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
+const CONTEXT_SCHEMA_VERSION = 1;
+const EVENT_ID_SUFFIX_BYTES = 16;
+const MAX_EVENT_ID_LENGTH = 200;
+const navigationTraces = new WeakMap();
 
 export function createLogBrewReactClient({
   apiKey,
@@ -15,16 +21,21 @@ export function createLogBrewReactClient({
   context,
   eventFilter,
   sdkName = "logbrew-react",
-  sdkVersion = "0.1.6",
+  sdkVersion = "0.1.7",
   maxQueueSize,
   maxRetries = 2,
-  onEventDropped
+  onEventDropped,
+  session = true
 }) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
     throw new SdkError("configuration_error", "createLogBrewReactClient requires clientKey or apiKey");
   }
-  return LogBrewClient.create({
+  // A session the app sets in its own context wins.
+  const appSession = session === false || context?.session !== undefined
+    ? undefined
+    : createLogBrewSession({ storage: defaultSessionStorage() });
+  const client = LogBrewClient.create({
     apiKey: authKey,
     context,
     eventFilter,
@@ -32,8 +43,27 @@ export function createLogBrewReactClient({
     maxRetries,
     onEventDropped,
     sdkName,
-    sdkVersion
+    sdkVersion,
+    [CONTEXT_PROVIDER]: () => reactEventContext(navigationTraces.get(client), appSession)
   });
+  return client;
+}
+
+// Adds the trace of the last router navigation and the tab session to every event.
+function reactEventContext(trace, appSession) {
+  const eventContext = {
+    ...(trace === undefined ? {} : { trace }),
+    ...(appSession === undefined ? {} : { session: { id: appSession.id() } })
+  };
+  return Object.keys(eventContext).length === 0 ? undefined : { schemaVersion: CONTEXT_SCHEMA_VERSION, ...eventContext };
+}
+
+function defaultSessionStorage() {
+  try {
+    return globalThis.window?.sessionStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 export function createReactTraceparent({
@@ -299,6 +329,9 @@ export function captureReactRouterNavigation(client, input = {}) {
   }
   const event = createReactRouterNavigationSpanEvent(input);
   client.span(event.id, event.timestamp, event.attributes);
+  if (typeof client === "object") {
+    navigationTraces.set(client, { traceId: event.attributes.traceId, spanId: event.attributes.spanId });
+  }
   recordIssueBreadcrumb(client, event, "navigation", "navigation");
   return event;
 }
@@ -713,20 +746,27 @@ function errorMessage(error) {
   return String(error ?? "unknown error");
 }
 
+// A random suffix keeps 2 identical events apart: the API drops a batch whose event IDs it already accepted.
+function uniqueEventId(prefix, semanticValue) {
+  const suffix = randomHex(EVENT_ID_SUFFIX_BYTES, defaultRandomValues);
+  const semantic = slugify(semanticValue).slice(0, MAX_EVENT_ID_LENGTH - prefix.length - suffix.length - 2);
+  return `${prefix}_${semantic}_${suffix}`;
+}
+
 function defaultErrorEventId({ message }) {
-  return `evt_react_error_${slugify(message)}`;
+  return uniqueEventId("evt_react_error", message);
 }
 
 function defaultActionEventId({ name }) {
-  return `evt_react_action_${slugify(name ?? "event")}`;
+  return uniqueEventId("evt_react_action", name ?? "event");
 }
 
 function defaultNetworkEventId({ method, routeTemplate }) {
-  return `evt_react_network_${slugify([method, routeTemplate].filter(Boolean).join("_") || "request")}`;
+  return uniqueEventId("evt_react_network", [method, routeTemplate].filter(Boolean).join("_") || "request");
 }
 
 function defaultRouterNavigationSpanId({ routeTemplate }) {
-  return `evt_react_router_${slugify(routeTemplate ?? "route")}`;
+  return uniqueEventId("evt_react_router", routeTemplate ?? "route");
 }
 
 function slugify(value) {

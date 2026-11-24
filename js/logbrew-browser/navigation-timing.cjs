@@ -25,6 +25,7 @@ const {
   resolveTraceContext
 } = require("./trace-context.cjs");
 const { SdkError } = require("@logbrew/sdk");
+const { recordTimingMetric } = require("./timing-metrics.cjs");
 
 /**
  * @import { SpanAttributes, TransportResponse } from "@logbrew/sdk"
@@ -285,6 +286,12 @@ async function captureBrowserNavigationTiming(entry, context, options = {}) {
   const event = createBrowserNavigationTimingEvent(entry, context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
+  recordTimingMetric(context.client, event, {
+    keys: ["documentPath", "navigationType"],
+    name: "browser.page_load.duration",
+    unit: "ms",
+    value: event.attributes.durationMs
+  });
   return flushAfterCapture(context, options);
 }
 

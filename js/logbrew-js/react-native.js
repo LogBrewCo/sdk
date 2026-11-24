@@ -16,6 +16,7 @@ export const {
   createTraceparentHeaders,
   createTracestate,
   createLogBrewPinoDestination,
+  createLogBrewSession,
   installLogBrewConsoleCapture,
   LogBrewClient,
   logbrewTraceContextFromCurrentOpenTelemetrySpan,

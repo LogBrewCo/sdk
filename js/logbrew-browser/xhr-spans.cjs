@@ -27,6 +27,7 @@ const {
 const { SdkError } = require("@logbrew/sdk");
 const { createBrowserFetchSpanEvent } = require("./fetch-spans.cjs");
 const { shouldPropagateTraceparent } = require("./traceparent-fetch.cjs");
+const { REQUEST_METRIC_KEYS, recordTimingMetric } = require("./timing-metrics.cjs");
 
 /**
  * @import { Metadata, SpanAttributes, TransportResponse } from "@logbrew/sdk"
@@ -139,6 +140,12 @@ async function captureBrowserXhrSpan(request, context, options = {}) {
   const event = createBrowserXhrSpanEvent(request, context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
+  recordTimingMetric(context.client, event, {
+    keys: REQUEST_METRIC_KEYS,
+    name: "http.client.duration",
+    unit: "ms",
+    value: event.attributes.durationMs
+  });
   return flushAfterCapture(context, options);
 }
 

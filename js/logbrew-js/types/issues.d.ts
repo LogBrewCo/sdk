@@ -214,6 +214,19 @@ declare function installBrowserBreadcrumbs(
   options?: BrowserBreadcrumbOptions
 ): () => void;
 
+type LogBrewSessionOptions = {
+  /** Web Storage-like object that keeps the session across page loads, such as `sessionStorage`. */
+  storage?: unknown;
+  storageKey?: string;
+  now?: () => number;
+};
+
+/**
+ * Keep one session ID for `context.session.id`. The session ends after 30 minutes without
+ * events or 4 hours after it starts, and the next event starts a new one.
+ */
+declare function createLogBrewSession(options?: LogBrewSessionOptions): { id(): string };
+
 /**
  * Convert a JavaScript Error-like value into safe issue attributes with optional source-map Debug ID metadata.
  * Parent-first cause and AggregateError evidence is bounded to the public exception-chain contract.
@@ -243,7 +256,8 @@ export type {
   IssueLikelyFixArea,
   IssueStackFrame,
   JavaScriptErrorIssueOptions,
+  LogBrewSessionOptions,
   NativeStackArchitecture,
   NativeStackFrame
 };
-export { createIssueAttributesFromError, installBrowserBreadcrumbs };
+export { createIssueAttributesFromError, createLogBrewSession, installBrowserBreadcrumbs };

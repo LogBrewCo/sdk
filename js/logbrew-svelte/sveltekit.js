@@ -131,15 +131,27 @@ function recordRequestSpan(capture) {
   const { context, event, options, startedAt, status, trace } = capture;
   const statusCode = statusCodeOf(status);
   const { parentSpanId } = trace;
-  context.client.span(`evt_sveltekit_request_${trace.spanId}`, now(options), {
-    durationMs: Math.max(NO_DURATION, nowMs(options) - startedAt),
-    name: `${svelteKitMethod(event)} ${svelteKitRoute(event)}`,
+  const durationMs = Math.max(NO_DURATION, nowMs(options) - startedAt);
+  const timestamp = now(options);
+  const method = svelteKitMethod(event);
+  const routeTemplate = svelteKitRoute(event);
+  context.client.span(`evt_sveltekit_request_${trace.spanId}`, timestamp, {
+    durationMs,
+    name: `${method} ${routeTemplate}`,
     ...(parentSpanId === undefined || parentSpanId === "" ? {} : { parentSpanId }),
     spanId: trace.spanId,
     status: statusCode >= SERVER_ERROR ? "error" : "ok",
     traceId: trace.traceId,
 
     metadata: svelteKitMetadata(event, statusCode, options.metadata)
+  });
+  context.client.metric(`evt_sveltekit_request_metric_${trace.spanId}`, timestamp, {
+    kind: "histogram",
+    metadata: { method, routeTemplate, statusCode },
+    name: "http.server.duration",
+    temporality: "delta",
+    unit: "ms",
+    value: durationMs
   });
 }
 

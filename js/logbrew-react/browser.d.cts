@@ -1,4 +1,6 @@
 import type {
+  BrowserFetchInstrumentation,
+  BrowserFetchOptions,
   BrowserInteractionTimingOptions,
   BrowserInteractionTimingInstrumentation,
   BrowserTraceContextInput,
@@ -13,11 +15,13 @@ import type {
   TransportResponse
 } from "@logbrew/sdk";
 
-export type LogBrewReactBrowserInstrumentationName = "interactionTiming" | "webVitals";
+export type LogBrewReactBrowserInstrumentationName = "fetch" | "interactionTiming" | "webVitals";
 
 export type LogBrewReactBrowserInstrumentationOptions = {
   browserWindow?: Window;
   enabled?: boolean;
+  /** Wraps `window.fetch` to send each request as a span and an `http.client.duration` metric. Off by default. */
+  fetch?: boolean | BrowserFetchOptions;
   flushOnCapture?: boolean;
   includeDocumentTitle?: boolean;
   includeHash?: boolean;
@@ -37,7 +41,7 @@ export type LogBrewReactBrowserInstrumentationOptions = {
   ) => void | Promise<void>;
   onInstrumentation?: (
     name: LogBrewReactBrowserInstrumentationName,
-    instrumentation: BrowserInteractionTimingInstrumentation | BrowserWebVitalsInstrumentation
+    instrumentation: BrowserFetchInstrumentation | BrowserInteractionTimingInstrumentation | BrowserWebVitalsInstrumentation
   ) => void;
   randomValues?: (length: number) => ArrayLike<number>;
   raiseCaptureErrors?: boolean;

@@ -81,6 +81,12 @@ For browser React apps, prefer a browser-scoped public key through `clientKey`. 
 
 `createLogBrewReactClient()` also passes through the core SDK queue controls: `maxQueueSize`, `eventFilter`, `onEventDropped`, and `maxRetries`. Use them to keep heavy UI bursts bounded and observable without interrupting React rendering.
 
+## Sessions And Trace Context
+
+`createLogBrewReactClient()` adds a session ID to every event as `context.session.id`. The ID is 32 random hexadecimal characters and lives in the tab's `sessionStorage`, so a reload continues it. A session ends after 30 minutes without events, or 4 hours after it starts. Set `session: false` to send no session ID. A `session` that you set in `context` replaces the automatic one.
+
+After `captureReactRouterNavigation()` or the React Router hooks record a route span, every later event from the client, such as an error, action, or log, carries that route's `traceId` and `spanId` in `context.trace`.
+
 ## Read Events Back
 
 A successful send shows that LogBrew accepted the request. It does not show
@@ -146,6 +152,8 @@ export function App({ webVitals }) {
   );
 }
 ```
+
+Set `fetch: true` to also wrap `window.fetch`. Each request then becomes a `browser.fetch` span and an `http.client.duration` metric in milliseconds. Web Vitals also arrive as `browser.web_vital.<name>` metrics.
 
 The hook delegates to `@logbrew/browser` for the actual Web Vitals and PerformanceObserver logic. It defaults `flushOnCapture` to `false`, so timing spans join the in-memory SDK queue and are sent only when your app flushes through an app-owned transport. It records route templates and timing fields, not raw element selectors, full URLs, query strings, hashes, headers, payloads, screenshots, or replay data. Pass a stable options object when possible to avoid reinstalling observers during React rerenders.
 
