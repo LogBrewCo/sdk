@@ -522,7 +522,7 @@
       },
       "method": "Angular 22 standalone app bootstrapped with JIT and zoneless change detection under happy-dom, with provideLogBrew, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, its ErrorHandler, injectLogBrew, and console capture; one HttpClient call under tracePropagationTargets and a click handler that throws twice",
       "probe": "tools/capture-matrix/probes/js/logbrew-angular",
-      "inputs": "601eb2607fdffa88947d60a157d95d235e991df869af08e50b0917505624ba39"
+      "inputs": "a1f312f7e156e45df1bb967a41854d3539912a58909e8f55eef2def4ad31da2a"
     },
     "js/logbrew-aws-sqs": {
       "share": 100.0,
@@ -987,7 +987,7 @@
       },
       "method": "Vue 3 app mounted under happy-dom with createLogBrewVuePlugin, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, plus $logbrew and console capture; one API call through window.fetch under tracePropagationTargets and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-vue",
-      "inputs": "502adf14cdd986b94c5415dbff96c7c8ed83ee5ee1d128c690ec442573213116"
+      "inputs": "edc31b97c0caaf4e9ceedd67ef7dcaca88c0a2e400b14eb978410823892adcbd"
     },
     "kotlin/logbrew-kotlin": {
       "share": 100.0,
