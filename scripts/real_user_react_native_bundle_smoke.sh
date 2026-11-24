@@ -4,8 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$repo_root/scripts/npm_locked.sh"
 source "$repo_root/scripts/native_verifier.sh"
-locked_versions="$(npm_locked_versions react-native-bundle react-native)"
-read -r react_native_version <<<"$locked_versions"
+locked_versions="$(npm_locked_versions react-native-bundle react-native expo react-native-worklets)"
+read -r react_native_version expo_version worklets_version <<<"$locked_versions"
 expected_sdk_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 expected_react_native_package_version="$(node -p "require('${repo_root}/js/logbrew-react-native/package.json').version")"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rn-bundle.XXXXXX")"
@@ -37,8 +37,8 @@ mkdir "$app_root"
 (
   cd "$app_root"
   npm init --yes >/dev/null
-  npm_ci_locked react-native-bundle --silent --ignore-scripts
-  npm_add_logbrew --silent --ignore-scripts \
+  npm_ci_locked react-native-bundle --loglevel=error --ignore-scripts
+  npm_add_logbrew --loglevel=error --ignore-scripts \
     "$core_tarball" \
     "$native_tarball"
 
@@ -222,9 +222,16 @@ JS
   cat > metro.config.js <<'JS'
 const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
 
+// React Native resolves its own modules only through package exports, so only
+// the LogBrew packages resolve through their legacy fields here.
 module.exports = mergeConfig(getDefaultConfig(__dirname), {
   resolver: {
-    unstable_enablePackageExports: false
+    resolveRequest(context, moduleName, platform) {
+      const resolver = moduleName.startsWith("@logbrew/")
+        ? { ...context, unstable_enablePackageExports: false }
+        : context;
+      return context.resolveRequest(resolver, moduleName, platform);
+    }
   }
 });
 JS
@@ -240,17 +247,21 @@ JS
 
   node --input-type=module - \
     "$fixture_root/index.android.bundle.map" \
-    "$fixture_root/legacy-index.android.bundle.map" <<'NODE'
+    "$fixture_root/legacy-index.android.bundle.map" \
+    "$react_native_version" <<'NODE'
 import fs from "node:fs";
 
+// Metro writes an indexed source map with one section for each module.
+function sourceEntries(sourceMap) {
+  return (sourceMap.sections ?? [{ map: sourceMap }]).flatMap(({ map }) => {
+    const sources = Array.isArray(map.sources) ? map.sources : [];
+    const sourcesContent = Array.isArray(map.sourcesContent) ? map.sourcesContent : [];
+    return sources.map((source, index) => ({ content: sourcesContent[index] ?? "", source }));
+  });
+}
+
 function inspectSourceMap(filename) {
-  const sourceMap = JSON.parse(fs.readFileSync(filename, "utf8"));
-  const sources = Array.isArray(sourceMap.sources) ? sourceMap.sources : [];
-  const sourcesContent = Array.isArray(sourceMap.sourcesContent)
-    ? sourceMap.sourcesContent
-    : [];
-  const sdkSources = sources
-    .map((source, index) => ({ content: sourcesContent[index] ?? "", source }))
+  const sdkSources = sourceEntries(JSON.parse(fs.readFileSync(filename, "utf8")))
     .filter(({ source }) => source.includes("/node_modules/@logbrew/"));
 
   if (!sdkSources.some(({ source }) => source.endsWith("/@logbrew/sdk/react-native.js"))) {
@@ -282,7 +293,7 @@ process.stdout.write(JSON.stringify({
   canonicalClient: true,
   legacyMainField,
   packageExports,
-  reactNative: "0.86.0"
+  reactNative: process.argv[4]
 }) + "\n");
 NODE
 
@@ -327,7 +338,7 @@ JS
     --source-maps external \
     >/dev/null
 
-  node --input-type=module - "$fixture_root/expo-dist" <<'NODE'
+  node --input-type=module - "$fixture_root/expo-dist" "$expo_version" "$worklets_version" <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
 
@@ -355,10 +366,10 @@ if (bytecode.includes(Buffer.from("__LOGBREW_REACT_NATIVE_DEBUG_ID__"))) {
 }
 
 process.stdout.write(JSON.stringify({
-  expo: "57.0.8",
+  expo: process.argv[3],
   expoDebugId: debugId,
   expoHermesRegistry: true,
-  worklets: "0.10.0"
+  worklets: process.argv[4]
 }) + "\n");
 NODE
 )
