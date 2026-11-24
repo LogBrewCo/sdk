@@ -30,15 +30,15 @@ next_pack_json="$tmp_dir/next-pack.json"
 browser_pack_json="$tmp_dir/browser-pack.json"
 (
   cd "$repo_root/js/logbrew-js"
-  npm pack --pack-destination "$pack_dir" --silent --json > "$sdk_pack_json"
+  npm pack --pack-destination "$pack_dir" --loglevel=error --json > "$sdk_pack_json"
 )
 (
   cd "$repo_root/js/logbrew-next"
-  npm pack --pack-destination "$pack_dir" --silent --json > "$next_pack_json"
+  npm pack --pack-destination "$pack_dir" --loglevel=error --json > "$next_pack_json"
 )
 (
   cd "$repo_root/js/logbrew-browser"
-  npm pack --pack-destination "$pack_dir" --silent --json > "$browser_pack_json"
+  npm pack --pack-destination "$pack_dir" --loglevel=error --json > "$browser_pack_json"
 )
 sdk_tgz="$(
   python3 - "$sdk_pack_json" <<'PY'
@@ -201,8 +201,8 @@ JS
 
 (
   cd "$app_dir"
-  npm_ci_locked next-release-artifact --silent
-  npm_add_logbrew --silent ../logbrew-browser.tgz ../logbrew-sdk.tgz ../logbrew-next.tgz
+  npm_ci_locked next-release-artifact --loglevel=error
+  npm_add_logbrew --loglevel=error ../logbrew-browser.tgz ../logbrew-sdk.tgz ../logbrew-next.tgz
   node --input-type=module - <<'JS'
 import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
 
