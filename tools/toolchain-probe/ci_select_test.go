@@ -66,11 +66,14 @@ func TestCISelectAreas(t *testing.T) {
 		"js/logbrew-react-native/src/NativeStore.ts":                 {"javascript", "react_native_native"},
 		"js/logbrew-react-native/persistent-delivery.native.js":      {"javascript", "react_native_native"},
 		"swift/logbrew-swift/Sources/LogBrewCrash/CrashEngine.swift": {"swift", "javascript", "react_native_native"},
-		"go":                       nil,
-		"gopher/main.go":           nil,
-		"javascript/main.js":       nil,
-		"maven/pom.xml":            nil,
-		"release_artifacts/a.json": nil,
+		"scripts/lockfiles/npm/react/package-lock.json":              {"javascript", "release_artifacts"},
+		"scripts/lockfiles/python/requirements-ci-tests.txt":         {"python"},
+		"scripts/lockfiles/cargo/Cargo.lock":                         nil,
+		"go":                                                         nil,
+		"gopher/main.go":                                             nil,
+		"javascript/main.js":                                         nil,
+		"maven/pom.xml":                                              nil,
+		"release_artifacts/a.json":                                   nil,
 	} {
 		areas, _, _ := selected(t, path)
 		onlyAreas(t, areas, want...)
@@ -150,6 +153,14 @@ func TestCISelectOutputs(t *testing.T) {
 		t.Fatalf("stdout %q", output.String())
 	}
 	failing := func(...string) ([]string, error) { return nil, errors.New("exit status 128") }
+	for _, event := range ciFullRunEvents {
+		output.Reset()
+		full := func(name string) string { return map[string]string{"GITHUB_EVENT_NAME": event}[name] }
+		if code := checkCISelect(nil, full, failing, &output, &diagnostic); code != exitOK ||
+			strings.Count(output.String(), "=true\n") != len(ciAreas)+1 || strings.Contains(output.String(), "=false") {
+			t.Fatalf("%s run selected %q", event, output.String())
+		}
+	}
 	for _, test := range []struct {
 		arguments []string
 		env       map[string]string
