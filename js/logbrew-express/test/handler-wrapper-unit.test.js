@@ -19,6 +19,7 @@ import {
 import { logbrewErrorHandler, logbrewMiddleware, withLogBrewExpressHandler } from "@logbrew/express";
 import assert from "node:assert/strict";
 import express from "express";
+import { once } from "node:events";
 import test from "node:test";
 
 /**
@@ -36,6 +37,7 @@ import test from "node:test";
  *   readonly second: Latch,
  *   readonly secondEnded: Counter
  * }} Overlap
+ * @typedef {{ readonly failure: unknown, readonly forward: (error: unknown) => void, readonly settle: (outcome: unknown) => void }} SettleRun
  */
 
 const TIMESTAMP = "2026-08-29T12:00:00Z";
@@ -112,6 +114,81 @@ void test("the wrapper forwards a promise rejection once without requiring middl
   const [falsyError] = falsy.errors;
   assert.equal(falsy.errors.length, ONE);
   assert.ok(falsyError instanceof Error);
+});
+
+/**
+ * @param {unknown} req
+ * @param {unknown} failure
+ * @returns {void}
+ */
+function failNextTraceRead(req, failure) {
+  assert.ok(typeof req === "object" && req !== null, "the request is not an object");
+  const saved = readField(req, "logbrew");
+  let armed = true;
+  Object.defineProperty(req, "logbrew", {
+    configurable: true,
+    get: () => {
+      if (armed) {
+        armed = false;
+        throwValue(failure);
+      }
+      return saved;
+    }
+  });
+}
+
+/**
+ * @param {SettleRun} run
+ * @returns {(req: Request, res: Response) => Promise<void>}
+ */
+function createSettleRoute(run) {
+  return async (req, res) => {
+    const handler = withLogBrewExpressHandler(async () => {
+      res.end("ok");
+      await once(res, "finish");
+      failNextTraceRead(req, run.failure);
+    });
+    try {
+      await handler(req, res, run.forward);
+      run.settle("fulfilled");
+    } catch (error) {
+      run.settle(error);
+    }
+  };
+}
+
+/**
+ * @param {(req: Request, res: Response) => Promise<void>} route
+ * @returns {Express}
+ */
+function createSettleApp(route) {
+  const app = express();
+  app.use(logbrewMiddleware({ serverApiKey: SERVER_API_KEY, transport: createRecorder().transport }));
+  app.get("/settle", route);
+  return app;
+}
+
+void test("an error while the wrapper settles a fulfilled handler rejects the handler and never reaches next", async (testContext) => {
+  /** @type {unknown[]} */
+  const forwarded = [];
+  /** @type {unknown[]} */
+  const outcomes = [];
+  /** @type {SettleRun} */
+  const run = {
+    failure: new TypeError("settle failure"),
+    forward: (error) => {
+      forwarded.push(error);
+    },
+    settle: (outcome) => {
+      outcomes.push(outcome);
+    }
+  };
+  const server = await serve(testContext, () => createSettleApp(createSettleRoute(run)).listen(ANY_PORT, HOST));
+  const response = await fetch(`${server.origin}/settle`);
+  assert.equal(await response.text(), "ok");
+  await waitFor(() => outcomes.length === ONE, "the wrapped handler did not settle");
+  assert.deepEqual(outcomes, [run.failure]);
+  assert.deepEqual(forwarded, []);
 });
 
 void test("the wrapper rejects invalid request handlers", () => {

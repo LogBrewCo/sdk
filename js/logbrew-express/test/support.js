@@ -390,9 +390,9 @@ async function disconnectAfterFirstChunk(port, requestText) {
  */
 function createThenable(value) {
   return {
-    then: async (onFulfilled, onRejected) => {
-      const settled = Promise.resolve(value);
-      return settled.then(onFulfilled, onRejected);
+    then: async (onFulfilled) => {
+      assert.ok(onFulfilled, "the thenable needs a fulfillment callback");
+      return onFulfilled(value);
     }
   };
 }
