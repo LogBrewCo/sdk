@@ -106,7 +106,12 @@ function requireAuthKey(config) {
  * @returns {LogBrewClient}
  */
 function createLogBrewAngularClient(config = {}) {
-  const { context, maxRetries = DEFAULT_MAX_RETRIES, sdkName = DEFAULT_SDK_NAME, sdkVersion = DEFAULT_SDK_VERSION } = config;
+  const {
+    context,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    sdkName = DEFAULT_SDK_NAME,
+    sdkVersion = DEFAULT_SDK_VERSION
+  } = config;
   return LogBrewClient.create({
     apiKey: requireAuthKey(config),
     maxRetries,
