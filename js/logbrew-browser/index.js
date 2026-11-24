@@ -1130,6 +1130,14 @@ function browserIssueGroupingKey(value) {
   return frameFile ? `${trimmed.slice(0, secondSeparator + 1)}${frameFile}` : trimmed;
 }
 
+const BROWSER_EXTENSION_PROTOCOLS = new Set([
+  "chrome-extension:",
+  "moz-extension:",
+  "safari-extension:",
+  "safari-web-extension:",
+  "ms-browser-extension:"
+]);
+
 function browserCodePath(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return undefined;
@@ -1137,7 +1145,11 @@ function browserCodePath(value) {
   const trimmed = value.trim();
   if (/^[a-z][a-z0-9+.-]*:/iu.test(trimmed)) {
     try {
-      return new URL(trimmed).pathname || undefined;
+      const url = new URL(trimmed);
+      if (BROWSER_EXTENSION_PROTOCOLS.has(url.protocol)) {
+        return `${url.protocol}//${url.host}${url.pathname}`;
+      }
+      return url.pathname || undefined;
     } catch {
       return pathBasename(trimmed);
     }
