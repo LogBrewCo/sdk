@@ -1111,7 +1111,7 @@
       },
       "method": "Plain PHP request handling under the PHP built-in server: per request, LogBrewHttpRequestTelemetry from the incoming traceparent, the documented client context for service, environment, and release, LogBrewTelemetry with the request user, LogBrewPsrLogger, an issue from IssueDiagnostics::fromThrowable for the thrown error, finishSpanAndMetric, and shutdown through HttpTransport; one request that succeeds and one that throws; the package's framework bridges are Symfony and Laravel, and plain PHP has no framework that catches errors, so the documented helpers are the capture path",
       "probe": "tools/capture-matrix/probes/php/logbrew-php",
-      "inputs": "eca952f3a81ca526b7c48fca7187bd6d35e8294b076f53c1a5635db00113e78e"
+      "inputs": "7ed17e55bf0178267933bf1f9f97da1ce835d95575751f17f24364659c86ee0a"
     },
     "python/logbrew_django": {
       "share": 100.0,
