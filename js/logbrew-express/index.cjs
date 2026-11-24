@@ -205,34 +205,34 @@ function forwardRejection(next, error) {
 
 /**
  * @param {() => PromiseLike<unknown>} pending
+ * @returns {Promise<{ readonly fulfilled: true, readonly value: unknown } | { readonly error: unknown, readonly fulfilled: false }>}
+ */
+async function settleOutcome(pending) {
+  try {
+    return { fulfilled: true, value: await pending() };
+  } catch (error) {
+    return { error, fulfilled: false };
+  }
+}
+
+/**
+ * @param {() => PromiseLike<unknown>} pending
  * @param {RequestLifecycle | undefined} lifecycle
  * @param {NextFunction} next
  * @returns {Promise<unknown>}
  */
 async function awaitWrappedHandler(pending, lifecycle, next) {
-  /**
-   * @param {unknown} value
-   * @returns {unknown}
-   */
-  function settleFulfilled(value) {
+  const outcome = await settleOutcome(pending);
+  if (outcome.fulfilled) {
     settleWrappedHandler(lifecycle);
-    return value;
+    return outcome.value;
   }
-
-  /**
-   * @param {unknown} error
-   * @returns {undefined}
-   */
-  function settleRejected(error) {
-    try {
-      forwardRejection(next, error);
-    } finally {
-      settleWrappedHandler(lifecycle);
-    }
-    return undefined;
+  try {
+    forwardRejection(next, outcome.error);
+  } finally {
+    settleWrappedHandler(lifecycle);
   }
-
-  return Promise.resolve(pending()).then(settleFulfilled, settleRejected);
+  return undefined;
 }
 
 /**
