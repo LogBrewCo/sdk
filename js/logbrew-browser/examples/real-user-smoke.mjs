@@ -121,8 +121,8 @@ await captureBrowserInteractionToNextPaint(createInteractionToNextPaintEntries()
   randomValues: () => fillBytes(8, 0xaa)
 });
 
-if (logbrew.client.pendingEvents() !== 12) {
-  throw new Error(`expected 12 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 15) {
+  throw new Error(`expected 12 captured events and 3 timing metrics, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -132,7 +132,7 @@ logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
 });
 browserWindow.dispatchEvent({ type: "pagehide" });
 await delay(10);
-if (transport.sentBodies.length !== 0 || logbrew.client.pendingEvents() !== 13) {
+if (transport.sentBodies.length !== 0 || logbrew.client.pendingEvents() !== 16) {
   throw new Error("pagehide should defer app-owned transport work");
 }
 await logbrew.flush();
@@ -174,8 +174,8 @@ const action = parsed.events.find((event) => event.type === "action");
 if (action?.attributes.metadata?.sessionId !== "sess_browser_001") {
   throw new Error(`expected action session metadata, got ${payload}`);
 }
-if (action.attributes.metadata.traceId !== traceContext.traceId || action.attributes.metadata.spanId !== traceContext.spanId) {
-  throw new Error(`expected action trace metadata, got ${payload}`);
+if (action.attributes.context?.trace?.traceId !== traceContext.traceId || action.attributes.context?.trace?.spanId !== traceContext.spanId) {
+  throw new Error(`expected action trace context, got ${payload}`);
 }
 if (action.attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested action metadata should be dropped: ${payload}`);
@@ -184,8 +184,8 @@ const network = parsed.events.find((event) => event.type === "action" && event.a
 if (network?.attributes.metadata?.routeTemplate !== "/api/checkout") {
   throw new Error(`expected query-free network route template, got ${payload}`);
 }
-if (network.attributes.metadata.traceId !== traceContext.traceId || network.attributes.metadata.spanId !== traceContext.spanId) {
-  throw new Error(`expected network trace metadata, got ${payload}`);
+if (network.attributes.context?.trace?.traceId !== traceContext.traceId || network.attributes.context?.trace?.spanId !== traceContext.spanId) {
+  throw new Error(`expected network trace context, got ${payload}`);
 }
 if (network.attributes.metadata.statusCode !== 503 || network.attributes.status !== "failure") {
   throw new Error(`expected failed network metadata, got ${payload}`);
@@ -268,6 +268,10 @@ if (inpSpan.attributes.traceId !== traceContext.traceId || inpSpan.attributes.pa
 }
 if (inpSpan.attributes.metadata.candidateRank !== 2 || inpSpan.attributes.metadata.interactionType !== "press") {
   throw new Error(`expected interaction-to-next-paint ranking metadata, got ${payload}`);
+}
+const timingMetrics = parsed.events.filter((event) => event.type === "metric").map((event) => event.attributes.name).join(",");
+if (timingMetrics !== "http.client.duration,browser.page_load.duration,browser.web_vital.lcp") {
+  throw new Error(`expected fetch, page load, and LCP timing metrics, got ${payload}`);
 }
 if (payload.includes("https://cdn.example.test/app.js") || payload.includes("iframe-private") || payload.includes("renderCheckout")) {
   throw new Error(`interaction timing metadata leaked attribution details: ${payload}`);

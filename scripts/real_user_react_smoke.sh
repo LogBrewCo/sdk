@@ -691,8 +691,13 @@ if (webVitalCallbacks.INP !== undefined) {
 }
 const browserInstrumentationPreview = JSON.parse(browserInstrumentationClient.previewJson());
 const browserInstrumentationBody = JSON.stringify(browserInstrumentationPreview);
-if (browserInstrumentationPreview.events.length !== 2) {
-  throw new Error(`expected two React browser instrumentation spans, got ${browserInstrumentationPreview.events.length}: ${browserInstrumentationBody}`);
+const browserInstrumentationTypes = browserInstrumentationPreview.events.map((event) => event.type).join(",");
+if (browserInstrumentationTypes !== "span,span,metric") {
+  throw new Error(`expected 2 React browser instrumentation spans and 1 Web Vital metric, got ${browserInstrumentationTypes}: ${browserInstrumentationBody}`);
+}
+const browserWebVitalMetric = browserInstrumentationPreview.events[2].attributes;
+if (browserWebVitalMetric.name !== "browser.web_vital.inp" || browserWebVitalMetric.value !== 88 || browserWebVitalMetric.unit !== "ms") {
+  throw new Error(`expected the INP histogram metric: ${browserInstrumentationBody}`);
 }
 const browserInteractionEvent = browserInstrumentationPreview.events.find((event) => event.attributes.metadata.source === "browser.interaction");
 const browserWebVitalEvent = browserInstrumentationPreview.events.find((event) => event.attributes.metadata.source === "browser.web_vital");
@@ -1013,7 +1018,7 @@ if ! node smoke.mjs > "$tmp_dir/react-smoke.stdout.json" 2> "$tmp_dir/react-smok
   exit 1
 fi
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/react-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/react-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/react-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"errorAttempts":2' "$tmp_dir/react-smoke.stderr.json"
@@ -1347,11 +1352,11 @@ grep -q '"attempts":2' "$tmp_dir/example-router.stderr.json"
 grep -q '"routeTemplate":"/projects/:projectId/settings"' "$tmp_dir/example-router.stderr.json"
 node node_modules/@logbrew/react/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"rendered":true' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/react/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/example-default.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"manualErrorAttempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"manualErrorEvents":3' "$tmp_dir/example-default.stderr.json"
@@ -1368,7 +1373,7 @@ grep -q '"ok":true' "$tmp_dir/npm-helper-router.stderr.json"
 grep -q '"routeTemplate":"/projects/:projectId/settings"' "$tmp_dir/npm-helper-router.stderr.json"
 npm --prefix node_modules/@logbrew/react/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 run_native_verifier event-batch-check "$repo_root/spec/event-batch.schema.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" --allow-additive-context "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"manualErrorAttempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"manualErrorEvents":3' "$tmp_dir/npm-helper-smoke.stderr.json"

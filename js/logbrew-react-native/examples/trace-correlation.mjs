@@ -104,7 +104,8 @@ for (const event of events) {
     }
     continue;
   }
-  if (metadata.traceId !== trace.traceId || metadata.spanId !== trace.spanId || metadata.parentSpanId !== trace.parentSpanId) {
+  const correlation = event.type === "issue" ? event.attributes.context?.trace ?? {} : metadata;
+  if (correlation.traceId !== trace.traceId || correlation.spanId !== trace.spanId || correlation.parentSpanId !== trace.parentSpanId) {
     throw new Error(`event was not trace-correlated: ${JSON.stringify(event)}`);
   }
 }

@@ -1164,11 +1164,13 @@ trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
 span_id = "b7ad6b7169203331"
 parent_span_id = "00f067aa0ba902b7"
 for index in (2, 3, 5, 6, 7, 8, 9, 10, 11):
-    metadata = events[index]["attributes"].get("metadata", {})
-    if metadata.get("traceId") != trace_id or metadata.get("spanId") != span_id:
-        raise SystemExit(f"event {index} is missing trace correlation: {metadata}")
-    if metadata.get("parentSpanId") != parent_span_id:
-        raise SystemExit(f"event {index} is missing parent span correlation: {metadata}")
+    attributes = events[index]["attributes"]
+    # captureReactNativeError() puts the trace in context.trace; other events keep it in metadata.
+    trace = attributes.get("context", {}).get("trace") or attributes.get("metadata", {})
+    if trace.get("traceId") != trace_id or trace.get("spanId") != span_id:
+        raise SystemExit(f"event {index} is missing trace correlation: {attributes}")
+    if trace.get("parentSpanId") != parent_span_id:
+        raise SystemExit(f"event {index} is missing parent span correlation: {attributes}")
 screen = events[5]["attributes"]
 if screen["name"] != "screen:Checkout" or screen["metadata"]["platform"] != "ios":
     raise SystemExit(f"unexpected screen event: {screen}")
@@ -1713,7 +1715,8 @@ for event in events:
             raise SystemExit(f"span trace missing: {event}")
         continue
     metadata = event["attributes"].get("metadata", {})
-    if metadata.get("traceId") != "4bf92f3577b34da6a3ce929d0e0e4736":
+    trace = event["attributes"].get("context", {}).get("trace") or metadata
+    if trace.get("traceId") != "4bf92f3577b34da6a3ce929d0e0e4736":
         raise SystemExit(f"event trace missing: {event}")
     if "errorStack" in metadata:
         raise SystemExit("trace example should not include stack text")
