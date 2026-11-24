@@ -34,7 +34,7 @@
       <dependency>
         <groupId>at.yawk.lz4</groupId>
         <artifactId>lz4-java</artifactId>
-        <version>1.14.0</version>
+        <version>1.14.1</version>
       </dependency>
       <!-- Kafka clients also pull an older Snappy release; keep it on a fixed one. -->
       <dependency>
