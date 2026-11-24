@@ -32,7 +32,7 @@ final class LogBrewGuzzleTracingPromise implements PromiseInterface
         return $this->promise->getState();
     }
 
-    public function resolve($value): void
+    public function resolve($value = null): void
     {
         $this->promise->resolve($value);
         if ($value instanceof ResponseInterface) {

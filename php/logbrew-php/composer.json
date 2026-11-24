@@ -8,7 +8,7 @@
     "psr/log": "^3.0"
   },
   "require-dev": {
-    "guzzlehttp/guzzle": "^7.9",
+    "guzzlehttp/guzzle": "^7.9 || ^8.0",
     "monolog/monolog": "^3.0",
     "symfony/console": "^6.4 || ^7.0 || ^8.0",
     "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
@@ -16,7 +16,7 @@
     "symfony/monolog-bundle": "^3.10 || ^4.0"
   },
   "suggest": {
-    "guzzlehttp/guzzle": "Required for Guzzle 7 outbound HTTP tracing.",
+    "guzzlehttp/guzzle": "Required for Guzzle 7 or 8 outbound HTTP tracing.",
     "laravel/framework": "Required for Laravel queue job tracing.",
     "monolog/monolog": "Required for Monolog and Laravel logging channels.",
     "symfony/console": "Required for the optional Symfony status and delivery-probe command.",
