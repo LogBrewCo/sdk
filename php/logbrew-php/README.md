@@ -481,7 +481,7 @@ try {
 
 ## Outbound HTTP Tracing
 
-Use `LogBrewHttpClientTracing` when your application owns a PSR-18 or Guzzle 7 client and wants each actual HTTP send to become a child of the active LogBrew trace:
+Use `LogBrewHttpClientTracing` when your application owns a PSR-18 or Guzzle 7 or 8 client and wants each actual HTTP send to become a child of the active LogBrew trace:
 
 ```shell
 composer require logbrew/sdk guzzlehttp/guzzle
