@@ -675,7 +675,7 @@
       },
       "method": "Fastify 5 app with the documented plugin, application-log capture through Fastify's Pino logger, request metrics, and the Node request user; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-fastify",
-      "inputs": "fb54640dc502ef6655357465616c3da25e2dd78540dc7dd722c7f7c80d836db7"
+      "inputs": "1e84e598b3b5fe38dfc48e77fd99f1e8f2c45990a1797f25fd1f5938eae869fe"
     },
     "js/logbrew-js": {
       "share": 91.7,

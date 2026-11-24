@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/fastify",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Fastify plugin helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
@@ -55,7 +55,7 @@
     "fastify": ">=4"
   },
   "dependencies": {
-    "fastify-plugin": "^5.1.0"
+    "fastify-plugin": "^6.0.1"
   },
   "scripts": {
     "test": "node --check index.js && node --check index.cjs && node --check internal.cjs && node --check events.cjs && node --check application-logs.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
