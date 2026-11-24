@@ -440,7 +440,7 @@ const handle: LogBrewHttpClientInstrumentation = installLogBrewHttpClientInstrum
 handle.uninstall();
 EOF
 
-npx tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --lib ES2022,DOM typecheck.ts
+npx tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --lib ES2022,DOM --types node typecheck.ts
 
 cat > cjs-smoke.cjs <<'EOF'
 const assert = require("node:assert/strict");
