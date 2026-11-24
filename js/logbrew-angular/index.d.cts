@@ -1,3 +1,4 @@
+import type { BrowserTraceContext, LogBrewBrowserOptions } from "@logbrew/browser";
 import type { ErrorHandler, FactoryProvider, InjectionToken, Injector } from "@angular/core";
 import type {
   IssueAttributes,
@@ -55,6 +56,8 @@ type LogBrewAngularContext = {
   readonly previewJson: () => string;
   readonly flush: () => Promise<TransportResponse>;
   readonly shutdown: () => Promise<TransportResponse>;
+  /** The page trace that issues and request spans share. Set when the provider runs in a browser. */
+  readonly traceContext?: BrowserTraceContext | undefined;
 };
 
 type LogBrewAngularRuntimeContext = {
@@ -98,11 +101,32 @@ type LogBrewAngularViewEventOptions = {
 };
 
 type LogBrewAngularErrorEventOptions = {
+  /** Whether app code handled the error. The provider's ErrorHandler sets false. Defaults to true. */
+  handled?: boolean | undefined;
   now?: (() => string) | undefined;
+  /** The trace the issue belongs to. */
+  trace?: BrowserTraceContext | undefined;
   idFactory?: ((error: unknown, context: LogBrewAngularErrorMetadata) => string) | undefined;
 };
 
-type LogBrewAngularOptions = CreateLogBrewAngularClientConfig & LogBrewAngularErrorMetadata & LogBrewAngularErrorEventOptions & {
+/** Options `installLogBrewBrowser` reads when the provider runs in a browser. */
+type LogBrewAngularBrowserOptions = Omit<
+  LogBrewBrowserOptions,
+  "apiKey" | "client" | "clientKey" | "context" | "errorEvent" | "idFactory" | "maxRetries" | "now" | "onCaptureError"
+  | "onFlush" | "sdkName" | "sdkVersion" | "transport"
+>;
+
+type LogBrewAngularOptions = CreateLogBrewAngularClientConfig
+  & LogBrewAngularErrorMetadata
+  & LogBrewAngularErrorEventOptions
+  & LogBrewAngularBrowserOptions
+  & {
+  /** Record a span for each fetch and XHR request the page makes, HttpClient included. Defaults to true. */
+  captureRequests?: boolean | undefined;
+  /** Record spans only for requests that match. Defaults to every request except LogBrew delivery. */
+  captureTargets?: TracePropagationTarget[] | undefined;
+  /** Add a traceparent header to requests that match. Defaults to none. */
+  tracePropagationTargets?: TracePropagationTarget[] | undefined;
   client?: LogBrewClient | LogBrewClientFactory | undefined;
   transport?: Transport | LogBrewTransportFactory | undefined;
   captureErrors?: boolean | undefined;
@@ -165,6 +189,7 @@ declare const defaultExport: {
 export type {
   AngularTraceparentConfig,
   CreateLogBrewAngularClientConfig,
+  LogBrewAngularBrowserOptions,
   LogBrewAngularCaptureContext,
   LogBrewAngularContext,
   LogBrewAngularErrorEvent,

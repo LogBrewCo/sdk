@@ -6,30 +6,46 @@
 
 Vue plugin and composable helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds Vue 3 `app.use(...)`, app-level provide/inject, a `useLogBrew()` composable, `$logbrew`, view helper events, and Vue error-handler capture while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds Vue 3 `app.use(...)`, app-level provide/inject, a `useLogBrew()` composable, `$logbrew`, view helper events, and Vue error-handler capture. In the browser it runs on `@logbrew/browser`, which sends events, records breadcrumbs, and times requests. `@logbrew/sdk` keeps event validation, retry, flush, and shutdown.
 
 ## Install
 
 ```bash
-npm install @logbrew/sdk @logbrew/vue vue
-pnpm add @logbrew/sdk @logbrew/vue vue
+npm install @logbrew/sdk @logbrew/browser @logbrew/vue vue
+pnpm add @logbrew/sdk @logbrew/browser @logbrew/vue vue
 ```
 
 ## App Plugin
 
 ```js
 import { createApp } from "vue";
-import { RecordingTransport } from "@logbrew/sdk";
 import { createLogBrewVuePlugin } from "@logbrew/vue";
 import App from "./App.vue";
 
 createApp(App)
   .use(createLogBrewVuePlugin({
     clientKey: "LOGBREW_CLIENT_KEY",
-    transport: RecordingTransport.alwaysAccept()
+    context: {
+      schemaVersion: 1,
+      resource: {
+        service: { name: "checkout-web" },
+        deployment: { environment: "production", release: "web@1.2.3" }
+      }
+    },
+    tracePropagationTargets: [/^\/api\//u]
   }))
   .mount("#app");
 ```
+
+In the browser the plugin starts `installLogBrewBrowser()` from `@logbrew/browser`, so with no other setup it:
+
+- sends events to LogBrew with the fetch transport, and again when the page is hidden or closed;
+- sends each component error as an issue with stack frames, the component name, and Vue's `info` text;
+- adds breadcrumbs for console calls, `fetch` and XHR requests, and route changes to each issue;
+- records a page view span and a span for each `fetch` and XHR request, all in one page trace;
+- adds a `traceparent` header to requests that match `tracePropagationTargets`, so backend spans join the page trace.
+
+Set `captureRequests: false` to stop request spans, or `captureTargets` to keep only some requests. The plugin also accepts the other `installLogBrewBrowser()` options, such as `endpoint`, `persistOffline`, and `breadcrumbs`. The plugin removes its listeners when the app unmounts. During server rendering there is no window, so the plugin creates a client and sends with the fetch transport only. Pass `client` and `transport` to use your own.
 
 For Vue browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples and server-side use.
 
@@ -73,7 +89,7 @@ The plugin uses Vue's app-level `provide` so `useLogBrew()` works from descendan
 
 ## Trace Propagation
 
-Use `createTraceparentFetch()` when Vue frontend work should connect to backend traces. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
+In the browser, set `tracePropagationTargets` on the plugin, as shown above. Use `createTraceparentFetch()` to add a `traceparent` header to a single fetch function without the plugin. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
 
 ```js
 import { createTraceparentFetch, createVueTraceparent } from "@logbrew/vue";

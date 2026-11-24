@@ -1,10 +1,13 @@
-import { ErrorHandler, InjectionToken, Injector, inject } from "@angular/core";
-import { LogBrewClient, RecordingTransport, SdkError } from "@logbrew/sdk";
+import { DestroyRef, ErrorHandler, InjectionToken, Injector, inject } from "@angular/core";
+import { LogBrewClient, SdkError, createIssueAttributesFromError } from "@logbrew/sdk";
 import { createRandomTraceparent, createTracedFetch, shouldPropagateTraceparent as shouldPropagate } from "./trace-fetch.js";
+import { findBrowserWindow, startBrowserCapture } from "./browser-capture.js";
+import { createFetchTransport } from "@logbrew/browser";
 
 /**
  * @import { FactoryProvider } from "@angular/core"
  * @import { Transport, TransportResponse } from "@logbrew/sdk"
+ * @import { BrowserDelivery } from "./browser-capture.js"
  * @import {
  *   AngularTraceparentConfig,
  *   TracePropagationTarget,
@@ -83,27 +86,34 @@ function currentTime() {
 }
 
 /**
- * @param {CreateLogBrewAngularClientConfig} [config]
- * @returns {LogBrewClient}
+ * @param {CreateLogBrewAngularClientConfig} config
+ * @returns {string}
  */
-function createLogBrewAngularClient(config = {}) {
-  const {
-    apiKey = readEnv("LOGBREW_API_KEY"),
-    clientKey = readEnv("LOGBREW_CLIENT_KEY"),
-    context,
-    maxRetries = DEFAULT_MAX_RETRIES,
-    sdkName = DEFAULT_SDK_NAME,
-    sdkVersion = DEFAULT_SDK_VERSION
-  } = config;
+function requireAuthKey(config) {
+  const { apiKey = readEnv("LOGBREW_API_KEY"), clientKey = readEnv("LOGBREW_CLIENT_KEY") } = config;
   const authKey = clientKey ?? apiKey;
-  const hasAuthKey = Boolean(authKey);
-  if (authKey === undefined || !hasAuthKey) {
+  if (authKey === undefined || !authKey) {
     throw new SdkError(
       "configuration_error",
       "createLogBrewAngularClient requires clientKey, apiKey, LOGBREW_CLIENT_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, maxRetries, sdkName, sdkVersion, ...(context === undefined ? {} : { context }) });
+  return authKey;
+}
+
+/**
+ * @param {CreateLogBrewAngularClientConfig} [config]
+ * @returns {LogBrewClient}
+ */
+function createLogBrewAngularClient(config = {}) {
+  const { context, maxRetries = DEFAULT_MAX_RETRIES, sdkName = DEFAULT_SDK_NAME, sdkVersion = DEFAULT_SDK_VERSION } = config;
+  return LogBrewClient.create({
+    apiKey: requireAuthKey(config),
+    maxRetries,
+    sdkName,
+    sdkVersion,
+    ...(context === undefined ? {} : { context })
+  });
 }
 
 /**
@@ -196,22 +206,31 @@ function createAngularViewEvent(name, options = {}) {
  * @returns {LogBrewAngularErrorEvent}
  */
 function createAngularErrorEvent(error, context = {}, options = {}) {
-  const { idFactory = defaultErrorEventId, now = currentTime } = options;
-  const message = errorMessage(error);
+  const { handled = true, idFactory = defaultErrorEventId, now = currentTime, trace } = options;
   const component = context.component ?? "";
   const route = context.route ?? context.path ?? "";
   return {
     id: idFactory(error, context),
     timestamp: now(),
 
-    attributes: {
+    attributes: createIssueAttributesFromError(error, {
+      handled,
+      mechanism: "angular.error_handler",
+      metadata: { component, info: context.info ?? "", route },
+      source: "angular.error",
       title: component ? `${component} failed` : "Angular error",
-
-      level: "error",
-      message,
-      metadata: { component, info: context.info ?? "", route }
-    }
+      ...(trace === undefined ? {} : { trace })
+    })
   };
+}
+
+/**
+ * @param {LogBrewAngularContext} context
+ * @returns {string | undefined}
+ */
+function currentPath(context) {
+  const path = readField(readField(readField(context, "browserWindow") ?? globalThis, "location"), "pathname");
+  return typeof path === "string" ? path : undefined;
 }
 
 /**
@@ -247,7 +266,11 @@ async function notifyFailure(options, error, context) {
 async function captureAngularError(error, context, options = {}) {
   const event = options.errorEvent !== undefined && isFunction(options.errorEvent)
     ? options.errorEvent(error, { context })
-    : createAngularErrorEvent(error, options, options);
+    : createAngularErrorEvent(
+      error,
+      { ...options, route: options.route ?? options.path ?? currentPath(context) },
+      { ...options, trace: context.traceContext }
+    );
   try {
     context.client.issue(event.id, event.timestamp, event.attributes);
     const response = await context.client.flush(context.transport);
@@ -293,7 +316,7 @@ class LogBrewErrorHandler {
    * @returns {void}
    */
   handleError(error) {
-    void captureQuietly(error, this.context, this.options);
+    void captureQuietly(error, this.context, { ...this.options, handled: false });
     const { delegate } = this;
     if (delegate !== null && delegate !== undefined && isFunction(readField(delegate, "handleError"))) {
       delegate.handleError(error);
@@ -323,7 +346,39 @@ function resolveTransport(options, injector, client) {
   if (typeof options.transport === "function") {
     return options.transport({ client, injector });
   }
-  return options.transport ?? RecordingTransport.alwaysAccept();
+  return options.transport ?? createFetchTransport(options);
+}
+
+/**
+ * @param {LogBrewAngularOptions} options
+ * @param {Injector} injector
+ * @returns {BrowserDelivery}
+ */
+function browserDelivery(options, injector) {
+  const { client, sdkName = DEFAULT_SDK_NAME, sdkVersion = DEFAULT_SDK_VERSION, transport } = options;
+  if (client !== undefined || typeof transport === "function") {
+    const resolved = resolveClient(options, injector);
+    return { client: resolved, sdkName, sdkVersion, transport: resolveTransport(options, injector, resolved) };
+  }
+  return { clientKey: requireAuthKey(options), sdkName, sdkVersion, ...(transport === undefined ? {} : { transport }) };
+}
+
+/**
+ * @param {LogBrewAngularOptions} options
+ * @param {Injector} injector
+ * @returns {LogBrewAngularContext}
+ */
+function createProvidedContext(options, injector) {
+  const browserWindow = findBrowserWindow(options.browserWindow);
+  if (browserWindow === undefined) {
+    const client = resolveClient(options, injector);
+    return createLogBrewAngularContext(client, resolveTransport(options, injector, client));
+  }
+  const capture = startBrowserCapture(options, browserWindow, browserDelivery(options, injector));
+  inject(DestroyRef, { optional: true })?.onDestroy(() => {
+    capture.uninstall();
+  });
+  return capture.context;
 }
 
 /**
@@ -347,11 +402,7 @@ function provideLogBrew(options = {}) {
   const providers = [
     {
       provide: LOG_BREW_ANGULAR_CONTEXT,
-      useFactory: () => {
-        const injector = inject(Injector);
-        const client = resolveClient(options, injector);
-        return createLogBrewAngularContext(client, resolveTransport(options, injector, client));
-      }
+      useFactory: () => createProvidedContext(options, inject(Injector))
     }
   ];
   if (options.captureErrors !== false) {
